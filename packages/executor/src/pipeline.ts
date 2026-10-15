@@ -87,7 +87,16 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
     const issues = parsed.error.issues.slice(0, MAX_ISSUES).map((i) => `${i.path.join(".") || "(input)"}: ${i.message}`);
     return refuse("INVALID_INPUT", `Invalid input for ${def.name}: ${issues.join("; ")}`);
   }
-  const input = parsed.data;
+  let input = parsed.data;
+  // Model-originated args never legitimately carry a secret: redact them before hashing, storing or running.
+  if (scope.caller === "agent" || scope.caller === "mcp") {
+    const red = e.redactor.value(input);
+    if (JSON.stringify(red) !== JSON.stringify(input)) {
+      const again = def.input.safeParse(red);
+      if (!again.success) return refuse("INVALID_INPUT", `Input for ${def.name} contained a secret or a full identifier and was redacted`);
+      input = again.data;
+    }
+  }
 
   // Ids must exist in this company, in grant-visible domains.
   const unknown = await findUnknownReference(tx, ctx.companyId, input, scope.grants);

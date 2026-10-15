@@ -57,7 +57,7 @@ export const fixtureCommands: WeftCommand[] = [
     ...base, name: "tax.update_rate", namespace: "tax", summary: "Update an employer tax rate", description: "Change an employer rate. Example: { \"rate_id\": \"etr_0001\", \"rate\": \"0.015\" }",
     input: z.object({ rate_id: z.string().startsWith("etr_"), rate: z.string().regex(/^0\.\d{1,5}$/), source_notice_id: z.string().startsWith("ntc_").optional() }),
     domain: "tax", needs: "edit", effect: "write", risk: () => "R2", approval: "always", reversible: { reverse: "tax.revert_rate" }, mcp: "propose",
-    lease: (i) => `rate:${i.rate_id}`,
+    lease: (i) => `rate:${i.rate_id}`, errorHints: { INVALID_INPUT: { hint: "rate is a decimal string", example: { rate_id: "etr_0001", rate: "0.015" } } },
     async preview(i, _ctx, deps) {
       const [r] = await deps.tx.select().from(employerTaxRates).where(eq(employerTaxRates.id, i.rate_id));
       return { title: `Update ${r!.jurisdiction} ${r!.code.toUpperCase()} rate from ${r!.rate} to ${i.rate} (${r!.id})`, diff: [{ label: "rate", before: r!.rate, after: i.rate }],
