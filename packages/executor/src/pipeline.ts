@@ -239,7 +239,7 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
   } catch (err) {
     const code = codeOfError(err) ?? "INTERNAL";
     const msg = e.redactor.redact(err instanceof Error ? err.message : String(err));
-    if (!e.testMode && code === "INTERNAL") e.log(e.redactor.redact(err instanceof Error ? (err.stack ?? err.message) : String(err)));
+    if (code === "INTERNAL") e.log(e.redactor.redact(err instanceof Error ? (err.stack ?? err.message) : String(err)));
     return refuse(code, code === "INTERNAL" ? `Internal error in ${def.name}: ${msg}` : msg);
   }
 }

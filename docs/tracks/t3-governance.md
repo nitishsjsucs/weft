@@ -39,6 +39,9 @@ Seed step `governance`: principals `usr_dana` (admin), `usr_theo` (payroll_admin
 - Never call `withWriteLock` inside a command: the executor already holds it.
 - Rollback runs `reversible.reverse` as the human with `output.reverseArgs`; mark reverse commands `access: "human_only"`.
 - Proposal `agentNote` comes from an `agent_note`, `reason` or `note` string arg.
+- A command with `amountCents` must report the same `moneyCents` from `run()`; on an approved proposal a mismatch rolls the transaction back with `INTERNAL` (harness 5.5 money check).
+- Daily ceilings sum pending, approved and executed proposals created on the same sim-clock day (the demo clock is the only clock the app shows).
+- T4 and T2 routes: `POST /v1/agent/runs` with an mcp-scope key should call `openChatRun(session, { surface: "mcp" })` (the run starts tainted); `GET /v1/sim/state` and SSE payloads should pass through `executor.redact`.
 
 ## For T4 (loop)
 
