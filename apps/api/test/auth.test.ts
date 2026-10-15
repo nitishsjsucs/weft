@@ -37,5 +37,16 @@ describe("auth", () => {
     let last = 0;
     for (let i = 0; i < 61; i++) last = (await weft.app.request("/v1/events", { headers: { "x-api-key": admin } })).status;
     expect(last).toBe(429);
+    expect(await (await weft.app.request("/v1/events", { headers: { "x-api-key": admin } })).json()).toMatchObject({ _tag: "RateLimitExceeded" });
+    // the UI proxy limit is separate and per principal
+    expect((await weft.app.request("/v1/events", { headers: weft.uiHeaders("usr_dana") })).status).toBe(200);
   });
+
+  it("rate limits 1,200 proxied UI requests per minute per principal", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 1201; i++) statuses.push((await weft.app.request("/v1/health", { headers: weft.uiHeaders("usr_sam") })).status);
+    expect(statuses.slice(0, 1200).every((x) => x === 200)).toBe(true);
+    expect(statuses[1200]).toBe(429);
+    expect((await weft.app.request("/v1/health", { headers: weft.uiHeaders("usr_theo") })).status).toBe(200);
+  }, 30_000);
 });
