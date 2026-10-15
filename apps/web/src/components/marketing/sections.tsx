@@ -147,7 +147,7 @@ function ProductFrame() {
             </table>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-1 text-gray-10">
-            <span className="rounded-full bg-gray-3 px-2 py-0.5 font-medium text-gray-11">R3</span>
+            <span className="rounded-full bg-gray-3 px-2 py-0.5 font-medium text-gray-11">R2</span>
             <span>Reversible with one click</span>
             <span className="ml-auto flex gap-2">
               <span className="inline-flex h-8 items-center rounded-md bg-white px-3 text-2 font-medium text-gray-12 shadow-[var(--shadow-border)]">Deny</span>
