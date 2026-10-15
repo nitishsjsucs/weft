@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { ChatMessageDto } from "@weft/contracts";
-import { directCtx, directDeps, ensureTestPrincipals, runDirect } from "@weft/core";
+import { directCtx, directDeps, directExecutors, ensureTestPrincipals, handlers, runDirect } from "@weft/core";
 import { digestDb } from "@weft/seed";
 import { createSimulators } from "@weft/sim";
 import { createTestWeft, type TestWeft } from "../src/testing";
@@ -81,5 +81,25 @@ describe("POST /v1/sim/reset", () => {
     expect(await digestDb(weft.db)).toBe(expected);
     expect(weft.clock.now()).toBe("2026-10-26T15:30:00.000Z");
     await ensureTestPrincipals(weft.db);
+  });
+});
+
+describe("registration faults through the handlers", () => {
+  it("a needs_info fault sets the CO account to needs_info through tax.record_registration", async () => {
+    const w2 = await createTestWeft();
+    try {
+      const d = directExecutors(w2.db, w2.clock, w2.sims);
+      await w2.sims.faults.arm({ target: "agency.co_dor.register", kind: "needs_info", mode: "once" });
+      const out = await d.human("usr_dana").exec("tax.register_state_account", { tax_account_id: "txa_0006" });
+      expect(out).toMatchObject({ ok: true, data: { status: "needs_info" } });
+      const evts = await w2.sims.tick(w2.clock.now());
+      expect(evts.map((e) => e.type)).toEqual(["sim.registration_needs_info"]);
+      const h = handlers.find((x) => x.event === "sim.registration_needs_info")!;
+      await h.handle({ id: "evt_x", type: evts[0]!.type, ts: w2.clock.now(), subjectRef: evts[0]!.subjectRef, payload: evts[0]!.payload, attended: false, requestedBy: null }, d.system, d.readOnly);
+      const [a] = await w2.db.all<{ status: string }>(sql`SELECT status FROM tax_accounts WHERE id = 'txa_0006'`);
+      expect(a!.status).toBe("needs_info");
+      const again = await d.human("usr_dana").exec("tax.register_state_account", { tax_account_id: "txa_0006" });
+      expect(again).toMatchObject({ ok: true, data: { status: "awaiting_state" } });
+    } finally { await w2.close(); }
   });
 });
