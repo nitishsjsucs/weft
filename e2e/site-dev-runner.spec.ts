@@ -91,6 +91,7 @@ test.describe("dev runner", () => {
   });
 
   test("secrets reach the API in dev mode and never in --e2e", async ({}, info) => {
+    test.setTimeout(180_000);   // two seeds: the merged world's payroll history takes about 25 s to seed
     const secrets = info.outputPath("fake.secrets.env");
     writeFileSync(secrets, "# test fixture, not a real key\nOPENAI_API_KEY=weft-test-not-a-key\n");
     const env = { WEFT_SECRETS_FILE: secrets, OPENAI_API_KEY: "weft-test-not-a-key", WEFT_LLM: "scripted" };
