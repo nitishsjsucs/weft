@@ -75,6 +75,8 @@ event loop never lets the open transaction commit and the write fails after the 
 - `seedGovernance` skips vault and memory when the seed digest test passes no executor.
 - `apps/api/test/health.test.ts` route-table check now accepts any JSON 2xx and tells a missing route (`No route for`) from a missing record (404 NotFound).
 - Rollback of an irreversible action returns `DOMAIN_IRREVERSIBLE` with the reason.
+- `POST /v1/proposals/:id/approve` takes an optional `value` (1 to 4,096 chars) only for a pending `secret_request`; `api.ts` still documents the body as `{ reasonCode, note }`, so the integrator may add `value` there. decide() runs first (roles, CAS, audit); the proposal stays `approved` (no action row, as before) and the value goes into the vault as the approver. A secret approve without a value, or a value on anything else, is a 400 `ValidationError`.
+- Human decision notes pass through the redactor before they are stored, audited or written to memory.
 
 ## Tests
 
@@ -102,7 +104,7 @@ Acceptance map: import scan (`tests/boundaries.test.ts`, scaffold) plus the forg
 ## Left after round 2
 
 - Memory alias expansion in `memory.search` (cut first; plain `git grep --fixed-strings` today). Recall at run start is P1.
-- The secret-request card has no route to enter the value: vault put is human-only and the SPEC 10 route table has no vault route. Adding one is a contract change in `packages/contracts/src/api.ts`.
+- T5: the secret-request card needs a password field that sends `value` on approve (below); today the card shows only the badge.
 - Rate limits are the scaffold's fixed windows (60 per minute per key, 1,200 per minute per UI principal); the auth test covers the key limit.
 - After merge 1: delete the fixture-only S7 and S8 bodies or keep them as executor unit tests; the real-stack variants already cover the merged world.
 - The integrator items from the trial merges above (clock writes under the lock, T2's direct test writes, the events source for routines, SSE redaction).
