@@ -1,7 +1,41 @@
 # Track t1-payroll: notes for the integrator
 
-Branch `track/t1-payroll`. Round 1 status at the end of the round. Everything below runs on synthetic data and the
+Branch `track/t1-payroll`. Status at the end of round 2 (2026-10-15). Everything below runs on synthetic data and the
 synthetic 2026.1 tables.
+
+## Round 2 status: checked on a trial merge
+
+Round 2 merged `main` with tracks t1, t2, t3 and t4 in a throwaway clone (outside the repo) and ran the merge 1 gates
+there. Results on that trial merge:
+
+- `pnpm db:reset && pnpm db:seed` twice gives the same `db:digest` (`f17234fe...d847`).
+- The real seed: `pay_2026_09_15`, `pay_2026_09_30`, `pay_2026_10_15` processed with 45, 45 and 47 paychecks (real
+  bank simulator batches `simb_0001` to `simb_0003`); the draft `pay_2026_10_30` with 48: 4 Needs Review (Mira Delgado
+  CA Oct 19 hire blocked by MISSING_BANK_ACCOUNT, Lena Brooks NY raise, Owen Mercer NY offboarder, Flora Quinn TX 120 h)
+  and 44 Ready.
+- `payroll.get_run` concise through the real agent executor: 5,073 characters, and the GROSS_CHANGE evidence for the
+  raise carries `created_action_seq: 1` and `action_result_id: res_0001` (the seeded `people.set_pay_rate` action).
+- S2 passes 5 of 5 (five repeats, and inside the full suite): the 4/44 split; GP2 (routine run, 4 template
+  explanations, one `payroll.submit_run` proposal with `exclude_blocked: true`, approval to `processing`, first tick
+  at Fri Oct 30 06:00 PT to `processed` with YTD rows and `payroll.processed`, totals equal to the approved preview);
+  `submitted_action_seq` equals the executor's `payroll.submit_run` action row; the STALE_SUBJECT variant (422, run
+  stays draft); the bank return fault variant; chain verify.
+- `tests/scenarios/scripts/s2-pre-payroll.json` (read flagged rows, explain and propose in one batch, final text; 3
+  model steps) also passes through T4's scripted provider when passed as `scenario`. S2 itself uses the routine's
+  default script `scenarios/rt_pre_payroll.json`, because `@weft/tests` does not depend on `@weft/agent`.
+
+### For the integrator at merge 1
+
+- `packages/core/src/index.ts` conflicts with t2-world. Keep both lines:
+  `export * as payroll from "./payroll/index";` and `export * from "./demo/index";`. Nothing else in t1 conflicts.
+- Failures seen on the trial merge that are outside t1 (left alone): `packages/seed/test/seed.test.ts` (its context
+  has no `executor`, so `seedGovernance` fails on `ctx.executor.vault.put`), and `apps/api/test/sim.test.ts` (3 tests:
+  SQLITE_BUSY_SNAPSHOT on `id_counters` while background agent runs write, then cascading assertions; the same
+  routes answer 200 in a fresh world).
+- The routines routes are still 501 stubs on t4-agent. S2 calls `POST /v1/routines/rt_pre_payroll/trigger` and falls
+  back to `weft.routines.trigger(...)` only while that route answers 501.
+- S2 waits on real time for `routine_runs` and `agent_runs` to settle (the agent runs in the background); it does
+  not spin scheduler ticks while a run is in flight.
 
 ## What is built
 
@@ -49,8 +83,9 @@ counts and the 4 planted anomalies. The route and command tests use small stand-
   `{ match_bps, cap_bps }` for the 401(k) (100% up to 4% is `{ match_bps: 10000, cap_bps: 400 }`). `deferral_bps` on the
   enrollment is the employee 401(k) percentage. Camel-case keys are also read.
 - Bank accounts: the active row (`status = "active"`, highest id) is the deposit account; the CA Oct 19 hire has none.
-  A direct-deposit change can either add a new active row and deactivate the old one or edit last4 in place: both
-  change the subject hash.
+  A direct-deposit change can either add a new active row and deactivate the old one or edit last4 or
+  `credential_ref` in place: all change the subject hash. With two active rows, payroll uses the highest id;
+  `people/queries.ts bankSummary` uses the lowest. Keep one active row per worker so the two agree.
 - Employer rates: the latest `employer_tax_rates` row for (state, code) effective at payday with
   `superseded_action_seq IS NULL`, ties broken by `created_action_seq`. A GP1 rate change followed by
   `payroll.preview_run` changes employer SUI only for the CA workers still under the $7,000 base (tested on the
@@ -61,8 +96,11 @@ counts and the 4 planted anomalies. The route and command tests use small stand-
 - YTD ledger codes: `sui_wages:<ST>`, `ss_wages`, `futa_wages` and `famli_wages:CO` hold taxable (capped) wages, so
   `tax.rate_change_impact` can multiply `sui_wages:CA` by the rate delta directly. Tax amounts are
   `tax:<jurisdiction>:<code>:<payer>`, for example `tax:CA:sui:employer`.
-- Bank simulator: `submitBatch` gets entries `{ workerId, amountCents: net + reimbursements, accountRef: <bnk_ id> }` and
-  `settleAt` = payday 06:00 PT. The seed passes the vault name `vault:sim-bank-operating` as `credential` (the seed
+- Bank simulator: `submitBatch` gets entries `{ workerId, amountCents: net + reimbursements, accountRef }` where
+  `accountRef` is the deposit account's `credential_ref` (a `vault:` name, as the simulator requires), and
+  `settleAt` = payday 06:00 PT. A returned batch (fault `return`) is terminal: the simulator never settles it, so
+  `payroll.mark_failed` marks the run and every in-flight paycheck `failed` (the returned entry is named in the result)
+  and writes no YTD rows. The seed passes the vault name `vault:sim-bank-operating` as `credential` (the seed
   cannot resolve secrets) and calls `bank.tick(settleAt)` right after each historic submit; while the bank is a
   scaffold stub it falls back to batch ids `simb_seed_<yyyy_mm_dd>`.
 
@@ -75,8 +113,8 @@ counts and the 4 planted anomalies. The route and command tests use small stand-
   `moneyCents` from `run()` equals `amountCents` (totalCost after exclude_blocked).
 - `submit_run.run()` calls `deps.resolveCredential("vault:sim-bank-operating")` and `deps.sims.bank.submitBatch`;
   `approved_by` is `proposals.decided_by` when `ctx.approvedProposalId` is set, else the principal.
-  `submitted_action_seq` is set to `max(actions.seq) + 1`, assuming the executor appends the action row next in the
-  same transaction. Please confirm or tell me how to read the seq.
+  `submitted_action_seq` is set to `max(actions.seq) + 1`; confirmed on the trial merge, where it equals the
+  `payroll.submit_run` action row the executor appends in the approval transaction (S2 asserts it).
 - Events returned in `CommandOutput.events`: `payroll.draft_created`, `payroll.submitted`, `payroll.processed`.
 - `payroll.mark_processed` and `payroll.mark_failed` are `system_only` and belong on the `svc_events` allowlist.
 - `explain_flags` keeps the per-paycheck repair count in `settings` under `payroll.explain_attempts.<run_id>`.
@@ -101,17 +139,22 @@ counts and the 4 planted anomalies. The route and command tests use small stand-
 - `POST /v1/payrolls/:id/submit { excludeBlocked }` and `POST /v1/payrolls/drafts { payScheduleId, periodEnd }` return
   a `ToolOutcome`, or 422 `{ _tag: "Refused", code, hint, example }`.
 
-## Left for round 2 and merge 1
+## How to run
 
-- Merge 1 gates: `pnpm db:reset && pnpm db:seed` twice with the same `db:digest`, and the 4/44 test on the real seed
-  (S2 first test). The fixture version passes now.
-- S2 green end to end once the executor, routines and scripted provider land; then check `submitted_action_seq`
-  against the real action row.
-- `mark_failed` is covered at the command level (one returned entry, the rest settles); the end-to-end fault path
-  through the bank simulator's `return` fault waits for T2's simulator.
-- Stretch states WA, IL, FL are not encoded (cut line); their federal lines are tested.
-- Not modeled: NY Method III, CA supplemental rates, bank holidays in the pay calendar, multi-rate proration inside
-  one period.
+```sh
+pnpm install
+pnpm --filter @weft/payroll-tax test     # golden and agency cases
+pnpm exec vitest run packages/core/test/payroll apps/api/test/payrolls.test.ts packages/seed
+pnpm exec vitest run tests/scenarios/s2-pre-payroll.test.ts   # skips itself until the merged world exists
+pnpm typecheck && pnpm test && pnpm lint:prose && pnpm lint:brand
+```
 
-The relayed request about open-source sandboxes and a Cloudflare free tier is answered in SPEC 9.9 (harness 3);
-nothing in this track depends on it.
+## Stubbed or not built
+
+- Until merge 1, the core, route and seed tests run on the local fixture world with an in-memory bank that follows
+  the real simulator's input rules and its `return` mode; the S2 tests skip themselves, naming what is missing.
+- Cut line, not built: stretch states WA, IL, FL (their federal lines are tested). `get_run` with
+  `response_format: "detailed"` only adds the unflagged rows to the concise shape; there is no separate detailed
+  layout and no per-line tax trace in it (the trace is on `GET /v1/paychecks/:id`).
+- Not modeled: NY Method III, CA supplemental rates, bank holidays in the pay calendar, more than one pay rate inside
+  one period, retrying a failed run (a failed run stays failed; a new draft can be created for the period).
