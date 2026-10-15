@@ -59,10 +59,9 @@ cache and does not disturb the first key.
    `events: { unconsumed(), consume(id) }`; without it event routines (`rt_agency_notice`, `rt_new_hire`) never fire
    from `tick`. Either pass one from apps/api or add `events` to `RUN_STORE` in `tests/boundaries.test.ts`
    (request in `.scratch/contract-requests/t4-agent.md`).
-4. **Batch identity for the executor.** `AgentCall` carries no step or batch id, so the executor cannot tell which
-   calls share a model turn for `SKIPPED_AFTER_BLOCK` and `afterPending`. The loop always dispatches one turn's calls
-   back to back, in emitted order, with call ids from that turn. If T3 needs it explicitly, the smallest change is an
-   optional `batch?: { step: number; index: number; size: number }` on `AgentCall`.
+4. **Batch identity for the executor.** `AgentCall` carries no batch id. track/t3-governance keys a batch by the
+   run's latest `model_call` row in `run_steps`; the loop writes that row (kind `model_call`, outcome `ok`) right
+   before it dispatches the turn's calls in emitted order, so the two agree without a contract change.
 5. **Read shapes the prechecks assume** (read tolerantly, several spellings): `notices.get` `data.extracted.{new_rate,
    effective_date, tax_account_id, tax_code, kind}`; `payroll.list_runs` `data.runs[].{id, status, approval_deadline}`;
    `payroll.get_run` `data.flagged[].{paycheck_id, worker, rule, before_display, after_display}`; `people.get`
@@ -71,11 +70,12 @@ cache and does not disturb the first key.
    effective_date, source_notice_id, tax_code}`, `tax.register_state_account {state, agency}`, `it.create_account
    {worker_id, system}`, `it.order_device {worker_id, sku}`. `chat_ny_raise.json` cites
    `data.flagged.0.evidence.result_id` from `payroll.get_run`.
-6. **Prebuilt owner.** `packages/routines/src/prebuilt.ts` uses `OWNER = "usr_dana"`; set it to Dana's seeded
-   principal id.
-7. **Boot rule suggestion.** The brain fails the agent run and its routine run with `PROCESS_RESTART`; the "Run again"
+6. **Prebuilt owner.** `packages/routines/src/prebuilt.ts` uses `OWNER = "usr_dana"` (the principal the scaffold tests use).
+7. **Scaffold core test.** Commit `5f2bd05` applies the same change to `packages/core/test/shared.test.ts` as
+   track/t1-payroll `3129725` (commands and handlers are appended), so the merge is identical on both sides.
+8. **Boot rule suggestion.** The brain fails the agent run and its routine run with `PROCESS_RESTART`; the "Run again"
    inbox suggestion needs the proposal notifier (T3), since the brain cannot write proposals.
-8. **Trace proposals.** `RunTrace.proposals` is empty from the brain; the agent route fills it from the proposals table.
-9. **Spend ledger dir.** compose.ts passes `join(dataDir, "spend")`; harness 4.5 wants it outside every company
+9. **Trace proposals.** `RunTrace.proposals` is empty from the brain; the agent route fills it from the proposals table.
+10. **Spend ledger dir.** compose.ts passes `join(dataDir, "spend")`; harness 4.5 wants it outside every company
    directory and untouched by `POST /v1/sim/reset`. If reset rebuilds `dataDir`, point the ledger at the repo's
    `.data/spend` instead.
