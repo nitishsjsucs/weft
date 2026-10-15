@@ -1,7 +1,8 @@
 // Contract tests for /v1/notices and the notices.* read commands (owner: t2-world).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Notice, Page } from "@weft/contracts";
-import { directCtx, directDeps, ensureTestPrincipals, findCommand, nonEmptyUntrusted, runDirect } from "@weft/core";
+import { sql } from "drizzle-orm";
+import { directCtx, directDeps, directExecutors, ensureTestPrincipals, findCommand, nonEmptyUntrusted, runDirect } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
@@ -41,5 +42,34 @@ describe("notices read commands", () => {
     expect(nonEmptyUntrusted(findCommand("notices.get"), g.data)).toEqual(["notice.title", "notice.body"]);
     const l = await runDirect("notices.list", { response_format: "detailed" }, directCtx(weft.clock), deps());
     expect(nonEmptyUntrusted(findCommand("notices.list"), l.data)).toEqual(["notices.*.title"]);
+  });
+});
+
+describe("notices.draft_response and send_response", () => {
+  it("drafts from the template plus a note, sends on approval, stores the confirmation and resolves; not reversible", async () => {
+    const d = directExecutors(weft.db, weft.clock, weft.sims).human("usr_dana");
+    const delivered = await d.exec("sim.deliver_notice", { scenario: "ca_de2088_rate_change" });
+    const id = (delivered as { data: { notice_id: string } }).data.notice_id;
+    const early = await d.exec("notices.send_response", { notice_id: id });
+    expect(early).toMatchObject({ ok: false, refusal: { code: "DOMAIN_NO_DRAFT", example: { notice_id: id, note: "" } } });
+    await expect(runDirect("notices.draft_response", { notice_id: id, note: "x".repeat(401) }, directCtx(weft.clock), deps())).rejects.toThrow();
+    const draft = await runDirect("notices.draft_response", { notice_id: id, note: "Thank you for the review." }, directCtx(weft.clock), deps());
+    expect(draft.data.body).toContain("UI 1.5% replacing 3.4%");
+    expect(draft.data.body).toContain("Note: Thank you for the review.");
+    expect(draft.data.body).not.toContain("Ignore prior");
+
+    const def = findCommand("notices.send_response");
+    expect([def.risk({ notice_id: id }), def.approval, def.reversible]).toEqual(["R3", "always", false]);
+    const pv = await def.preview!({ notice_id: id }, directCtx(weft.clock), deps());
+    expect(pv.title).toBe(`File response 1 to DE 2088 notice ${id} with CA EDD (sim)`);
+    expect(pv.content).toEqual([{ label: "Content to be sent", text: draft.data.body }]);
+
+    const sent = await d.exec("notices.send_response", { notice_id: id });
+    expect(sent).toMatchObject({ ok: true, status: "done", data: { status: "resolved", confirmation: expect.stringMatching(/^CA-EDD-R-\d{6}$/), not_reversible_reason: "Not reversible: filed with the agency simulator" } });
+    expect(nonEmptyUntrusted(def, (sent as { data: unknown }).data)).toEqual(["confirmation"]);
+    const n = await (await get(`/v1/notices/${id}`)).json();
+    expect(n).toMatchObject({ status: "resolved", responseConfirmation: (sent as { data: { confirmation: string } }).data.confirmation, resolution: { outcome: "response_filed", not_reversible_reason: "Not reversible: filed with the agency simulator" } });
+    const evts = await weft.db.all<{ type: string }>(sql`SELECT type FROM events WHERE subject_ref = ${id} ORDER BY id`);
+    expect(evts.map((e) => e.type)).toEqual(["notice.received", "notice.resolved"]);
   });
 });

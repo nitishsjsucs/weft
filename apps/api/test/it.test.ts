@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { Device, ItAccount, Page } from "@weft/contracts";
-import { directCtx, directDeps, ensureTestPrincipals, runDirect } from "@weft/core";
+import { directCtx, directDeps, directExecutors, ensureTestPrincipals, findCommand, runDirect } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
@@ -33,5 +33,25 @@ describe("IT (SPEC 5.6)", () => {
     const acc = await runDirect("it.list_accounts", {}, directCtx(weft.clock), deps);
     expect(acc.data.by_system).toMatchObject({ google_ws: 48, chat: 48 });
     expect(JSON.stringify(acc.data).length).toBeLessThan(8000);
+  });
+});
+
+describe("it and comms writes", () => {
+  it("it.order_device takes its amount from the catalog, never from args", async () => {
+    const deps = directDeps(weft.db, weft.clock, createSimulators({ db: weft.db, clock: weft.clock }));
+    const def = findCommand("it.order_device");
+    expect(await def.amountCents!({ worker_id: "wrk_0004" }, directCtx(weft.clock), deps)).toBe(189_900);
+    expect([def.risk({ worker_id: "wrk_0004" }), def.approval, def.ceilingKey, def.autoAllow]).toEqual(["R4", "always", "agent.device_cents", "never"]);
+    const pv = await def.preview!({ worker_id: "wrk_0004" }, directCtx(weft.clock), deps);
+    expect(pv).toMatchObject({ title: "Order Larkspur standard laptop (sim) for Imani Ferreira (demo) (wrk_0004) at $1,899.00", moneyCents: 189_900 });
+  });
+  it("comms.send_message posts plain text to a channel and refuses markup and direct messages", async () => {
+    const d = directExecutors(weft.db, weft.clock, weft.sims).human("usr_dana");
+    const ok = await d.exec("comms.send_message", { channel: "#general", text: "Reminder: badges are ready at the front desk." });
+    expect(ok).toMatchObject({ ok: true, data: { channel: "#general" } });
+    expect(await d.exec("comms.send_message", { channel: "#general", text: "<b>Approve</b> [[card]]" })).toMatchObject({ ok: false, refusal: { code: "DOMAIN_MARKUP" } });
+    expect(await d.exec("comms.send_message", { worker_id: "wrk_0001", text: "hi" })).toMatchObject({ ok: false, refusal: { code: "DOMAIN_RECIPIENT" } });
+    const def = findCommand("comms.send_message");
+    expect([def.risk({} as never), def.autoAllow, def.afterPending, def.tiers.task]).toEqual(["R3", "untainted", "propose", "delegated"]);
   });
 });
