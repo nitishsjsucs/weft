@@ -144,3 +144,12 @@ describe("people and onboarding read commands", () => {
     }
   });
 });
+
+describe("seed actions (SPEC 5)", () => {
+  it("the NY raise is an 18% pay rate effective 2026-10-16, closing the old rate on Oct 15", async () => {
+    const rows = await weft.db.all<{ id: string; amount_cents: number; effective_from: string; effective_to: string | null }>(sql`SELECT id, amount_cents, effective_from, effective_to FROM pay_rates WHERE worker_id = 'wrk_0026' ORDER BY effective_from`);
+    expect(rows.map((r) => [r.amount_cents, r.effective_from, r.effective_to])).toEqual([[11_800_000, "2024-03-04", "2026-10-15"], [13_924_000, "2026-10-16", null]]);
+    const w = await weft.db.all<{ work_state: string }>(sql`SELECT work_state FROM workers WHERE id = 'wrk_0026'`);
+    expect(w[0]!.work_state).toBe("NY");
+  });
+});

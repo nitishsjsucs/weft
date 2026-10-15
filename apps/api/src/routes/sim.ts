@@ -1,8 +1,134 @@
-// /v1 sim routes. Owner: t2-world. Replace the 501 stubs with handlers; keep the paths of packages/contracts/src/api.ts.
+// /v1 sim routes (demo controls, dev only). Owner: t2-world. Every mutation kicks the scheduler before responding.
+// Reset rebuilds the database in place (drop every table, migrate, seed), deletes memory repos and run workspaces
+// under .data/companies, and never touches .data/spend.
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
+import { z } from "zod";
+import { sql } from "drizzle-orm";
+import { ChatChannel, FaultKind, FaultMode, NoticeScenario, NotImplemented, ValidationError, type ChatMessageDto, type HumanSession } from "@weft/contracts";
+import { migrate, withWriteLock } from "@weft/db";
+import { emitEvent, SEED_TIME } from "@weft/core";
+import { seedWorld } from "@weft/seed";
 import type { Weft, WeftEnv } from "../http/context";
-import { stubRoutes } from "../http/stub";
 
-export function simRoutes(_weft: Weft): Hono<WeftEnv> {
-  return stubRoutes(new Hono<WeftEnv>(), "sim");
+const AdvanceBody = z.union([
+  z.object({ to: z.string() }).strict(),
+  z.object({ by: z.string().regex(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/) }).strict(),
+  z.object({ toNext: z.literal("cron") }).strict(),
+]);
+const FaultBody = z.union([
+  z.object({ target: z.string().min(3).max(80), kind: FaultKind, mode: FaultMode }).strict(),
+  z.object({ target: z.string().min(3).max(80), disarm: z.literal(true) }).strict(),
+]);
+
+/** ISO-8601 duration subset: P2D, PT30M, PT1H30M, P1DT2H. */
+export function durationMs(by: string): number {
+  const m = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/.exec(by);
+  if (!m || by === "P" || by === "PT") throw new ValidationError(`Bad duration ${by}`);
+  return ((Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0)) * 60 + Number(m[3] ?? 0)) * 60_000;
+}
+
+const weekdayHourPt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+/** Next prebuilt cron slot (09:00 PT on a weekday) strictly after `now`. */
+export function nextCronSlot(now: string): string {
+  let t = Math.floor(Date.parse(now) / 60_000) * 60_000 + 60_000;
+  for (let i = 0; i < 60 * 24 * 8; i++, t += 60_000) {
+    const parts = Object.fromEntries(weekdayHourPt.formatToParts(new Date(t)).map((p) => [p.type, p.value]));
+    if (parts.weekday !== "Sat" && parts.weekday !== "Sun" && parts.hour === "09" && parts.minute === "00") return new Date(t).toISOString();
+  }
+  throw new Error("nextCronSlot: none within 8 days");
+}
+
+function session(c: { var: { session: HumanSession | null } }): HumanSession {
+  const s = c.var.session;
+  if (!s) throw new ValidationError("session required");
+  return s;
+}
+
+export async function resetWorld(weft: Weft): Promise<{ ms: number }> {
+  const t0 = Date.now();
+  const rate = weft.clock.rate();
+  await withWriteLock(async () => {
+    await weft.db.run(sql`PRAGMA foreign_keys=OFF`);
+    try {
+      const tables = await weft.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`);
+      for (const { name } of tables) await weft.db.run(sql.raw(`DROP TABLE IF EXISTS "${name.replace(/"/g, "")}"`));
+    } finally { await weft.db.run(sql`PRAGMA foreign_keys=ON`); }
+    rmSync(join(weft.dataDir, "companies"), { recursive: true, force: true });   // memory repos and run workspaces; never spend/
+    await migrate(weft.db);
+  });
+  await seedWorld(weft);
+  await weft.clock.set(SEED_TIME, rate);
+  return { ms: Date.now() - t0 };
+}
+
+export function simRoutes(weft: Weft): Hono<WeftEnv> {
+  const r = new Hono<WeftEnv>();
+
+  r.get("/v1/sim/clock", (c) => c.json({ now: weft.clock.now(), rate: weft.clock.rate() }));
+
+  r.post("/v1/sim/clock/advance", async (c) => {
+    const body = AdvanceBody.parse(await c.req.json().catch(() => ({})));
+    const from = weft.clock.now();
+    const to = "to" in body ? new Date(Date.parse(body.to)).toISOString() : "by" in body ? new Date(Date.parse(from) + durationMs(body.by)).toISOString() : nextCronSlot(from);
+    if (Number.isNaN(Date.parse(to)) || to < from) throw new ValidationError(`Cannot move the clock from ${from} to ${to}`);
+    await weft.clock.advance(to);
+    await withWriteLock(() => weft.db.transaction(async (tx) => {
+      await emitEvent(tx, weft.clock, { body: { type: "clock.advanced", payload: { from, to } }, subjectRef: "clock", attended: true, requestedBy: c.var.session?.principalId ?? null });
+    }));
+    await weft.scheduler.kick();
+    return c.json({ now: weft.clock.now(), rate: weft.clock.rate() });
+  });
+
+  r.post("/v1/sim/notices/deliver", async (c) => {
+    const { scenario } = z.object({ scenario: NoticeScenario }).strict().parse(await c.req.json().catch(() => ({})));
+    const out = await weft.executor.human.exec(session(c), "sim.deliver_notice", { scenario });
+    await weft.scheduler.kick();
+    return c.json(out);
+  });
+
+  r.get("/v1/sim/state", async (c) => {
+    const rows = async (table: string, order = "id") => weft.db.all<Record<string, unknown>>(sql.raw(`SELECT * FROM "${table}" ORDER BY "${order}" DESC LIMIT 50`));
+    const state = {
+      clock: { now: weft.clock.now(), rate: weft.clock.rate() },
+      registrations: await rows("sim_registrations"),
+      agencyMail: await rows("sim_agency_mail"),
+      bankBatches: (await rows("sim_bank_batches")).map(({ entries_json: e, ...b }) => ({ ...b, entryCount: (JSON.parse(String(e)) as unknown[]).length })),
+      idpAccounts: Number((await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM sim_idp_accounts`))[0]?.n ?? 0),
+      deviceOrders: await rows("sim_device_orders"),
+      faults: await weft.sims.faults.list(),
+      catalog: weft.sims.devices.catalog(),
+    };
+    let text = JSON.stringify(state);
+    try { text = weft.executor.redact(text); } catch { /* executor stub: nothing to redact yet */ }
+    return c.body(text, 200, { "content-type": "application/json" });
+  });
+
+  r.post("/v1/sim/faults", async (c) => {
+    const body = FaultBody.parse(await c.req.json().catch(() => ({})));
+    if ("disarm" in body) await weft.sims.faults.disarm(body.target as never);
+    else await weft.sims.faults.arm({ target: body.target as never, kind: body.kind, mode: body.mode });
+    await weft.scheduler.kick();
+    return c.json(await weft.sims.faults.list());
+  });
+
+  r.get("/v1/sim/chat", async (c) => {
+    const channel = ChatChannel.optional().parse(c.req.query("channel") || undefined);
+    const afterId = c.req.query("afterId") || undefined;
+    const channels = channel ? [channel] : ChatChannel.options;
+    const msgs: ChatMessageDto[] = [];
+    for (const ch of channels) for (const m of await weft.sims.chat.list(ch, afterId)) msgs.push({ id: m.id, channel: m.channel, author: m.author, text: m.text, card: m.card as Record<string, unknown> | null, ts: m.ts, inbound: m.inbound });
+    msgs.sort((a, b) => (a.id < b.id ? -1 : 1));
+    return c.json(msgs);
+  });
+
+  r.post("/v1/sim/reset", async (c) => {
+    if (!weft.testMode && process.env.WEFT_ALLOW_RESET === "0") throw new NotImplemented("reset disabled by WEFT_ALLOW_RESET=0");
+    // No scheduler kick here: a reset world must digest exactly like a fresh `pnpm db:seed` (no tick has run).
+    const { ms } = await resetWorld(weft);
+    return c.json({ ok: true, ms });
+  });
+
+  return r;
 }
