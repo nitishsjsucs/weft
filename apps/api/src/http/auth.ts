@@ -6,6 +6,7 @@ import type { MiddlewareHandler } from "hono";
 import { and, eq, isNull } from "drizzle-orm";
 import { Forbidden, RateLimitExceeded, ROUTES, Unauthorized, type HumanSession, type RouteDef } from "@weft/contracts";
 import { apiKeys, principals } from "@weft/db";
+import { executorInternals } from "@weft/executor";
 import type { WeftEnv } from "./context";
 
 export function allowedHosts(ports: { api: number; web: number }, testMode: boolean): Set<string> {
@@ -41,8 +42,12 @@ class Window {
 export function auth(): MiddlewareHandler<WeftEnv> {
   const keyLimit = new Window(60);
   const uiLimit = new Window(1200);
+  const primed = new WeakSet<object>();
   return async (c, next) => {
     const weft = c.var.weft;
+    // The redactor learns the proxy secret once per executor, and every API key plaintext it sees (harness 6.4).
+    const internals = (() => { try { return executorInternals(weft.executor); } catch { return null; } })();
+    if (internals && !primed.has(weft.executor)) { internals.addSecret(weft.proxySecret); primed.add(weft.executor); }
     const url = new URL(c.req.url);
     const host = c.req.header("host") ?? url.host;
     const hosts = allowedHosts(weft.ports, weft.testMode);
@@ -62,6 +67,7 @@ export function auth(): MiddlewareHandler<WeftEnv> {
     if (apiKey) {
       const [row] = await weft.db.select().from(apiKeys).where(and(eq(apiKeys.hash, hashApiKey(apiKey)), isNull(apiKeys.revokedAt))).limit(1);
       if (!row) throw new Unauthorized("Unknown or revoked API key");
+      internals?.addSecret(apiKey);
       if (!keyLimit.take(row.id)) throw new RateLimitExceeded();
       session = { principalId: row.principalId, companyId: row.companyId, via: "api_key", keyScope: row.scope as HumanSession["keyScope"] };
     } else {

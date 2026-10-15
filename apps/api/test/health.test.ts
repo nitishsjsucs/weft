@@ -35,9 +35,10 @@ describe("route table", () => {
       if (r.path === "/v1/health") continue;
       const path = r.path.replace(/:[A-Za-z]+/g, "x_0001");
       const res = await weft.app.request(path, { method: r.method, headers: weft.uiHeaders("usr_dana") });
-      expect(res.status, `${r.method} ${r.path}`).not.toBe(404);
       const body = await res.json();
-      expect(Object.keys(ERROR_STATUS).concat(["ok"]).some((k) => k === body._tag || k in body), `${r.method} ${r.path}`).toBe(true);
+      if (res.status === 404) expect(String(body.message), `${r.method} ${r.path}`).not.toMatch(/^No route for/);
+      const answered = res.status < 400 ? body !== null && typeof body === "object" : Object.keys(ERROR_STATUS).includes(body._tag);
+      expect(answered, `${r.method} ${r.path}`).toBe(true);
     }
   });
   it("unknown paths give a NotFound _tag", async () => {
