@@ -1,0 +1,20 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "it__create_account", "arguments": "{{derived.it.create_account.0}}" },
+          { "type": "function_call", "name": "it__create_account", "arguments": "{{derived.it.create_account.1}}" },
+          { "type": "function_call", "name": "it__create_account", "arguments": "{{derived.it.create_account.2}}" },
+          { "type": "function_call", "name": "comms__send_message", "arguments": "{{derived.comms.send_message}}" },
+          { "type": "function_call", "name": "tax__register_state_account", "arguments": "{{derived.tax.register_state_account.0}}" },
+          { "type": "function_call", "name": "tax__register_state_account", "arguments": "{{derived.tax.register_state_account.1}}" },
+          { "type": "function_call", "name": "it__order_device", "arguments": "{{derived.it.order_device}}" }
+        ]
+      },
+      {
+        "output": [{ "type": "text", "text": "Created the accounts and posted the welcome in #new-hires. The state registrations and the laptop wait for approval in the inbox." }]
+      }
+    ]
+  }
+}

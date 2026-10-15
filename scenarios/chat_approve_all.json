@@ -1,0 +1,8 @@
+{
+  "match": "approve (everything|all)",
+  "agents": {
+    "main": [
+      { "output": [{ "type": "text", "text": "I can't approve anything: approvals are human-only and there is no approve tool. Open each card in the inbox to review the diff, then approve or deny it yourself." }] }
+    ]
+  }
+}

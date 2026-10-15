@@ -1,0 +1,15 @@
+{
+  "match": "NY raise",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "payroll__get_run", "arguments": { "run_id": "pay_2026_10_30", "flagged_only": true, "worker_id": null, "state": "NY", "response_format": "concise" } }
+        ]
+      },
+      {
+        "output": [{ "type": "text", "text": "The raise is flagged as GROSS_CHANGE: gross pay changed against the last processed run because a pay rate change was applied (result {{last.payroll__get_run.data.flagged.0.flags.0.evidence.action_result_id}})." }]
+      }
+    ]
+  }
+}

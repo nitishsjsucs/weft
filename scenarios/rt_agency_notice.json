@@ -1,0 +1,17 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "notices__draft_response", "arguments": { "notice_id": "{{trigger.notice_id}}", "note": "We will apply the new rate from the effective date and request the credit for prior overpayment." } },
+          { "type": "function_call", "name": "tax__update_rate", "arguments": "{{derived.tax.update_rate}}" },
+          { "type": "function_call", "name": "notices__send_response", "arguments": { "notice_id": "{{trigger.notice_id}}" } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "notices__draft_response", "status": "done" }, { "tool": "tax__update_rate", "status": "pending_approval" }, { "tool": "notices__send_response", "status": "pending_approval" }] },
+        "output": [{ "type": "text", "text": "Drafted the reply and proposed the rate change and the filing. Both wait for approval in the inbox." }]
+      }
+    ]
+  }
+}
