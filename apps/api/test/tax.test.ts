@@ -71,6 +71,8 @@ describe("hero rate change (GP1 domain)", () => {
     }
     const out = await dana().exec("tax.update_rate", { ...good, rate: "0.02" });
     expect(out).toMatchObject({ ok: false, refusal: { code: "DOMAIN_NOTICE_MISMATCH", example: good } });
+    // The message carries the derived values too, for executors that read hints only from the static errorHints.
+    expect(!out.ok && out.refusal.message).toContain(`The notice ${noticeId} says: account 000-4817-2 (txa_0002), sui 0.015 (1.5%) effective 2026-01-01`);
   });
 
   it("matching args preview a headline built only from structured fields; executing keeps the old row; revert restores 3.4%", async () => {

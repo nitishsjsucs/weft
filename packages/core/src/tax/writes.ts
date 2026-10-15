@@ -59,7 +59,8 @@ async function checkAgainstNotice(i: UpdateInput, companyId: string, tx: DbTx) {
   const ok = derived && derived.tax_account_id === i.tax_account_id && derived.code === i.code && derived.rate === i.rate && derived.effective_from === i.effective_from && acct.accountNumber === ex.accountNumber;
   if (!ok) {
     const hint = derived ? `The notice ${n.id} says: account ${ex.accountNumber} (${derived.tax_account_id}), ${derived.code} ${derived.rate} (${rateDisplay(derived.rate)}) effective ${derived.effective_from}` : `Notice ${n.id} carries no rate change for ${i.code}`;
-    throw new DomainRefusal("DOMAIN_NOTICE_MISMATCH", "The rate change does not match the notice's extracted fields", hint, derived);
+    // The message repeats the derived values: an executor that takes hints only from the static errorHints still shows them.
+    throw new DomainRefusal("DOMAIN_NOTICE_MISMATCH", `The rate change does not match the notice's extracted fields. ${hint}`, hint, derived);
   }
   if (!["unemployment", "combined"].includes(acct.accountType)) throw new DomainRefusal("DOMAIN_NOT_A_RATE_ACCOUNT", `${acct.id} is a ${acct.accountType} account`, null, derived);
   return { acct, notice: n, extract: ex, oldRate: r!.oldRate };
