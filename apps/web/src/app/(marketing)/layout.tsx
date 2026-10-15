@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-// Marketing shell. Owner: t6-site.
+// Marketing shell (full width; sections set their own 1280 px container). Owner: t6-site.
 export default function MarketingLayout({ children }: { children: ReactNode }) {
-  return <div className="mx-auto max-w-[1280px] px-4 laptop:px-8">{children}</div>;
+  return <div className="min-h-dvh overflow-x-clip bg-background">{children}</div>;
 }
