@@ -163,7 +163,7 @@ describe("SPEC 7.1 and 7.2 rules", () => {
   });
   it("YTD deltas carry wages and each tax amount", () => {
     const c = calculatePaycheck(input({ gross: 300000, jurisdiction: "CA", state: { filingStatus: "single", allowances: 1 }, employerRates: { sui: { rate: "0.034", wageBaseCents: 700000 }, ett: { rate: "0.001", wageBaseCents: 700000 } } }));
-    expect(c.ytdDeltas).toMatchObject({ gross: 300000, ss_wages: 300000, "sui_wages:CA": 300000, "sdi_wages:CA": 300000, "tax:US:fit:employee": 32038, "tax:CA:sui:employer": 10200 });
+    expect(c.ytdDeltas).toMatchObject({ gross: 300000, ss_wages: 300000, "sui_wages:CA": 300000, "sdi_wages:CA": 300000, "state_pit_wages:CA": 300000, "tax:US:fit:employee": 32038, "tax:CA:sui:employer": 10200 });
   });
   it("rejects non-integer cents and unknown deduction codes", () => {
     expect(() => calculatePaycheck(input({ gross: 100.5 }))).toThrow(/integer cents/);
@@ -173,5 +173,18 @@ describe("SPEC 7.1 and 7.2 rules", () => {
     const i = input({ gross: 412345, jurisdiction: "NY", payPeriodsPerYear: 24, state: { filingStatus: "married", allowances: 2 } });
     expect(calculatePaycheck(i)).toEqual(calculatePaycheck(i));
     expect(TAX_2026.version).toBe("2026.1");
+  });
+});
+
+describe("YTD deltas record capped wages for capped taxes", () => {
+  it("SUI wages stop at the base so a rate-change credit uses taxable wages", () => {
+    const c = calculatePaycheck(input({
+      gross: 400000, jurisdiction: "CA", payPeriodsPerYear: 24, state: { filingStatus: "single", allowances: 1 }, ytd: { "sui_wages:CA": 500000, futa_wages: 500000, ss_wages: 18300000 },
+      employerRates: { sui: { rate: "0.034", wageBaseCents: 700000 }, ett: { rate: "0.001", wageBaseCents: 700000 } },
+    }));
+    expect(c.ytdDeltas["sui_wages:CA"]).toBe(200000);
+    expect(c.ytdDeltas.futa_wages).toBe(200000);
+    expect(c.ytdDeltas.ss_wages).toBe(150000);
+    expect(c.ytdDeltas.medicare_wages).toBe(400000);
   });
 });

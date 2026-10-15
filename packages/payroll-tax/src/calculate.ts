@@ -7,6 +7,7 @@ import { futa } from "./futa";
 import { fmt } from "./math";
 import { stateTaxes } from "./states/index";
 import type { PaycheckCalc, PaycheckInput, TaxCalcLine } from "./types";
+import { ytdDeltasFromLines } from "./ytd";
 
 function assertCents(label: string, v: number): void {
   if (!Number.isSafeInteger(v)) throw new Error(`payroll-tax: ${label} must be integer cents, got ${v}`);
@@ -66,20 +67,7 @@ export function calculatePaycheck(input: PaycheckInput, tables: TaxTables = TAX_
   const net = gross - employeeTaxes - pretaxTotal - posttaxTotal;
   trace.push(`Net ${fmt(gross)} - employee taxes ${fmt(employeeTaxes)} - pre-tax ${fmt(pretaxTotal)} - post-tax ${fmt(posttaxTotal)} = ${fmt(net)} (reimbursements ${fmt(input.reimbursements_cents)} paid on top)`);
 
-  const ytdDeltas: Record<string, number> = {
-    gross, fit_wages: w.fit, ss_wages: w.ss, medicare_wages: w.medicare, futa_wages: w.futa,
-    [`sui_wages:${state}`]: w.sui, [`state_pit_wages:${state}`]: w.state_pit,
-  };
-  if (state === "CA") ytdDeltas["sdi_wages:CA"] = w.sdi;
-  if (state === "NY") { ytdDeltas["pfl_wages:NY"] = w.pfl; ytdDeltas["dbl_wages:NY"] = w.dbl; }
-  if (state === "CO") ytdDeltas["famli_wages:CO"] = w.famli;
-  const k401 = input.pretax.filter((d) => d.code === "401k_traditional").reduce((s, d) => s + d.amount_cents, 0);
-  if (k401) ytdDeltas.k401_deferral = k401;
-  if (supplemental) ytdDeltas.supplemental = gross;
-  for (const x of taxes) {
-    const k = `tax:${x.jurisdiction}:${x.code}:${x.payer}`;
-    ytdDeltas[k] = (ytdDeltas[k] ?? 0) + x.amount_cents;
-  }
+  const ytdDeltas = ytdDeltasFromLines({ state, grossCents: gross, taxes, deductions: input.pretax, supplemental });
 
   return {
     gross_cents: gross, taxableWages: { ...w }, taxes,
