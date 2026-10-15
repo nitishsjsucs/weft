@@ -49,8 +49,8 @@ describe("shared", () => {
     expect((await db.select().from(events)).length).toBe(1);
     await expect(emitEvent(db, clock, { body: { type: "notice.received", payload: { notice_id: "free text" } } as never, subjectRef: "x", attended: false, requestedBy: null })).rejects.toThrow();
   });
-  it("command and handler arrays start empty", () => {
-    expect(commands).toEqual([]);
-    expect(handlers).toEqual([]);
+  it("command and handler arrays are well formed (tracks append to them)", () => {
+    expect(new Set(commands.map((c) => c.name)).size).toBe(commands.length);
+    for (const h of handlers) expect(typeof h.handle).toBe("function");
   });
 });
