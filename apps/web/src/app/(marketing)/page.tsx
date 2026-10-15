@@ -2,7 +2,7 @@
 // Stats and the simulated clock are read from the API on each request, with the seed's numbers as the fallback.
 import type { Metadata } from "next";
 import { loadLanding } from "@/components/marketing/live";
-import { AgentIsland, Announcement, CtaBand, Footer, Hero, HowItWorks, Nav, SimulatorsMarquee, StatsTiles } from "@/components/marketing/sections";
+import { AgentIsland, Announcement, CtaBand, Footer, Hero, HowItWorks, Nav, ProductsSection, SimulatorsMarquee, StatsTiles } from "@/components/marketing/sections";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +20,7 @@ export default async function Home() {
       <main>
         <Hero clock={clock} />
         <SimulatorsMarquee />
+        <ProductsSection />
         <HowItWorks />
         <AgentIsland />
         <StatsTiles stats={stats} />

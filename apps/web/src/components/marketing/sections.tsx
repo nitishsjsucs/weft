@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { LoomField, WeaveMark, Wordmark, WovenBands } from "./brand";
 import { CopyCommand, SimClockTicker } from "./client";
+import { ProductGrid } from "./products";
 import type { LandingStats } from "./live";
 import css from "./marketing.module.css";
 
@@ -34,6 +35,7 @@ export function Announcement() {
 }
 
 const NAV = [
+  { href: "#product", label: "Product" },
   { href: "#how-it-works", label: "How it works" },
   { href: "#agent", label: "Agent" },
   { href: "#simulators", label: "Simulators" },
@@ -216,6 +218,19 @@ function SectionHeading({ lead, rest, id }: { lead: string; rest: string; id?: s
     <h2 id={id} className="weft-rule max-w-[860px] scroll-mt-20 pl-6 text-[28px] leading-[34px] font-book tracking-[-0.35px] tablet:text-8">
       <span className="text-gray-12">{lead}</span> <span className="text-gray-10">{rest}</span>
     </h2>
+  );
+}
+
+// ---- products ------------------------------------------------------------------------------------------------------
+
+export function ProductsSection() {
+  return (
+    <section className="pt-12 tablet:pt-16 laptop:pt-24">
+      <Container className="flex flex-col gap-12 laptop:gap-16">
+        <SectionHeading id="product" lead="Payroll, compliance, benefits and IT in one place." rest="Built in the open, run on your own machine, honest about what is simulated." />
+        <ProductGrid />
+      </Container>
+    </section>
   );
 }
 
