@@ -47,7 +47,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
-| `pnpm e2e` | Playwright golden paths GP1 to GP5 against a fresh seed on ports 3170 and 4170, one worker, reset before each test |
+| `pnpm e2e` | Playwright golden paths GP1 to GP5 and the site specs against a fresh seed on ports 3170 and 4170, one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files |
 | `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world and print its digest (stable across runs) |
@@ -63,6 +63,7 @@ Weft runs on one fictional company, Larkspur Robotics (demo), with 48 synthetic 
 - [docs/api.md](docs/api.md): the `/v1` API, auth, paging and errors
 - [docs/simulators.md](docs/simulators.md): what each simulator does and how to drive it
 - [docs/models.md](docs/models.md): providers, spend caps, the live gate, sandboxes
+- [docs/testing.md](docs/testing.md): unit, lint and E2E layers, reading a failed golden path, rehearsing a merge
 - [docs/status.md](docs/status.md): what works today and what is left
 - `SPEC.md`: the foundation spec; `AGENTS.md`: rules for anyone building here
 
