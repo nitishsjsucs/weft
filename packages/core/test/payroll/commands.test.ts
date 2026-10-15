@@ -137,7 +137,9 @@ describe("drafts and explanations", () => {
     expect(items[1]).toMatchObject({ status: "refused", source: null, code: "UNGROUNDED" });
     expect(items[1]!.offending).toContain("140.00");
     const second = await exec("payroll.explain_flags", { run_id: "pay_2026_10_30", items: [{ paycheck_id: spike.id, explanation: "Worked 150.00 hours." }] });
-    expect((second.data as { items: unknown[] }).items[0]).toMatchObject({ status: "refused", source: "template", code: "UNGROUNDED" });
+    // After the one repair: the text is refused (UNGROUNDED) and the row is saved with the labeled template.
+    expect(second.data).toMatchObject({ saved: 1, refused: 0, items: [{ status: "saved", source: "template", code: "UNGROUNDED" }] });
+    expect(first.data).toMatchObject({ saved: 1, refused: 1 });
     const after = await db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
     expect(after.find((p) => p.id === raise.id)).toMatchObject({ explanationSource: "agent" });
     const s = after.find((p) => p.id === spike.id)!;

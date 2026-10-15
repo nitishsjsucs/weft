@@ -140,7 +140,7 @@ const ExplainInput = z.object({
 type ExplainInput = z.infer<typeof ExplainInput>;
 export const explainFlagsCommand: WeftCommand<ExplainInput> = {
   ...base, name: "payroll.explain_flags", summary: "Save explanations for flagged paychecks",
-  description: "Saves one plain explanation per flagged paycheck in one call. Each is checked against that paycheck's flag evidence: numbers must come from it. Ungrounded items are refused per item (UNGROUNDED); after one repair the template is saved. Omit explanation to save the template. Example: {\"run_id\": \"pay_2026_10_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
+  description: "Saves one plain explanation per flagged paycheck in one call. Each is checked against that paycheck's flag evidence: numbers must come from it. Ungrounded items are refused per item (UNGROUNDED); after one repair the template is saved (source template). Omit explanation to save the template. Example: {\"run_id\": \"pay_2026_10_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
   compactDescription: "Save grounded explanations for flagged paychecks (batch).",
   input: ExplainInput, needs: "edit", effect: "draft", risk: () => "R1", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "hidden",
@@ -175,7 +175,8 @@ export const explainFlagsCommand: WeftCommand<ExplainInput> = {
         const t = templateExplanation(flags);
         await save(t, "template");
         delete attempts[p.id];
-        results.push({ paycheck_id: p.id, status: "refused", source: "template", code: "UNGROUNDED", offending: g.offending, explanation: t });
+        // The agent's text is refused again (code UNGROUNDED), and the row is saved with the labeled template instead.
+        results.push({ paycheck_id: p.id, status: "saved", source: "template", code: "UNGROUNDED", offending: g.offending, explanation: t });
       } else {
         attempts[p.id] = (attempts[p.id] ?? 0) + 1;
         results.push({ paycheck_id: p.id, status: "refused", source: null, code: "UNGROUNDED", offending: g.offending, explanation: null });
@@ -186,7 +187,7 @@ export const explainFlagsCommand: WeftCommand<ExplainInput> = {
     const remaining = rows.filter((p) => p.reviewGroup === "needs_review" && p.status !== "excluded").length
       - (await deps.tx.select({ id: paychecks.id, e: paychecks.explanation, g: paychecks.reviewGroup, s: paychecks.status }).from(paychecks).where(eq(paychecks.payrollRunId, run.id))).filter((r) => r.g === "needs_review" && r.s !== "excluded" && r.e !== null).length;
     return {
-      data: { run_id: run.id, items: results, saved: saved.length, refused: results.filter((r) => r.status === "refused" && r.source === null).length, unexplained_flagged: remaining },
+      data: { run_id: run.id, items: results, saved: saved.length, refused: results.filter((r) => r.status === "refused").length, unexplained_flagged: remaining },
       summary: `Explanations for ${run.id}: ${saved.filter((r) => r.source === "agent").length} agent, ${saved.filter((r) => r.source === "template").length} template, ${results.filter((r) => r.source === null).length} refused`,
     };
   },
