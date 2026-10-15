@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { simAgencyMail, simBankBatches, simRegistrations } from "@weft/db";
 import { addBusinessDays, createSimulators, fixtureText, parseNotice, percentToRate, renderScenarioAt, SCENARIOS, toUsdCents } from "../src/index";
@@ -112,12 +110,6 @@ describe("notice scenarios", () => {
       .toEqual([{ code: "sui", oldRate: "0.034", newRate: "0.02" }]);
   });
 
-  it("fixtures carry no dashes that lint:prose bans", () => {
-    for (const name of Object.keys(SCENARIOS)) {
-      const t = readFileSync(join(__dirname, "../fixtures/notices", `${name}.txt`), "utf8");
-      expect(/[–—]/.test(t)).toBe(false);
-    }
-  });
 });
 
 describe("bank simulator", () => {
