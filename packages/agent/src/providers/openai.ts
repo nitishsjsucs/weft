@@ -139,6 +139,12 @@ export function handleResponse(res: RawResponse, model: string): ModelStepResult
   return { ...base, stop: toolCalls.length ? "tool_calls" : "final", text, toolCalls };
 }
 
+/** The SDK error classes errorResult maps, for tests (boundary rule: only this file imports openai). */
+export const OPENAI_ERRORS = {
+  APIError: OpenAI.APIError, APIConnectionError: OpenAI.APIConnectionError, APIConnectionTimeoutError: OpenAI.APIConnectionTimeoutError,
+  APIUserAbortError: OpenAI.APIUserAbortError,
+} as const;
+
 function errorResult(e: unknown, model: string): ModelStepResult {
   const empty = { stop: "error" as const, text: "", toolCalls: [], native: [], usage: mapUsage(null), servedBy: model, requestId: null };
   const msg = e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300);

@@ -5,7 +5,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { Cron } from "croner";
-import { agentRuns, routineRuns, routines, runSteps, withWriteLock, type Db } from "@weft/db";
+import { agentRuns, routineRuns, routines, runSteps, type Db } from "@weft/db";
+import { lockedWrite } from "./busy";
 import type { AgentRuntime, PrecheckResult, ProposalDecided, ReadOnlyExecutor, RoutineDef, RoutineRun, RoutineRunAuthority, RoutineRunStatus, RoutinesEngine, SimClock, ToolOutcome, WeftEvent } from "@weft/contracts";
 import { evaluateChecklist, type RunCall, type RunFacts } from "./checks";
 import { PREBUILT, TZ } from "./prebuilt";
@@ -94,7 +95,7 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     const existing = new Set((await db.select({ id: routines.id }).from(routines)).map((r) => r.id));
     for (const r of PREBUILT) {
       if (existing.has(r.id)) continue;
-      await withWriteLock(() => db.insert(routines).values({
+      await lockedWrite(() => db.insert(routines).values({
         id: r.id, companyId, name: r.name, description: r.description, ownerPrincipalId: r.ownerPrincipalId, enabled: r.enabled, autonomy: r.autonomy,
         triggerJson: JSON.stringify(r.trigger), filterJson: r.filter ? JSON.stringify(r.filter) : null, instructions: r.instructions, toolsJson: JSON.stringify(r.tools),
         precheck: r.precheck, checklistJson: JSON.stringify(r.checklist), budgetJson: JSON.stringify(r.budget), surfaceJson: JSON.stringify(r.surface), source: r.source,
@@ -117,7 +118,7 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     return r[0] ? toRun(r[0]) : null;
   }
   async function updateRun(id: string, p: Partial<typeof routineRuns.$inferInsert>) {
-    await withWriteLock(() => db.update(routineRuns).set(p).where(eq(routineRuns.id, id)));
+    await lockedWrite(() => db.update(routineRuns).set(p).where(eq(routineRuns.id, id)));
     const row = await getRun(id);
     if (row && !["queued", "running"].includes(row.status)) {
       const ws = waiters.get(id) ?? [];
@@ -166,7 +167,7 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     if (existing) return toRun(existing);
     const id = newId();
     const now = clock.now();
-    await withWriteLock(() => db.insert(routineRuns).values({ id, routineId: routine.id, runKey: key, triggerRef: input.triggerRef, status: "running", attended: input.attended, startedAt: now }).onConflictDoNothing());
+    await lockedWrite(() => db.insert(routineRuns).values({ id, routineId: routine.id, runKey: key, triggerRef: input.triggerRef, status: "running", attended: input.attended, startedAt: now }).onConflictDoNothing());
     // A cron slot is judged at its own time, so a catch-up tick on Wednesday still skips Monday's and Tuesday's slots.
     const pre = await runPrecheck(routine.precheck, { companyId, now: input.at ?? now, triggerRef: input.triggerRef, payload: input.payload }, readOnly);
     if (pre.action === "skip") {

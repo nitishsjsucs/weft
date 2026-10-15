@@ -3,10 +3,10 @@
 export { createSpendLedger, capsFromEnv, SpendLockTimeout, type SpendLedgerOptions, type SpendCaps, type WeftSpendLedger } from "./spend";
 export type { SpendLedgerOptions as CreateSpendLedgerOptions } from "./spend";
 export { createProvider, isTestEnv, ProviderError, DEFAULT_MODEL, DEFAULT_SCRIPTS_DIR, type CreateProviderOptions } from "./providers/factory";
-export { openaiProvider, createOpenAIClient, buildResponsesRequest, handleResponse, historyToInput, mapUsage, renderNotice, OPENAI_FIXED, type OpenAIProviderOptions } from "./providers/openai";
+export { openaiProvider, createOpenAIClient, buildResponsesRequest, handleResponse, historyToInput, mapUsage, renderNotice, OPENAI_FIXED, OPENAI_ERRORS, type OpenAIProviderOptions } from "./providers/openai";
 export { scriptedProvider, applyTemplates, parseContext, SCRIPTED_LABEL, ScriptExpectationError, type Script, type ScriptStep, type ScriptOutput, type ScriptedProviderOptions } from "./providers/scripted";
 export { createAgentRuntime, CHAT_TOOLS, DRAFT_TOOLS, DEFAULT_COMPANY_ID, type CreateAgentRuntimeOptions, type RoutinesView, type ChatContextSource, type WeftAgentRuntime } from "./runtime";
-export { runLoop, historyFromSteps, renderPlan, outputFor, BUDGETS, MAX_OUTPUT_TOKENS, RETRY_OUTPUT_TOKENS, MAX_REQUEUES, type ChecklistState, type LoopDeps, type RunSetup } from "./loop";
+export { runLoop, historyFromSteps, renderPlan, outputFor, BUDGETS, MAX_OUTPUT_TOKENS, MAX_TOOLS, assertToolCap, RETRY_OUTPUT_TOKENS, MAX_REQUEUES, type ChecklistState, type LoopDeps, type RunSetup } from "./loop";
 export { createRunStore, type RunStore } from "./store";
 export { buildTrace, summarize, stageLabel, type TraceSummary, type StageRow } from "./trace";
 export { createRunQueue, concurrencyFor, type RunQueue } from "./queue";
@@ -15,3 +15,4 @@ export { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
 export { LUNA, stepCostUsd, reserveUsd, usdToMicros, pricesFromEnv, type Prices } from "./cost";
 export { loadSecret, parseSecretsFile } from "./secrets";
 export { canonicalJson, sha256, newNonce, escapeTagText } from "./canonical";
+export { lockedWrite, isBusy } from "./busy";

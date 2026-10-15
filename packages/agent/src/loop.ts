@@ -21,6 +21,12 @@ export const BUDGETS = {
 
 export const MAX_OUTPUT_TOKENS = 8_000;
 export const RETRY_OUTPUT_TOKENS = 16_000;
+/** Harness 5.3: no agent kind or routine sees more than 16 tools. */
+export const MAX_TOOLS = 16;
+
+export function assertToolCap(count: number, what: string): void {
+  if (count > MAX_TOOLS) throw new Error(`${what}: ${count} tools exceed the cap of ${MAX_TOOLS}`);
+}
 export const MAX_REQUEUES = 2;
 
 /** Stored on the context step so a requeued run rebuilds the same request. */
@@ -123,7 +129,9 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
   const stepBudget = run.budget.steps || budget.steps;
   const usdBudget = run.budget.usd || budget.usd;
   const prompt = frozenPrompt(setup.promptKind);
+  assertToolCap(setup.allowlist.length, `runLoop: run ${run.id} allowlist`);
   const tools: ToolSpec[] = executor.registry.toolSpecs({ agentKind: run.kind, allowlist: setup.allowlist });
+  assertToolCap(tools.length, `runLoop: run ${run.id} tool specs`);
   const settings = { model: run.model, effort: run.effort, parallelToolCalls: true, store: false, toolChoice: "auto" };
   const pHash = prefixHash(prompt, tools, settings);
   let history = historyFromSteps(steps, provider.id);

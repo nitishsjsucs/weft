@@ -1,7 +1,8 @@
 // The run store (SPEC 6.5): agent_runs and run_steps only. agent_runs.id equals exec_runs.id (the RunAuthority mints
 // the id first and the brain reuses it). Brain writes are single statements under the process write lock.
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { agentRuns, runSteps, routineRuns, withWriteLock, type Db } from "@weft/db";
+import { agentRuns, runSteps, routineRuns, type Db } from "@weft/db";
+import { lockedWrite } from "./busy";
 import type { AgentRunRow, RunStepRow, RunStatus, TerminalReason, Usage } from "@weft/contracts";
 
 type AgentRunInsert = typeof agentRuns.$inferInsert;
@@ -72,7 +73,7 @@ export function createRunStore(db: Db, opts: { wallNow?: () => string; onStep?: 
 
   return {
     async createRun(row, onBehalfOf = null) {
-      await withWriteLock(() => db.insert(agentRuns).values(toInsert(row, onBehalfOf)));
+      await lockedWrite(() => db.insert(agentRuns).values(toInsert(row, onBehalfOf)));
     },
     async getRun(id) {
       const rows = await db.select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1);
@@ -95,13 +96,13 @@ export function createRunStore(db: Db, opts: { wallNow?: () => string; onStep?: 
       if (p.summary !== undefined) set.summary = p.summary;
       if (p.endedAt !== undefined) set.endedAt = p.endedAt;
       if (Object.keys(set).length === 0) return;
-      await withWriteLock(() => db.update(agentRuns).set(set).where(eq(agentRuns.id, id)));
+      await lockedWrite(() => db.update(agentRuns).set(set).where(eq(agentRuns.id, id)));
     },
     async appendStep(runId, s) {
       const n = await counter(runId);
       nextN.set(runId, n + 1);
       const row: RunStepRow = { ...s, runId, n, createdAt: s.createdAt ?? nowIso() };
-      await withWriteLock(() => db.insert(runSteps).values({
+      await lockedWrite(() => db.insert(runSteps).values({
         runId, n, parentN: row.parentN, stage: row.stage, kind: row.kind, callId: row.callId, attempt: row.attempt, toolName: row.toolName,
         toolArgsJson: str(row.toolArgs), outcome: row.outcome, resultJson: str(row.result), nativeJson: str(row.native), usageJson: str(row.usage),
         costUsdMicros: row.costUsdMicros, requestId: row.requestId, prefixHash: row.prefixHash, timingsJson: str(row.timings), createdAt: row.createdAt,
@@ -123,7 +124,7 @@ export function createRunStore(db: Db, opts: { wallNow?: () => string; onStep?: 
       return rows.map(toRow).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, filter.limit ?? 50);
     },
     async failRoutineRun(routineRunId, summary, at) {
-      await withWriteLock(() => db.update(routineRuns).set({ status: "failed", summary, endedAt: at })
+      await lockedWrite(() => db.update(routineRuns).set({ status: "failed", summary, endedAt: at })
         .where(and(eq(routineRuns.id, routineRunId), inArray(routineRuns.status, ["queued", "running", "waiting_approval", "waiting_event"]))));
     },
   };
