@@ -8,8 +8,21 @@ import { Cron } from "croner";
 import { agentRuns, routineRuns, routines, runSteps, withWriteLock, type Db } from "@weft/db";
 import type { AgentRuntime, PrecheckResult, ProposalDecided, ReadOnlyExecutor, RoutineDef, RoutineRun, RoutineRunAuthority, RoutineRunStatus, RoutinesEngine, SimClock, ToolOutcome, WeftEvent } from "@weft/contracts";
 import { evaluateChecklist, type RunCall, type RunFacts } from "./checks";
-import { PREBUILT } from "./prebuilt";
+import { PREBUILT, TZ } from "./prebuilt";
 import { runPrecheck } from "./prechecks";
+
+/** settings.notify.quiet_hours default (harness 8): digest-severity cron posts wait; event posts and the weekly digest never do. */
+export const QUIET_HOURS = { start: "19:00", end: "07:00", tz: TZ };
+
+export function inQuietHours(iso: string, q = QUIET_HOURS): boolean {
+  const hm = new Intl.DateTimeFormat("en-GB", { timeZone: q.tz, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+  return q.start > q.end ? hm >= q.start || hm < q.end : hm >= q.start && hm < q.end;
+}
+
+export function surfaceHash(findings: unknown): string {
+  const canon = (v: unknown): unknown => Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, canon((v as Record<string, unknown>)[k])])) : v;
+  return createHash("sha256").update(JSON.stringify(canon(findings ?? null))).digest("hex");
+}
 
 export interface EventSource {
   /** Events not yet consumed by the routines engine, in id order. */
@@ -160,7 +173,23 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
       await updateRun(id, { status: "skipped", precheckJson: JSON.stringify(pre), summary: pre.reason, endedAt: now });
       return (await getRun(id))!;
     }
-    await updateRun(id, { precheckJson: JSON.stringify(pre) });
+    const isCron = routine.trigger.type === "cron" && !input.attended;
+    // Quiet hours defer only digest-severity cron posts; the weekly digest itself is never deferred.
+    if (isCron && pre.severity === "digest" && routine.id !== "rt_people_digest" && inQuietHours(input.at ?? now)) {
+      await updateRun(id, { status: "skipped", precheckJson: JSON.stringify(pre), summary: "Deferred by quiet hours (19:00 to 07:00 PT).", endedAt: now });
+      return (await getRun(id))!;
+    }
+    // Worth surfacing: a background run posts only when its findings changed since the last surfaced run.
+    const hash = surfaceHash(pre.findings);
+    if (isCron && routine.surface.worthSurfacing) {
+      const last = (await db.select().from(routineRuns).where(eq(routineRuns.routineId, routine.id)).orderBy(desc(routineRuns.startedAt)))
+        .find((r) => r.id !== id && r.surfaceHash !== null && r.status !== "skipped");
+      if (last && last.surfaceHash === hash) {
+        await updateRun(id, { status: "skipped", precheckJson: JSON.stringify(pre), summary: "Nothing new since the last run.", surfaceHash: hash, endedAt: now });
+        return (await getRun(id))!;
+      }
+    }
+    await updateRun(id, { precheckJson: JSON.stringify(pre), surfaceHash: hash });
     const handle = await runs.openRoutineRun({ routineId: routine.id, routineRunId: id, triggerRef: input.triggerRef, attended: input.attended });
     await updateRun(id, { agentRunId: handle.runId });
     const unsubscribe = agent.subscribe(handle.runId, (step) => {

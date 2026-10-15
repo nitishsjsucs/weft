@@ -121,3 +121,26 @@ describe("routines engine", () => {
     expect(ptDate("2026-10-28T16:00:00.000Z")).toBe("2026-10-28");
   });
 });
+
+describe("quiet hours and worth surfacing", () => {
+  it("knows 19:00 to 07:00 PT", async () => {
+    const { inQuietHours } = await import("../src/index");
+    expect(inQuietHours("2026-10-27T03:00:00.000Z")).toBe(true);   // Mon 20:00 PT
+    expect(inQuietHours("2026-10-26T16:00:00.000Z")).toBe(false);  // Mon 09:00 PT
+    expect(inQuietHours("2026-10-27T13:59:00.000Z")).toBe(true);   // Tue 06:59 PT
+  });
+
+  it("a custom digest-severity cron routine is deferred in quiet hours and skipped when nothing changed", async () => {
+    const clock = mutableClock("2026-10-26T15:30:00.000Z");
+    const agent = fakeAgent();
+    const eng = createRoutines({ db, clock, agent, runs, readOnly: fakeRead() });
+    const base = (await eng.view.get("rt_people_digest"))!;
+    const custom = { ...base, id: "rt_custom_0001", precheck: "open_approvals", source: "custom" as const, surface: { worthSurfacing: true, channel: "#payroll" } };
+    const night = await eng.fire(custom, { triggerRef: "cron:2026-10-27T03:00:00.000Z", payload: {}, attended: false, event: null, at: "2026-10-27T03:00:00.000Z" });
+    expect(night).toMatchObject({ status: "skipped", summary: expect.stringContaining("quiet hours") });
+    const first = await eng.fire(custom, { triggerRef: "cron:2026-10-30T16:00:00.000Z", payload: {}, attended: false, event: null, at: "2026-10-30T16:00:00.000Z" });
+    expect(first.status).toBe("running");
+    const second = await eng.fire(custom, { triggerRef: "cron:2026-11-06T17:00:00.000Z", payload: {}, attended: false, event: null, at: "2026-11-06T17:00:00.000Z" });
+    expect(second).toMatchObject({ status: "skipped", summary: "Nothing new since the last run." });
+  });
+});
