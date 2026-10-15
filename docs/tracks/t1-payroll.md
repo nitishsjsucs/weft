@@ -27,8 +27,14 @@ there. Results on that trial merge:
 ### For the integrator at merge 1
 
 - `packages/core/src/index.ts` conflicts with t2-world. Keep both lines:
-  `export * as payroll from "./payroll/index";` and `export * from "./demo/index";`. Nothing else in t1 conflicts.
-- Failures seen on the trial merge that are outside t1 (left alone): `packages/seed/test/seed.test.ts` (its context
+  `export * as payroll from "./payroll/index";` and `export * from "./demo/index";`.
+- `packages/core/test/shared.test.ts` was changed by t1, t2 and t4 (the scaffold asserted empty arrays). t1 and t4
+  have the same version (unique command names, callable handlers); keep that one.
+- A second trial at about 16:00 PDT (with newer t2, t3 and t4 commits) still passes S2 5 of 5, three repeats. There,
+  `TestWeft.close()` sometimes threw ENOTEMPTY removing the temp dir (a background file write lands after the db
+  closes); S2 waits for agent runs to go idle and retries only the directory removal. Worth a look in `testing.ts`.
+- Failures seen on the trial merges that are outside t1 (left alone; the second trial also showed
+  `health.test.ts` route table, s1 and s5 failing on their own tracks' code): `packages/seed/test/seed.test.ts` (its context
   has no `executor`, so `seedGovernance` fails on `ctx.executor.vault.put`), and `apps/api/test/sim.test.ts` (3 tests:
   SQLITE_BUSY_SNAPSHOT on `id_counters` while background agent runs write, then cascading assertions; the same
   routes answer 200 in a fresh world).

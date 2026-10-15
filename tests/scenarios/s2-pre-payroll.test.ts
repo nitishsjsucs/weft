@@ -3,6 +3,7 @@
 // Needs the merged world (T2 seed and simulators, T3 executor, T4 routines and scripted provider): until those land
 // each test skips itself, naming the missing parts. The payroll pieces are covered now by packages/core/test/payroll
 // and apps/api/test/payrolls.test.ts on a local fixture world.
+import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { PayrollRun } from "@weft/contracts";
@@ -19,7 +20,7 @@ beforeAll(async () => {
   const res = await weft.app.request(`/v1/payrolls/${RUN}`, { headers: weft.uiHeaders("usr_theo") });
   if (res.status !== 200) missing.push(`seeded ${RUN} (GET answered ${res.status})`);
 });
-afterAll(async () => { await weft?.close(); });
+afterAll(async () => { if (weft) await closeWorld(weft); });
 
 const get = (path: string, who = "usr_theo") => weft.app.request(path, { headers: weft.uiHeaders(who) });
 const post = (path: string, body: unknown, who = "usr_theo") => weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders(who), "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -34,6 +35,19 @@ async function waitFor<T>(what: string, probe: () => Promise<T | null | undefine
     if (v) return v;
     if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
     await sleep(20);
+  }
+}
+
+/**
+ * Waits until no agent run is queued or running, then closes the world. close() closes the database before it removes
+ * the temp dir; a late background file write can make that removal fail with ENOTEMPTY, so only the removal is retried.
+ */
+async function closeWorld(w: TestWeft): Promise<void> {
+  await waitFor("agent runs to go idle", async () => (await w.db.select().from(agentRuns)).every((r) => !["queued", "running"].includes(r.status)), 10_000).catch(() => undefined);
+  try { await w.close(); } catch (e) {
+    if ((e as { code?: string }).code !== "ENOTEMPTY") throw e;
+    await sleep(200);
+    rmSync(w.dataDir, { recursive: true, force: true });
   }
 }
 
@@ -135,7 +149,7 @@ describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant
 describe("S2 fault variant: the bank returns the batch", () => {
   beforeAll(async () => {
     if (missing.length) return;
-    await weft.close();
+    await closeWorld(weft);
     weft = await createTestWeft();
   });
 
