@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { PayrollRun } from "@weft/contracts";
-import { bankAccounts, events, paychecks, proposals, ytdLedger } from "@weft/db";
+import { agentRuns, bankAccounts, events, paychecks, proposals, routineRuns, ytdLedger } from "@weft/db";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 const RUN = "pay_2026_10_30";
@@ -24,17 +24,51 @@ afterAll(async () => { await weft?.close(); });
 const get = (path: string, who = "usr_theo") => weft.app.request(path, { headers: weft.uiHeaders(who) });
 const post = (path: string, body: unknown, who = "usr_theo") => weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders(who), "content-type": "application/json" }, body: JSON.stringify(body) });
 
-async function reviewAndPropose(): Promise<string> {
-  const trig = await post("/v1/routines/rt_pre_payroll/trigger", {}, "usr_dana");
-  expect(trig.status).toBe(200);
-  await weft.scheduler.tick();
-  for (let i = 0; i < 50; i++) {
-    const open = await weft.db.select().from(proposals).where(eq(proposals.command, "payroll.submit_run"));
-    const p = open.find((x) => x.status === "pending" && x.subjectRef === RUN);
-    if (p) return p.id;
-    await weft.scheduler.tick();
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Polls real time (the agent runs in the background); no scheduler ticks while waiting, so nothing races the run. */
+async function waitFor<T>(what: string, probe: () => Promise<T | null | undefined | false>, ms = 15_000): Promise<T> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = await probe();
+    if (v) return v;
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+    await sleep(20);
   }
-  throw new Error("no payroll.submit_run proposal was created");
+}
+
+const SETTLED = new Set(["waiting_approval", "done", "completed", "failed", "skipped", "escalated", "cancelled", "left_for_human"]);
+const routineRun = async (id: string) => (await weft.db.select().from(routineRuns).where(eq(routineRuns.id, id)))[0];
+const agentRunStatus = async (id: string | null) => (id ? (await weft.db.select().from(agentRuns).where(eq(agentRuns.id, id)))[0]?.status ?? null : null);
+
+/** "Run review now" (attended). Uses the route; while T4's routines routes are still 501 stubs, the engine directly. */
+async function triggerReview(): Promise<string> {
+  const trig = await post("/v1/routines/rt_pre_payroll/trigger", {}, "usr_dana");
+  if (trig.status === 501) return (await weft.routines.trigger("rt_pre_payroll", { attended: true, requestedBy: "usr_dana" })).routineRunId;
+  expect(trig.status).toBe(200);
+  return ((await trig.json()) as { routineRunId: string }).routineRunId;
+}
+
+/** Triggers the review, waits until its agent run stops, and returns the pending payroll.submit_run proposal it made. */
+async function reviewAndPropose(): Promise<{ proposalId: string; routineRunId: string }> {
+  const routineRunId = await triggerReview();
+  const rr = await waitFor(`routine run ${routineRunId} to settle`, async () => {
+    const r = await routineRun(routineRunId);
+    return r && SETTLED.has(r.status) ? r : null;
+  });
+  const p = (await weft.db.select().from(proposals).where(eq(proposals.command, "payroll.submit_run")))
+    .find((x) => x.status === "pending" && x.subjectRef === RUN && x.proposerRunId === rr.agentRunId);
+  if (!p) throw new Error(`routine run ${routineRunId} ended ${rr.status} without a pending payroll.submit_run proposal`);
+  return { proposalId: p.id, routineRunId };
+}
+
+/** After a decision the engine wakes the proposing agent run; wait until it stops again before moving the clock. */
+async function waitForWake(routineRunId: string): Promise<void> {
+  const rr = await routineRun(routineRunId);
+  await waitFor(`agent run ${rr?.agentRunId} to stop after the decision`, async () => {
+    const st = await agentRunStatus(rr?.agentRunId ?? null);
+    return st !== null && !["queued", "running"].includes(st);
+  });
 }
 
 describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant", () => {
@@ -46,25 +80,32 @@ describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant
 
   it("STALE_SUBJECT: a direct-deposit change between proposal and approval refuses the approval", async (ctx) => {
     if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
-    const proposalId = await reviewAndPropose();
+    const { proposalId, routineRunId } = await reviewAndPropose();
     const rows = await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN));
     const ready = rows.find((p) => p.reviewGroup === "ready")!;
     const acct = (await weft.db.select().from(bankAccounts).where(eq(bankAccounts.workerId, ready.workerId)))[0]!;
     await weft.db.update(bankAccounts).set({ accountLast4: "0000" }).where(eq(bankAccounts.id, acct.id));
     const res = await post(`/v1/proposals/${proposalId}/approve`, { reasonCode: null, note: null });
     const body = (await res.json()) as { ok?: boolean; code?: string };
+    expect(res.status).toBe(422);
     expect(body.code ?? JSON.stringify(body)).toContain("STALE_SUBJECT");
     await weft.db.update(bankAccounts).set({ accountLast4: acct.accountLast4 }).where(eq(bankAccounts.id, acct.id));
+    expect((await weft.db.select().from(proposals).where(eq(proposals.id, proposalId)))[0]!.status).not.toBe("pending");
+    expect(PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json()).status).toBe("draft");   // nothing moved
+    await waitForWake(routineRunId);
   });
 
   it("runs end to end with the scripted provider: explained, proposed, approved, processing, processed", async (ctx) => {
     if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
-    const proposalId = await reviewAndPropose();
+    const { proposalId, routineRunId } = await reviewAndPropose();
     const flagged = (await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN))).filter((p) => p.reviewGroup === "needs_review");
     expect(flagged).toHaveLength(4);
     for (const p of flagged) expect(p.explanation, p.workerId).not.toBeNull();
     const approved = await post(`/v1/proposals/${proposalId}/approve`, { reasonCode: null, note: null });
     expect(approved.status).toBe(200);
+    const decided = (await approved.json()) as { ok: boolean; outcome?: { ok: boolean; status?: string } };
+    expect(decided.outcome, JSON.stringify(decided).slice(0, 600)).toMatchObject({ ok: true, status: "done" });
+    await waitForWake(routineRunId);
     let run = PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json());
     expect(run.status).toBe("processing");
     expect(run.excludedWorkerIds).toHaveLength(1);

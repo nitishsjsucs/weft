@@ -1,39 +1,34 @@
 {
-  "name": "s2-pre-payroll",
-  "routine": "rt_pre_payroll",
-  "note": "GP2 with the scripted provider. The precheck derives {run_id, exclude_blocked: true}. Explanations are omitted, so payroll.explain_flags saves the grounded templates (labeled template); the live L2 gate is where model-written explanations are counted.",
   "agents": {
     "main": [
       {
-        "expect": { "tools_include": ["payroll__get_run", "payroll__explain_flags", "payroll__submit_run"] },
         "output": [
           { "type": "function_call", "name": "payroll__get_run", "arguments": { "run_id": "{{derived.run_id}}", "flagged_only": true, "response_format": "concise" } }
-        ],
-        "stop": false
+        ]
       },
       {
+        "expect": { "lastResults": [{ "tool": "payroll__get_run", "ok": true, "status": "done" }] },
         "output": [
           {
             "type": "function_call", "name": "payroll__explain_flags",
             "arguments": {
               "run_id": "{{derived.run_id}}",
               "items": [
-                { "paycheck_id": "{{last.payroll__get_run.flagged.0.paycheck_id}}" },
-                { "paycheck_id": "{{last.payroll__get_run.flagged.1.paycheck_id}}" },
-                { "paycheck_id": "{{last.payroll__get_run.flagged.2.paycheck_id}}" },
-                { "paycheck_id": "{{last.payroll__get_run.flagged.3.paycheck_id}}" }
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.0.paycheck_id}}" },
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.1.paycheck_id}}" },
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.2.paycheck_id}}" },
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.3.paycheck_id}}" }
               ]
             }
           },
-          { "type": "function_call", "name": "payroll__submit_run", "arguments": { "run_id": "{{derived.run_id}}", "exclude_blocked": true } }
-        ],
-        "stop": false
+          { "type": "function_call", "name": "payroll__submit_run", "arguments": "{{derived.payroll.submit_run}}" }
+        ]
       },
       {
+        "expect": { "lastResults": [{ "tool": "payroll__explain_flags", "ok": true, "status": "done" }, { "tool": "payroll__submit_run", "ok": true, "status": "pending_approval" }] },
         "output": [
-          { "type": "text", "text": "Reviewed the draft: 4 paychecks need review and each now has an explanation. I proposed submitting the run with the blocked paycheck excluded; it waits for a payroll approver." }
-        ],
-        "stop": true
+          { "type": "text", "text": "Reviewed the draft: 4 paychecks need review and each now has an explanation from its evidence. I proposed submitting the run with the blocked paycheck excluded; it waits for a payroll approver." }
+        ]
       }
     ]
   }
