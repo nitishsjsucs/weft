@@ -4,6 +4,13 @@
 import { money, type Action, type ArmedFault, type ChainStatus, type RoutineRunDto, type AgentRunRow, type DecisionResult, type Health, type PageResult, type Proposal, type RunStepRow, type ToolOutcome } from "@weft/contracts";
 import { buildWorld, PRINCIPALS, type MockWorld } from "./world";
 
+const MOCK_DEPT: Record<string, string> = { dpt_engineering: "Engineering", dpt_hardware: "Hardware", dpt_operations: "Operations", dpt_people: "People", dpt_finance: "Finance", dpt_gtm: "Go-to-market" };
+const MOCK_WKP: Record<string, string> = { wkp_oakland: "Oakland HQ", wkp_brooklyn: "Brooklyn Studio", wkp_austin: "Austin Yard", wkp_remote: "Remote US" };
+const MOCK_PLANS = [
+  { id: "bpl_0001", carrier: "Juniper Mutual (sim)", category: "health", type: "medical", name: "Juniper PPO 1500", pretaxCode: "section125_medical", prices: { ee: 9500, family: 31000, employer: 38000 }, match: null },
+  { id: "bpl_0003", carrier: "Juniper Mutual (sim)", category: "health", type: "dental", name: "Juniper Dental Basic", pretaxCode: "section125_dental", prices: { ee: 800, family: 2400, employer: 1600 }, match: null },
+];
+
 export { PRINCIPALS } from "./world";
 export const mocksEnabled = process.env.NEXT_PUBLIC_WEFT_MOCKS === "1";
 
@@ -107,7 +114,31 @@ const routes: [string, RegExp, Handler][] = [
     return json(200, { now: world.now, rate: world.rate });
   }],
   ["GET", /^\/v1\/workers$/, (_m, q) => json(200, page(world.workers, q, (w) => w.id))],
-  ["GET", /^\/v1\/workers\/([^/]+)$/, (m) => { const w = world.workers.find((x) => x.id === m[1]); return w ? json(200, w) : err(404, "NotFound", "No such worker"); }],
+  // WorkerDetail, as the API returns it (the route table's type; the scaffold client still types it as Worker).
+  ["GET", /^\/v1\/workers\/([^/]+)$/, (m) => {
+    const w = world.workers.find((x) => x.id === m[1]);
+    if (!w) return err(404, "NotFound", "No such worker");
+    const annual = (w as { annualCents?: number | null }).annualCents ?? null;
+    const n = Number(w.id.slice(4));
+    return json(200, {
+      worker: w, department: MOCK_DEPT[w.departmentId ?? ""] ?? null, manager: null, workplace: MOCK_WKP[w.workplaceId ?? ""] ?? null,
+      payRates: annual ? [{ id: `prt_${w.id.slice(4)}`, workerId: w.id, kind: "salary", amount: money(annual), effectiveFrom: w.startDate, effectiveTo: null, createdActionSeq: null }] : [],
+      bankAccount: w.status === "onboarding" ? null : { id: `bnk_${w.id.slice(4)}`, bankName: "Sim Federal Credit Union", last4: String(1000 + n * 37).slice(-4), status: "active", source: "seed" },
+      taxProfile: { w4Version: "2020", filingStatus: "single", stateFilingStatus: "single", stateAllowances: 1, source: "seed" },
+      profile: { preferredName: null, personalEmail: null, homeAddress: null, untrusted: true },
+    });
+  }],
+  ["GET", /^\/v1\/benefits\/plans$/, () => json(200, MOCK_PLANS)],
+  ["GET", /^\/v1\/benefits\/enrollments$/, (_m, q) => {
+    const wid = q.get("workerId");
+    const rows = world.workers.filter((w) => w.status === "active" && (!wid || w.id === wid)).map((w) => ({ id: `ben_${w.id.slice(4)}`, workerId: w.id, planId: "bpl_0001", tier: "ee", employeeCents: 9500, deferralBps: null, status: "active", effectiveFrom: "2026-01-01", effectiveTo: null }));
+    return json(200, page(rows, q, (r) => r.id));
+  }],
+  ["GET", /^\/v1\/it\/accounts$/, (_m, q) => {
+    const wid = q.get("workerId");
+    const rows = world.workers.filter((w) => w.status === "active" && (!wid || w.id === wid)).flatMap((w) => (["google_ws", "chat"] as const).map((system, i) => ({ id: `ita_${w.id.slice(4)}${i}`, workerId: w.id, system, handle: `${w.firstName}.${w.lastName}`.toLowerCase(), groups: ["all-staff"], status: "active", simRef: null })));
+    return json(200, page(rows, q, (r) => r.id));
+  }],
   ["GET", /^\/v1\/payrolls$/, (_m, q) => json(200, page([...world.runs.values()].sort((a, b) => b.periodEnd.localeCompare(a.periodEnd)), q, (r) => r.id))],
   ["GET", /^\/v1\/payrolls\/([^/]+)$/, (m) => { const r = world.runs.get(m[1]!); return r ? json(200, r) : err(404, "NotFound", `No payroll ${m[1]}`); }],
   ["GET", /^\/v1\/payrolls\/([^/]+)\/paychecks$/, (m, q) => {

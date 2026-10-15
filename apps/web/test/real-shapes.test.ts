@@ -81,3 +81,17 @@ describe("mock GET /v1/sim/state matches the API's keys", () => {
     expect(Object.keys((s.bankBatches as Record<string, unknown>[])[0] ?? {})).toEqual(expect.arrayContaining(["payroll_run_id", "total_cents", "settle_at", "entryCount"]));
   });
 });
+
+describe("mock GET /v1/workers/:id returns a WorkerDetail like the API", () => {
+  beforeEach(() => resetMockWorld());
+  it("wraps the worker and adds pay rates, bank account and tax profile; benefits and IT accounts filter by worker", async () => {
+    const get = async (p: string) => (await mockFetch(`/api${p}`, { headers: { "x-weft-principal": "usr_dana" } })).json() as Promise<Record<string, unknown>>;
+    const d = await get("/v1/workers/wrk_0001");
+    expect(Object.keys(d).sort()).toEqual(["bankAccount", "department", "manager", "payRates", "profile", "taxProfile", "worker", "workplace"]);
+    expect((d.worker as { id: string }).id).toBe("wrk_0001");
+    const enr = await get("/v1/benefits/enrollments?workerId=wrk_0001");
+    expect((enr.data as { workerId: string }[]).every((e) => e.workerId === "wrk_0001")).toBe(true);
+    const it = await get("/v1/it/accounts?workerId=wrk_0001");
+    expect((it.data as unknown[]).length).toBeGreaterThan(0);
+  });
+});
