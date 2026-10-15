@@ -113,7 +113,7 @@ const routes: [string, RegExp, Handler][] = [
     }
     return json(200, { now: world.now, rate: world.rate });
   }],
-  ["GET", /^\/v1\/workers$/, (_m, q) => json(200, page(world.workers, q, (w) => w.id))],
+  ["GET", /^\/v1\/workers$/, (_m, q) => json(200, page(world.workers.filter((w) => (!q.get("type") || w.type === q.get("type")) && (!q.get("status") || w.status === q.get("status")) && (!q.get("state") || w.workState === q.get("state"))), q, (w) => w.id))],
   // WorkerDetail, as the API returns it (the route table's type; the scaffold client still types it as Worker).
   ["GET", /^\/v1\/workers\/([^/]+)$/, (m) => {
     const w = world.workers.find((x) => x.id === m[1]);

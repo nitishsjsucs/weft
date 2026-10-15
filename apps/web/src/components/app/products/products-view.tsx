@@ -3,7 +3,7 @@
 // simulators. Writes stay with the agent and the Inbox; these pages show what the simulators hold.
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { HeartPulse, Laptop, KeyRound } from "lucide-react";
+import { Globe, HeartPulse, Laptop, KeyRound } from "lucide-react";
 import { Badge, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import type { BenefitPlan, Device, Enrollment, ItAccount, Worker } from "@weft/contracts";
 import { client, errorText, useGet, useVersion } from "@/lib/api/hooks";
@@ -125,6 +125,37 @@ export function ItView() {
           </Card>
         </section>
       </div>
+    </div>
+  );
+}
+
+export function ContractorsView() {
+  const q = useGet("/v1/workers", { query: { type: "contractor", limit: 100 } });
+  const rows = (q.data?.data ?? []) as Worker[];
+  return (
+    <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
+      <PageHeader title={<span className="flex items-center gap-2">Contractors <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Global contractors on the monthly schedule. Payouts through the FX simulator are P1; today this page lists who is engaged." />
+      {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(q.error)}</div> : null}
+      <CardHeading icon={<Globe />}>Contractors</CardHeading>
+      <Card className="overflow-hidden">
+        {rows.length === 0 ? <Empty text={q.data ? "No contractors." : "Loading..."} /> : (
+          <Table className="text-[13px]">
+            <THead><TR><TH>Name</TH><TH>Role</TH><TH>Country</TH><TH>Currency</TH><TH>Since</TH><TH>Status</TH></TR></THead>
+            <TBody>
+              {rows.map((w) => (
+                <TR key={w.id} data-testid={`contractor-${w.id}`}>
+                  <TD className="h-10 whitespace-nowrap"><Link href={`/app/people/${w.id}`} className="font-medium hover:underline">{w.displayName}</Link></TD>
+                  <TD className="h-10">{w.title}</TD>
+                  <TD className="h-10">{w.country}</TD>
+                  <TD className="h-10 font-mono text-1">{w.currency}</TD>
+                  <TD className="h-10 whitespace-nowrap">{w.startDate}</TD>
+                  <TD className="h-10 capitalize">{w.status}</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        )}
+      </Card>
     </div>
   );
 }

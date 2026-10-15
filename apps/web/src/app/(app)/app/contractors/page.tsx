@@ -1,5 +1,5 @@
-import { Placeholder } from "@/components/app/page";
+import { ContractorsView } from "@/components/app/products/products-view";
 
 export default function ContractorsPage() {
-  return <Placeholder title="Contractors" note="Simulated. Global contractor payouts are P1." />;
+  return <ContractorsView />;
 }
