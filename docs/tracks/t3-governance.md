@@ -86,7 +86,7 @@ after the T4 merge. The fix stays on the writer's side: take `withWriteLock` (or
 
 ## Tests
 
-`packages/executor/test` (61, including `composed.test.ts`, which checks the governance invariants over every command `@weft/core` exports plus the builtins, so it covers T1 and T2 the moment they merge), `apps/api/test` (route contracts and auth for every route file this track owns), `tests/scenarios/s7-taint`, `s7b-taint-carry`, `s8-mcp-api`. On this branch the gate is 130 passed, 2 skipped (the real-stack S7 and S8 below), 13 todo owned by other tracks; typecheck 15 of 15.
+`packages/executor/test` (62, including `busy.test.ts` and `composed.test.ts`, which checks the governance invariants over every command `@weft/core` exports plus the builtins, so it covers T1 and T2 the moment they merge), `apps/api/test` (route contracts and auth for every route file this track owns), `tests/scenarios/s7-taint`, `s7b-taint-carry`, `s8-mcp-api`. On this branch the gate is 131 passed, 2 skipped (the real-stack S7 and S8 below), 13 todo owned by other tracks; typecheck 15 of 15.
 
 Until T1 and T2 land, most tests run on fixture commands shaped like theirs (`packages/executor/test/fixtures.ts`, `fixtureWeft()`). The fixture `notices.get` now returns T2's shape (`{ notice }`, title and body only with `response_format: "detailed"`), and the S7 script asks for detailed. Two more scenario tests run on the real commands and switch on by themselves when `@weft/core` carries `sim.deliver_notice`, `notices.get` and `tax.update_rate`:
 
