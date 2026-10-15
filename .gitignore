@@ -1,0 +1,12 @@
+# Warp reference material (their copyrighted pages, CSS and screenshots): local only, never committed
+research/design/reference/
+node_modules/
+.turbo/
+.next/
+dist/
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+.data/
