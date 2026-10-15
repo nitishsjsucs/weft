@@ -507,6 +507,12 @@ importers:
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
+      '@weft/executor':
+        specifier: workspace:*
+        version: link:../executor
+      '@weft/sim':
+        specifier: workspace:*
+        version: link:../sim
       typescript:
         specifier: 7.0.2
         version: 7.0.2

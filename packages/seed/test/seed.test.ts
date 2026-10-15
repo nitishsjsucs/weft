@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { closeDb, migrate, openDb } from "@weft/db";
-import { createSimClock } from "@weft/core";
+import { commands, createSimClock } from "@weft/core";
+import { createExecutor } from "@weft/executor";
+import { createSimulators } from "@weft/sim";
 import { digestDb, SEED_STEPS, seedWorld, SEED_CLOCK } from "../src/index";
 
 async function seededDigest(): Promise<string> {
@@ -12,7 +14,12 @@ async function seededDigest(): Promise<string> {
   try {
     await migrate(db);
     const clock = await createSimClock({ db, initial: { at: SEED_CLOCK, rate: 0 } });
-    await seedWorld({ db, clock, executor: {} as never, sims: {} as never, dataDir: dir });
+    // The governance step writes the vault through the executor and the payroll step submits bank batches through
+    // the bank simulator, so the seed needs the real parts.
+    const executor = await createExecutor({ db, clock, dataDir: dir, commands, simulators: createSimulators, testMode: true });
+    try {
+      await seedWorld({ db, clock, executor, sims: createSimulators({ db, clock }), dataDir: dir });
+    } finally { await executor.close(); }
     expect(clock.now()).toBe(SEED_CLOCK);
     return await digestDb(db);
   } finally { await closeDb(db); rmSync(dir, { recursive: true, force: true }); }

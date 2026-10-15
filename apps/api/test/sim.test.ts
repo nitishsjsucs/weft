@@ -39,7 +39,9 @@ describe("faults, chat and state", () => {
     expect((await req("/v1/sim/faults", { target: "x", kind: "boom", mode: "once" })).status).toBe(400);
   });
   it("lists the seeded chat feed by channel", async () => {
-    const all = (await (await req("/v1/sim/chat")).json()).map((m: unknown) => ChatMessageDto.parse(m));
+    // The clock test above moved past Mon 09:00, so the people digest routine may have posted to #people-ops; the six
+    // seeded messages are the inbound ones.
+    const all = (await (await req("/v1/sim/chat")).json()).map((m: unknown) => ChatMessageDto.parse(m)).filter((m: ChatMessageDto) => m.inbound);
     expect(all).toHaveLength(6);
     expect(all.every((m: ChatMessageDto) => m.inbound && m.author.endsWith("(demo)"))).toBe(true);
     const nh = await (await req("/v1/sim/chat?channel=%23new-hires")).json();
