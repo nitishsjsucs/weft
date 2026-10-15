@@ -5,7 +5,7 @@ import { and, asc, eq, gt, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { NotFound, Unauthorized, type DecisionInput } from "@weft/contracts";
 import { proposals } from "@weft/db";
-import { toProposal } from "@weft/executor";
+import { executorInternals, toProposal } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
 import { parsePage, toPage } from "../http/paging";
 
@@ -52,6 +52,15 @@ export function proposalsRoutes(weft: Weft): Hono<WeftEnv> {
       const result = await weft.executor.human.decide(input);
       await kick(weft);
       if (!result.ok) return c.json({ ...result, _tag: "Refused" }, 422);
+      if (decision === "start" && result.proposal.kind === "suggestion") {
+        // A started suggestion opens a chat run carrying the suggestion's provenance (best-effort until T4 lands).
+        try {
+          const run = await weft.executor.runs.openChatRun(s, { threadId: null, surface: "human_ui" });
+          if (result.proposal.taintedBy) await executorInternals(weft.executor)?.taintRun(run.runId, `suggestion:${result.proposal.id}`);
+          await weft.agent.startChat(run, { text: result.proposal.headline, recipe: "chat", pageContext: `proposal:${result.proposal.id}` });
+          return c.json(redactJson(weft, { ...result, runId: run.runId }));
+        } catch { /* agent runtime not available */ }
+      }
       return c.json(redactJson(weft, result));
     });
   }

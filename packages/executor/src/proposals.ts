@@ -88,7 +88,23 @@ export async function insertProposal(e: Engine, tx: DbTx, p: NewProposal): Promi
   };
   await tx.insert(proposals).values(row);
   await emitEvent(tx, e.clock, { body: { type: "proposal.created", payload: { proposal_id: id } }, subjectRef: id, attended: p.stamp.attended, requestedBy: p.stamp.requestedBy });
+  await postCard(e, tx, row);
   return row;
+}
+
+/**
+ * The proposal notifier's approval card (harness 6.9): the only writer of chat cards. Headline from structured
+ * fields; the card opens the proposal page, where decide() re-renders it from the DB. Best-effort: a missing chat
+ * simulator never blocks a proposal.
+ */
+async function postCard(e: Engine, tx: DbTx, row: ProposalRow): Promise<void> {
+  if (row.kind === "suggestion") return;
+  try {
+    const chat = (e.simulators({ db: tx, clock: e.clock }) as Partial<ReturnType<Engine["simulators"]>> | undefined)?.chat;
+    if (!chat || typeof chat.post !== "function") return;
+    await chat.post({ channel: row.domain === "payroll" || row.domain === "tax" ? "#payroll" : "#people-ops", author: "Weft agent",
+      text: `Approval needed: ${row.headline}`, card: { proposalId: row.id, headline: row.headline, risk: row.risk ?? "R1", moneyCents: row.moneyCents } });
+  } catch { /* the chat simulator is optional here */ }
 }
 
 export async function proposeCall(e: Engine, tx: DbTx, scope: CallScope, def: WeftCommand, input: unknown, preview: Preview, decision: PolicyDecision): Promise<ToolOutcome> {

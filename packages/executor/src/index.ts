@@ -16,6 +16,7 @@ import { createHumanExecutor } from "./human";
 import { expireProposals } from "./proposals";
 import { createRegistry } from "./registry";
 import { createRunAuthority } from "./runs";
+import { markTainted } from "./taint";
 import { createReadOnlyExecutor, createSystemExecutor } from "./system";
 import { Redactor } from "./vault/redact";
 import { createVault, loadVaultKey } from "./vault/vault";
@@ -46,7 +47,12 @@ export interface CreateExecutorOptions {
 }
 
 /** Executor internals that apps/api routes and the seed may reach (never the brain). */
-export interface ExecutorInternals { engine: Engine; addSecret(value: string | null | undefined): void }
+export interface ExecutorInternals {
+  engine: Engine;
+  addSecret(value: string | null | undefined): void;
+  /** Taints a freshly opened run, for runs started from a tainted suggestion (harness 6.2). */
+  taintRun(runId: string, by: string): Promise<void>;
+}
 const internals = new WeakMap<object, ExecutorInternals>();
 export function executorInternals(bundle: ExecutorBundle): ExecutorInternals | null { return internals.get(bundle) ?? null; }
 
@@ -94,7 +100,10 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
     redact: (text) => redactor.redact(text),
     async close() { /* the db belongs to createWeft; nothing else is held open */ },
   };
-  internals.set(bundle, { engine, addSecret: (v) => redactor.add(v) });
+  internals.set(bundle, {
+    engine, addSecret: (v) => redactor.add(v),
+    taintRun: (runId, by) => withWriteLock(() => opts.db.transaction((tx) => markTainted(tx, runId, by, 0))),
+  });
   return bundle;
 }
 
