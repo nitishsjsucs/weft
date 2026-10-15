@@ -206,8 +206,31 @@ export async function eventually<T, R>(read: () => Promise<T>, pick: (v: T) => R
 
 // Fixtures ------------------------------------------------------------------------------------------------------
 
-export const test = base.extend<{ weft: WeftApi; freshWorld: void }>({
+/** "METHOD /v1/path -> status: body" for every /api response of 400 or more the browser saw. */
+export type ApiErrors = string[];
+
+export const test = base.extend<{ weft: WeftApi; freshWorld: void; apiErrors: ApiErrors }>({
   weft: async ({ request }, use) => { await use(new WeftApi(request)); },
+  // Runs for every test (auto): records the API errors behind the browser's clicks. A golden path that waits on a
+  // result usually fails as a timeout; when it fails, this prints and attaches the 4xx and 5xx responses (a 501 names
+  // the track that still owns the stub), so the failure says which route is missing instead of only what timed out.
+  apiErrors: [async ({ page }, use, info) => {
+    const seen: ApiErrors = [];
+    page.on("response", async (res) => {
+      if (res.status() < 400) return;
+      const url = new URL(res.url());
+      if (!url.pathname.startsWith("/api/")) return;
+      let body = "";
+      try { body = (await res.text()).replace(/\s+/g, " ").slice(0, 240); } catch { /* the page navigated away */ }
+      seen.push(`${res.request().method()} ${url.pathname.slice(4)}${url.search} -> ${res.status()}: ${body}`);
+    });
+    await use(seen);
+    if (seen.length && info.status !== info.expectedStatus) {
+      const text = [...new Set(seen)].join("\n");
+      await info.attach("api-errors.txt", { body: text, contentType: "text/plain" });
+      console.error(`API errors behind the browser during this test:\n${text}`);
+    }
+  }, { auto: true }],
   // Runs before every test (auto): rebuild the world from the seed and confirm the frozen clock is at seed time.
   freshWorld: [async ({ weft }, use) => {
     await weft.reset();
