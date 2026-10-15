@@ -32,6 +32,8 @@ export { toProposal } from "./proposals";
 export { toCsv } from "./workspace";
 export type { WeftRunHandle } from "./runs";
 export type { BatchedAgentCall } from "./agent";
+export { adminChange, createApiKey, AdminRefused } from "./admin";
+export { MemoryError, MEMORY_FOLDERS } from "./memory/store";
 
 export interface CreateExecutorOptions {
   db: Db;
