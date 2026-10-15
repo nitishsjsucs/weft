@@ -176,7 +176,9 @@ export function scriptedProvider(opts: ScriptedProviderOptions): ModelProvider {
     live: false,
     async step(req): Promise<ModelStepResult> {
       const parsed = parseContext(req.history);
-      const stepIndex = req.history.filter((h) => h.kind === "model").length;
+      // Only this provider's own items count, so a run that fell back from a live model to templates starts at step 0.
+      const own = req.history.filter((h) => h.kind === "model" && h.provider === "scripted");
+      const stepIndex = own.length;
       const name = pick(req, parsed);
       const agent = req.agentKind === "main" ? "main" : req.agentKind.slice(5);
       const steps = name ? load(name)?.agents[agent] : undefined;
@@ -188,7 +190,7 @@ export function scriptedProvider(opts: ScriptedProviderOptions): ModelProvider {
         return { stop: "final", text, toolCalls: [], native: { scripted: true, scenario: name, step: stepIndex, output: [{ type: "text", text }] }, usage: synthUsage(req, text.length, stepIndex), servedBy: "scripted", requestId: null };
       }
       checkExpect(step, req.history, `${name}.${agent}[${stepIndex}]`);
-      const priorCalls = req.history.reduce((n, h) => n + (h.kind === "model" ? ((h.native as { calls?: number })?.calls ?? 0) : 0), 0);
+      const priorCalls = own.reduce((n, h) => n + ((h.kind === "model" ? (h.native as { calls?: number })?.calls : 0) ?? 0), 0);
       const scope = { trigger: parsed.trigger, derived: parsed.derived, history: req.history };
       let text = "";
       const toolCalls: ModelStepResult["toolCalls"] = [];

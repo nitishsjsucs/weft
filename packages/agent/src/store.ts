@@ -81,6 +81,8 @@ export function createRunStore(db: Db, opts: { wallNow?: () => string; onStep?: 
     async updateRun(id, p) {
       const set: Partial<AgentRunInsert> = {};
       if (p.status !== undefined) set.status = p.status;
+      if (p.provider !== undefined) set.provider = p.provider;
+      if (p.model !== undefined) set.model = p.model;
       if (p.terminalReason !== undefined) set.terminalReason = p.terminalReason;
       if (p.tainted !== undefined) set.tainted = p.tainted;
       if (p.taintedBy !== undefined) set.taintedBy = p.taintedBy;

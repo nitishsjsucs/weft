@@ -65,7 +65,7 @@ export function historyFromSteps(steps: RunStepRow[], provider: ModelProvider["i
     if (s.kind === "recite") continue; // the plan is already inside the last output of its batch
     flush();
     if (s.kind === "context" && (s.result as RunSetup | null)?.pack) out.push({ kind: "context", text: (s.result as RunSetup).text });
-    else if (s.kind === "model_call" && s.outcome === "ok" && s.native !== null) out.push({ kind: "model", provider, native: s.native });
+    else if (s.kind === "model_call" && s.outcome === "ok" && s.native !== null) out.push({ kind: "model", provider: ((s.result as { provider?: ModelProvider["id"] } | null)?.provider) ?? provider, native: s.native });
     else if (s.kind === "notice") {
       const r = s.result as { notice: "decision" | "event" | "budget" | "repair"; attrs: Record<string, string>; text: string };
       out.push({ kind: "notice", notice: r.notice, attrs: r.attrs, text: r.text });
@@ -172,7 +172,8 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     // ---- admission
     const tAdm = wall();
     run = (await store.getRun(run.id))!;
-    if (run.stepsUsed >= stepBudget) return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: `Stopped at the step budget (${stepBudget} model steps).` });
+    // Template steps (the deterministic fallback) are free and bounded by their script, so only model steps count.
+    if (run.stepsUsed >= stepBudget && run.model !== "template") return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: `Stopped at the step budget (${stepBudget} model steps).` });
     if (wall() - startedWall > budget.minutes * 60_000) {
       return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: "Stopped at the wall-clock budget." });
     }
@@ -228,7 +229,7 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
       const ok = res.stop === "tool_calls" || res.stop === "final";
       modelStepRow = await append({
         stage: "model", kind: "model_call", attempt, outcome: ok ? "ok" : "error", native: ok ? res.native : null,
-        result: { stop: res.stop, text: res.text.slice(0, 2000), toolCalls: res.toolCalls.map((c) => c.name), error: res.error ?? null, refusal: res.refusal ?? null, servedBy: res.servedBy },
+        result: { provider: provider.id, stop: res.stop, text: res.text.slice(0, 2000), toolCalls: res.toolCalls.map((c) => c.name), error: res.error ?? null, refusal: res.refusal ?? null, servedBy: res.servedBy },
         usage: res.usage, costUsdMicros: actualMicros, requestId: res.requestId, prefixHash: pHash,
         timings: { admissionMs, assembleMs, timeToLlmMs, modelMs, dispatchMs: 0, tokensPerSecond: modelMs > 0 && res.usage.output > 0 ? Math.round((res.usage.output / modelMs) * 1000) : null },
       });

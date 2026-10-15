@@ -264,6 +264,33 @@ describe("default scenarios in scenarios/", () => {
   });
 });
 
+describe("template fallback (SPEC 9.6)", () => {
+  const down: ModelProvider = {
+    id: "openai", model: "gpt-5.6-luna", label: "OpenAI gpt-5.6-luna", live: true,
+    step: async () => ({ stop: "error", text: "", toolCalls: [], native: [], usage: { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 }, servedBy: "gpt-5.6-luna", requestId: null, error: { code: "PROVIDER_CONFIG", message: "401", retryable: false } }),
+  };
+
+  it("a routine whose live model fails finishes on the deterministic templates", async () => {
+    const fake = noticeExecutor();
+    const rt = runtimeWith(fake, down);
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
+    const run = await rt.settled(h.runId);
+    expect(run).toMatchObject({ status: "waiting", model: "template", provider: "scripted" });
+    expect(fake.proposals.map((p) => p.command)).toEqual(["tax.update_rate", "notices.send_response"]);
+  });
+
+  it("an unattended routine under a live provider runs on templates from the start", async () => {
+    const fake = noticeExecutor();
+    let liveCalls = 0;
+    const rt = runtimeWith(fake, { ...down, step: async (r) => { liveCalls++; return down.step(r); } });
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun: { ...routineRun, attended: false }, trigger, precheck });
+    expect(await rt.settled(h.runId)).toMatchObject({ status: "waiting", model: "template" });
+    expect(liveCalls).toBe(0);
+  });
+});
+
 describe("runtime rules", () => {
   it("boot rule: a running run at start fails with PROCESS_RESTART", async () => {
     const fake = noticeExecutor();

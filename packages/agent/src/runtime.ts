@@ -104,6 +104,13 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       try {
         const current = await store.getRun(runId);
         const row = await runLoop({ ...loopDeps, provider: current ? providerFor(current) : opts.provider }, handle);
+        // Template fallback (SPEC 9.6): a routine whose live model failed finishes on the deterministic templates.
+        if (row.trigger.startsWith("routine:") && row.model !== "template" && opts.provider.live && row.status === "failed"
+          && (row.terminalReason === "PROVIDER_DOWN" || row.terminalReason === "MODEL_INCOMPLETE")) {
+          await store.updateRun(runId, { provider: templateProvider.id, model: templateProvider.model, status: "queued", terminalReason: null, endedAt: null });
+          enqueue(runId);
+          return;
+        }
         notifySettled(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
