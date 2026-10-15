@@ -62,7 +62,11 @@ function advanceScripted(entry: { run: AgentRunRow; steps: RunStepRow[] } & { sc
     entry.run.costUsdMicros += cost;
     if (usage) entry.run.tokens = { ...entry.run.tokens, input: entry.run.tokens.input + usage.input, cached: entry.run.tokens.cached + usage.cached, output: entry.run.tokens.output + usage.output };
   }
-  if (entry.steps.length === entry.script.length) {
+  if (entry.steps.length === entry.script.length && entry.run.trigger.startsWith("routine:")) {
+    entry.run.status = "waiting"; entry.run.terminalReason = "WAITING_APPROVAL";
+    entry.run.summary = "Explained 4 flagged paychecks. Submitting 47 paychecks (1 excluded, no bank account) is waiting in the Inbox.";
+    entry.run.checklist = [{ id: "c1", label: "Explanations complete", passed: true }, { id: "c2", label: "Submit proposed", passed: true }];
+  } else if (entry.steps.length === entry.script.length) {
     entry.run.status = "done"; entry.run.terminalReason = "DONE"; entry.run.endedAt = world.now;
     entry.run.summary = /raise|flag/i.test(entry.text ?? "")
       ? "Mireille Osterhout (demo) is flagged GROSS_CHANGE because Dana's 18% raise (action 3) took effect Oct 16; gross moves from $6,041.67 to $7,129.17."

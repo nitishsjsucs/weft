@@ -31,3 +31,11 @@ export function initials(name: string): string {
 }
 /** "Oct 16 to Oct 31" */
 export function period(start: string, end: string): string { return `${fmtDate(start)} to ${fmtDate(end)}`; }
+
+/** Period end of the next semi-monthly period: the 15th, or the last day of the month. */
+export function nextPeriodEnd(periodEnd: string): string {
+  const [y, m, d] = periodEnd.split("-").map(Number) as [number, number, number];
+  if (d === 15) return `${y}-${String(m).padStart(2, "0")}-${new Date(Date.UTC(y, m, 0)).getUTCDate()}`;
+  const ny = m === 12 ? y + 1 : y; const nm = m === 12 ? 1 : m + 1;
+  return `${ny}-${String(nm).padStart(2, "0")}-15`;
+}

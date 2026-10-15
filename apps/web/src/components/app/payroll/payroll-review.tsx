@@ -6,8 +6,9 @@ import { FilePlus2, Play, RefreshCw, Send } from "lucide-react";
 import { Badge, Button, Drawer } from "@weft/ui/components";
 import { TID, type Paycheck, type PayrollRun, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
-import { fmtDate, fmtDateTime, period, relative } from "../format";
+import { fmtDate, fmtDateTime, nextPeriodEnd, period, relative } from "../format";
 import { PageHeader } from "../page";
+import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
 import { PaycheckDrawer } from "./paycheck-drawer";
 import { PaycheckTable } from "./paycheck-table";
@@ -15,14 +16,6 @@ import { TotalsStrip } from "./totals";
 
 const STATUS_TONE: Record<PayrollRun["status"], "gray" | "blue" | "green" | "amber" | "red"> = { draft: "gray", pending: "amber", processing: "blue", processed: "green", failed: "red", voided: "gray" };
 const SCHEDULE_LABEL: Record<string, string> = { ps_us_semimonthly: "Semi-monthly US payroll", ps_global_monthly: "Monthly global payroll" };
-
-/** Period end of the next semi-monthly period: the 15th, or the last day of the month. */
-export function nextPeriodEnd(periodEnd: string): string {
-  const [y, m, d] = periodEnd.split("-").map(Number) as [number, number, number];
-  if (d === 15) return `${y}-${String(m).padStart(2, "0")}-${new Date(Date.UTC(y, m, 0)).getUTCDate()}`;
-  const ny = m === 12 ? y + 1 : y; const nm = m === 12 ? 1 : m + 1;
-  return `${ny}-${String(nm).padStart(2, "0")}-15`;
-}
 
 function OutcomeLine({ o }: { o: ToolOutcome | null }) {
   if (!o) return null;
@@ -84,7 +77,7 @@ export function PayrollReview({ id }: { id: string }) {
             <Badge data-testid={TID.payrollStatus} data-status={r.status} tone={STATUS_TONE[r.status]} size="md">{r.status}</Badge>
             <span className="text-1 text-gray-11">Payday {fmtDate(r.payday, { weekday: "short", month: "short", day: "numeric" })}</span>
             {r.status === "draft" ? <span className="text-1 text-gray-11">Approve by {fmtDateTime(r.approvalDeadline)}{now ? ` (${relative(r.approvalDeadline, now)})` : ""}</span> : null}
-            {r.approvedBy ? <span className="text-1 text-gray-11">Approved by {r.approvedBy}</span> : null}
+            {r.approvedBy ? <span className="text-1 text-gray-11">Approved by {principalName(r.approvedBy)}</span> : null}
             {r.bankBatchId ? <span className="font-mono text-0 text-gray-10">batch {r.bankBatchId}</span> : null}
           </>
         }
