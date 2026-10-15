@@ -184,8 +184,9 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     let modelStepRow: RunStepRow | null = null;
     while (result === null) {
       const estInput = approxTokens(prompt) + approxTokens(JSON.stringify(tools)) + approxTokens(JSON.stringify(history));
-      const reserveMicros = usdToMicros(reserveUsd(estInput, maxOut, deps.prices));
-      if (run.costUsdMicros + reserveMicros > usdBudget * 1e6) {
+      // A provider that is not live (scripted, templates) spends nothing: it still reserves and settles, at zero.
+      const reserveMicros = provider.live ? usdToMicros(reserveUsd(estInput, maxOut, deps.prices)) : 0;
+      if (provider.live && run.costUsdMicros + reserveMicros > usdBudget * 1e6) {
         await append({ stage: "admission", kind: "verify", outcome: "refused:BUDGET_EXCEEDED", result: { cap: "run", reserveMicros }, timings: { ...emptyTimings(), admissionMs: wall() - tAdm } });
         return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: "Stopped before the per-run spend cap." });
       }
