@@ -125,3 +125,31 @@ describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant
     expect(chain.ok).toBe(true);
   });
 });
+
+describe("S2 fault variant: the bank returns the batch", () => {
+  beforeAll(async () => {
+    if (missing.length) return;
+    await weft.close();
+    weft = await createTestWeft();
+  });
+
+  it("arms bank.submitBatch return; after payday 06:00 PT the run is failed, nothing is paid and no YTD is written", async (ctx) => {
+    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+    const armed = await post("/v1/sim/faults", { target: "bank.submitBatch", kind: "return", mode: "once" });
+    expect(armed.status).toBe(200);
+    const { proposalId, routineRunId } = await reviewAndPropose();
+    const approved = await post(`/v1/proposals/${proposalId}/approve`, { reasonCode: null, note: null });
+    expect(((await approved.json()) as { outcome?: unknown }).outcome).toMatchObject({ ok: true, status: "done" });
+    await waitForWake(routineRunId);
+    expect(PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json()).status).toBe("processing");
+    await weft.clock.advance("2026-10-30T13:00:00.000Z");   // Fri Oct 30 06:00 PT
+    await weft.scheduler.tick();
+    const run = PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json());
+    expect(run.status).toBe("failed");
+    const rows = await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN));
+    expect(rows.filter((p) => p.status === "failed")).toHaveLength(47);
+    expect(await weft.db.select().from(ytdLedger).where(eq(ytdLedger.source, `payroll:${RUN}`))).toEqual([]);
+    expect((await weft.db.select().from(events).where(eq(events.type, "payroll.processed"))).map((e) => e.subjectRef)).not.toContain(RUN);
+    expect((await weft.executor.verifyChain()).ok).toBe(true);
+  });
+});

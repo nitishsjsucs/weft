@@ -178,6 +178,28 @@ export async function markProcessed(tx: DbTx, deps: Pick<LifecycleDeps, "now">, 
   return { runId: run.id, ytdRows: n, paychecks: rows.length };
 }
 
+/**
+ * The system record of a returned bank batch (payroll.mark_failed, SPEC 7.4 states). The bank simulator returns the
+ * whole batch (sim_bank_batches.status = returned) and never settles it, so nothing in it was paid: the run and every
+ * paycheck still processing become failed, the returned entry is named as the cause, and no YTD rows are written.
+ * Idempotent on a failed run.
+ */
+export async function markFailed(tx: DbTx, deps: Pick<LifecycleDeps, "now">, input: { runId: string; batchId?: string; workerId: string }): Promise<{ runId: string; returnedPaycheckId: string; failed: number }> {
+  const run = await getRun(tx, input.runId);
+  const all = await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, run.id));
+  const returned = all.find((p) => p.workerId === input.workerId);
+  if (!returned) throw new NotFound(`No paycheck for ${input.workerId} in ${run.id}`);
+  if (run.status === "failed") return { runId: run.id, returnedPaycheckId: returned.id, failed: 0 };
+  if (run.status !== "processing") throw new PayrollRefusal("DOMAIN_NOT_PROCESSING", `Payroll run ${run.id} is ${run.status}, not processing`);
+  if (input.batchId && run.bankBatchId && input.batchId !== run.bankBatchId) throw new PayrollRefusal("DOMAIN_BATCH_MISMATCH", `Batch ${input.batchId} does not belong to ${run.id}`);
+  if (returned.status !== "processing") throw new PayrollRefusal("DOMAIN_NOT_PROCESSING", `Paycheck ${returned.id} is ${returned.status}, not processing`);
+  const inFlight = all.filter((p) => p.status === "processing");
+  await tx.update(paychecks).set({ status: "failed" }).where(inArray(paychecks.id, inFlight.map((p) => p.id)));
+  await tx.update(payrollRuns).set({ status: "failed", updatedAt: deps.now }).where(eq(payrollRuns.id, run.id));
+  await writeRunSummary(tx, deps, run.id);
+  return { runId: run.id, returnedPaycheckId: returned.id, failed: inFlight.length };
+}
+
 async function workerStatesOf(tx: DbTx, ids: string[]): Promise<{ workerStates: Map<string, string> }> {
   const rows = ids.length ? await tx.select({ id: workers.id, state: workers.workState }).from(workers).where(inArray(workers.id, ids)) : [];
   return { workerStates: new Map(rows.map((r) => [r.id, r.state ?? "CA"])) };

@@ -186,10 +186,6 @@ describe("submit_run", () => {
     expect(batch.entries).toHaveLength(47);
     expect(batch.total).toBe((out.data as { bank_total_cents: number }).bank_total_cents);
 
-    // A returned entry (fault "return") marks only that paycheck failed; the rest settles.
-    const svc = { id: "svc_events", kind: "service" as const, role: null };
-    expect((await exec("payroll.mark_failed", { run_id: "pay_2026_10_30", worker_id: ids.nyRaise }, ctx(svc))).data).toMatchObject({ status: "failed" });
-
     // First tick at or after Fri Oct 30 06:00 PT settles; the handler records it as svc_events.
     const evts = await bank.bank.tick("2026-10-30T13:00:00.000Z");
     expect(evts).toHaveLength(1);
@@ -210,11 +206,46 @@ describe("submit_run", () => {
     const run = (await db.select().from(payrollRuns).where(eq(payrollRuns.id, "pay_2026_10_30")))[0]!;
     expect(run.status).toBe("processed");
     const final = await db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
-    expect(final.filter((p) => p.status === "processed")).toHaveLength(46);
-    expect(final.find((p) => p.workerId === ids.nyRaise)!.status).toBe("failed");
+    expect(final.filter((p) => p.status === "processed")).toHaveLength(47);
+    expect(final.find((p) => p.workerId === ids.caOct19)!.status).toBe("excluded");
     const ytd = await db.select().from(ytdLedger).where(eq(ytdLedger.source, "payroll:pay_2026_10_30"));
-    expect(new Set(ytd.map((r) => r.workerId)).size).toBe(46);
-    expect(ytd.some((r) => r.workerId === ids.nyRaise)).toBe(false);
+    expect(new Set(ytd.map((r) => r.workerId)).size).toBe(47);
+    expect(ytd.some((r) => r.workerId === ids.caOct19)).toBe(false);
     expect((await refusal(exec("payroll.submit_run", { run_id: "pay_2026_10_30", exclude_blocked: true }))).code).toBe("DOMAIN_NOT_DRAFT");
+  });
+});
+
+describe("bank return (fault return in the simulator)", () => {
+  it("a returned batch fails the run and its in-flight paychecks, writes no YTD, and is idempotent", async () => {
+    const t = await openTempDb();
+    const rbank = fakeBank({ returnFirst: true });
+    try {
+      const fx = await buildFixtureWorld(t.db);
+      await seedPayHistory(t.db, { newId: idMinter(t.db), bank: fakeBank().bank, credential: "vault:sim-bank-operating", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
+      const rdeps = (): CommandDeps => ({ tx: t.db, sims: { bank: rbank.bank } as unknown as Simulators, clock, newId: idMinter(t.db), resolveCredential: async (ref) => `secret-for-${ref}` });
+      const run = async (name: string, args: unknown, c = ctx()) => { const def = cmd(name); return def.run(def.input.parse(args), c, rdeps()); };
+      await run("payroll.submit_run", { run_id: "pay_2026_10_30", exclude_blocked: true });
+      const evts = await rbank.bank.tick("2026-10-30T13:00:00.000Z");
+      expect(evts.map((e) => e.type)).toEqual(["sim.bank_batch_returned"]);
+      const sys = {
+        async exec(principal: string, command: string, args: unknown) {
+          expect([principal, command]).toEqual(["svc_events", "payroll.mark_failed"]);
+          const o = await run(command, args, ctx({ id: principal, kind: "service", role: null }));
+          return { ok: true as const, status: "done" as const, resultId: "pay_2026_10_30", data: o.data, summary: o.summary, actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" as const };
+        },
+      };
+      const evt: WeftEvent = { id: "evt_0002", type: evts[0]!.type, ts: "2026-10-30T13:00:00.000Z", subjectRef: evts[0]!.subjectRef, payload: evts[0]!.payload, attended: false, requestedBy: null };
+      await payrollHandlers.find((h) => h.event === evt.type)!.handle(evt, sys, {} as never);
+      const after = (await t.db.select().from(payrollRuns).where(eq(payrollRuns.id, "pay_2026_10_30")))[0]!;
+      expect(after.status).toBe("failed");
+      const rows = await t.db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
+      expect(rows.filter((p) => p.status === "failed")).toHaveLength(47);
+      expect(rows.find((p) => p.workerId === fx.caOct19)!.status).toBe("excluded");
+      expect(await t.db.select().from(ytdLedger).where(eq(ytdLedger.source, "payroll:pay_2026_10_30"))).toEqual([]);
+      const again = await run("payroll.mark_failed", { run_id: "pay_2026_10_30", worker_id: evt.payload.worker_id! }, ctx({ id: "svc_events", kind: "service", role: null }));
+      expect(again.data).toMatchObject({ status: "failed", failed: 0 });
+      expect((await refusal(run("payroll.mark_processed", { run_id: "pay_2026_10_30" }, ctx({ id: "svc_events", kind: "service", role: null })))).code).toBe("DOMAIN_NOT_PROCESSING");
+      expect((await refusal(run("payroll.submit_run", { run_id: "pay_2026_10_30", exclude_blocked: true }))).code).toBe("DOMAIN_NOT_DRAFT");
+    } finally { await t.close(); }
   });
 });

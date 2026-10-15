@@ -7,7 +7,7 @@ import { formatCents, NotFound, Refused, type ExecContext, type Flag, type Previ
 import { actions, paychecks, proposals, type DbTx } from "@weft/db";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import {
-  concisePayrollRun, createDraft, getRun, groundExplanation, listRuns, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
+  concisePayrollRun, createDraft, getRun, groundExplanation, listRuns, markFailed, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
   readAttempts, runSubjectHash, submitRun, templateExplanation, totalsFromDto, workerNames, writeAttempts, writeRunSummary, type TotalsCents,
 } from "../payroll/index";
 
@@ -270,17 +270,15 @@ export const markProcessedCommand: WeftCommand<MarkProcessedInput> = {
 const MarkFailedInput = z.object({ run_id: RunId, batch_id: z.string().optional(), worker_id: z.string().startsWith("wrk_") });
 type MarkFailedInput = z.infer<typeof MarkFailedInput>;
 export const markFailedCommand: WeftCommand<MarkFailedInput> = {
-  ...base, ...system, name: "payroll.mark_failed", summary: "Record a returned bank entry",
-  description: "System record of a returned bank entry: marks that paycheck failed; the rest of the batch settles normally. Run by svc_events from sim.bank_batch_returned.",
-  compactDescription: "System: record a returned bank entry.", input: MarkFailedInput,
+  ...base, ...system, name: "payroll.mark_failed", summary: "Record a returned bank batch",
+  description: "System record of a returned bank batch: the simulator returned an entry and settled nothing, so the run and its in-flight paychecks become failed and no YTD rows are written. Run by svc_events from sim.bank_batch_returned.",
+  compactDescription: "System: record a returned bank batch.", input: MarkFailedInput,
   async run(i, ctx, deps) {
-    const run = await getRun(deps.tx, i.run_id);
-    const p = (await deps.tx.select().from(paychecks).where(and(eq(paychecks.payrollRunId, run.id), eq(paychecks.workerId, i.worker_id))))[0];
-    if (!p) throw new NotFound(`No paycheck for ${i.worker_id} in ${run.id}`);
-    if (p.status !== "processing") throw new Refused("DOMAIN_NOT_PROCESSING", `Paycheck ${p.id} is ${p.status}, not processing`);
-    await deps.tx.update(paychecks).set({ status: "failed" }).where(eq(paychecks.id, p.id));
-    await writeRunSummary(deps.tx, { now: ctx.now }, run.id);
-    return { data: { run_id: run.id, paycheck_id: p.id, worker_id: i.worker_id, status: "failed" }, summary: `Bank returned the deposit for ${i.worker_id} in ${run.id}` };
+    const res = await domain(() => markFailed(deps.tx, { now: ctx.now }, { runId: i.run_id, batchId: i.batch_id, workerId: i.worker_id }));
+    return {
+      data: { run_id: res.runId, status: "failed", returned_paycheck_id: res.returnedPaycheckId, worker_id: i.worker_id, failed: res.failed },
+      summary: `Bank returned the batch for ${res.runId} (entry for ${i.worker_id}); ${res.failed} paychecks failed, none paid`,
+    };
   },
 };
 

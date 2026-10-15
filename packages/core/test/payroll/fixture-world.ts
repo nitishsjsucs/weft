@@ -10,7 +10,7 @@ import {
   actions, bankAccounts, benefitEnrollments, benefitPlans, closeDb, companies, employerTaxRates, migrate, openDb, payRates, paySchedules,
   taxAccounts, taxProfiles, timeEntries, workers, type Db,
 } from "@weft/db";
-import type { BankSim } from "@weft/contracts";
+import type { BankSim, SimEvent } from "@weft/contracts";
 
 export const CO = "cmp_larkspur";
 export const PS = "ps_us_semimonthly";
@@ -107,8 +107,11 @@ export async function buildFixtureWorld(db: Db): Promise<FixtureIds> {
 
 const eqId = (workerId: string) => eq(payRates.workerId, workerId);
 
-/** In-memory bank simulator: settles on the first tick at or after settle_at. */
-export function fakeBank() {
+/**
+ * In-memory bank simulator: settles on the first tick at or after settle_at. With `returnFirst` it behaves like the
+ * real simulator's `return` fault: the batch is returned (first entry, R03) and never settles.
+ */
+export function fakeBank(opts: { returnFirst?: boolean } = {}) {
   const batches: { id: string; payrollRunId: string; total: number; entries: { workerId: string; amountCents: number; accountRef: string }[]; settleAt: string; status: string }[] = [];
   const bank: Pick<BankSim, "submitBatch" | "tick"> = {
     async submitBatch(req) {
@@ -123,8 +126,12 @@ export function fakeBank() {
       return { batchId: id, settleAt: req.settleAt };
     },
     async tick(now) {
-      const out = [];
-      for (const b of batches) if (b.status === "submitted" && b.settleAt <= now) { b.status = "settled"; out.push({ type: "sim.bank_batch_settled" as const, subjectRef: b.payrollRunId, payload: { batch_id: b.id, payroll_run_id: b.payrollRunId } }); }
+      const out: SimEvent[] = [];
+      for (const b of batches) {
+        if (b.status !== "submitted" || b.settleAt > now) continue;
+        if (opts.returnFirst) { b.status = "returned"; out.push({ type: "sim.bank_batch_returned" as const, subjectRef: b.id, payload: { batch_id: b.id, payroll_run_id: b.payrollRunId, worker_id: b.entries[0]!.workerId } }); }
+        else { b.status = "settled"; out.push({ type: "sim.bank_batch_settled" as const, subjectRef: b.id, payload: { batch_id: b.id, payroll_run_id: b.payrollRunId } }); }
+      }
       return out;
     },
   };
