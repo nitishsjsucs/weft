@@ -1,11 +1,13 @@
-import { NotImplemented } from "@weft/contracts";
-import { TAX_2026, type TaxTables } from "./data/2026";
-import type { PaycheckCalc, PaycheckInput } from "./types";
-
+// @weft/payroll-tax: the pure payroll and tax engine (SPEC 7). No I/O; integer cents; synthetic 2026.1 tables.
 export * from "./types";
-export { TAX_2026, TAX_DATA_VERSION, type TaxTables } from "./data/2026";
-
-/** Pure, no I/O (SPEC 7.2). */
-export function calculatePaycheck(_input: PaycheckInput, _tables: TaxTables = TAX_2026): PaycheckCalc {
-  throw new NotImplemented("calculatePaycheck (t1-payroll)");
-}
+export { TAX_2026, TAX_DATA_VERSION, WAGE_BASES, type TaxTables, type WageBase, type Bracket, type PretaxRule } from "./data/2026";
+export { calculatePaycheck, taxableWages } from "./calculate";
+export { ytdDeltasFromLines } from "./ytd";
+export { federalIncomeTax } from "./federal";
+export { fica } from "./fica";
+export { futa } from "./futa";
+export { californiaPit } from "./states/ca";
+export { newYorkPit, newYorkPfl, newYorkDbl, nyDblPeriodCapCents, nyPeriodTable, nyTableA } from "./states/ny";
+export { coloradoPit } from "./states/co";
+export { SUPPORTED_STATES } from "./states/index";
+export { roundCents, dec, D, type Dec } from "./math";

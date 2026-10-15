@@ -1,0 +1,35 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "payroll__get_run", "arguments": { "run_id": "{{derived.run_id}}", "flagged_only": true, "response_format": "concise" } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "payroll__get_run", "ok": true, "status": "done" }] },
+        "output": [
+          {
+            "type": "function_call", "name": "payroll__explain_flags",
+            "arguments": {
+              "run_id": "{{derived.run_id}}",
+              "items": [
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.0.paycheck_id}}" },
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.1.paycheck_id}}" },
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.2.paycheck_id}}" },
+                { "paycheck_id": "{{last.payroll__get_run.data.flagged.3.paycheck_id}}" }
+              ]
+            }
+          },
+          { "type": "function_call", "name": "payroll__submit_run", "arguments": "{{derived.payroll.submit_run}}" }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "payroll__explain_flags", "ok": true, "status": "done" }, { "tool": "payroll__submit_run", "ok": true, "status": "pending_approval" }] },
+        "output": [
+          { "type": "text", "text": "Reviewed the draft: 4 paychecks need review and each now has an explanation from its evidence. I proposed submitting the run with the blocked paycheck excluded; it waits for a payroll approver." }
+        ]
+      }
+    ]
+  }
+}
