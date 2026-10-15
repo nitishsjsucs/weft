@@ -33,7 +33,7 @@ beforeAll(async () => {
     readOnly: { exec: async (_c, command) => ok(command === "people.search" ? { total: 48 } : { runs: [] }) },
   });
   const weft = {
-    db, clock, routines: engine,
+    db, clock, routines: engine, provider: { id: "scripted", model: "scripted", label: "Scripted, no model", live: false },
     scheduler: { kick: async () => { kicks++; } },
     executor: { human: { exec: async (_s: HumanSession, command: string, args: unknown) => { humanCalls.push({ command, args }); return ok({ routine_id: "rt_custom_0001", enabled: false }); } } },
   } as unknown as Weft;

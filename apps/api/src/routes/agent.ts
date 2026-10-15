@@ -4,10 +4,10 @@
 // the run's proposals from the executor's table.
 import { Hono } from "hono";
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { NotFound, Unauthorized, ValidationError, type Proposal, type RunStepRow } from "@weft/contracts";
-import { proposals } from "@weft/db";
-import { createRunStore, summarize, type WeftAgentRuntime } from "@weft/agent";
+import { execRuns, notices, payrollRuns, principals, proposals, workers, type Db } from "@weft/db";
+import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
 import type { Weft, WeftEnv } from "../http/context";
 import { sse } from "../http/sse";
 import { stubRoutes } from "../http/stub";
@@ -25,6 +25,38 @@ function toProposal(r: ProposalRow): Proposal {
     proposerRunId: r.proposerRunId, routineRunId: r.routineRunId, onBehalfOf: r.onBehalfOf, supersedes: r.supersedes, createdAt: r.createdAt, expiresAt: r.expiresAt,
     status: r.status as Proposal["status"], decidedBy: r.decidedBy, decidedAt: r.decidedAt, decisionCode: r.decisionCode, decisionNote: r.decisionNote,
     executedActionSeq: r.executedActionSeq,
+  };
+}
+
+/**
+ * The chat pack's deterministic company summary and open-loops board from DB rows (harness 7.2). The brain never reads
+ * domain tables, so apps/api builds this and the integrator passes it as createAgentRuntime({ contextSource }).
+ */
+export function createChatContextSource(db: Db): ChatContextSource {
+  return {
+    async chat({ companyId, runId }) {
+      const [run] = await db.select().from(execRuns).where(eq(execRuns.id, runId)).limit(1);
+      const who = run?.onBehalfOf ? (await db.select().from(principals).where(eq(principals.id, run.onBehalfOf)).limit(1))[0] : undefined;
+      const active = await db.select({ state: workers.workState }).from(workers).where(and(eq(workers.companyId, companyId), eq(workers.status, "active")));
+      const byState = new Map<string, number>();
+      for (const w of active) byState.set(w.state ?? "none", (byState.get(w.state ?? "none") ?? 0) + 1);
+      const drafts = await db.select().from(payrollRuns).where(and(eq(payrollRuns.companyId, companyId), eq(payrollRuns.status, "draft")));
+      const open = await db.select().from(proposals).where(and(eq(proposals.companyId, companyId), eq(proposals.status, "pending"))).orderBy(desc(proposals.createdAt));
+      const openNotices = await db.select({ id: notices.id, kind: notices.kind, respondBy: notices.respondBy }).from(notices).where(and(eq(notices.companyId, companyId), inArray(notices.status, ["new", "in_review", "proposed"])));
+      const summary = [
+        `active headcount ${active.length} (${[...byState.entries()].sort().map(([k, v]) => `${k} ${v}`).join(", ")})`,
+        `open payroll drafts: ${drafts.map((d) => `${d.id} payday ${d.payday} approval deadline ${d.approvalDeadline}`).join("; ") || "none"}`,
+        `pending approvals: ${open.length}`,
+        `open notices: ${openNotices.map((n) => `${n.id} ${n.kind}${n.respondBy ? ` respond by ${n.respondBy}` : ""}`).join("; ") || "none"}`,
+      ].join("\n");
+      return {
+        actingFor: who ? `${who.display} (${who.id}), role ${who.role ?? "none"}` : (run?.onBehalfOf ?? "the person in this chat"),
+        grants: who ? (JSON.parse(who.grantsJson) as Record<string, string>) : {},
+        companySummary: summary,
+        openLoops: open.slice(0, 20).map((p) => ({ id: p.id, title: p.headline, owner: p.onBehalfOf ?? "people ops", due: p.expiresAt })),
+      };
+    },
+    async channels() { return ["#general", "#new-hires", "#payroll", "#people-ops"]; },
   };
 }
 

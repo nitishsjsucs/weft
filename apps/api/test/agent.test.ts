@@ -11,7 +11,7 @@ import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, scriptedProvider, ty
 import { createFakeExecutor } from "../../../packages/agent/test/fake-executor";
 import type { Weft, WeftEnv } from "../src/http/context";
 import { toErrorResponse } from "../src/http/errors";
-import { agentRoutes } from "../src/routes/agent";
+import { agentRoutes, createChatContextSource } from "../src/routes/agent";
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
 const session: HumanSession = { principalId: "usr_dana", companyId: "cmp_larkspur", via: "ui", keyScope: null };
@@ -103,5 +103,13 @@ describe("/v1/agent routes", () => {
     expect(cancel.status).toBe(200);
     const costs = (await (await app.request("/v1/agent/costs?day=2026-10-15")).json()) as { daySpentUsd: number; provider: { live: boolean } };
     expect(costs).toMatchObject({ daySpentUsd: 0, provider: { live: false } });
+  });
+
+  it("the chat context source summarizes the company from DB rows", async () => {
+    const c = await createChatContextSource(db).chat({ companyId: "cmp_larkspur", runId: "run_none" });
+    expect(c.companySummary).toContain("active headcount 0");
+    expect(c.companySummary).toContain("pending approvals: 0");
+    expect(c.openLoops).toEqual([]);
+    expect(c.actingFor).toBe("the person in this chat");
   });
 });

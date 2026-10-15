@@ -58,7 +58,13 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
     const s = session(c);
     const body = DraftBody.parse(await c.req.json());
     const p = parseRoutineDraft(body.prompt);
-    if (!p.ok) throw new Refused(p.reason, p.hint);
+    if (!p.ok) {
+      // Only a live provider gets the model-backed routine_draft recipe (attended); otherwise ask for a clearer prompt.
+      if (!weft.provider.live) throw new Refused(p.reason, p.hint);
+      const handle = await weft.executor.runs.openChatRun(s, { threadId: null, surface: "human_ui" });
+      await weft.agent.startChat(handle, { text: body.prompt, recipe: "routine_draft", pageContext: null });
+      return c.json({ runId: handle.runId, parser: { reason: p.reason } }, 202);
+    }
     const outcome = await weft.executor.human.exec(s, "routines.draft", { name: p.name, cron: p.cron, tz: p.tz, channel: p.channel, tools: p.tools, instructions: p.instructions, precheck: p.precheck });
     await kick();
     return c.json(outcome);
