@@ -40,7 +40,7 @@ There was no merge on `main` yet. I built a scratch integration in my own scratc
 - Inbox: the R4 submit card shows its diff. After switching "Viewing as" to Theo, Approve records `decidedBy: usr_theo` and the payroll goes to `processing`. Deny with a reason code records `denied`, `incorrect` and Dana.
 - Run view for a completed run: stage rows, 7,214 input tokens, a 38% cache-hit ratio, USD and model time.
 - Simulators: the clock chip moves from 8:30 to 9:00 AM (+30 min) and then to Tue 9:00 AM (+1 day). Arming `bank.submitBatch` shows up in `GET /v1/sim/state`. Delivering `ca_de2088_rate_change` creates `ntc_0002`.
-- Home shows 4 widgets on live data (headcount 51, +3 in 30 days). Audit shows a valid chain; Undo appends a reversing row and links both ways. Offer accept creates 9 onboarding tasks. Compliance shows 7 registration rows, rates with their source and notices with plain-text bodies. Routines: 4 prebuilt cards, the draft box adds a card, and the run log shows cron and manual runs with cost.
+- Home shows 4 widgets on live data (headcount 51, +3 in 30 days). Audit shows a valid chain; Undo appends a reversing row and links both ways. Offer accept creates 9 onboarding tasks. Compliance shows 7 registration rows, rates with their source and notices with plain-text bodies. Routines: 4 prebuilt cards, the draft box adds a card and a `routine_enable` proposal, and the run log shows cron and manual runs with cost.
 - No horizontal page scroll at 1280 or 390 px on any `/app` screen with live data.
 
 Fixed in round 2 because of these checks: the person detail page read a `Worker`, but the API returns a `WorkerDetail` (the page showed "undefined"). Tool step chips now read `{ output, outcome }`. The SSE `status` frame is now handled. The Simulators panel now handles `idpAccounts` as a count, snake_case rows and the missing `nextEvent`. Audit reasons are no longer doubled ("Not reversible: x is not reversible."). Home registration rows show agency names. Long routine checklist and trigger text wraps. A runless `routine_enable` proposal says "Routine draft".
@@ -54,7 +54,8 @@ Fixed in round 2 because of these checks: the person detail page read a `Worker`
 5. **Chat script (t4 and t1)**: `scenarios/chat_ny_raise.json` fails with "script template {{last.payroll__get_run.data.flagged.0.flags.0.evidence.result_id}} resolved to nothing" against t1's `payroll.get_run` output. The UI shows the failed status and the message.
 6. **Reset (t2 and t4)**: after `POST /v1/sim/reset`, `GET /v1/routines` is empty. The prebuilt routines are not re-seeded by `seedWorld`.
 7. **Client typing (scaffold)**: `apps/web/src/lib/api/client.ts` types `GET /v1/workers/:id` as `Worker`, but the route table and the API say `WorkerDetail`. The person view reads both forms (`toDetail`). Please type it as WorkerDetail once a contract type exists.
-8. **next dev side effects**: every start writes an untracked `apps/web/AGENTS.md` (which fails `lint:prose`) and edits `apps/web/next-env.d.ts`. Neither is committed. Consider `agentRules: false` in `next.config.ts` and a `.gitignore` entry.
+8. **Digest post (t4 and t2)**: on the scratch API, +30 min to Mon 9:00 PT fires `rt_people_digest` (cron run `done`, `run_0004`). Its summary says "Posted the weekly people digest in #people-ops", but `GET /v1/sim/chat?channel=#people-ops` has no new message. Either the post went elsewhere or the summary is not grounded in a tool outcome. GP4 needs this message.
+9. **next dev side effects**: every start writes an untracked `apps/web/AGENTS.md` (which fails `lint:prose`) and edits `apps/web/next-env.d.ts`. Neither is committed. Consider `agentRules: false` in `next.config.ts` and a `.gitignore` entry.
 
 ## Assumptions still open
 
