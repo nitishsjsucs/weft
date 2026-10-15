@@ -153,3 +153,32 @@ describe("seed actions (SPEC 5)", () => {
     expect(w[0]!.work_state).toBe("NY");
   });
 });
+
+describe("people.update_profile (human only)", () => {
+  it("sets the employee-editable fields, echoes only field names, and the detailed read then taints", async () => {
+    const w = await createTestWeft();
+    try {
+      await ensureTestPrincipals(w.db);
+      const { directExecutors } = await import("@weft/core");
+      const d = directExecutors(w.db, w.clock, w.sims);
+      const def = findCommand("people.update_profile");
+      expect([def.access, def.risk({} as never), def.approval, def.mcp, def.tiers]).toEqual(["human_only", "R1", "never", "hidden", { main: "unavailable", task: "unavailable" }]);
+      const out = await d.human("usr_dana").exec("people.update_profile", { worker_id: "wrk_0040", preferred_name: "Robin", personal_email: "robin.home@mail.example", home_address: { line1: "12 Elm Way", city: "Austin", state: "TX", postal_code: "78701" } });
+      expect(out).toMatchObject({ ok: true, status: "done", data: { worker_id: "wrk_0040", updated: ["home_address", "personal_email", "preferred_name"] } });
+      expect(JSON.stringify(out)).not.toContain("Robin");
+      const concise = await d.readOnly.exec("cmp_larkspur", "people.get", { worker_id: "wrk_0040" });
+      expect(concise.ok && nonEmptyUntrusted(findCommand("people.get"), (concise as { data: unknown }).data)).toEqual([]);
+      const detailed = await d.readOnly.exec("cmp_larkspur", "people.get", { worker_id: "wrk_0040", response_format: "detailed" });
+      expect(detailed.ok && nonEmptyUntrusted(findCommand("people.get"), (detailed as { data: unknown }).data)).toEqual(["worker.preferred_name", "worker.personal_email", "worker.home_address"]);
+      expect(detailed).toMatchObject({ data: { worker: { home_address: "12 Elm Way, Austin, TX, 78701" } } });
+      const real = await d.human("usr_dana").exec("people.update_profile", { worker_id: "wrk_0040", personal_email: "robin@gmail.com" });
+      expect(real).toMatchObject({ ok: false, refusal: { code: "INVALID_INPUT" } });
+      const nothing = await d.human("usr_dana").exec("people.update_profile", { worker_id: "wrk_0040" });
+      expect(nothing).toMatchObject({ ok: false, refusal: { code: "DOMAIN_NOTHING_TO_UPDATE" } });
+      const cleared = await d.human("usr_dana").exec("people.update_profile", { worker_id: "wrk_0040", preferred_name: "" });
+      expect(cleared).toMatchObject({ ok: true, data: { updated: ["preferred_name"] } });
+      const [row] = await w.db.all<{ preferred_name: string | null }>(sql`SELECT preferred_name FROM workers WHERE id = 'wrk_0040'`);
+      expect(row!.preferred_name).toBeNull();
+    } finally { await w.close(); }
+  });
+});

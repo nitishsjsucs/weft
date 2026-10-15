@@ -44,7 +44,7 @@ describe("t2 registry rules (harness 5.4)", () => {
 
   it("every t2 command parses an all-null-optionals sample (null mapped to undefined)", () => {
     const required: Record<string, Record<string, unknown>> = {
-      "people.get": { worker_id: "wrk_0001" }, "people.set_pay_rate": { worker_id: "wrk_0001", amount_cents: 1, effective_from: "2026-11-01" }, "people.revert_pay_rate": { pay_rate_id: "prt_0001" },
+      "people.get": { worker_id: "wrk_0001" }, "people.update_profile": { worker_id: "wrk_0001" }, "people.set_pay_rate": { worker_id: "wrk_0001", amount_cents: 1, effective_from: "2026-11-01" }, "people.revert_pay_rate": { pay_rate_id: "prt_0001" },
       "people.accept_offer": { offer_id: "offr_0001" }, "onboarding.get_checklist": { worker_id: "wrk_0001" }, "onboarding.complete_task": { worker_id: "wrk_0001", kind: "device" },
       "tax.rate_change_impact": { jurisdiction: "CA", code: "sui", new_rate: "0.015" }, "tax.update_rate": { tax_account_id: "txa_0002", code: "sui", rate: "0.015", effective_from: "2026-01-01", source_notice_id: "ntc_0002" },
       "tax.revert_rate": { rate_id: "etr_0001" }, "tax.register_state_account": { tax_account_id: "txa_0006" }, "tax.record_registration": { application_id: "sima_0001" },

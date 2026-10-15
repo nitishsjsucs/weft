@@ -6,7 +6,7 @@ import { workers } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { isDetailed, notFound, ptDateOf, readCommand, responseFormatField } from "../demo/define";
 import { nameRef } from "../people/names";
-import { acceptOffer, revertPayRate, setPayRate } from "../people/writes";
+import { acceptOffer, revertPayRate, setPayRate, updateProfile } from "../people/writes";
 import { bankSummary, currentPayRate, getWorker, homeAddressText, lookups, payRateHistory, taxProfile, workerWhere } from "../people/queries";
 
 const WorkerStatus = z.enum(["draft", "invited", "onboarding", "active", "offboarding", "inactive"]);
@@ -84,4 +84,4 @@ const peopleGet = readCommand({
   },
 });
 
-export const peopleCommands: WeftCommand[] = [peopleSearch, peopleGet, setPayRate, revertPayRate, acceptOffer];
+export const peopleCommands: WeftCommand[] = [peopleSearch, peopleGet, updateProfile, setPayRate, revertPayRate, acceptOffer];

@@ -154,3 +154,32 @@ export const acceptOffer = writeCommand({
     };
   },
 });
+
+// people.update_profile ----------------------------------------------------------------------------------------
+// Employee-editable fields (preferred name, personal email, home address) are untrusted text (harness 6.2), so the
+// command is human_only: no agent or MCP caller ever writes them, and the output names the changed fields only.
+const Address = z.object({ line1: z.string().min(1).max(120), line2: z.string().max(120).optional(), city: z.string().min(1).max(80), state: z.string().regex(/^[A-Z]{2}$/), postal_code: z.string().regex(/^\d{5}$/) }).strict();
+const ProfileInput = z.object({
+  worker_id: z.string(),
+  preferred_name: z.string().max(80).optional(),
+  personal_email: z.string().max(120).regex(/^[^@\s]+@[a-z0-9.-]+\.example$/i, "use a *.example address (demo data)").optional(),
+  home_address: Address.optional(),
+});
+export const updateProfile = writeCommand({
+  name: "people.update_profile", summary: "Edit a worker's own profile fields (preferred name, personal email, home address).",
+  description: "Human only: sets the employee-editable profile fields preferred_name, personal_email (a *.example address) and home_address. Empty preferred_name or personal_email clears the field. These fields are untrusted text; the result lists the changed field names only.",
+  input: ProfileInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false,
+  lease: (i) => `worker:${i.worker_id}:profile`, preview: null,
+  async run(i, ctx, deps) {
+    const w = await getWorker(deps.tx, ctx.companyId, i.worker_id);
+    if (!w) throw notFound("worker", i.worker_id);
+    const set: Partial<typeof workers.$inferInsert> = {};
+    if (i.preferred_name !== undefined) set.preferredName = i.preferred_name.trim() || null;
+    if (i.personal_email !== undefined) set.personalEmail = i.personal_email.trim() || null;
+    if (i.home_address !== undefined) set.homeAddressJson = JSON.stringify(i.home_address);
+    const fields = Object.keys(set).map((k) => ({ preferredName: "preferred_name", personalEmail: "personal_email", homeAddressJson: "home_address" })[k as "preferredName"]).sort();
+    if (fields.length === 0) throw new DomainRefusal("DOMAIN_NOTHING_TO_UPDATE", "No profile field given", "Pass preferred_name, personal_email or home_address", { worker_id: w.id, preferred_name: "Sam" });
+    await deps.tx.update(workers).set({ ...set, updatedAt: ctx.now }).where(eq(workers.id, w.id));
+    return { data: { worker_id: w.id, updated: fields }, summary: `Updated ${fields.join(", ")} for ${nameRef(w.firstName, w.lastName, w.id)}` };
+  },
+});

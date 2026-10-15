@@ -2,6 +2,7 @@
 // handle and calls a command's run() without the executor pipeline (no grants, approvals, taint or action rows).
 // Production calls always go through the executor.
 import { isWeftError, type ExecContext, type ReadOnlyExecutor, type SimClock, type Simulators, type SystemExecutor, type ToolOutcome } from "@weft/contracts";
+import { z } from "zod";
 import { withWriteLock, type DbTx } from "@weft/db";
 import { emitEvent } from "../shared/events";
 import { commands } from "../commands/index";
@@ -78,6 +79,7 @@ export function directExecutors(db: import("@weft/db").Db, clock: SimClock, sims
   const toOutcome = (out: { data: unknown; summary: string }): ToolOutcome => ({ ok: true, status: "done", resultId: `res_direct`, data: out.data, summary: out.summary, actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" });
   const refusal = (e: unknown): ToolOutcome => {
     if (isWeftError(e) && e._tag === "Refused") return { ok: false, refusal: { code: String(e.extra.code) as never, message: e.message, hint: (e.extra.hint as string | null) ?? null, example: e.extra.example ?? null }, tainted: false };
+    if (e instanceof z.ZodError) return { ok: false, refusal: { code: "INVALID_INPUT", message: e.issues.map((x) => `${x.path.join(".")}: ${x.message}`).join("; "), hint: null, example: null }, tainted: false };
     throw e;
   };
   const run = async (ctx: ExecContext, command: string, args: unknown, stamp: { attended: boolean; requestedBy: string | null }) => {
