@@ -123,7 +123,8 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
       if (input.decision === "approve" && row.onBehalfOf === who.id && (await readSetting(e.db, "require_second_approver", false)) === true) {
         return no("SELF_APPROVAL", "A second approver is required for proposals made on your behalf");
       }
-      const note = input.note ? input.note.slice(0, 2000) : null;
+      // A person may paste a credential into a note; it is redacted before it is stored, audited or written to memory.
+      const note = input.note ? e.redactor.redact(input.note.slice(0, 2000)) : null;
 
       // Deny, dismiss and start: CAS, audit, event.
       if (input.decision !== "approve") {

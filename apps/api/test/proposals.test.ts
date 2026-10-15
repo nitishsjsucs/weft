@@ -77,3 +77,26 @@ describe("/v1/proposals", () => {
     expect(agent.status).toBe(401);
   });
 });
+
+describe("secret requests", () => {
+  it("approve takes the value once; it lands in the vault, never in a response or the DB in clear", async () => {
+    const o = await weft.executor.agent.exec(h, { callId: "v1", command: "vault__request", args: { name: "ga-dol-portal", kind: "portal_password", reason: "needed to register CO" } });
+    if (!(o.ok && o.status === "pending_approval")) throw new Error(JSON.stringify(o));
+    const value = "sim-co-portal-Pass/7+q=";
+    expect((await post(`/v1/proposals/${o.proposalId}/approve`, weft.uiHeaders("usr_dana"))).status).toBe(400);
+    const rate = await propose();
+    expect((await post(`/v1/proposals/${rate}/approve`, weft.uiHeaders("usr_theo"), { value })).status).toBe(400);
+    const res = await post(`/v1/proposals/${o.proposalId}/approve`, weft.uiHeaders("usr_dana"), { value, note: `stored ${value}` });
+    const text = await res.text();
+    expect(res.status, text).toBe(200);
+    expect(JSON.parse(text)).toMatchObject({ ok: true, proposal: { kind: "secret_request", status: "approved" } });
+    expect(text).not.toContain(value);
+    expect((await weft.executor.vault.list()).map((x) => x.name)).toContain("ga-dol-portal");
+    const again = await post(`/v1/proposals/${o.proposalId}/approve`, weft.uiHeaders("usr_dana"), { value: "other" });
+    expect(again.status).toBe(400);
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const walk = (d: string): string[] => readdirSync(d).flatMap((e) => statSync(join(d, e)).isDirectory() ? walk(join(d, e)) : [join(d, e)]);
+    for (const f of walk(weft.dataDir)) if (!f.endsWith("-shm")) expect(readFileSync(f).toString("latin1").includes(value), f).toBe(false);
+  });
+});
