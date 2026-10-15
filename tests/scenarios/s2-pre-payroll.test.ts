@@ -1,8 +1,86 @@
 // Scenario s2 (SPEC 12, 13). Owner: t1-payroll. GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant.
-// Uses createTestWeft() from ./helpers; ends by verifying the action chain and the memory repo SHAs.
-import { describe, it } from "vitest";
+// Uses createTestWeft() from ./helpers; ends by verifying the action chain. Script: scripts/s2-pre-payroll.json.
+// Needs the merged world (T2 seed and simulators, T3 executor, T4 routines and scripted provider): until those land
+// each test skips itself, naming the missing parts. The payroll pieces are covered now by packages/core/test/payroll
+// and apps/api/test/payrolls.test.ts on a local fixture world.
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { PayrollRun } from "@weft/contracts";
+import { bankAccounts, events, paychecks, proposals, ytdLedger } from "@weft/db";
+import { createTestWeft, type TestWeft } from "./helpers";
+
+const RUN = "pay_2026_10_30";
+let weft: TestWeft;
+let missing: string[] = [];
+
+beforeAll(async () => {
+  weft = await createTestWeft();
+  missing = weft.stubs.filter((s) => ["sim", "executor", "agent", "routines"].includes(s) || s.startsWith("wiring"));
+  const res = await weft.app.request(`/v1/payrolls/${RUN}`, { headers: weft.uiHeaders("usr_theo") });
+  if (res.status !== 200) missing.push(`seeded ${RUN} (GET answered ${res.status})`);
+});
+afterAll(async () => { await weft?.close(); });
+
+const get = (path: string, who = "usr_theo") => weft.app.request(path, { headers: weft.uiHeaders(who) });
+const post = (path: string, body: unknown, who = "usr_theo") => weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders(who), "content-type": "application/json" }, body: JSON.stringify(body) });
+
+async function reviewAndPropose(): Promise<string> {
+  const trig = await post("/v1/routines/rt_pre_payroll/trigger", {}, "usr_dana");
+  expect(trig.status).toBe(200);
+  await weft.scheduler.tick();
+  for (let i = 0; i < 50; i++) {
+    const open = await weft.db.select().from(proposals).where(eq(proposals.command, "payroll.submit_run"));
+    const p = open.find((x) => x.status === "pending" && x.subjectRef === RUN);
+    if (p) return p.id;
+    await weft.scheduler.tick();
+  }
+  throw new Error("no payroll.submit_run proposal was created");
+}
 
 describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant", () => {
-  it.todo("runs end to end with the scripted provider (t1-payroll)");
-  it.todo("verifies the action chain and memory SHAs (t1-payroll)");
+  it("the seeded draft has 48 paychecks, 4 Needs Review and 44 Ready", async (ctx) => {
+    if (missing.some((m) => m.startsWith("seeded"))) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+    const run = PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json());
+    expect(run).toMatchObject({ status: "draft", paycheckCount: 48, anomalySummary: { needsReview: 4, ready: 44 } });
+  });
+
+  it("STALE_SUBJECT: a direct-deposit change between proposal and approval refuses the approval", async (ctx) => {
+    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+    const proposalId = await reviewAndPropose();
+    const rows = await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN));
+    const ready = rows.find((p) => p.reviewGroup === "ready")!;
+    const acct = (await weft.db.select().from(bankAccounts).where(eq(bankAccounts.workerId, ready.workerId)))[0]!;
+    await weft.db.update(bankAccounts).set({ accountLast4: "0000" }).where(eq(bankAccounts.id, acct.id));
+    const res = await post(`/v1/proposals/${proposalId}/approve`, { reasonCode: null, note: null });
+    const body = (await res.json()) as { ok?: boolean; code?: string };
+    expect(body.code ?? JSON.stringify(body)).toContain("STALE_SUBJECT");
+    await weft.db.update(bankAccounts).set({ accountLast4: acct.accountLast4 }).where(eq(bankAccounts.id, acct.id));
+  });
+
+  it("runs end to end with the scripted provider: explained, proposed, approved, processing, processed", async (ctx) => {
+    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+    const proposalId = await reviewAndPropose();
+    const flagged = (await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN))).filter((p) => p.reviewGroup === "needs_review");
+    expect(flagged).toHaveLength(4);
+    for (const p of flagged) expect(p.explanation, p.workerId).not.toBeNull();
+    const approved = await post(`/v1/proposals/${proposalId}/approve`, { reasonCode: null, note: null });
+    expect(approved.status).toBe(200);
+    let run = PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json());
+    expect(run.status).toBe("processing");
+    expect(run.excludedWorkerIds).toHaveLength(1);
+    const approvedTotal = run.totals!.totalCost.amount;
+    await weft.clock.advance("2026-10-30T13:00:00.000Z");   // Fri Oct 30 06:00 PT
+    await weft.scheduler.tick();
+    run = PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json());
+    expect(run.status).toBe("processed");
+    expect(run.totals!.totalCost.amount).toBe(approvedTotal);
+    expect((await weft.db.select().from(ytdLedger).where(eq(ytdLedger.source, `payroll:${RUN}`))).length).toBeGreaterThan(0);
+    expect((await weft.db.select().from(events).where(eq(events.type, "payroll.processed"))).map((e) => e.subjectRef)).toContain(RUN);
+  });
+
+  it("verifies the action chain", async (ctx) => {
+    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+    const chain = await weft.executor.verifyChain();
+    expect(chain.ok).toBe(true);
+  });
 });
