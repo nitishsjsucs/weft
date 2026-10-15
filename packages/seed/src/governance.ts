@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 
 import { newId } from "@weft/core";
-import { agentGrants, apiKeys, limits, principals, settings, workers } from "@weft/db";
+import { agentGrants, apiKeys, companies, limits, principals, settings, workers } from "@weft/db";
 import type { SeedContext } from "./context";
 
 type G = "none" | "view" | "edit" | "approve";
@@ -45,6 +45,10 @@ function writeSecretFile(path: string, text: string): void {
 
 export async function seedGovernance(ctx: SeedContext): Promise<void> {
   const { db, companyId, clock } = ctx;
+  // principals.company_id references companies. The company step (t2-world) normally wrote this row already; the
+  // fallback carries the SPEC 5.1 values so a governance-only world (track tests) still satisfies the foreign key.
+  await db.insert(companies).values({ id: companyId, legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-4817265", hqState: "CA",
+    foundedOn: "2023-03-01", createdAt: clock.now() }).onConflictDoNothing();
   for (const h of HUMANS) {
     const [w] = await db.select({ id: workers.id, email: workers.workEmail }).from(workers)
       .where(and(eq(workers.companyId, companyId), eq(workers.firstName, h.first), eq(workers.lastName, h.last))).limit(1);

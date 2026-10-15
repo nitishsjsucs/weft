@@ -146,11 +146,8 @@ export const fakeSims = (() => ({})) as unknown as (o: unknown) => Simulators;
 
 export interface World { db: Db; dir: string; executor: ExecutorBundle; ui(principalId: string): HumanSession; close(): Promise<void> }
 
-export async function makeWorld(opts: { commands?: WeftCommand[] } = {}): Promise<World> {
-  const dir = mkdtempSync(join(tmpdir(), "weft-exec-"));
-  const db = openDb({ dataDir: dir });
-  await migrate(db);
-  const clock = await createSimClock({ db, initial: { at: SEED_TIME, rate: 0 } });
+/** The domain rows the fixture commands read (company, 4 workers, the injection notice, the CA SUI rate, the open draft). */
+export async function seedFixtureRows(db: Db): Promise<void> {
   await db.insert(companies).values({ id: CMP, legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01", createdAt: SEED_TIME });
   const w = (id: string, first: string, last: string) => ({ id, companyId: CMP, type: "employee", workerType: "us_w2", status: "active", firstName: first, lastName: last,
     workEmail: `${first.toLowerCase()}.${last.toLowerCase()}@larkspur.example`, title: "Engineer", timezone: "America/Los_Angeles", startDate: "2025-01-01", createdAt: SEED_TIME, updatedAt: SEED_TIME });
@@ -161,6 +158,14 @@ export async function makeWorld(opts: { commands?: WeftCommand[] } = {}): Promis
   await db.insert(payrollRuns).values({ id: "pay_2026_10_30", companyId: CMP, payScheduleId: "ps_us_semimonthly", type: "us", subtype: "regular", status: "draft", periodStart: "2026-10-16",
     periodEnd: "2026-10-31", payday: "2026-10-30", approvalDeadline: "2026-10-29T00:00:00.000Z", taxDataVersion: "TAX_2026", totalsJson: JSON.stringify({ cashRequirement: 41234500 }),
     createdAt: SEED_TIME, updatedAt: SEED_TIME });
+}
+
+export async function makeWorld(opts: { commands?: WeftCommand[] } = {}): Promise<World> {
+  const dir = mkdtempSync(join(tmpdir(), "weft-exec-"));
+  const db = openDb({ dataDir: dir });
+  await migrate(db);
+  const clock = await createSimClock({ db, initial: { at: SEED_TIME, rate: 0 } });
+  await seedFixtureRows(db);
   const executor = await createExecutor({ db, clock, dataDir: dir, commands: opts.commands ?? fixtureCommands, simulators: fakeSims as never, testMode: true });
   await seedGovernance({ db, clock, executor, sims: {} as Simulators, dataDir: dir, companyId: CMP, faker: null as never });
   return {
