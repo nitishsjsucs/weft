@@ -36,7 +36,19 @@ and S5 scenarios.
 - `@weft/core`: `routines/draft-parser.ts` ("Every Friday" gives `0 9 * * 5` America/Los_Angeles) and the
   `routines.*` commands (list, runs, draft with croner validation and the main-tier tool enum, human-only enable and
   disable).
-- `scenarios/`: default scripts per prebuilt routine, `chat_ny_raise`, `chat_approve_all`.
+- `scenarios/`: default scripts per prebuilt routine, `chat_ny_raise`, `chat_approve_all`. They double as the
+  deterministic templates: unattended routine runs under a live provider, and routine runs whose live model failed
+  (`PROVIDER_DOWN`, `MODEL_INCOMPLETE`), finish on them (model `template`, label "Template, no model").
+- Routines engine extras: quiet hours (19:00 to 07:00 PT) defer digest-severity cron posts except the weekly digest;
+  worth-surfacing skips a background run whose findings hash equals the last surfaced run (off for the digest).
+- Routes: `/v1/agent` (POST runs answers 202 with the run id; list; get; trace with `summary` of stage rows, ms,
+  tokens, cache-hit ratio, USD and `queuePosition`, plus proposals from the table; SSE `step` events then a `status`
+  event; cancel; costs) and `/v1/routines` (list, get, runs, routine run, trigger answers 200, draft through the parser
+  then `routines.draft` as the human, enable and disable through the HumanExecutor). Artifacts stay 501.
+  `createChatContextSource(db)` in `routes/agent.ts` builds the chat pack's company summary and open loops.
+- Scenarios S1, S4, S5 (`tests/scenarios/`) skip themselves until the merged world lands, naming the missing parts.
+- `evals/live/run.ts`: L1 to L4 on a fresh seed per case in `.data/eval-live/` (ledger kept there, so the live cap is
+  cumulative), results in `evals/results/`. Not run yet: `createWeft({ strict: true })` refuses the scaffold stubs.
 - `evals/live/smoke.ts`: the 5 smoke calls (results in `.scratch/t4-agent/smoke.md`, $0.0015 total).
 
 ## Smoke results (gpt-5.6-luna, Responses API)
@@ -51,9 +63,9 @@ cache and does not disturb the first key.
 
 1. **routinesView.** The agent's `RoutinesView` gained an optional `checklist(...)`. Routines are created after the
    agent, so wire it lazily: `routinesView: { get: (id) => routinesRef.current!.view.get(id), checklist: (x) => routinesRef.current!.view.checklist(x) }`.
-2. **Optional runtime options** (additive, my package): `companyId` (default `cmp_larkspur`), `contextSource` (the
-   chat pack's deterministic company summary and open-loops rows, built in apps/api from DB rows; the brain never
-   reads domain tables), `env`, `modelTimeoutMs`.
+2. **Optional runtime options** (additive, my package): `companyId` (default `cmp_larkspur`), `contextSource` (pass
+   `createChatContextSource(db)` from `apps/api/src/routes/agent.ts`; the brain never reads domain tables), `env`,
+   `modelTimeoutMs`. Without `contextSource` the chat pack says no company summary is available.
 3. **Events for the routines engine.** Boundary rule 1 lets the brain import only `agentRuns`, `runSteps`,
    `routineRuns` and `routines`, so the engine cannot read the `events` table. `createRoutines` takes an optional
    `events: { unconsumed(), consume(id) }`; without it event routines (`rt_agency_notice`, `rt_new_hire`) never fire
