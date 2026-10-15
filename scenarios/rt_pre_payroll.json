@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "payroll__explain_flags", "arguments": "{{derived.payroll.explain_flags}}" },
+          { "type": "function_call", "name": "payroll__submit_run", "arguments": "{{derived.payroll.submit_run}}" }
+        ]
+      },
+      {
+        "output": [{ "type": "text", "text": "Explained every flagged paycheck from its evidence and proposed submitting the run without blocked paychecks. It waits for approval in the inbox." }]
+      }
+    ]
+  }
+}

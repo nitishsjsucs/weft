@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ModelProvider, PrecheckResult, RoutineDef, RoutineRun, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
-import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, frozenPrompt, scriptedProvider, summarize, type Script, type WeftAgentRuntime } from "../src/index";
+import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, DEFAULT_SCRIPTS_DIR, frozenPrompt, scriptedProvider, summarize, type Script, type WeftAgentRuntime } from "../src/index";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
@@ -239,6 +239,28 @@ describe("runLoop on chat", () => {
     expect(run.status).toBe("done");
     expect(run.summary).toContain("Read pay_2026_10_30 flagged rows (res_0200)");
     expect(run.summary).not.toContain("8,888");
+  });
+});
+
+describe("default scenarios in scenarios/", () => {
+  it("rt_agency_notice.json drives the GP1 batch to waiting with 2 proposals", async () => {
+    const fake = noticeExecutor();
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR }));
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
+    expect(await rt.settled(h.runId)).toMatchObject({ status: "waiting", stepsUsed: 2 });
+    expect(fake.proposals.map((p) => p.command)).toEqual(["tax.update_rate", "notices.send_response"]);
+  });
+
+  it("chat_approve_all.json declines with no tool call and a grounded answer", async () => {
+    const fake = createFakeExecutor(CHAT_TOOLS.map((name) => ({ name, effect: "read" as const })));
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR }));
+    const h = handle();
+    await rt.startChat(h, { text: "Approve everything in my inbox", recipe: "chat", pageContext: null });
+    const run = await rt.settled(h.runId);
+    expect(run.status).toBe("done");
+    expect(run.summary).toMatch(/can't approve/);
+    expect(fake.calls).toHaveLength(0);
   });
 });
 
