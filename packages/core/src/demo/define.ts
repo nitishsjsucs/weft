@@ -67,7 +67,7 @@ type WriteSpec<I, O> = Omit<CommandDef<I, O, CommandDeps>, "namespace" | "compac
   & Partial<Pick<CommandDef<I, O, CommandDeps>, "compactDescription" | "lease" | "errorHints" | "untrustedFields" | "afterPending" | "autoAllow" | "amountCents" | "ceilingKey" | "mcp" | "tiers" | "access">>;
 
 /** A state-changing command. human_only and system_only get tiers "unavailable" and mcp "hidden" (SPEC 9.0). */
-export function writeCommand<I, O>(s: WriteSpec<I, O>): WeftCommand<I, O> {
+export function writeCommand<I, O = Record<string, unknown>>(s: WriteSpec<I, NoInfer<O>>): WeftCommand<I, O> {
   if (s.description.length > 400) throw new Error(`${s.name}: description over 400 chars`);
   const restricted = s.access === "human_only" || s.access === "system_only";
   return {
@@ -93,4 +93,29 @@ export async function nextActionSeq(tx: import("@weft/db").DbTx): Promise<number
 /** YYYY-MM-DD minus one day. */
 export function dayBefore(date: string): string {
   return new Date(Date.parse(`${date}T12:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10);
+}
+
+/** cents x rate (decimal string), rounded half up to whole cents, exact (BigInt). */
+export function mulRateCents(cents: number, rate: string): number {
+  if (!Number.isInteger(cents)) throw new Error(`mulRateCents: not an integer ${cents}`);
+  const [i = "0", f = ""] = rate.split(".");
+  const scale = 10n ** BigInt(f.length);
+  const num = BigInt(cents) * BigInt(i + f);
+  const neg = num < 0n;
+  const abs = neg ? -num : num;
+  const q = abs / scale, r = abs % scale;
+  const out = r * 2n >= scale ? q + 1n : q;
+  return Number(neg ? -out : out);
+}
+
+/** a - b for decimal strings, exact: ("0.034", "0.015") gives "0.019". */
+export function rateSub(a: string, b: string): string {
+  const fa = a.split(".")[1]?.length ?? 0, fb = b.split(".")[1]?.length ?? 0;
+  const s = Math.max(fa, fb);
+  const toInt = (x: string, f: number) => BigInt(x.replace(".", "") + "0".repeat(s - f));
+  const d = toInt(a, fa) - toInt(b, fb);
+  const neg = d < 0n;
+  const digits = (neg ? -d : d).toString().padStart(s + 1, "0");
+  const out = `${digits.slice(0, digits.length - s)}${s ? `.${digits.slice(digits.length - s)}` : ""}`.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  return `${neg ? "-" : ""}${out}`;
 }

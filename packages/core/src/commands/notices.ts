@@ -6,6 +6,7 @@ import type { WeftCommand } from "../shared/deps";
 import { isDetailed, notFound, readCommand, responseFormatField } from "../demo/define";
 import { AGENCY_LABELS } from "../tax/queries";
 import { getNotice, listNotices, parseDrafts, parseExtract } from "../notices/queries";
+import { noticeWriteCommands } from "../notices/writes";
 
 const NoticeStatus = z.enum(["new", "in_review", "proposed", "resolved", "escalated"]);
 
@@ -56,4 +57,4 @@ const noticesGet = readCommand({
   },
 });
 
-export const noticesCommands: WeftCommand[] = [noticesList, noticesGet];
+export const noticesCommands: WeftCommand[] = [noticesList, noticesGet, ...noticeWriteCommands];

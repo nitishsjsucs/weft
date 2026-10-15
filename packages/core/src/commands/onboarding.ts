@@ -5,6 +5,7 @@ import { notFound, readCommand, responseFormatField } from "../demo/define";
 import { getWorker } from "../people/queries";
 import { nameRef } from "../people/names";
 import { listTasks } from "../onboarding/queries";
+import { completeTask } from "../onboarding/writes";
 
 const ChecklistInput = z.object({ worker_id: z.string(), ...responseFormatField });
 type ChecklistInput = z.infer<typeof ChecklistInput>;
@@ -25,4 +26,4 @@ const getChecklist = readCommand({
   },
 });
 
-export const onboardingCommands: WeftCommand[] = [getChecklist];
+export const onboardingCommands: WeftCommand[] = [getChecklist, completeTask];

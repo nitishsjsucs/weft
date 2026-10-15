@@ -4,6 +4,7 @@ import { formatCents } from "@weft/contracts";
 import type { WeftCommand } from "../shared/deps";
 import { isDetailed, ptDateOf, rateDisplay, readCommand, responseFormatField } from "../demo/define";
 import { AGENCY_LABELS, FEDERAL_FUTA, listRates, listTaxAccounts } from "../tax/queries";
+import { taxWriteCommands } from "../tax/writes";
 
 const Jurisdiction = z.enum(["US", "CA", "NY", "TX", "CO"]);
 
@@ -47,4 +48,4 @@ const getRates = readCommand({
   },
 });
 
-export const taxCommands: WeftCommand[] = [listRegistrations, getRates];
+export const taxCommands: WeftCommand[] = [listRegistrations, getRates, ...taxWriteCommands];

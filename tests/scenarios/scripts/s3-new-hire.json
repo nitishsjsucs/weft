@@ -1,0 +1,34 @@
+{
+  "name": "s3-new-hire",
+  "routine": "rt_new_hire",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "people__get", "arguments": { "worker_id": "{{trigger.worker_id}}" } },
+          { "type": "function_call", "name": "onboarding__get_checklist", "arguments": { "worker_id": "{{trigger.worker_id}}" } },
+          { "type": "function_call", "name": "tax__list_registrations", "arguments": { "jurisdiction": "CO" } }
+        ],
+        "stop": false
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "people__get", "ok": true }, { "tool": "onboarding__get_checklist", "ok": true }, { "tool": "tax__list_registrations", "ok": true }] },
+        "output": [
+          { "type": "function_call", "name": "it__create_account", "arguments": { "worker_id": "{{trigger.worker_id}}", "system": "chat" } },
+          { "type": "function_call", "name": "it__create_account", "arguments": { "worker_id": "{{trigger.worker_id}}", "system": "google_ws" } },
+          { "type": "function_call", "name": "it__create_account", "arguments": { "worker_id": "{{trigger.worker_id}}", "system": "github" } },
+          { "type": "function_call", "name": "comms__send_message", "arguments": { "channel": "#new-hires", "text": "Please welcome our new Senior Firmware Engineer joining the Hardware team in Colorado. Say hello here!" } },
+          { "type": "function_call", "name": "tax__register_state_account", "arguments": { "tax_account_id": "txa_0006" } },
+          { "type": "function_call", "name": "tax__register_state_account", "arguments": { "tax_account_id": "txa_0007" } },
+          { "type": "function_call", "name": "it__order_device", "arguments": { "worker_id": "{{trigger.worker_id}}" } }
+        ],
+        "stop": false
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "it__create_account", "status": "done" }, { "tool": "it__create_account", "status": "done" }, { "tool": "it__create_account", "status": "done" }, { "tool": "comms__send_message", "status": "done" }, { "tool": "tax__register_state_account", "status": "pending_approval" }, { "tool": "tax__register_state_account", "status": "pending_approval" }, { "tool": "it__order_device", "status": "pending_approval" }] },
+        "output": [{ "type": "text", "text": "Accounts are created and the welcome is posted. Two Colorado registrations and the laptop order are waiting for approval." }],
+        "stop": true
+      }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ import type { WeftCommand } from "../shared/deps";
 import { readCommand, responseFormatField } from "../demo/define";
 import { lookups } from "../people/queries";
 import { listDevices, listItAccounts } from "../it/queries";
+import { itWriteCommands } from "../it/writes";
 
 const ListAccountsInput = z.object({ worker_id: z.string().optional(), ...responseFormatField });
 type ListAccountsInput = z.infer<typeof ListAccountsInput>;
@@ -41,4 +42,4 @@ const listDevicesCmd = readCommand({
   },
 });
 
-export const itCommands: WeftCommand[] = [listAccounts, listDevicesCmd];
+export const itCommands: WeftCommand[] = [listAccounts, listDevicesCmd, ...itWriteCommands];
