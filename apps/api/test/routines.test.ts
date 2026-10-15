@@ -6,11 +6,11 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AgentRuntime, HumanSession, RoutineDef, SimClock, ToolOutcome } from "@weft/contracts";
-import { closeDb, migrate, openDb, type Db } from "@weft/db";
+import { closeDb, events, migrate, openDb, type Db } from "@weft/db";
 import { createRoutines, type WeftRoutinesEngine } from "@weft/routines";
 import type { Weft, WeftEnv } from "../src/http/context";
 import { toErrorResponse } from "../src/http/errors";
-import { routinesRoutes } from "../src/routes/routines";
+import { createRoutinesEventSource, routinesRoutes } from "../src/routes/routines";
 
 const clock: SimClock & { at: string } = { at: "2026-10-26T15:30:00.000Z", now: () => clock.at, rate: () => 0, advance: async () => undefined, set: async () => undefined };
 const session: HumanSession = { principalId: "usr_dana", companyId: "cmp_larkspur", via: "ui", keyScope: null };
@@ -86,5 +86,24 @@ describe("/v1/routines routes", () => {
     expect((await engine.getRun(routineRunId))?.attended).toBe(true);
     expect((await post("/v1/routines/rt_people_digest/disable")).status).toBe(200);
     expect(humanCalls.at(-1)).toEqual({ command: "routines.disable", args: { routine_id: "rt_people_digest" } });
+  });
+
+  it("the events source lists unconsumed events in order and consume marks only the routines consumer", async () => {
+    const src = createRoutinesEventSource(db);
+    const base = { ts: clock.at, subjectRef: "ntc_1", attended: false, requestedBy: null };
+    await db.insert(events).values([
+      { id: "evt_a", type: "notice.received", payloadJson: JSON.stringify({ notice_id: "ntc_1" }), consumedJson: "[]", ...base },
+      { id: "evt_b", type: "worker.hired", payloadJson: JSON.stringify({ worker_id: "wkr_1" }), consumedJson: JSON.stringify(["handler"]), ...base, attended: true, requestedBy: "usr_dana" },
+    ]);
+    const first = await src.unconsumed();
+    expect(first.map((e) => e.id)).toEqual(["evt_a", "evt_b"]);
+    expect(first[1]).toMatchObject({ type: "worker.hired", payload: { worker_id: "wkr_1" }, attended: true, requestedBy: "usr_dana" });
+    await src.consume("evt_a");
+    await src.consume("evt_a");
+    expect((await src.unconsumed()).map((e) => e.id)).toEqual(["evt_b"]);
+    await src.consume("evt_b");
+    expect(await src.unconsumed()).toEqual([]);
+    const rows = await db.select().from(events);
+    expect(Object.fromEntries(rows.map((r) => [r.id, JSON.parse(r.consumedJson)]))).toEqual({ evt_a: ["routines"], evt_b: ["handler", "routines"] });
   });
 });

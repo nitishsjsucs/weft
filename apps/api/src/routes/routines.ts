@@ -4,12 +4,37 @@
 // commands through the HumanExecutor. Every mutation calls scheduler.kick() before it answers.
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { NotFound, Refused, Unauthorized, type RoutineDef, type RoutineRun } from "@weft/contracts";
+import { sql } from "drizzle-orm";
+import { NotFound, Refused, Unauthorized, type RoutineDef, type RoutineRun, type WeftEvent } from "@weft/contracts";
+import { events, type Db } from "@weft/db";
 // Relative on purpose: @weft/core exports only "." and its index is shared; the integrator may re-export it there.
 import { parseRoutineDraft } from "../../../../packages/core/src/routines/draft-parser";
-import type { WeftRoutinesEngine } from "@weft/routines";
+import type { EventSource, WeftRoutinesEngine } from "@weft/routines";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
+
+/** Marker the routines engine appends to events.consumed_json once it has matched an event against the routines. */
+export const ROUTINES_CONSUMER = "routines";
+
+/**
+ * The events source for createRoutines({ events }). Boundary rule 1 keeps the brain off the events table, so the
+ * composition root passes this one: unconsumed means consumed_json lacks "routines", in rowid order.
+ */
+export function createRoutinesEventSource(db: Db): EventSource {
+  return {
+    async unconsumed(): Promise<WeftEvent[]> {
+      const rows = await db.all<{ id: string; type: string; ts: string; subject_ref: string; payload_json: string; attended: number; requested_by: string | null; consumed_json: string }>(
+        sql`SELECT id, type, ts, subject_ref, payload_json, attended, requested_by, consumed_json FROM ${events} ORDER BY rowid`);
+      return rows
+        .filter((r) => { try { return !(JSON.parse(r.consumed_json) as string[]).includes(ROUTINES_CONSUMER); } catch { return true; } })
+        .map((r) => ({ id: r.id, type: r.type, ts: r.ts, subjectRef: r.subject_ref, payload: JSON.parse(r.payload_json) as Record<string, string>, attended: !!r.attended, requestedBy: r.requested_by }));
+    },
+    async consume(eventId: string): Promise<void> {
+      await db.run(sql`UPDATE ${events} SET consumed_json = json_insert(CASE WHEN json_valid(consumed_json) THEN consumed_json ELSE '[]' END, '$[#]', ${ROUTINES_CONSUMER})
+        WHERE id = ${eventId} AND NOT EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(consumed_json) THEN consumed_json ELSE '[]' END) WHERE value = ${ROUTINES_CONSUMER})`);
+    },
+  };
+}
 
 const DraftBody = z.object({ prompt: z.string().min(1).max(400) });
 
