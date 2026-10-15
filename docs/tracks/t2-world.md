@@ -7,7 +7,7 @@ Branch `track/t2-world`. People, onboarding, tax, notices, benefits, IT, comms, 
 - **Simulators** (`packages/sim`): `createSimulators({ db, clock })` over a db or transaction handle. Agency (register completes after 2 sim business days with a synthetic account number; `needs_info` fault; `fileResponse` confirmation such as `CA-EDD-R-000001`), bank ACH (settles on the first tick at or after `settleAt`; `return` fault returns the first entry), IdP (`delay` fault provisions for one tick), devices (catalog `lrk-laptop-std` at $1,899.00, ETA 3 business days, delivery on tick), chat (closed channel enum; `postInbound` for seeded human messages), faults, fixed synthetic FX, carrier (P1 stub). Rows hold only vault names. Business days are judged in America/Los_Angeles.
 - **Notice scenarios** (`packages/sim/fixtures/notices/*.txt`, original text): `ca_de2088_rate_change`, `ca_de2088_injection` (the only fixture with the injection line), `ny_missing_filing`, `irs_deposit_schedule_change`. Rendered with the sim date; a deterministic labeled-line parser produces `NoticeExtract` (changed rates only).
 - **Seed** (`packages/seed/src/{company,people,benefits,tax,it,actions}.ts`): SPEC 5.1 to 5.4 and 5.6 counts. Roster order fixes ids: employees `wrk_0001` to `wrk_0048` (EMP numbers match), contractors `wrk_0049` to `wrk_0051`.
-- **Commands** (`packages/core/src/commands/*.ts`, logic in `people/ tax/ notices/ benefits/ it/ comms/ onboarding/ demo/`): every read and write in SPEC 9.2 for t2 except `people.update_profile` (cut line).
+- **Commands** (`packages/core/src/commands/*.ts`, logic in `people/ tax/ notices/ benefits/ it/ comms/ onboarding/ demo/`): every read and write in SPEC 9.2 for t2. `people.update_profile` is human_only R1 (the fields it writes are untrusted, so no agent or MCP caller writes them) and returns the changed field names only.
 - **Handlers**: `sim.registration_completed` and `sim.registration_needs_info` run `tax.record_registration`; `tax_account.activated` completes `state_registration` once every account of the work state is active; `sim.device_delivered` runs `it.record_delivery`. All run as `svc_events`.
 - **Routes**: company, stats, workers (list, detail, onboarding), offers (list, accept), tax, notices, benefits, it, sim (clock, advance, deliver, state, faults, chat, reset).
 - **Scenario S3** (`tests/scenarios/s3-new-hire.test.ts`), asserts `tainted === false`. Part 1: the domain flow through the real scheduler and handlers with direct stand-ins for the executor; once T1's `payroll.create_draft` and `payroll.preview_run` exist it also checks that a Nov 1 to 15 draft made before activation blocks Noor with `UNREGISTERED_STATE` and that the preview after activation has no block flag (`PRORATED` review and `NEW_IN_RUN` info remain, as SPEC GP3 says). Part 2: the end-to-end run through the real executor (offer accepted through `POST /v1/offers/offr_0001/accept`, the calls of `scripts/s3-new-hire.json` through `executor.agent` in a routine run, Dana approving the 2 CO registrations and the laptop, `POST /v1/sim/clock/advance {"by":"P2D"}`, then activation, CO UI 3.05%, `state_registration` completed by `svc_events`, `verifyChain()` and `memory.head()`). Part 2 skips while the executor is a stub.
@@ -41,7 +41,7 @@ Branch `track/t2-world`. People, onboarding, tax, notices, benefits, IT, comms, 
 
 ```sh
 pnpm install
-pnpm typecheck && pnpm test                    # 108 passed, 1 skipped (S3 part 2 until the executor lands)
+pnpm typecheck && pnpm test                    # 109 passed, 1 skipped (S3 part 2 until the executor lands)
 pnpm vitest run tests/scenarios/s3-new-hire.test.ts
 pnpm db:reset && pnpm db:seed && pnpm db:digest  # same digest on every run
 ```
@@ -51,7 +51,7 @@ No live model calls and no servers are needed. Tests build a seeded world in a t
 ## What is stubbed or cut
 
 - Executor, routines and agent are stubs on this branch. Tests use the direct stand-ins in `packages/core/src/demo/direct.ts`; the seed runs the NY raise directly while the executor is a stub and through `executor.human.exec` as Dana once it is real.
-- Cut line, not built: `people.update_profile`; routines or impact logic for `ny_missing_filing` and `irs_deposit_schedule_change` (they deliver, parse, refuse a rate change, draft from their kind templates and resolve on send, and a test covers that); direct messages in `comms.send_message` (`worker_id` is refused with `DOMAIN_RECIPIENT`).
+- Cut line, not built: routines or impact logic for `ny_missing_filing` and `irs_deposit_schedule_change` (they deliver, parse, refuse a rate change, draft from their kind templates and resolve on send, and a test covers that); direct messages in `comms.send_message` (`worker_id` is refused with `DOMAIN_RECIPIENT`).
 - Benefits: plan list and per-worker enrollment reads only; the carrier invoice simulator is a P1 stub.
 
 ## Integration check (2026-10-15, scratch merges, nothing committed there)
