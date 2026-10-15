@@ -1,0 +1,60 @@
+"use client";
+import Link from "next/link";
+import { Bot, FileText } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@weft/ui/components";
+import { cn } from "@weft/ui";
+import { tid, type Flag, type Paycheck } from "@weft/contracts";
+
+const TONE: Record<Flag["severity"], string> = {
+  block: "bg-red-3 text-red-11",
+  review: "bg-amber-3 text-amber-11",
+  info: "bg-gray-3 text-gray-11",
+};
+export const RULE_LABEL: Record<Flag["rule"], string> = {
+  GROSS_CHANGE: "Gross change", HOURS_SPIKE: "Hours spike", NEW_IN_RUN: "New in run", MISSING_FROM_RUN: "Missing from run", PRORATED: "Prorated",
+  MISSING_BANK_ACCOUNT: "No bank account", UNREGISTERED_STATE: "Unregistered state", NEGATIVE_NET: "Negative net", TOTAL_CHANGE: "Total change",
+};
+
+function evidenceRows(ev: Record<string, unknown>): [string, string][] {
+  return Object.entries(ev)
+    .filter(([k]) => !k.endsWith("_cents") || !(`${k.slice(0, -6)}_display` in ev))
+    .map(([k, v]) => [k.replace(/_display$/, "").replaceAll("_", " "), typeof v === "string" || typeof v === "number" ? String(v) : JSON.stringify(v)]);
+}
+
+/** Flag chip with an explanation popover showing the grounded explanation and whether the agent or a template wrote it. */
+export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
+  const src = pc.explanationSource;
+  return (
+    <Popover>
+      <PopoverTrigger
+        data-testid={tid.payrollFlag(pc.workerId, flag.rule)}
+        data-severity={flag.severity}
+        onClick={(e) => e.stopPropagation()}
+        className={cn("inline-flex h-5 items-center rounded-md px-1.5 text-0 font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]", TONE[flag.severity])}
+      >
+        {RULE_LABEL[flag.rule]}{flag.severity === "block" ? " (blocks)" : ""}
+      </PopoverTrigger>
+      <PopoverContent onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
+          <span className={cn("rounded-md px-1.5 py-0.5 text-0 font-medium", TONE[flag.severity])}>{flag.rule}</span>
+          <span className="text-1 text-gray-10">{flag.severity}</span>
+        </div>
+        <p className="mt-2 font-medium">{flag.message}</p>
+        {pc.explanation ? (
+          <div className="mt-2 rounded-lg bg-gray-2 px-2.5 py-2">
+            <p className="leading-5 whitespace-pre-wrap">{pc.explanation}</p>
+            <div data-explanation-source={src ?? ""} className="mt-1.5 flex items-center gap-1 text-1 text-gray-10">
+              {src === "agent" ? <><Bot className="size-3.5" /> Explanation written by the agent</> : <><FileText className="size-3.5" /> Explanation from a template</>}
+              {pc.explanationRunId ? <Link href={`/app/runs/${pc.explanationRunId}`} className="ml-auto text-blue-11 hover:underline">Run</Link> : null}
+            </div>
+          </div>
+        ) : <p className="mt-2 text-1 text-gray-10">No explanation yet. Run review to have the agent explain it.</p>}
+        {Object.keys(flag.evidence).length ? (
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-1">
+            {evidenceRows(flag.evidence).flatMap(([k, v]) => [<dt key={`k${k}`} className="text-gray-10">{k}</dt>, <dd key={`v${k}`} className="font-mono break-all">{v}</dd>])}
+          </dl>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
