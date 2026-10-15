@@ -93,7 +93,7 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
     registry: engine.registry,
     expireProposals: (now) => withWriteLock(() => opts.db.transaction((tx) => expireProposals(engine, tx, now))),
     async verifyChain() {
-      const gitSeq = memory.root() ? (memory.chainHeadSeq() ?? engine.gitHeadSeq ?? 0) : null;
+      const gitSeq = memory.root() ? (memory.chainHeadSeq() ?? 0) : null;
       const s = await verifyActions(opts.db, gitSeq);
       return { ok: s.ok, head: s.head, gaps: s.gaps, badSeq: s.badSeq, gitLag: s.gitLag };
     },

@@ -109,3 +109,11 @@ describe("redaction", () => {
     expect(await count(w.db, "vault_secrets")).toBe(10);
   });
 });
+
+describe("redaction patterns stay narrow", () => {
+  it("does not hit words that merely contain aba or ordinary ids", () => {
+    const r = new Redactor();
+    expect(r.redact("database row 123456789")).toBe("database row 123456789");
+    expect(r.redact("Updated account txa_0003 for pay_2026_10_30")).toBe("Updated account txa_0003 for pay_2026_10_30");
+  });
+});

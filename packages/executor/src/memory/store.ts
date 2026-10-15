@@ -108,6 +108,7 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
         const r = join(opts.dataDir, "companies", companyId, "memory");
         root = r;
         if (existsSync(join(r, ".git"))) { headSeq = await readHeadSeq(r); return; }
+        headSeq = null;   // a fresh repo (first seed or after a reset) has no chain head yet
         mkdirSync(r, { recursive: true });
         for (const f of MEMORY_FOLDERS) mkdirSync(join(r, f), { recursive: true });
         writeFileSync(join(r, "README.md"), "# Weft memory (demo)\n\nMarkdown memory for a fictional company. Facts live in entities/ and knowledge/, events in timeline/ and comms/. Written only by the Weft executor.\n");

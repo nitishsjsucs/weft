@@ -15,8 +15,8 @@ export function encodings(value: string): string[] {
 const PATTERNS: [RegExp, string][] = [
   [/\b\d{3}-\d{2}-\d{4}\b/g, "***-**-****"],                                       // full SSN
   [/\b\d{2}-\d{7}\b/g, "**-*******"],                                              // full EIN
-  [/((?:routing|aba|rtn)[^0-9\n]{0,24})\d{9}\b/gi, `$1${REDACTED}`],               // routing number in context
-  [/((?:account|acct)(?:[ _-]?(?:no|number|num))?[^0-9\n]{0,24})\d{6,17}\b/gi, `$1${REDACTED}`],   // account number in context
+  [/(\b(?:routing|aba|rtn)[^0-9\n]{0,24})\d{9}\b/gi, `$1${REDACTED}`],               // routing number in context
+  [/(\b(?:account|acct)(?:[ _-]?(?:no|number|num))?[^0-9\n]{0,24})\d{6,17}\b/gi, `$1${REDACTED}`],   // account number in context
 ];
 
 export class Redactor {
