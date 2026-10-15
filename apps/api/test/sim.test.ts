@@ -103,3 +103,39 @@ describe("registration faults through the handlers", () => {
     } finally { await w2.close(); }
   });
 });
+
+describe("partial registration (SPEC 9.7)", () => {
+  it("one active CO account leaves state_registration pending; a repeated completion is idempotent", async () => {
+    const w3 = await createTestWeft();
+    try {
+      await ensureTestPrincipals(w3.db);
+      const d = directExecutors(w3.db, w3.clock, w3.sims);
+      const dana = d.human("usr_dana");
+      const accepted = await dana.exec("people.accept_offer", { offer_id: "offr_0001" });
+      if (!accepted.ok || accepted.status !== "done") throw new Error(JSON.stringify(accepted));
+      const noor = (accepted.data as { worker_id: string }).worker_id;
+      expect(await dana.exec("tax.register_state_account", { tax_account_id: "txa_0007" })).toMatchObject({ ok: true, data: { status: "awaiting_state" } });
+
+      await w3.clock.advance("2026-10-28T15:30:00.000Z");   // 2 business days after Mon 08:30 PT
+      const evts = await w3.sims.tick(w3.clock.now());
+      expect(evts.map((e) => e.type)).toEqual(["sim.registration_completed"]);
+      const deliver = async (type: string, payload: Record<string, string>, subjectRef: string) => {
+        for (const h of handlers.filter((x) => x.event === type)) await h.handle({ id: "evt_t2x", type, ts: w3.clock.now(), subjectRef, payload, attended: false, requestedBy: null }, d.system, d.readOnly);
+      };
+      await deliver(evts[0]!.type, evts[0]!.payload, evts[0]!.subjectRef);
+      await deliver(evts[0]!.type, evts[0]!.payload, evts[0]!.subjectRef);   // a duplicate event changes nothing
+      const co = await w3.db.all<{ id: string; status: string }>(sql`SELECT id, status FROM tax_accounts WHERE jurisdiction = 'CO' ORDER BY id`);
+      expect(co).toEqual([{ id: "txa_0006", status: "not_registered" }, { id: "txa_0007", status: "active" }]);
+      const confirmed = await w3.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM notices WHERE kind = 'registration_confirmed'`);
+      expect(confirmed[0]!.n).toBe(1);
+      const rates = await w3.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM employer_tax_rates WHERE jurisdiction = 'CO'`);
+      expect(rates[0]!.n).toBe(1);
+
+      await deliver("tax_account.activated", { tax_account_id: "txa_0007", worker_ids: noor }, "txa_0007");
+      const task = await w3.db.all<{ status: string }>(sql`SELECT status FROM onboarding_tasks WHERE worker_id = ${noor} AND kind = 'state_registration'`);
+      expect(task).toEqual([{ status: "pending" }]);
+      const early = await d.system.exec("svc_events", "onboarding.complete_task", { worker_id: noor, kind: "state_registration" }, { eventId: null, attended: false, requestedBy: null });
+      expect(early).toMatchObject({ ok: false, refusal: { code: "DOMAIN_REGISTRATION_INCOMPLETE", message: "CO registrations not active: txa_0006 not_registered" } });
+    } finally { await w3.close(); }
+  });
+});
