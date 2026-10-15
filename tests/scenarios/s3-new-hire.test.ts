@@ -68,6 +68,19 @@ describe("GP3 new hire in a new state (asserts tainted === false)", () => {
     const co = await weft.db.all<{ status: string }>(sql`SELECT status FROM tax_accounts WHERE jurisdiction = 'CO' ORDER BY id`);
     expect(co.map((r) => r.status)).toEqual(["awaiting_state", "awaiting_state"]);
 
+    // Once T1's draft commands land: a Nov 1 to 15 draft made before activation blocks Noor with UNREGISTERED_STATE.
+    const noorFlags = async (runId: string) => {
+      const rows = await weft.db.all<{ flags_json: string }>(sql`SELECT flags_json FROM paychecks WHERE worker_id = ${noor} AND payroll_run_id = ${runId}`);
+      expect(rows).toHaveLength(1);
+      return JSON.parse(rows[0]!.flags_json) as { rule: string; severity: string }[];
+    };
+    let novRun: string | null = null;
+    if (commands.some((c) => c.name === "payroll.create_draft") && commands.some((c) => c.name === "payroll.preview_run")) {
+      const draft = done<{ run_id: string }>(await dana.exec("payroll.create_draft", { pay_schedule_id: "ps_us_semimonthly", period_end: "2026-11-15" }));
+      novRun = draft.run_id;
+      expect((await noorFlags(novRun)).filter((f) => f.severity === "block").map((f) => f.rule)).toEqual(["UNREGISTERED_STATE"]);
+    }
+
     const bundle = { ...(weft.executor as object), system: d.system, readOnly: d.readOnly, expireProposals: async () => 0, redact: (t: string) => t } as unknown as ExecutorBundle;
     const routines = { tick: async () => undefined, trigger: async () => ({ routineRunId: "rtr_none" }), onProposalDecided: async () => undefined } as RoutinesEngine;
     const scheduler = createScheduler({ db: weft.db, clock: weft.clock, sims: weft.sims, executor: bundle, handlers, routines, log: () => undefined });
@@ -97,13 +110,13 @@ describe("GP3 new hire in a new state (asserts tainted === false)", () => {
     const dev = await weft.db.all<{ status: string; price_cents: number }>(sql`SELECT status, price_cents FROM devices WHERE worker_id = ${noor}`);
     expect(dev).toEqual([{ status: "delivered", price_cents: 189_900 }]);
 
-    // Noor's Nov 1 to 15 preview has no block flag once T1's draft commands land.
-    if (commands.some((c) => c.name === "payroll.create_draft")) {
-      const out = await dana.exec("payroll.create_draft", { pay_schedule_id: "ps_us_semimonthly", period_end: "2026-11-15" });
-      expect(out.ok).toBe(true);
-      const flags = await weft.db.all<{ flags_json: string }>(sql`SELECT flags_json FROM paychecks WHERE worker_id = ${noor}`);
-      expect(flags.length).toBeGreaterThan(0);
-      for (const f of flags) expect((JSON.parse(f.flags_json) as { severity: string }[]).some((x) => x.severity === "block")).toBe(false);
+    // Once T1's draft commands land: the Nov 1 to 15 preview shows no block flag on Noor (PRORATED and NEW_IN_RUN remain).
+    if (novRun) {
+      const again = await dana.exec("payroll.preview_run", { run_id: novRun });
+      expect(again.ok, JSON.stringify(again)).toBe(true);
+      const flags = await noorFlags(novRun);
+      expect(flags.filter((f) => f.severity === "block")).toEqual([]);
+      expect(flags.map((f) => `${f.rule}:${f.severity}`).sort()).toEqual(expect.arrayContaining(["NEW_IN_RUN:info", "PRORATED:review"]));
     }
     expect(seen).toEqual(expect.arrayContaining(RT_NEW_HIRE.filter((n) => n !== "onboarding.complete_task")));
     expect(tainted).toBe(false);
