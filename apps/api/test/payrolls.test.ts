@@ -17,7 +17,7 @@ function standInHuman(w: TestWeft): HumanExecutor {
     async exec(session: HumanSession, name: string, args: unknown): Promise<ToolOutcome> {
       const def = commands.find((c) => c.name === name);
       if (!def) throw new Error(`unknown command ${name}`);
-      const deps: CommandDeps = { tx: w.db, sims: { bank: bank.bank } as never, clock: w.clock, newId: idMinter(w.db), resolveCredential: async () => "test" };
+      const deps: CommandDeps = { tx: w.db, sims: { bank: bank.bank } as never, clock: w.clock, newId: idMinter(w.db), resolveCredential: async (ref) => `secret-for-${ref}` };
       const ctx = { companyId: session.companyId, principal: { id: session.principalId, kind: "human" as const, role: "admin" }, onBehalfOf: null, surface: "human_ui" as const, agentKind: null, run: null, tainted: false, routineRunId: null, approvedProposalId: null, now: w.clock.now() };
       try {
         const input = def.input.parse(args);
@@ -43,7 +43,7 @@ beforeAll(async () => {
   weft = await createTestWeft({ seed: false });
   ids = await buildFixtureWorld(weft.db);
   await weft.db.insert(principals).values({ id: "usr_theo", companyId: CO, kind: "human", display: "Theo Marsh (demo)", role: "payroll_admin", grantsJson: "{}" });
-  await payroll.seedPayHistory(weft.db, { newId: idMinter(weft.db), bank: bank.bank, credential: "x", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
+  await payroll.seedPayHistory(weft.db, { newId: idMinter(weft.db), bank: bank.bank, credential: "vault:sim-bank-operating", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
   (weft as { executor: unknown }).executor = { human: standInHuman(weft), redact: (s: string) => s, system: weft.executor.system, readOnly: weft.executor.readOnly, expireProposals: async () => 0 };
 });
 afterAll(async () => { await weft.close(); });

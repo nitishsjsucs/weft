@@ -38,7 +38,7 @@ beforeAll(async () => {
   const t = await openTempDb();
   db = t.db; close = t.close;
   ids = await buildFixtureWorld(db);
-  await seedPayHistory(db, { newId: idMinter(db), bank: bank.bank, credential: "x", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
+  await seedPayHistory(db, { newId: idMinter(db), bank: bank.bank, credential: "vault:sim-bank-operating", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
 });
 afterAll(async () => { await close(); });
 

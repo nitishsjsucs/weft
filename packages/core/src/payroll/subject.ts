@@ -1,6 +1,6 @@
 // Subject hash for payroll.submit_run (SPEC 7.4, harness 5.5): sha256 of canonical JSON over the included paycheck ids
 // after exclude_blocked, each net_cents, each paycheck's status and its worker's active bank account (id and status,
-// plus the masked last4 so an in-place edit also counts), and the totals. Any change after a proposal, including a
+// plus the masked last4 and the credential_ref the bank batch pays to, so an in-place edit also counts), and the totals. Any change after a proposal, including a
 // direct-deposit change, yields STALE_SUBJECT.
 import { eq, inArray } from "drizzle-orm";
 import { bankAccounts, paychecks, type DbTx } from "@weft/db";
@@ -14,7 +14,7 @@ export type BankAccountRow = typeof bankAccounts.$inferSelect;
 
 export interface SubjectMaterial {
   runId: string;
-  paychecks: { id: string; worker_id: string; status: string; net_cents: number; reimbursements_cents: number; bank: { id: string; status: string; account_last4: string; routing_last4: string } | null }[];
+  paychecks: { id: string; worker_id: string; status: string; net_cents: number; reimbursements_cents: number; bank: { id: string; status: string; account_last4: string; routing_last4: string; credential_ref: string } | null }[];
   totals: TotalsCents;
 }
 
@@ -44,7 +44,7 @@ export async function subjectMaterial(tx: DbTx, runId: string, excludeBlocked: b
     runId,
     paychecks: included.map((p) => {
       const b = activeBankOf(banks, p.workerId);
-      return { id: p.id, worker_id: p.workerId, status: p.status, net_cents: p.netCents, reimbursements_cents: p.reimbursementsCents, bank: b ? { id: b.id, status: b.status, account_last4: b.accountLast4, routing_last4: b.routingLast4 } : null };
+      return { id: p.id, worker_id: p.workerId, status: p.status, net_cents: p.netCents, reimbursements_cents: p.reimbursementsCents, bank: b ? { id: b.id, status: b.status, account_last4: b.accountLast4, routing_last4: b.routingLast4, credential_ref: b.credentialRef } : null };
     }),
     totals: computeTotals(included.map(rowAmounts)),
   };

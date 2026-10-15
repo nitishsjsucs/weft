@@ -136,7 +136,8 @@ export async function submitRun(tx: DbTx, deps: LifecycleDeps, input: SubmitInpu
   const entries = included.map((p) => {
     const b = activeBankOf(banks, p.workerId);
     if (!b) throw new PayrollRefusal("BLOCKED_LINES", `Paycheck ${p.id} has no active bank account`, { runId: run.id });
-    return { workerId: p.workerId, amountCents: p.netCents + p.reimbursementsCents, accountRef: b.id };
+    // Simulators store only vault names (SPEC 8): the deposit account travels as its credential_ref, never its id.
+    return { workerId: p.workerId, amountCents: p.netCents + p.reimbursementsCents, accountRef: b.credentialRef };
   });
   const totals = computeTotals(included.map(rowAmounts));
   assertTotalsIdentities(totals);

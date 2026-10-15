@@ -14,7 +14,7 @@ async function seeded(): Promise<{ db: Db; ids: FixtureIds; bank: ReturnType<typ
   const t = await openTempDb();
   const ids = await buildFixtureWorld(t.db);
   const bank = fakeBank();
-  await seedPayHistory(t.db, { newId: idMinter(t.db), bank: bank.bank, credential: "test", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
+  await seedPayHistory(t.db, { newId: idMinter(t.db), bank: bank.bank, credential: "vault:sim-bank-operating", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
   return { db: t.db, ids, bank, close: t.close };
 }
 
@@ -136,9 +136,18 @@ describe("draft, preview, submit and processed", () => {
     expect((await runSubjectHash(w.db, "pay_2026_10_30", true)).hash).toBe(h1);
   });
 
+  it("an in-place swap of the deposit credential_ref (same id and last4) changes the subject hash", async () => {
+    const h1 = (await runSubjectHash(w.db, "pay_2026_10_30", true)).hash;
+    const old = (await w.db.select().from(bankAccounts).where(eq(bankAccounts.workerId, w.ids.nyRaise)))[0]!;
+    await w.db.update(bankAccounts).set({ credentialRef: "vault:bank-elsewhere" }).where(eq(bankAccounts.id, old.id));
+    expect((await runSubjectHash(w.db, "pay_2026_10_30", true)).hash).not.toBe(h1);
+    await w.db.update(bankAccounts).set({ credentialRef: old.credentialRef }).where(eq(bankAccounts.id, old.id));
+    expect((await runSubjectHash(w.db, "pay_2026_10_30", true)).hash).toBe(h1);
+  });
+
   it("refuses BLOCKED_LINES without exclude_blocked, then submits 47 and settles to processed", async () => {
     const deps = { newId: idMinter(w.db), now: "2026-10-28T16:05:00.000Z" };
-    const base = { runId: "pay_2026_10_30", approvedBy: "usr_theo", actionSeq: 2, bank: w.bank.bank, credential: "test" };
+    const base = { runId: "pay_2026_10_30", approvedBy: "usr_theo", actionSeq: 2, bank: w.bank.bank, credential: "vault:sim-bank-operating" };
     const err = await submitRun(w.db, deps, { ...base, excludeBlocked: false }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PayrollRefusal);
     expect((err as PayrollRefusal).code).toBe("BLOCKED_LINES");
@@ -148,6 +157,9 @@ describe("draft, preview, submit and processed", () => {
     expect(res).toMatchObject({ includedCount: 47, excludedWorkerIds: [w.ids.caOct19], settleAt: "2026-10-30T13:00:00.000Z" });
     expect(res.moneyCents).toBe(material.totals.totalCost);
     expect(res.bankTotalCents).toBe(res.totals.netPay + res.totals.reimbursements);
+    const sent = w.bank.batches.find((b) => b.id === res.batchId)!;
+    expect(sent.entries).toHaveLength(47);
+    expect(sent.entries.every((e) => /^vault:bank-/.test(e.accountRef))).toBe(true);   // credential_ref, never the bnk_ id
     const run = (await w.db.select().from(payrollRuns).where(eq(payrollRuns.id, "pay_2026_10_30")))[0]!;
     expect(run).toMatchObject({ status: "processing", approvedBy: "usr_theo", submittedActionSeq: 2, bankBatchId: res.batchId });
     expect(JSON.parse(run.excludedWorkerIdsJson)).toEqual([w.ids.caOct19]);

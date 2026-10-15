@@ -112,6 +112,12 @@ export function fakeBank() {
   const batches: { id: string; payrollRunId: string; total: number; entries: { workerId: string; amountCents: number; accountRef: string }[]; settleAt: string; status: string }[] = [];
   const bank: Pick<BankSim, "submitBatch" | "tick"> = {
     async submitBatch(req) {
+      // Same input rules as the real bank simulator (packages/sim/src/bank.ts).
+      if (typeof req.credential !== "string" || req.credential.length < 8) throw new Error("SIM_AUTH: the sim bank rejected the credential");
+      for (const e of req.entries) {
+        if (!Number.isInteger(e.amountCents) || e.amountCents < 0) throw new Error(`bank.submitBatch: bad amount for ${e.workerId}`);
+        if (!e.accountRef.startsWith("vault:")) throw new Error("bank.submitBatch: account refs must be vault names");
+      }
       const id = `simb_${String(batches.length + 1).padStart(4, "0")}`;
       batches.push({ id, payrollRunId: req.payrollRunId, total: req.entries.reduce((s, e) => s + e.amountCents, 0), entries: req.entries, settleAt: req.settleAt, status: "submitted" });
       return { batchId: id, settleAt: req.settleAt };
