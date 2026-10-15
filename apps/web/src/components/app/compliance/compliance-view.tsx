@@ -4,11 +4,10 @@ import { useEffect, useState } from "react";
 import { Badge, Card, Drawer, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { TID, tid, type EmployerRate, type Notice, type TaxAccount } from "@weft/contracts";
 import { errorText, useGet } from "@/lib/api/hooks";
-import { fmtDate, fmtDateTime } from "../format";
+import { AGENCY, fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { refHref } from "../refs";
 
-const AGENCY: Record<TaxAccount["agency"], string> = { irs: "IRS (sim)", ca_edd: "CA EDD (sim)", ny_dtf: "NY DTF (sim)", ny_dol: "NY DOL (sim)", tx_twc: "TX TWC (sim)", co_dor: "CO DOR (sim)", co_cdle: "CO CDLE (sim)" };
 const STATUS_TONE: Record<TaxAccount["status"], "green" | "amber" | "gray" | "red"> = { active: "green", awaiting_state: "amber", needs_info: "red", not_registered: "gray" };
 const NOTICE_TONE: Record<Notice["status"], "gray" | "blue" | "amber" | "green" | "red"> = { new: "blue", in_review: "blue", proposed: "amber", resolved: "green", escalated: "red" };
 export const ratePct = (r: string) => `${(Number(r) * 100).toFixed(r.length > 6 ? 3 : 2).replace(/0+$/, "").replace(/\.$/, "")}%`;

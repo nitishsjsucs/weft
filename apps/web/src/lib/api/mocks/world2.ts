@@ -77,8 +77,8 @@ export function buildSim(): { faults: ArmedFault[]; chat: ChatMessageDto[]; regi
       msg("msg_0003", "#payroll", "Theo Marsh (demo)", "Oct 15 payroll settled with the sim bank. 47 paychecks.", "2026-10-15T13:05:00.000Z"),
       msg("msg_0004", "#new-hires", "Weft agent", "Welcome Rowan Achterberg (demo), Controls Engineer in Oakland, starting Oct 19.", "2026-10-19T16:30:00.000Z"),
     ],
-    registrations: [{ id: "simr_0001", agency: "ca_edd", accountType: "combined", status: "active", accountNumber: "000-4817-2", completedAt: "2023-03-17" }],
-    bankBatches: [{ id: "simb_2026_10_15", payrollRunId: "pay_2026_10_15", entries: 47, totalCents: 18_212_440, status: "settled", settleAt: "2026-10-15T13:00:00.000Z" }],
+    registrations: [{ id: "simr_0001", agency: "ca_edd", account_type: "combined", status: "active", account_number: "000-4817-2", completed_at: "2023-03-17T17:00:00.000Z" }],
+    bankBatches: [{ id: "simb_2026_10_15", payroll_run_id: "pay_2026_10_15", total_cents: 18_212_440, status: "settled", settle_at: "2026-10-15T13:00:00.000Z", entryCount: 47 }],
     idpAccounts: [{ ref: "idp_0001", worker: "Dana Whitfield (demo)", system: "google_ws", handle: "dana.whitfield@larkspur.example", status: "active" }, { ref: "idp_0002", worker: "Dana Whitfield (demo)", system: "chat", handle: "@dana", status: "active" }, { ref: "idp_0003", worker: "Imani Ferreira (demo)", system: "github", handle: "imani-ferreira-demo", status: "active" }],
   };
 }

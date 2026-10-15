@@ -5,7 +5,7 @@ import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } fro
 import { cn } from "@weft/ui";
 import { NoticeScenario, TID, tid, type ArmedFault, type ChatMessageDto, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, invalidate, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
-import { fmtDateTime, relative } from "../format";
+import { fmtDateTime, nextCronSlot, relative } from "../format";
 import { PageHeader } from "../page";
 import { useAgent } from "../agent-context";
 
@@ -19,16 +19,35 @@ const FAULT_TARGETS = ["agency.CO.register", "agency.CA.fileResponse", "bank.sub
 const FAULT_KIND: Record<string, ArmedFault["kind"]> = { "agency.CO.register": "needs_info", "bank.submitBatch": "return", "idp.createAccount": "delay" };
 const CHANNELS = ["#people-ops", "#payroll", "#new-hires", "#general"] as const;
 
-interface SimState { registrations?: Record<string, unknown>[]; bankBatches?: Record<string, unknown>[]; idpAccounts?: Record<string, unknown>[]; faults?: ArmedFault[]; nextEvent?: { at: string; label: string } | null }
+/**
+ * GET /v1/sim/state has no contract type yet. The API returns simulator rows as snake_case table rows, `idpAccounts`
+ * as a count, plus agency mail, device orders, faults and the device catalog. Older mocks sent `idpAccounts` as rows
+ * and a `nextEvent`; both forms render.
+ */
+interface SimState {
+  registrations?: Row[]; agencyMail?: Row[]; bankBatches?: Row[]; idpAccounts?: Row[] | number; deviceOrders?: Row[];
+  faults?: ArmedFault[]; nextEvent?: { at: string; label: string } | null;
+}
+type Row = Record<string, unknown>;
+const HIDDEN_COLS = new Set(["company_id", "payload_json", "body", "entries_json", "card_json"]);
 
-function Generic({ rows, empty, testid }: { rows: Record<string, unknown>[] | undefined; empty: string; testid: string }) {
+function cell(col: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "-";
+  if (typeof v === "number" && /cents$/.test(col)) return `$${(v / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (typeof v === "string" && /(_at|At)$/.test(col) && !Number.isNaN(Date.parse(v))) return fmtDateTime(v);
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+
+function Generic({ rows, empty, testid }: { rows: Row[] | undefined; empty: string; testid: string }) {
   if (!rows?.length) return <div data-testid={testid} className="px-4 py-4 text-[13px] text-gray-10">{empty}</div>;
-  const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))].slice(0, 7);
+  const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => !HIDDEN_COLS.has(c)).slice(0, 7);
   return (
-    <Table data-testid={testid} className="min-w-[520px] text-[13px]">
-      <THead><TR>{cols.map((c) => <TH key={c}>{c.replace(/([A-Z])/g, " $1").toLowerCase()}</TH>)}</TR></THead>
-      <TBody>{rows.map((r, i) => <TR key={i}>{cols.map((c) => <TD key={c} className="h-9 font-mono text-1 whitespace-nowrap">{typeof r[c] === "object" ? JSON.stringify(r[c]) : String(r[c] ?? "-")}</TD>)}</TR>)}</TBody>
-    </Table>
+    <div data-testid={testid} className="overflow-x-auto">
+      <Table className="text-[13px]">
+        <THead><TR>{cols.map((c) => <TH key={c}>{c.replace(/([A-Z])/g, " $1").replace(/_/g, " ").toLowerCase()}</TH>)}</TR></THead>
+        <TBody>{rows.map((r, i) => <TR key={i}>{cols.map((c) => <TD key={c} className="h-9 font-mono text-1 whitespace-nowrap">{cell(c, r[c])}</TD>)}</TR>)}</TBody>
+      </Table>
+    </div>
   );
 }
 
@@ -98,6 +117,10 @@ export function SimulatorsView() {
   const now = clock.data?.now;
   const err = clock.error ?? state.error ?? advance.error ?? deliver.error ?? fault.error;
   const step = async (body: Record<string, string>) => { await advance.run(body); invalidate(); };
+  const slot = now ? nextCronSlot(now) : null;
+  const nextEvent = s.nextEvent ?? (slot ? { at: slot, label: "prebuilt routine slot (weekdays 9:00 AM PT)" } : null);
+  const idpRows = Array.isArray(s.idpAccounts) ? s.idpAccounts : undefined;
+  const idpCount = typeof s.idpAccounts === "number" ? s.idpAccounts : idpRows?.length;
 
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
@@ -114,7 +137,7 @@ export function SimulatorsView() {
               <Button data-testid={tid.simAdvance("1d")} size="sm" disabled={advance.pending} onClick={() => void step({ by: "P1D" })}><FastForward /> +1 day</Button>
               <Button data-testid={tid.simAdvance("next")} size="sm" disabled={advance.pending} onClick={() => void step({ toNext: "cron" })}><CalendarClock /> Next scheduled event</Button>
             </div>
-            {s.nextEvent ? <p className="mt-3 text-1 break-words text-gray-11">Next: {s.nextEvent.label} at {fmtDateTime(s.nextEvent.at)}{now ? ` (${relative(s.nextEvent.at, now)})` : ""}</p> : null}
+            {nextEvent ? <p data-testid="sim-next-event" className="mt-3 text-1 break-words text-gray-11">Next: {nextEvent.label} at {fmtDateTime(nextEvent.at)}{now ? ` (${relative(nextEvent.at, now)})` : ""}</p> : null}
           </Card>
         </section>
         <section>
@@ -159,9 +182,21 @@ export function SimulatorsView() {
           <CardHeading icon={<FlaskConical />}>Bank batches</CardHeading>
           <Card className="overflow-hidden"><Generic testid="sim-bank-batches" rows={s.bankBatches} empty="No batches." /></Card>
         </section>
-        <section className="min-w-0 laptop:col-span-2">
+        <section className="min-w-0">
           <CardHeading icon={<FlaskConical />}>Identity provider accounts</CardHeading>
-          <Card className="overflow-hidden"><Generic testid="sim-idp-accounts" rows={s.idpAccounts} empty="No accounts." /></Card>
+          <Card className="overflow-hidden">
+            {idpRows ? <Generic testid="sim-idp-accounts" rows={idpRows} empty="No accounts." /> : (
+              <div data-testid="sim-idp-accounts" className="px-4 py-4"><div className="text-6 font-semibold tabular">{idpCount ?? "-"}</div><div className="text-1 text-gray-10">accounts in the simulated identity provider</div></div>
+            )}
+          </Card>
+        </section>
+        <section className="min-w-0">
+          <CardHeading icon={<Mail />}>Agency mail</CardHeading>
+          <Card className="overflow-hidden"><Generic testid="sim-agency-mail" rows={s.agencyMail} empty="No mail from agencies yet." /></Card>
+        </section>
+        <section className="min-w-0 laptop:col-span-2">
+          <CardHeading icon={<FlaskConical />}>Device orders</CardHeading>
+          <Card className="overflow-hidden"><Generic testid="sim-device-orders" rows={s.deviceOrders} empty="No device orders." /></Card>
         </section>
         <section className="min-w-0 laptop:col-span-2">
           <CardHeading icon={<MessageSquare />}>Chat (simulated)</CardHeading>

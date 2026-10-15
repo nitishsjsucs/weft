@@ -128,7 +128,7 @@ export function RoutineDetail({ id }: { id: string }) {
         </Card>
         <Card className="p-4">
           <h2 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Checklist (done when every item holds)</h2>
-          <ul className="flex flex-col gap-1.5">{d.checklist.map((c) => <li key={c.id} className="text-[13px]">{c.label}<div className="font-mono text-0 text-gray-10">{c.check}</div></li>)}</ul>
+          <ul className="flex flex-col gap-1.5">{d.checklist.map((c) => <li key={c.id} className="text-[13px]">{c.label}<div className="font-mono text-0 break-all text-gray-10">{c.check}</div></li>)}</ul>
         </Card>
       </div>
       <h2 className="mb-2 text-3 font-medium">Run log</h2>
@@ -138,12 +138,12 @@ export function RoutineDetail({ id }: { id: string }) {
           <TBody>
             {(runs.data?.data ?? []).map((x) => (
               <TR key={x.id} data-testid={TID.routineRunRow} data-status={x.status}>
-                <TD className="h-11"><code className="font-mono text-1">{x.triggerRef}</code>{x.attended ? <Badge tone="blue" size="xs" className="ml-1.5">attended</Badge> : null}{x.overdue ? <Badge tone="red" size="xs" className="ml-1.5">overdue</Badge> : null}</TD>
+                <TD className="h-11 max-w-[220px]"><code className="font-mono text-1 break-all">{x.triggerRef}</code>{x.attended ? <Badge tone="blue" size="xs" className="ml-1.5">attended</Badge> : null}{x.overdue ? <Badge tone="red" size="xs" className="ml-1.5">overdue</Badge> : null}</TD>
                 <TD className="h-11"><Badge tone={RUN_TONE[x.status]}>{x.status.replace("_", " ")}</Badge></TD>
                 <TD className="h-11 whitespace-nowrap">{x.startedAt ? fmtDateTime(x.startedAt) : "-"}</TD>
                 <TD numeric className="h-11">{duration(x)}</TD>
                 <TD numeric className="h-11">{usd(x.costUsdMicros)}</TD>
-                <TD className="h-11">{x.leftForHuman.length ? x.leftForHuman.join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div className="text-1 text-gray-10">{x.summary}</div> : null}</TD>
+                <TD className="h-11 min-w-[280px] py-2">{x.leftForHuman.length ? x.leftForHuman.join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div className="text-1 text-gray-10">{x.summary}</div> : null}</TD>
                 <TD className="h-11">{x.agentRunId ? <Link href={`/app/runs/${x.agentRunId}`} className="font-mono text-0 text-blue-11 hover:underline">{x.agentRunId}</Link> : <span className="text-1 text-gray-10">precheck only</span>}</TD>
               </TR>
             ))}

@@ -58,7 +58,7 @@ function advanceScripted(entry: { run: AgentRunRow; steps: RunStepRow[] } & { sc
     const s = entry.script[n - 1]!;
     const usage = s.kind === "model_call" ? { input: 1_800 + n * 100, cached: 1_536, cacheWrite: 0, output: 120, reasoning: 0 } : null;
     const cost = usage ? Math.round(((usage.input - usage.cached) * 0.2 + usage.cached * 0.02 + usage.output * 1.2)) : 0;
-    entry.steps.push({ runId: entry.run.id, n, parentN: null, stage: s.stage, kind: s.kind, callId: s.tool ? `call_${n}` : null, toolName: s.tool, toolArgs: null, outcome: "ok", result: { summary: s.summary }, native: null, usage, costUsdMicros: cost, attempt: 1, requestId: null, prefixHash: null, timings: usage ? { admissionMs: 2, assembleMs: 8, timeToLlmMs: 15, modelMs: 640, dispatchMs: 0, tokensPerSecond: null } : null, createdAt: world.now });
+    entry.steps.push({ runId: entry.run.id, n, parentN: null, stage: s.stage, kind: s.kind, callId: s.tool ? `call_${n}` : null, toolName: s.tool ? s.tool.replace(/\./g, "__") : null, toolArgs: null, outcome: "ok", result: { output: JSON.stringify({ summary: s.summary }), outcome: { ok: true, status: "done", summary: s.summary } }, native: null, usage, costUsdMicros: cost, attempt: 1, requestId: null, prefixHash: null, timings: usage ? { admissionMs: 2, assembleMs: 8, timeToLlmMs: 15, modelMs: 640, dispatchMs: 0, tokensPerSecond: null } : null, createdAt: world.now });
     entry.run.stepsUsed = entry.steps.filter((x) => x.kind === "model_call").length;
     entry.run.costUsdMicros += cost;
     if (usage) entry.run.tokens = { ...entry.run.tokens, input: entry.run.tokens.input + usage.input, cached: entry.run.tokens.cached + usage.cached, output: entry.run.tokens.output + usage.output };
@@ -194,7 +194,8 @@ const routes: [string, RegExp, Handler][] = [
     return json(200, { ok: true, status: "done", resultId: wid, data: { workerId: wid }, summary: `Accepted the offer for ${o.candidateFirst} ${o.candidateLast} (demo)`, actionSeq: ++world.counter, artifactRef: null, tainted: false, label: "synthetic" } satisfies ToolOutcome);
   }],
   ["GET", /^\/v1\/workers\/([^/]+)\/onboarding$/, (m) => json(200, world.onboarding.filter((t) => t.workerId === m[1]))],
-  ["GET", /^\/v1\/sim\/state$/, () => json(200, { registrations: world.sim.registrations, bankBatches: world.sim.bankBatches, idpAccounts: world.sim.idpAccounts, faults: world.sim.faults, nextEvent: { at: world.now < DIGEST_SLOT ? DIGEST_SLOT : "2026-10-28T16:00:00.000Z", label: world.now < DIGEST_SLOT ? "Weekly people digest (rt_people_digest)" : "Pre-payroll review (rt_pre_payroll)" } })],
+  // Same keys as the API: snake_case table rows, idpAccounts as a count, no nextEvent (the UI computes the next slot).
+  ["GET", /^\/v1\/sim\/state$/, () => json(200, { clock: { now: world.now, rate: 0 }, registrations: world.sim.registrations, agencyMail: [], bankBatches: world.sim.bankBatches, idpAccounts: world.sim.idpAccounts.length, deviceOrders: [], faults: world.sim.faults, catalog: [] })],
   ["POST", /^\/v1\/sim\/faults$/, (_m, _q, b) => {
     const target = String(b.target ?? "");
     world.sim.faults = world.sim.faults.filter((f) => f.target !== target);

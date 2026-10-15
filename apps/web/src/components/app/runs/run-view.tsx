@@ -9,7 +9,7 @@ import { watchRun, type RunWatch } from "@/lib/api/sse";
 import { fmtDateTime, usd } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
-import { outcomeTone, stepSummary } from "../agent/run-steps";
+import { outcomeTone, stepSummary, toolLabel } from "../agent/run-steps";
 
 const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "-");
 const int = (n: number) => n.toLocaleString("en-US");
@@ -30,6 +30,8 @@ function OutcomeBadge({ o }: { o: RunStepRow["outcome"] }) {
   return <Badge tone={tone === "ok" ? "green" : tone === "pending" ? "amber" : "red"} className="max-w-[220px] truncate">{o}</Badge>;
 }
 
+const STEP_KIND: Partial<Record<RunStepRow["kind"], string>> = { context: "Context assembled", model_call: "Model call", verify: "Checks", recite: "Plan recited", notice: "Notice", error: "Error" };
+
 /** Run view (SPEC 11.3): stages, tool calls, outcomes, tokens, cache-hit ratio, USD and model time, checklist, proposals. */
 export function RunView({ id }: { id: string }) {
   const [w, setW] = useState<RunWatch>({ run: null, steps: [], trace: null, mode: "idle" });
@@ -46,7 +48,7 @@ export function RunView({ id }: { id: string }) {
         meta={
           <>
             <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{run.status}</ShimmerText> : run.status}</Badge>
-            {run.terminalReason ? <code className="font-mono text-0 text-gray-10">{run.terminalReason}</code> : null}
+            {run.terminalReason && run.terminalReason.toLowerCase() !== run.status ? <code className="font-mono text-0 text-gray-10">{run.terminalReason}</code> : null}
             <Badge tone="outline" size="md">{run.provider === "scripted" ? "Scripted, no model" : `${run.provider} ${run.model}`}</Badge>
             <Badge tone={run.attended ? "blue" : "gray"} size="md">{run.attended ? "Attended" : "Unattended"}</Badge>
             <span className="text-1 text-gray-11">Trigger <code className="font-mono">{run.trigger}</code></span>
@@ -95,8 +97,8 @@ export function RunView({ id }: { id: string }) {
                   <TD className="h-10"><code className="font-mono text-0">{s.stage}</code></TD>
                   <TD className="h-10">
                     <div className="min-w-0">
-                      <div className="truncate">{stepSummary(s)}</div>
-                      <div className="font-mono text-0 text-gray-10">{s.kind}{s.toolName ? ` · ${s.toolName}` : ""}{s.attempt > 1 ? ` · attempt ${s.attempt}` : ""}</div>
+                      <div className="truncate">{s.toolName ? stepSummary(s) : STEP_KIND[s.kind] ?? stepSummary(s)}</div>
+                      {s.toolName || s.attempt > 1 ? <div className="font-mono text-0 text-gray-10">{s.kind}{s.toolName ? ` · ${toolLabel(s.toolName)}` : ""}{s.attempt > 1 ? ` · attempt ${s.attempt}` : ""}</div> : null}
                     </div>
                   </TD>
                   <TD className="h-10"><OutcomeBadge o={s.outcome} /></TD>

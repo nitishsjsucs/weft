@@ -33,6 +33,26 @@ export function createSseParser(onEvent: (event: string, data: string) => void) 
   };
 }
 
+export type SseFrame =
+  | { kind: "step"; step: RunStepRow }
+  | { kind: "run"; run: AgentRunRow }
+  | { kind: "trace"; trace: RunTrace }
+  | { kind: "status"; status: RunStatus }
+  | { kind: "other" };
+
+/**
+ * Classifies one SSE frame from GET /v1/agent/runs/:id/events. The API sends `event: step` with a RunStepRow and a
+ * final `event: status` with `{ status }`; full run rows and traces are accepted too. Exported for tests.
+ */
+export function classifyFrame(event: string, v: unknown): SseFrame {
+  if (!v || typeof v !== "object") return { kind: "other" };
+  if ("n" in v && "stage" in v) return { kind: "step", step: v as RunStepRow };
+  if ("run" in v && "steps" in v) return { kind: "trace", trace: v as RunTrace };
+  if ("status" in v && "id" in v) return { kind: "run", run: v as AgentRunRow };
+  if ("status" in v && typeof (v as { status: unknown }).status === "string" && (event === "status" || Object.keys(v).length === 1)) return { kind: "status", status: (v as { status: RunStatus }).status };
+  return { kind: "other" };
+}
+
 export function mergeSteps(prev: RunStepRow[], incoming: RunStepRow[]): RunStepRow[] {
   const byN = new Map(prev.map((s) => [s.n, s]));
   for (const s of incoming) byN.set(s.n, s);
@@ -61,9 +81,10 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
       return isTerminal(trace.run.status);
     } catch { return false; }
   }
-  function startPolling() {
+  /** `keepMode`: the SSE stream ended cleanly on a paused run; keep the "sse" label while the slow re-poll waits. */
+  function startPolling(keepMode = false) {
     if (stopped || pollTimer) return;
-    emit({ mode: "polling" });
+    if (!keepMode) emit({ mode: "polling" });
     const loop = async () => {
       pollTimer = null;
       const done = await pollOnce();
@@ -80,14 +101,20 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
         const res = await fetch(`/api/v1/agent/runs/${encodeURIComponent(runId)}/events`, { headers: { ...headers(), accept: "text/event-stream" }, signal: ctrl.signal });
         if (!res.ok || !res.body) throw new Error(`SSE ${res.status}`);
         emit({ mode: "sse" });
+        let sawStatus: RunStatus | null = null;
         void pollOnce(); // history and the run row
         const parse = createSseParser((event, data) => {
           try {
             const v = JSON.parse(data) as unknown;
-            if (v && typeof v === "object" && "n" in v && "stage" in v) emit({ steps: mergeSteps(state.steps, [v as RunStepRow]) });
-            else if (v && typeof v === "object" && "status" in v && "id" in v) emit({ run: v as AgentRunRow });
-            else if (v && typeof v === "object" && "run" in v && "steps" in v) { const t = v as RunTrace; emit({ trace: t, run: t.run, steps: mergeSteps(state.steps, t.steps) }); }
-            if (event === "end" || event === "done" || event === "run.finished") void pollOnce();
+            const frame = classifyFrame(event, v);
+            if (frame.kind === "step") emit({ steps: mergeSteps(state.steps, [frame.step]) });
+            else if (frame.kind === "run") emit({ run: frame.run });
+            else if (frame.kind === "trace") emit({ trace: frame.trace, run: frame.trace.run, steps: mergeSteps(state.steps, frame.trace.steps) });
+            else if (frame.kind === "status" && state.run) emit({ run: { ...state.run, status: frame.status } });
+            // A status frame (the API sends `event: status` with { status } before it closes) or an end marker means
+            // the run row changed: read the trace once for the final row, proposals and the stage summary.
+            if (frame.kind === "status") sawStatus = frame.status;
+            if (frame.kind === "status" || event === "end" || event === "done" || event === "run.finished") void pollOnce();
           } catch { /* ignore malformed frames */ }
         });
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -96,8 +123,10 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
           if (done) break;
           parse(value);
         }
-        if (!stopped && !isTerminal(state.run?.status)) startPolling();
-        else void pollOnce();
+        const last = sawStatus ?? state.run?.status;
+        if (stopped) return;
+        if (isTerminal(last)) void pollOnce();
+        else startPolling(sawStatus !== null && isPaused(last));   // ended early: fall back; paused: slow re-poll
       } catch {
         if (!stopped) startPolling();
       }

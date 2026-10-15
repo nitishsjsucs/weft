@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Banknote, ChevronRight, Inbox, Landmark, Users } from "lucide-react";
 import { Badge, Card, CardHeading } from "@weft/ui/components";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
-import { fmtDate, period, relative } from "../format";
+import { AGENCY, fmtDate, period, relative } from "../format";
 
 function greeting(iso: string | undefined): string {
   if (!iso) return "Hello";
@@ -59,7 +59,7 @@ export function HomeView() {
           <ul>
             {(accounts.data ?? []).filter((a) => a.jurisdiction !== "US").map((a) => (
               <li key={a.id} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-2 text-[13px] last:border-0">
-                <span className="w-8 font-medium">{a.jurisdiction}</span><span className="min-w-0 flex-1 truncate text-gray-11">{a.agency} {a.accountType}{a.registeredAt && now ? `, ${relative(a.registeredAt, now).replace(" ago", "")} old` : ""}</span>
+                <span className="w-8 font-medium">{a.jurisdiction}</span><span className="min-w-0 flex-1 truncate text-gray-11">{AGENCY[a.agency] ?? a.agency} <span className="text-gray-10">{a.accountType}{a.registeredAt ? ` · since ${fmtDate(a.registeredAt, { month: "short", year: "numeric" })}` : ""}</span></span>
                 <Badge tone={a.status === "active" ? "green" : a.status === "awaiting_state" ? "amber" : "gray"}>{a.status.replace("_", " ")}</Badge>
               </li>
             ))}

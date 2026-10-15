@@ -5,7 +5,7 @@ import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/c
 import { cn } from "@weft/ui";
 import { TID, tid, type Action, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDateTime } from "../format";
+import { fmtDateTime, notReversibleText } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { useState } from "react";
@@ -16,10 +16,7 @@ function actor(a: Action): string {
   return principalName(a.actorId);
 }
 
-function notReversible(a: Action): string {
-  const r = a.notReversibleReason ?? "no reverse command";
-  return /^not reversible/i.test(r) ? r : `Not reversible: ${r}`;
-}
+const notReversible = (a: Action) => notReversibleText(a.notReversibleReason);
 
 export function AuditView() {
   const actions = useGet("/v1/actions", { query: { limit: 100 }, refreshMs: 5_000 });

@@ -1,11 +1,21 @@
 import type { RunStepRow } from "@weft/contracts";
 
-/** Chip text for a step: the outcome summary when the tool returned one, else the tool name (SPEC 9.6). */
+/** Tool names arrive in wire form (`payroll__explain_flags`); the UI shows the dotted command name. */
+export function toolLabel(name: string | null): string | null {
+  return name ? name.replace(/__/g, ".") : null;
+}
+
+/**
+ * Chip text for a step: the tool outcome's summary (or a proposal's title) when the tool returned one, else the tool
+ * name (SPEC 9.6). The API stores tool results as `{ output, outcome }`; a bare `{ summary }` is accepted too.
+ */
 export function stepSummary(s: RunStepRow): string {
-  const r = s.result as { summary?: unknown } | null;
-  if (r && typeof r === "object" && typeof r.summary === "string") return r.summary;
-  if (s.toolName) return s.toolName;
-  return s.kind.replace("_", " ");
+  const r = s.result as { summary?: unknown; outcome?: { summary?: unknown; title?: unknown; refusal?: { message?: unknown } } } | null;
+  const o = r && typeof r === "object" ? r.outcome : undefined;
+  for (const v of [o?.summary, o?.title, o?.refusal?.message, r && typeof r === "object" ? r.summary : undefined]) {
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return toolLabel(s.toolName) ?? s.kind.replace("_", " ");
 }
 export function isChipStep(s: RunStepRow): boolean { return s.kind === "tool_call"; }
 export function outcomeTone(o: RunStepRow["outcome"]): "ok" | "pending" | "refused" | "error" | "none" {
