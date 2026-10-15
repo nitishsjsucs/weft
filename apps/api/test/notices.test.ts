@@ -73,3 +73,26 @@ describe("notices.draft_response and send_response", () => {
     expect(evts.map((e) => e.type)).toEqual(["notice.received", "notice.resolved"]);
   });
 });
+
+describe("the other notice scenarios (cut line: draft and send only)", () => {
+  it("ny_missing_filing and irs_deposit_schedule_change deliver, refuse a rate change, draft from the kind template and resolve on send", async () => {
+    const d = directExecutors(weft.db, weft.clock, weft.sims).human("usr_dana");
+    const want = {
+      ny_missing_filing: { account: "txa_0003", kind: "missing_filing", body: "We are reviewing the 2026-Q3 filing named in this notice" },
+      irs_deposit_schedule_change: { account: "txa_0001", kind: "deposit_schedule_change", body: "We acknowledge this notice and will respond by" },
+    } as const;
+    for (const [scenario, w] of Object.entries(want)) {
+      const delivered = await d.exec("sim.deliver_notice", { scenario });
+      if (!delivered.ok || delivered.status !== "done") throw new Error(JSON.stringify(delivered));
+      const id = (delivered.data as { notice_id: string }).notice_id;
+      const got = await d.exec("notices.get", { notice_id: id });
+      expect(got, scenario).toMatchObject({ ok: true, data: { notice: { tax_account_id: w.account, kind: w.kind, extracted: { rates: [] } } } });
+      const rate = await d.exec("tax.update_rate", { tax_account_id: w.account, code: "sui", rate: "0.01", effective_from: "2027-01-01", source_notice_id: id });
+      expect(rate, scenario).toMatchObject({ ok: false, refusal: { code: "DOMAIN_NOTICE_MISMATCH", message: expect.stringContaining(`Notice ${id} carries no rate change for sui`) } });
+      const draft = await d.exec("notices.draft_response", { notice_id: id });
+      expect(draft.ok && draft.status === "done" && (draft.data as { body: string }).body, scenario).toContain(w.body);
+      const sent = await d.exec("notices.send_response", { notice_id: id });
+      expect(sent, scenario).toMatchObject({ ok: true, status: "done", data: { status: "resolved", confirmation: expect.stringMatching(/^[A-Z]+(-[A-Z]+)*-R-\d{6}$/) } });
+    }
+  });
+});
