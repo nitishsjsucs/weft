@@ -1,13 +1,31 @@
-// Landing page placeholder. Owner: t6-site (research/design.md section 13.1 structure, original copy only).
-export default function Home() {
+// Landing page `/` (SPEC 11.2): structure after research/design.md 13.1, original copy and art only. Owner: t6-site.
+// Stats and the simulated clock are read from the API on each request, with the seed's numbers as the fallback.
+import type { Metadata } from "next";
+import { loadLanding } from "@/components/marketing/live";
+import { AgentIsland, Announcement, CtaBand, Footer, Hero, HowItWorks, Nav, SimulatorsMarquee, StatsTiles } from "@/components/marketing/sections";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Weft: open-source payroll and HR with an agent that asks first",
+  description: "An open-source HRIS, payroll and benefits platform with an agent that drafts the admin work and waits for approval. Synthetic data and in-repo simulators only.",
+};
+
+export default async function Home() {
+  const { stats, clock } = await loadLanding();
   return (
-    <main className="py-24">
-      <p className="text-1 font-mono uppercase text-muted">Weft, synthetic data only</p>
-      <h1 className="mt-4 text-8 font-semibold tracking-tight">Payroll and HR that does the admin work, and asks first.</h1>
-      <p className="mt-4 max-w-xl text-3 text-muted">
-        An open-source foundation running on a fictional company, with every agency, bank and carrier simulated in the repo.
-      </p>
-      <a href="/app" className="weft-press mt-8 inline-flex rounded-[7px] bg-primary px-4 py-2 text-2 font-medium text-primary-fg">Open the demo app</a>
-    </main>
+    <>
+      <Announcement />
+      <Nav />
+      <main>
+        <Hero clock={clock} />
+        <SimulatorsMarquee />
+        <HowItWorks />
+        <AgentIsland />
+        <StatsTiles stats={stats} />
+        <CtaBand />
+      </main>
+      <Footer />
+    </>
   );
 }

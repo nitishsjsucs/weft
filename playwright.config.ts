@@ -10,7 +10,7 @@ const API = Number(process.env.WEFT_E2E_API_PORT ?? 4170);
 
 export default defineConfig({
   testDir: "e2e",
-  testMatch: /gp\d+-.*\.spec\.ts$/,
+  testMatch: /(gp\d+|site)-.*\.spec\.ts$/,
   globalSetup: "./e2e/global-setup.ts",
   workers: 1,
   fullyParallel: false,
