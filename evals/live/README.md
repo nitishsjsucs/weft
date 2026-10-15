@@ -12,6 +12,9 @@ WEFT_SECRETS_FILE=~/Developer/projects/.weft.secrets.env WEFT_LIVE_OPENAI=1 WEFT
 The cumulative live cap is `WEFT_LIVE_USD_CAP=0.50` (expected under $0.05 for the suite). Results go to
 `evals/results/<date>-<sha>.json` (gitignored): pass or fail with reasons, model steps, tool calls, invalid-argument
 errors, tokens, cache-hit ratio, USD and wall time. Automated tests never run this suite. It needs the merged world
-(`createWeft({ strict: true })` refuses scaffold stubs).
+(`createWeft({ strict: true })` refuses scaffold stubs) with the t4 wiring in compose.ts.
+
+Last run, 2026-10-15 on a trial merge of tracks t1 to t4: L1, L2 and L3 pass on gpt-5.6-luna for $0.0051 in total
+(2, 5 and 3 model steps). Numbers are in `docs/tracks/t4-agent.md`.
 
 `smoke.ts` holds the 5 builder smoke calls of harness 11.2 (run once; results in `.scratch/t4-agent/smoke.md`).

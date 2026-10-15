@@ -1,4 +1,4 @@
-# Track t4-agent notes (Round 1, 2026-10-15)
+# Track t4-agent notes (Rounds 1 and 2, 2026-10-15)
 
 Owner paths: `packages/agent`, `packages/routines`, `packages/grounding`, `packages/core/src/routines`,
 `packages/core/src/commands/routines.ts`, `scenarios/*.json`, `evals/**`, the agent and routines routes and the S1, S4
@@ -46,9 +46,16 @@ and S5 scenarios.
   event; cancel; costs) and `/v1/routines` (list, get, runs, routine run, trigger answers 200, draft through the parser
   then `routines.draft` as the human, enable and disable through the HumanExecutor). Artifacts stay 501.
   `createChatContextSource(db)` in `routes/agent.ts` builds the chat pack's company summary and open loops.
-- Scenarios S1, S4, S5 (`tests/scenarios/`) skip themselves until the merged world lands, naming the missing parts.
+- Scenarios S1, S4, S5 (`tests/scenarios/`) skip themselves in this branch until the merged world lands, naming the
+  missing parts. On a trial merge they pass (see "Round 2: trial merge and live gate").
 - `evals/live/run.ts`: L1 to L4 on a fresh seed per case in `.data/eval-live/` (ledger kept there, so the live cap is
-  cumulative), results in `evals/results/`. Not run yet: `createWeft({ strict: true })` refuses the scaffold stubs.
+  cumulative), results in `evals/results/` (gitignored). L1 to L3 pass on gpt-5.6-luna on a trial merge.
+- `createRoutinesEventSource(db)` in `apps/api/src/routes/routines.ts`: the events source for `createRoutines`
+  (unconsumed means `consumed_json` lacks `"routines"`, rowid order; `consume` appends the marker once). The brain
+  cannot read the events table (boundary rule 1), so the composition root passes this one.
+- Tool cap: `MAX_TOOLS = 16` and `assertToolCap` in `loop.ts`; the loop refuses an allowlist or tool spec list over 16.
+- Run-store writes (`store.ts`, the routines engine) go through `lockedWrite`: the process write lock plus up to about
+  5 s of `SQLITE_BUSY` retries (`busy.ts`; a copy lives in `packages/routines/src/busy.ts`).
 - `evals/live/smoke.ts`: the 5 smoke calls (results in `.scratch/t4-agent/smoke.md`, $0.0015 total).
 
 ## Smoke results (gpt-5.6-luna, Responses API)
@@ -59,7 +66,57 @@ and the user item started a new turn); Luna emits parallel calls; `cached_tokens
 `cache_write_tokens` is present (priced 0, no price was given); a different `prompt_cache_key` does not share the
 cache and does not disturb the first key.
 
+## Round 2: trial merge and live gate (2026-10-15, 15:50 to 16:20 PDT)
+
+I merged track/t2-world, track/t1-payroll and track/t3-governance into this branch in a scratch clone (outside every
+worktree, never committed or pushed), applied the wiring below, and ran the suite there.
+
+- Conflicts: `packages/core/test/shared.test.ts` (take t1's and mine, they are identical) and `packages/core/src/index.ts`
+  (keep both `export * from "./demo/index"` and `export * as payroll from "./payroll/index"`). Typecheck passes.
+- S1, S4 and S5 pass (8 tests, 3 runs in a row), and so do S3, the boundaries test and every agent and routines test.
+  Bugs the merge found, fixed here: the NY raise evidence key is `action_result_id`, not `result_id`; the digest cited
+  51 active workers, which `comms.send_message` refuses as UNGROUNDED (its company facts count employees, and
+  contractors carry no work state), so it now cites the per-state counts and their sum ("48 employees by work state
+  (CA 22, NY 14, TX 12)"); S1 waited on proposals instead of the routine's agent run; the forged-decide test skipped
+  because the seed has no proposal, so it now makes its own through the agency notice routine.
+- Live gate on gpt-5.6-luna (Responses API), all on the trial merge, fresh seed per case:
+
+  | Case | Result | Model steps | Tool calls | USD | Cache hit |
+  | --- | --- | --- | --- | --- | --- |
+  | L1 agency notice to 2 proposals | pass | 2 | 3 | 0.0014 | 46% |
+  | L2 pre-payroll, 4 model explanations, submit proposal | pass | 5 | 5 | 0.0023 | 70% |
+  | L3 grounded NY raise answer citing the raise result id | pass | 3 | 3 | 0.0014 | 58% |
+
+  Cumulative live spend for this track is $0.0067 (smoke $0.0015 plus the gate), well under the $0.50 cap. The ledger
+  with every entry is `.data/eval-live/spend/2026-10-15.jsonl` (it also holds the smoke entries, so reruns stay
+  cumulative); the combined results are `evals/results/2026-10-15-trial-merge-L1-L3.json`. L4 was not run.
+- The first L1 attempt picked the digest's agent run (a fresh world fires the digest on its first tick); the runner now
+  finds the agency notice run by routine id.
+- **S2 (t1's GP2) fails on the trial merge, and the cause is in the DB layer.** The libsql 0.18 client pools
+  connections, and the open-time PRAGMAs in `openDb` (busy_timeout among them) reach only the first one. While a
+  woken routine run writes in the background, the test's own direct `bank_accounts` updates get `SQLITE_BUSY`, then
+  `SQLITE_BUSY_SNAPSHOT` (517) even under `withWriteLock`. Before `lockedWrite`, my run-store append failed instead
+  and the run ended `REPEATED_ERRORS`. Setting `createClient({ url, timeout: 5000 })` made it worse: the timeout blocks
+  the one JS thread while the lock holder sits on another connection in the same process, so S4 stalled 5 s. This needs
+  an owner in `packages/db` (one connection for writes, or PRAGMAs on every pooled connection, plus finding the
+  connection that goes back to the pool with a read snapshot). S3 passes.
+
 ## For the integrator
+
+0. **Wiring for compose.ts** (exactly what the trial merge used):
+
+   ```ts
+   import { createRoutines, type WeftRoutinesEngine } from "@weft/routines";
+   import { createChatContextSource } from "./routes/agent";
+   import { createRoutinesEventSource } from "./routes/routines";
+   // createAgentRuntime({ ...,
+   routinesView: {
+     get: (id: string) => (routinesRef.current as WeftRoutinesEngine).view.get(id),
+     checklist: (x) => (routinesRef.current as WeftRoutinesEngine).view.checklist(x),
+   },
+   contextSource: createChatContextSource(db),
+   // createRoutines({ db, clock, agent, runs: executor.runs, readOnly: executor.readOnly, events: createRoutinesEventSource(db) })
+   ```
 
 1. **routinesView.** The agent's `RoutinesView` gained an optional `checklist(...)`. Routines are created after the
    agent, so wire it lazily: `routinesView: { get: (id) => routinesRef.current!.view.get(id), checklist: (x) => routinesRef.current!.view.checklist(x) }`.
@@ -67,10 +124,9 @@ cache and does not disturb the first key.
    `createChatContextSource(db)` from `apps/api/src/routes/agent.ts`; the brain never reads domain tables), `env`,
    `modelTimeoutMs`. Without `contextSource` the chat pack says no company summary is available.
 3. **Events for the routines engine.** Boundary rule 1 lets the brain import only `agentRuns`, `runSteps`,
-   `routineRuns` and `routines`, so the engine cannot read the `events` table. `createRoutines` takes an optional
-   `events: { unconsumed(), consume(id) }`; without it event routines (`rt_agency_notice`, `rt_new_hire`) never fire
-   from `tick`. Either pass one from apps/api or add `events` to `RUN_STORE` in `tests/boundaries.test.ts`
-   (request in `.scratch/contract-requests/t4-agent.md`).
+   `routineRuns` and `routines`, so the engine cannot read the `events` table. Pass
+   `events: createRoutinesEventSource(db)` (item 0); without it event routines (`rt_agency_notice`, `rt_new_hire`)
+   never fire from `tick`. No boundary change is needed.
 4. **Batch identity for the executor.** `AgentCall` carries no batch id. track/t3-governance keys a batch by the
    run's latest `model_call` row in `run_steps`; the loop writes that row (kind `model_call`, outcome `ok`) right
    before it dispatches the turn's calls in emitted order, so the two agree without a contract change.
@@ -84,8 +140,8 @@ cache and does not disturb the first key.
    {jurisdiction, code, new_rate, effective_from}`, `tax.register_state_account {tax_account_id}`, `it.create_account
    {worker_id, system}`, `it.order_device {worker_id}`, `payroll.explain_flags {run_id, items[].{paycheck_id}}` (no
    explanation, so T1 saves its template), `payroll.submit_run {run_id, exclude_blocked: true}`.
-   `chat_ny_raise.json` cites `data.flagged.0.flags.0.evidence.result_id` with `state: "NY"`; S5 must confirm the
-   NY raise is the first NY flagged row (both NY rows are flagged).
+   `chat_ny_raise.json` cites `data.flagged.0.flags.0.evidence.action_result_id` with `state: "NY"`; confirmed on the
+   trial merge: the NY raise (Lena Brooks, wrk_0026) is the first NY flagged row.
 6. **Prebuilt owner.** `packages/routines/src/prebuilt.ts` uses `OWNER = "usr_dana"` (the principal the scaffold tests use).
 7. **Scaffold core test.** Commit `5f2bd05` applies the same change to `packages/core/test/shared.test.ts` as
    track/t1-payroll `3129725` (commands and handlers are appended), so the merge is identical on both sides.
@@ -95,3 +151,14 @@ cache and does not disturb the first key.
 10. **Spend ledger dir.** compose.ts passes `join(dataDir, "spend")`; harness 4.5 wants it outside every company
    directory and untouched by `POST /v1/sim/reset`. If reset rebuilds `dataDir`, point the ledger at the repo's
    `.data/spend` instead.
+11. **What is stubbed or left.** `GET /v1/agent/runs/:id/artifacts/:ref` answers 501; overdue detection, the
+   `WEFT_PIN_PREFIX=1` pin test and L4 are not built or not run (cut line); the boot rule's "Run again" inbox suggestion
+   needs T3's proposal notifier; the model-backed routine_draft recipe runs only under a live provider (the parser is the
+   default path).
+
+## How to run
+
+- Tests: `pnpm vitest run packages/agent packages/routines packages/grounding apps/api/test/agent.test.ts
+  apps/api/test/routines.test.ts packages/core/src/routines tests/scenarios/s1-agency-notice.test.ts
+  tests/scenarios/s4-digest.test.ts tests/scenarios/s5-chat-guardrails.test.ts` (the scenarios skip until merge).
+- Live gate (costs money, opt-in): see `evals/live/README.md`; `pnpm eval:live` runs L1 to L3 with the cumulative cap.

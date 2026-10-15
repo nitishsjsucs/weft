@@ -1,6 +1,8 @@
 // Scenario s4 (SPEC 12, 13). Owner: t4-agent. GP4 a routine runs on schedule and logs its run, then the
 // create-your-own parser drafts a disabled routine and a routine_enable proposal. Scripted provider
 // (scenarios/rt_people_digest.json). Skips itself until the merged world lands, naming the missing parts.
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { AgentRunRow, RoutineRun } from "@weft/contracts";
@@ -50,4 +52,20 @@ describe("GP4 a routine runs on schedule and logs its run", () => {
     const enable = (await weft.db.select().from(proposals)).filter((p) => p.kind === "routine_enable" && p.status === "pending");
     expect(enable).toHaveLength(1);
   });
+
+  it("POST /v1/sim/reset and clock moves never touch the spend ledger (t4-agent)", async (ctx) => {
+    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+    const r = await weft.ledger.reserve({ runId: null, usdMicros: 7, model: "gpt-5.6-luna", live: true });
+    if (!r.ok) throw new Error(`reserve refused: ${r.cap}`);
+    await weft.ledger.settle(r.reservationId, 5);
+    const dir = join(weft.dataDir, "spend");
+    const before = readdirSync(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")] as const);
+    expect(before.length).toBeGreaterThan(0);
+    const res = await post("/v1/sim/reset", {});
+    expect(res.status, await res.clone().text()).toBe(200);
+    await weft.clock.advance("2026-11-02T17:00:00.000Z");
+    expect(readdirSync(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")] as const)).toEqual(before);
+    expect(await weft.ledger.spent({ live: true })).toBeGreaterThanOrEqual(5);
+  });
 });
+
