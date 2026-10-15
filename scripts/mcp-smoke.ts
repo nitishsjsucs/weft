@@ -39,9 +39,24 @@ async function main(): Promise<void> {
     if (bad.length) throw new Error(`exposed tools that must stay hidden: ${bad.map((t) => t.name).join(", ")}`);
     const read = await client.callTool({ name: "actions__list", arguments: { limit: 3, before_seq: null, run_id: null, command: null, response_format: null } });
     console.log(`actions__list: ${(read.content as { text: string }[])[0]!.text.slice(0, 200)}`);
-    if (tools.some((t) => t.name === "tax__update_rate")) {
-      const p = await client.callTool({ name: "tax__update_rate", arguments: { rate_id: "etr_0001", rate: "0.015", source_notice_id: null } });
-      console.log(`tax__update_rate: ${(p.content as { text: string }[])[0]!.text.slice(0, 200)}`);
+    const update = tools.find((t) => t.name === "tax__update_rate");
+    if (update) {
+      // T2's tax.update_rate is checked against a notice: deliver the hero notice with the admin key, read its extract
+      // over MCP, and propose exactly that change. The call must come back as a proposal, never an executed write.
+      const text = (r: unknown) => JSON.parse(((r as { content: { text: string }[] }).content)[0]!.text) as Record<string, unknown>;
+      let args: Record<string, unknown> = { rate_id: "etr_0001", rate: "0.015", source_notice_id: null };
+      if ("tax_account_id" in ((update.inputSchema as { properties?: object }).properties ?? {})) {
+        const admin = readFileSync(join(dataDir, "demo-api-key.txt"), "utf8").trim();
+        const res = await fetch(`http://127.0.0.1:${port}/v1/sim/notices/deliver`, { method: "POST", headers: { "x-api-key": admin, "content-type": "application/json" }, body: JSON.stringify({ scenario: "ca_de2088_rate_change" }) });
+        const noticeId = ((await res.json()) as { data?: { notice_id?: string } }).data?.notice_id;
+        if (!noticeId) throw new Error(`could not deliver the hero notice (HTTP ${res.status})`);
+        const got = text(await client.callTool({ name: "notices__get", arguments: { notice_id: noticeId, response_format: null } }));
+        const n = (got.data as { notice: { tax_account_id: string; extracted: { effectiveFrom: string; rates: { code: string; newRate: string }[] } } }).notice;
+        args = { tax_account_id: n.tax_account_id, code: n.extracted.rates[0]!.code, rate: n.extracted.rates[0]!.newRate, effective_from: n.extracted.effectiveFrom, source_notice_id: noticeId };
+      }
+      const out = text(await client.callTool({ name: "tax__update_rate", arguments: args }));
+      console.log(`tax__update_rate: ${JSON.stringify(out).slice(0, 200)}`);
+      if (out.status !== "pending_approval") throw new Error("tax__update_rate over MCP must return a proposal");
     }
     await client.close();
     console.log("mcp smoke: ok");
