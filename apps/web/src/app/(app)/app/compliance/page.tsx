@@ -1,5 +1,5 @@
-import { Placeholder } from "@/components/app/page";
+import { ComplianceView } from "@/components/app/compliance/compliance-view";
 
 export default function CompliancePage() {
-  return <Placeholder title="Taxes & Compliance" note="Registrations, rates and notices arrive in round 2." />;
+  return <ComplianceView />;
 }

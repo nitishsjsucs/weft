@@ -1,5 +1,5 @@
-import { Placeholder } from "@/components/app/page";
+import { PeopleView } from "@/components/app/people/people-view";
 
 export default function PeoplePage() {
-  return <Placeholder title="People" note="Directory, offers and onboarding arrive in round 2." />;
+  return <PeopleView />;
 }

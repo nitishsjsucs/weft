@@ -5,8 +5,10 @@ import type { AgentRunRow, RunStatus, RunStepRow, RunTrace } from "@weft/contrac
 import { getPrincipal, rawFetch } from "./hooks";
 import { mocksEnabled } from "./mocks";
 
-export const TERMINAL: RunStatus[] = ["done", "failed", "refused", "escalated", "expired", "cancelled", "waiting", "held"];
+export const TERMINAL: RunStatus[] = ["done", "failed", "refused", "escalated", "expired", "cancelled"];
 export const isTerminal = (s: RunStatus | undefined) => !!s && TERMINAL.includes(s);
+/** Paused runs (waiting for an approval, or held) wake later, so they are re-checked slowly. */
+export const isPaused = (s: RunStatus | undefined) => s === "waiting" || s === "held";
 
 export interface RunWatch { run: AgentRunRow | null; steps: RunStepRow[]; trace: RunTrace | null; mode: "sse" | "polling" | "idle" }
 
@@ -50,6 +52,7 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
   const headers = () => ({ accept: "application/json", "x-weft-principal": getPrincipal() });
 
   async function pollOnce(): Promise<boolean> {
+    if (stopped) return true;
     try {
       const res = await rawFetch(`/api/v1/agent/runs/${encodeURIComponent(runId)}/trace`, { headers: headers(), signal: ctrl.signal });
       if (!res.ok) return false;
@@ -64,7 +67,7 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
     const loop = async () => {
       pollTimer = null;
       const done = await pollOnce();
-      if (!stopped && !done) pollTimer = setTimeout(loop, 1_000);
+      if (!stopped && !done) pollTimer = setTimeout(loop, isPaused(state.run?.status) ? 3_000 : 1_000);
     };
     void loop();
   }

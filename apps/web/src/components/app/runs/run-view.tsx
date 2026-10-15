@@ -1,0 +1,143 @@
+"use client";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { CircleCheck, CircleDashed, ShieldAlert } from "lucide-react";
+import { Badge, Card, ShimmerText, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
+import { cn } from "@weft/ui";
+import { TID, type RunStepRow } from "@weft/contracts";
+import { watchRun, type RunWatch } from "@/lib/api/sse";
+import { fmtDateTime, usd } from "../format";
+import { PageHeader } from "../page";
+import { principalName } from "../refs";
+import { outcomeTone, stepSummary } from "../agent/run-steps";
+
+const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "-");
+const int = (n: number) => n.toLocaleString("en-US");
+
+function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 px-4 py-3">
+      <span className="truncate text-1 text-gray-10">{label}</span>
+      <span className="truncate text-4 font-semibold tabular">{value}</span>
+      {hint ? <span className="truncate text-0 text-gray-10">{hint}</span> : null}
+    </div>
+  );
+}
+
+function OutcomeBadge({ o }: { o: RunStepRow["outcome"] }) {
+  const tone = outcomeTone(o);
+  if (tone === "none") return <span className="text-gray-9">-</span>;
+  return <Badge tone={tone === "ok" ? "green" : tone === "pending" ? "amber" : "red"} className="max-w-[220px] truncate">{o}</Badge>;
+}
+
+/** Run view (SPEC 11.3): stages, tool calls, outcomes, tokens, cache-hit ratio, USD and model time, checklist, proposals. */
+export function RunView({ id }: { id: string }) {
+  const [w, setW] = useState<RunWatch>({ run: null, steps: [], trace: null, mode: "idle" });
+  useEffect(() => watchRun(id, setW), [id]);
+  const run = w.run;
+  if (!run) return <div className="p-8 text-2 text-gray-10">{w.mode === "idle" ? "Loading run..." : "Waiting for the run..."}</div>;
+  const modelMs = w.steps.reduce((a, s) => a + (s.timings?.modelMs ?? 0), 0);
+  const working = run.status === "running" || run.status === "queued";
+  return (
+    <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
+      <PageHeader
+        title={<span className="font-mono text-5">{run.id}</span>}
+        subtitle={run.summary ?? undefined}
+        meta={
+          <>
+            <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{run.status}</ShimmerText> : run.status}</Badge>
+            {run.terminalReason ? <code className="font-mono text-0 text-gray-10">{run.terminalReason}</code> : null}
+            <Badge tone="outline" size="md">{run.provider === "scripted" ? "Scripted, no model" : `${run.provider} ${run.model}`}</Badge>
+            <Badge tone={run.attended ? "blue" : "gray"} size="md">{run.attended ? "Attended" : "Unattended"}</Badge>
+            <span className="text-1 text-gray-11">Trigger <code className="font-mono">{run.trigger}</code></span>
+            <span className="text-1 text-gray-11">Started {fmtDateTime(run.createdAt)}</span>
+            <span className="text-1 text-gray-10">({w.mode === "sse" ? "live" : w.mode === "polling" ? "polling every 1 s" : "loaded"})</span>
+          </>
+        }
+      />
+      {run.tainted ? (
+        <div data-testid="run-tainted-banner" role="alert" className="mb-4 flex items-start gap-2 rounded-xl bg-amber-3 px-4 py-2.5 text-[13px] text-amber-11">
+          <ShieldAlert className="mt-0.5 size-4 shrink-0" />This run read untrusted content: {run.taintedBy ?? "unknown source"}. Every write it asked for became a proposal.
+        </div>
+      ) : null}
+      <Card className="@container mb-6">
+        <div className="grid grid-cols-2 divide-[var(--app-border)] @min-[720px]:grid-cols-6 [&>*]:border-[var(--app-border)] [&>*:nth-child(n+3)]:border-t @min-[720px]:[&>*:nth-child(n+3)]:border-t-0 @min-[720px]:[&>*+*]:border-l">
+          <Metric label="Model steps" value={`${run.stepsUsed} of ${run.budget.steps}`} />
+          <Metric label="Input tokens" value={int(run.tokens.input)} hint={`${int(run.tokens.cached)} cached`} />
+          <Metric label="Output tokens" value={int(run.tokens.output)} hint={run.tokens.reasoning ? `${int(run.tokens.reasoning)} reasoning` : undefined} />
+          <Metric label="Cache-hit ratio" value={pct(run.tokens.cached, run.tokens.input)} />
+          <Metric label="Cost" value={usd(run.costUsdMicros)} hint={`cap $${run.budget.usd.toFixed(2)}`} />
+          <Metric label="Model time" value={`${(modelMs / 1000).toFixed(1)} s`} />
+        </div>
+      </Card>
+      {run.checklist?.length ? (
+        <section className="mb-6">
+          <h2 className="mb-2 text-2 font-medium">Checklist</h2>
+          <ul className="flex flex-col gap-1">
+            {run.checklist.map((c) => (
+              <li key={c.id} className="flex items-center gap-2 text-[13px]">
+                {c.passed ? <CircleCheck className="size-4 text-green-11" /> : <CircleDashed className="size-4 text-gray-9" />}
+                <span className={cn(!c.passed && "text-gray-11")}>{c.label}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <section className="mb-6">
+        <h2 className="mb-2 text-2 font-medium">Steps</h2>
+        <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-card shadow-xs">
+          <Table className="min-w-[880px] text-[13px]">
+            <THead><TR><TH>#</TH><TH>Stage</TH><TH>Step</TH><TH>Outcome</TH><TH numeric>Tokens in / cached / out</TH><TH numeric>Cache hit</TH><TH numeric>USD</TH><TH numeric>Model time</TH></TR></THead>
+            <TBody>
+              {w.steps.map((s) => (
+                <TR key={s.n} data-testid={TID.runStep} data-stage={s.stage} data-kind={s.kind}>
+                  <TD className="h-10 tabular text-gray-10">{s.n}</TD>
+                  <TD className="h-10"><code className="font-mono text-0">{s.stage}</code></TD>
+                  <TD className="h-10">
+                    <div className="min-w-0">
+                      <div className="truncate">{stepSummary(s)}</div>
+                      <div className="font-mono text-0 text-gray-10">{s.kind}{s.toolName ? ` · ${s.toolName}` : ""}{s.attempt > 1 ? ` · attempt ${s.attempt}` : ""}</div>
+                    </div>
+                  </TD>
+                  <TD className="h-10"><OutcomeBadge o={s.outcome} /></TD>
+                  <TD numeric className="h-10">{s.usage ? `${int(s.usage.input)} / ${int(s.usage.cached)} / ${int(s.usage.output)}` : "-"}</TD>
+                  <TD numeric className="h-10">{s.usage ? pct(s.usage.cached, s.usage.input) : "-"}</TD>
+                  <TD numeric className="h-10">{s.costUsdMicros ? usd(s.costUsdMicros) : "-"}</TD>
+                  <TD numeric className="h-10">{s.timings ? `${(s.timings.modelMs / 1000).toFixed(2)} s` : "-"}</TD>
+                </TR>
+              ))}
+              {w.steps.length === 0 ? <TR><TD colSpan={8} className="text-gray-10">No steps yet.</TD></TR> : null}
+            </TBody>
+          </Table>
+        </div>
+      </section>
+      {w.trace?.proposals.length ? (
+        <section className="mb-6">
+          <h2 className="mb-2 text-2 font-medium">Proposals and their fate</h2>
+          <Card className="divide-y divide-[var(--app-border)]">
+            {w.trace.proposals.map((p) => (
+              <Link key={p.id} href="/app/inbox" className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
+                <code className="font-mono text-0 text-gray-10">{p.id}</code>
+                <span className="min-w-0 flex-1 truncate">{p.headline}</span>
+                <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "pending" ? "amber" : "red"}>{p.status}</Badge>
+                {p.decidedBy ? <span className="hidden text-1 text-gray-10 tablet:inline">{principalName(p.decidedBy)}</span> : null}
+              </Link>
+            ))}
+          </Card>
+        </section>
+      ) : null}
+      {w.trace?.actions.length ? (
+        <section>
+          <h2 className="mb-2 text-2 font-medium">Actions</h2>
+          <Card className="divide-y divide-[var(--app-border)]">
+            {w.trace.actions.map((a) => (
+              <Link key={a.seq} href="/app/audit" className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
+                <span className="tabular text-gray-10">#{a.seq}</span><code className="font-mono text-0">{a.command}</code><span className="min-w-0 flex-1 truncate">{a.summary}</span>
+              </Link>
+            ))}
+          </Card>
+        </section>
+      ) : null}
+    </div>
+  );
+}

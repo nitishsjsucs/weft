@@ -1,5 +1,5 @@
-import { Placeholder } from "@/components/app/page";
+import { SimulatorsView } from "@/components/app/simulators/simulators-view";
 
 export default function SimulatorsPage() {
-  return <Placeholder title="Simulators" note="Clock, notice scenarios and faults arrive in round 2." />;
+  return <SimulatorsView />;
 }

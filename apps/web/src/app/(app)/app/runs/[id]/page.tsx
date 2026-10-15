@@ -1,6 +1,6 @@
-import { Placeholder } from "@/components/app/page";
+import { RunView } from "@/components/app/runs/run-view";
 
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <Placeholder title={`Run ${id}`} note="Stage rows with tokens, cache-hit ratio, USD and model time arrive in round 2." />;
+  return <RunView id={id} />;
 }

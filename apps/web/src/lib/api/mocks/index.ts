@@ -242,7 +242,8 @@ const routes: [string, RegExp, Handler][] = [
       { kind: "tool_call", tool: "payroll.explain_flags", summary: "Saved 4 explanations", stage: "dispatch" },
       { kind: "tool_call", tool: "payroll.submit_run", summary: "Proposed submitting 47 paychecks", stage: "dispatch" },
     ];
-    if (!world.proposals.some((p) => p.command === "payroll.submit_run" && p.status === "pending")) {
+    world.routineRuns.unshift({ id: e.run.routineRunId as `rtr_${string}`, routineId: m[1] as `rt_${string}`, runKey: `manual-${world.counter}`, triggerRef: `manual by ${"usr_dana"}`, status: "running", agentRunId: runId, summary: null, leftForHuman: [], overdue: false, attended: true, startedAt: world.now, endedAt: null, costUsdMicros: 0 });
+    if (m[1] === "rt_pre_payroll" && !world.proposals.some((p) => p.command === "payroll.submit_run" && p.status === "pending")) {
       const r = world.runs.get("pay_2026_10_30")!;
       world.proposals.unshift({
         id: `prp_${String(++world.counter).padStart(4, "0")}`, companyId: "cmp_larkspur", kind: "action", command: "payroll.submit_run", args: { run_id: r.id, exclude_blocked: true }, argsHash: "h",

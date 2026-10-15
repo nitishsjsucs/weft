@@ -1,5 +1,5 @@
-import { Placeholder } from "@/components/app/page";
+import { RoutinesView } from "@/components/app/routines/routines-view";
 
 export default function RoutinesPage() {
-  return <Placeholder title="Routines" note="Routine gallery and run log arrive in round 2." />;
+  return <RoutinesView />;
 }
