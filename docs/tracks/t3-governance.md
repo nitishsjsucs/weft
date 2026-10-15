@@ -1,6 +1,13 @@
 # t3-governance: the executor (hands)
 
-Branch `track/t3-governance`. Round 1 status and the notes other tracks and the integrator need.
+Branch `track/t3-governance`. Status after rounds 1 and 2, plus the notes other tracks and the integrator need.
+
+## How to run
+
+- `pnpm install`, then `pnpm test`, `pnpm typecheck`, `pnpm lint:prose` and `pnpm lint:brand` from the worktree root.
+- Executor only: `npx vitest run packages/executor`. Routes: `npx vitest run apps/api/test`. Scenarios: `npx vitest run tests/scenarios/s7-taint.test.ts tests/scenarios/s7b-taint-carry.test.ts tests/scenarios/s8-mcp-api.test.ts`.
+- MCP over stdio, end to end: `npx tsx scripts/mcp-smoke.ts` (seeds a scratch data dir, starts the API on 127.0.0.1:4141 in its own process group, spawns `apps/mcp`, lists tools, calls `actions__list`, stops everything).
+- The MCP server for a real client: `WEFT_API_URL=http://127.0.0.1:<api port> WEFT_API_KEY=$(cat .data/demo-mcp-key.txt) npx tsx apps/mcp/src/main.ts`.
 
 ## What is built
 
@@ -23,6 +30,8 @@ Branch `track/t3-governance`. Round 1 status and the notes other tracks and the 
 | `vault/` | AES-256-GCM vault (`.data/run/vault.key`, mode 0600, or `WEFT_VAULT_KEY`), redactor (secrets in 5 encodings plus SSN, EIN, routing and account patterns) |
 | `memory/` | hardened git store (execFile argv, hardening flags, minimal env, `GIT_LITERAL_PATHSPECS=1`), seed content in one commit, timeline bullets with `Weft-Chain-Head`, `memory.search` / `read` / `write_note`, `vault.list` / `request` |
 | `admin.ts` | audited admin changes (agent grants, API keys) |
+
+Untrusted paths are dotted; arrays are walked implicitly and a `*` segment matches every array element or object key (`notices.*.title`, `notice.body`). The taint source is the result's id, the id of a single wrapped record (`{ notice: { id } }`), or the first id-shaped arg, so T2's `notices.get` taints as `notice:ntc_...`. Event payloads are redacted before they are stored, and `/v1/events` plus every refusal body from `/v1/tools` and `/v1/proposals` pass through the redactor.
 
 Routes: `/v1/proposals` (list, get, approve, deny, dismiss, start), `/v1/actions` (list, verify, get, rollback), `/v1/tools`, `/v1/memory/*`, `/v1/events`, `/v1/settings/*`, `/v1/api-keys`. `apps/mcp` is a stdio server over `/v1/tools?surface=mcp` plus `agent_ask`. `scripts/mcp-smoke.ts` runs it end to end against a scratch API (port 4141 by default, its own process group, stopped at exit).
 
@@ -69,12 +78,33 @@ event loop never lets the open transaction commit and the write fails after the 
 
 ## Tests
 
-`packages/executor/test` (51), `apps/api/test` (route contracts, auth), `tests/scenarios/s7-taint`, `s7b-taint-carry`, `s8-mcp-api`. Until T1 and T2 land, tests run on fixture commands shaped like theirs (`packages/executor/test/fixtures.ts`, `fixtureWeft()`); the integrator can switch S7 and S8 to the real `notices.get`, `comms.send_message` and `tax.update_rate`.
+`packages/executor/test` (56), `apps/api/test` (route contracts and auth for every route file this track owns), `tests/scenarios/s7-taint`, `s7b-taint-carry`, `s8-mcp-api`. On this branch the gate is 123 passed, 2 skipped (the real-stack S7 and S8 below), 13 todo owned by other tracks; typecheck 15 of 15.
 
-## Left for round 2 or later
+Until T1 and T2 land, most tests run on fixture commands shaped like theirs (`packages/executor/test/fixtures.ts`, `fixtureWeft()`). The fixture `notices.get` now returns T2's shape (`{ notice }`, title and body only with `response_format: "detailed"`), and the S7 script asks for detailed. Two more scenario tests run on the real commands and switch on by themselves when `@weft/core` carries `sim.deliver_notice`, `notices.get` and `tax.update_rate`:
 
-- Memory alias expansion in `memory.search` (cut first; plain `git grep` today).
-- Artifact paging beyond 50 rows per page is in place; recall at run start is P1.
+- S7 real: deliver `ca_de2088_injection`, one batch `[notices__get, comms__send_message]` as Dana's chat run, then `memory__write_note`. The run taints with `notice:<id>`, the send is a pending tainted proposal, memory gets `TAINTED_WRITE`, no action row is appended, no plain chat message carries the text, the chain verifies.
+- S8 real: deliver `ca_de2088_rate_change`, read it over MCP, `tax__update_rate` with the notice's extracted fields gives a tainted proposal, the mcp key gets 403 on approve and rollback, Theo approves (the live CA SUI rate becomes 1.5%), Theo rolls back (3.4% again, reversing row with `reverses_seq`), verify is ok.
+
+Acceptance map: import scan (`tests/boundaries.test.ts`, scaffold) plus the forged handle and forged principal tests (`pipeline.test.ts`) and the forged proposal test (`decide.test.ts`); decide CAS, OVER_CEILING, STALE_SUBJECT, AGENT_PRINCIPAL, UI_SESSION_REQUIRED (`decide.test.ts`); policy snapshot (`registry.test.ts`); taint and S7 (`pipeline.test.ts`, `memory.test.ts`, S7, S7b); action log triggers, verify, tamper (`chain.test.ts`, `actions.test.ts`); rollback (`chain.test.ts`, `actions.test.ts`, S8 real); redaction over the DB file, WAL, artifacts, git objects, logs, event rows, MCP responses and `/v1/events` (`chain.test.ts`, `logs.test.ts`, `memory.test.ts`, `hardening.test.ts`, S8); memory paths, reproducible SHAs, non-hex `at` (`memory.test.ts`, `apps/api/test/memory.test.ts`); S8 scopes (S8, `auth.test.ts`); `svc_` principals (`pipeline.test.ts`).
+
+## Trial merges (round 2, in a scratch clone, nothing pushed or merged here)
+
+- `track/t2-world` into this branch: no conflicts; the whole suite passes (190 tests); the real-stack S7 and S8 pass. Probed by hand as well: taint, proposal, `TAINTED_WRITE`, MCP proposal, approve, rollback and verify all behave on T2's commands. Note that a Theo chat run gets `NOT_PERMITTED` on `comms.send_message` (Theo's comms grant is view), so S7 runs as Dana.
+- Plus `track/t1-payroll`: two trivial conflicts (`packages/core/src/index.ts` keeps both export lines; `packages/core/test/shared.test.ts` takes T1's stricter test). `payroll.submit_run` through the agent gives an R4 proposal with the headline and money from T1's preview; Theo's approve executes it once with the money check passing, a second approve gives `NOT_PENDING`, verify is ok. One failure is T1 and scaffold business: the seed digest test (`packages/seed/test/seed.test.ts`) passes `sims: {}` and T1's `seedBank` reads `sims.bank.submitBatch` (TypeError). T1's payroll determinism test failed once under full-suite load and passes alone and on a rerun.
+- Plus `track/t4-agent`: typecheck passes; 8 tests fail. The ones that matter for the integrator:
+  - `POST /v1/sim/clock/advance {toNext}` gives Internal 500: `packages/core/src/shared/clock.ts` `write()` upserts `settings` (`clock.base_sim`) outside `withWriteLock` while a routine run kicked by the previous request holds an executor write transaction, and fails with SQLITE_BUSY. This is the hazard below. Fix: route clock writes through `withWriteLock` (careful: never from inside a locked section, the lock does not nest), or have the sim routes take the lock around `clock.advance`.
+  - T2's `apps/api/test/sim.test.ts` calls `runDirect` with `directDeps(weft.db, ...)` outside the lock, so it races the same background work (SQLITE_BUSY_SNAPSHOT on `id_counters`).
+  - GP1, GP4 and GP5 fail with "no proposals after delivering the notice (is the events source wired into createRoutines?)": composition wiring for T4 and the integrator.
+- T4's SSE route (`GET /v1/agent/runs/:id/events`) sends `RunStepRow`s without `executor.redact`. Executor outcomes inside them are already redacted, but raw model call args stored by the loop are not. Pass each payload through `weft.executor.redact(JSON.stringify(...))` before `send`.
+
+## Left after round 2
+
+- Memory alias expansion in `memory.search` (cut first; plain `git grep --fixed-strings` today). Recall at run start is P1.
+- The secret-request card has no route to enter the value: vault put is human-only and the SPEC 10 route table has no vault route. Adding one is a contract change in `packages/contracts/src/api.ts`.
 - Rate limits are the scaffold's fixed windows (60 per minute per key, 1,200 per minute per UI principal); the auth test covers the key limit.
-- The secret-request card has no route to enter the value yet (vault put is human-only and has no route in the table).
-- S7 and S8 against the real T2 commands after merge 1.
+- After merge 1: delete the fixture-only S7 and S8 bodies or keep them as executor unit tests; the real-stack variants already cover the merged world.
+- The integrator items from the trial merges above (clock writes under the lock, T2's direct test writes, the events source for routines, SSE redaction).
+
+## Sandbox and the Cloudflare free tier
+
+Nitish asked for open-source sandboxes and a Cloudflare free-tier option. SPEC 9.9 and harness section 3 hold the decision: locally `code.run` on `quickjs-emscripten` (MIT) is P1, and hosting on Cloudflare Workers Free is a design only (one SQLite-backed Durable Object per company, `WEFT_SANDBOX=off`, Dynamic Workers as the paid upgrade path). This track ships only the `createSandbox()` stub that throws `NotImplemented` with `WEFT_SANDBOX=off`, and `code.run` is on no allowlist. Nothing in the executor blocks either option: the sandbox would call back through `weft.call(name, args)`, which maps to the same pipeline as a read-only agent call.
