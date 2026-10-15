@@ -1,7 +1,8 @@
 "use client";
 // Small client islands for the landing page. Owner: t6-site.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { loomGlyphs, MADDER } from "./art";
 
 const FMT = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
@@ -44,4 +45,67 @@ export function CopyCommand({ command }: { command: string }) {
       </button>
     </div>
   );
+}
+
+/**
+ * The hero's loom field on a canvas: the same seeded glyphs as public/brand/loom-glyphs.svg, with the '|' threads
+ * drifting slowly downward (wrapping at the bottom) and the madder glyphs pulsing where the agent is "working". Pauses offscreen and when the
+ * tab is hidden; draws one static frame under prefers-reduced-motion.
+ */
+export function LoomCanvas({ className }: { className?: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const field = loomGlyphs({ cols: 80, rows: 30 });
+    const cw = 16, rh = 22;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0, visible = true, last = 0;
+    const size = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const { width, height } = canvas.getBoundingClientRect();
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    const draw = (t: number) => {
+      const { width, height } = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, width, height);
+      ctx.font = "13px 'JetBrains Mono Variable', ui-monospace, monospace";
+      ctx.textAlign = "center";
+      const offsetX = width - field.cols * cw;   // right-aligned, like xMaxYMin
+      const span = field.rows * rh;
+      for (const g of field.glyphs) {
+        const x = offsetX + g.x * cw + cw / 2;
+        if (x < -cw) continue;
+        const y = (g.y * rh + 16 + (g.ch === "|" ? t / 90 : 0)) % span;   // threads drift down and wrap
+        if (g.accent) {
+          ctx.globalAlpha = 0.55 + 0.35 * Math.sin(t / 700 + g.x);
+          ctx.fillStyle = MADDER;
+        } else {
+          ctx.globalAlpha = g.o * 0.7;
+          ctx.fillStyle = "#bbbbbb";
+        }
+        if (y > height + rh) continue;
+        ctx.fillText(g.ch, x, y);
+      }
+      ctx.globalAlpha = 1;
+    };
+    const loop = (t: number) => {
+      raf = requestAnimationFrame(loop);
+      if (!visible || document.hidden || t - last < 50) return;   // about 20 frames a second is plenty
+      last = t;
+      draw(t);
+    };
+    size();
+    draw(0);
+    const ro = new ResizeObserver(() => { size(); draw(last); });
+    ro.observe(canvas);
+    const io = new IntersectionObserver(([e]) => { visible = !!e?.isIntersecting; });
+    io.observe(canvas);
+    if (!reduce) raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); };
+  }, []);
+  return <canvas ref={ref} className={className} aria-hidden="true" />;
 }

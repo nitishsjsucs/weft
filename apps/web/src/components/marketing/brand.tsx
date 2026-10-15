@@ -1,5 +1,5 @@
 // Weft brand pieces as JSX, drawn from the same geometry as the static files in public/brand. Owner: t6-site.
-import { HATCH_ID, loomGlyphs, MADDER, weaveMarkStrokes, wovenBands } from "./art";
+import { HATCH_ID, weaveMarkStrokes, wovenBands } from "./art";
 
 export function WeaveMark({ size = 24, className }: { size?: number; className?: string }) {
   return (
@@ -48,21 +48,6 @@ export function WovenBands({ className, idPrefix = "cta" }: { className?: string
       <g fill="none" strokeLinecap="butt">
         {w.bands.map((b) => <g key={b.band.id}>{draw(b)}</g>)}
         {w.overs.map((o, k) => <g key={k} clipPath={`url(#${idPrefix}-c${k})`}><g mask={`url(#${idPrefix}-m${k})`}>{draw(o)}</g></g>)}
-      </g>
-    </svg>
-  );
-}
-
-/** The hero's loom field: '|' threads, '-' weft rows and currency glyphs, denser to the right. Desktop only. */
-export function LoomField({ className }: { className?: string }) {
-  const g = loomGlyphs({ cols: 80, rows: 30 });
-  const cw = 16, rh = 22;
-  return (
-    <svg viewBox={`0 0 ${g.cols * cw} ${g.rows * rh}`} className={className} preserveAspectRatio="xMaxYMin slice" aria-hidden="true">
-      <g fontFamily="var(--font-mono)" fontSize="13" textAnchor="middle">
-        {g.glyphs.map((x, i) => (
-          <text key={i} x={x.x * cw + cw / 2} y={x.y * rh + 16} fill={x.accent ? MADDER : "#bbbbbb"} fillOpacity={x.accent ? 0.85 : x.o * 0.7}>{x.ch}</text>
-        ))}
       </g>
     </svg>
   );
