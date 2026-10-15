@@ -15,6 +15,18 @@ test.describe("landing page", () => {
     await expect(page.locator('img[src^="http"], [style*="url(http"]')).toHaveCount(0);   // no hotlinked art
   });
 
+  test("stats tiles show GET /v1/stats when it answers, and the labeled seed numbers when it does not", async ({ page, request }) => {
+    const res = await request.get("/api/v1/stats", { headers: { accept: "application/json" } });
+    const body = res.ok() ? ((await res.json()) as Partial<Record<"employees" | "simulatedAgencies" | "runsLogged", unknown>>) : null;
+    const live = !!body && [body.employees, body.simulatedAgencies, body.runsLogged].every((v) => typeof v === "number");
+    await page.goto("/");
+    const stats = page.getByTestId("marketing-stats");
+    await expect(stats).toHaveAttribute("data-source", live ? "live" : "fallback");
+    const expected = live ? [body!.employees, body!.simulatedAgencies] : [48, 7];
+    for (const v of expected) await expect(stats).toContainText(String(v));
+    await expect(page.locator("#numbers")).toContainText(live ? "Read live from GET /v1/stats." : "the seed's numbers");
+  });
+
   test("has no horizontal scroll at 390 px", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
