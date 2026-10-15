@@ -50,6 +50,22 @@ async function approvedScope(e: Engine, tx: DbTx, row: ProposalRow, approver: Pr
 
 const no = (code: DecisionRefusal, message: string): DecisionResult => ({ ok: false, code, message });
 
+/** The human's decision note goes to knowledge/decisions/DEC-<proposal>.md as an untrusted field (best-effort). */
+async function decisionNote(e: Engine, row: ProposalRow, who: PrincipalRow, decision: string, note: string | null): Promise<void> {
+  if (!note) return;
+  const id = row.id.replace(/^prp_/, "");
+  try {
+    await e.memory.write({
+      path: `knowledge/decisions/DEC-${id}.md`, message: `decision: ${decision} ${row.id}`,
+      author: { name: who.display, email: `${who.id}@larkspur.example` },
+      frontmatter: { id: `DEC-${id}`, type: "decision", aliases: [], links: [row.id], sources: [`proposal:${row.id}`], status: decision, updated: e.clock.now().slice(0, 10), taintedBy: `decision_note:${row.id}` },
+      body: `# ${decision} ${row.id}\n\nCommand: ${row.command ?? row.kind}\n\n## Note (entered by a person, untrusted)\n\n${note}\n`,
+    });
+  } catch (err) {
+    e.log(`decision note for ${row.id} not written: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export function createHumanExecutor(e: Engine): HumanExecutor {
   const fire = async (p: ProposalDecided) => {
     for (const cb of e.decided) {
@@ -121,6 +137,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
           return r!;
         }));
         if (!done) return no("NOT_PENDING", `${row.id} was decided already`);
+        await decisionNote(e, done, who, input.decision, note);
         await fire({ proposalId: row.id, runId: row.proposerRunId, status, actionSeq: null, deciderRole: who.role ?? "human", reasonCode: input.reasonCode });
         return { ok: true, proposal: toProposal(done), outcome: null };
       }
@@ -163,6 +180,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
         throw err;
       }
       await afterCommit(e, outcome);
+      await decisionNote(e, final, who, "approve", note);
       await fire({ proposalId: final.id, runId: final.proposerRunId, status: final.status as ProposalStatus, actionSeq: final.executedActionSeq, deciderRole: who.role ?? "human", reasonCode: input.reasonCode });
       return { ok: true, proposal: toProposal(final), outcome };
     },
