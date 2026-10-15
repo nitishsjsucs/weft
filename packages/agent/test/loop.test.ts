@@ -103,9 +103,9 @@ describe("runLoop on a routine (GP1 shape)", () => {
     expect(outputs[2]!._weft_plan).toBe("[x] draft reply  [x] propose tax.update_rate  [x] propose notices.send_response | steps 1/6 | $0.0000");
     expect(steps.filter((s) => s.kind === "model_call").every((s) => s.prefixHash && s.timings && s.usage)).toBe(true);
 
-    fake.decide(fake.proposals[0]!.id, true);
+    fake.settleProposal(fake.proposals[0]!.id, true);
     expect(await rt.wake(h.runId, { kind: "decision", attrs: { proposal_id: fake.proposals[0]!.id, status: "executed" }, text: "approved" })).toBe("waiting");
-    fake.decide(fake.proposals[1]!.id, true);
+    fake.settleProposal(fake.proposals[1]!.id, true);
     expect(await rt.wake(h.runId, { kind: "decision", attrs: { proposal_id: fake.proposals[1]!.id, status: "executed" }, text: "approved" })).toBe("done");
     run = (await rt.store.getRun(h.runId))!;
     expect(run.status).toBe("done");
@@ -272,11 +272,11 @@ describe("runtime rules", () => {
     await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
     expect((await rt.settled(h.runId)).status).toBe("waiting");
     for (let i = 0; i < 2; i++) {
-      for (const p of fake.proposals.filter((x) => x.command === "tax.update_rate" && x.status === "pending")) fake.decide(p.id, false);
+      for (const p of fake.proposals.filter((x) => x.command === "tax.update_rate" && x.status === "pending")) fake.settleProposal(p.id, false);
       expect(await rt.wake(h.runId, { kind: "decision", attrs: { status: "denied" }, text: "denied" })).toBe("requeued");
       expect((await rt.settled(h.runId)).status).toBe("waiting");
     }
-    for (const p of fake.proposals.filter((x) => x.command === "tax.update_rate" && x.status === "pending")) fake.decide(p.id, false);
+    for (const p of fake.proposals.filter((x) => x.command === "tax.update_rate" && x.status === "pending")) fake.settleProposal(p.id, false);
     expect(await rt.wake(h.runId, { kind: "decision", attrs: { status: "denied" }, text: "denied" })).toBe("escalated");
   });
 });
@@ -287,7 +287,7 @@ describe("prompts", () => {
       const p = frozenPrompt(kind);
       expect(p.length / 4.2, kind).toBeGreaterThan(1024);
       expect(p).not.toMatch(/\d{4}-\d{2}-\d{2}/);
-      expect(p).not.toMatch(/[–—]/);
+      expect(p).not.toMatch(new RegExp(String.fromCharCode(91, 0x2013, 0x2014, 93)));
       expect(frozenPrompt(kind)).toBe(p);
     }
   });

@@ -10,7 +10,7 @@ export interface FakeProposal { id: string; runId: string; command: string; args
 export interface FakeExecutor extends AgentExecutor {
   calls: { runId: string; callId: string; command: string; args: unknown }[];
   proposals: FakeProposal[];
-  decide(proposalId: string, approve: boolean): FakeProposal;
+  settleProposal(proposalId: string, approve: boolean): FakeProposal;
   taint(runId: string, by: string): void;
 }
 
@@ -75,7 +75,7 @@ export function createFakeExecutor(commands: FakeCommand[]): FakeExecutor {
     async runState(run) {
       return { tainted: taints.has(run.runId), taintedBy: taints.get(run.runId) ?? null, pendingProposalIds: proposals.filter((p) => p.runId === run.runId && p.status === "pending").map((p) => p.id) };
     },
-    decide(proposalId, approve) {
+    settleProposal(proposalId, approve) {
       const p = proposals.find((x) => x.id === proposalId);
       if (!p) throw new Error(`no proposal ${proposalId}`);
       p.status = approve ? "executed" : "denied";
