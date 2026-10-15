@@ -6,8 +6,8 @@ import { errorText, useGet } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 import { ProposalCard } from "./proposal-card";
 
-function List({ items, empty }: { items: Proposal[] | undefined; empty: string }) {
-  if (!items) return <div className="text-2 text-gray-10">Loading...</div>;
+function List({ items, empty, failed }: { items: Proposal[] | undefined; empty: string; failed?: boolean }) {
+  if (!items) return <div className="text-2 text-gray-10">{failed ? "The Inbox is not available right now." : "Loading..."}</div>;
   if (items.length === 0) return (
     <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-[var(--app-border)] px-6 py-12 text-center text-2 text-gray-10">
       <InboxIcon className="size-5" strokeWidth={1.5} />{empty}
@@ -32,9 +32,9 @@ export function InboxView() {
           <TabsTrigger value="suggestions">Suggestions {suggestions?.length ? <Badge size="xs">{suggestions.length}</Badge> : null}</TabsTrigger>
           <TabsTrigger value="decided">Decided</TabsTrigger>
         </TabsList>
-        <TabsContent value="pending"><List items={pending} empty="Nothing waiting for a decision." /></TabsContent>
-        <TabsContent value="suggestions"><List items={suggestions} empty="No suggestions right now." /></TabsContent>
-        <TabsContent value="decided"><List items={decided} empty="No decisions yet." /></TabsContent>
+        <TabsContent value="pending"><List items={pending} failed={!!all.error} empty="Nothing waiting for a decision." /></TabsContent>
+        <TabsContent value="suggestions"><List items={suggestions} failed={!!all.error} empty="No suggestions right now." /></TabsContent>
+        <TabsContent value="decided"><List items={decided} failed={!!all.error} empty="No decisions yet." /></TabsContent>
       </Tabs>
     </div>
   );
