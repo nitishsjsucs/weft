@@ -68,6 +68,12 @@ event loop never lets the open transaction commit and the write fails after the 
 (the loop's run store, scheduler cursors, simulator ticks, route handlers) must go through `withWriteLock` from
 `@weft/db`, and nothing may nest it. Reads are fine outside the lock (WAL).
 
+Round 2: the executor's own writes now go through `writeLocked()` (`packages/executor/src/write.ts`), which takes the
+lock and retries the whole transaction with backoff for about 2.5 s while another connection holds SQLite's write lock
+(`busy.test.ts`). That protects executor calls from a stray outside writer, but not the reverse: an outside writer
+that runs while an executor transaction is open still fails at once, which is what breaks `POST /v1/sim/clock/advance`
+after the T4 merge. The fix stays on the writer's side: take `withWriteLock` (or reuse `writeLocked`).
+
 ## Contract notes
 
 - `packages/contracts/src/ext/t3-governance.ts` (commit `contract: ...`): `BatchedAgentCall`, `RunHandleWithNonce`, `CommandOutputTaintHints`. Additive only.
