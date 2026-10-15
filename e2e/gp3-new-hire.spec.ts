@@ -61,7 +61,10 @@ test("GP3: accepting Noor's offer onboards her in Colorado and the first payroll
     await openApp(page, "/app/compliance");
     const rows = page.getByTestId(tid.registrationRow("CO"));
     await expect(rows).toHaveCount(2);
-    for (const row of await rows.all()) await expect(row).toContainText(/awaiting state/i);
+    for (const row of await rows.all()) {
+      await expect(row).toHaveAttribute("data-status", "awaiting_state");
+      await expect(row).toContainText(/awaiting state/i);
+    }
   });
 
   let nextRun = "";
@@ -90,9 +93,9 @@ test("GP3: accepting Noor's offer onboards her in Colorado and the first payroll
     expect(confirmations.length).toBeGreaterThanOrEqual(2);
 
     await openApp(page, "/app/compliance");
-    for (const row of await page.getByTestId(tid.registrationRow("CO")).all()) await expect(row).toContainText(/active/i);
+    for (const row of await page.getByTestId(tid.registrationRow("CO")).all()) await expect(row).toHaveAttribute("data-status", "active");
     await openApp(page, `/app/people/${noorId}`);
-    await expect(page.getByTestId(tid.onboardingTask("state_registration"))).toContainText(/done|complete/i);
+    await expect(page.getByTestId(tid.onboardingTask("state_registration"))).toHaveAttribute("data-status", "done");
   });
 
   await test.step("Preview again shows no block flag on Noor; PRORATED and NEW_IN_RUN remain", async () => {

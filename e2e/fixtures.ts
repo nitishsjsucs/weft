@@ -160,7 +160,8 @@ export async function viewAs(page: Page, person: Person): Promise<void> {
 export async function openAgentPanel(page: Page): Promise<Locator> {
   const composer = page.getByTestId(TID.agentComposer);
   if (!(await composer.isVisible())) {
-    await page.getByRole("button", { name: /agent/i }).first().click();
+    const toggle = page.getByRole("button", { name: /agent panel/i });
+    await (await toggle.count() ? toggle : page.getByRole("button", { name: /agent/i })).first().click();
   }
   await expect(composer).toBeVisible();
   return composer;
