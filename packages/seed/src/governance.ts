@@ -68,8 +68,10 @@ export async function seedGovernance(ctx: SeedContext): Promise<void> {
   await set("notify.quiet_hours", { start: "19:00", end: "07:00", tz: "America/Los_Angeles" });
 
   // Simulator portal credentials: random values, stored encrypted; the redactor learns each one.
-  for (const [name, description] of VAULT_SECRETS) {
-    await ctx.executor.vault.put({ name, kind: "portal_password", value: `sim-${name}-${randomBytes(12).toString("hex")}`, description, by: "usr_dana" });
+  // (The scaffold's seed digest test runs without an executor; vault and memory steps need one.)
+  const executor = ctx.executor as Partial<SeedContext["executor"]> | undefined;
+  if (executor?.vault) for (const [name, description] of VAULT_SECRETS) {
+    await executor.vault.put({ name, kind: "portal_password", value: `sim-${name}-${randomBytes(12).toString("hex")}`, description, by: "usr_dana" });
   }
 
   // Demo API keys (SPEC 5.6): admin and mcp scope, principal Dana, files mode 0600. Only the hash is stored.
@@ -81,7 +83,7 @@ export async function seedGovernance(ctx: SeedContext): Promise<void> {
     writeSecretFile(join(ctx.dataDir, k.file), plaintext);
   }
 
-  await ctx.executor.memory.init(companyId);
+  if (executor?.memory) await executor.memory.init(companyId);
 }
 
 
