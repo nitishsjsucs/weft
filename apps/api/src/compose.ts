@@ -1,4 +1,4 @@
-// Scaffold (frozen): the composition root (SPEC 2, 9.0). The only place that wires db, simulators, executor,
+// The composition root (SPEC 2, 9.0). The only place that wires db, simulators, executor,
 // core commands and handlers, providers, the agent runtime, routines, the scheduler and the Hono app.
 // Until every track lands, factories may still throw NotImplemented; unless `strict`, each such part becomes a
 // stub that throws NotImplemented when used and is listed in `weft.stubs` (and in GET /v1/health).
@@ -11,7 +11,9 @@ import { commands, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createExecutor } from "@weft/executor";
 import { createAgentRuntime, createProvider, createSpendLedger } from "@weft/agent";
-import { createRoutines } from "@weft/routines";
+import { createRoutines, type WeftRoutinesEngine } from "@weft/routines";
+import { createChatContextSource } from "./routes/agent";
+import { createRoutinesEventSource } from "./routes/routines";
 import type { Weft } from "./http/context";
 import { buildApp } from "./app";
 import { createScheduler } from "./scheduler";
@@ -80,9 +82,14 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   const routinesRef: { current: RoutinesEngine | null } = { current: null };
   const agent = await tolerate<AgentRuntime>("agent", () => createAgentRuntime({
     db, clock, executor: executor.agent, provider, ledger,
-    routinesView: { get: async (_id: string) => null },   // replaced by the integrator once routines expose a view
+    // Routines are built after the agent, so the view resolves lazily through routinesRef.
+    routinesView: {
+      get: (id: string) => (routinesRef.current as WeftRoutinesEngine).view.get(id),
+      checklist: (x) => (routinesRef.current as WeftRoutinesEngine).view.checklist(x),
+    },
+    contextSource: createChatContextSource(db),
   }), () => stubOf("agent"));
-  const routines = await tolerate<RoutinesEngine>("routines", () => createRoutines({ db, clock, agent, runs: executor.runs, readOnly: executor.readOnly }), () => stubOf("routines"));
+  const routines = await tolerate<RoutinesEngine>("routines", () => createRoutines({ db, clock, agent, runs: executor.runs, readOnly: executor.readOnly, events: createRoutinesEventSource(db) }), () => stubOf("routines"));
   routinesRef.current = routines;
   const scheduler = createScheduler({ db, clock, sims, executor, handlers, routines, log: testMode ? () => undefined : undefined });
 
