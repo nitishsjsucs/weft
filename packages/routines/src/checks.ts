@@ -22,8 +22,12 @@ const callsTo = (facts: RunFacts, command: string) => facts.calls.filter((c) => 
 export const PREDICATES: Record<string, Predicate> = {
   draft_exists: ([noticeId = ""], f) => callsTo(f, "notices.draft_response").some((c) => c.status === "done" && mentions(c.args, noticeId)),
   proposal_exists: ([command = "", subject = ""], f) => callsTo(f, command).some((c) => c.status === "pending_approval" && live(f, c) && mentions(c.args, subject)),
-  explanations_complete: ([runId = ""], f) => callsTo(f, "payroll.explain_flags").some((c) => c.status === "done" && mentions(c.args, runId)
-    && !((c.data as { refused?: unknown[] } | null)?.refused?.length)),
+  // payroll.explain_flags (t1-payroll) returns counts: refused and unexplained_flagged.
+  explanations_complete: ([runId = ""], f) => callsTo(f, "payroll.explain_flags").some((c) => {
+    if (c.status !== "done" || !mentions(c.args, runId)) return false;
+    const d = (c.data ?? {}) as { unexplained_flagged?: number; refused?: number };
+    return d.unexplained_flagged !== undefined ? d.unexplained_flagged === 0 : !(Number(d.refused) > 0);
+  }),
   accounts_created: ([workerId = ""], f) => callsTo(f, "it.create_account").filter((c) => (c.status === "done" || live(f, c)) && mentions(c.args, workerId)).length >= 3,
   posted: ([channel = ""], f) => callsTo(f, "comms.send_message").some((c) => live(f, c) && mentions(c.args, channel)),
   registrations_proposed: ([workerId = ""], f) => callsTo(f, "tax.register_state_account").filter((c) => c.status === "pending_approval" && live(f, c) && mentions(c.args, workerId)).length >= 2,

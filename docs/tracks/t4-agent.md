@@ -62,14 +62,18 @@ cache and does not disturb the first key.
 4. **Batch identity for the executor.** `AgentCall` carries no batch id. track/t3-governance keys a batch by the
    run's latest `model_call` row in `run_steps`; the loop writes that row (kind `model_call`, outcome `ok`) right
    before it dispatches the turn's calls in emitted order, so the two agree without a contract change.
-5. **Read shapes the prechecks assume** (read tolerantly, several spellings): `notices.get` `data.extracted.{new_rate,
-   effective_date, tax_account_id, tax_code, kind}`; `payroll.list_runs` `data.runs[].{id, status, approval_deadline}`;
-   `payroll.get_run` `data.flagged[].{paycheck_id, worker, rule, before_display, after_display}`; `people.get`
-   `data.{display, work_state}`; `tax.list_registrations` `data.registrations[].{agency, status}`; `people.search`
-   `data.total`. Derived argument names to reconcile with T2 inputs: `tax.update_rate {tax_account_id, rate,
-   effective_date, source_notice_id, tax_code}`, `tax.register_state_account {state, agency}`, `it.create_account
-   {worker_id, system}`, `it.order_device {worker_id, sku}`. `chat_ny_raise.json` cites
-   `data.flagged.0.evidence.result_id` from `payroll.get_run`.
+5. **Read shapes the prechecks use**, checked against track/t1-payroll and track/t2-world on 2026-10-15:
+   `notices.get` `data.notice.{kind, tax_account_id, extracted.{agency, effectiveFrom, respondBy, rates[].{code,
+   oldRate, newRate}}}`; `payroll.list_runs` `data.runs[].{run_id, status, approval_deadline}`; `payroll.get_run`
+   `data.flagged[].{paycheck_id, worker, flags[].{rule, evidence}}`; `payroll.explain_flags` `data.{refused,
+   unexplained_flagged}`; `people.get` `data.worker.{name, work_state}`; `tax.list_registrations`
+   `data.accounts[].{id, jurisdiction, status}`; `people.search` `data.total`. Derived args match their inputs:
+   `tax.update_rate {tax_account_id, code, rate, effective_from, source_notice_id}`, `tax.rate_change_impact
+   {jurisdiction, code, new_rate, effective_from}`, `tax.register_state_account {tax_account_id}`, `it.create_account
+   {worker_id, system}`, `it.order_device {worker_id}`, `payroll.explain_flags {run_id, items[].{paycheck_id}}` (no
+   explanation, so T1 saves its template), `payroll.submit_run {run_id, exclude_blocked: true}`.
+   `chat_ny_raise.json` cites `data.flagged.0.flags.0.evidence.result_id` with `state: "NY"`; S5 must confirm the
+   NY raise is the first NY flagged row (both NY rows are flagged).
 6. **Prebuilt owner.** `packages/routines/src/prebuilt.ts` uses `OWNER = "usr_dana"` (the principal the scaffold tests use).
 7. **Scaffold core test.** Commit `5f2bd05` applies the same change to `packages/core/test/shared.test.ts` as
    track/t1-payroll `3129725` (commands and handlers are appended), so the merge is identical on both sides.

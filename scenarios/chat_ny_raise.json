@@ -8,7 +8,7 @@
         ]
       },
       {
-        "output": [{ "type": "text", "text": "The raise is flagged as GROSS_CHANGE: gross pay changed against the last processed run because a pay rate change was applied (result {{last.payroll__get_run.data.flagged.0.evidence.result_id}})." }]
+        "output": [{ "type": "text", "text": "The raise is flagged as GROSS_CHANGE: gross pay changed against the last processed run because a pay rate change was applied (result {{last.payroll__get_run.data.flagged.0.flags.0.evidence.result_id}})." }]
       }
     ]
   }

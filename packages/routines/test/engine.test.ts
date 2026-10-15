@@ -31,8 +31,8 @@ function fakeRead(): ReadOnlyExecutor & { log: string[] } {
     log,
     async exec(_c, command) {
       log.push(command);
-      if (command === "payroll.list_runs") return done({ runs: [{ id: "pay_2026_10_30", status: "draft", approval_deadline: "2026-10-29T00:00:00.000Z" }] });
-      if (command === "payroll.get_run") return done({ flagged: [{ paycheck_id: "pyc_0001", worker: "Rowan Achebe (demo) (wrk_0014)", rule: "GROSS_CHANGE", before_display: "$4,000.00", after_display: "$4,320.00" }] });
+      if (command === "payroll.list_runs") return done({ runs: [{ run_id: "pay_2026_10_30", status: "draft", approval_deadline: "2026-10-29T00:00:00.000Z" }] });
+      if (command === "payroll.get_run") return done({ flagged: [{ paycheck_id: "pyc_0001", worker: "Rowan Achebe (demo) (wrk_0014)", flags: [{ rule: "GROSS_CHANGE", severity: "review", evidence: { result_id: "res_0041" } }] }] });
       if (command === "people.search") return done({ total: 48 });
       return done({});
     },
