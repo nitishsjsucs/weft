@@ -3,7 +3,7 @@
 //   WEFT_SECRETS_FILE=~/Developer/projects/.weft.secrets.env WEFT_LIVE_OPENAI=1 tsx evals/live/smoke.ts --record packages/agent/test/fixtures
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { HistoryItem, ModelStepRequest, ToolSpec } from "@weft/contracts";
+import type { HistoryItem, ModelStepRequest, ToolSpec } from "../../packages/contracts/src/index";
 import { buildResponsesRequest, createOpenAIClient, createSpendLedger, frozenPrompt, handleResponse, loadSecret, reserveUsd, stepCostUsd, usdToMicros } from "../../packages/agent/src/index";
 
 if (process.env.WEFT_LIVE_OPENAI !== "1") {
