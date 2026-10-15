@@ -51,7 +51,7 @@ export function proposalsRoutes(weft: Weft): Hono<WeftEnv> {
       const input: DecisionInput = { proposalId: c.req.param("id"), decision, reasonCode: body.reasonCode ?? null, note: body.note ?? null, session: s };
       const result = await weft.executor.human.decide(input);
       await kick(weft);
-      if (!result.ok) return c.json({ ...result, _tag: "Refused" }, 422);
+      if (!result.ok) return c.json(redactJson(weft, { ...result, _tag: "Refused" }), 422);
       if (decision === "start" && result.proposal.kind === "suggestion") {
         // A started suggestion opens a chat run carrying the suggestion's provenance (best-effort until T4 lands).
         try {

@@ -33,11 +33,15 @@ export const fixtureCommands: WeftCommand[] = [
     },
   },
   {
-    ...base, name: "notices.get", namespace: "notices", summary: "Read a notice", description: "Read one agency notice. Example: { \"notice_id\": \"ntc_0001\" }",
-    input: z.object({ notice_id: z.string().startsWith("ntc_") }), domain: "tax", needs: "view", effect: "read", risk: () => "R0", untrustedFields: ["title", "body"], mcp: "read",
+    // Same result shape as T2's notices.get: { notice }, with title and body only in detailed mode.
+    ...base, name: "notices.get", namespace: "notices", summary: "Read a notice", description: "Read one agency notice. Example: { \"notice_id\": \"ntc_0001\", \"response_format\": \"detailed\" }",
+    input: z.object({ notice_id: z.string().startsWith("ntc_"), response_format: z.enum(["concise", "detailed"]).optional() }), domain: "tax", needs: "view", effect: "read",
+    risk: () => "R0", untrustedFields: ["notice.title", "notice.body"], mcp: "read",
     async run(i, _ctx, deps) {
       const [n] = await deps.tx.select().from(notices).where(eq(notices.id, i.notice_id));
-      return { data: { id: n!.id, title: n!.title, body: n!.bodyText, extracted: JSON.parse(n!.extractedJson ?? "{}") }, summary: `Notice ${n!.id}` };
+      const notice: Record<string, unknown> = { id: n!.id, agency: n!.agency, extracted: JSON.parse(n!.extractedJson ?? "{}") };
+      if (i.response_format === "detailed") { notice.title = n!.title; notice.body = n!.bodyText; }
+      return { data: { notice }, summary: `Read ${n!.fileName}` };
     },
   },
   {

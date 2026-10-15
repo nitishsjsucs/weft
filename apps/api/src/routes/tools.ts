@@ -34,7 +34,7 @@ export function toolsRoutes(weft: Weft): Hono<WeftEnv> {
     const args = await c.req.json().catch(() => ({}));
     const outcome = await weft.executor.human.exec(s, c.req.param("name"), args ?? {});
     await kick(weft);
-    if (!outcome.ok) return c.json({ ...outcome, _tag: "Refused", code: outcome.refusal.code, message: outcome.refusal.message }, 422);
+    if (!outcome.ok) return c.json(redactJson(weft, { ...outcome, _tag: "Refused", code: outcome.refusal.code, message: outcome.refusal.message }), 422);
     return c.json(redactJson(weft, outcome));
   });
   return r;

@@ -30,15 +30,19 @@ function nonEmpty(v: unknown): boolean {
 }
 
 /**
- * Walks the declared dotted paths (arrays are traversed element by element). Returns the wrapped copy of `data`
- * and whether any declared path was non-empty (the run taints). Non-string values at a path are JSON-encoded
- * and wrapped as a string.
+ * Walks the declared dotted paths (arrays are traversed element by element, and a `*` segment matches every
+ * element of an array or every key of an object, so `notices.*.title` and `notices.title` both reach each title).
+ * Returns the wrapped copy of `data` and whether any declared path was non-empty (the run taints). Non-string
+ * values at a path are JSON-encoded and wrapped as a string.
  */
 export function applyUntrusted(data: unknown, paths: string[], nonce: string, source: string): { data: unknown; found: boolean } {
   let found = false;
   const walk = (node: unknown, parts: string[]): unknown => {
     if (node === null || node === undefined) return node;
-    if (Array.isArray(node)) return node.map((x) => walk(x, parts));
+    if (Array.isArray(node)) {
+      const next = parts[0] === "*" ? parts.slice(1) : parts;
+      return node.map((x) => walk(x, next));
+    }
     if (parts.length === 0) {
       if (!nonEmpty(node)) return node;
       found = true;
@@ -47,6 +51,7 @@ export function applyUntrusted(data: unknown, paths: string[], nonce: string, so
     if (typeof node !== "object") return node;
     const [head, ...rest] = parts as [string, ...string[]];
     const obj = node as Record<string, unknown>;
+    if (head === "*") return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, walk(v, rest)]));
     if (!(head in obj)) return node;
     return { ...obj, [head]: walk(obj[head], rest) };
   };

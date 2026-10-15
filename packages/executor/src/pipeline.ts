@@ -45,7 +45,10 @@ export interface CallOptions {
 const NOUN: Record<string, string> = { ntc_: "notice", wrk_: "worker", offr_: "offer", art_: "artifact", run_: "run", prp_: "proposal" };
 function sourceOf(def: WeftCommand, data: unknown, input: unknown): string {
   const pick = (o: unknown) => (o && typeof o === "object" && typeof (o as { id?: unknown }).id === "string" ? (o as { id: string }).id : null);
-  const id = pick(data) ?? Object.values((input ?? {}) as Record<string, unknown>).find((v): v is string => typeof v === "string" && /^[a-z]{2,5}_/.test(v)) ?? null;
+  // The result's own id, or the id of a single wrapped record ({ notice: { id } }), or the first id-shaped arg.
+  const nested = data && typeof data === "object" && !Array.isArray(data) ? Object.values(data).map(pick).filter((x): x is string => x !== null) : [];
+  const id = pick(data) ?? (nested.length === 1 ? nested[0]! : null)
+    ?? Object.values((input ?? {}) as Record<string, unknown>).find((v): v is string => typeof v === "string" && /^[a-z]{2,5}_/.test(v)) ?? null;
   if (!id) return def.name;
   const p = Object.keys(NOUN).find((k) => id.startsWith(k));
   return p ? `${NOUN[p]}:${id}` : `${def.namespace}:${id}`;
@@ -207,7 +210,7 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
         }
       }
       for (const ev of out.events ?? []) {
-        const evt = await emitEvent(sp, e.clock, { body: { type: ev.type, payload: ev.payload } as never, subjectRef: ev.subjectRef, attended: scope.stamp.attended, requestedBy: scope.stamp.requestedBy });
+        const evt = await emitEvent(sp, e.clock, { body: { type: ev.type, payload: e.redactor.value(ev.payload) } as never, subjectRef: ev.subjectRef, attended: scope.stamp.attended, requestedBy: scope.stamp.requestedBy });
         await notify(e, sp, scope, evt.type, evt.payload);
       }
       if (leaseKey) {

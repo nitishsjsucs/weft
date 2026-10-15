@@ -17,7 +17,7 @@ describe("S7b taint carries into later runs and memory", () => {
     await insertRoutine("rt_people_digest", null);
     const chat = await weft.executor.runs.openChatRun({ principalId: "usr_dana", companyId: "cmp_larkspur", via: "ui", keyScope: null }, { threadId: null, surface: "human_ui" });
     const before = await weft.executor.memory.tree();
-    await weft.executor.agent.exec(chat, { callId: "1", command: "notices__get", args: { notice_id: "ntc_0001" }, batch: 1 } as never);
+    await weft.executor.agent.exec(chat, { callId: "1", command: "notices__get", args: { notice_id: "ntc_0001", response_format: "detailed" }, batch: 1 } as never);
     expect(await weft.executor.agent.exec(chat, { callId: "2", command: "memory__write_note", args: { path: "knowledge/procedures/x.md", title: "x", body: "1. x", sources: ["ntc_0001"] }, batch: 2 } as never))
       .toMatchObject({ ok: false, refusal: { code: "TAINTED_WRITE" } });
     expect(await weft.executor.agent.exec(chat, { callId: "3", command: "routines__draft", args: { name: "Notice says", cron: "0 9 * * 5" }, batch: 3 } as never))

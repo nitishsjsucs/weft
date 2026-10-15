@@ -5,6 +5,7 @@ import { Unauthorized, type EventRow } from "@weft/contracts";
 import { events } from "@weft/db";
 import type { Weft, WeftEnv } from "../http/context";
 import { parsePage, toPage } from "../http/paging";
+import { redactJson } from "./proposals";
 
 export function eventsRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
@@ -17,7 +18,8 @@ export function eventsRoutes(weft: Weft): Hono<WeftEnv> {
     if (type) conds.push(eq(events.type, type));
     const rows = await weft.db.select().from(events).where(conds.length ? and(...conds) : undefined).orderBy(asc(events.id)).limit(page.limit + 1);
     const data: EventRow[] = rows.map((e) => ({ id: e.id, type: e.type, ts: e.ts, subjectRef: e.subjectRef, payload: JSON.parse(e.payloadJson) as Record<string, string>, attended: e.attended, requestedBy: e.requestedBy }));
-    return c.json(toPage(data, page.limit));
+    // Payloads are id-only by contract; the redactor still runs so a command that slips a secret in never leaks it.
+    return c.json(redactJson(weft, toPage(data, page.limit)));
   });
   return r;
 }

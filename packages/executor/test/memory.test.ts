@@ -58,7 +58,7 @@ describe("memory", () => {
 
   it("memory.write_note, routines.draft and vault.request return TAINTED_WRITE in a tainted run", async () => {
     const { w, h } = await world();
-    await w.executor.agent.exec(h, { callId: "r", command: "notices.get", args: { notice_id: "ntc_0001" } });
+    await w.executor.agent.exec(h, { callId: "r", command: "notices.get", args: { notice_id: "ntc_0001", response_format: "detailed" } });
     expect(code(await w.executor.agent.exec(h, { callId: "1", command: "memory.write_note", args: note }))).toBe("TAINTED_WRITE");
     expect(code(await w.executor.agent.exec(h, { callId: "2", command: "routines.draft", args: { name: "x", cron: "0 9 * * 5" } }))).toBe("TAINTED_WRITE");
     expect(code(await w.executor.agent.exec(h, { callId: "3", command: "vault.request", args: { name: "new-portal", kind: "portal_password", reason: "x" } }))).toBe("TAINTED_WRITE");

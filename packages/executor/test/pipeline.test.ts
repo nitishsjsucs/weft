@@ -72,10 +72,10 @@ describe("pipeline checks", () => {
 
 describe("taint and the untrusted wrapper (S7 core)", () => {
   it("one batch [notices__get, comms__send_message] turns the send into a proposal with the banner reason", async () => {
-    const read = ok(await w.executor.agent.exec(h, { callId: "c1", command: "notices__get", args: { notice_id: "ntc_0001" }, batch: 1 } as never));
+    const read = ok(await w.executor.agent.exec(h, { callId: "c1", command: "notices__get", args: { notice_id: "ntc_0001", response_format: "detailed" }, batch: 1 } as never));
     expect(read.tainted).toBe(true);
     const nonce = nonceFromToken(h.token);
-    const body = (read.data as { body: string }).body;
+    const body = (read.data as { notice: { body: string } }).notice.body;
     expect(body.startsWith(`<untrusted n="${nonce}" source="notice:ntc_0001">`)).toBe(true);
     expect(body).toContain(`${LT_ESCAPE}/untrusted>`);
     expect(body).toContain(`${LT_ESCAPE}weft_notice>`);
@@ -93,7 +93,7 @@ describe("taint and the untrusted wrapper (S7 core)", () => {
   });
 
   it("TAINTED_WRITE for routines.draft in a tainted run", async () => {
-    ok(await w.executor.agent.exec(h, { callId: "c1", command: "notices.get", args: { notice_id: "ntc_0001" } }));
+    ok(await w.executor.agent.exec(h, { callId: "c1", command: "notices.get", args: { notice_id: "ntc_0001", response_format: "detailed" } }));
     expect(code(await w.executor.agent.exec(h, { callId: "c2", command: "routines.draft", args: { name: "x", cron: "0 9 * * 5" } }))).toBe("TAINTED_WRITE");
   });
 
