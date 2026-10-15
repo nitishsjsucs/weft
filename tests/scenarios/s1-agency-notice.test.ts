@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { AgentRunRow } from "@weft/contracts";
-import { actions, agentRuns, notices, proposals } from "@weft/db";
+import { actions, agentRuns, notices, proposals, routineRuns } from "@weft/db";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 let weft: TestWeft;
@@ -21,15 +21,17 @@ const settled = (runId: string) => (weft.agent as unknown as { settled(id: strin
 async function deliverAndPropose() {
   const res = await post("/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" });
   expect(res.status, await res.clone().text()).toBe(200);
+  // The scheduler tick fires rt_agency_notice from the notice.received event; the agent run itself is queued, so
+  // wait for it to settle before reading its proposals.
   for (let i = 0; i < 20; i++) {
     await weft.scheduler.tick();
-    const rows = (await weft.db.select().from(proposals)).filter((p) => p.status === "pending" && p.proposerRunId);
-    if (rows.length >= 2) {
-      const runId = rows[0]!.proposerRunId!;
-      return { runId, run: await settled(runId), proposals: rows };
-    }
+    const [rr] = await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, "rt_agency_notice"));
+    if (!rr?.agentRunId) continue;
+    const run = await settled(rr.agentRunId);
+    const rows = (await weft.db.select().from(proposals)).filter((p) => p.status === "pending" && p.proposerRunId === rr.agentRunId);
+    return { runId: rr.agentRunId, run, proposals: rows };
   }
-  throw new Error("GP1: no proposals after delivering the notice (is the events source wired into createRoutines?)");
+  throw new Error("GP1: no agency notice routine run after delivering the notice (is the events source wired into createRoutines?)");
 }
 
 describe("GP1 tax notice to rate change (hero)", () => {

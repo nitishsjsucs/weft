@@ -3,7 +3,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../../packages/grounding/src/index";   // relative: tests/package.json does not list @weft/grounding
 import type { AgentRunRow } from "@weft/contracts";
-import { actions, proposals } from "@weft/db";
+import { eq } from "drizzle-orm";
+import { actions, principals, proposals, routineRuns } from "@weft/db";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 let weft: TestWeft;
@@ -45,10 +46,25 @@ describe("GP5 grounded chat answer and the cannot-approve guardrail", () => {
 
   it("a forged decide with an agent principal returns AGENT_PRINCIPAL (t4-agent)", async (ctx) => {
     if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
-    const any = (await weft.db.select().from(proposals))[0];
-    if (!any) return ctx.skip("no proposal in the seed to forge a decision on");
-    const r = await weft.executor.human.decide({ proposalId: any.id, decision: "approve", reasonCode: null, note: null, session: { principalId: "agt_weft", companyId: "cmp_larkspur", via: "ui", keyScope: null } });
+    // The seed has no pending proposal, so let the agency notice routine make two (GP1), then forge a decision.
+    const res = await post("/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" });
+    expect(res.status, await res.clone().text()).toBe(200);
+    let pending: (typeof proposals.$inferSelect)[] = [];
+    for (let i = 0; i < 20 && pending.length === 0; i++) {
+      await weft.scheduler.tick();
+      const [rr] = await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, "rt_agency_notice"));
+      if (!rr?.agentRunId) continue;
+      await (weft.agent as unknown as { settled(id: string): Promise<AgentRunRow> }).settled(rr.agentRunId);
+      pending = (await weft.db.select().from(proposals)).filter((p) => p.status === "pending");
+    }
+    const target = pending[0];
+    if (!target) throw new Error("GP5: the agency notice routine made no proposal to forge a decision on");
+    const [agent] = await weft.db.select().from(principals).where(eq(principals.kind, "agent"));
+    const agentId = agent?.id ?? "agt_weft";
+    const r = await weft.executor.human.decide({ proposalId: target.id, decision: "approve", reasonCode: null, note: null, session: { principalId: agentId, companyId: "cmp_larkspur", via: "ui", keyScope: null } });
     expect(r).toMatchObject({ ok: false, code: "AGENT_PRINCIPAL" });
+    const [still] = await weft.db.select().from(proposals).where(eq(proposals.id, target.id));
+    expect(still?.status).toBe("pending");
   });
 
   it("verifies the action chain and memory SHAs (t4-agent)", async (ctx) => {

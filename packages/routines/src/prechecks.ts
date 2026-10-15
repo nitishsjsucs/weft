@@ -117,11 +117,19 @@ export const newHire: Precheck = async (ctx, exec) => {
 };
 
 export const peopleDigest: Precheck = async (ctx, exec) => {
-  const people = await read(exec, ctx.companyId, "people.search", { status: "active", limit: 100 });
-  const headcount = Number(pick(people ?? {}, "total", "count") ?? arr(pick(people ?? {}, "items", "workers", "results")).length);
+  const people = await read(exec, ctx.companyId, "people.search", { status: "active", limit: 50 });
+  // comms.send_message grounds its numbers against company facts (employees by work state, not every active worker,
+  // since contractors carry no work state), so the digest cites the per-state counts and their sum.
+  const byState = Object.entries(obj(pick(people ?? {}, "by_state")))
+    .map(([state, n]) => [state, Number(n)] as const).filter(([, n]) => Number.isFinite(n) && n > 0).sort(([a], [b]) => a.localeCompare(b));
+  const total = Number(pick(people ?? {}, "total", "count") ?? arr(pick(people ?? {}, "items", "workers", "results")).length);
+  const headcount = byState.length ? byState.reduce((sum, [, n]) => sum + n, 0) : total;
   const slot = str(obj(ctx.payload).slot) ?? ctx.triggerRef;
-  const text = `Weekly people digest: ${headcount} active people. Open items are in the Weft inbox.`;
-  return { action: "run", severity: "digest", subjectRefs: [], findings: { headcount, slot }, derivedArgs: { slot, "comms.send_message": { channel: "#people-ops", text } } };
+  const states = byState.map(([state, n]) => `${state} ${n}`).join(", ");
+  const text = byState.length
+    ? `Weekly people digest: ${headcount} employees by work state (${states}). Open items are in the Weft inbox.`
+    : `Weekly people digest: ${headcount} active people. Open items are in the Weft inbox.`;
+  return { action: "run", severity: "digest", subjectRefs: [], findings: { headcount, by_state: Object.fromEntries(byState), slot }, derivedArgs: { slot, "comms.send_message": { channel: "#people-ops", text } } };
 };
 
 export const openApprovals: Precheck = async (ctx, exec) => {

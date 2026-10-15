@@ -42,4 +42,12 @@ describe("prechecks on the t1 and t2 read shapes", () => {
     const r = await PRECHECKS.people_digest!(ctx({ slot: "cron:2026-10-26T16:00:00.000Z" }), exec({ "people.search": { total: 48 } }));
     expect(r).toMatchObject({ action: "run", severity: "digest", derivedArgs: { slot: "cron:2026-10-26T16:00:00.000Z", "comms.send_message": { channel: "#people-ops", text: expect.stringContaining("48 active people") } } });
   });
+
+  it("people_digest cites the per-state employee counts that comms grounding knows (contractors carry no state)", async () => {
+    const r = await PRECHECKS.people_digest!(ctx({ slot: "cron:2026-10-26T16:00:00.000Z" }), exec({ "people.search": { total: 51, by_state: { TX: 12, CA: 22, NY: 14 } } }));
+    expect(r).toMatchObject({ action: "run", findings: { headcount: 48, by_state: { CA: 22, NY: 14, TX: 12 } } });
+    const text = (r as { derivedArgs: Record<string, { text: string }> }).derivedArgs["comms.send_message"]!.text;
+    expect(text).toBe("Weekly people digest: 48 employees by work state (CA 22, NY 14, TX 12). Open items are in the Weft inbox.");
+    expect(text).not.toContain("51");
+  });
 });
