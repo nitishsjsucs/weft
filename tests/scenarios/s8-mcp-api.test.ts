@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SEED_TIME } from "@weft/core";
+import { commands as coreCommands, SEED_TIME } from "@weft/core";
 import { events, notices } from "@weft/db";
 import { encodings } from "../../packages/executor/src/vault/redact";
 import { createTestWeft, type TestWeft } from "./helpers";
@@ -82,5 +82,50 @@ describe("S8 MCP stdio and REST API with scoped keys", () => {
   it("verifies the action chain and the memory SHA", async () => {
     expect((await weft.executor.verifyChain()).ok).toBe(true);
     expect(await weft.executor.memory.head()).toMatch(/^[0-9a-f]{40}$/);
+  });
+});
+
+// After merge 1: the hero rate change through MCP on T2's real tax.update_rate, approved and rolled back in the UI.
+// Skipped until @weft/core carries those commands; verified on a trial merge of T2 into this branch.
+const REAL = coreCommands.some((c) => (c.name as string) === "sim.deliver_notice") && coreCommands.some((c) => (c.name as string) === "tax.update_rate");
+describe.runIf(REAL)("S8 on the real T2 commands", () => {
+  it("tax__update_rate over MCP is a proposal; Theo approves and rolls back in the UI; the rate is restored", async () => {
+    const real = await createTestWeft();
+    let mcp: InstanceType<typeof Client> | null = null;
+    try {
+      const key = readFileSync(join(real.dataDir, "demo-mcp-key.txt"), "utf8").trim();
+      const server = createMcpServer({ apiUrl: "http://127.0.0.1:4070", apiKey: key }, (u, i) => Promise.resolve(real.app.request(u, i)));
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await server.connect(st);
+      mcp = new Client({ name: "s8-real", version: "0.0.0" });
+      await mcp.connect(ct);
+      const names = (await mcp.listTools()).tools.map((t) => t.name);
+      expect(names).toContain("tax__update_rate");
+      for (const n of names) expect(n).not.toMatch(/approve|deny|rollback|vault|settings|api_key|write_note|routines__enable|revert_rate/);
+      const theo = real.uiHeaders("usr_theo");
+      const json = { "content-type": "application/json" };
+      const d = await real.app.request("/v1/sim/notices/deliver", { method: "POST", headers: { ...real.uiHeaders("usr_dana"), ...json }, body: JSON.stringify({ scenario: "ca_de2088_rate_change" }) });
+      const noticeId = ((await d.json()) as { data: { notice_id: string } }).data.notice_id;
+      const text = async (r: unknown) => JSON.parse(((r as { content: { text: string }[] }).content)[0]!.text);
+      const got = await text(await mcp.callTool({ name: "notices__get", arguments: { notice_id: noticeId, response_format: null } }));
+      const n = got.data.notice as { tax_account_id: string; extracted: { effectiveFrom: string; rates: { code: string; oldRate: string; newRate: string }[] } };
+      const rate = n.extracted.rates[0]!;
+      const proposed = await text(await mcp.callTool({ name: "tax__update_rate", arguments: { tax_account_id: n.tax_account_id, code: rate.code, rate: rate.newRate, effective_from: n.extracted.effectiveFrom, source_notice_id: noticeId } }));
+      expect(proposed).toMatchObject({ ok: true, status: "pending_approval", tainted: true });
+      expect((await real.app.request(`/v1/proposals/${proposed.proposalId}/approve`, { method: "POST", headers: { "x-api-key": key, ...json }, body: "{}" })).status).toBe(403);
+      const approved = await (await real.app.request(`/v1/proposals/${proposed.proposalId}/approve`, { method: "POST", headers: { ...theo, ...json }, body: "{}" })).json();
+      expect(approved).toMatchObject({ ok: true, proposal: { status: "executed" } });
+      const live = async () => ((await (await real.app.request("/v1/tax/rates?jurisdiction=CA", { headers: theo })).json()) as { code: string; rate: string; supersededActionSeq: number | null }[])
+        .filter((r) => r.code === rate.code && r.supersededActionSeq === null).map((r) => r.rate);
+      expect(await live()).toEqual([rate.newRate]);
+      const seq = approved.proposal.executedActionSeq as number;
+      expect((await real.app.request(`/v1/actions/${seq}/rollback`, { method: "POST", headers: { "x-api-key": key, ...json }, body: JSON.stringify({ reason: "x" }) })).status).toBe(403);
+      const rb = await (await real.app.request(`/v1/actions/${seq}/rollback`, { method: "POST", headers: { ...theo, ...json }, body: JSON.stringify({ reason: "Undo for the demo" }) })).json();
+      expect(rb).toMatchObject({ ok: true, status: "done" });
+      expect(await live()).toEqual([rate.oldRate]);
+      const reversing = await real.db.all<{ reverses_seq: number }>(`SELECT reverses_seq FROM actions WHERE seq = ${rb.actionSeq}` as never);
+      expect(reversing[0]!.reverses_seq).toBe(seq);
+      expect(await (await real.app.request("/v1/actions/verify", { headers: theo })).json()).toMatchObject({ ok: true, gaps: [], badSeq: null });
+    } finally { await mcp?.close(); await real.close(); }
   });
 });
