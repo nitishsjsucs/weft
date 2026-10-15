@@ -24,10 +24,12 @@ import { offloadIfLarge } from "./workspace";
 export const LEASE_MS = 10 * 60_000;
 export const MAX_ISSUES = 5;
 
+/** Command deps bound to the executor's transaction. Simulators are built on first use (reads never need them). */
 export function makeDeps(e: Engine, tx: DbTx): CommandDeps {
+  let sims: CommandDeps["sims"] | null = null;
   return {
     tx,
-    sims: e.simulators({ db: tx, clock: e.clock }),
+    get sims() { return (sims ??= e.simulators({ db: tx, clock: e.clock })); },
     resolveCredential: (ref) => e.vault.resolve(tx, ref),
     clock: e.clock,
     newId: idMinter(tx),
