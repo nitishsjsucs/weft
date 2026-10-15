@@ -94,7 +94,7 @@ export async function insertProposal(e: Engine, tx: DbTx, p: NewProposal): Promi
 export async function proposeCall(e: Engine, tx: DbTx, scope: CallScope, def: WeftCommand, input: unknown, preview: Preview, decision: PolicyDecision): Promise<ToolOutcome> {
   const taintedBy = scope.ctx.tainted ? (scope.taintedBy ?? "external") : null;
   const row = await insertProposal(e, tx, {
-    kind: "action", def, command: def.name, input, preview, risk: decision.risk, reason: decision.reason, domain: def.domain,
+    kind: def.name === "vault.request" ? "secret_request" : "action", def, command: def.name, input, preview, risk: decision.risk, reason: decision.reason, domain: def.domain,
     reversible: def.reversible !== false, agentNote: agentNoteOf(input), taintedBy,
     proposerRunId: scope.run?.id ?? null, routineRunId: scope.ctx.routineRunId, onBehalfOf: scope.ctx.onBehalfOf ?? (scope.actor.kind === "human" ? scope.actor.id : null),
     companyId: scope.ctx.companyId, stamp: scope.stamp,

@@ -6,6 +6,7 @@ import { withWriteLock } from "@weft/db";
 import type { Engine } from "./engine";
 import { refusal } from "./outcome";
 import { runInTx } from "./pipeline";
+import { afterCommit } from "./timeline";
 import { readonlyScope, type CallScope } from "./scope";
 import { DOMAINS, loadPrincipal, noGrants } from "./store";
 
@@ -26,7 +27,7 @@ export function createSystemExecutor(e: Engine): SystemExecutor {
   return {
     async exec(principal, command, args, source) {
       if (!SYSTEM_PRINCIPALS.includes(principal)) return refusal("NOT_PERMITTED", `${String(principal)} is not a system principal`, false);
-      return withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
         const p = await loadPrincipal(tx, principal);
         let companyId = p?.companyId ?? null;
         if (!companyId) {
@@ -47,6 +48,8 @@ export function createSystemExecutor(e: Engine): SystemExecutor {
         };
         return (await runInTx(e, tx, scope, command, args)).outcome;
       }));
+      await afterCommit(e, outcome);
+      return outcome;
     },
   };
 }

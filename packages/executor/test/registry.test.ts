@@ -3,9 +3,10 @@ import { z } from "zod";
 import type { WeftCommand } from "@weft/core";
 import { createRegistry, MAX_TOOLS, nullToUndefined, policy, rawJsonSchema, sampleFromSchema, strictSchemaProblems, toStrictJsonSchema, wireName, type PolicyFacts } from "../src/index";
 import { builtinCommands } from "../src/builtins";
+import { memoryCommands } from "../src/memory/commands";
 import { fixtureCommands } from "./fixtures";
 
-const all: WeftCommand[] = [...fixtureCommands, ...builtinCommands({ dataDir: "/nonexistent" } as never)];
+const all: WeftCommand[] = [...fixtureCommands, ...builtinCommands({ dataDir: "/nonexistent" } as never), ...memoryCommands({} as never)];
 const registry = createRegistry(all);
 const sample = (d: WeftCommand) => (d.errorHints.INVALID_INPUT?.example as Record<string, unknown> | undefined) ?? (sampleFromSchema(rawJsonSchema(d.input)) as Record<string, unknown>);
 
@@ -74,6 +75,9 @@ describe("policy snapshot", () => {
         "comms.post_update": "R1 execute | tainted execute",
         "comms.send_message": "R3 execute | tainted propose",
         "it.order_device": "R4 propose | tainted propose",
+        "memory.read": "R0 execute | tainted execute",
+        "memory.search": "R0 execute | tainted execute",
+        "memory.write_note": "R1 execute | tainted refuse TAINTED_WRITE",
         "notices.get": "R0 execute | tainted execute",
         "payroll.mark_processed": "R1 propose | tainted propose",
         "payroll.preview_run": "R1 execute | tainted execute",
@@ -84,6 +88,8 @@ describe("policy snapshot", () => {
         "routines.enable": "R1 execute | tainted execute",
         "tax.revert_rate": "R2 propose | tainted propose",
         "tax.update_rate": "R2 propose | tainted propose",
+        "vault.list": "R0 execute | tainted execute",
+        "vault.request": "R1 propose | tainted refuse TAINTED_WRITE",
       }
     `);
   });

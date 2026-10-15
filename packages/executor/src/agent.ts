@@ -9,6 +9,7 @@ import { priorCall, recordCall, runInTx } from "./pipeline";
 import { agentScope, resolveRun } from "./scope";
 import { readTaint } from "./taint";
 import { readArtifactInTx } from "./workspace";
+import { afterCommit } from "./timeline";
 
 export type BatchedAgentCall = AgentCall & { batch?: string | number | null };
 
@@ -26,7 +27,7 @@ export function createAgentExecutor(e: Engine): AgentExecutor {
     async exec(handle: RunHandle, call: AgentCall) {
       const c = call as BatchedAgentCall;
       if (!c || typeof c.callId !== "string" || !c.callId || typeof c.command !== "string") return refusal("INVALID_INPUT", "A call needs a callId and a command", false);
-      return withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
         const row = await resolveRun(tx, handle);
         if (!row) return UNKNOWN_HANDLE();
         const prior = await priorCall(tx, row.id, c.callId);
@@ -41,6 +42,8 @@ export function createAgentExecutor(e: Engine): AgentExecutor {
         await recordCall(tx, row.id, c.callId, c.command, outcome, e.clock.now());
         return outcome;
       }));
+      await afterCommit(e, outcome);
+      return outcome;
     },
     async readArtifact(handle, ref, offset, limit) {
       return withWriteLock(() => e.db.transaction(async (tx) => {

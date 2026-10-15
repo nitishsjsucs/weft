@@ -215,9 +215,10 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
       // Untrusted fields: wrap with the run nonce and taint the run.
       let data: unknown = out.data;
       const hinted = (out as { taintedBy?: string | null }).taintedBy ?? null;
-      if (def.untrustedFields.length > 0 || hinted) {
+      const paths = [...def.untrustedFields, ...((out as { untrusted?: string[] }).untrusted ?? [])];
+      if (paths.length > 0 || hinted) {
         const src = hinted ?? sourceOf(def, out.data, input);
-        const w = scope.nonce ? applyUntrusted(out.data, def.untrustedFields, scope.nonce, src) : { data: out.data, found: false };
+        const w = scope.nonce ? applyUntrusted(out.data, paths, scope.nonce, src) : { data: out.data, found: false };
         data = w.data;
         if ((w.found || hinted) && scope.run && scope.caller === "agent") {
           await markTainted(sp, scope.run.id, src, ctx.run?.stepN ?? 0);

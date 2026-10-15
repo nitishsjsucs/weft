@@ -39,6 +39,11 @@ export class Redactor {
     return out;
   }
 
+  /** True when the text carries any registered secret in any encoding. */
+  hasSecret(text: string): boolean { return this.forms.some((f) => text.includes(f)); }
+  /** True when the text matches the SSN, EIN, routing or account patterns. */
+  hasPattern(text: string): boolean { return PATTERNS.some(([re]) => { re.lastIndex = 0; const hit = re.test(text); re.lastIndex = 0; return hit; }); }
+
   /** Deep redaction of a JSON-like value (strings only; keys untouched). */
   value<T>(v: T): T {
     if (typeof v === "string") return this.redact(v) as T;

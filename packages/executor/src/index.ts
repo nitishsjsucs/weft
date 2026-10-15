@@ -1,7 +1,11 @@
 // The hands (SPEC 9.3, harness 5 and 6). Owner: t3-governance.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NotImplemented, type ExecutorBundle, type MemoryStore, type SandboxEngine, type SimClock } from "@weft/contracts";
+import { sql } from "drizzle-orm";
+import { NotImplemented, type ExecutorBundle, type SandboxEngine, type SimClock } from "@weft/contracts";
+import { createMemoryStore } from "./memory/store";
+import { seedMemoryFiles } from "./memory/seed-content";
+import { memoryCommands } from "./memory/commands";
 import { withWriteLock, type Db } from "@weft/db";
 import type { WeftCommand } from "@weft/core";
 import { createAgentExecutor } from "./agent";
@@ -44,10 +48,6 @@ export interface ExecutorInternals { engine: Engine; addSecret(value: string | n
 const internals = new WeakMap<object, ExecutorInternals>();
 export function executorInternals(bundle: ExecutorBundle): ExecutorInternals | null { return internals.get(bundle) ?? null; }
 
-function memoryStub(): MemoryStore {
-  const ni = (what: string) => async () => { throw new NotImplemented(`memory.${what} (t3-governance round 2)`); };
-  return { init: async () => undefined, head: ni("head"), read: async () => null, search: async () => [], write: ni("write"), appendTimeline: ni("appendTimeline"), remove: ni("remove"), tree: async () => [] };
-}
 
 export async function createExecutor(opts: CreateExecutorOptions): Promise<ExecutorBundle> {
   const redactor = new Redactor();
@@ -57,11 +57,18 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
   const vault = createVault({ db: opts.db, clock: opts.clock, key, redactor });
   const engine: Engine = {
     db: opts.db, clock: opts.clock, dataDir: opts.dataDir, testMode: opts.testMode, registry: undefined as never, redactor, vault,
-    simulators: opts.simulators, memory: memoryStub(), decided: [], batches: new Map(), lastBatch: new Map(),
+    simulators: opts.simulators, memory: undefined as never, decided: [], batches: new Map(), lastBatch: new Map(),
     log: opts.log ?? ((line) => { if (!opts.testMode) console.error(redactor.redact(line)); }), gitHeadSeq: null,
   };
-  const own = new Set(builtinCommands(engine).map((c) => c.name));
-  engine.registry = createRegistry([...opts.commands.filter((c) => !own.has(c.name)), ...builtinCommands(engine)]);
+  const memory = createMemoryStore({
+    dataDir: opts.dataDir, clock: opts.clock, redactor,
+    defaultCompanyId: async () => (await opts.db.all<{ id: string }>(sql`SELECT id FROM companies ORDER BY id LIMIT 1`))[0]?.id ?? null,
+    initialFiles: (companyId, now) => seedMemoryFiles(opts.db, companyId, now),
+  });
+  engine.memory = memory;
+  const mine = [...builtinCommands(engine), ...memoryCommands(engine)];
+  const own = new Set(mine.map((c) => c.name));
+  engine.registry = createRegistry([...opts.commands.filter((c) => !own.has(c.name)), ...mine]);
   await vault.primeRedactor().catch(() => undefined);
   for (const f of ["demo-api-key.txt", "demo-mcp-key.txt"]) {
     try { redactor.add(readFileSync(join(opts.dataDir, f), "utf8").trim()); } catch { /* not seeded yet */ }
@@ -78,7 +85,8 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
     registry: engine.registry,
     expireProposals: (now) => withWriteLock(() => opts.db.transaction((tx) => expireProposals(engine, tx, now))),
     async verifyChain() {
-      const s = await verifyActions(opts.db, engine.gitHeadSeq);
+      const gitSeq = memory.root() ? (memory.chainHeadSeq() ?? engine.gitHeadSeq ?? 0) : null;
+      const s = await verifyActions(opts.db, gitSeq);
       return { ok: s.ok, head: s.head, gaps: s.gaps, badSeq: s.badSeq, gitLag: s.gitLag };
     },
     redact: (text) => redactor.redact(text),

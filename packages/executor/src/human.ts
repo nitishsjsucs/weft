@@ -13,6 +13,7 @@ import { toProposal, type ProposalRow } from "./proposals";
 import { humanScope, runGrants, type CallScope } from "./scope";
 import { GRANT_RANK, intersect, loadPrincipal, readSetting, type PrincipalRow } from "./store";
 import { readTaint } from "./taint";
+import { afterCommit } from "./timeline";
 
 class NotPending extends Error {}
 
@@ -69,11 +70,13 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
 
   return {
     async exec(session: HumanSession, command: string, args: unknown): Promise<ToolOutcome> {
-      return withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
         const scope = await humanScope(e, tx, session);
         if (!scope) return refusal("NOT_PERMITTED", "The session principal is not a human of this company", false);
         return (await runInTx(e, tx, scope, command, args)).outcome;
       }));
+      await afterCommit(e, outcome);
+      return outcome;
     },
 
     async decide(input: DecisionInput): Promise<DecisionResult> {
@@ -159,13 +162,14 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
         }
         throw err;
       }
+      await afterCommit(e, outcome);
       await fire({ proposalId: final.id, runId: final.proposerRunId, status: final.status as ProposalStatus, actionSeq: final.executedActionSeq, deciderRole: who.role ?? "human", reasonCode: input.reasonCode });
       return { ok: true, proposal: toProposal(final), outcome };
     },
 
     async rollback(session, input) {
       if (session.via !== "ui") return refusal("NOT_PERMITTED", "UI_SESSION_REQUIRED: rollback accepts only the UI session", false);
-      return withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
         const scope = await humanScope(e, tx, session);
         if (!scope) return refusal("NOT_PERMITTED", "The session principal is not a human of this company", false);
         const [a] = await tx.select().from(actions).where(eq(actions.seq, input.seq)).limit(1);
@@ -179,6 +183,8 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
         const r = await runInTx(e, tx, scope, def.reversible.reverse, JSON.parse(a.reverseJson), { reversesSeq: a.seq });
         return r.outcome;
       }));
+      await afterCommit(e, outcome);
+      return outcome;
     },
 
     onProposalDecided(cb) { e.decided.push(cb); },
