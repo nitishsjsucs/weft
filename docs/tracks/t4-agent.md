@@ -105,7 +105,12 @@ worktree, never committed or pushed), applied the wiring below, and ran the suit
   and the run ended `REPEATED_ERRORS`. Setting `createClient({ url, timeout: 5000 })` made it worse: the timeout blocks
   the one JS thread while the lock holder sits on another connection in the same process, so S4 stalled 5 s. This needs
   an owner in `packages/db` (one connection for writes, or PRAGMAs on every pooled connection, plus finding the
-  connection that goes back to the pool with a read snapshot). S3 passes.
+  connection that goes back to the pool with a read snapshot). S3 passes. Before `lockedWrite` the STALE_SUBJECT test
+  passed only because my woken run died on the BUSY error; with it, the run survives and the test's own unlocked write
+  is the one refused, so both S2 tests fail until the DB layer is fixed.
+- Other failures on the trial merge that do not involve t4 code: `packages/seed/test/seed.test.ts` (the bank simulator
+  stub in `packages/seed/src/payroll.ts` meets t2's real sims) and two `apps/api/test/sim.test.ts` cases (they fail the
+  same way with the t4 wiring removed). Full trial suite: 346 passed, 5 failed (those 3 plus the 2 in S2).
 
 ## For the integrator
 
