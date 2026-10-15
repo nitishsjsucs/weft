@@ -53,7 +53,9 @@ counts and the 4 planted anomalies. The route and command tests use small stand-
   change the subject hash.
 - Employer rates: the latest `employer_tax_rates` row for (state, code) effective at payday with
   `superseded_action_seq IS NULL`, ties broken by `created_action_seq`. A GP1 rate change followed by
-  `payroll.preview_run` changes employer SUI only for the CA workers still under the $7,000 base.
+  `payroll.preview_run` changes employer SUI only for the CA workers still under the $7,000 base (tested on the
+  fixture: exactly the 3 recent CA hires change, and undo restores the prior numbers). `preview_run` reports a
+  paycheck as changed only when an amount changes, not when a rate changes on a line with zero taxable wages.
 - UNREGISTERED_STATE: the work state needs an active UI (or combined) account, and CA, NY and CO also an active
   withholding (or combined) account.
 - YTD ledger codes: `sui_wages:<ST>`, `ss_wages`, `futa_wages` and `famli_wages:CO` hold taxable (capped) wages, so
@@ -105,7 +107,8 @@ counts and the 4 planted anomalies. The route and command tests use small stand-
   (S2 first test). The fixture version passes now.
 - S2 green end to end once the executor, routines and scripted provider land; then check `submitted_action_seq`
   against the real action row.
-- `mark_failed`: the command exists; the lifecycle test for a returned entry is a `test.todo` (cut line).
+- `mark_failed` is covered at the command level (one returned entry, the rest settles); the end-to-end fault path
+  through the bank simulator's `return` fault waits for T2's simulator.
 - Stretch states WA, IL, FL are not encoded (cut line); their federal lines are tested.
 - Not modeled: NY Method III, CA supplemental rates, bank holidays in the pay calendar, multi-rate proration inside
   one period.

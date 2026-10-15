@@ -168,7 +168,7 @@ describe("draft, preview, submit and processed", () => {
     expect((await markProcessed(w.db, { now: TS }, { runId: "pay_2026_10_30" })).paychecks).toBe(0);   // idempotent
   });
 
-  it.todo("mark_failed on a returned batch entry marks that paycheck failed (cut line: fault path)");
+  // mark_failed on a returned entry is covered in commands.test.ts (the settle handler test).
 });
 
 describe("determinism", () => {

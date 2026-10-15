@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { isWeftError, type ExecContext, type SimClock, type Simulators, type WeftEvent } from "@weft/contracts";
-import { bankAccounts, paychecks, payrollRuns, type Db } from "@weft/db";
+import { bankAccounts, employerTaxRates, paychecks, payrollRuns, ytdLedger, type Db } from "@weft/db";
 import { idMinter } from "../../src/shared/ids";
 import { payrollCommands, submitRunCommand } from "../../src/commands/payroll";
 import { payrollHandlers } from "../../src/payroll/handlers";
@@ -110,6 +110,20 @@ describe("drafts and explanations", () => {
     const out = await exec("payroll.preview_run", { run_id: "pay_2026_10_30" });
     expect(out.data).toMatchObject({ run_id: "pay_2026_10_30", changed: 0, unchanged: 48 });
   });
+  it("a CA SUI rate change shows in the next preview only for the 3 CA workers under the wage base (GP1)", async () => {
+    await db.update(employerTaxRates).set({ supersededActionSeq: 9 }).where(eq(employerTaxRates.id, "etr_0001"));
+    await db.insert(employerTaxRates).values({ id: "etr_0101", companyId: CO, jurisdiction: "CA", code: "sui", rate: "0.015", wageBaseCents: 700000, effectiveFrom: "2026-01-01", source: "notice:ntc_0001", createdActionSeq: 9 });
+    const out = await exec("payroll.preview_run", { run_id: "pay_2026_10_30" });
+    const d = out.data as { changed: number; changes: { worker_id: string; employer_taxes_before_cents: number; employer_taxes_after_cents: number }[] };
+    expect(d.changes.map((c) => c.worker_id).sort()).toEqual([...ids.caOct1, ids.caOct19].sort());
+    for (const c of d.changes) expect(c.employer_taxes_after_cents).toBeLessThan(c.employer_taxes_before_cents);
+    // Undo restores the prior numbers.
+    await db.delete(employerTaxRates).where(eq(employerTaxRates.id, "etr_0101"));
+    await db.update(employerTaxRates).set({ supersededActionSeq: null }).where(eq(employerTaxRates.id, "etr_0001"));
+    const back = await exec("payroll.preview_run", { run_id: "pay_2026_10_30" });
+    expect((back.data as { changed: number }).changed).toBe(3);
+    expect((await exec("payroll.preview_run", { run_id: "pay_2026_10_30" })).data).toMatchObject({ changed: 0 });
+  });
   it("explain_flags saves grounded text, refuses ungrounded per item, then falls back to the labeled template", async () => {
     const rows = await db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
     const raise = rows.find((p) => p.workerId === ids.nyRaise)!;
@@ -172,6 +186,10 @@ describe("submit_run", () => {
     expect(batch.entries).toHaveLength(47);
     expect(batch.total).toBe((out.data as { bank_total_cents: number }).bank_total_cents);
 
+    // A returned entry (fault "return") marks only that paycheck failed; the rest settles.
+    const svc = { id: "svc_events", kind: "service" as const, role: null };
+    expect((await exec("payroll.mark_failed", { run_id: "pay_2026_10_30", worker_id: ids.nyRaise }, ctx(svc))).data).toMatchObject({ status: "failed" });
+
     // First tick at or after Fri Oct 30 06:00 PT settles; the handler records it as svc_events.
     const evts = await bank.bank.tick("2026-10-30T13:00:00.000Z");
     expect(evts).toHaveLength(1);
@@ -191,6 +209,12 @@ describe("submit_run", () => {
     expect(emitted).toEqual([{ type: "payroll.processed", subjectRef: "pay_2026_10_30", payload: { payroll_run_id: "pay_2026_10_30" } }]);
     const run = (await db.select().from(payrollRuns).where(eq(payrollRuns.id, "pay_2026_10_30")))[0]!;
     expect(run.status).toBe("processed");
+    const final = await db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
+    expect(final.filter((p) => p.status === "processed")).toHaveLength(46);
+    expect(final.find((p) => p.workerId === ids.nyRaise)!.status).toBe("failed");
+    const ytd = await db.select().from(ytdLedger).where(eq(ytdLedger.source, "payroll:pay_2026_10_30"));
+    expect(new Set(ytd.map((r) => r.workerId)).size).toBe(46);
+    expect(ytd.some((r) => r.workerId === ids.nyRaise)).toBe(false);
     expect((await refusal(exec("payroll.submit_run", { run_id: "pay_2026_10_30", exclude_blocked: true }))).code).toBe("DOMAIN_NOT_DRAFT");
   });
 });

@@ -94,7 +94,9 @@ export const previewRunCommand: WeftCommand<PreviewRunInput> = {
     const run = await domain(() => previewRun(deps.tx, { newId: deps.newId, now: ctx.now }, i.run_id));
     const after = await deps.tx.select().from(paychecks).where(eq(paychecks.payrollRunId, i.run_id));
     const employer = (json: string) => (JSON.parse(json) as { payer: string; amount_cents: number }[]).filter((x) => x.payer === "employer").reduce((s, x) => s + x.amount_cents, 0);
-    const changes = after.filter((p) => { const b = before.get(p.workerId); return !b || b.netCents !== p.netCents || b.taxesJson !== p.taxesJson; })
+    // A paycheck changed when any amount changed (a rate on a line whose taxable wages are 0 is not a change).
+    const amounts = (json: string) => (JSON.parse(json) as { code: string; jurisdiction: string; payer: string; amount_cents: number }[]).map((x) => `${x.jurisdiction}:${x.code}:${x.payer}:${x.amount_cents}`).sort().join("|");
+    const changes = after.filter((p) => { const b = before.get(p.workerId); return !b || b.netCents !== p.netCents || b.grossCents !== p.grossCents || amounts(b.taxesJson) !== amounts(p.taxesJson); })
       .sort((a, b) => (a.workerId < b.workerId ? -1 : 1))
       .map((p) => { const b = before.get(p.workerId); const eb = b ? employer(b.taxesJson) : 0; const ea = employer(p.taxesJson); return { paycheck_id: p.id, worker_id: p.workerId, net_before_cents: b?.netCents ?? null, net_after_cents: p.netCents, employer_taxes_before_cents: b ? eb : null, employer_taxes_after_cents: ea, employer_taxes_before_display: b ? formatCents(eb) : null, employer_taxes_after_display: formatCents(ea) }; });
     const t = totalsFromDto(run.totalsJson);
