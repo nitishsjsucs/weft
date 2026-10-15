@@ -66,7 +66,7 @@ export function Nav() {
 export function Hero({ clock }: { clock: { now: string; rate: number } }) {
   return (
     <section className="relative overflow-hidden">
-      <LoomField className={`pointer-events-none absolute inset-y-0 right-0 hidden h-[620px] w-[70%] tablet:block ${css.loomFade}`} />
+      <LoomField className={`pointer-events-none absolute inset-y-0 right-0 hidden h-[620px] w-[62%] laptop:block ${css.loomFade}`} />
       <Container className="relative flex flex-col gap-8 pt-14 pb-12 tablet:gap-11 tablet:pt-20">
         <p className="flex flex-wrap items-center gap-x-2 text-[13px] leading-5 font-medium text-gray-10">
           <span>Simulated clock at Larkspur Robotics (demo):</span>
