@@ -53,7 +53,7 @@ describe("memory", () => {
     expect(code(await w.executor.agent.exec(h, { callId: "t", command: "memory.search", args: { query: "x", at: "HEAD~1" } }))).toBe("INVALID_INPUT");
     expect(code(await w.executor.agent.exec(h, { callId: "u", command: "memory.search", args: { query: "x", at: "--output=/tmp/x" } }))).toBe("INVALID_INPUT");
     const regex = await w.executor.agent.exec(h, { callId: "v", command: "memory.search", args: { query: ".*" } });
-    expect(regex.ok && (regex.data as { hits: unknown[] }).hits).toEqual([]);
+    expect(regex.ok && regex.status === "done" && (regex.data as { hits: unknown[] }).hits).toEqual([]);
   });
 
   it("memory.write_note, routines.draft and vault.request return TAINTED_WRITE in a tainted run", async () => {
