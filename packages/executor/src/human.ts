@@ -4,7 +4,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { DecisionInput, DecisionResult, DecisionRefusal, HumanExecutor, HumanSession, ProposalDecided, ProposalStatus, ToolOutcome } from "@weft/contracts";
 import { emitEvent } from "@weft/core";
-import { actions, execRuns, proposals, withWriteLock, type DbTx } from "@weft/db";
+import { actions, execRuns, proposals, type DbTx } from "@weft/db";
 import { appendAudit } from "./chain";
 import type { Engine } from "./engine";
 import { refusal, Rollback } from "./outcome";
@@ -14,6 +14,7 @@ import { humanScope, runGrants, type CallScope } from "./scope";
 import { GRANT_RANK, intersect, loadPrincipal, readSetting, type PrincipalRow } from "./store";
 import { readTaint } from "./taint";
 import { afterCommit } from "./timeline";
+import { writeLocked } from "./write";
 
 class NotPending extends Error {}
 
@@ -74,7 +75,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
   };
 
   async function finishRefused(row: ProposalRow, by: string, code: string, outcomeStatus: ProposalStatus): Promise<ProposalRow> {
-    return withWriteLock(() => e.db.transaction(async (tx) => {
+    return writeLocked(() => e.db.transaction(async (tx) => {
       const now = e.clock.now();
       await tx.run(sql`UPDATE proposals SET status = ${outcomeStatus}, decided_by = ${by}, decided_at = ${now}, decision_code = ${code} WHERE id = ${row.id} AND status = 'pending'`);
       await appendAudit(tx, { proposalId: row.id, principalId: by, attempt: "approve", outcome: `refused:${code}`, ts: now });
@@ -86,7 +87,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
 
   return {
     async exec(session: HumanSession, command: string, args: unknown): Promise<ToolOutcome> {
-      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
         const scope = await humanScope(e, tx, session);
         if (!scope) return refusal("NOT_PERMITTED", "The session principal is not a human of this company", false);
         return (await runInTx(e, tx, scope, command, args)).outcome;
@@ -107,7 +108,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
       if (row.status !== "pending") return no("NOT_PENDING", `${row.id} is ${row.status}`);
       const now = e.clock.now();
       if (row.expiresAt <= now) {
-        await withWriteLock(() => e.db.transaction(async (tx) => {
+        await writeLocked(() => e.db.transaction(async (tx) => {
           const res = await tx.run(sql`UPDATE proposals SET status = 'expired', decided_at = ${now}, decision_code = 'EXPIRED' WHERE id = ${row.id} AND status = 'pending'`);
           if (res.rowsAffected === 1) await appendAudit(tx, { proposalId: row.id, principalId: who.id, attempt: input.decision, outcome: "refused:EXPIRED", ts: now });
         }));
@@ -129,7 +130,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
       // Deny, dismiss and start: CAS, audit, event.
       if (input.decision !== "approve") {
         const status: ProposalStatus = input.decision === "deny" ? "denied" : input.decision === "dismiss" ? "dismissed" : "approved";
-        const done = await withWriteLock(() => e.db.transaction(async (tx) => {
+        const done = await writeLocked(() => e.db.transaction(async (tx) => {
           const res = await tx.run(sql`UPDATE proposals SET status = ${status}, decided_by = ${who.id}, decided_at = ${now}, decision_code = ${input.reasonCode ?? (input.decision === "start" ? "STARTED" : null)}, decision_note = ${note} WHERE id = ${row.id} AND status = 'pending'`);
           if (res.rowsAffected !== 1) return null;
           await appendAudit(tx, { proposalId: row.id, principalId: who.id, attempt: input.decision, outcome: "ok", ts: now });
@@ -147,7 +148,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
       let outcome: ToolOutcome | null = null;
       let final: ProposalRow;
       try {
-        final = await withWriteLock(() => e.db.transaction(async (tx) => {
+        final = await writeLocked(() => e.db.transaction(async (tx) => {
           const res = await tx.run(sql`UPDATE proposals SET status = 'approved', decided_by = ${who.id}, decided_at = ${now}, decision_code = ${input.reasonCode}, decision_note = ${note} WHERE id = ${row.id} AND status = 'pending'`);
           if (res.rowsAffected !== 1) throw new NotPending();
           const [p] = await tx.select().from(proposals).where(eq(proposals.id, row.id)).limit(1);
@@ -188,7 +189,7 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
 
     async rollback(session, input) {
       if (session.via !== "ui") return refusal("NOT_PERMITTED", "UI_SESSION_REQUIRED: rollback accepts only the UI session", false);
-      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
         const scope = await humanScope(e, tx, session);
         if (!scope) return refusal("NOT_PERMITTED", "The session principal is not a human of this company", false);
         const [a] = await tx.select().from(actions).where(eq(actions.seq, input.seq)).limit(1);

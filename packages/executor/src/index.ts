@@ -6,7 +6,7 @@ import { NotImplemented, type ExecutorBundle, type SandboxEngine, type SimClock 
 import { createMemoryStore } from "./memory/store";
 import { seedMemoryFiles } from "./memory/seed-content";
 import { memoryCommands } from "./memory/commands";
-import { withWriteLock, type Db } from "@weft/db";
+import { type Db } from "@weft/db";
 import type { WeftCommand } from "@weft/core";
 import { createAgentExecutor } from "./agent";
 import { builtinCommands } from "./builtins";
@@ -20,6 +20,7 @@ import { markTainted } from "./taint";
 import { createReadOnlyExecutor, createSystemExecutor } from "./system";
 import { Redactor } from "./vault/redact";
 import { createVault, loadVaultKey } from "./vault/vault";
+import { writeLocked } from "./write";
 
 export type { SimulatorsFactory } from "./engine";
 export { toStrictJsonSchema, nullToUndefined, sampleFromSchema, rawJsonSchema, strictSchemaProblems } from "./strict-schema";
@@ -91,7 +92,7 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
     vault: { put: (i) => vault.put(i), list: () => vault.list() },
     memory: engine.memory,
     registry: engine.registry,
-    expireProposals: (now) => withWriteLock(() => opts.db.transaction((tx) => expireProposals(engine, tx, now))),
+    expireProposals: (now) => writeLocked(() => opts.db.transaction((tx) => expireProposals(engine, tx, now))),
     async verifyChain() {
       const gitSeq = memory.root() ? (memory.chainHeadSeq() ?? 0) : null;
       const s = await verifyActions(opts.db, gitSeq);
@@ -102,7 +103,7 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
   };
   internals.set(bundle, {
     engine, addSecret: (v) => redactor.add(v),
-    taintRun: (runId, by) => withWriteLock(() => opts.db.transaction((tx) => markTainted(tx, runId, by, 0))),
+    taintRun: (runId, by) => writeLocked(() => opts.db.transaction((tx) => markTainted(tx, runId, by, 0))),
   });
   return bundle;
 }

@@ -3,12 +3,13 @@
 import { randomBytes, createHash } from "node:crypto";
 import type { ExecutorBundle, HumanSession } from "@weft/contracts";
 import { newId } from "@weft/core";
-import { apiKeys, withWriteLock, type DbTx } from "@weft/db";
+import { apiKeys, type DbTx } from "@weft/db";
 import { appendAction } from "./chain";
 import { digestOf } from "./digest";
 import type { Engine } from "./engine";
 import { afterCommit } from "./timeline";
 import { loadPrincipal } from "./store";
+import { writeLocked } from "./write";
 
 export class AdminRefused extends Error { constructor(readonly code: "UI_SESSION_REQUIRED" | "WRONG_ROLE", message: string) { super(message); } }
 
@@ -16,7 +17,7 @@ export async function adminChange<T>(e: Engine, session: HumanSession, command: 
   if (session.via !== "ui") throw new AdminRefused("UI_SESSION_REQUIRED", "administration accepts only the UI session");
   const p = await loadPrincipal(e.db, session.principalId);
   if (!p || p.kind !== "human" || p.companyId !== session.companyId || p.grants.company !== "approve") throw new AdminRefused("WRONG_ROLE", "only an admin can change settings and keys");
-  const out = await withWriteLock(() => e.db.transaction(async (tx) => {
+  const out = await writeLocked(() => e.db.transaction(async (tx) => {
     const result = await apply(tx);
     const a = await appendAction(tx, {
       ts: e.clock.now(), actorKind: "human", actorId: p.id, onBehalfOf: null, agentRunId: null, routineRunId: null, proposalId: null, command,

@@ -2,13 +2,14 @@
 // System-record commands are R1 by definition. Events emitted by system calls copy the source event's stamps.
 import { sql } from "drizzle-orm";
 import type { ReadOnlyExecutor, SystemExecutor, SystemPrincipal } from "@weft/contracts";
-import { withWriteLock } from "@weft/db";
+
 import type { Engine } from "./engine";
 import { refusal } from "./outcome";
 import { runInTx } from "./pipeline";
 import { afterCommit } from "./timeline";
 import { readonlyScope, type CallScope } from "./scope";
 import { DOMAINS, loadPrincipal, noGrants } from "./store";
+import { writeLocked } from "./write";
 
 /** System calls are governed by the allowlist; references resolve in every domain. */
 const allView = () => { const g = noGrants(); for (const d of DOMAINS) g[d] = "view"; return g; };
@@ -27,7 +28,7 @@ export function createSystemExecutor(e: Engine): SystemExecutor {
   return {
     async exec(principal, command, args, source) {
       if (!SYSTEM_PRINCIPALS.includes(principal)) return refusal("NOT_PERMITTED", `${String(principal)} is not a system principal`, false);
-      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
         const p = await loadPrincipal(tx, principal);
         let companyId = p?.companyId ?? null;
         if (!companyId) {

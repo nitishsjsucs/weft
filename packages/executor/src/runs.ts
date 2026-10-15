@@ -5,12 +5,13 @@ import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { AgentKind, HumanSession, RunAuthority, RunHandle } from "@weft/contracts";
 import { newId } from "@weft/core";
-import { execRuns, routines, withWriteLock } from "@weft/db";
+import { execRuns, routines } from "@weft/db";
 import type { Engine } from "./engine";
 import { hashToken, resolveRun } from "./scope";
 import { agentPrincipalId, loadPrincipal } from "./store";
 import { initTaint, readTaint } from "./taint";
 import { nonceFromToken } from "./untrusted";
+import { writeLocked } from "./write";
 
 export interface WeftRunHandle extends RunHandle { readonly nonce: string }
 
@@ -24,7 +25,7 @@ interface OpenInput {
 }
 
 async function open(e: Engine, i: OpenInput): Promise<WeftRunHandle> {
-  return withWriteLock(() => e.db.transaction(async (tx) => {
+  return writeLocked(() => e.db.transaction(async (tx) => {
     const id = await newId(tx, "run_");
     const token = randomBytes(24).toString("hex");
     const principalId = await agentPrincipalId(tx, i.companyId);

@@ -2,7 +2,7 @@
 // on (run_id, call_id). The optional `batch` field on a call names the model turn it came from (batch rules).
 import { and, eq, sql } from "drizzle-orm";
 import type { AgentCall, AgentExecutor, RunHandle, ToolOutcome } from "@weft/contracts";
-import { proposals, withWriteLock } from "@weft/db";
+import { proposals } from "@weft/db";
 import type { Engine } from "./engine";
 import { refusal } from "./outcome";
 import { priorCall, recordCall, runInTx } from "./pipeline";
@@ -10,6 +10,7 @@ import { agentScope, resolveRun } from "./scope";
 import { readTaint } from "./taint";
 import { readArtifactInTx } from "./workspace";
 import { afterCommit } from "./timeline";
+import { writeLocked } from "./write";
 
 export type BatchedAgentCall = AgentCall & { batch?: string | number | null };
 
@@ -27,7 +28,7 @@ export function createAgentExecutor(e: Engine): AgentExecutor {
     async exec(handle: RunHandle, call: AgentCall) {
       const c = call as BatchedAgentCall;
       if (!c || typeof c.callId !== "string" || !c.callId || typeof c.command !== "string") return refusal("INVALID_INPUT", "A call needs a callId and a command", false);
-      const outcome = await withWriteLock(() => e.db.transaction(async (tx) => {
+      const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
         const row = await resolveRun(tx, handle);
         if (!row) return UNKNOWN_HANDLE();
         const prior = await priorCall(tx, row.id, c.callId);
@@ -46,7 +47,7 @@ export function createAgentExecutor(e: Engine): AgentExecutor {
       return outcome;
     },
     async readArtifact(handle, ref, offset, limit) {
-      return withWriteLock(() => e.db.transaction(async (tx) => {
+      return writeLocked(() => e.db.transaction(async (tx) => {
         const row = await resolveRun(tx, handle);
         if (!row) return UNKNOWN_HANDLE();
         const scope = await agentScope(e, tx, row, handle.token, null, null);

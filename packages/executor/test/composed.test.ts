@@ -48,9 +48,9 @@ describe("composed command set", () => {
   });
 
   it("every system_only command is on a svc_ allowlist, and the allowlists name only R0 or R1 commands that exist", () => {
-    const listed = new Set(Object.values(SYSTEM_ALLOWLISTS).flat());
+    const listed = new Set<string>(Object.values(SYSTEM_ALLOWLISTS).flat());
     for (const d of all.filter((x) => x.access === "system_only")) expect(listed.has(d.name), `${d.name} is system_only but no svc_ principal may run it`).toBe(true);
-    const byName = new Map(all.map((d) => [d.name, d]));
+    const byName = new Map<string, WeftCommand>(all.map((d) => [d.name, d]));
     for (const name of listed) {
       const d = byName.get(name);
       if (!d) continue;   // lands with T1 or T2
