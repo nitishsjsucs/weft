@@ -14,6 +14,8 @@ import type { PromptKind } from "./prompts/index";
 import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
 import { createRunStore, type RunStore } from "./store";
 import { buildTrace } from "./trace";
+import { DEFAULT_SCRIPTS_DIR } from "./providers/factory";
+import { scriptedProvider } from "./providers/scripted";
 
 /** Harness 5.3: chat and MCP agent.ask, read-only in P0, exactly 14 tools. */
 export const CHAT_TOOLS = [
@@ -76,6 +78,11 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     return opts.routinesView.checklist({ routine: t.routine, agentRunId: run.id, routineRunId: run.routineRunId, companyId: run.companyId, trigger: t.trigger });
   }
 
+  /** Unattended runs under a live provider use the deterministic templates unless WEFT_BACKGROUND_LLM=1 (SPEC 9.6). */
+  const templateProvider: ModelProvider = { ...scriptedProvider({ scriptsDir: env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR }), model: "template", label: "Template, no model" };
+  const useTemplates = (attended: boolean) => opts.provider.live && !attended && env.WEFT_BACKGROUND_LLM !== "1";
+  const providerFor = (run: { provider: string; model: string }) => (run.model === "template" ? templateProvider : opts.provider);
+
   const loopDeps = {
     store, executor: opts.executor, provider: opts.provider, ledger: opts.ledger, clock: opts.clock, prices, checklist,
     isCancelled: (id: string) => cancelled.has(id),
@@ -95,7 +102,8 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     aborts.set(runId, new AbortController());
     void queue.push(runId, async () => {
       try {
-        const row = await runLoop(loopDeps, handle);
+        const current = await store.getRun(runId);
+        const row = await runLoop({ ...loopDeps, provider: current ? providerFor(current) : opts.provider }, handle);
         notifySettled(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -109,9 +117,10 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
 
   function baseRow(handle: RunHandle, p: { trigger: string; attended: boolean; routineRunId: string | null; routineId: string | null; kind: PromptKind; budget?: { steps: number; usd: number; minutes: number } }): AgentRunRow {
     const b = p.budget ?? BUDGETS[p.kind];
+    const provider = p.kind === "routine" && useTemplates(p.attended) ? templateProvider : opts.provider;
     return {
       id: handle.runId, companyId, kind: "main", parentRunId: null, threadId: null, routineRunId: p.routineRunId, trigger: p.trigger, attended: p.attended,
-      provider: opts.provider.id, model: opts.provider.model, effort: "low", cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
+      provider: provider.id, model: provider.model, effort: "low", cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
       status: "queued", terminalReason: null, tainted: false, taintedBy: null, checklist: null, budget: { steps: b.steps, usd: b.usd, minutes: b.minutes },
       stepsUsed: 0, requeues: 0, consecutiveErrors: 0, costUsdMicros: 0, tokens: { ...ZERO_USAGE }, createdAt: opts.clock.now(), endedAt: null, summary: null,
     };
@@ -149,7 +158,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     async startRoutineRun(handle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }) {
       handles.set(handle.runId, handle);
       if (input.precheck.action !== "run") throw new Error("startRoutineRun needs a precheck with action run");
-      const trigger: Record<string, unknown> = input.trigger ? { event: input.trigger.type, event_id: input.trigger.id, subject_ref: input.trigger.subjectRef, ...input.trigger.payload } : { manual: true, trigger_ref: input.routineRun.triggerRef };
+      const trigger: Record<string, unknown> = input.trigger ? { event: input.trigger.type, event_id: input.trigger.id, subject_ref: input.trigger.subjectRef, ...input.trigger.payload } : { trigger_ref: input.routineRun.triggerRef, attended: input.routineRun.attended };
       triggers.set(handle.runId, { routine: input.routine, trigger });
       await store.createRun(baseRow(handle, { trigger: `routine:${input.routineRun.id}`, attended: input.routineRun.attended, routineRunId: input.routineRun.id, routineId: input.routine.id, kind: "routine", budget: input.routine.budget }));
       const nonce = newNonce();
