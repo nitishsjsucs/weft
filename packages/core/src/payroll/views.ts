@@ -4,7 +4,7 @@ import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { formatCents, money, TOTALS_FIELDS, type Flag, type Paycheck, type PayrollRun } from "@weft/contracts";
 import { paychecks, payrollRuns, workers, type DbTx } from "@weft/db";
 import type { TaxCalcLine } from "@weft/payroll-tax";
-import type { BenefitJson, DeductionJson, EarningJson } from "./compute";
+import { computeWorkerPaycheck, loadWorld, loadYtd, type BenefitJson, type DeductionJson, type EarningJson } from "./compute";
 import { totalsFromDto } from "./totals";
 
 type RunRow = typeof payrollRuns.$inferSelect;
@@ -89,4 +89,21 @@ export async function concisePayrollRun(tx: DbTx, run: RunRow, filters: { flagge
     run_flags: summary.runFlags ?? [],
     ...(listOthers ? { ready: rows.filter((p) => p.reviewGroup === "ready" && p.status !== "excluded").filter(matches).map(row) } : {}),
   };
+}
+
+/**
+ * The tax trace of a paycheck, recomputed with the engine from current HR data and the YTD ledger as of that run
+ * (sources from this run and later paydays excluded). Labeled as a recomputation in the UI.
+ */
+export async function paycheckTrace(tx: DbTx, p: PaycheckRow): Promise<string[]> {
+  const run = (await tx.select().from(payrollRuns).where(eq(payrollRuns.id, p.payrollRunId)))[0];
+  if (!run) return [];
+  const w = (await tx.select().from(workers).where(eq(workers.id, p.workerId)))[0];
+  if (!w) return [];
+  const later = (await tx.select({ id: payrollRuns.id, payday: payrollRuns.payday }).from(payrollRuns).where(eq(payrollRuns.payScheduleId, run.payScheduleId)))
+    .filter((r) => r.payday >= run.payday).map((r) => `payroll:${r.id}`);
+  const world = await loadWorld(tx, run.companyId, [w.id]);
+  const ytd = await loadYtd(tx, [w.id], Number(run.payday.slice(0, 4)), later);
+  const cp = computeWorkerPaycheck(w, { companyId: run.companyId, payScheduleId: run.payScheduleId, periodStart: run.periodStart, periodEnd: run.periodEnd, payday: run.payday }, world, ytd.get(w.id) ?? {});
+  return [`Recomputed from current HR data (synthetic ${run.taxDataVersion} tables)`, ...cp.calc.trace];
 }
