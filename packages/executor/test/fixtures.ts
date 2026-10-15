@@ -179,3 +179,12 @@ export async function count(db: Db, table: string, where = "1=1"): Promise<numbe
   const [r] = await db.all<{ n: number }>(sql.raw(`SELECT count(*) AS n FROM ${table} WHERE ${where}`));
   return r?.n ?? 0;
 }
+
+/** Swaps a createTestWeft() world (built with seed: false) onto the fixture commands and seeds governance. */
+export async function fixtureWeft<T extends { db: Db; clock: { set(to: string, rate?: number): Promise<void>; now(): string }; dataDir: string; sims: Simulators; executor: ExecutorBundle }>(w: T): Promise<T> {
+  w.executor = await createExecutor({ db: w.db, clock: w.clock as never, dataDir: w.dataDir, commands: fixtureCommands, simulators: fakeSims as never, testMode: true });
+  await seedFixtureRows(w.db);
+  await seedGovernance({ db: w.db, clock: w.clock as never, executor: w.executor, sims: w.sims, dataDir: w.dataDir, companyId: CMP, faker: null as never });
+  await w.clock.set(SEED_TIME, 0);
+  return w;
+}
