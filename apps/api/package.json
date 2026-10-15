@@ -1,0 +1,38 @@
+{
+  "name": "@weft/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./compose": "./src/compose.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.4",
+    "@hono/zod-validator": "0.9.1",
+    "@libsql/client": "0.18.0",
+    "@weft/agent": "workspace:*",
+    "@weft/contracts": "workspace:*",
+    "@weft/core": "workspace:*",
+    "@weft/db": "workspace:*",
+    "@weft/executor": "workspace:*",
+    "@weft/grounding": "workspace:*",
+    "@weft/routines": "workspace:*",
+    "@weft/seed": "workspace:*",
+    "@weft/sim": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "hono": "4.13.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4",
+    "tsx": "4.23.15"
+  }
+}

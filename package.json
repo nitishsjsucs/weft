@@ -1,0 +1,30 @@
+{
+  "name": "weft",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.3.4",
+  "engines": { "node": ">=25.9.0" },
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "build": "turbo run build",
+    "test": "vitest run",
+    "typecheck": "turbo run typecheck",
+    "e2e": "playwright test",
+    "lint:prose": "tsx scripts/check-prose.ts",
+    "lint:brand": "tsx scripts/check-brand.ts",
+    "db:migrate": "tsx packages/db/src/cli.ts migrate",
+    "db:seed": "tsx packages/seed/src/cli.ts seed",
+    "db:reset": "tsx packages/seed/src/cli.ts reset",
+    "db:digest": "tsx packages/seed/src/cli.ts digest",
+    "eval:live": "tsx evals/live/run.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "turbo": "2.11.7",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}

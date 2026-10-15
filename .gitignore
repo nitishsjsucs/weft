@@ -1,4 +1,4 @@
-# Warp reference material (their copyrighted pages, CSS and screenshots): local only, never committed
+# Reference-site material (its copyrighted pages, CSS and screenshots): local only, never committed
 research/design/reference/
 node_modules/
 .turbo/
@@ -10,3 +10,9 @@ dist/
 *.db
 *.db-*
 .data/
+.scratch/
+evals/results/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.data-e2e/

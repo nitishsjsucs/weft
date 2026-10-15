@@ -1,0 +1,99 @@
+/* @weft/ui tokens.css: original Weft tokens (research/design.md section 12, SPEC 11.1). */
+:root {
+  /* neutrals (light) */
+  --gray-1: #fcfcfc; --gray-2: #f9f9f9; --gray-3: #efefef; --gray-4: #e8e8e8;
+  --gray-5: #e0e0e0; --gray-6: #d9d9d9; --gray-7: #cecece; --gray-8: #bbbbbb;
+  --gray-9: #8d8d8d; --gray-10: #838383; --gray-11: #646464; --gray-12: #202020;
+  --gray-a2: #00000006; --gray-a3: #00000010; --gray-a4: #00000017; --gray-a5: #0000001f;
+  --gray-a6: #00000026; --gray-a9: #00000072; --gray-a10: #0000007c; --gray-a11: #0000009b; --gray-a12: #000000df;
+  --black-a1: #0000000d; --black-a2: #0000001a; --black-a3: #00000026;
+
+  /* Weft accent "madder" (12 steps): design.md section 12 accent scale rotated in oklch to the hue of #d6264b, lightness and chroma kept per step (chroma reduced only to stay in sRGB); step 9 is exactly #d6264b and steps 10 and 11 (light) and 10 (dark) keep the original lightness and chroma offsets from step 9. */
+  --accent-1: #fefcfc; --accent-2: #fef7f7; --accent-3: #ffe9ea; --accent-4: #ffd6d7;
+  --accent-5: #fec5c7; --accent-6: #feb6b9; --accent-7: #ffa1a6; --accent-8: #f9838c;
+  --accent-9: #d6264b; --accent-10: #c90f41; --accent-11: #b60338; --accent-12: #602229;
+  --accent-surface: #fef5f5cc; --accent-contrast: #ffffff;
+
+  /* status */
+  --green-3: #e6f6eb; --green-9: #30a46c; --green-11: #218358;
+  --blue-3: #e6f4fe;  --blue-9: #0090ff;  --blue-11: #0d74ce;
+  --amber-3: #fff8e7; --amber-9: #f59e0b; --amber-11: #ac6500;
+  --red-3: #ffeae6;   --red-9: #e5484d;   --red-11: #ce2c31;
+  --violet-9: #6e56cf; --purple-9: #8e4ec6; --cyan-9: #00a5b9; --pink-9: #d6409f;
+
+  /* semantic */
+  --background: #ffffff; --foreground: var(--gray-12); --muted: var(--gray-11); --subtle: var(--gray-10);
+  --border: var(--gray-4); --card: #ffffff; --well: var(--gray-2); --ink-surface: #242424; --island: #2b2b2b;
+  --primary: var(--accent-9); --primary-fg: #ffffff; --success: var(--green-11); --warning: var(--amber-9);
+  --danger: var(--red-9); --info: var(--blue-11);
+
+  /* app shell */
+  --app-sidebar-bg: #fafafa; --app-sidebar-w: 244px; --app-header-h: 48px; --app-agent-w: 340px;
+  --app-border: #e5e5e5; --app-item-active: #efefef;
+
+  /* type */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: ui-serif, Georgia, serif;
+  --font-weight-book: 450; --font-weight-medium-plus: 550;
+
+  /* layout */
+  --page-max-width: 1280px; --page-padding: 32px; --nav-h: 56px; --banner-h: 44px;
+
+  /* radii */
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px; --radius-btn: 7px; --radius-lg: 8px;
+  --radius-xl: 12px; --radius-2xl: 16px; --radius-3xl: 24px;
+
+  /* shadows */
+  --shadow-border: 0 0 0 1px #00000014;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.05);
+  --shadow-small: 0 2px 2px #0000000a;
+  --shadow-medium: 0 2px 2px #0000000a, 0 8px 8px -8px #0000000a;
+  --shadow-large: 0 2px 2px #0000000a, 0 8px 16px -4px #0000000a;
+  --shadow-menu: var(--shadow-border), 0 1px 1px #00000005, 0 4px 8px -4px #0000000a, 0 16px 24px -8px #0000000f;
+  --shadow-modal: var(--shadow-border), 0 1px 1px #00000005, 0 8px 16px -4px #0000000a, 0 24px 32px -8px #0000000f;
+  --shadow-card: 0 0 0 1px #00000010, 0 0 0 .5px rgba(0,0,0,.05), 0 1px 1px #00000006, 0 2px 1px -1px rgba(0,0,0,.05), 0 1px 3px rgba(0,0,0,.05);
+  --shadow-product: 0 1px 1px rgb(0 0 0/.05), 0 6px 12px -4px rgb(0 0 0/.024), 0 12px 24px -8px rgb(0 0 0/.024), 0 24px 48px -16px rgb(0 0 0/.024), 0 48px 96px -32px rgb(0 0 0/.024);
+  --shadow-float: var(--shadow-product), 0 10px 28px -8px rgb(0 0 0/.07), 0 28px 56px -16px rgb(0 0 0/.05);
+  --shadow-btn-dark: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 2px rgba(0,0,0,.3);
+
+  /* motion */
+  --ease-standard: cubic-bezier(.2,0,0,1);
+  --ease-out-expo: cubic-bezier(.16,1,.3,1);
+  --ease-menu: cubic-bezier(.22,1,.36,1);
+  --ease-default: cubic-bezier(.4,0,.2,1);
+  --dur-press: 100ms; --dur-fast: 150ms; --dur-menu: 350ms; --dur-pop: 250ms;
+}
+
+/* Dark scope: apply .dark to a section (islands, CTA band) or to <html> for app dark mode */
+.dark {
+  --gray-1: #242424; --gray-2: #2b2b2b; --gray-3: #333333; --gray-4: #393939; --gray-5: #3e3e3e;
+  --gray-6: #464646; --gray-7: #525252; --gray-8: #696969; --gray-9: #757575; --gray-10: #808080;
+  --gray-11: #b6b6b6; --gray-12: #eeeeee;
+  --gray-a3: #ffffff11; --gray-a4: #ffffff18; --gray-a6: #ffffff28; --gray-a11: #ffffffaa; --gray-a12: #ffffffeb;
+  --accent-1: #2a2122; --accent-2: #302324; --accent-3: #4d2326; --accent-4: #641c26; --accent-5: #72212c;
+  --accent-6: #802c36; --accent-7: #973a45; --accent-8: #be4856; --accent-9: #d6264b; --accent-10: #c81341;
+  --accent-11: #ff828c; --accent-12: #ffd0d1; --accent-surface: #3e232580;
+  --background: #242424; --foreground: #eeeeee; --border: #ffffff14; --card: #2b2b2b; --well: #2b2b2b;
+  --app-sidebar-bg: #1f1f1f; --app-border: #3d3d3d; --app-item-active: #333333;
+}
+
+/* Signature effects */
+.weft-hatch { -webkit-text-fill-color: transparent; background: repeating-linear-gradient(0deg, currentColor 0 50%, transparent 50% 100%) 0 0 / 100% .05em; -webkit-background-clip: text; background-clip: text; }
+.weft-hatch-strong { -webkit-text-fill-color: transparent; background: repeating-linear-gradient(0deg, currentColor 0 68%, transparent 68% 100%) 0 0 / 100% .05em; -webkit-background-clip: text; background-clip: text; }
+.weft-rule { border-left: 1px solid; border-image: repeating-linear-gradient(to bottom, var(--accent-9) 0 1px, transparent 1px 2px) 1; }
+.weft-shimmer { -webkit-text-fill-color: transparent; background-image: linear-gradient(90deg, #0a111180 0% 30%, #dcdcdcb3 50%, #0a111180 70% 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; animation: weft-shimmer 2.5s linear infinite; }
+.weft-press { transition: background-color var(--dur-press) var(--ease-standard), box-shadow var(--dur-press) var(--ease-standard), color var(--dur-press) var(--ease-standard), transform var(--dur-press) var(--ease-standard); }
+.weft-press:not(:disabled):active { scale: .99; }
+.weft-caret { display: inline-block; width: 1.5px; height: 1em; margin-left: 1px; background: currentColor; transform: translateY(2px); animation: weft-caret 1.05s step-end infinite; }
+@keyframes weft-shimmer { 0% { background-position: 200% 0 } to { background-position: -200% 0 } }
+@keyframes weft-caret { 0%, 49% { opacity: 1 } 50%, to { opacity: 0 } }
+@keyframes weft-pop { 0% { opacity: 0; transform: translateY(6px) scale(.97) } to { opacity: 1; transform: none } }
+@keyframes weft-slide-up { 0% { opacity: 0; transform: translateY(12px) scale(.98) } to { opacity: 1; transform: none } }
+@keyframes weft-letter-in { 0% { opacity: 0; filter: blur(2px); transform: translateY(3px) } to { opacity: 1; filter: none; transform: none } }
+@keyframes weft-row-flash { from { transform: translateX(-100%) } to { transform: translateX(100%) } }
+@keyframes weft-grid-chase { 0% { background-color: #1d1c1d } 12.5% { background-color: #4a4a4a } 25% { background-color: #8a8a8a } 37.5% { background-color: #b5b5b5 } 50%, to { background-color: #d9d9d9 } }
+@media (prefers-reduced-motion: reduce) {
+  .weft-shimmer, .weft-caret { animation: none; -webkit-text-fill-color: currentColor; background-image: none; }
+  .weft-press { transition: none; }
+}

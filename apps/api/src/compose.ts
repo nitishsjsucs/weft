@@ -1,0 +1,111 @@
+// Scaffold (frozen): the composition root (SPEC 2, 9.0). The only place that wires db, simulators, executor,
+// core commands and handlers, providers, the agent runtime, routines, the scheduler and the Hono app.
+// Until every track lands, factories may still throw NotImplemented; unless `strict`, each such part becomes a
+// stub that throws NotImplemented when used and is listed in `weft.stubs` (and in GET /v1/health).
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { isWeftError, NotImplemented, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
+import { closeDb, migrate, openDb } from "@weft/db";
+import { commands, createSimClock, handlers } from "@weft/core";
+import { createSimulators } from "@weft/sim";
+import { createExecutor } from "@weft/executor";
+import { createAgentRuntime, createProvider, createSpendLedger } from "@weft/agent";
+import { createRoutines } from "@weft/routines";
+import type { Weft } from "./http/context";
+import { buildApp } from "./app";
+import { createScheduler } from "./scheduler";
+
+export type { Weft, WeftEnv } from "./http/context";
+
+export interface CreateWeftOptions {
+  dataDir: string;
+  /** Provide a clock, or let createWeft build the persisted SimClock (rate from WEFT_CLOCK_RATE, 0 in testMode). */
+  clock?: SimClock;
+  provider?: ModelProvider;
+  testMode?: boolean;
+  /** Throw on any NotImplemented factory instead of stubbing it. */
+  strict?: boolean;
+  /** Set by the seed CLI: skips agent.boot() and the proposal wiring side effects that need a seeded world. */
+  seeding?: boolean;
+  ports?: { api?: number; web?: number };
+}
+
+const isStubError = (e: unknown) => isWeftError(e) && e._tag === "NotImplemented";
+
+/** A callable, infinitely nested proxy whose calls throw NotImplemented. Never thenable. */
+export function stubOf<T>(name: string): T {
+  const make = (path: string): unknown => new Proxy(function stub() {}, {
+    get: (_t, prop) => (prop === "then" ? undefined : prop === Symbol.toPrimitive ? () => `[stub ${path}]` : make(`${path}.${String(prop)}`)),
+    apply: () => { throw new NotImplemented(path); },
+  });
+  return make(name) as T;
+}
+
+function readOrCreateProxySecret(dataDir: string): string {
+  const dir = join(dataDir, "run");
+  const file = join(dir, "proxy.secret");
+  mkdirSync(dir, { recursive: true });
+  if (existsSync(file)) { const s = readFileSync(file, "utf8").trim(); if (s.length >= 32) return s; }
+  const secret = randomBytes(32).toString("hex");
+  writeFileSync(file, secret + "\n", { mode: 0o600 });
+  chmodSync(file, 0o600);
+  return secret;
+}
+
+const placeholderProvider: ModelProvider = {
+  id: "scripted", model: "none", label: "Scripted, no model", live: false,
+  step: async () => { throw new NotImplemented("provider.step (t4-agent)"); },
+};
+
+export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
+  const testMode = opts.testMode ?? false;
+  const dataDir = resolve(opts.dataDir);
+  const stubs: string[] = [];
+  const tolerate = async <T>(name: string, build: () => T | Promise<T>, fallback: () => T): Promise<T> => {
+    try { return await build(); } catch (e) {
+      if (opts.strict || !isStubError(e)) throw e;
+      stubs.push(name);
+      return fallback();
+    }
+  };
+
+  const db = openDb({ dataDir });
+  await migrate(db);
+  const clock = opts.clock ?? (await createSimClock({ db, initial: testMode ? { at: "2026-10-26T15:30:00.000Z", rate: 0 } : undefined }));
+  const sims = await tolerate<Simulators>("sim", () => createSimulators({ db, clock }), () => stubOf("sims"));
+  const executor = await tolerate<ExecutorBundle>("executor", () => createExecutor({ db, clock, dataDir, commands, simulators: createSimulators, testMode }), () => stubOf("executor"));
+  const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
+  const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({ env: process.env, ledger, testMode }), () => placeholderProvider));
+  const routinesRef: { current: RoutinesEngine | null } = { current: null };
+  const agent = await tolerate<AgentRuntime>("agent", () => createAgentRuntime({
+    db, clock, executor: executor.agent, provider, ledger,
+    routinesView: { get: async (_id: string) => null },   // replaced by the integrator once routines expose a view
+  }), () => stubOf("agent"));
+  const routines = await tolerate<RoutinesEngine>("routines", () => createRoutines({ db, clock, agent, runs: executor.runs, readOnly: executor.readOnly }), () => stubOf("routines"));
+  routinesRef.current = routines;
+  const scheduler = createScheduler({ db, clock, sims, executor, handlers, routines, log: testMode ? () => undefined : undefined });
+
+  // Wiring (SPEC 9.0): decisions wake routines; agent boot rule PROCESS_RESTART.
+  await tolerate("wiring.onProposalDecided", () => executor.human.onProposalDecided((p) => routines.onProposalDecided(p)), () => undefined);
+  if (!opts.seeding) await tolerate("wiring.agent.boot", () => agent.boot(), () => undefined);
+
+  const proxySecret = readOrCreateProxySecret(dataDir);
+  const ports = {
+    api: opts.ports?.api ?? Number(process.env.WEFT_API_PORT ?? 4070),
+    web: opts.ports?.web ?? Number(process.env.WEFT_WEB_PORT ?? 3070),
+  };
+  let closed = false;
+  const weft: Weft = {
+    app: undefined as never, db, dataDir, executor, sims, agent, routines, scheduler, clock, ledger, provider, proxySecret, testMode, ports, stubs,
+    async close() {
+      if (closed) return;
+      closed = true;
+      await scheduler.stop();
+      try { await executor.close(); } catch (e) { if (!isStubError(e)) throw e; }
+      await closeDb(db);
+    },
+  };
+  weft.app = buildApp(weft);
+  return weft;
+}

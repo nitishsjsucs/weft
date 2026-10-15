@@ -1,0 +1,27 @@
+{
+  "name": "@weft/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0",
+    "@weft/contracts": "workspace:*",
+    "@weft/db": "workspace:*",
+    "@weft/grounding": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "openai": "7.32.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}
