@@ -28,6 +28,7 @@ export { createRegistry, wireName, MAX_TOOLS, type Registry } from "./registry";
 export { policy, riskOf, RISK_RANK, TAINTED_WRITE_COMMANDS, type PolicyFacts } from "./policy";
 export { SYSTEM_ALLOWLISTS, SYSTEM_PRINCIPALS } from "./system";
 export { Redactor, encodings } from "./vault/redact";
+export { writeLocked, isBusy } from "./write";
 export { escapeUntrusted, wrapUntrusted, nonceFromToken, LT_ESCAPE } from "./untrusted";
 export { actionHash, GENESIS_HASH } from "./chain";
 export { toProposal } from "./proposals";
