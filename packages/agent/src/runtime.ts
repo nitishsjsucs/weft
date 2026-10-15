@@ -21,7 +21,7 @@ export const CHAT_TOOLS = [
   "actions.list", "actions.get_run", "memory.search", "memory.read", "agent.read_artifact", "comms.post_update",
 ] as const;
 
-export const DRAFT_TOOLS = ["routines.draft"] as const;
+export const DRAFT_TOOLS = ["routines.draft", "routines.list"] as const;
 export const DEFAULT_COMPANY_ID = "cmp_larkspur";
 
 /** Read access to routine definitions and their code-owned checklists. */
