@@ -41,7 +41,7 @@ describe("contract-typed mocks", () => {
   });
 
   it("unknown routes answer 501 NotImplemented like the scaffold", async () => {
-    await expect(as("usr_dana").get("/v1/stats")).rejects.toMatchObject({ status: 501 });
+    await expect(as("usr_dana").get("/v1/memory/tree")).rejects.toMatchObject({ status: 501 });
   });
 });
 

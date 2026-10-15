@@ -48,13 +48,13 @@ export function AgentPanel({ className }: { className?: string }) {
           </div>
         ) : null}
         <div className="flex flex-col gap-4">
-          {agent.thread.map((m) =>
+          {agent.thread.map((m, i) =>
             m.kind === "user" ? (
               <div key={m.id} className="ml-auto max-w-[85%] rounded-[16px_16px_6px_16px] bg-gray-3 px-3 py-2 text-2 break-words whitespace-pre-wrap">{m.text}</div>
             ) : m.kind === "error" ? (
               <div key={m.id} className="rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{m.text}</div>
             ) : (
-              <RunFeed key={m.id} runId={m.runId!} label={m.label} />
+              <RunFeed key={m.id} runId={m.runId!} label={m.label} latest={!agent.thread.slice(i + 1).some((x) => x.kind === "run")} />
             ),
           )}
         </div>

@@ -1,5 +1,6 @@
 // Contract-typed fixture world for building the app before merge 1 (NEXT_PUBLIC_WEFT_MOCKS=1). Owner: t5-app.
 // Every name is fictional and ends with "(demo)"; every domain is *.example. Money is integer cents.
+import { buildActions, buildPeople, buildRoutines, buildSim, buildTax } from "./world2";
 import { formatCents, money, TOTALS_FIELDS, type AgentRunRow, type Paycheck, type PayrollRun, type Proposal, type RunStepRow, type Totals, type Worker, type Flag, type TaxLine } from "@weft/contracts";
 
 export const SEED_NOW = "2026-10-26T15:30:00.000Z";
@@ -256,6 +257,7 @@ export function buildWorld() {
     ["pay_2026_10_30", run("pay_2026_10_30", "2026-10-16", "2026-10-31", "2026-10-30", "draft", draft, "pay_2026_10_15")],
     ["pay_2026_10_15", run("pay_2026_10_15", "2026-10-01", "2026-10-15", "2026-10-15", "processed", oct15, "pay_2026_09_30")],
   ]);
-  return { now: SEED_NOW, rate: 0, workers, paychecks, runs, proposals: buildProposals(), agentRuns: new Map(buildRuns().map((r) => [r.run.id, r])), counter: 10 };
+  const routines = buildRoutines();
+  return { now: SEED_NOW, rate: 0, workers, paychecks, runs, proposals: buildProposals(), agentRuns: new Map(buildRuns().map((r) => [r.run.id, r])), counter: 10, ...buildTax(), actions: buildActions(), routines: routines.defs, routineRuns: routines.runs, ...buildPeople(), sim: buildSim() };
 }
 export type MockWorld = ReturnType<typeof buildWorld>;

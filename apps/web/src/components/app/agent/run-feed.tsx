@@ -10,7 +10,7 @@ import { invalidate } from "@/lib/api/hooks";
 import { isChipStep, outcomeTone, stepSummary } from "./run-steps";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
-export function RunFeed({ runId, label }: { runId: string; label?: string }) {
+export function RunFeed({ runId, label, latest = true }: { runId: string; label?: string; latest?: boolean }) {
   const [w, setW] = useState<RunWatch>({ run: null, steps: [], trace: null, mode: "idle" });
   useEffect(() => {
     let last = "";
@@ -34,12 +34,12 @@ export function RunFeed({ runId, label }: { runId: string; label?: string }) {
           return (
             <li key={s.n} data-testid={TID.agentStep} data-outcome={s.outcome ?? ""} className="flex min-w-0 items-start gap-1.5 text-[13px] leading-5 text-gray-11 animate-[weft-pop_.25s_ease-out]">
               {tone === "pending" ? <Clock className="mt-0.5 size-3.5 shrink-0 text-amber-11" /> : tone === "refused" || tone === "error" ? <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-red-11" /> : <Check className="mt-0.5 size-3.5 shrink-0 text-gray-9" />}
-              <span className="min-w-0 break-words">{stepSummary(s)}{tone === "pending" ? <span className="text-amber-11"> (waiting for approval)</span> : null}</span>
+              <span className="min-w-0 break-words">{stepSummary(s)}{s.toolName && stepSummary(s) !== s.toolName ? <span className="ml-1.5 font-mono text-0 text-gray-9">{s.toolName}</span> : null}{tone === "pending" ? <span className="text-amber-11"> (waiting for approval)</span> : null}</span>
             </li>
           );
         })}
       </ul>
-      <div data-testid={TID.agentStatus} data-status={status ?? "starting"} className="text-[13px]">
+      <div data-testid={latest ? TID.agentStatus : undefined} data-status={status ?? "starting"} className="text-[13px]">
         {working ? <ShimmerText>Working...</ShimmerText>
           : status === "waiting" ? <span className="text-amber-11">Waiting for approval in the Inbox</span>
           : status === "done" ? <span className="text-gray-10">Done</span>
