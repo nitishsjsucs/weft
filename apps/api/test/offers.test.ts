@@ -50,7 +50,7 @@ describe("t2 registry rules (harness 5.4)", () => {
       "tax.revert_rate": { rate_id: "etr_0001" }, "tax.register_state_account": { tax_account_id: "txa_0006" }, "tax.record_registration": { application_id: "sima_0001" },
       "notices.get": { notice_id: "ntc_0001" }, "notices.draft_response": { notice_id: "ntc_0001" }, "notices.send_response": { notice_id: "ntc_0001" },
       "benefits.get_enrollment": { worker_id: "wrk_0001" }, "it.create_account": { worker_id: "wrk_0001", system: "chat" }, "it.order_device": { worker_id: "wrk_0001" },
-      "comms.send_message": { text: "hi" }, "sim.deliver_notice": { scenario: "ca_de2088_rate_change" },
+      "comms.send_message": { text: "hi" }, "sim.deliver_notice": { scenario: "ca_de2088_rate_change" }, "it.record_delivery": { order_ref: "simd_0001" },
     };
     for (const c of t2) {
       const shape = (c.input as unknown as { shape?: Record<string, unknown> }).shape ?? {};
