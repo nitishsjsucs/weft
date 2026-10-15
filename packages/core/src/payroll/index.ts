@@ -6,3 +6,5 @@ export * from "./totals";
 export * from "./subject";
 export * from "./lifecycle";
 export * from "./history";
+export * from "./views";
+export * from "./explain";

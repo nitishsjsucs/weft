@@ -1,31 +1,14 @@
 // Pay run lifecycle, anomalies, totals and subject hash over the local fixture world (SPEC 5.5, 7.4, 7.5).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { TOTALS_FIELDS, type BankSim, type Flag } from "@weft/contracts";
+import { TOTALS_FIELDS, type Flag } from "@weft/contracts";
 import { bankAccounts, paychecks, payrollRuns, ytdLedger, type Db } from "@weft/db";
 import { idMinter } from "../../src/shared/ids";
 import {
   assertTotalsIdentities, computeTotals, createDraft, markProcessed, prePayrollPrecheck, previewRun, rowAmounts, runSubjectHash,
   seedPayHistory, submitRun, totalsFromDto, PayrollRefusal,
 } from "../../src/payroll/index";
-import { buildFixtureWorld, CO, openTempDb, PS, TS, type FixtureIds } from "./fixture-world";
-
-export function fakeBank() {
-  const batches: { id: string; payrollRunId: string; total: number; entries: { workerId: string; amountCents: number; accountRef: string }[]; settleAt: string; status: string }[] = [];
-  const bank: Pick<BankSim, "submitBatch" | "tick"> = {
-    async submitBatch(req) {
-      const id = `simb_${String(batches.length + 1).padStart(4, "0")}`;
-      batches.push({ id, payrollRunId: req.payrollRunId, total: req.entries.reduce((s, e) => s + e.amountCents, 0), entries: req.entries, settleAt: req.settleAt, status: "submitted" });
-      return { batchId: id, settleAt: req.settleAt };
-    },
-    async tick(now) {
-      const out = [];
-      for (const b of batches) if (b.status === "submitted" && b.settleAt <= now) { b.status = "settled"; out.push({ type: "sim.bank_batch_settled" as const, subjectRef: b.payrollRunId, payload: { batch_id: b.id, payroll_run_id: b.payrollRunId } }); }
-      return out;
-    },
-  };
-  return { bank, batches };
-}
+import { buildFixtureWorld, CO, fakeBank, openTempDb, PS, TS, type FixtureIds } from "./fixture-world";
 
 async function seeded(): Promise<{ db: Db; ids: FixtureIds; bank: ReturnType<typeof fakeBank>; close(): Promise<void> }> {
   const t = await openTempDb();

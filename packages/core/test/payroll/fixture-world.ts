@@ -10,6 +10,7 @@ import {
   actions, bankAccounts, benefitEnrollments, benefitPlans, closeDb, companies, employerTaxRates, migrate, openDb, payRates, paySchedules,
   taxAccounts, taxProfiles, timeEntries, workers, type Db,
 } from "@weft/db";
+import type { BankSim } from "@weft/contracts";
 
 export const CO = "cmp_larkspur";
 export const PS = "ps_us_semimonthly";
@@ -105,3 +106,22 @@ export async function buildFixtureWorld(db: Db): Promise<FixtureIds> {
 }
 
 const eqId = (workerId: string) => eq(payRates.workerId, workerId);
+
+/** In-memory bank simulator: settles on the first tick at or after settle_at. */
+export function fakeBank() {
+  const batches: { id: string; payrollRunId: string; total: number; entries: { workerId: string; amountCents: number; accountRef: string }[]; settleAt: string; status: string }[] = [];
+  const bank: Pick<BankSim, "submitBatch" | "tick"> = {
+    async submitBatch(req) {
+      const id = `simb_${String(batches.length + 1).padStart(4, "0")}`;
+      batches.push({ id, payrollRunId: req.payrollRunId, total: req.entries.reduce((s, e) => s + e.amountCents, 0), entries: req.entries, settleAt: req.settleAt, status: "submitted" });
+      return { batchId: id, settleAt: req.settleAt };
+    },
+    async tick(now) {
+      const out = [];
+      for (const b of batches) if (b.status === "submitted" && b.settleAt <= now) { b.status = "settled"; out.push({ type: "sim.bank_batch_settled" as const, subjectRef: b.payrollRunId, payload: { batch_id: b.id, payroll_run_id: b.payrollRunId } }); }
+      return out;
+    },
+  };
+  return { bank, batches };
+}
+
