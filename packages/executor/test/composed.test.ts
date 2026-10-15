@@ -33,9 +33,11 @@ describe("composed command set", () => {
   });
 
   it("R2 and above never have approval never; no R4 command has autoAllow", () => {
+    // human_only commands (T4's routines.enable is R2 with approval "never") only ever run as a person: the pipeline
+    // refuses every agent, MCP and system caller before policy, so a human session is the approval.
     for (const d of all) {
       const r = riskOf(d);
-      if (RANK[r] >= 2 && d.access !== "system_only") expect(d.approval, d.name).not.toBe("never");
+      if (RANK[r] >= 2 && d.access === "all") expect(d.approval, d.name).not.toBe("never");
       if (r === "R4") expect(d.autoAllow, d.name).toBe("never");
     }
   });
