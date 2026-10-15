@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { SimClock, VaultAdmin } from "@weft/contracts";
-import { vaultSecrets, type Db, type DbTx } from "@weft/db";
+import { vaultSecrets, withWriteLock, type Db, type DbTx } from "@weft/db";
 import type { Redactor } from "./redact";
 
 export const VAULT_NAME = /^[a-z0-9][a-z0-9-]{1,62}$/;
@@ -57,7 +57,7 @@ export function createVault(opts: { db: Db; clock: SimClock; key: Buffer; redact
         tag: c.getAuthTag().toString("base64"), fingerprint: fingerprint(input.value), createdBy: input.by, createdAt: clock.now(), lastUsedAt: null,
       };
       redactor.add(input.value);
-      await db.insert(vaultSecrets).values(row).onConflictDoUpdate({ target: vaultSecrets.name, set: { kind: row.kind, description: row.description, ciphertext: row.ciphertext, iv: row.iv, tag: row.tag, fingerprint: row.fingerprint } });
+      await withWriteLock(() => db.insert(vaultSecrets).values(row).onConflictDoUpdate({ target: vaultSecrets.name, set: { kind: row.kind, description: row.description, ciphertext: row.ciphertext, iv: row.iv, tag: row.tag, fingerprint: row.fingerprint } }));
     },
     async list() {
       const rows = await db.select({ name: vaultSecrets.name, kind: vaultSecrets.kind, fingerprint: vaultSecrets.fingerprint }).from(vaultSecrets).orderBy(vaultSecrets.name);

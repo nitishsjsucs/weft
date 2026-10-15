@@ -47,6 +47,15 @@ Seed step `governance`: principals `usr_dana` (admin), `usr_theo` (payroll_admin
 - `routines.draft` emitting `routine.drafted` gets its `routine_enable` proposal from the notifier; approving it runs `routines.enable` as the approver.
 - `POST /v1/proposals/:id/start` opens a chat run (tainted when the suggestion is) and calls `agent.startChat` best-effort.
 
+## Integration hazard: every writer takes withWriteLock
+
+Verified on this Mac with `@libsql/client` 0.18: while an executor transaction is open, a write through `weft.db` on
+another pooled connection fails at once with `SQLITE_BUSY` (the open-time `busy_timeout` PRAGMA applies only to the
+first connection). Passing `timeout` to `createClient` is worse: the local driver busy-waits synchronously, so the
+event loop never lets the open transaction commit and the write fails after the timeout. So every write in the process
+(the loop's run store, scheduler cursors, simulator ticks, route handlers) must go through `withWriteLock` from
+`@weft/db`, and nothing may nest it. Reads are fine outside the lock (WAL).
+
 ## Contract notes
 
 - `packages/contracts/src/ext/t3-governance.ts` (commit `contract: ...`): `BatchedAgentCall`, `RunHandleWithNonce`, `CommandOutputTaintHints`. Additive only.
