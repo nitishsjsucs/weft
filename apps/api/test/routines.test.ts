@@ -81,7 +81,7 @@ describe("/v1/routines routes", () => {
 
   it("trigger is attended and returns the routine run id; enable and disable go through the HumanExecutor", async () => {
     const res = await post("/v1/routines/rt_people_digest/trigger");
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(200);
     const { routineRunId } = (await res.json()) as { routineRunId: string };
     expect((await engine.getRun(routineRunId))?.attended).toBe(true);
     expect((await post("/v1/routines/rt_people_digest/disable")).status).toBe(200);

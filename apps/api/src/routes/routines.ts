@@ -51,7 +51,7 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
     await getRoutine(c.req.param("id"));
     const out = await engine.trigger(c.req.param("id"), { attended: true, requestedBy: s.principalId });
     await kick();
-    return c.json(out, 202);
+    return c.json(out);
   });
 
   r.post("/v1/routines/draft", async (c) => {
