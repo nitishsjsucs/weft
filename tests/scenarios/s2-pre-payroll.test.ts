@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { PayrollRun } from "@weft/contracts";
-import { agentRuns, bankAccounts, events, paychecks, proposals, routineRuns, ytdLedger } from "@weft/db";
+import { actions, agentRuns, bankAccounts, events, paychecks, payrollRuns, proposals, routineRuns, ytdLedger } from "@weft/db";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 const RUN = "pay_2026_10_30";
@@ -109,6 +109,12 @@ describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant
     let run = PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json());
     expect(run.status).toBe("processing");
     expect(run.excludedWorkerIds).toHaveLength(1);
+    // submitted_action_seq points at the payroll.submit_run action row the executor appended in the same transaction.
+    const stored = (await weft.db.select().from(payrollRuns).where(eq(payrollRuns.id, RUN)))[0]!;
+    const submitAction = (await weft.db.select().from(actions).where(eq(actions.command, "payroll.submit_run")))[0];
+    expect(submitAction, "payroll.submit_run action row").toBeDefined();
+    expect(stored.submittedActionSeq).toBe(submitAction!.seq);
+    expect(submitAction!.proposalId).toBe(proposalId);
     const approvedTotal = run.totals!.totalCost.amount;
     await weft.clock.advance("2026-10-30T13:00:00.000Z");   // Fri Oct 30 06:00 PT
     await weft.scheduler.tick();
