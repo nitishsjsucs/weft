@@ -42,7 +42,7 @@ Seed step `governance`: principals `usr_dana` (admin), `usr_theo` (payroll_admin
 - Refuse from inside a command by throwing a `Refused` WeftError, or any error with a string `code` that is a `RefusalCode` or starts with `DOMAIN_`. Anything else becomes `INTERNAL` and the savepoint rolls back.
 - `CommandOutput` may carry `taintedBy` (taint the run with that source) and `untrusted` (extra dotted paths to wrap for this result). Types in `packages/contracts/src/ext/t3-governance.ts`.
 - Day ceilings: the executor reads `${ceilingKey}_day` and also `agent.device_day_cents` style keys (`_cents` replaced by `_day_cents`), so the seeded SPEC names work with `ceilingKey: "agent.device_cents"`.
-- `access: "system_only"` commands are R1 by definition. System callers need the command on `SYSTEM_ALLOWLISTS` in `packages/executor/src/system.ts`: today `svc_events` has `tax.record_registration`, `payroll.mark_processed`, `payroll.mark_failed`, `onboarding.complete_task`, `comms.post_update`. Ask T3 for additions; nothing at R2 or above is ever allowed.
+- `access: "system_only"` commands are R1 by definition. System callers need the command on `SYSTEM_ALLOWLISTS` in `packages/executor/src/system.ts`: today `svc_events` has `tax.record_registration`, `payroll.mark_processed`, `payroll.mark_failed`, `onboarding.complete_task`, `it.record_delivery` (added in round 2 for T2's delivery handler), `comms.post_update`. `packages/executor/test/composed.test.ts` fails if a `system_only` command is on no allowlist. Ask T3 for additions; nothing at R2 or above is ever allowed.
 - The executor redacts model-originated args (agent and MCP) before hashing, storing or running them. A field that only validates unredacted gets `INVALID_INPUT`.
 - `deps.sims` is built on first use, so read commands never need the simulators.
 - Never call `withWriteLock` inside a command: the executor already holds it.
@@ -80,7 +80,7 @@ event loop never lets the open transaction commit and the write fails after the 
 
 ## Tests
 
-`packages/executor/test` (56), `apps/api/test` (route contracts and auth for every route file this track owns), `tests/scenarios/s7-taint`, `s7b-taint-carry`, `s8-mcp-api`. On this branch the gate is 123 passed, 2 skipped (the real-stack S7 and S8 below), 13 todo owned by other tracks; typecheck 15 of 15.
+`packages/executor/test` (61, including `composed.test.ts`, which checks the governance invariants over every command `@weft/core` exports plus the builtins, so it covers T1 and T2 the moment they merge), `apps/api/test` (route contracts and auth for every route file this track owns), `tests/scenarios/s7-taint`, `s7b-taint-carry`, `s8-mcp-api`. On this branch the gate is 130 passed, 2 skipped (the real-stack S7 and S8 below), 13 todo owned by other tracks; typecheck 15 of 15.
 
 Until T1 and T2 land, most tests run on fixture commands shaped like theirs (`packages/executor/test/fixtures.ts`, `fixtureWeft()`). The fixture `notices.get` now returns T2's shape (`{ notice }`, title and body only with `response_format: "detailed"`), and the S7 script asks for detailed. Two more scenario tests run on the real commands and switch on by themselves when `@weft/core` carries `sim.deliver_notice`, `notices.get` and `tax.update_rate`:
 
