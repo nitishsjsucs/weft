@@ -88,6 +88,12 @@ describe("GP3 new hire in a new state (asserts tainted === false)", () => {
     expect(Object.fromEntries(task.map((t) => [t.kind, t.status]))).toMatchObject({ state_registration: "done", it_accounts: "done", device: "done" });
     const activated = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM events WHERE type = 'tax_account.activated'`);
     expect(activated[0]!.n).toBe(2);
+    await weft.clock.advance("2026-10-29T15:30:00.000Z");   // laptop ETA: 3 business days after the order
+    const s2 = createScheduler({ db: weft.db, clock: weft.clock, sims: weft.sims, executor: bundle, handlers, routines, log: () => undefined });
+    await s2.tick();
+    await s2.stop();
+    const dev = await weft.db.all<{ status: string; price_cents: number }>(sql`SELECT status, price_cents FROM devices WHERE worker_id = ${noor}`);
+    expect(dev).toEqual([{ status: "delivered", price_cents: 189_900 }]);
 
     // Noor's Nov 1 to 15 preview has no block flag once T1's draft commands land.
     if (commands.some((c) => c.name === "payroll.create_draft")) {

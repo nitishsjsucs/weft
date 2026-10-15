@@ -20,3 +20,12 @@ export const onboardingHandlers: EventHandler[] = [{
     }
   },
 }];
+
+/** sim.device_delivered marks the device delivered (it.record_delivery as svc_events). */
+onboardingHandlers.push({
+  event: "sim.device_delivered", principal: "svc_events",
+  async handle(evt, sys) {
+    if (!evt.payload.order_ref) return;
+    await sys.exec("svc_events", "it.record_delivery", { order_ref: evt.payload.order_ref }, { eventId: evt.id, attended: evt.attended, requestedBy: evt.requestedBy });
+  },
+});

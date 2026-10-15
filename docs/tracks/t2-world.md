@@ -8,7 +8,7 @@ Branch `track/t2-world`. People, onboarding, tax, notices, benefits, IT, comms, 
 - **Notice scenarios** (`packages/sim/fixtures/notices/*.txt`, original text): `ca_de2088_rate_change`, `ca_de2088_injection` (the only fixture with the injection line), `ny_missing_filing`, `irs_deposit_schedule_change`. Rendered with the sim date; a deterministic labeled-line parser produces `NoticeExtract` (changed rates only).
 - **Seed** (`packages/seed/src/{company,people,benefits,tax,it,actions}.ts`): SPEC 5.1 to 5.4 and 5.6 counts. Roster order fixes ids: employees `wrk_0001` to `wrk_0048` (EMP numbers match), contractors `wrk_0049` to `wrk_0051`.
 - **Commands** (`packages/core/src/commands/*.ts`, logic in `people/ tax/ notices/ benefits/ it/ comms/ onboarding/ demo/`): every read and write in SPEC 9.2 for t2 except `people.update_profile` (cut line).
-- **Handlers**: `sim.registration_completed` and `sim.registration_needs_info` run `tax.record_registration`; `tax_account.activated` completes `state_registration` once every account of the work state is active.
+- **Handlers**: `sim.registration_completed` and `sim.registration_needs_info` run `tax.record_registration`; `tax_account.activated` completes `state_registration` once every account of the work state is active; `sim.device_delivered` runs `it.record_delivery`. All run as `svc_events`.
 - **Routes**: company, stats, workers (list, detail, onboarding), offers (list, accept), tax, notices, benefits, it, sim (clock, advance, deliver, state, faults, chat, reset).
 - **Scenario S3** (`tests/scenarios/s3-new-hire.test.ts`): the domain flow through the real scheduler and handlers, with direct stand-ins for the executor; script `tests/scenarios/scripts/s3-new-hire.json` for the scripted provider.
 

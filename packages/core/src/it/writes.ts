@@ -102,4 +102,18 @@ export const orderDevice = writeCommand({
   },
 });
 
-export const itWriteCommands: WeftCommand[] = [createAccount, orderDevice];
+
+const DeliveryInput = z.object({ order_ref: z.string() });
+export const recordDelivery = writeCommand({
+  name: "it.record_delivery", summary: "System: record a simulated device delivery.",
+  description: "System command (svc_events): records the device vendor simulator's delivery of an order by setting the device status to delivered.",
+  input: DeliveryInput, domain: "it", needs: "edit", effect: "write", risk: () => "R1", approval: "never", access: "system_only", reversible: false, preview: null,
+  async run(i, _ctx, deps) {
+    const [d] = await deps.tx.select().from(devices).where(eq(devices.orderRef, i.order_ref)).limit(1);
+    if (!d) throw notFound("device order", i.order_ref);
+    if (d.status === "ordered" || d.status === "shipped") await deps.tx.update(devices).set({ status: "delivered" }).where(eq(devices.id, d.id));
+    return { data: { device_id: d.id, order_ref: i.order_ref, status: "delivered" }, summary: `Device ${d.id} delivered (${i.order_ref})` };
+  },
+});
+
+export const itWriteCommands: WeftCommand[] = [createAccount, orderDevice, recordDelivery];
