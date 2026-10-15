@@ -35,7 +35,7 @@ export const rawFetch: typeof fetch = mocksEnabled ? mockFetch : (...a) => fetch
 let version = 0;
 const versionSubs = new Set<() => void>();
 export function invalidate() { version++; versionSubs.forEach((f) => f()); }
-function useVersion() { return useSyncExternalStore((cb) => { versionSubs.add(cb); return () => versionSubs.delete(cb); }, () => version, () => 0); }
+export function useVersion() { return useSyncExternalStore((cb) => { versionSubs.add(cb); return () => versionSubs.delete(cb); }, () => version, () => 0); }
 
 const cache = new Map<string, unknown>();
 

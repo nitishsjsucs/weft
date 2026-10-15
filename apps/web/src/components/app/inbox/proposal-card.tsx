@@ -81,7 +81,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
                 {p.routineRunId ? <span className="font-mono text-1">{p.routineRunId}</span> : null}
                 {p.proposerRunId ? <Link className="inline-flex items-center gap-0.5 text-blue-11 hover:underline" href={`/app/runs/${p.proposerRunId}`}>Open run <ExternalLink className="size-3" /></Link> : null}
               </span>
-            ) : "Agent suggestion"}
+            ) : p.kind === "routine_enable" ? "Routine draft" : p.kind === "suggestion" ? "Agent suggestion" : "No run recorded"}
           </Field>
         </dl>
         {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} rows={p.diff} /> : null}

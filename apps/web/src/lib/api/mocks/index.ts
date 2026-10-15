@@ -134,6 +134,7 @@ const routes: [string, RegExp, Handler][] = [
     const rows = world.workers.filter((w) => w.status === "active" && (!wid || w.id === wid)).map((w) => ({ id: `ben_${w.id.slice(4)}`, workerId: w.id, planId: "bpl_0001", tier: "ee", employeeCents: 9500, deferralBps: null, status: "active", effectiveFrom: "2026-01-01", effectiveTo: null }));
     return json(200, page(rows, q, (r) => r.id));
   }],
+  ["GET", /^\/v1\/it\/devices$/, (_m, q) => json(200, page(world.workers.filter((w) => w.status === "active").map((w) => ({ id: `dev_${w.id.slice(4)}`, workerId: w.id, model: "Larkspur standard laptop (sim)", status: "assigned", orderRef: null, price: money(189_900) })), q, (r) => r.id))],
   ["GET", /^\/v1\/it\/accounts$/, (_m, q) => {
     const wid = q.get("workerId");
     const rows = world.workers.filter((w) => w.status === "active" && (!wid || w.id === wid)).flatMap((w) => (["google_ws", "chat"] as const).map((system, i) => ({ id: `ita_${w.id.slice(4)}${i}`, workerId: w.id, system, handle: `${w.firstName}.${w.lastName}`.toLowerCase(), groups: ["all-staff"], status: "active", simRef: null })));
