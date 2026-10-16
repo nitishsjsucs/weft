@@ -1,5 +1,49 @@
 # Review log
 
+## Wave 3 fixer round (2026-10-16, 16:20 to 17:10 PDT)
+
+Four review lenses (correctness, security, product design, honesty and brand) ran against main at 6241cde. Each
+finding was re-checked in the code before it was fixed or set aside.
+
+### Fixed
+
+| Lens | Finding | Fix | Commit subject |
+|---|---|---|---|
+| Correctness | The public webhook route sent the wrong args to `screening.apply_vendor_event` and `documents.apply_esign_event`, answered 200 anyway and deduped the retry, so every real Checkr, HireRight and DocuSign delivery was lost | The route uses the simulators' ingest path; a failed apply keeps its row with the error and frees the dedupe key; route test with the signed Checkr and DocuSign vectors | fix(integrations): apply real Checkr, HireRight and DocuSign webhooks |
+| Security | The webhook body was buffered whole before the 1 MB cap when Content-Length was missing | Capped stream reader | (same commit) |
+| Correctness | A sick request filed inside the waiting period for a date after the unlock was blocked with 0 available | `availableOn(balance, start, unlock)`; T10b | fix(time-off): a request after the waiting period counts the locked accrual |
+| Correctness | Two pending duplicate claims each flagged the other, so both were proposed for decline | A pending twin counts only when submitted first | fix(expenses): between two pending twins only the later one is a duplicate |
+| Correctness | A reimbursement released from an excluded paycheck skipped a draft that was already open | `expenses.mark_paid` reattaches released items to the earliest open draft (no dedicated scenario test yet) | fix(expenses): released reimbursements ride the next open draft; no self-approval |
+| Security | Admins could approve their own expense; deciders their own time off | `DOMAIN_SELF_APPROVAL` in `expenses.decide` and `time_off.decide`, with API tests | (same commit) and fix(time-off): no self-approval; a manager reopens only a direct report's request |
+| Security | `expenses.explain` was a laundering channel from tainted runs | A tainted run saves the template only. The explanation is not wrapped as untrusted: with this rule an agent explanation only ever comes from an untainted run | fix(expenses): released reimbursements ride the next open draft; no self-approval |
+| Security | Any manager could reopen any team's request | `time_off.reopen` applies the decide reach | fix(time-off): no self-approval; a manager reopens only a direct report's request |
+| Security | Greenhouse and Workday text reached the model unwrapped and candidate text landed in trusted offer columns | Untrusted fields on `ats.list_jobs`, `ats.get_hire` (job name), `integrations.list_sync_items` and `hris.get_worker_external`; imported names and titles must be plain name or title text of a few words, otherwise the hire waits as a sync item. A per-row source flag that taints later reads of imported names is not built | fix(security): wrap vendor text, plain imported names, ui_only adverse steps |
+| Security | An API key could run the screening review and adverse steps through `POST /v1/tools` | They join `UI_ONLY_COMMANDS`; `apps/api/test/ui-only.test.ts` | (same commit) |
+| Security | The redactor never learned the vendor credentials; a missing DocuSign key file put its path in a refusal | `compose.ts` adds every contract-named integration secret and the PEM contents; the refusal names only the variable | fix(security): the redactor learns the vendor credentials |
+| Security | `GET /v1/sync-items` showed base pay to people without compensation access | The `canSeeComp` rule masks pay values | fix(integrations): cards that fit any width and say what is real |
+| Design (blocking) | Integration cards broke at 1440 docked, 1280 and 1024: HireRight's title shrank to one letter and badges spilled out | Container-sized grid, wrapping header, plain Simulated badge with the HireRight note in its free path; GP17 e2e follows | (same commit) |
+| Design | No action hierarchy on the cards; the secrets paragraph repeated five times; secret names truncated alike | Connection controls both secondary, a labeled Simulator group, full secret names, the paragraph once in the page notice | (same commit) |
+| Honesty | The page and Workday card promised credentials make a card real; the Greenhouse free board is not wired; Test connection on Checkr and DocuSign tests nothing; Checkr copy said never production | Copy says what runs; Workday shows "Real adapter not built yet"; the test result reads "Status (not tested)" for adapters without a test; a real adapter held back by its live flags reads "Real, disabled"; the setup line names the DocuSign and Checkr live flags | (same commit) |
+| Honesty | HireRight label inconsistent in the portal; "(sim)" hardcoded | Portal badge reuses the label; "(sim)" follows the card mode | (same commit) |
+| Design | The Time Off calendar drew no approved leave (`bg-accent-4` is never generated) | blue-9 approved, dashed blue-3 pending | fix(time-off): calendar draws approved leave; rows read like the rest of the app |
+| Design | Raw lowercase status, mono hours, "No checks fired", tooltip-only reason for a disabled Approve; Workday rows looked real | Sentence-case labels, tabular Inter, "All checks passed", a visible reason linked by aria-describedby, "Managed in Workday (simulated)" | (same commit) |
+| Honesty | A local model showed as "Scripted, no model calls" | Local is recognised before the live check; the fixture uses live: false like the real provider | fix(web): a local model reads Local in the top bar; charts drop the accent |
+| Design | Chat charts used the brand accent for a series | Accent removed from the palette | (same commit) |
+| Honesty | README overstated the HireRight simulator and the free Greenhouse board; docs/wave3.md claimed expense manager routing; the open item about `expense_auto_cents` pointed at the wrong fix; status.md and .env.example were stale | Corrected; status entry and commented integration switches added | docs: wave 3 fixer round |
+
+### Deferred, with the reason
+
+| Lens | Finding | Why it waits |
+|---|---|---|
+| Design | No way to request time off in the UI (portal section is a stub; no admin action) | A new form with live minutes preview and projected balance is feature work beyond this round; the API (`POST /v1/time-off/requests`) works and is tested. Top of the open list in docs/wave3.md |
+| Design | Expenses and People tables hide Amount and Status at common docked widths | Needs container queries and a stacked row layout for both tables plus layout spec updates; recorded in docs/wave3.md |
+| Design | The agent panel does not follow streaming content | Needs a ResizeObserver stick-to-bottom with a "Jump to latest" pill and an e2e check; recorded |
+| Design | Raw ISO dates in check messages and proposal summaries | One shared formatter across core messages touches planner hash inputs and eval expectations; needs its own pass with the lint-style test the finding proposes |
+| Correctness | Unpaid leave never docks salaried pay (spec 6.4) | Payroll math change with its own hand-computed cases; recorded as an open item |
+| Honesty | Real connection tests for Checkr and DocuSign | Needs adapter calls tested on a fake fetch; the card now labels the result "Status (not tested)" instead of claiming a test |
+| Honesty | Reading a public Greenhouse board without the Harvest credentials | The copy now says what happens today; wiring `fetchBoardJobs` into `/v1/ats/jobs` is open |
+| Design (minor) | The expense drawer's unlabeled decline reason and the Return note hint; the chat card's repeated worker id and "below" copy | Small UI follow-ups, recorded |
+
 ## Polish round: four polish branches merged (2026-10-15, 22:07 to 22:32 PDT)
 
 `polish/reset`, `polish/brand`, `polish/times` and `polish/ui` were cut from main at 42e618f and merged in that order.

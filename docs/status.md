@@ -1,5 +1,18 @@
 # Status
 
+## Wave 3 integration and fixer round (2026-10-16, 17:10 PDT)
+
+The seven wave 3 tracks are merged (rounds 1 and 2 in `docs/wave3.md` section 10) and a fixer round closed the
+review findings recorded in `docs/review-log.md`: real vendor webhooks are now applied, the waiting-period, duplicate
+and released-reimbursement bugs are fixed, self-approval is refused for expenses and time off, vendor text is wrapped
+as untrusted, the adverse action steps are UI only, the redactor knows the vendor credentials, the Integrations cards
+fit every width and say what is real, and the Time Off calendar draws approved leave. Left: the portal time-off
+request form, container-sized tables, the agent panel following new content, one date formatter for messages,
+unpaid-leave docking and the other items in `docs/wave3.md`'s open list. Fresh clone (e2e on ports 4770 and 4771):
+`pnpm test` 889 passed and 1 skipped (160 files), `pnpm typecheck` 16 of 16, build ok, `pnpm e2e` 44 passed and 1
+skipped, `pnpm demo` exit 0 with GP1 to GP18 and the audit chain verifying, and lint:prose, lint:brand and
+brand:overlap ok.
+
 ## Wave 3 scaffold (2026-10-16, 13:40 PDT)
 
 The wave 3 plan is in `docs/wave3.md`: agent parity (ranks 1 to 9 and 13 of `research/wave3/agent-parity.md`), real

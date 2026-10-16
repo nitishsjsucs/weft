@@ -49,8 +49,9 @@ Decisions the architect made where the research left a choice:
 - **Auto autonomy ships behind `agent.allow_auto_autonomy` (default off).** The three-way control renders; auto is
   selectable only when the setting is on. Changing autonomy is itself a proposal.
 - **Managers become real, narrow principals.** One seeded manager (`usr_imani`, role `manager`, linked to
-  wrk_0004) approves time off and expenses for direct reports only; the direct-report check lives inside the decide
-  commands, so the grant model is unchanged. Routing skips a manager whose worker is not active (GP9 terminates Imani
+  wrk_0004) approves time off for direct reports only; the direct-report check lives inside `time_off.decide` (and,
+  since the fixer round, `time_off.reopen`), so the grant model is unchanged. Expense manager routing is still open
+  (section 10 and the README's "Wave 3: left"). Routing skips a manager whose worker is not active (GP9 terminates Imani
   in its own world and the demo walks GP9 before GP14), falling back to the department lead, then Dana.
 - **Birthdays are opt-in and synthetic**: `workers.birth_month_day` (`MM-DD`, never a year), seeded for about half
   the people. Anniversaries come from the start date.
@@ -467,8 +468,15 @@ and two L7 reruns; no single run came near the per-run cap.
 
 ### Still open after round 2
 
-- Auto autonomy end to end: `expenses.decide` should declare `autoEligible` with a seeded `agent.expense_auto_cents`
-  limit, followed by the GP16 auto scenario.
+- Auto autonomy end to end: `expenses.decide` already declares `autoEligible` (`agent.expense_auto_cents`); seed the
+  `agent.expense_auto_cents` limit row and add the GP16 auto scenario. Without the row the executor never
+  auto-executes, which is the safe default.
+- Left by the fixer round (docs/review-log.md): a portal "Request time off" form and a "Request time off" action on
+  the admin Time Off page; container-sized Expenses and People tables; the agent panel following new content; one
+  shared date formatter for check messages and proposal summaries (they still print ISO dates); full-day docking of
+  salaried pay for unpaid leave (spec 6.4); real connection tests for Checkr and DocuSign; reading a public Greenhouse
+  board without the Harvest credentials; the expense drawer's decline reason label and the chat card's worker
+  grouping.
 - No live case yet for GP16's Ready Check and milestones; GP14's routine runs live only on its template path.
 - Everything else in section 10's open list, apart from the two items closed above.
 
