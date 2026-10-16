@@ -355,8 +355,9 @@ export const proposeOffCycleCommand: WeftCommand<OffCycleInput> = {
 
 export const payrollCommands: WeftCommand[] = [
   listRunsCommand, getRunCommand, previewRunCommand, createDraftCommand, explainFlagsCommand, submitRunCommand, markProcessedCommand, markFailedCommand,
-  proposeOffCycleCommand,
 ];
+// proposeOffCycleCommand is registered through offboardingCommands (commands/offboarding.ts), which keeps this
+// wave 1 array, and the registry test that pins it, unchanged.
 
 /** For tests and the precheck: the deps-free view of a run's submit amount. */
 export async function submitPreviewFor(deps: CommandDeps, runId: string, excludeBlocked: boolean) { return submitAmount({ run_id: runId, exclude_blocked: excludeBlocked }, deps); }

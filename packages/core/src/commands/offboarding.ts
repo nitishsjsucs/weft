@@ -14,7 +14,7 @@ import { nameRef } from "../people/names";
 import { getWorker } from "../people/queries";
 import { PayrollRefusal, submitRun } from "../payroll/lifecycle";
 import { createSpecialRun } from "../payroll/offcycle";
-import { BANK_CREDENTIAL_REF, PAYROLL_RUN_CEILING } from "./payroll";
+import { BANK_CREDENTIAL_REF, PAYROLL_RUN_CEILING, proposeOffCycleCommand } from "./payroll";
 import {
   caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL, stepsOf,
   type CaseRow, type StepRow,
@@ -250,8 +250,8 @@ type RunStepInput = z.infer<typeof RunStepInput>;
 
 export const runStepCommand = writeCommand({
   name: "offboarding.run_step", summary: "Run a direct offboarding step after final pay.",
-  description: "Runs one direct step of an offboarding case_id once final pay is done: group_removal (clear IdP groups), app_removal (GitHub and chat), cobra_notice (email through the email simulator) or benefits_terminate (end enrollments at month end). R3 for agents; people run it directly.",
-  input: RunStepInput, domain: "people", needs: "edit", effect: "external", risk: (i) => (i.step === "benefits_terminate" ? "R2" : "R3"), approval: "never", reversible: false,
+  description: "Runs one direct step of an offboarding case_id once final pay is done: group_removal (clear IdP groups), app_removal (GitHub and chat), cobra_notice (email through the email simulator) or benefits_terminate (end enrollments at month end). An agent's call is a proposal; a person runs it directly.",
+  input: RunStepInput, domain: "people", needs: "edit", effect: "external", risk: (i) => (i.step === "benefits_terminate" ? "R2" : "R3"), approval: "always", reversible: false,
   lease: (i) => `offboarding:${i.case_id}:${i.step}`,
   async preview(i, ctx, deps) {
     const { c, step, worker } = await openStep(deps.tx, ctx.companyId, i.case_id, i.step);
@@ -299,4 +299,5 @@ export { liveEnrollments };
 
 export const offboardingCommands: WeftCommand[] = [
   listCases, getCase, terminateCommand, finalPayCommand, suspendDirectoryCommand, deactivateSsoCommand, lockDeviceCommand, runStepCommand,
+  proposeOffCycleCommand,   // payroll.propose_off_cycle, defined in commands/payroll.ts
 ];
