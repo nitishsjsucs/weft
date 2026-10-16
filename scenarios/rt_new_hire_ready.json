@@ -1,0 +1,11 @@
+{
+  "agents": {
+    "main": [
+      { "output": [
+        { "type": "function_call", "name": "comms__send_message", "arguments": "{{derived.comms.send_message}}" },
+        { "type": "function_call", "name": "onboarding__flag_not_ready", "arguments": "{{derived.onboarding.flag_not_ready}}" }
+      ] },
+      { "output": [{ "type": "text", "text": "Posted the ready check in #new-hires and added an Inbox suggestion for each blocked hire." }] }
+    ]
+  }
+}

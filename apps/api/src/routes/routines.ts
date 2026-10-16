@@ -37,6 +37,8 @@ export function createRoutinesEventSource(db: Db): EventSource {
 }
 
 const DraftBody = z.object({ prompt: z.string().min(1).max(400) });
+/** Wave 3 (w3-parity-routines): an autonomy change is a proposal (routines.set_autonomy), approved in the Inbox. */
+const AutonomyBody = z.object({ autonomy: z.enum(["recommend", "approve", "auto"]) });
 
 export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
@@ -54,7 +56,12 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
   };
   const dto = (run: RoutineRun) => ({ ...run, durationMs: run.startedAt && run.endedAt ? new Date(run.endedAt).getTime() - new Date(run.startedAt).getTime() : null });
 
-  r.get("/v1/routines", async (c) => c.json(await engine.list()));
+  // Wave 3 (w3-parity-routines): each row also carries lastRun and nextRunAt for the gallery and the list.
+  r.get("/v1/routines", async (c) => {
+    const defs = await engine.list();
+    const ov = typeof engine.overview === "function" ? new Map((await engine.overview()).map((o) => [o.routineId, o])) : new Map();
+    return c.json(defs.map((d) => ({ ...d, lastRun: ov.get(d.id)?.lastRun ?? null, nextRunAt: ov.get(d.id)?.nextRunAt ?? null })));
+  });
 
   r.get("/v1/routines/:id", async (c) => c.json(await getRoutine(c.req.param("id"))));
 
@@ -106,8 +113,21 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
     });
   }
 
+  r.post("/v1/routines/:id/autonomy", async (c) => {
+    const s = session(c);
+    const def = await getRoutine(c.req.param("id"));
+    const body = AutonomyBody.parse(await c.req.json().catch(() => ({})));
+    if (def.autonomy === body.autonomy) throw new Refused("DOMAIN_NO_CHANGE", `${def.id} is already at ${body.autonomy}`);
+    const human = weft.executor.human;
+    if (!human.propose) throw new Refused("NOT_PERMITTED", "This executor cannot file proposals for a person");
+    const outcome = await human.propose(s, "routines.set_autonomy", { routine_id: def.id, autonomy: body.autonomy });
+    await kick();
+    if (!outcome.ok) return c.json({ ...outcome, _tag: "Refused", code: outcome.refusal.code, message: outcome.refusal.message }, 422);
+    return c.json(outcome);
+  });
+
   return stubRoutes(r, "routines", [
     "GET /v1/routines", "GET /v1/routines/:id", "GET /v1/routines/:id/runs", "GET /v1/routine-runs/:id", "POST /v1/routines/:id/trigger",
-    "POST /v1/routines/draft", "POST /v1/routines/:id/enable", "POST /v1/routines/:id/disable",
+    "POST /v1/routines/draft", "POST /v1/routines/:id/enable", "POST /v1/routines/:id/disable", "POST /v1/routines/:id/autonomy",
   ]);
 }

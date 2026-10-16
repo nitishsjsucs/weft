@@ -10,6 +10,12 @@ export const W3_CHAT_TID = {
 } as const;
 export const W3_ROUTINES_TID = {
   autonomy: (routineId: string) => `routine-autonomy-${routineId}`,
+  autonomyLevel: (routineId: string, level: string) => `routine-autonomy-${routineId}-${level}`,
+  autonomyStatus: (routineId: string) => `routine-autonomy-status-${routineId}`,
   gallery: "routine-gallery",
   tryIt: (routineId: string) => `routine-try-${routineId}`,
+  settingsAgent: "settings-agent",
+  settingChatCanPropose: "setting-chat-can-propose",
+  settingAllowAutoAutonomy: "setting-allow-auto-autonomy",
+  noticeEscalation: "notice-escalation",
 } as const;

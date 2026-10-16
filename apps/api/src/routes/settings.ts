@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { stubRoutes } from "../http/stub";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { Forbidden, Unauthorized } from "@weft/contracts";
+import { Forbidden, Unauthorized, W3_SETTINGS } from "@weft/contracts";
 import { agentGrants, limits, principals, settings } from "@weft/db";
 import { adminChange, AdminRefused, executorInternals } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
@@ -25,6 +25,16 @@ async function permissions(weft: Weft, companyId: string) {
     viewingAsNote: "The Viewing as switcher is a demo control that defeats SELF_APPROVAL by design.",
   };
 }
+
+/** Wave 3 agent settings (w3-parity-routines): both default off; a missing row reads as false. */
+async function agentSettings(weft: Weft) {
+  const read = async (key: string) => {
+    const [r] = await weft.db.select().from(settings).where(eq(settings.key, key));
+    try { return r ? JSON.parse(r.valueJson) === true : false; } catch { return false; }
+  };
+  return { chatCanPropose: await read(W3_SETTINGS.chatCanPropose), allowAutoAutonomy: await read(W3_SETTINGS.allowAutoAutonomy) };
+}
+const AgentSettingsBody = z.object({ chatCanPropose: z.boolean().optional(), allowAutoAutonomy: z.boolean().optional() }).strict();
 
 export function settingsRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
@@ -53,5 +63,31 @@ export function settingsRoutes(weft: Weft): Hono<WeftEnv> {
     await kick(weft);
     return c.json(await permissions(weft, s.companyId));
   });
-  return stubRoutes(r, "settings", ["GET /v1/settings/permissions", "PUT /v1/settings/agent-grants"]);   // wave 3 rows answer 501 until w3-parity-routines lands them
+  r.get("/v1/settings/agent", async (c) => {
+    if (!c.var.session) throw new Unauthorized();
+    return c.json(await agentSettings(weft));
+  });
+  r.put("/v1/settings/agent", async (c) => {
+    const s = c.var.session;
+    if (!s) throw new Unauthorized();
+    const body = AgentSettingsBody.parse(await c.req.json().catch(() => ({})));
+    const changes = ([["chatCanPropose", W3_SETTINGS.chatCanPropose], ["allowAutoAutonomy", W3_SETTINGS.allowAutoAutonomy]] as const)
+      .filter(([k]) => body[k] !== undefined).map(([k, key]) => ({ key, value: body[k]! }));
+    if (changes.length) {
+      const e = executorInternals(weft.executor)?.engine;
+      if (!e) throw new Forbidden("executor unavailable");
+      try {
+        await adminChange(e, s, "settings.set_agent_settings", Object.fromEntries(changes.map((x) => [x.key, x.value])), `Set ${changes.map((x) => `${x.key} ${x.value ? "on" : "off"}`).join(", ")}`, async (tx) => {
+          for (const x of changes) await tx.insert(settings).values({ key: x.key, valueJson: JSON.stringify(x.value) }).onConflictDoUpdate({ target: settings.key, set: { valueJson: JSON.stringify(x.value) } });
+          return null;
+        });
+      } catch (err) {
+        if (err instanceof AdminRefused) throw new Forbidden(err.message, { code: err.code });
+        throw err;
+      }
+      await kick(weft);
+    }
+    return c.json(await agentSettings(weft));
+  });
+  return stubRoutes(r, "settings", ["GET /v1/settings/permissions", "PUT /v1/settings/agent-grants", "GET /v1/settings/agent", "PUT /v1/settings/agent"]);
 }

@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "comms__send_exec_report", "arguments": "{{derived.comms.send_exec_report}}" }] },
+      { "output": [{ "type": "text", "text": "Sent the Monday exec briefing to #leadership and the leadership list." }] }
+    ]
+  }
+}

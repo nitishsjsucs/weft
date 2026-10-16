@@ -50,9 +50,9 @@ afterAll(async () => {
 const post = (path: string, body?: unknown) => app.request(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body), headers: { "content-type": "application/json" } });
 
 describe("/v1/routines routes", () => {
-  it("lists the 7 prebuilt routines (4 wave 1, 3 wave 2) and reads one", async () => {
+  it("lists the prebuilt routines (4 wave 1, 3 wave 2, 4 wave 3 parity) and reads one", async () => {
     const list = (await (await app.request("/v1/routines")).json()) as RoutineDef[];
-    expect(list.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_memory_digest", "rt_new_hire", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll"]);
+    expect(list.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_contractor_forms", "rt_exec_briefing", "rt_memory_digest", "rt_milestones", "rt_monthly_exec_report", "rt_new_hire", "rt_new_hire_ready", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll", "rt_thirty_day_checkin"]);
     const one = (await (await app.request("/v1/routines/rt_pre_payroll")).json()) as RoutineDef;
     expect(one.trigger).toEqual({ type: "cron", cron: "0 9 * * 1-5", tz: "America/Los_Angeles" });
     expect((await app.request("/v1/routines/rt_nope")).status).toBe(404);

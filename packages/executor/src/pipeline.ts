@@ -10,8 +10,8 @@ import { appendAction } from "./chain";
 import { digestOf } from "./digest";
 import type { Engine } from "./engine";
 import { codeOfError, hintsOfError, refusal } from "./outcome";
-import { policy, RISK_RANK, riskOf } from "./policy";
-import { genericPreview, insertProposal, proposeCall, type ProposalRow } from "./proposals";
+import { loadAutonomyFacts, policy, RISK_RANK, riskOf } from "./policy";
+import { agentNoteOf, genericPreview, insertProposal, proposeCall, type ProposalRow } from "./proposals";
 import { findUnknownReference } from "./references";
 import { tierFor } from "./registry";
 import type { CallScope } from "./scope";
@@ -158,10 +158,12 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
     openR4 = rows.filter((r) => !(r.command === def.name && r.subjectRef === preview?.subjectRef)).length;
   }
 
+  // Wave 3: the autonomy of the routine an agent call runs in (recommend, approve, auto); policy() applies it.
+  const autonomy = scope.caller === "agent" && ctx.routineRunId ? await loadAutonomyFacts(tx, ctx.companyId, ctx.routineRunId, def.autoEligible ?? null) : null;
   const decision = policy(def, input, {
     caller: scope.caller, agentKind: ctx.agentKind, tainted: scope.caller === "approved" ? false : ctx.tainted, taintedBy: scope.taintedBy,
     blockedInBatch: scope.batch?.blocked ?? false, pendingInBatch: scope.batch?.pending ?? false, amountCents: amount, ceiling, openR4,
-    systemAllowed: scope.systemAllowed,
+    systemAllowed: scope.systemAllowed, autonomy,
   });
   if (decision.decision === "refuse") return refuse(decision.code ?? "NOT_PERMITTED", decision.reason);
 
@@ -178,6 +180,15 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
     if (l) return refuse("LEASE_HELD", `${leaseKey} is held by another run until ${l.expiresAt}`);
   }
 
+  if (decision.decision === "propose" && decision.suggest) {
+    // Recommend autonomy: an Inbox suggestion a person starts or dismisses; it never executes.
+    const row = await insertProposal(e, tx, {
+      kind: "suggestion", def, command: def.name, input, preview: preview ?? genericPreview(def, input, amount), risk: decision.risk, reason: decision.reason,
+      domain: def.domain, reversible: def.reversible !== false, agentNote: agentNoteOf(input), taintedBy: ctx.tainted ? (scope.taintedBy ?? "external") : null,
+      proposerRunId: scope.run?.id ?? null, routineRunId: ctx.routineRunId, onBehalfOf: ctx.onBehalfOf, companyId: ctx.companyId, stamp: scope.stamp,
+    });
+    return done({ ok: true, status: "pending_approval", proposalId: row.id, title: row.headline, expiresAt: row.expiresAt, tainted: ctx.tainted });
+  }
   if (decision.decision === "propose") {
     return done(await proposeCall(e, tx, scope, def, input, preview ?? genericPreview(def, input, amount), decision));
   }
