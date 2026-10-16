@@ -37,6 +37,15 @@ async function requestOf(tx: DbTx, companyId: string, id: string): Promise<Reque
   return r;
 }
 
+const SOURCE_NAMES: Record<string, string> = { workday: "Workday" };
+/** A request imported from a connected HR system (source other than weft) is read-only in Weft: it is decided,
+ * cancelled and rerouted where it lives, and the next sync brings the change. */
+function weftOwned(r: RequestRow): RequestRow {
+  if (r.source === "weft") return r;
+  const where = SOURCE_NAMES[r.source] ?? r.source;
+  throw new DomainRefusal("DOMAIN_MANAGED_EXTERNALLY", `${r.id} is managed in ${where}; Weft shows it read-only`, `Change it in ${where}; the next sync updates Weft`, null);
+}
+
 const policySummary = (p: PolicyRow) => ({
   id: p.id, name: p.name, type: p.typeKind, type_name: p.typeName, paid: p.paid, jurisdiction: p.jurisdiction, schedule: p.schedule,
   minutes_per_period: p.minutesPerPeriod, tiers: JSON.parse(p.tiersJson) as unknown[], worked_minutes_per_chunk: p.workedMinutesPerChunk, minutes_per_chunk: p.minutesPerChunk,
@@ -128,7 +137,7 @@ const listRequests = readCommand({
     const rows = await listRequestRows(deps.tx, ctx.companyId, i);
     const ws = new Map((await deps.tx.select().from(workers).where(eq(workers.companyId, ctx.companyId))).map((w) => [w.id, w]));
     const pols = new Map((await loadPolicies(deps.tx, ctx.companyId)).map((p) => [p.id, p]));
-    const requests = rows.map((r) => ({ ...requestDto(r), workerName: ws.get(r.workerId) ? displayName(ws.get(r.workerId)!) : r.workerId, departmentId: ws.get(r.workerId)?.departmentId ?? null, policyName: pols.get(r.policyId)?.name ?? r.policyId, typeKind: pols.get(r.policyId)?.typeKind ?? null }));
+    const requests = rows.map((r) => ({ ...requestDto(r), workerName: ws.get(r.workerId) ? displayName(ws.get(r.workerId)!) : r.workerId, departmentId: ws.get(r.workerId)?.departmentId ?? null, policyName: pols.get(r.policyId)?.name ?? r.policyId, typeKind: pols.get(r.policyId)?.typeKind ?? null, source: r.source, extRef: r.extRef }));
     return { data: { count: requests.length, requests }, summary: `${requests.length} time-off requests` };
   },
 });
@@ -170,7 +179,7 @@ const checkRequest = writeCommand({
   description: "Recompute the checks for request_id: insufficient projected balance, waiting period, annual use cap and minimum increment (block); coverage conflict and payroll deadline overlap (review); holidays inside the range and short notice (info). Idempotent; stores the result on the request.",
   input: RequestIdInput, domain: "people", needs: "view", effect: "draft", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   async run(i: RequestIdInput, ctx, deps) {
-    const r = await requestOf(deps.tx, ctx.companyId, i.request_id);
+    const r = weftOwned(await requestOf(deps.tx, ctx.companyId, i.request_id));
     const checks = await recheck(deps, ctx.companyId, r, ctx.now);
     return { data: { request_id: r.id, checks }, summary: checks.length ? `${r.id}: ${checks.map((c) => `${c.rule} (${c.severity})`).join(", ")}` : `${r.id}: no checks fired` };
   },
@@ -181,7 +190,7 @@ const routeRequestCmd = writeCommand({
   description: "Set the approver for request_id: the worker's manager when that manager is active and has a Weft login, else the department lead's login, else the People admin. Records each step and its reason.",
   input: RequestIdInput, domain: "people", needs: "view", effect: "draft", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   async run(i: RequestIdInput, ctx, deps) {
-    const r = await requestOf(deps.tx, ctx.companyId, i.request_id);
+    const r = weftOwned(await requestOf(deps.tx, ctx.companyId, i.request_id));
     const w = await workerOf(deps.tx, ctx.companyId, r.workerId);
     if (!w) throw notFound("worker", r.workerId);
     const route = await routeRequest(deps.tx, ctx.companyId, w);
@@ -208,7 +217,7 @@ async function deciderOf(tx: DbTx, ctx: { principal: { id: string; kind: string 
 }
 
 async function decidePlan(tx: DbTx, companyId: string, i: DecideInput) {
-  const r = await requestOf(tx, companyId, i.request_id);
+  const r = weftOwned(await requestOf(tx, companyId, i.request_id));
   const w = await workerOf(tx, companyId, r.workerId);
   if (!w) throw notFound("worker", r.workerId);
   const p = await policyById(tx, companyId, r.policyId);
@@ -272,7 +281,7 @@ const decide = writeCommand({
     }
     const status = i.decision === "approve" ? "approved" : "denied";
     await deps.tx.update(timeOffRequests).set({ status, decidedBy: who.id, decidedAt: ctx.now, decisionNote: i.note ?? null }).where(eq(timeOffRequests.id, r.id));
-    const refreshed = i.decision === "approve" ? await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.startAt.slice(0, 10)) : [];
+    const refreshed = await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.startAt.slice(0, 10));   // leave lines, or the pending flag cleared
     return {
       data: { request_id: r.id, status, decided_by: who.id, minutes: r.requestedMinutes, refreshed_runs: refreshed },
       summary: `${status === "approved" ? "Approved" : "Denied"} ${displayName(w)}'s ${p.typeName.toLowerCase()} ${r.startAt.slice(0, 10)} to ${r.endAt.slice(0, 10)} (${h(r.requestedMinutes)})`,
@@ -323,6 +332,8 @@ export async function submitRequest(deps: CommandDeps, ctx: { companyId: string;
   const row = (await tx.select().from(timeOffRequests).where(eq(timeOffRequests.id, id)).limit(1))[0]!;
   const checks = await checksForRequest(tx, ctx.companyId, row, ptDateOf(ctx.now));
   await tx.update(timeOffRequests).set({ checksJson: JSON.stringify(checks) }).where(eq(timeOffRequests.id, id));
+  // An open draft that pays these days gets its PENDING_TIME_OFF_IN_PERIOD flag now, not at the next recompute.
+  await refreshOpenDrafts(tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, i.start_date);
   return { id, w, p, minutes, days, checks, approver: route.approver };
 }
 
@@ -346,7 +357,7 @@ const cancel = writeCommand({
   description: "Cancel request_id. A pending request releases its hold; an approved request that has not started returns its use rows to the balance.",
   input: RequestIdInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R2"), approval: "never", reversible: false, preview: null, access: "human_only",
   async run(i: RequestIdInput, ctx, deps) {
-    const r = await requestOf(deps.tx, ctx.companyId, i.request_id);
+    const r = weftOwned(await requestOf(deps.tx, ctx.companyId, i.request_id));
     if (!(await mayActFor(deps.tx, ctx.companyId, ctx.principal.id, ctx.principal.role, r.workerId))) throw new DomainRefusal("DOMAIN_NOT_PERMITTED", "You can cancel only your own requests", null, null);
     const today = ptDateOf(ctx.now);
     if (r.status !== "pending" && !(r.status === "approved" && r.startAt.slice(0, 10) > today)) throw new DomainRefusal("DOMAIN_NOT_CANCELLABLE", `${r.id} is ${r.status}${r.status === "approved" ? " and has started" : ""}`, null, null);
@@ -357,7 +368,7 @@ const cancel = writeCommand({
     if (held > 0) await appendLedger(deps.tx, deps.newId, { ...base, kind: "hold_release", minutes: held, effectiveDate: r.startAt.slice(0, 10), note: "cancelled" });
     for (const u of rows.filter((x) => x.kind === "use")) await appendLedger(deps.tx, deps.newId, { ...base, kind: "use", minutes: -u.minutes, effectiveDate: u.effectiveDate, note: "cancelled" });
     await deps.tx.update(timeOffRequests).set({ status: "cancelled" }).where(eq(timeOffRequests.id, r.id));
-    if (r.status === "approved") await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.startAt.slice(0, 10));
+    await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.startAt.slice(0, 10));   // leave lines or the pending flag go away
     return { data: { request_id: r.id, status: "cancelled", returned_minutes: -net }, summary: `Cancelled ${r.id}`, events: [{ type: "time_off.request.cancelled", subjectRef: r.id, payload: { request_id: r.id } }] };
   },
 });
@@ -409,7 +420,7 @@ const reopen = writeCommand({
   description: "Reopen request_id: an approved request that has not started gets its use rows returned and its hold back; a denied one gets its hold back. The checks run again and the request waits for its approver.",
   input: RequestIdInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R2"), approval: "never", reversible: false, preview: null, access: "human_only",
   async run(i: RequestIdInput, ctx, deps) {
-    const r = await requestOf(deps.tx, ctx.companyId, i.request_id);
+    const r = weftOwned(await requestOf(deps.tx, ctx.companyId, i.request_id));
     if (!DECIDERS.has(ctx.principal.role ?? "") && ctx.principal.role !== "manager") throw new DomainRefusal("DOMAIN_NOT_APPROVER", "Only an approver reopens a decided request", null, null);
     const today = ptDateOf(ctx.now);
     if (!(r.status === "approved" || r.status === "denied") || r.startAt.slice(0, 10) <= today) throw new DomainRefusal("DOMAIN_NOT_REOPENABLE", `${r.id} is ${r.status}${r.startAt.slice(0, 10) <= today ? " and has started" : ""}`, null, null);
@@ -420,7 +431,7 @@ const reopen = writeCommand({
     await deps.tx.update(timeOffRequests).set({ status: "pending", decidedBy: null, decidedAt: null, decisionNote: null }).where(eq(timeOffRequests.id, r.id));
     const fresh = (await deps.tx.select().from(timeOffRequests).where(eq(timeOffRequests.id, r.id)).limit(1))[0]!;
     await recheck(deps, ctx.companyId, fresh, ctx.now);
-    if (r.status === "approved") await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.startAt.slice(0, 10));
+    await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.startAt.slice(0, 10));
     return { data: { request_id: r.id, status: "pending" }, summary: `Reopened ${r.id}` };
   },
 });

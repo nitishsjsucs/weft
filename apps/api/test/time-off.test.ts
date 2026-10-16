@@ -112,6 +112,40 @@ describe("time-off routes", () => {
     expect(typed.status).toBe(400);   // the employee never types an amount
   });
 
+  it("flags time off on the open draft: PTO_LINE for the approved TX day, pending requests as info, review counts unchanged", async () => {
+    type Pc = { workerId: string; reviewGroup: string; flags: { rule: string; severity: string; message: string; evidence: Record<string, unknown> }[] };
+    const checks = async () => (await weft.db.all<{ worker_id: string; review_group: string; flags_json: string }>(sql`SELECT worker_id, review_group, flags_json FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' ORDER BY worker_id`))
+      .map((r) => ({ workerId: r.worker_id, reviewGroup: r.review_group, flags: JSON.parse(r.flags_json) }) as Pc);
+    const pcs = await checks();
+    const lucy = pcs.find((p) => p.flags.some((f) => f.rule === "PTO_LINE"))!;
+    expect(lucy.flags.find((f) => f.rule === "PTO_LINE")).toMatchObject({ severity: "info", message: "Paid leave on this paycheck: 8.00 h pto (tor_0006)", evidence: { request_ids: ["tor_0006"], gross_cents: 475_000 } });
+    const pending = pcs.flatMap((p) => p.flags.filter((f) => f.rule === "PENDING_TIME_OFF_IN_PERIOD").map((f) => [p.workerId, f.severity, f.evidence.request_id]));
+    // Kenji's NY sick half day (salaried: hours move, gross does not) and Ben's blocked CA sick day are info.
+    expect(pending).toEqual([["wrk_0021", "info", "tor_0005"], ["wrk_0034", "info", "tor_0004"]]);
+    expect(pcs.find((p) => p.workerId === "wrk_0021")!.flags.find((f) => f.rule === "PENDING_TIME_OFF_IN_PERIOD")!.message).toContain("blocked by WAITING_PERIOD");
+    expect(pcs.filter((p) => p.reviewGroup === "needs_review")).toHaveLength(4);   // GP2 and S2 still see four
+
+    // A new request inside the period refreshes the draft at once; cancelling it clears the flag again.
+    const res = await call("usr_dana", "POST", "/v1/time-off/requests?workerId=wrk_0011", { policyId: "top_vac_us", startDate: "2026-10-27", endDate: "2026-10-27", reason: "Errand" });
+    const id = (res.json as { data: { request_id: string } }).data.request_id;
+    expect((await checks()).find((p) => p.workerId === "wrk_0011")!.flags.map((f) => f.rule)).toContain("PENDING_TIME_OFF_IN_PERIOD");
+    await call("usr_dana", "POST", `/v1/time-off/requests/${id}/cancel`);
+    expect((await checks()).find((p) => p.workerId === "wrk_0011")!.flags.map((f) => f.rule)).not.toContain("PENDING_TIME_OFF_IN_PERIOD");
+  });
+
+  it("a request imported from Workday is read-only: decide, cancel, reopen and the checks refuse it", async () => {
+    await weft.db.run(sql`INSERT INTO time_off_requests (id, company_id, worker_id, policy_id, status, start_at, end_at, range_type, time_zone, requested_minutes, days_json, reason, approver_principal_id, routing_json, checks_json, source, ext_ref, created_at)
+      SELECT 'tor_0900', company_id, worker_id, policy_id, 'approved', '2026-12-14', '2026-12-14', 'date', time_zone, 480, '[{"date":"2026-12-14","minutes":480,"holiday":false}]', '', NULL, '[]', '[]', 'workday', 'a1b2c3d4e5f60718293a4b5c6d7e8f90', created_at FROM time_off_requests WHERE id = 'tor_0004'`);
+    const row = (await call("usr_dana", "GET", "/v1/time-off/requests/tor_0900")).json as Req & { source: string; extRef: string };
+    expect(row).toMatchObject({ source: "workday", status: "approved" });
+    for (const [path, body] of [["/v1/time-off/requests/tor_0900/decide", { decision: "deny", note: "" }], ["/v1/time-off/requests/tor_0900/cancel", undefined], ["/v1/tools/time_off.reopen", { request_id: "tor_0900" }], ["/v1/tools/time_off.check_request", { request_id: "tor_0900" }]] as const) {
+      const out = await call("usr_dana", "POST", path, body);
+      expect((out.json as { code: string }).code, path).toBe("DOMAIN_MANAGED_EXTERNALLY");
+    }
+    expect((await request("tor_0900")).status).toBe("approved");
+    await weft.db.run(sql`DELETE FROM time_off_requests WHERE id = 'tor_0900'`);
+  });
+
   it("posts accruals once per processed regular run and assignment; re-running changes nothing", async () => {
     await weft.db.run(sql`UPDATE payroll_runs SET status = 'processed' WHERE id = 'pay_2026_10_30'`);
     const count = async () => (await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_ledger`))[0]!.n;
