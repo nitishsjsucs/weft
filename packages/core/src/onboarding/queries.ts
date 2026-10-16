@@ -16,3 +16,10 @@ export async function listTasks(tx: DbTx, workerId: string): Promise<TaskRow[]> 
   const rows = await tx.select().from(onboardingTasks).where(eq(onboardingTasks.workerId, workerId)).orderBy(asc(onboardingTasks.id));
   return rows.sort((a, b) => TASK_ORDER.indexOf(a.kind as never) - TASK_ORDER.indexOf(b.kind as never) || (a.id < b.id ? -1 : 1));
 }
+
+// Wave 2 (w2-onboarding) reads for the offers, portal and documents routes.
+export { portalView, PORTAL_TASK_TITLES } from "../portal/view";
+export { loadPersona, personaOfOffer, PERSONA_ROLE } from "../portal/persona";
+export { maskedUpload, portalKindsFor } from "../portal/forms";
+export { getDocument, listWorkerDocuments, signatureOf, toDocumentDto } from "../documents/queries";
+export { loadOffer, portalLink, OFFER_STATES } from "../portal/offers";

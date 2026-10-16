@@ -1,11 +1,11 @@
-// onboarding.* commands. Owner: t2-world. Append WeftCommand definitions to this array; commands/index.ts concatenates it.
+// onboarding.* commands. Owner: t2-world; wave 2 offer lifecycle and portal commands by w2-onboarding. Append WeftCommand definitions to this array; commands/index.ts concatenates it.
 import { z } from "zod";
 import type { WeftCommand } from "../shared/deps";
 import { notFound, readCommand, responseFormatField } from "../demo/define";
 import { getWorker } from "../people/queries";
 import { nameRef } from "../people/names";
 import { listTasks } from "../onboarding/queries";
-import { completeTask } from "../onboarding/writes";
+import { completeTask, w2OnboardingCommands } from "../onboarding/writes";
 
 const ChecklistInput = z.object({ worker_id: z.string(), ...responseFormatField });
 type ChecklistInput = z.infer<typeof ChecklistInput>;
@@ -26,4 +26,4 @@ const getChecklist = readCommand({
   },
 });
 
-export const onboardingCommands: WeftCommand[] = [getChecklist, completeTask];
+export const onboardingCommands: WeftCommand[] = [getChecklist, completeTask, ...w2OnboardingCommands];
