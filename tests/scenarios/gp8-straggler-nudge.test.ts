@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AgentRunRow, RoutineRun } from "@weft/contracts";
+import { routines } from "@weft/db";
+import { RT_ONBOARDING_NUDGE as R } from "../../packages/routines/src/wave2/onboarding";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 const NUDGE = {
@@ -32,6 +34,12 @@ describe("GP8 straggler nudge", () => {
     writeFileSync(join(scripts, "rt_onboarding_nudge.json"), JSON.stringify(NUDGE));
     process.env.WEFT_SCRIPTS_DIR = scripts;
     weft = await createTestWeft();
+    // Until the integrator spreads it into PREBUILT (see the routine file), the scenario installs the definition.
+    await weft.db.insert(routines).values({
+      id: R.id, companyId: "cmp_larkspur", name: R.name, description: R.description, ownerPrincipalId: R.ownerPrincipalId, enabled: R.enabled, autonomy: R.autonomy,
+      triggerJson: JSON.stringify(R.trigger), filterJson: null, instructions: R.instructions, toolsJson: JSON.stringify(R.tools), precheck: R.precheck,
+      checklistJson: JSON.stringify(R.checklist), budgetJson: JSON.stringify(R.budget), surfaceJson: JSON.stringify(R.surface), source: R.source, taintedBy: null, createdAt: weft.clock.now(),
+    });
   });
   afterAll(async () => {
     await weft.close();

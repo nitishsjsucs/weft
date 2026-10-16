@@ -3,6 +3,9 @@
 // rt_onboarding_nudge: on weekday mornings, a deterministic precheck finds hires whose employee-owned onboarding tasks
 // are past due and not yet nudged today; the model posts one nudge per hire in #new-hires naming the open tasks.
 // It ships disabled (GP8 is a scenario test that triggers it); enable it in Routines to run it on schedule.
+// Not yet spread into PREBUILT: the frozen wave 1 tests apps/api/test/routines.test.ts and
+// packages/routines/test/engine.test.ts assert exactly the 4 prebuilt routines. The integrator moves
+// W2_ONBOARDING_ROUTINES into `routines` together with those two assertions (docs/tracks/w2-onboarding.md).
 import type { Precheck, ReadOnlyExecutor, RoutineDef } from "@weft/contracts";
 import type { Predicate } from "../checks";
 
@@ -44,6 +47,7 @@ export const onboardingNudge: Precheck = async (ctx, exec) => {
   };
 };
 
-export const routines: RoutineDef[] = [RT_ONBOARDING_NUDGE];
+export const W2_ONBOARDING_ROUTINES: RoutineDef[] = [RT_ONBOARDING_NUDGE];
+export const routines: RoutineDef[] = [];
 export const prechecks: Record<string, Precheck> = { onboarding_nudge: onboardingNudge };
 export const predicates: Record<string, Predicate> = {};
