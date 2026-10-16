@@ -4,10 +4,11 @@
 // order validated for color-vision deficiency on the light surface; every chart has a legend for two or more series
 // and an accessible data table, so identity and values never depend on color alone.
 import { useEffect, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Table2 } from "lucide-react";
 import { formatCents, ReportResult, W3_CHAT_TID, type ChartSpec } from "@weft/contracts";
 import { client, errorText } from "@/lib/api/hooks";
+import { fmtDate } from "../format";
 import type { ReportRef } from "./run-steps";
 
 /** Fixed categorical order (never cycled): blue-11, accent-9, violet-9, green-9, amber-11, then gray for a sixth. */
@@ -66,22 +67,27 @@ export function ReportChart({ report }: { report: ReportResult }) {
   const unit = spec.series[0]!.unit;
   const [table, setTable] = useState(false);
   const data = rows.map((r) => ({ ...r, __x: xLabel(spec, r) }));
-  const many = spec.series.length > 1;
+  // Color follows the series (its index in the spec), so a series that is all zero in this range keeps its slot
+  // empty instead of repainting the others; it is left out of the plot and the legend but stays in the table.
+  const drawn = spec.series.map((s, i) => ({ ...s, color: SERIES_COLORS[i] ?? SERIES_COLORS[5] })).filter((s) => rows.some((r) => Number(r[s.key] ?? 0) !== 0));
+  const zero = spec.series.filter((s) => !drawn.some((d) => d.key === s.key));
+  const many = drawn.length > 1;
+  const range = `${fmtDate(report.from, { month: "short", day: "numeric", year: "numeric" })} to ${fmtDate(report.to, { month: "short", day: "numeric", year: "numeric" })}`;
   const axis = { stroke: "var(--gray-a6)", tick: { fill: "var(--gray-10)", fontSize: 11 }, tickLine: false };
   const tooltip = (
     <Tooltip cursor={{ fill: "var(--gray-a3)" }} formatter={(v, name) => {
       const s = spec.series.find((x) => x.label === name || x.key === name);
       return [formatValue(v, s?.unit ?? unit), s?.label ?? String(name)];
-    }} contentStyle={{ borderRadius: 8, border: "1px solid var(--gray-a5)", fontSize: 12, background: "var(--card, #fff)", color: "var(--gray-12)" }} labelStyle={{ color: "var(--gray-11)" }} />
+    }} contentStyle={{ borderRadius: 8, border: "1px solid var(--gray-a5)", fontSize: 12, background: "var(--card, #fff)", color: "var(--gray-12)", padding: "6px 8px" }}
+      itemStyle={{ color: "var(--gray-12)", padding: 0 }} labelStyle={{ color: "var(--gray-11)", marginBottom: 2 }} />
   );
-  const chart = rows.length === 0 ? null : spec.kind === "line" ? (
+  const chart = rows.length === 0 || drawn.length === 0 ? null : spec.kind === "line" ? (
     <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
       <CartesianGrid vertical={false} stroke="var(--gray-a4)" />
       <XAxis dataKey="__x" {...axis} interval="preserveStartEnd" minTickGap={12} />
       <YAxis {...axis} axisLine={false} width={48} tickFormatter={(v: number) => formatTick(v, unit)} />
       {tooltip}
-      {many ? <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: "var(--gray-11)" }} /> : null}
-      {spec.series.map((s, i) => <Line key={s.key} dataKey={s.key} name={s.label} type="monotone" stroke={SERIES_COLORS[i]} strokeWidth={2} dot={{ r: 3, strokeWidth: 2, stroke: "var(--card, #fff)" }} activeDot={{ r: 4 }} isAnimationActive={false} />)}
+      {drawn.map((s) => <Line key={s.key} dataKey={s.key} name={s.label} type="monotone" stroke={s.color} strokeWidth={2} dot={{ r: 3, strokeWidth: 2, stroke: "var(--card, #fff)" }} activeDot={{ r: 4 }} isAnimationActive={false} />)}
     </LineChart>
   ) : (
     <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="24%">
@@ -89,11 +95,10 @@ export function ReportChart({ report }: { report: ReportResult }) {
       <XAxis dataKey="__x" {...axis} interval="preserveStartEnd" minTickGap={8} />
       <YAxis {...axis} axisLine={false} width={48} tickFormatter={(v: number) => formatTick(v, unit)} allowDecimals={unit !== "count"} />
       {tooltip}
-      {many ? <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: "var(--gray-11)" }} /> : null}
-      {spec.series.map((s, i) => (
-        <Bar key={s.key} dataKey={s.key} name={s.label} fill={SERIES_COLORS[i]} stackId={spec.kind === "stacked_bar" ? "stack" : undefined}
+      {drawn.map((s, i) => (
+        <Bar key={s.key} dataKey={s.key} name={s.label} fill={s.color} stackId={spec.kind === "stacked_bar" ? "stack" : undefined}
           stroke="var(--card, #fff)" strokeWidth={spec.kind === "stacked_bar" ? 1 : 0} maxBarSize={36} isAnimationActive={false}
-          radius={spec.kind === "stacked_bar" ? (i === spec.series.length - 1 ? [4, 4, 0, 0] : 0) : [4, 4, 0, 0]} />
+          radius={spec.kind === "stacked_bar" ? (i === drawn.length - 1 ? [4, 4, 0, 0] : 0) : [4, 4, 0, 0]} />
       ))}
     </BarChart>
   );
@@ -103,18 +108,24 @@ export function ReportChart({ report }: { report: ReportResult }) {
       <figcaption className="flex items-start gap-2">
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] font-medium text-gray-12">{spec.title}</span>
-          <span className="block text-1 text-gray-10">{report.from} to {report.to}</span>
+          <span className="block text-1 text-gray-10">{range}</span>
         </span>
         <button type="button" onClick={() => setTable((t) => !t)} aria-pressed={table} className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-1 text-gray-11 hover:bg-gray-a3 focus-visible:ring-2 focus-visible:ring-[var(--blue-9)] focus-visible:outline-none">
           <Table2 className="size-3.5" />{table ? "Chart" : "Table"}
         </button>
       </figcaption>
       {rows.length === 0 ? <p className="text-1 text-gray-10">No rows in this range.</p> : null}
+      {chart && !table && many ? (
+        <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-1 text-gray-11" aria-hidden="true">
+          {drawn.map((s) => <li key={s.key} className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: s.color }} />{s.label}</li>)}
+        </ul>
+      ) : null}
       {chart && !table ? (
-        <div className="h-48 w-full" role="img" aria-label={`${spec.title}: ${spec.kind === "line" ? "line" : "bar"} chart of ${spec.series.map((s) => s.label).join(", ")} by ${spec.x.label.toLowerCase()}. The table below has every value.`}>
+        <div className="h-44 w-full" role="img" aria-label={`${spec.title}: ${spec.kind === "line" ? "line" : "bar"} chart of ${spec.series.map((s) => s.label).join(", ")} by ${spec.x.label.toLowerCase()}. The table below has every value.`}>
           <ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer>
         </div>
       ) : null}
+      {chart && !table && zero.length > 0 ? <p className="text-0 text-gray-10">Zero in this range, so not drawn: {zero.map((s) => s.label).join(", ")}. The table lists them.</p> : null}
       {/* The table is always in the page for screen readers; the toggle shows it to everyone. */}
       <div className={table ? "max-h-56 overflow-auto" : "sr-only"}><DataTable spec={spec} rows={rows} /></div>
     </figure>
