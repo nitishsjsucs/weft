@@ -12,7 +12,7 @@ import { getWorker } from "../people/queries";
 const CompleteInput = z.object({ worker_id: z.string(), kind: OnboardingTaskKind });
 export const completeTask = writeCommand({
   name: "onboarding.complete_task", summary: "Mark an onboarding checklist task done.",
-  description: "Mark one onboarding task (worker_id, kind) done. state_registration is refused until every tax account for the worker's work state is active. When every task is done, emits worker.onboarding_completed. R1: no approval.",
+  description: "Mark one onboarding task (worker_id, kind) done. Tasks the new hire owns (portal signatures, forms, uploads, elections) are refused with DOMAIN_EMPLOYEE_TASK. state_registration is refused until every tax account for the worker's work state is active. When every task is done, emits worker.onboarding_completed. R1: no approval.",
   input: CompleteInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false,
   tiers: { main: "executable", task: "executable" }, preview: null,
   async run(i, ctx, deps) {
@@ -21,6 +21,9 @@ export const completeTask = writeCommand({
     if (!w) throw notFound("worker", i.worker_id);
     const [t] = await tx.select().from(onboardingTasks).where(and(eq(onboardingTasks.workerId, w.id), eq(onboardingTasks.kind, i.kind))).limit(1);
     if (!t) throw new DomainRefusal("DOMAIN_NO_TASK", `${w.id} has no ${i.kind} task`, "Read onboarding.get_checklist for the task kinds", null);
+    // Employee-owned tasks (the portal's signatures, forms, uploads and elections) finish only when the new hire
+    // submits them in the portal; marking one done here would skip the signature and lock the hire out of the form.
+    if (t.owner === "employee") throw new DomainRefusal("DOMAIN_EMPLOYEE_TASK", `${i.kind} for ${w.id} is the new hire's task; they complete it in the portal`, "Nudge the new hire instead (comms.send_message)", null);
     if (t.status === "done") return { data: { task_id: t.id, kind: t.kind, status: "done", changed: false }, summary: `${i.kind} already done for ${nameRef(w.firstName, w.lastName, w.id)}` };
     if (i.kind === "state_registration") {
       const accts = w.workState ? await tx.select().from(taxAccounts).where(and(eq(taxAccounts.companyId, ctx.companyId), eq(taxAccounts.jurisdiction, w.workState))) : [];

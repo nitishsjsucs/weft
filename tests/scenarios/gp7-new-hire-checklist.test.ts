@@ -63,6 +63,14 @@ describe("GP7 new-hire checklist unblocks payroll", () => {
     }
   });
 
+  it("the new hire's own tasks cannot be marked done for them through onboarding.complete_task", async () => {
+    for (const kind of ["i9_sim", "federal_w4"]) {
+      const res = await call("usr_dana", "POST", "/v1/tools/onboarding.complete_task", { worker_id: workerId, kind });
+      expect(res.status, JSON.stringify(res.json)).toBe(422);
+      expect((res.json as { code: string }).code).toBe("DOMAIN_EMPLOYEE_TASK");
+    }
+  });
+
   it("the I-9 image is stored under the data dir and every response shows it masked", async () => {
     const form = new FormData();
     form.set("citizenship", "citizen"); form.set("documentKind", "us_passport"); form.set("documentNumberLast4", "A7Q2"); form.set("expiresOn", "2031-04-30"); form.set("typedName", NAME);
