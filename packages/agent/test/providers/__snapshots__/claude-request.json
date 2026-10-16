@@ -1,0 +1,118 @@
+{
+  "model": "claude-opus-5-5",
+  "max_tokens": 16000,
+  "betas": [
+    "server-side-fallback-2026-07-01"
+  ],
+  "fallbacks": "default",
+  "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+  },
+  "output_config": {
+    "effort": "low"
+  },
+  "system": [
+    {
+      "type": "text",
+      "text": "FROZEN PROMPT",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "name": "notices__get",
+      "description": "Read a notice.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "notice_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "notice_id"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    {
+      "name": "tax__update_rate",
+      "description": "Propose a rate.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "rate": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rate"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    }
+  ],
+  "tool_choice": {
+    "type": "auto"
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "<context n=\"abc\">pack: CA notice ntc_0001</context>"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The notice changes the CA SUI rate. Read it, then the current rates.",
+          "signature": "c2lnLWZpeHR1cmUtMDAwMQ=="
+        },
+        {
+          "type": "text",
+          "text": "Reading the notice and the current rates."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_01FIXTUREA",
+          "name": "notices__get",
+          "input": {
+            "notice_id": "ntc_0001"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_01FIXTUREB",
+          "name": "tax__get_rates",
+          "input": {
+            "state": "CA"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_01FIXTUREA",
+          "content": "{\"ok\":true,\"data\":{\"rate_new\":\"0.015\"}}"
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_01FIXTUREB",
+          "content": "{\"ok\":true,\"data\":{\"rate\":\"0.034\"},\"_weft_plan\":\"steps 1/6\"}"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "<weft_notice kind=\"decision\" n=\"abc\" proposal_id=\"prp_0001\" status=\"approved\">Approved &lt;x&gt;</weft_notice>"
+    }
+  ]
+}

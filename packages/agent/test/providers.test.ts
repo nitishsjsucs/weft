@@ -42,9 +42,11 @@ describe("provider factory", () => {
     expect(p).toMatchObject({ id: "openai", model: "gpt-5.6-luna", live: true, label: "OpenAI gpt-5.6-luna" });
   });
 
-  it("claude and the local providers throw PROVIDER_CONFIG; a missing key throws PROVIDER_CONFIG", () => {
-    for (const w of ["claude", "mlx", "llama"]) {
-      expect(() => createProvider({ env: { WEFT_LLM: w }, ledger, testMode: false })).toThrow(/PROVIDER_CONFIG: not built in P0/);
+  it("unconfigured claude and local providers throw PROVIDER_CONFIG naming the missing variable; a missing key throws PROVIDER_CONFIG", () => {
+    // Wave 2 built these providers (test/providers/); only the missing setting is refused now.
+    expect(() => createProvider({ env: { WEFT_LLM: "claude" }, ledger, testMode: false })).toThrow(/PROVIDER_CONFIG: ANTHROPIC_API_KEY/);
+    for (const w of ["mlx", "llama"]) {
+      expect(() => createProvider({ env: { WEFT_LLM: w }, ledger, testMode: false })).toThrow(/PROVIDER_CONFIG: WEFT_LOCAL_BASE_URL/);
     }
     expect(() => createProvider({ env: { WEFT_LLM: "openai" }, ledger, testMode: false })).toThrow(/PROVIDER_CONFIG/);
   });
