@@ -42,12 +42,16 @@ function Breadcrumb() {
   );
 }
 
-export function Header({ sidebarVisible, onToggleSidebar, onOpenSearch }: { sidebarVisible: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
+/**
+ * `sidebarVisible` is the docked sidebar (it carries search, so the bar shows a search icon only without it);
+ * `sidebarExpanded` is the docked sidebar or the drawer below 1024 px, for the toggle's aria-expanded.
+ */
+export function Header({ sidebarVisible, sidebarExpanded, onToggleSidebar, onOpenSearch }: { sidebarVisible: boolean; sidebarExpanded: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const agent = useAgent();
   return (
     <div className="@container shrink-0 border-b border-[var(--app-border)] bg-background">
       <header className="flex h-[var(--tb-h)] min-w-0 items-center gap-[var(--tb-gap)] px-[var(--tb-pad-x)]">
-        <Button variant="ghost" size="icon" className={barIconClass} onClick={onToggleSidebar} aria-label="Toggle sidebar" aria-expanded={sidebarVisible} aria-controls={SIDEBAR_ID}>
+        <Button variant="ghost" size="icon" className={barIconClass} onClick={onToggleSidebar} aria-label="Toggle sidebar" aria-expanded={sidebarExpanded} aria-controls={SIDEBAR_ID}>
           <PanelLeft strokeWidth={1.5} />
         </Button>
         <Breadcrumb />

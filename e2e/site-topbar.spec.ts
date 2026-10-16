@@ -112,8 +112,11 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await expect(page.getByTestId(TID.cmdkInput)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(header(page).getByRole("button", { name: /search/i })).toHaveCount(0);
-    await header(page).getByRole("button", { name: "Toggle sidebar" }).click();
+    const toggle = header(page).getByRole("button", { name: "Toggle sidebar" });
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await toggle.click();
     await expect(page.getByTestId(S.sidebarSearch)).toBeHidden();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await header(page).getByRole("button", { name: /search/i }).click();
     await expect(page.getByTestId(TID.cmdkInput)).toBeVisible();
     await page.keyboard.press("Escape");
