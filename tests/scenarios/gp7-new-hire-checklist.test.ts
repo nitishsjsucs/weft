@@ -72,6 +72,9 @@ describe("GP7 new-hire checklist unblocks payroll", () => {
     expect(res.status).toBe(200);
     expect(out.data.upload).toMatchObject({ masked: true, fileName: "ro***.png", bytes: PNG.length });
     expect(JSON.stringify(out)).not.toContain("rowan-passport");
+    const acts = await weft.db.all<{ args_json: string }>(sql`SELECT args_json FROM actions WHERE command = 'documents.submit_i9'`);
+    expect(acts).toHaveLength(1);
+    expect(acts[0]!.args_json).not.toContain("rowan-passport");
     const [row] = await weft.db.all<{ storage_path: string; sha256: string }>(sql`SELECT storage_path, sha256 FROM uploads WHERE worker_id = ${workerId}`);
     expect(row!.storage_path).toMatch(/^uploads\/[0-9a-f]{64}\.bin$/);
     expect(readFileSync(join(weft.dataDir, row!.storage_path)).equals(PNG)).toBe(true);

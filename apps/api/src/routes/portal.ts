@@ -18,6 +18,7 @@ function need(session: HumanSession | null): HumanSession {
   if (!session) throw new Unauthorized();
   return session;
 }
+const maskName = (n: string) => `${n.slice(0, 2)}***${/\.[A-Za-z0-9]{1,5}$/.exec(n)?.[0] ?? ""}`;
 const refusedJson = (code: string, message: string) => ({ ok: false, _tag: "Refused", code, message, refusal: { code, message, hint: null, example: null } });
 
 export function portalRoutes(weft: Weft): Hono<WeftEnv> {
@@ -96,7 +97,8 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     const out = await weft.executor.human.exec(s, "documents.submit_i9", {
       citizenship: field("citizenship"), documentKind: field("documentKind"), documentNumberLast4: field("documentNumberLast4"),
       expiresOn: field("expiresOn") || null, typedName: field("typedName"),
-      file_name: (file.name || "id-image").slice(0, 120), bytes: bytes.length, sha256: sha, storage_path: rel,
+      // Only the masked name travels into the command, its action row and the uploads row.
+      file_name: maskName(file.name || "id-image"), bytes: bytes.length, sha256: sha, storage_path: rel,
     });
     if (!out.ok && fresh) { try { unlinkSync(abs); } catch { /* already gone */ } }
     return outcomeJson(c, out);

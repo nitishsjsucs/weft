@@ -229,7 +229,7 @@ export const submitDirectDeposit = writeCommand({
     const w = await requireHired(tx, p);
     await openTask(tx, w.id, "direct_deposit");
     checkTypedName(p, i.typed_name);
-    if (!i.credential_ref.endsWith(w.id.replace(/_/g, "-"))) throw new DomainRefusal("DOMAIN_BAD_CREDENTIAL", "The vault reference does not belong to this worker", null, null);
+    if (i.credential_ref !== `vault:bank-${w.id.replace(/_/g, "-")}`) throw new DomainRefusal("DOMAIN_BAD_CREDENTIAL", "The vault reference does not belong to this worker", null, null);
     const secret = JSON.parse(await deps.resolveCredential(i.credential_ref as `vault:${string}`)) as { routing: string; account: string };
     if (secret.routing.slice(-4) !== i.routing_last4 || secret.account.slice(-4) !== i.account_last4) throw new DomainRefusal("DOMAIN_BAD_CREDENTIAL", "The last 4 digits do not match the vaulted numbers", null, null);
     const v = await deps.sims.bankVerify.verify({ workerId: w.id, routing: secret.routing, accountLast4: i.account_last4 });
