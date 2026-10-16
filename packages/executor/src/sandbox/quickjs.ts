@@ -89,7 +89,10 @@ export function createQuickJsEngine(): SandboxEngine {
       let logsCut = false;
       let tainted = false;
       let callBytes = 0;
+      let callCount = 0;
       const calls: CodeRunResult["calls"] = [];
+      /** The calls list keeps the first refusal past the budget, not every retry of a script that loops on refusals. */
+      const record = (entry: CodeRunResult["calls"][number]) => { if (calls.length <= limits.maxCalls) calls.push(entry); };
       const deferreds = new Set<QuickJSDeferredPromise>();
       let queue: Promise<void> = Promise.resolve();
       const inflight: Promise<{ d: QuickJSDeferredPromise; json: string }>[] = [];
@@ -134,22 +137,22 @@ export function createQuickJsEngine(): SandboxEngine {
           const argsJson = c.getString(argsH);
           const d = c.newPromise();
           deferreds.add(d);
-          const n = calls.length + 1;
+          const n = ++callCount;
           const settle = (json: string) => ({ d, json });
           if (n > limits.maxCalls || budget) {
             budget ??= `more than ${limits.maxCalls} weft.call calls`;
-            calls.push({ command: name, outcome: "refused:CALL_BUDGET", ms: 0 });
+            record({ command: name, outcome: "refused:CALL_BUDGET", ms: 0 });
             inflight.push(Promise.resolve(settle(JSON.stringify(refusedAsData("CALL_BUDGET", `At most ${limits.maxCalls} calls per code.run; this one was not run.`)))));
             return d.handle;
           }
           if (Buffer.byteLength(argsJson) > limits.maxCallBytes) {
-            calls.push({ command: name, outcome: "refused:CALL_BUDGET", ms: 0 });
+            record({ command: name, outcome: "refused:CALL_BUDGET", ms: 0 });
             budget ??= "an argument object over the byte budget";
             inflight.push(Promise.resolve(settle(JSON.stringify(refusedAsData("CALL_BUDGET", "The arguments are too large.")))));
             return d.handle;
           }
           const entry = { command: name, outcome: "pending", ms: 0 };
-          calls.push(entry);
+          record(entry);
           // Serialized: inner calls share the executor's transaction, so they never overlap.
           const p = queue.then(async () => {
             const t0 = Date.now();

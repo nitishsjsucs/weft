@@ -67,6 +67,13 @@ describe("quickjs engine", () => {
     expect(r.calls[25]).toMatchObject({ outcome: "refused:CALL_BUDGET" });
   });
 
+  it("a script that keeps calling past the budget is stopped and its calls list stays bounded", async () => {
+    const r = await run("for (;;) await weft.call('x', {});", async () => ({ ok: true, status: "done", data: null, tainted: false }), { ...DEFAULT_CODE_LIMITS, cpuMs: 300 });
+    expect(r.ok).toBe(false);
+    expect(["SANDBOX_TIMEOUT", "CALL_BUDGET"]).toContain(r.error?.code);
+    expect(r.calls).toHaveLength(26);
+  });
+
   it("inner results over the byte budget are refused as data", async () => {
     const r = await run("const a = await weft.call('x', {}); return a.ok;", async () => ({ ok: true, status: "done", data: "y".repeat(2_000), tainted: false }), { ...DEFAULT_CODE_LIMITS, maxCallBytes: 1_000 });
     expect(r.error?.code).toBe("CALL_BUDGET");

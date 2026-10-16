@@ -78,8 +78,8 @@ stopped afterwards (process group killed). The 27B model was never started. Live
 
 ## Tests added
 
-38 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
-`packages/executor/test/sandbox/quickjs.test.ts` (11) and `code-run.test.ts` (9, including a vault value that an inner
+39 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
+`packages/executor/test/sandbox/quickjs.test.ts` (12) and `code-run.test.ts` (9, including a vault value that an inner
 read leaks in every encoding and that never reaches the output), the s6 scenario, plus 2 in the existing files below.
 
 ## Edits outside the owned list, and why
