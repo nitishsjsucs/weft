@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { PayrollRun } from "@weft/contracts";
-import { events, expenses, paychecks, payrollRuns } from "@weft/db";
+import { events, expenses, paychecks, payrollRuns, simBankBatches } from "@weft/db";
 import { W3ExpensesDetail, W3ExpensesPage } from "../../../packages/contracts/src/ext/w3-expenses";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
@@ -105,6 +105,10 @@ describe("expenses (GP13)", () => {
     const sub = await weft.executor.human.exec({ principalId: "usr_dana", companyId: "cmp_larkspur", via: "ui", keyScope: null }, "payroll.submit_run", { run_id: RUN, exclude_blocked: true });
     expect(sub.ok, JSON.stringify(sub)).toBe(true);
     expect((await detail("exp_0001")).payrollRunStatus).toBe("processing");
+    // The bank entry for Mateo is net pay plus the reimbursements.
+    const [batch] = await weft.db.select().from(simBankBatches).where(eq(simBankBatches.payrollRunId, RUN));
+    const entry = (JSON.parse(batch!.entriesJson) as { workerId: string; amountCents: number }[]).find((e) => e.workerId === "wrk_0005")!;
+    expect(entry.amountCents).toBe(before.mateo.netCents + 47_622);
     expect(await (await post("/v1/expenses/exp_0001/reopen", {})).json()).toMatchObject({ code: "DOMAIN_NOT_REVERSIBLE", message: `Not reversible: ${RUN} is processing` });
     await weft.clock.advance("2026-10-30T13:00:00.000Z");   // Fri Oct 30 06:00 PT
     await weft.scheduler.tick();
