@@ -56,6 +56,7 @@ export async function resetWorld(weft: Weft): Promise<{ ms: number }> {
       for (const { name } of tables) await weft.db.run(sql.raw(`DROP TABLE IF EXISTS "${name.replace(/"/g, "")}"`));
     } finally { await weft.db.run(sql`PRAGMA foreign_keys=ON`); }
     rmSync(join(weft.dataDir, "companies"), { recursive: true, force: true });   // memory repos and run workspaces; never spend/
+    rmSync(join(weft.dataDir, "run", "handles"), { recursive: true, force: true });   // run ids restart after a reset
     await migrate(weft.db);
   });
   await seedWorld(weft);
