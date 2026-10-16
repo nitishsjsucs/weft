@@ -40,9 +40,11 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
   r.post("/v1/portal/documents/:id/sign", async (c) => {
     const s = need(c.var.session);
     const b = (await c.req.json().catch(() => ({}))) as { typedName?: unknown; documentSha256?: unknown };
-    await weft.executor.human.exec(s, "documents.view_offer", {});   // marks viewed, or expired past expires_on
+    // An unopened offer is marked viewed, and one past expires_on expired, before the signature is checked.
+    const p = await loadPersona(weft.db, s.companyId, s.principalId);
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(weft.clock.now()));
+    if (p && (p.offer.status === "sent" || (p.offer.status === "viewed" && !!p.offer.expiresOn && day > p.offer.expiresOn))) await weft.executor.human.exec(s, "documents.view_offer", {});
     const out = await weft.executor.human.exec(s, "documents.sign", { document_id: c.req.param("id"), typed_name: b.typedName, document_sha256: b.documentSha256 });
-    await weft.scheduler.kick();
     return outcomeJson(c, out);
   });
 
@@ -50,8 +52,7 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     r.post(path, async (c) => {
       const s = need(c.var.session);
       const out = await weft.executor.human.exec(s, command, await c.req.json().catch(() => ({})));
-      await weft.scheduler.kick();
-      return outcomeJson(c, out);
+        return outcomeJson(c, out);
     });
   }
 
@@ -71,7 +72,6 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     const out = await weft.executor.human.exec(s, "documents.submit_direct_deposit", {
       bank_name: d.bankName, routing_last4: d.routing.slice(-4), account_last4: d.account.slice(-4), account_type: d.accountType, credential_ref: `vault:${name}`, typed_name: d.typedName,
     });
-    await weft.scheduler.kick();
     return outcomeJson(c, out);
   });
 
@@ -99,7 +99,6 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
       file_name: (file.name || "id-image").slice(0, 120), bytes: bytes.length, sha256: sha, storage_path: rel,
     });
     if (!out.ok && fresh) { try { unlinkSync(abs); } catch { /* already gone */ } }
-    await weft.scheduler.kick();
     return outcomeJson(c, out);
   });
 

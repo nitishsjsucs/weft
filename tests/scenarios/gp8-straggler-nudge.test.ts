@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AgentRunRow, RoutineRun } from "@weft/contracts";
+import { sql } from "drizzle-orm";
 import { routines } from "@weft/db";
 import { RT_ONBOARDING_NUDGE as R } from "../../packages/routines/src/wave2/onboarding";
 import { createTestWeft, type TestWeft } from "./helpers";
@@ -42,6 +43,16 @@ describe("GP8 straggler nudge", () => {
     });
   });
   afterAll(async () => {
+    // offer.accepted starts rt_new_hire in the background; run the pending events now and let every queued or
+    // running run settle before closing (weft.close() does not drain them yet, a known w2-reliability item).
+    await weft.scheduler.tick();
+    for (let i = 0; i < 10; i++) {
+      const open = await weft.db.all<{ id: string; agent_run_id: string | null }>(sql`SELECT id, agent_run_id FROM routine_runs WHERE status IN ('queued', 'running')`);
+      const runs = await weft.db.all<{ id: string }>(sql`SELECT id FROM agent_runs WHERE status IN ('queued', 'running')`);
+      if (!open.length && !runs.length) break;
+      for (const r of runs) await (weft.agent as unknown as { settled(id: string): Promise<unknown> }).settled(r.id);
+      for (const r of open) await (weft.routines as unknown as { settled(id: string): Promise<unknown> }).settled(r.id);
+    }
     await weft.close();
     if (prev === undefined) delete process.env.WEFT_SCRIPTS_DIR; else process.env.WEFT_SCRIPTS_DIR = prev;
     rmSync(scripts, { recursive: true, force: true });

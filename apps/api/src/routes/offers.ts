@@ -69,9 +69,7 @@ export function offersRoutes(weft: Weft): Hono<WeftEnv> {
     r.post(path, async (c) => {
       const session = c.var.session;
       if (!session) throw new Unauthorized();
-      const out = await weft.executor.human.exec(session, command, { offer_id: c.req.param("id") });
-      await weft.scheduler.kick();
-      return outcomeJson(c, out);
+      return outcomeJson(c, await weft.executor.human.exec(session, command, { offer_id: c.req.param("id") }));
     });
   }
   stubRoutes(r, "offers", ["GET /v1/offers", "POST /v1/offers/:id/accept", "POST /v1/offers", "GET /v1/offers/:id", "POST /v1/offers/:id/send", "POST /v1/offers/:id/void"]);
