@@ -110,8 +110,13 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
       if (row.expiresAt <= now) {
         await writeLocked(() => e.db.transaction(async (tx) => {
           const res = await tx.run(sql`UPDATE proposals SET status = 'expired', decided_at = ${now}, decision_code = 'EXPIRED' WHERE id = ${row.id} AND status = 'pending'`);
-          if (res.rowsAffected === 1) await appendAudit(tx, { proposalId: row.id, principalId: who.id, attempt: input.decision, outcome: "refused:EXPIRED", ts: now });
-        }));
+          if (res.rowsAffected === 1) {
+            await appendAudit(tx, { proposalId: row.id, principalId: who.id, attempt: input.decision, outcome: "refused:EXPIRED", ts: now });
+            await emitEvent(tx, e.clock, { body: { type: "proposal.decided", payload: { proposal_id: row.id, status: "expired" } }, subjectRef: row.id, attended: false, requestedBy: null });
+            return true;
+          }
+          return false;
+        })).then(async (changed) => { if (changed) await fire({ proposalId: row.id, runId: row.proposerRunId, status: "expired", actionSeq: null, deciderRole: "system", reasonCode: "EXPIRED" }); });
         return no("EXPIRED", `${row.id} expired at ${row.expiresAt}`);
       }
       const suggestion = row.kind === "suggestion";

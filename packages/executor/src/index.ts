@@ -13,7 +13,7 @@ import { builtinCommands } from "./builtins";
 import { verifyActions } from "./chain";
 import type { Engine, SimulatorsFactory } from "./engine";
 import { createHumanExecutor } from "./human";
-import { expireProposals } from "./proposals";
+import { expireProposals, fireExpired } from "./proposals";
 import { createRegistry } from "./registry";
 import { createRunAuthority } from "./runs";
 import { markTainted } from "./taint";
@@ -93,7 +93,11 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
     vault: { put: (i) => vault.put(i), list: () => vault.list() },
     memory: engine.memory,
     registry: engine.registry,
-    expireProposals: (now) => writeLocked(() => opts.db.transaction((tx) => expireProposals(engine, tx, now))),
+    expireProposals: async (now) => {
+      const expired = await writeLocked(() => opts.db.transaction((tx) => expireProposals(engine, tx, now)));
+      await fireExpired(engine, expired);
+      return expired.length;
+    },
     async verifyChain() {
       const gitSeq = memory.root() ? (memory.chainHeadSeq() ?? 0) : null;
       const s = await verifyActions(opts.db, gitSeq);

@@ -131,15 +131,30 @@ export function toProposal(r: ProposalRow): Proposal {
   };
 }
 
-/** Marks pending proposals past expires_at as expired (scheduler step 2). */
-export async function expireProposals(e: Engine, tx: DbTx, now: string): Promise<number> {
-  const due = await tx.select({ id: proposals.id }).from(proposals).where(and(eq(proposals.status, "pending"), lte(proposals.expiresAt, now)));
+/** Marks pending proposals past expires_at as expired (scheduler step 2). Returns the rows this call expired. */
+export async function expireProposals(e: Engine, tx: DbTx, now: string): Promise<{ id: string; proposerRunId: string | null }[]> {
+  const due = await tx.select({ id: proposals.id, proposerRunId: proposals.proposerRunId }).from(proposals).where(and(eq(proposals.status, "pending"), lte(proposals.expiresAt, now)));
+  const expired: { id: string; proposerRunId: string | null }[] = [];
   for (const p of due) {
     const res = await tx.run(sql`UPDATE proposals SET status = 'expired', decided_at = ${now}, decision_code = 'EXPIRED' WHERE id = ${p.id} AND status = 'pending'`);
     if (res.rowsAffected === 1) {
       await appendAudit(tx, { proposalId: p.id, principalId: "svc_scheduler", attempt: "expire", outcome: "ok", ts: now });
       await emitEvent(tx, e.clock, { body: { type: "proposal.decided", payload: { proposal_id: p.id, status: "expired" } }, subjectRef: p.id, attended: false, requestedBy: null });
+      expired.push(p);
     }
   }
-  return due.length;
+  return expired;
+}
+
+/** Tells the decided callbacks (agent wake, routine finalize) about each proposal that expired, after the commit. */
+export async function fireExpired(e: Engine, rows: { id: string; proposerRunId: string | null }[]): Promise<void> {
+  for (const r of rows) {
+    for (const cb of e.decided) {
+      try {
+        await cb({ proposalId: r.id, runId: r.proposerRunId, status: "expired", actionSeq: null, deciderRole: "system", reasonCode: "EXPIRED" });
+      } catch (err) {
+        e.log(e.redactor.redact(`onProposalDecided failed: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    }
+  }
 }
