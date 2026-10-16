@@ -132,7 +132,7 @@ async function finalPayFacts(i: FinalPayInput, companyId: string, deps: CommandD
 
 export const finalPayCommand = writeCommand({
   name: "offboarding.final_pay", summary: "Propose final pay as a dismissal payroll run.",
-  description: "Final pay for an offboarding case_id: a dismissal payroll run with the period wages through the last day plus unused PTO (pay_unused_pto, default true), each earning line in the preview. R4, always needs approval; approval submits the run to the bank simulator and marks the step done.",
+  description: "Final pay for an offboarding case_id: a dismissal payroll run with the period wages through the last day plus unused PTO (pay_unused_pto, default true), each earning line in the preview. R4: an agent's call always needs approval (a person's direct call runs it); approval submits the run to the bank simulator and marks the step done.",
   input: FinalPayInput, domain: "payroll", needs: "edit", effect: "external", risk: () => "R4", approval: "always", reversible: false,
   amountCents: async (i, ctx, deps) => (await finalPayFacts(i, ctx.companyId, deps, ctx.now)).plan.totalCostCents,
   ceilingKey: PAYROLL_RUN_CEILING, lease: (i) => `offboarding:${i.case_id}:final_pay`, tiers: { main: "executable", task: "unavailable" },

@@ -47,7 +47,7 @@ async function plan(i: ScheduleInput, companyId: string, deps: Parameters<WeftCo
 }
 const schedulePayoutsCmd = writeCommand({
   name: "contractors.schedule_payouts", summary: "Propose monthly payouts to global contractors through the payment rail.",
-  description: "Propose this month's payouts for the given contractors (worker_ids) on scheduled_for. Amounts come from each contractor's contract rate and the fixed FX table, never from arguments. Always a proposal; approval books each payment on the payment rail simulator (pending, then sent, then delivered).",
+  description: "Propose this month's payouts for the given contractors (worker_ids) on scheduled_for. Amounts come from each contractor's contract rate and the fixed FX table, never from arguments. An agent's call is always a proposal (a person's direct call runs it); approval books each payment on the payment rail simulator (pending, then sent, then delivered).",
   input: ScheduleInput, domain: "payroll", needs: "edit", effect: "external", risk: () => "R4", approval: "always", reversible: false, ceilingKey: "agent.payroll_run_cents",
   amountCents: async (i, ctx, deps) => { const p = await planPayouts(deps.tx, ctx.companyId, i.worker_ids, i.scheduled_for); return p.ok ? p.totalUsdCents : null; },
   async preview(i: ScheduleInput, ctx, deps) {
