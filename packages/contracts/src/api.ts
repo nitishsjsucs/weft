@@ -143,6 +143,8 @@ export const ROUTES = [
   r("POST", "/v1/screening/orders/:id/adjudicate", "screening", "w3-integrations-screening-esign", "ToolOutcome", { auth: "ui_only", body: "{ step: 'engage' | 'pre_adverse' | 'final_adverse' | 'cancel_adverse' | 'proceed_to_criminal' }" }),
   r("GET", "/v1/offers/:id/envelope", "screening", "w3-integrations-screening-esign", "EsignEnvelope"),
   r("POST", "/v1/portal/esign/url", "screening", "w3-integrations-screening-esign", "{ url, expiresAt }", { auth: "ui_only" }),
+  r("GET", "/v1/portal/screening", "screening", "w3-integrations-screening-esign", "W3ScreeningPortalView[]"),
+  r("POST", "/v1/portal/screening/consent", "screening", "w3-integrations-screening-esign", "{ ok, orderId }", { auth: "ui_only", body: "{ orderId, typedName } (simulated apply page only)" }),
 ] as const satisfies readonly RouteDef[];
 
 export type RouteKey = `${(typeof ROUTES)[number]["method"]} ${(typeof ROUTES)[number]["path"]}`;
