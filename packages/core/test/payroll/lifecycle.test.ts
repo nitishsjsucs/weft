@@ -193,5 +193,5 @@ describe("determinism", () => {
     const a = await seeded();
     const b = await seeded();
     try { expect(await dump(a.db)).toBe(await dump(b.db)); } finally { await a.close(); await b.close(); }
-  });
+  }, 30_000);   // two full seeds: about 1.6 s alone, past the 5 s default under a load average of 20 or more
 });

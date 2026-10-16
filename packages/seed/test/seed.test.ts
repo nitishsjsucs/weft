@@ -31,5 +31,5 @@ describe("seed", () => {
   });
   it("is deterministic: two seeds give the same digest", async () => {
     expect(await seededDigest()).toBe(await seededDigest());
-  });
+  }, 30_000);   // two full seeds: about 3.5 s alone, past the 5 s default under a load average of 20 or more
 });
