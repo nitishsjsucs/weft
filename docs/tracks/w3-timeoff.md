@@ -140,6 +140,15 @@ WEFT_E2E_WEB_PORT=4676 WEFT_E2E_API_PORT=4677 pnpm exec playwright test e2e/gp14
 Round 1 ran the e2e on 4640/4641 (docs/wave3.md 7); round 2 was told to use only 4660 to 4679, and 4660 to 4671
 belong to the two integrations tracks, so round 2 used 4676/4677. Any free pair works.
 
+The e2e suite sits at the UI rate limit (apps/api/src/http/auth.ts: 1,200 requests per principal in a fixed 60 s
+window). The app shell polls the clock, proposals, offers, health and the chat about every second, and almost every
+spec runs as Dana, so a fast machine packs about 1,200 of her requests into one window. Measured in round 2: the
+golden-path specs alone made 1,196 Dana requests in 29 s. Main at 35b385f also failed one site-layout spec with 429
+on the same machine. Both GP14 specs therefore view as Sam (HR manager) and read the API as Sam, which leaves 6 Dana
+requests from this track. The full suite passed 33 of 33 on the final run; when it fails, the failures are 429s in
+GP9 or the site-layout specs. The fix belongs to the e2e harness or the auth limits (outside this track): a higher
+limit in test mode, or the reset fixture on its own principal.
+
 In the app: Time Off in the sidebar (`/app/time-off`), a person's Time off tab (`/app/people/<id>`), and the Time off
 tile on Home. "Viewing as" Sam (HR manager) or Dana (People admin) shows Approve and Deny on every pending request.
 
@@ -163,7 +172,7 @@ the w3-integrations-hr Workday simulator (or its real adapter once configured) a
   (T19), manager scope, block refusal, submit and cancel, the draft flags (four in review, the refresh on submit and
   cancel), Workday rows read-only, a hire after the seed (assignments and the TX front load on the first request),
   accrual idempotency (T18), year end (T16 in the database), adjust and reopen.
-- `tests/scenarios/gp14-time-off.test.ts`; `e2e/gp14-time-off.spec.ts` has GP14 (Ruth's conflict, Imani's scope, the
+- `tests/scenarios/gp14-time-off.test.ts`; `e2e/gp14-time-off.spec.ts` has GP14 (Ruth's conflict, Imani's scope, Sam's
   approval, the TX pto line) and GP14b (the Home tile, Kenji's info flag, Sam approves on the Requests tab, the sick
   line and PTO_LINE on the draft, the Balances, Policies and Holidays tabs, the person Time off tab).
 

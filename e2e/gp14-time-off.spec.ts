@@ -1,19 +1,22 @@
 // GP14. Time off with a coverage conflict (docs/wave3.md 5). Owner of the spec: w3-timeoff.
 // On Time Off, Ruth's pending vacation shows the coverage and holiday checks and is routed to Imani; Ben's sick day is
 // blocked by the waiting period; the Hardware calendar outlines Nov 23 to 25 (3 of 9 out). Imani may decide only for
-// her direct reports (checked by the API); the People admin approves Ruth's request on the Requests tab, the hold
+// her direct reports (checked by the API); Sam (HR manager) approves Ruth's request on the Requests tab, the hold
 // becomes use rows and the calendar marks the days approved. The TX vacation day is a pto line on the open draft with
 // gross unchanged. ("Viewing as" Imani joins the persona menu with w3-topbar-shell; until then her call goes through
-// the API here.)
+// the API here.) Both tests view as Sam: the UI rate limit is per principal per minute, the app shell polls several
+// endpoints a second, and the rest of the suite runs as Dana, so these specs stay out of Dana's budget.
 import { W3_TIMEOFF_TID as T } from "../packages/contracts/src/index";
 import { eventually, expect, openApp, SEED, test, viewAs, WeftApi } from "./fixtures";
 
 type Req = { id: string; status: string; approverPrincipalId: string | null; decidedBy?: string | null; checks: { rule: string }[] };
 type DraftPage = { data: { workerId: string; gross: { amount: number }; earnings: { type: string; amountCents: number; hoursX100: number | null }[]; flags: { rule: string; severity: string }[] }[] };
 
-test("GP14: coverage conflict routed to the manager, approved on the Requests tab, pto line on the draft", async ({ page, weft, request }) => {
+test("GP14: coverage conflict routed to the manager, approved on the Requests tab, pto line on the draft", async ({ page, request }) => {
+  const weft = new WeftApi(request, "usr_sam");
   await test.step("Requests: Ruth's vacation carries its checks and routing; Ben's sick day is blocked", async () => {
     await openApp(page, "/app/time-off");
+    await viewAs(page, "sam");
     await page.getByTestId(T.tab("requests")).click();
     const ruth = page.getByTestId(T.requestRow("tor_0003"));
     await expect(ruth).toHaveAttribute("data-status", "pending");
@@ -39,12 +42,13 @@ test("GP14: coverage conflict routed to the manager, approved on the Requests ta
     expect(JSON.stringify(refused)).toContain("DOMAIN_NOT_DIRECT_REPORT");
   });
 
-  await test.step("the People admin approves Ruth's request; the hold becomes use rows and the calendar marks it approved", async () => {
+  await test.step("Sam approves Ruth's request; the hold becomes use rows and the calendar marks it approved", async () => {
     await page.getByTestId(T.tab("requests")).click();
     const ruth = page.getByTestId(T.requestRow("tor_0003"));
     await ruth.getByTestId(T.decide("approve")).click();
     await expect(page.getByRole("status")).toContainText("Approved Ruth Okoro (demo)'s vacation");
-    await eventually(() => weft.get<Req>("/v1/time-off/requests/tor_0003"), (r) => r.status === "approved", "Ruth's request is approved");
+    const ruthAfter = await eventually(() => weft.get<Req>("/v1/time-off/requests/tor_0003"), (r) => r.status === "approved" && r, "Ruth's request is approved");
+    expect(ruthAfter.decidedBy).toBe("usr_sam");
     const ledger = await weft.get<{ kind: string; minutes: number; source_ref: string | null }[]>("/v1/time-off/ledger", { workerId: "wrk_0010", policyId: "top_vac_us" });
     expect(ledger.filter((l) => l.kind === "use" && l.source_ref === "tor_0003").reduce((s, l) => s + l.minutes, 0)).toBe(-1_440);
     await page.getByTestId(T.tab("calendar")).click();
@@ -60,31 +64,32 @@ test("GP14: coverage conflict routed to the manager, approved on the Requests ta
   });
 });
 
-test("GP14b: an HR manager decides on the Requests tab; balances, policies, holidays, the person tab and the Home tile", async ({ page, weft }) => {
+test("GP14b: an HR manager decides on the Requests tab; balances, policies, holidays, the person tab and the Home tile", async ({ page, request }) => {
+  const sam = new WeftApi(request, "usr_sam");
   await test.step("Home: the Time off tile counts the three requests waiting for a decision", async () => {
     await openApp(page, "/app");
+    await viewAs(page, "sam");
     await expect(page.getByTestId("home-time-off-pending")).toHaveText("3");
   });
 
   await test.step("the open draft flags Kenji's pending sick half day as info (salaried: gross does not move)", async () => {
-    const draft = await weft.get<DraftPage>(`/v1/payrolls/${SEED.draftRun}/paychecks`, { limit: 100 });
+    const draft = await sam.get<DraftPage>(`/v1/payrolls/${SEED.draftRun}/paychecks`, { limit: 100 });
     const kenji = draft.data.find((p) => p.workerId === "wrk_0034")!;
     expect(kenji.flags.filter((f) => f.rule.includes("TIME_OFF") || f.rule === "PTO_LINE")).toEqual([expect.objectContaining({ rule: "PENDING_TIME_OFF_IN_PERIOD", severity: "info" })]);
   });
 
-  await test.step("Sam (HR manager) approves Kenji's request, routed to the People admin, on the Requests tab", async () => {
+  await test.step("Sam approves Kenji's request, routed to the People admin, on the Requests tab", async () => {
     await openApp(page, "/app/time-off");
-    await viewAs(page, "sam");
     const kenji = page.getByTestId(T.requestRow("tor_0004"));
     await expect(kenji).toContainText("Routed to Dana Whitfield (demo)");
     await kenji.getByTestId(T.decide("approve")).click();
     await expect(page.getByRole("status")).toContainText("Approved Kenji Watanabe (demo)'s sick leave");
-    const r = await eventually(() => weft.get<Req>("/v1/time-off/requests/tor_0004"), (x) => x.status === "approved" && x, "Kenji's request is approved");
+    const r = await eventually(() => sam.get<Req>("/v1/time-off/requests/tor_0004"), (x) => x.status === "approved" && x, "Kenji's request is approved");
     expect(r.decidedBy).toBe("usr_sam");
   });
 
   await test.step("the draft now pays 4.00 h of sick leave out of the salary line, gross unchanged, flagged PTO_LINE", async () => {
-    const draft = await weft.get<DraftPage>(`/v1/payrolls/${SEED.draftRun}/paychecks`, { limit: 100 });
+    const draft = await sam.get<DraftPage>(`/v1/payrolls/${SEED.draftRun}/paychecks`, { limit: 100 });
     const kenji = draft.data.find((p) => p.workerId === "wrk_0034")!;
     expect(kenji.earnings.map((e) => [e.type, e.amountCents, e.hoursX100])).toEqual([["salary", 620_000, null], ["sick", 30_000, 400]]);
     expect(kenji.gross.amount).toBe(650_000);
