@@ -99,7 +99,8 @@ screenshot capture and its `package.json` script changed) while another project'
 14 and 38. `pnpm test` passed 596 of 596 (181 s), `pnpm typecheck` 15 of 15, `pnpm demo` exited 0 and `pnpm lint:brand`
 passed, but the first `pnpm e2e` passed 27 of 30: the fixture's `POST /v1/sim/reset` answered 500 before GP7, GP9 and
 the 1440 px spec. A second `pnpm e2e` on that clone, still under load, passed 30 of 30 (175 s). The cause is not known:
-in test mode the API does not log a 500's stack (`apps/api/src/http/errors.ts`), so nothing was recorded.
+in test mode the API does not log a 500's stack (`apps/api/src/http/errors.ts`), so nothing was recorded. A third run
+with that logging patched in locally (not committed) passed 30 of 30 and logged no 500.
 
 Live on `gpt-5.6-luna` (Responses API), on the same clone. Wave 2 added no live case, so L1 to L4 are the whole live
 suite:
