@@ -116,7 +116,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     if (t || !run.routineRunId) return t;
     const setup = await setupOf(run.id);
     if (!setup?.routineId || !setup.trigger) return undefined;
-    const routine = await opts.routinesView.get(setup.routineId);
+    const routine = await opts.routinesView.get(setup.routineId).catch(() => null);
     if (!routine) return undefined;
     const back = { routine, trigger: setup.trigger };
     triggers.set(run.id, back);
@@ -125,7 +125,8 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
 
   const remember = async (handle: RunHandle) => {
     handles.set(handle.runId, handle);
-    await handleStore?.save(handle);
+    // A handle that cannot be persisted still works in this process; only restart survival is lost for that run.
+    await handleStore?.save(handle).catch(() => undefined);
   };
   const forget = (runId: string) => {
     handles.delete(runId);
