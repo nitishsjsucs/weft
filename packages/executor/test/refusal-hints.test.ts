@@ -1,7 +1,8 @@
 // A Refused error's own extra.hint and extra.example (values derived for this call) win over the command's static
 // errorHints; without them the static hint is used (t2 finding, SPEC 9.2 refusal shape).
 import { describe, expect, it } from "vitest";
-import { Refused, type WeftCommand } from "@weft/contracts";
+import { Refused } from "@weft/contracts";
+import type { WeftCommand } from "@weft/core";
 import { hintsOfError, refusal } from "../src/outcome";
 
 const def = { errorHints: { DOMAIN_NOTICE_MISMATCH: { hint: "static hint", example: { rate: "0.000" } } } } as unknown as WeftCommand;
