@@ -362,6 +362,69 @@ const cancel = writeCommand({
   },
 });
 
+// ------------------------------------------------------------------ adjust and reopen
+
+const AdjustInput = z.object({ worker_id: z.string(), policy_id: z.string(), minutes: z.number().int(), reason: z.string().min(1).max(400) });
+type AdjustInput = z.infer<typeof AdjustInput>;
+async function adjustPlan(tx: DbTx, ctx: { companyId: string; now: string }, i: AdjustInput) {
+  const w = await workerOf(tx, ctx.companyId, i.worker_id);
+  if (!w) throw notFound("worker", i.worker_id);
+  const p = await policyById(tx, ctx.companyId, i.policy_id);
+  if (!p) throw notFound("time-off policy", i.policy_id);
+  const asn = (await assignmentsOf(tx, [w.id])).find((a) => a.policyId === p.id);
+  if (!asn) throw new DomainRefusal("DOMAIN_NOT_ASSIGNED", `${displayName(w)} is not on ${p.name}`, "Use a policy from time_off.get_balance for this worker", null);
+  if (i.minutes === 0) throw new DomainRefusal("DOMAIN_ZERO_ADJUSTMENT", "minutes must not be 0", null, null);
+  const b = await balanceFor(tx, w, p, ptDateOf(ctx.now));
+  if (b.availableMinutes + i.minutes < 0) throw new DomainRefusal("DOMAIN_NEGATIVE_BALANCE", `${displayName(w)} has ${h(b.availableMinutes)} available; Weft never takes a balance below zero`, "Adjust by at most the available balance", { worker_id: w.id, policy_id: p.id, minutes: -b.availableMinutes, reason: i.reason });
+  return { w, p, asn, b };
+}
+const adjustBalance = writeCommand({
+  name: "time_off.adjust_balance", summary: "Correct a worker's time-off balance by a signed number of minutes (always a proposal for agents).",
+  description: "Post a signed adjustment of minutes to worker_id's balance on policy_id with a reason (for example a balance imported wrong). Never takes the available balance below zero. An agent's call is a proposal; the inverse adjustment reverses it.",
+  input: AdjustInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R2"), approval: "always", reversible: { reverse: "time_off.adjust_balance" },
+  lease: (i: AdjustInput) => `time_off_balance:${i.worker_id}:${i.policy_id}`,
+  async preview(i: AdjustInput, ctx, deps) {
+    const { w, p, b } = await adjustPlan(deps.tx, ctx, i);
+    return {
+      title: `Adjust ${displayName(w)}'s ${p.name} by ${i.minutes > 0 ? "+" : ""}${h(i.minutes)}`,
+      diff: [{ label: `${p.name} available`, before: h(b.availableMinutes), after: h(b.availableMinutes + i.minutes) }],
+      content: [{ label: "Reason", text: i.reason }], moneyCents: null, subjectRef: `time_off_balance:${w.id}:${p.id}`,
+      subjectHash: sha256Hex(canonicalJson({ w: w.id, p: p.id, available: b.availableMinutes, minutes: i.minutes })), evidence: [{ label: "worker", ref: w.id }],
+    };
+  },
+  async run(i: AdjustInput, ctx, deps) {
+    const { w, p, asn, b } = await adjustPlan(deps.tx, ctx, i);
+    const id = await appendLedger(deps.tx, deps.newId, { assignmentId: asn.id, workerId: w.id, policyId: p.id, kind: "adjustment", minutes: i.minutes, effectiveDate: ptDateOf(ctx.now), sourceRef: null, runKey: null, note: i.reason.slice(0, 200), actionSeq: null, createdAt: ctx.now });
+    return {
+      data: { ledger_id: id, worker_id: w.id, policy_id: p.id, minutes: i.minutes, available_before: b.availableMinutes, available_after: b.availableMinutes + i.minutes },
+      summary: `Adjusted ${displayName(w)}'s ${p.name} by ${h(i.minutes)} (now ${h(b.availableMinutes + i.minutes)})`,
+      reverseArgs: { worker_id: w.id, policy_id: p.id, minutes: -i.minutes, reason: `Reverses: ${i.reason}`.slice(0, 400) },
+      events: [{ type: "time_off.balance.adjusted", subjectRef: w.id, payload: { worker_id: w.id, policy_id: p.id } }],
+    };
+  },
+});
+
+const reopen = writeCommand({
+  name: "time_off.reopen", summary: "Return a decided time-off request that has not started to pending.",
+  description: "Reopen request_id: an approved request that has not started gets its use rows returned and its hold back; a denied one gets its hold back. The checks run again and the request waits for its approver.",
+  input: RequestIdInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R2"), approval: "never", reversible: false, preview: null, access: "human_only",
+  async run(i: RequestIdInput, ctx, deps) {
+    const r = await requestOf(deps.tx, ctx.companyId, i.request_id);
+    if (!DECIDERS.has(ctx.principal.role ?? "") && ctx.principal.role !== "manager") throw new DomainRefusal("DOMAIN_NOT_APPROVER", "Only an approver reopens a decided request", null, null);
+    const today = ptDateOf(ctx.now);
+    if (!(r.status === "approved" || r.status === "denied") || r.startAt.slice(0, 10) <= today) throw new DomainRefusal("DOMAIN_NOT_REOPENABLE", `${r.id} is ${r.status}${r.startAt.slice(0, 10) <= today ? " and has started" : ""}`, null, null);
+    const rows = (await ledgerOf(deps.tx, r.workerId, r.policyId)).filter((x) => x.sourceRef === r.id);
+    const base = { assignmentId: rows[0]?.assignmentId ?? "tasn_none", workerId: r.workerId, policyId: r.policyId, sourceRef: r.id, runKey: null, actionSeq: null, createdAt: ctx.now };
+    for (const u of rows.filter((x) => x.kind === "use")) await appendLedger(deps.tx, deps.newId, { ...base, kind: "use", minutes: -u.minutes, effectiveDate: u.effectiveDate, note: "reopened" });
+    await appendLedger(deps.tx, deps.newId, { ...base, kind: "hold", minutes: -r.requestedMinutes, effectiveDate: r.startAt.slice(0, 10), note: "reopened" });
+    await deps.tx.update(timeOffRequests).set({ status: "pending", decidedBy: null, decidedAt: null, decisionNote: null }).where(eq(timeOffRequests.id, r.id));
+    const fresh = (await deps.tx.select().from(timeOffRequests).where(eq(timeOffRequests.id, r.id)).limit(1))[0]!;
+    await recheck(deps, ctx.companyId, fresh, ctx.now);
+    if (r.status === "approved") await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.startAt.slice(0, 10));
+    return { data: { request_id: r.id, status: "pending" }, summary: `Reopened ${r.id}` };
+  },
+});
+
 // ------------------------------------------------------------------ system: accruals, payouts, year end
 
 const RunInput = z.object({ run_id: z.string() });
@@ -501,5 +564,5 @@ export function validatePolicy(p: Parameters<typeof forfeitureProblem>[0]): void
 }
 
 export const timeOffCommands: WeftCommand[] = [
-  listPolicies, getBalance, listRequests, teamCalendar, checkRequest, routeRequestCmd, decide, submit, cancel, postAccrualsCmd, recordPayoutCmd, closeYearCmd,
+  listPolicies, getBalance, listRequests, teamCalendar, checkRequest, routeRequestCmd, decide, adjustBalance, submit, cancel, reopen, postAccrualsCmd, recordPayoutCmd, closeYearCmd,
 ];

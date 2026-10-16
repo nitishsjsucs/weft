@@ -54,6 +54,9 @@ conflict), docs/wave3.md 2 and 5; design and hand-computed cases in research/wav
   their own worker record is active; anyone else is refused (`DOMAIN_NOT_APPROVER`). Approval re-runs the checks and
   refuses while a block stands (`DOMAIN_REQUEST_BLOCKED`), releases the hold, posts one `use` row per day and refreshes
   the open drafts; denial releases the hold. `time_off.check_request` and `time_off.route_request` are R1.
+- `time_off.adjust_balance` (R2, approval always, reverse: the inverse adjustment) posts a signed `adjustment` row and
+  never takes the available balance below zero (`DOMAIN_NEGATIVE_BALANCE`). `time_off.reopen` (human only, an
+  approver) returns a decided request that has not started to pending: the use rows come back and the hold returns.
 - `usr_imani` (role `manager`, worker wrk_0004) is seeded with `people: view`; she decides on the Requests tab (her own
   call runs). Approving agent proposals in the Inbox needs `people: approve`, which she does not have, so the grant
   model is unchanged.
@@ -124,7 +127,7 @@ The same list is in `.scratch/w3-timeoff/left.md`.
   flags to the seeded draft (Ben and Kenji are pending inside Oct 16 to 31), which moves the GP2 and S2 counts.
 - The `peopleDigest` out-this-week line (prechecks.ts, GP4) was cut first as planned.
 - The pay statement "Time off" block per policy (NYC accrued, used and available each period).
-- Front loads and assignments for a worker hired after the seed (Noor on GP6 acceptance); `time_off.adjust_balance`
-  and `time_off.reopen` (planned, not built); unpaid salaried docking for full days.
+- Front loads and assignments for a worker hired after the seed (Noor on GP6 acceptance); unpaid salaried docking for
+  full days; Approve and Deny buttons for HR managers (the API already allows them).
 - A directly decided request leaves an agent proposal for it pending; approving that proposal later fails with
   `DOMAIN_NOT_PENDING`. Superseding it needs an executor hook.

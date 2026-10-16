@@ -148,4 +148,25 @@ describe("time-off routes", () => {
     await tick();
     expect((await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_ledger`))[0]!.n).toBe(n);
   });
+
+  it("adjusts a balance (a proposal for agents, never below zero) and reopens a decided request", async () => {
+    const viaMcp = (await call(`key:${mcpKey}`, "POST", "/v1/tools/time_off.adjust_balance", { worker_id: "wrk_0011", policy_id: "top_vac_us", minutes: 480, reason: "Import missed a day" })).json as ToolOutcome;
+    expect(viaMcp).toMatchObject({ ok: true, status: "pending_approval" });
+    const bal = async () => ((await call("usr_dana", "GET", "/v1/time-off/balances?workerId=wrk_0011")).json as { policyId: string; availableMinutes: number }[]).find((b) => b.policyId === "top_vac_us")!.availableMinutes;
+    const before = await bal();
+    const direct = await call("usr_dana", "POST", "/v1/tools/time_off.adjust_balance", { worker_id: "wrk_0011", policy_id: "top_vac_us", minutes: 480, reason: "Import missed a day" });
+    expect(direct.status).toBe(200);
+    expect(await bal()).toBe(before + 480);
+    const over = await call("usr_dana", "POST", "/v1/tools/time_off.adjust_balance", { worker_id: "wrk_0011", policy_id: "top_vac_us", minutes: -(before + 481), reason: "Too much" });
+    expect((over.json as { code: string }).code).toBe("DOMAIN_NEGATIVE_BALANCE");
+
+    // Ruth's approved request (earlier test) has not started: reopening returns the use rows and puts the hold back.
+    const reopened = await call("usr_dana", "POST", "/v1/tools/time_off.reopen", { request_id: "tor_0003" });
+    expect(reopened.status).toBe(200);
+    expect((await request("tor_0003")).status).toBe("pending");
+    const ledger = (await call("usr_dana", "GET", "/v1/time-off/ledger?workerId=wrk_0010&policyId=top_vac_us")).json as { kind: string; minutes: number; source_ref: string | null }[];
+    const mine = ledger.filter((l) => l.source_ref === "tor_0003");
+    expect(mine.filter((l) => l.kind === "use").reduce((s, l) => s + l.minutes, 0)).toBe(0);
+    expect(mine.filter((l) => l.kind === "hold" || l.kind === "hold_release").reduce((s, l) => s + l.minutes, 0)).toBe(-1_440);
+  });
 });
