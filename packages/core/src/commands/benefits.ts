@@ -139,7 +139,7 @@ const disputeFindingCmd = writeCommand({
     const { f, msg } = await disputable(i, ctx.companyId, deps);
     const { id } = await deps.sims.email.send({ to: CARRIER_BILLING_EMAIL, from: "benefits@larkspur.example", subject: msg.subject, body: msg.body, kind: "generic", relatedRef: f.id });
     await deps.tx.update(benefitReconFindings).set({ status: "disputed" }).where(eq(benefitReconFindings.id, f.id));
-    return { data: { finding_id: f.id, status: "disputed", email_id: id, to: CARRIER_BILLING_EMAIL }, summary: `Disputed ${f.id} with ${f.carrier} (${id})` };
+    return { data: { finding_id: f.id, status: "disputed", email_id: id, to: CARRIER_BILLING_EMAIL }, summary: `Dispute about the ${f.kind.replace(/_/g, " ")} on the ${f.month} ${f.carrier} invoice emailed to ${CARRIER_BILLING_EMAIL}` };
   },
 });
 

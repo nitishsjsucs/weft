@@ -11,6 +11,9 @@ import { benefitEnrollments, benefitPlans, benefitReconFindings, paychecks, payr
 export const RECON_CARRIER = "Juniper Mutual (sim)";
 export const RECON_BILLED_TYPES: readonly string[] = ["medical", "dental", "vision"];
 export const RECON_DEPENDENT_TIERS: readonly string[] = ["ee_spouse", "ee_children", "family"];
+/** Coverage tiers in words for finding text a person reads; the codes stay in the finding's data. */
+const TIER_WORDS: Record<string, string> = { ee: "employee only", ee_spouse: "employee and spouse", ee_children: "employee and children", family: "family", unknown: "unrecognized" };
+const tierText = (t: string) => TIER_WORDS[t] ?? t.replaceAll("_", " ");
 const EXCLUDED_RUN_STATUSES = ["failed", "void", "voided", "canceled", "cancelled"];
 
 export type ReconFindingRow = typeof benefitReconFindings.$inferSelect;
@@ -127,13 +130,13 @@ export async function computeFindings(tx: DbTx, companyId: string, invoice: Reco
       const addsDependents = RECON_DEPENDENT_TIERS.includes(billedTier) && !dependentsOnFile.has(l.workerId);
       out.push({ kind: addsDependents ? "missing_dependent" : "wrong_tier", workerId: l.workerId, planId: l.planId, billedCents: l.amountCents, expectedCents: exp.cents, deductedCents: ded,
         detail: addsDependents
-          ? `${nameOf(l.workerId)} is billed the ${billedTier} tier for ${plan.name} (${formatCents(l.amountCents)}) but has no dependent on file; the ${exp.tier} enrollment expects ${formatCents(exp.cents)} and paychecks deducted ${formatCents(ded)}.`
-          : `${nameOf(l.workerId)} is billed the ${billedTier} tier for ${plan.name} (${formatCents(l.amountCents)}) but is enrolled at ${exp.tier}; expected ${formatCents(exp.cents)}, paychecks deducted ${formatCents(ded)}.` });
+          ? `${nameOf(l.workerId)} is billed ${tierText(billedTier)} coverage for ${plan.name} (${formatCents(l.amountCents)}) but has no dependent on file; the ${tierText(exp.tier)} enrollment expects ${formatCents(exp.cents)} and paychecks deducted ${formatCents(ded)}.`
+          : `${nameOf(l.workerId)} is billed ${tierText(billedTier)} coverage for ${plan.name} (${formatCents(l.amountCents)}) but is enrolled at ${tierText(exp.tier)}; expected ${formatCents(exp.cents)}, paychecks deducted ${formatCents(ded)}.` });
       continue;
     }
     if (l.amountCents !== exp.cents) {
       out.push({ kind: "amount_mismatch", workerId: l.workerId, planId: l.planId, billedCents: l.amountCents, expectedCents: exp.cents, deductedCents: ded,
-        detail: `${nameOf(l.workerId)} is billed ${formatCents(l.amountCents)} for ${plan.name}; the ${exp.tier} enrollment expects ${formatCents(exp.cents)}.` });
+        detail: `${nameOf(l.workerId)} is billed ${formatCents(l.amountCents)} for ${plan.name}; the ${tierText(exp.tier)} enrollment expects ${formatCents(exp.cents)}.` });
     }
   }
   for (const [workerId, t] of terminated) {
