@@ -74,24 +74,25 @@ export async function planPayouts(tx: DbTx, companyId: string, workerIds: string
 export async function syncRail(tx: DbTx, sims: Pick<Simulators, "rail">, now: string, stamp: { attended: boolean; requestedBy: string | null } = { attended: false, requestedBy: null }) {
   const delivered = await sims.rail.tick(now);
   const open = await tx.select().from(contractorPayments).where(inArray(contractorPayments.railStatus, ["pending", "sent"]));
-  if (open.length === 0) return { sent: 0, delivered: 0 };
+  if (open.length === 0) return { sent: 0, delivered: 0, returned: 0 };
   const transfers = new Map((await tx.select().from(simRailTransfers).where(inArray(simRailTransfers.paymentId, open.map((p) => p.id)))).map((t) => [t.paymentId, t]));
-  let sent = 0, done = 0;
+  let sent = 0, done = 0, returned = 0;
   for (const p of open) {
     const t = transfers.get(p.id);
     if (!t) continue;
     if (t.status === "delivered") {
       await tx.update(contractorPayments).set({ railStatus: "delivered", status: "paid", sentAt: p.sentAt ?? t.sentAt, deliveredAt: t.deliveredAt ?? now, railRef: t.id }).where(eq(contractorPayments.id, p.id));
       done++;
-    } else if (t.status === "sent" && p.railStatus === "pending") {
+    } else if ((t.status === "sent" || t.status === "sent_return") && p.railStatus === "pending") {
       await tx.update(contractorPayments).set({ railStatus: "sent", sentAt: now, railRef: t.id }).where(eq(contractorPayments.id, p.id));
       sent++;
     } else if (t.status === "returned") {
-      await tx.update(contractorPayments).set({ railStatus: "returned", status: "failed" }).where(eq(contractorPayments.id, p.id));
+      await tx.update(contractorPayments).set({ railStatus: "returned", status: "failed", sentAt: p.sentAt ?? t.sentAt, railRef: t.id }).where(eq(contractorPayments.id, p.id));
+      returned++;
     }
   }
   for (const e of delivered) {
     if (open.some((p) => p.id === e.payload.payment_id)) await emitBenefitsWave2Event(tx, now, { type: "sim.rail_delivered", payload: { payment_id: e.payload.payment_id! } }, e.payload.payment_id!, stamp);
   }
-  return { sent, delivered: done };
+  return { sent, delivered: done, returned };
 }

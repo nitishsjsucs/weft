@@ -15,7 +15,7 @@ enrollment and contractor payouts (GP11). Everything runs on synthetic data and 
 | Chase routine | `packages/routines/src/wave2/benefits.ts` | `rt_open_enrollment`: weekdays 10:00 PT, disabled, tools `benefits.list_open_enrollment` and `comms.send_message`. The precheck `open_enrollment` names everyone not started or in progress (names only, no digits, so grounding passes) and skips when nobody is left, after the deadline, or when everyone left was reminded today. **Defined but not yet in PREBUILT** (see contract changes). |
 | FX table | `packages/sim/src/fx.ts` (unchanged), seed step | `fx_rates` seeded from `FX_USD_PER_UNIT` as of 2026-01-01 with the synthetic label. |
 | Payouts | `packages/core/src/contractors/index.ts`, `packages/core/src/commands/contractors.ts` | `contractors.schedule_payouts` (R4, approval always, `amountCents` from DB rows): each active contractor's `contract_monthly` rate, the fixed FX rate, `decimal.js` half up to USD cents (EUR 6,500.00 is $7,020.00, INR 410,000.00 is $4,920.00, CAD 9,800.00 is $7,154.00). Refuses non-contractors and a second payout for the same date. Approval writes `contractor_payments` and books each on the rail. Also `contractors.list_payouts` and `contractors.list_fx_rates` (R0). |
-| Rail simulator | `packages/sim/src/rail.ts` | `send` books `pending` (one per payment id), `tick(now)` moves pending to `sent` and delivers sent transfers two business days after booking (PT), returning `sim.rail_delivered`. Fault target `rail.send`. |
+| Rail simulator | `packages/sim/src/rail.ts` | `send` books `pending` (one per payment id), `tick(now)` moves pending to `sent` and delivers sent transfers two business days after booking (PT), returning `sim.rail_delivered`. Fault target `rail.send`: `error` throws, `return` bounces the transfer (sent, then returned, no delivery event). |
 | Rail sync | `syncRail` in `packages/core/src/contractors/index.ts` | Ticks the rail and mirrors `rail_status`, `sent_at`, `delivered_at` onto `contractor_payments` (delivered turns `status` to `paid`) and appends `sim.rail_delivered` events (validated against `Wave2EventBody`, appended directly because `emitEvent` only takes the frozen union). Called by `GET /v1/contractors/payouts` when a payout is pending or sent (no action row, like a sim tick). |
 | API | `apps/api/src/routes/benefits.ts`, `contractors.ts` | `GET /v1/benefits/reconciliation?month&status`, `POST /v1/benefits/reconciliation/run {month}`, `GET /v1/benefits/open-enrollment?status`, `GET|POST /v1/contractors/payouts`, `GET /v1/contractors/fx`. Disputes go through `POST /v1/tools/benefits.dispute_finding`. |
 | Web | `apps/web/src/components/app/benefits/**`, `contractors/**`, `products/products-view.tsx` | Benefits gets Plans, Reconciliation and Open enrollment tabs; Contractors gets Payouts (amount, FX, USD, rail badge with time) and the FX table. Simulated badges stay. Test ids in `packages/contracts/src/w2/testids-benefits.ts`. |
@@ -43,7 +43,8 @@ expected and deducted $620.00.
 - The routine's reminders through `comms.send_message` do not bump `open_enrollment.nudges`; the screen's reminder
   button (`benefits.nudge_open_enrollment`) does.
 - Rail state advances on `GET /v1/contractors/payouts`, not in the scheduler tick (see contract changes).
-- No `returned` transfers yet (the status and UI badge exist; the simulator never returns).
+- Rail returns only come from the `rail.send` fault with kind `return` (the transfer shows sent, then returned, and
+  the payout turns `failed`); there is no retry of a returned payout yet.
 
 ## Contract changes
 

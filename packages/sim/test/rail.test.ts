@@ -37,3 +37,16 @@ describe("payment rail simulator", () => {
     await expect(sims.rail.send({ paymentId: "cpy_0002", amountMinor: 10, currency: "USD", credential: CRED })).resolves.toMatchObject({ status: "pending" });
   });
 });
+
+describe("payment rail simulator returns", () => {
+  it("a return fault books a bouncing transfer: sent on the next tick, returned instead of delivered, no delivery event", async () => {
+    w = await simWorld("2026-10-30T16:00:00.000Z");
+    const sims = createSimulators({ db: w.db, clock: w.clock });
+    await sims.faults.arm({ target: "rail.send", kind: "return", mode: "once" });
+    await sims.rail.send({ paymentId: "cpy_0009", amountMinor: 980_000, currency: "CAD", credential: CRED });
+    expect(await sims.rail.tick(w.clock.now())).toEqual([]);
+    expect((await w.db.select().from(simRailTransfers))[0]!.status).toBe("sent_return");
+    expect(await sims.rail.tick("2026-11-03T17:00:00.000Z")).toEqual([]);
+    expect((await w.db.select().from(simRailTransfers))[0]).toMatchObject({ status: "returned", deliveredAt: null });
+  });
+});
