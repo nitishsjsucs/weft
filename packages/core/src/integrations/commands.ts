@@ -5,12 +5,13 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { IntegrationVendor, VENDOR_CATEGORY, type AtsHire } from "@weft/contracts";
-import { departments, extLinks, integrationDeliveries, offers, syncItems, workplaces } from "@weft/db";
+import { departments, extLinks, integrationDeliveries, offers, payRates, syncItems, timeOffRequests, workers, workplaces } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, notFound, readCommand, riskOf, writeCommand } from "../demo/define";
 import { sha256Hex } from "../shared/hash";
 import { canonicalJson } from "../shared/canonical-json";
 import { allJobs, recordAtsHire } from "./ats";
+import { applyHrisChange, changedWorkers, detectWorkday, WORKDAY_EPOCH } from "./hris";
 import { getConnection, listSyncItems, settingsOf, toSyncItem, upsertConnection, type ConnectionSettings } from "./store";
 
 const HrVendor = z.enum(["greenhouse", "workday"]);
@@ -83,14 +84,19 @@ const listJobs = readCommand({
 
 const syncNow = writeCommand({
   name: "integrations.sync_now", summary: "Poll an HR integration now for new or changed records.",
-  description: "Poll Greenhouse (or Workday) now: reads hires updated since the last sync and emits one detection event per new or changed hire; the hire is then applied by a system record after a re-read. Writes only the sync cursor. R1: no approval.",
+  description: "Poll Greenhouse or Workday now: reads hires (or workers) changed since the last sync; each is then applied by a system record after a re-read. Writes only the sync time. R1: no approval.",
   input: z.object({ vendor: HrVendor }), domain: "people", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   lease: (i) => `integration:${i.vendor}`,
   async run(i, ctx, deps) {
     const now = ctx.now;
     if (i.vendor === "workday") {
-      const c = await upsertConnection(deps.tx, ctx.companyId, "workday", now, { lastSyncAt: now });
-      return { data: { vendor: "workday", detected: [], last_sync_at: c.lastSyncAt }, summary: "Workday sync: nothing to apply" };
+      // Detection only: the Get_Workers transaction log window from the cursor to now. The cursor moves when
+      // integrations.apply_hris_change has re-read and applied the same window.
+      const conn = await getConnection(deps.tx, ctx.companyId, "workday");
+      const detected = await detectWorkday(deps, conn?.cursor ?? WORKDAY_EPOCH, now);
+      const status = await deps.sims.vendors.workday.status();
+      await upsertConnection(deps.tx, ctx.companyId, "workday", now, { lastSyncAt: now, mode: status.mode, health: "ok" });
+      return { data: { vendor: "workday", detected, through: now, last_sync_at: now }, summary: detected.length ? `Workday sync: ${detected.length} changed worker(s) to apply` : "Workday sync: nothing new" };
     }
     const conn = await getConnection(deps.tx, ctx.companyId, "greenhouse");
     const since = conn?.cursor ?? null;
@@ -196,11 +202,61 @@ const recordHire = writeCommand({
   },
 });
 
+const applyHris = writeCommand({
+  ...system,
+  name: "integrations.apply_hris_change", summary: "Apply Workday worker and time-off changes after re-reading them.",
+  description: "System record: re-read the Workday workers changed in the window (ids only in, never a body), link them by work email, apply a changed title, open sync items for pay-affecting changes (people.external_change) and import approved time off as read-only requests with source workday.",
+  input: z.object({ vendor: z.literal("workday"), worker_refs: z.array(z.string().regex(/^[0-9a-f]{32}$/)).max(500), through: z.string().datetime() }),
+  lease: () => "hris:workday:apply",
+  async run(i, ctx, deps) {
+    const r = await applyHrisChange(deps, ctx, i);
+    const { events, ...data } = r;
+    return { data, summary: `Workday: ${r.workers_seen} worker(s), ${r.applied.length} change(s) applied, ${r.time_off_imported.length} time-off entr${r.time_off_imported.length === 1 ? "y" : "ies"} imported, ${r.sync_item_ids.length} sync item(s)`, events };
+  },
+});
+
+async function workdayRefOf(deps: Parameters<WeftCommand["run"]>[2], workerId: string): Promise<string> {
+  const [l] = await deps.tx.select().from(extLinks).where(and(eq(extLinks.vendor, "workday"), eq(extLinks.extType, "worker"), eq(extLinks.weftId, workerId))).limit(1);
+  if (!l) throw new DomainRefusal("DOMAIN_NOT_LINKED", `${workerId} is not linked to a Workday worker yet`, "Run integrations.sync_now for workday first", null);
+  return l.extId;
+}
+const getWorkerExternal = readCommand({
+  name: "hris.get_worker_external", domain: "people",
+  summary: "Compare a worker's Weft record with Workday (simulated unless connected).",
+  description: "Read the linked Workday worker for worker_id and compare title, work state, base pay (cents) and termination date with Weft, field by field. Takes worker_id.",
+  input: z.object({ worker_id: z.string().startsWith("wrk_") }),
+  async run(i, ctx, deps) {
+    const ref = await workdayRefOf(deps, i.worker_id);
+    const [w] = await deps.tx.select().from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.id, i.worker_id))).limit(1);
+    if (!w) throw notFound("worker", i.worker_id);
+    const wd = (await changedWorkers(deps, WORKDAY_EPOCH, ctx.now)).find((x) => x.workerRef === ref) ?? null;
+    if (!wd) throw notFound("Workday worker", ref);
+    const rate = (await deps.tx.select().from(payRates).where(eq(payRates.workerId, w.id))).filter((r) => r.effectiveTo === null).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
+    const pairs: [string, string | number | null, string | number | null][] = [["title", w.title, wd.title], ["work_state", w.workState, wd.locationState], ["base_cents", rate?.amountCents ?? null, wd.baseAmountMinor], ["termination_date", w.endDate, wd.terminationDate]];
+    const fields = pairs.map(([field, weft, workday]) => ({ field, weft, workday, same: weft === workday }));
+    return { data: { worker_id: w.id, workday_ref: ref, employee_id: wd.employeeId, fields }, summary: `${fields.filter((f) => !f.same).length} field(s) differ from Workday` };
+  },
+});
+const listTimeOffExt = readCommand({
+  name: "hris.list_time_off", domain: "people",
+  summary: "Time off for a worker as Workday holds it (simulated unless connected).",
+  description: "List the Workday time-off entries for worker_id (date, minutes, type, status and the employee's comment, which is untrusted) from from to to (YYYY-MM-DD), and which ones Weft imported as read-only requests. status approved (default) or all.",
+  input: z.object({ worker_id: z.string().startsWith("wrk_"), from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), status: z.enum(["approved", "all"]).optional() }),
+  untrustedFields: ["entries.*.comment"],
+  async run(i, _ctx, deps) {
+    const ref = await workdayRefOf(deps, i.worker_id);
+    const page = await deps.sims.vendors.workday.listTimeOff({ workerRef: ref, from: i.from, to: i.to, status: i.status ?? "approved" });
+    const imported = new Map((await deps.tx.select().from(timeOffRequests).where(and(eq(timeOffRequests.workerId, i.worker_id), eq(timeOffRequests.source, "workday")))).map((r) => [r.extRef, r.id]));
+    const entries = page.items.map((e) => ({ entry_ref: e.entryRef, date: e.date, minutes: e.quantityMinutes, type_ref: e.typeRef, status: e.status, comment: e.comment, weft_request_id: imported.get(e.entryRef) ?? null }));
+    return { data: { worker_id: i.worker_id, count: entries.length, entries }, summary: `${entries.length} Workday time-off entr${entries.length === 1 ? "y" : "ies"}` };
+  },
+});
+
 // ---- human only: resolve a sync item -------------------------------------------------------------------------------
 
 const resolveSync = writeCommand({
   name: "integrations.resolve_sync_item", summary: "Resolve a sync item: keep the Weft value or take the vendor value.",
-  description: "Human only, in the Integrations screen: resolve sync_item_id. take weft keeps Weft as it is; take vendor applies the vendor value (start date or base salary) to a draft offer. A sent offer is refused: void and reissue it instead.",
+  description: "Human only, in the Integrations screen: resolve sync_item_id. take weft keeps Weft as it is; take vendor applies the vendor value (start date or base salary) to a draft offer, or a Workday title to the worker. A sent offer and a pay change are refused.",
   input: z.object({ sync_item_id: z.string().startsWith("syn_"), take: z.enum(["weft", "vendor"]) }), domain: "people", needs: "edit", effect: "write", risk: riskOf("R2"), approval: "never", access: "human_only", reversible: false, preview: null,
   async run(i, ctx, deps) {
     const [r] = await deps.tx.select().from(syncItems).where(and(eq(syncItems.companyId, ctx.companyId), eq(syncItems.id, i.sync_item_id), isNull(syncItems.resolvedAt))).limit(1);
@@ -209,6 +265,15 @@ const resolveSync = writeCommand({
     let applied: string | null = null;
     if (i.take === "vendor") {
       if (r.kind !== "sync_conflict") throw new DomainRefusal("DOMAIN_NOTHING_TO_TAKE", `${r.kind} has no vendor value to apply`, "Map the value with integrations.map_value, or keep the Weft value", null);
+      if (r.subjectRef.startsWith("wrk_")) {
+        if (d.field !== "title") throw new DomainRefusal("DOMAIN_PAY_CHANGE_IN_PEOPLE", `A Workday ${d.field} change affects pay; apply it from the person's pay settings so payroll previews it`, "Keep the Weft value here once the change is applied in People", null);
+        const [w] = await deps.tx.select().from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.id, r.subjectRef))).limit(1);
+        if (!w) throw notFound("worker", r.subjectRef);
+        await deps.tx.update(workers).set({ title: d.vendor_value!, updatedAt: ctx.now }).where(eq(workers.id, w.id));
+        applied = `title ${w.title} to ${d.vendor_value}`;
+        await deps.tx.update(syncItems).set({ status: "resolved", resolvedAt: ctx.now, resolvedBy: ctx.principal.id, detailJson: JSON.stringify({ ...d, resolution: i.take }) }).where(eq(syncItems.id, r.id));
+        return { data: { sync_item_id: r.id, take: i.take, applied, subject_ref: r.subjectRef }, summary: `Resolved ${r.id}: took the Workday value (${applied})` };
+      }
       const [o] = await deps.tx.select().from(offers).where(eq(offers.id, r.subjectRef)).limit(1);
       if (!o) throw notFound("offer", r.subjectRef);
       if (o.status !== "draft") throw new DomainRefusal("DOMAIN_OFFER_NOT_DRAFT", `Offer ${o.id} is ${o.status}; only a draft takes a vendor change`, "Keep the Weft value, or void the offer and import it again", null);
@@ -220,5 +285,5 @@ const resolveSync = writeCommand({
   },
 });
 
-export const hrIntegrationCommands: WeftCommand[] = [status, listSync, getHire, listJobs, syncNow, mapValue, recordDelivery, recordHire, resolveSync];
+export const hrIntegrationCommands: WeftCommand[] = [status, listSync, getHire, listJobs, getWorkerExternal, listTimeOffExt, syncNow, mapValue, recordDelivery, recordHire, applyHris, resolveSync];
 export { allJobs };

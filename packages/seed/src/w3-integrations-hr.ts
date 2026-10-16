@@ -2,8 +2,11 @@
 // connection row with the value maps for the fictional Larkspur account (Engineering, Hardware and Operations; the
 // Oakland and Austin offices; the Boulder field office is left unmapped on purpose so a simulated hire shows an
 // unmapped-value item), and the simulator's Larkspur jobs and in-process candidates. No hires are seeded, so the
-// 15-minute poll stays idle until someone simulates one. Never changes wave 1 or wave 2 seed counts.
-import type { W3GreenhouseSimControls } from "@weft/contracts";
+// 15-minute poll stays idle until someone simulates one. The simulated Workday tenant mirrors the seeded employees
+// (same work email, title, state and pay, so a first sync links everyone with no conflict) and the Workday connection
+// row carries the absence type map read from the tenant (Vacation and Sick). Workday stays unsynced until someone
+// presses Sync now, so time off keeps Weft as its system of record. Never changes wave 1 or wave 2 seed counts.
+import type { W3GreenhouseSimControls, W3WorkdaySimControls } from "@weft/contracts";
 import { integrationConnections } from "@weft/db";
 import type { SeedContext } from "./context";
 
@@ -20,4 +23,16 @@ export async function seedW3IntegrationsHr(ctx: SeedContext): Promise<void> {
   }).onConflictDoNothing();
   const gh = ctx.sims.vendors.greenhouse as unknown as Partial<W3GreenhouseSimControls>;
   if (typeof gh.seedLarkspur === "function") await gh.seedLarkspur();   // a real adapter (connected) has no simulator to seed
+  const wd = ctx.sims.vendors.workday as unknown as Partial<W3WorkdaySimControls>;
+  if (typeof wd.seedLarkspur === "function" && typeof wd.rest === "function") {
+    await wd.seedLarkspur();
+    const first = (await wd.rest("/common/v1/workers", { limit: "1" })).body as { data: { id: string }[] };
+    const types = first.data[0] ? ((await wd.rest(`/absenceManagement/v5/workers/${first.data[0].id}/eligibleAbsenceTypes`, { limit: "100" })).body as { data: { id: string; descriptor: string }[] }).data : [];
+    const KINDS: Record<string, string> = { vacation: "vacation", sick: "sick" };
+    const map = Object.fromEntries(types.flatMap((t) => (KINDS[t.descriptor.toLowerCase()] ? [[t.id, KINDS[t.descriptor.toLowerCase()]!]] : [])));
+    await ctx.db.insert(integrationConnections).values({
+      id: "intc_workday", companyId: ctx.companyId, vendor: "workday", mode: "simulated", lastSyncAt: null, cursor: null, health: "ok", detail: null,
+      ownershipJson: null, settingsJson: JSON.stringify({ time_off_types: map }), updatedAt: now,
+    }).onConflictDoNothing();
+  }
 }

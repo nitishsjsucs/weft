@@ -1,11 +1,12 @@
 // Vendor polling on the scheduler tick (wave 3, docs/wave3.md). Owner: w3-integrations-hr. A local Weft cannot receive
 // webhooks, so polling is the baseline: Greenhouse every 15 minutes of sim time through integrations.sync_now
 // (svc_scheduler), only when there is something to read (an unlinked or newer hire in the simulator, or a real
-// connection). The simulator's due webhook deliveries are delivered in-process to the same receiver the public route
+// connection), and Workday every 15 minutes once it has been synced, when a worker changed after the cursor
+// (detect with sync_now, then apply_hris_change). The simulator's due webhook deliveries are delivered in-process to the same receiver the public route
 // uses, with the retry schedule on the sim clock. Then the screening and e-signature poll owned by
 // w3-integrations-screening-esign.
 import { sql } from "drizzle-orm";
-import { W3_POLL_MINUTES, type ExecutorBundle, type SimClock, type W3GreenhouseSimControls } from "@weft/contracts";
+import { W3_POLL_MINUTES, type ExecutorBundle, type SimClock, type ToolOutcome, type W3GreenhouseSimControls } from "@weft/contracts";
 import { withWriteLock, type Db } from "@weft/db";
 import { createSimulators } from "@weft/sim";
 import { integrationMode } from "@weft/integrations";
@@ -41,6 +42,35 @@ export async function deliverSimWebhooks(d: Pick<PollDeps, "db" | "clock">): Pro
   return out;
 }
 
+/** Workday: once someone has synced it (lastSyncAt set), poll every 15 minutes when a worker changed after the cursor. */
+async function workdayDue(d: PollDeps): Promise<boolean> {
+  const [c] = await d.db.all<{ last: string | null; cursor: string | null }>(sql`SELECT last_sync_at AS last, cursor FROM integration_connections WHERE vendor = 'workday' LIMIT 1`);
+  if (!c?.last) return false;
+  if (Date.parse(d.now) - Date.parse(c.last) < W3_POLL_MINUTES * 60_000) return false;
+  let real = false;
+  try { real = integrationMode("workday", process.env) === "real"; } catch { real = false; }
+  if (real) return true;
+  // Simulated: a worker transaction after the cursor, or an approved entry Weft has not imported.
+  const [n] = await d.db.all<{ n: number }>(sql`
+    SELECT (SELECT COUNT(*) FROM sim_vendor_records r, json_each(r.body_json, '$.transactionLog') t
+      WHERE r.vendor = 'workday' AND r.kind = 'worker' AND json_extract(t.value, '$.moment') > ${c.cursor ?? ""} AND json_extract(t.value, '$.moment') <= ${d.now})
+    + (SELECT COUNT(*) FROM sim_vendor_records e WHERE e.vendor = 'workday' AND e.kind = 'time_off_entry' AND json_extract(e.body_json, '$.status.descriptor') = 'Approved'
+      AND NOT EXISTS (SELECT 1 FROM time_off_requests q WHERE q.source = 'workday' AND q.ext_ref = e.ext_id)) AS n`);
+  return !!n?.n;
+}
+
+/**
+ * Workday sync: integrations.sync_now detects the workers changed in the transaction log window, then
+ * integrations.apply_hris_change (svc_events) re-reads and applies the same window. Used by the poll and by the
+ * human Sync now route (after its own sync_now).
+ */
+export async function applyWorkdayDetected(executor: ExecutorBundle, out: ToolOutcome): Promise<ToolOutcome | null> {
+  if (!out.ok || out.status !== "done") return null;
+  const data = out.data as { vendor?: string; detected?: string[]; through?: string };
+  if (data.vendor !== "workday" || !data.detected?.length || !data.through) return null;
+  return executor.system.exec("svc_events", "integrations.apply_hris_change", { vendor: "workday", worker_refs: data.detected, through: data.through }, { eventId: null, attended: false, requestedBy: null });
+}
+
 async function greenhouseDue(d: PollDeps): Promise<boolean> {
   const [c] = await d.db.all<{ last: string | null }>(sql`SELECT last_sync_at AS last FROM integration_connections WHERE vendor = 'greenhouse' LIMIT 1`);
   if (c?.last && Date.parse(d.now) - Date.parse(c.last) < W3_POLL_MINUTES * 60_000) return false;
@@ -65,6 +95,10 @@ export async function pollIntegrations(d: PollDeps): Promise<void> {
   await deliverSimWebhooks(d);
   if (await greenhouseDue(d)) {
     await d.executor.system.exec("svc_scheduler", "integrations.sync_now", { vendor: "greenhouse" }, { eventId: null, attended: false, requestedBy: null });
+  }
+  if (await workdayDue(d)) {
+    const out = await d.executor.system.exec("svc_scheduler", "integrations.sync_now", { vendor: "workday" }, { eventId: null, attended: false, requestedBy: null });
+    await applyWorkdayDetected(d.executor, out);
   }
   await pollScreeningEsign(d);
 }

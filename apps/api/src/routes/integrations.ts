@@ -10,14 +10,14 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   Conflict, IntegrationVendor, NotFound, Unauthorized, ValidationError, VENDOR_APPLY_COMMAND, VENDOR_CATEGORY, W3_INTEGRATIONS_HR_SIMULATE, W3_WEBHOOK_MAX_BYTES,
-  type IntegrationCard, type ToolOutcome, type W3GreenhouseSimControls,
+  type IntegrationCard, type ToolOutcome, type W3GreenhouseSimControls, type W3WorkdaySimControls,
 } from "@weft/contracts";
 import { extLinks, integrationConnections, integrationDeliveries, offers, syncItems, withWriteLock } from "@weft/db";
 import { createSimulators } from "@weft/sim";
 import { secretsReport, VENDOR_COPY } from "@weft/integrations";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
-import { deliverSimWebhooks, webhookReceivers, type WebhookReceiver } from "../integrations/poll";
+import { applyWorkdayDetected, deliverSimWebhooks, webhookReceivers, type WebhookReceiver } from "../integrations/poll";
 
 const DEFAULT_OWNERSHIP = { people: "weft", compensation: "weft", time_off: "weft" } as const;
 const vendorOf = (c: Context<WeftEnv>) => {
@@ -27,6 +27,7 @@ const vendorOf = (c: Context<WeftEnv>) => {
 };
 const outcomeJson = (c: Context<WeftEnv>, out: ToolOutcome) => (out.ok ? c.json(out) : c.json({ ...out, _tag: "Refused", code: out.refusal.code, message: out.refusal.message, hint: out.refusal.hint }, 422));
 const isGhControls = (x: unknown): x is W3GreenhouseSimControls => !!x && typeof x === "object" && "simulate" in x && "dueDeliveries" in x;
+const isWdControls = (x: unknown): x is W3WorkdaySimControls => !!x && typeof x === "object" && "simulate" in x && "rest" in x;
 
 export async function integrationCard(weft: Weft, vendor: IntegrationVendor): Promise<IntegrationCard> {
   const s = await weft.sims.vendors[vendor].status();
@@ -69,7 +70,7 @@ export function createWebhookReceiver(weft: Weft): WebhookReceiver {
   };
 }
 
-const SimulateBody = z.object({ kind: z.string(), applicationId: z.string().optional() });
+const SimulateBody = z.object({ kind: z.string(), applicationId: z.string().optional(), employeeId: z.string().regex(/^\d{1,10}$/).optional() });
 
 export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
@@ -91,7 +92,9 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     const vendor = vendorOf(c);
     if (vendor !== "greenhouse" && vendor !== "workday") throw new ValidationError(`${vendor} syncs through its own screening or signing flow`);
     const out = await weft.executor.human.exec(session, "integrations.sync_now", { vendor });
+    const applied = vendor === "workday" ? await applyWorkdayDetected(weft.executor, out) : null;
     await weft.scheduler.kick();
+    if (applied && out.ok && out.status === "done") return c.json({ ...out, data: { ...(out.data as object), applied: applied.ok && applied.status === "done" ? applied.data : null } });
     return outcomeJson(c, out);
   });
   r.post("/v1/integrations/:vendor/simulate", async (c) => {
@@ -99,7 +102,18 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     if (!session) throw new Unauthorized();
     const vendor = vendorOf(c);
     const body = SimulateBody.parse(await c.req.json().catch(() => ({})));
-    if (vendor !== "greenhouse") throw new ValidationError(`No simulate controls for ${vendor} yet`);
+    if (vendor === "workday") {
+      const kinds: readonly string[] = W3_INTEGRATIONS_HR_SIMULATE.workday;
+      if (!kinds.includes(body.kind)) throw new ValidationError(`kind must be one of ${kinds.join(", ")}`);
+      if (!isWdControls(weft.sims.vendors.workday)) throw new Conflict("Workday is connected for real; the simulate controls run only in simulated mode");
+      const result = await withWriteLock(() => weft.db.transaction(async (tx) => {
+        const sim = createSimulators({ db: tx, clock: weft.clock }).vendors.workday as unknown as W3WorkdaySimControls;
+        return sim.simulate(body.kind as "worker_change" | "time_off", body.employeeId ? { employeeId: body.employeeId } : {});
+      }));
+      const out: ToolOutcome = { ok: true, status: "done", data: result, summary: `Simulated Workday ${body.kind.replace("_", " ")}; press Sync now to apply it` } as ToolOutcome;
+      return c.json(out);
+    }
+    if (vendor !== "greenhouse") throw new ValidationError(`No simulate controls for ${vendor}`);
     const kinds: readonly string[] = W3_INTEGRATIONS_HR_SIMULATE.greenhouse;
     if (!kinds.includes(body.kind)) throw new ValidationError(`kind must be one of ${kinds.join(", ")}`);
     if (!isGhControls(weft.sims.vendors.greenhouse)) throw new Conflict("Greenhouse is connected for real; the simulate controls run only in simulated mode");

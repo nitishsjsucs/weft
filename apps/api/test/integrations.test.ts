@@ -118,6 +118,10 @@ describe("registry rules for the w3-integrations-hr commands", () => {
     expect(row("integrations.record_ats_hire")).toEqual(["R1", "never", "system_only"]);
     expect(row("integrations.record_delivery")).toEqual(["R1", "never", "system_only"]);
     expect(row("integrations.resolve_sync_item")).toEqual(["R2", "never", "human_only"]);
+    expect(row("integrations.apply_hris_change")).toEqual(["R1", "never", "system_only"]);
+    expect(row("hris.get_worker_external")).toEqual(["R0", "never", "all"]);
+    expect(row("hris.list_time_off")).toEqual(["R0", "never", "all"]);
+    expect(mine.find((c) => c.name === "hris.list_time_off")!.untrustedFields).toEqual(["entries.*.comment"]);
     for (const c of mine) {
       expect(c.description.length, c.name).toBeLessThanOrEqual(400);
       if (c.access === "all" && c.risk({} as never) >= "R2") expect(c.preview, c.name).not.toBeNull();
