@@ -59,7 +59,10 @@ export const createOffer = writeCommand({
     }
     const today = ptDateOf(ctx.now);
     if (i.start_date <= today) throw new DomainRefusal("DOMAIN_BAD_START_DATE", `start_date ${i.start_date} is not after today (${today})`, "Pick a start date in the future", null);
-    const expiresOn = i.expires_on ?? addDays(today, 14);
+    // Default expiry: two weeks out, but never on or after the start date.
+    const twoWeeks = addDays(today, 14), dayBeforeStart = addDays(i.start_date, -1);
+    const expiresOn = i.expires_on ?? (twoWeeks < dayBeforeStart ? twoWeeks : dayBeforeStart);
+    if (expiresOn >= i.start_date) throw new DomainRefusal("DOMAIN_BAD_EXPIRY", `expires_on ${expiresOn} is not before the start date ${i.start_date}`, "Let the offer expire before the first day", null);
     if (expiresOn < today) throw new DomainRefusal("DOMAIN_BAD_EXPIRY", `expires_on ${expiresOn} is before today (${today})`, "Pick an expiry on or after today", null);
     const id = await deps.newId("offr_");
     await tx.insert(offers).values({
