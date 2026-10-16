@@ -34,7 +34,7 @@ export const ROUTES = [
   r("GET", "/v1/it/devices", "it", "t2-world", "Page<Device>"),
   r("GET", "/v1/proposals", "proposals", "t3-governance", "Page<Proposal>", { query: ["status", "kind", "limit", "afterId"] }),
   r("GET", "/v1/proposals/:id", "proposals", "t3-governance", "Proposal"),
-  r("POST", "/v1/proposals/:id/approve", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only", body: "{ reasonCode, note }" }),
+  r("POST", "/v1/proposals/:id/approve", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only", body: "{ reasonCode, note, value? } (value only for a pending secret_request)" }),
   r("POST", "/v1/proposals/:id/deny", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only", body: "{ reasonCode, note }" }),
   r("POST", "/v1/proposals/:id/dismiss", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only" }),
   r("POST", "/v1/proposals/:id/start", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only" }),
