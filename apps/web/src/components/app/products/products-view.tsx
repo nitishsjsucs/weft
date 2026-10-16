@@ -1,11 +1,15 @@
 "use client";
-// Benefits and IT page bodies (SPEC 11.3 product pages): read-only views over the carrier, identity and device
-// simulators. Writes stay with the agent and the Inbox; these pages show what the simulators hold.
+// Benefits, IT and Contractors page bodies (SPEC 11.3 product pages): views over the carrier, identity, device and
+// payment rail simulators. Wave 2 (w2-benefits-contractors) adds the Reconciliation and Open enrollment tabs and the
+// contractor payouts with rail status; those components live in components/app/benefits and components/app/contractors.
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Globe, HeartPulse, Laptop, KeyRound } from "lucide-react";
-import { Badge, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
-import type { BenefitPlan, Device, Enrollment, ItAccount, Worker } from "@weft/contracts";
+import { Badge, Card, CardHeading, TBody, TD, TH, THead, TR, Table, Tabs, TabsContent, TabsList, TabsTrigger } from "@weft/ui/components";
+import { W2_BENEFITS_TID, type BenefitPlan, type Device, type Enrollment, type ItAccount, type Worker } from "@weft/contracts";
+import { ReconciliationTab } from "../benefits/reconciliation-tab";
+import { OpenEnrollmentTab } from "../benefits/open-enrollment-tab";
+import { PayoutsSection } from "../contractors/payouts-section";
 import { client, errorText, useGet, useVersion } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 
@@ -45,34 +49,48 @@ function Empty({ text }: { text: string }) { return <p className="px-4 py-4 text
 export function BenefitsView() {
   const plans = useGet("/v1/benefits/plans");
   const enr = useAll<Enrollment>("/v1/benefits/enrollments");
+  const people = useAll<Worker>("/v1/workers");
   const list = (plans.data ?? []) as BenefitPlan[];
   const active = (enr.rows ?? []).filter((e) => e.status === "active");
   const count = (id: string) => active.filter((e) => e.planId === id).length;
+  const names = new Map((people.rows ?? []).map((w) => [w.id, w.displayName]));
+  const planNames = new Map(list.map((p) => [p.id, p.name]));
   const err = plans.error ?? enr.error;
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title={<span className="flex items-center gap-2">Benefits <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Plans and enrollments held by the carrier simulators in this repo. Deductions flow into payroll through the pretax codes." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
-      <CardHeading icon={<HeartPulse />}>Plans</CardHeading>
-      <Card className="overflow-hidden">
-        {list.length === 0 ? <Empty text={plans.data ? "No plans." : "Loading..."} /> : (
-          <Table className="text-[13px]">
-            <THead><TR><TH>Plan</TH><TH>Type</TH><TH numeric>Employee only</TH><TH numeric>Employer</TH><TH numeric>Enrolled</TH></TR></THead>
-            <TBody>
-              {list.map((p) => (
-                <TR key={p.id} data-testid={`benefit-plan-${p.id}`}>
-                  <TD className="h-12 py-1.5"><div className="font-medium">{p.name}</div><div className="text-1 text-gray-10">{p.carrier} · <code className="font-mono text-0">{p.pretaxCode}</code></div></TD>
-                  <TD className="h-12">{PLAN_TYPE[p.type] ?? human(p.type)}</TD>
-                  <TD numeric className="h-12">{p.prices.ee !== undefined ? dollars(p.prices.ee) : p.match ? "match" : "-"}</TD>
-                  <TD numeric className="h-12">{dollars(p.prices.employer)}</TD>
-                  <TD numeric className="h-12">{enr.rows ? count(p.id) : "..."}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
-      </Card>
-      <p className="mt-3 text-1 text-gray-10">{enr.rows ? `${active.length} active enrollments across ${new Set(active.map((e) => e.workerId)).size} people.` : ""} Per-person enrollments are on each person&apos;s Benefits tab.</p>
+      <Tabs defaultValue="plans">
+        <TabsList className="mb-2">
+          <TabsTrigger value="plans" data-testid={W2_BENEFITS_TID.tabPlans}>Plans</TabsTrigger>
+          <TabsTrigger value="reconciliation" data-testid={W2_BENEFITS_TID.tabRecon}>Reconciliation</TabsTrigger>
+          <TabsTrigger value="enrollment" data-testid={W2_BENEFITS_TID.tabEnrollment}>Open enrollment</TabsTrigger>
+        </TabsList>
+        <TabsContent value="plans">
+          <CardHeading icon={<HeartPulse />}>Plans</CardHeading>
+          <Card className="overflow-hidden">
+            {list.length === 0 ? <Empty text={plans.data ? "No plans." : "Loading..."} /> : (
+              <Table className="text-[13px]">
+                <THead><TR><TH>Plan</TH><TH>Type</TH><TH numeric>Employee only</TH><TH numeric>Employer</TH><TH numeric>Enrolled</TH></TR></THead>
+                <TBody>
+                  {list.map((p) => (
+                    <TR key={p.id} data-testid={`benefit-plan-${p.id}`}>
+                      <TD className="h-12 py-1.5"><div className="font-medium">{p.name}</div><div className="text-1 text-gray-10">{p.carrier} · <code className="font-mono text-0">{p.pretaxCode}</code></div></TD>
+                      <TD className="h-12">{PLAN_TYPE[p.type] ?? human(p.type)}</TD>
+                      <TD numeric className="h-12">{p.prices.ee !== undefined ? dollars(p.prices.ee) : p.match ? "match" : "-"}</TD>
+                      <TD numeric className="h-12">{dollars(p.prices.employer)}</TD>
+                      <TD numeric className="h-12">{enr.rows ? count(p.id) : "..."}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </Card>
+          <p className="mt-3 text-1 text-gray-10">{enr.rows ? `${active.length} active enrollments across ${new Set(active.map((e) => e.workerId)).size} people.` : ""} Per-person enrollments are on each person&apos;s Benefits tab.</p>
+        </TabsContent>
+        <TabsContent value="reconciliation"><ReconciliationTab names={names} plans={planNames} /></TabsContent>
+        <TabsContent value="enrollment"><OpenEnrollmentTab /></TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -134,7 +152,7 @@ export function ContractorsView() {
   const rows = (q.data?.data ?? []) as Worker[];
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title={<span className="flex items-center gap-2">Contractors <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Global contractors on the monthly schedule. Payouts through the FX simulator are P1; today this page lists who is engaged." />
+      <PageHeader title={<span className="flex items-center gap-2">Contractors <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Global contractors on the monthly schedule, paid through the fixed FX table and the payment rail simulator." />
       {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(q.error)}</div> : null}
       <CardHeading icon={<Globe />}>Contractors</CardHeading>
       <Card className="overflow-hidden">
@@ -156,6 +174,7 @@ export function ContractorsView() {
           </Table>
         )}
       </Card>
+      <PayoutsSection contractors={rows} />
     </div>
   );
 }
