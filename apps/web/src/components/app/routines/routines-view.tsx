@@ -9,6 +9,7 @@ import { fmtDateTime, usd } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
+import { AUTONOMY_COPY, AutonomyControl } from "./autonomy-control";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /** Readable trigger: "Mondays 9:00 PT", "Weekdays 9:00 PT", "On notice.received". Falls back to the raw cron. */
@@ -75,6 +76,7 @@ export function RoutinesView() {
               <p className="text-[13px] text-gray-11">{r.description}</p>
               <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-2">
                 <TriggerChip t={r.trigger} />
+                {r.autonomy !== "approve" ? <Badge tone="outline">{AUTONOMY_COPY[r.autonomy].label}</Badge> : null}
                 {r.source === "custom" ? <Badge tone="blue">Custom</Badge> : null}
                 {r.taintedBy ? <Badge tone="amber">Tainted draft</Badge> : null}
                 <span className="ml-auto font-mono text-0 text-gray-10">{r.id}</span>
@@ -126,10 +128,13 @@ export function RoutineDetail({ id }: { id: string }) {
           <h2 className="mt-4 mb-1.5 text-1 font-medium text-gray-10 uppercase">Tool allowlist</h2>
           <div className="flex flex-wrap gap-1.5">{d.tools.map((t) => <code key={t} className="rounded-md bg-gray-3 px-1.5 py-0.5 font-mono text-0">{t}</code>)}</div>
         </Card>
-        <Card className="p-4">
-          <h2 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Checklist (done when every item holds)</h2>
-          <ul className="flex flex-col gap-1.5">{d.checklist.map((c) => <li key={c.id} className="text-[13px]">{c.label}<div className="font-mono text-0 break-all text-gray-10">{c.check}</div></li>)}</ul>
-        </Card>
+        <div className="flex flex-col gap-4">
+          <AutonomyControl routine={d} />
+          <Card className="p-4">
+            <h2 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Checklist (done when every item holds)</h2>
+            <ul className="flex flex-col gap-1.5">{d.checklist.map((c) => <li key={c.id} className="text-[13px]">{c.label}<div className="font-mono text-0 break-all text-gray-10">{c.check}</div></li>)}</ul>
+          </Card>
+        </div>
       </div>
       <h2 className="mb-2 text-3 font-medium">Run log</h2>
       <Card className="overflow-hidden">

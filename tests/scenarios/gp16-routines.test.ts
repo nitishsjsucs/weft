@@ -106,7 +106,7 @@ describe("GP16 routine parity", () => {
     expect(posts[0]!.text).toContain(`${f.headcount} employees at month end`);
     expect(posts[0]!.text).toContain(`Payroll cost ${f.cost.total_cost_display} across 1 processed run`);
     expect(posts[0]!.text).toContain(`from September 2026 (${f.previous.total_cost_display})`);
-    expect(posts[0]!.text).not.toMatch(/—/);
+    expect(posts[0]!.text).not.toMatch(/\u2014/);
     const list = await weft.db.select().from(simEmailMessages);
     expect(list.some((m) => m.toAddr === "leadership@larkspur.example" && m.subject === "Exec report for October 2026")).toBe(true);
     const pre = run.precheck as { action: string; derivedArgs: Record<string, unknown> };
