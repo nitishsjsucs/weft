@@ -1,0 +1,16 @@
+{
+  "_note": "Hand-built in the documented Messages API response shape; not a live recording.",
+  "id": "msg_01FIXTURE0002",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    { "type": "thinking", "thinking": "", "signature": "c2lnLWZpeHR1cmUtMDAwMg==" },
+    { "type": "text", "text": "Proposed the CA SUI rate change from 3.4% to 1.5%; " },
+    { "type": "text", "text": "it waits for approval." }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": { "input_tokens": 90, "cache_creation_input_tokens": 1500, "cache_read_input_tokens": 0, "output_tokens": 44 }
+}

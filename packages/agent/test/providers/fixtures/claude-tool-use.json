@@ -1,0 +1,17 @@
+{
+  "_note": "Hand-built in the documented Messages API response shape (bundled claude-api docs); no Anthropic key exists on this machine, so nothing here came from a live call.",
+  "id": "msg_01FIXTURE0001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    { "type": "thinking", "thinking": "The notice changes the CA SUI rate. Read it, then the current rates.", "signature": "c2lnLWZpeHR1cmUtMDAwMQ==" },
+    { "type": "text", "text": "Reading the notice and the current rates." },
+    { "type": "tool_use", "id": "toolu_01FIXTUREA", "name": "notices__get", "input": { "notice_id": "ntc_0001" } },
+    { "type": "tool_use", "id": "toolu_01FIXTUREB", "name": "tax__get_rates", "input": { "state": "CA" } }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": { "input_tokens": 312, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 2048, "output_tokens": 210 }
+}

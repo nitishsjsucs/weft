@@ -72,6 +72,7 @@ describe("policy snapshot", () => {
         "actions.get_run": "R0 execute | tainted execute",
         "actions.list": "R0 execute | tainted execute",
         "agent.read_artifact": "R0 execute | tainted execute",
+        "code.run": "R0 execute | tainted execute",
         "comms.post_update": "R1 execute | tainted execute",
         "comms.send_message": "R3 execute | tainted propose",
         "it.order_device": "R4 propose | tainted propose",

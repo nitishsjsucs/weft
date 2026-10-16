@@ -21,6 +21,7 @@ import { createReadOnlyExecutor, createSystemExecutor } from "./system";
 import { Redactor } from "./vault/redact";
 import { createVault, loadVaultKey } from "./vault/vault";
 import { writeLocked } from "./write";
+import { sandboxFromEnv } from "./sandbox/select";
 
 export type { SimulatorsFactory } from "./engine";
 export { toStrictJsonSchema, nullToUndefined, sampleFromSchema, rawJsonSchema, strictSchemaProblems } from "./strict-schema";
@@ -114,10 +115,13 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
 }
 
 /**
- * P1 (SPEC 9.9, harness 3): code.run sandbox. Local engine is quickjs-emscripten inside the executor; the hosted
- * Cloudflare Workers Free twin keeps WEFT_SANDBOX=off; Dynamic Workers ("worker_loader") are the paid upgrade path
- * behind the same SandboxEngine contract. P0 ships only this stub.
+ * The code.run sandbox (SPEC 9.9, harness 3). WEFT_SANDBOX=quickjs returns the quickjs-emscripten engine that runs
+ * inside the executor; off (the default, and the hosted Cloudflare Workers Free twin) throws NotImplemented, as do
+ * the engines that are not built (microvm, and Dynamic Workers "worker_loader" on the paid upgrade path), all
+ * behind the same SandboxEngine contract.
  */
-export function createSandbox(): SandboxEngine {
-  throw new NotImplemented("createSandbox (P1, WEFT_SANDBOX=off)");
+export function createSandbox(env: Record<string, string | undefined> = process.env): SandboxEngine {
+  const s = sandboxFromEnv(env);
+  if (!s.engine) throw new NotImplemented(`createSandbox: ${s.reason}`);
+  return s.engine;
 }

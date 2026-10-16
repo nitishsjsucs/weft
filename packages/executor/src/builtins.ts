@@ -1,13 +1,16 @@
-// Executor-owned commands (SPEC 9.2, T3): comms.post_update, actions.list, actions.get_run, agent.read_artifact.
-// actions.list summaries are built from structured fields only.
+// Executor-owned commands (SPEC 9.2, T3): comms.post_update, actions.list, actions.get_run, agent.read_artifact,
+// and code.run (wave 2, harness 3). actions.list summaries are built from structured fields only.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
-import type { Preview } from "@weft/contracts";
+import { DEFAULT_CODE_LIMITS, type Preview } from "@weft/contracts";
 import type { WeftCommand } from "@weft/core";
 import { actions, execRuns, proposals, runArtifacts } from "@weft/db";
 import type { Engine } from "./engine";
+import { codeFiles } from "./sandbox/files";
+import { sandboxCall } from "./sandbox/host";
+import { sandboxFromEnv } from "./sandbox/select";
 
 const base = {
   compactDescription: "", amountCents: null, ceilingKey: null, reversible: false as const, lease: null, sandbox: "hidden" as const,
@@ -98,7 +101,44 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       return a.taintedBy ? Object.assign(out, { taintedBy: `artifact:${a.id}` }) : out;
     },
   };
-  return [postUpdate, listActions, getRun, readArtifact] as WeftCommand[];
+  // code.run (harness 3): one short read-only script in QuickJS. On no wave 1 allowlist, hidden from MCP, refused
+  // outside an agent run (people and API keys have no run), never callable from inside itself (sandbox hidden).
+  // Off unless WEFT_SANDBOX=quickjs. Inner calls go through sandboxCall; the result's taint is the OR of theirs,
+  // and a tainted result is wrapped as untrusted with the run nonce.
+  const codeRun: WeftCommand<{ source: string; purpose: string; inputs_json?: string }> = {
+    ...base, name: "code.run", namespace: "code", summary: "Run a short read-only script over many reads",
+    description: "Run a short JavaScript async function body that reads with await weft.call(\"people__search\", args) and returns one JSON value (the data of each call is in .data). Read commands only. Limits: 2 s CPU, 25 calls, 64 KiB result. Example: { \"purpose\": \"count CA staff\", \"source\": \"const r = await weft.call('people__search', { state: 'CA' }); return r.data.people.length;\" }",
+    compactDescription: "Run read-only JS: await weft.call(tool, args); return JSON.",
+    input: z.object({ source: z.string().min(1).max(20_000), purpose: z.string().min(1).max(200), inputs_json: z.string().max(65_536).optional() }),
+    domain: "company", needs: "view", effect: "read", risk: () => "R0", approval: "never", autoAllow: "never", tiers: { main: "executable", task: "executable" },
+    mcp: "hidden", sandbox: "hidden",
+    errorHints: {
+      INVALID_INPUT: { hint: "source is the body of an async function that returns a value; inputs_json is optional JSON the script reads as inputs", example: { purpose: "count people", source: "const r = await weft.call('people__search', {}); return r.data.people.length;" } },
+      SANDBOX_TIMEOUT: { hint: "do less work per run: fewer loops, fewer calls", example: null },
+      CALL_BUDGET: { hint: "at most 25 weft.call calls and 256 KiB of results per run; filter in the call args", example: null },
+    },
+    async run(i, ctx, deps) {
+      if (!ctx.run) throw Object.assign(new Error("code.run runs inside agent runs"), { code: "NOT_PERMITTED" });
+      const s = sandboxFromEnv(process.env);
+      if (!s.engine) throw Object.assign(new Error(s.reason), { code: "UNAVAILABLE" });
+      let inputs: unknown = null;
+      if (i.inputs_json !== undefined && i.inputs_json.trim()) {
+        try { inputs = JSON.parse(i.inputs_json) as unknown; } catch { throw Object.assign(new Error("inputs_json is not valid JSON"), { code: "INVALID_INPUT" }); }
+      }
+      // Memory reads in the box are pinned to the commit at start (harness 3.3).
+      let memoryAt = "";
+      try { memoryAt = await e.memory.head(); } catch { /* no memory repo in this world */ }
+      const files = codeFiles(e, ctx, i.source);
+      const res = await s.engine.run({ language: "js", source: i.source, purpose: i.purpose, inputs }, DEFAULT_CODE_LIMITS, sandboxCall(e, deps.tx, ctx, { memoryAt }));
+      files.writeOutput({ purpose: i.purpose, ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, tainted: res.tainted, memory_at: memoryAt });
+      // Resource failures are refusals the model can act on; a script error comes back as data so it can be fixed.
+      if (res.error && res.error.code !== "SANDBOX_ERROR") throw Object.assign(new Error(res.error.message), { code: res.error.code });
+      const data = { ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, memory_at: memoryAt };
+      const out = { data, summary: `Ran a script: ${res.calls.length} inner call${res.calls.length === 1 ? "" : "s"}, ${res.ok ? "ok" : "error"}` };
+      return res.tainted ? Object.assign(out, { taintedBy: "sandbox:code.run", untrusted: ["value", "logs", "error"] }) : out;
+    },
+  };
+  return [postUpdate, listActions, getRun, readArtifact, codeRun] as WeftCommand[];
 }
 
 export type { Preview };
