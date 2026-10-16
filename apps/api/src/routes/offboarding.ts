@@ -73,9 +73,14 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
         const step = data.steps.find((x) => x.kind === kind);
         if (!step || step.status !== "pending") continue;
         const args = kind === "final_pay" ? { case_id: data.case_id, pay_unused_pto: input.payUnusedPto } : { case_id: data.case_id };
-        const o = await propose.call(weft.executor.human, s, PROPOSAL_COMMAND[kind]!, args);
         // A step whose proposal is refused (for example final pay with no bank account) stays pending; say why.
-        filed.push({ kind, proposalId: o.ok && o.status === "pending_approval" ? o.proposalId : null, refusal: o.ok ? null : `${o.refusal.code}: ${o.refusal.message}` });
+        // The case is already committed, so an unexpected error here is reported per step, never as a 500.
+        try {
+          const o = await propose.call(weft.executor.human, s, PROPOSAL_COMMAND[kind]!, args);
+          filed.push({ kind, proposalId: o.ok && o.status === "pending_approval" ? o.proposalId : null, refusal: o.ok ? null : `${o.refusal.code}: ${o.refusal.message}` });
+        } catch (err) {
+          filed.push({ kind, proposalId: null, refusal: `INTERNAL: ${weft.executor.redact(err instanceof Error ? err.message : String(err))}` });
+        }
       }
     }
     await weft.scheduler.kick();

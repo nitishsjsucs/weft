@@ -49,6 +49,8 @@ export async function finalPayPlan(tx: DbTx, c: CaseRow, w: WorkerRow, payUnused
   const payday = businessDayOnOrAfter(c.lastDay > today ? c.lastDay : today);
   const plan = await planSpecialRun(tx, { companyId: c.companyId, subtype: "dismissal", periodStart: period.periodStart, periodEnd: period.periodEnd, payday, lines: [{ workerId: w.id, earnings }], benefits: true });
   const p = plan.lines[0]!;
+  const blocking = p.flags.filter((f) => f.severity === "block" && f.rule !== "MISSING_BANK_ACCOUNT").map((f) => f.rule);
+  if (blocking.length) throw new DomainRefusal("DOMAIN_FINAL_PAY_BLOCKED", `Final pay for ${w.id} is blocked: ${blocking.join(", ")}`, "Resolve the blocking flag (for example the state registration), then propose final pay again", null);
   const calc = p.paycheck.calc;
   const deductionsCents = p.paycheck.deductions.reduce((s, d) => s + d.amountCents, 0);
   const totalCostCents = computeTotals([{ status: "draft", grossCents: calc.gross_cents, netCents: calc.net_cents, reimbursementsCents: 0, taxes: calc.taxes, deductions: p.paycheck.deductions, benefits: p.paycheck.benefits }]).totalCost;
