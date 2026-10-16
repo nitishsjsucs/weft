@@ -89,7 +89,7 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     const body = StartBody.parse(await c.req.json());
     // Harness 5.3 wave 3 amendment: code picks the chat tools (reads, or proposals when the setting is on and the
     // request reads as an action). With no registry wired (route tests), the wave 1 list stays.
-    const choice = await chooseChatTools({ db: weft.db, registry: weft.executor.registry }, session, body.text);
+    const choice = await chooseChatTools({ db: weft.db, registry: weft.executor.registry, liveProvider: weft.provider?.live === true }, session, body.text);
     const allowlist = choice.allowlist ?? [...CHAT_TOOLS];
     const handle = await weft.executor.runs.openChatRun(session, { threadId: body.threadId ?? null, surface: "human_ui", allowlist });
     await weft.agent.startChat(handle, { text: body.text, recipe: "chat", pageContext: body.pageContext ?? null, ...(choice.allowlist ? { allowlist } : {}) });

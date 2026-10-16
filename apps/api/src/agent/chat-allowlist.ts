@@ -13,7 +13,7 @@ import { CHAT_ACT_TOOLS, CHAT_TOOLS_W3, W3_SETTINGS, type HumanSession } from "@
 import { settings, type Db } from "@weft/db";
 
 export type ChatMode = "read" | "act";
-export interface ChatToolChoice { mode: ChatMode; intent: boolean; canPropose: boolean; allowlist: string[] | null }
+export interface ChatToolChoice { mode: ChatMode; intent: boolean; canPropose: boolean; allowlist: string[] | null; dropped: string[] }
 
 /** Verbs that ask the agent to do something rather than explain something. */
 const ACT_VERB = /\b(pay|propose|approve|deny|decline|reject|reimburse|issue|request|book|schedule|submit|file|run an off-cycle|send an off-cycle|make up|fix)\b/i;
@@ -42,7 +42,23 @@ export async function chatCanPropose(db: Db): Promise<boolean> {
   } catch { return false; }
 }
 
-interface RegistryLike { get(name: string): { tiers: { main: string } } | undefined }
+interface RegistryLike {
+  get(name: string): { tiers: { main: string } } | undefined;
+  toolSpecs?(input: { agentKind: "main"; allowlist: string[] }): readonly { name: string; parameters: unknown }[];
+}
+
+/**
+ * Keywords a strict function-calling provider refuses in a tool schema. One refused schema fails the whole request,
+ * so a live run drops that tool instead of failing every step (z.record inputs render `propertyNames`; see
+ * docs/tracks/w3-parity-chat.md for the contract request on payroll.propose_off_cycle's bonus_cents).
+ */
+const STRICT_REFUSED = /"(propertyNames|patternProperties)"\s*:/;
+export function strictUnsafe(registry: RegistryLike | undefined, names: readonly string[]): string[] {
+  if (!registry?.toolSpecs) return [];
+  return names.filter((n) => {
+    try { return STRICT_REFUSED.test(JSON.stringify(registry.toolSpecs!({ agentKind: "main", allowlist: [n] })[0]?.parameters ?? {})); } catch { return false; }
+  });
+}
 
 /** The names the registry knows and offers to the main agent, in list order; null when no registry is wired (route tests). */
 export function registered(registry: RegistryLike | undefined, names: readonly string[]): string[] | null {
@@ -50,9 +66,12 @@ export function registered(registry: RegistryLike | undefined, names: readonly s
   return names.filter((n) => { const d = registry.get(n); return Boolean(d && d.tiers.main !== "unavailable"); });
 }
 
-export async function chooseChatTools(deps: { db: Db; registry?: RegistryLike }, session: Pick<HumanSession, "keyScope">, text: string): Promise<ChatToolChoice> {
+/** `liveProvider`: the run goes to a real model with strict tool schemas (the scripted provider never validates them). */
+export async function chooseChatTools(deps: { db: Db; registry?: RegistryLike; liveProvider?: boolean }, session: Pick<HumanSession, "keyScope">, text: string): Promise<ChatToolChoice> {
   const intent = readsActionIntent(text);
   const canPropose = intent ? await chatCanPropose(deps.db) : false;
   const mode: ChatMode = intent && canPropose && session.keyScope !== "mcp" ? "act" : "read";
-  return { mode, intent, canPropose, allowlist: registered(deps.registry, mode === "act" ? CHAT_ACT_TOOLS : CHAT_TOOLS_W3) };
+  const names = registered(deps.registry, mode === "act" ? CHAT_ACT_TOOLS : CHAT_TOOLS_W3);
+  const dropped = names && deps.liveProvider ? strictUnsafe(deps.registry, names) : [];
+  return { mode, intent, canPropose, allowlist: names ? names.filter((n) => !dropped.includes(n)) : null, dropped };
 }

@@ -6,7 +6,7 @@ import { CHAT_ACT_TOOLS, CHAT_TOOLS_W3, ReportResult, W3_SETTINGS, type AgentRun
 import { proposals, runSteps, settings } from "@weft/db";
 import { approvalCardOf } from "@weft/executor";
 import { createTestWeft, type TestWeft } from "../src/testing";
-import { chooseChatTools, readsActionIntent, registered } from "../src/agent/chat-allowlist";
+import { chooseChatTools, readsActionIntent, registered, strictUnsafe } from "../src/agent/chat-allowlist";
 
 let weft: TestWeft;
 beforeAll(async () => { weft = await createTestWeft(); });
@@ -88,6 +88,19 @@ describe("chat allowlist choice (harness 5.3 wave 3 amendment)", () => {
       expect(on.allowlist).toContain("payroll.propose_off_cycle");
       expect((await chooseChatTools({ db: weft.db, registry: weft.executor.registry }, session("usr_dana"), "Approve everything in my inbox")).mode).toBe("read");
       expect((await chooseChatTools({ db: weft.db, registry: weft.executor.registry }, { keyScope: "mcp" }, "Pay Hollis a bonus")).mode).toBe("read");
+    } finally {
+      await setCanPropose(false);
+    }
+  });
+
+  it("a live provider drops a tool whose schema strict function calling refuses (z.record renders propertyNames)", async () => {
+    await setCanPropose(true);
+    try {
+      const live = await chooseChatTools({ db: weft.db, registry: weft.executor.registry, liveProvider: true }, session("usr_dana"), "Pay Hollis a bonus");
+      expect(live.mode).toBe("act");
+      expect(live.dropped).toEqual(["payroll.propose_off_cycle"]);
+      expect(live.allowlist).not.toContain("payroll.propose_off_cycle");
+      expect(strictUnsafe(weft.executor.registry, registered(weft.executor.registry, CHAT_TOOLS_W3)!)).toEqual([]);
     } finally {
       await setCanPropose(false);
     }
