@@ -1,5 +1,16 @@
 # Status
 
+## Wave 3 scaffold (2026-10-16, 13:40 PDT)
+
+The wave 3 plan is in `docs/wave3.md`: agent parity (ranks 1 to 9 and 13 of `research/wave3/agent-parity.md`), real
+Expenses and Time Off, the Greenhouse, Workday, Checkr, HireRight and DocuSign integrations (simulated unless real
+credentials are configured), and the top bar redesign, in seven tracks with disjoint owned paths and golden paths GP13
+to GP19. The scaffold commit lands the shared contracts, migration `0006_wave3.sql`, 37 route rows answering 501, the
+payroll seams, the `@weft/integrations` package and the vendor simulator stubs. Chat proposals and auto autonomy are
+built behind settings that stay off until Nitish approves them. Fresh clone of the scaffold (e2e on ports 4590 and
+4591): `pnpm test` 633 of 633 (120 files), `pnpm typecheck` 16 of 16 (the new package adds one), build ok, `pnpm e2e` 31
+of 31, `pnpm demo` exit 0 with GP1 to GP12 and the audit chain verifying, and lint:prose, lint:brand and brand:overlap ok.
+
 ## Polish merge (2026-10-15, 22:32 PDT)
 
 `polish/reset` (the sim reset 500), `polish/brand` (reference copy restated, `pnpm brand:overlap`), `polish/times`
