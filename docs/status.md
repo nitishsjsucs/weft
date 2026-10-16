@@ -1,5 +1,19 @@
 # Status
 
+## Integration round 1 (2026-10-15, 17:30 PDT)
+
+All six tracks are merged on main. `pnpm test` passes 391 of 391 (no skips), `pnpm typecheck` passes 15 of 15, and
+`pnpm e2e` passes GP1, GP2, GP3 and GP4 in the browser. GP5 passes its grounded answer and approve-all refusal; its
+injection step fails because the scripted agency notice script reads notices in concise form, so the run is not
+tainted (S7 covers the taint rules in process). The rehearsal notes below predate the merge and are kept for history;
+README "What works" is current.
+
+Fixed during integration: compose.ts wiring (routines view, chat context, event source); autocommit writes now
+serialize through the re-entrant write mutex (the SQLITE_BUSY_SNAPSHOT failures); a reset world re-seeds the prebuilt
+routines and resets the cron cursor; the filing's not-reversible reason matches SPEC 12; the NY raise chat script
+also reads people.get; the seed test uses the real executor and bank simulator.
+
+
 Snapshot of the foundation build on 2026-10-15. The integrator updates this file at the end of integration. Until then it reflects the t6-site branch after Round 2, plus a merge rehearsal of all six track branches done in a throwaway clone (see `docs/testing.md`, "Rehearsing a merge").
 
 ## Works today
