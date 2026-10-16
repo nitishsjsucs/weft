@@ -132,6 +132,8 @@ export const DRAFT_TOOLS = ["routines.draft", "routines.list"] as const;
 /** Imported only by apps/api routes. Banned in packages/agent and packages/routines by the import scan. */
 export interface HumanExecutor {
   exec(session: HumanSession, command: string, args: unknown): Promise<ToolOutcome>;
+  /** Wave 2 (w2-offboarding): files the person's own call as a pending proposal (preview, approval) instead of running it. Untainted. */
+  propose?(session: HumanSession, command: string, args: unknown): Promise<ToolOutcome>;
   decide(input: DecisionInput): Promise<DecisionResult>;
   rollback(session: HumanSession, input: { seq: number; reason: string }): Promise<ToolOutcome>;
   onProposalDecided(cb: (p: ProposalDecided) => Promise<void>): void;

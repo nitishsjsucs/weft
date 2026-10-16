@@ -96,6 +96,20 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
       return outcome;
     },
 
+    /**
+     * A person's own gated call (wave 2, w2-offboarding): the proposal path of an MCP call, with the session's own
+     * surface and no taint, so a step the person starts (for example an offboarding final pay) waits for approval.
+     */
+    async propose(session: HumanSession, command: string, args: unknown): Promise<ToolOutcome> {
+      const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
+        const scope = await humanScope(e, tx, session);
+        if (!scope) return refusal("NOT_PERMITTED", "The session principal is not a human of this company", false);
+        return (await runInTx(e, tx, { ...scope, caller: "mcp" }, command, args)).outcome;
+      }));
+      await afterCommit(e, outcome);
+      return outcome;
+    },
+
     async decide(input: DecisionInput): Promise<DecisionResult> {
       const s = input.session;
       if (s.via !== "ui") return no("UI_SESSION_REQUIRED", "Decisions accept only the UI session");
