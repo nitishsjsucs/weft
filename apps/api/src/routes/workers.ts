@@ -15,7 +15,7 @@ const ListQuery = z.object({
   type: z.enum(["employee", "contractor"]).optional(),
 });
 
-async function canSeeComp(weft: Weft, principalId: string | undefined): Promise<boolean> {
+export async function canSeeComp(weft: Weft, principalId: string | undefined): Promise<boolean> {
   if (!principalId) return false;
   const [p] = await weft.db.select().from(principals).where(eq(principals.id, principalId)).limit(1);
   if (!p) return false;

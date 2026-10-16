@@ -8,19 +8,19 @@ export const VENDOR_COPY: Record<IntegrationVendor, VendorCopy> = {
   greenhouse: {
     title: "Greenhouse",
     body: "Bring hired candidates into Weft as draft offers, then send them through the Weft portal, signing and onboarding.",
-    freePath: "No free sandbox for individuals. The simulator follows the Harvest v3 shapes, and open roles can be read from a public job board with no key.",
+    freePath: "No free sandbox for individuals. The simulator follows the Harvest v3 shapes. A public job board is readable without a key, but Weft reads one only alongside the Harvest credentials today.",
     connect: "Connect Greenhouse",
   },
   workday: {
     title: "Workday",
     body: "Keep people, pay and approved time off in sync when Workday is the HR system of record. Weft runs payroll downstream.",
-    freePath: "The Workday developer program offers a personal development tenant in beta; which APIs it includes is not stated. Until one is connected, the simulator runs.",
+    freePath: "The Workday developer program offers a personal development tenant in beta; which APIs it includes is not stated. Weft runs a simulator in its place.",
     connect: "Connect Workday",
   },
   checkr: {
     title: "Checkr",
     body: "Order a background check after an offer is accepted. The screening company collects consent; results feed the onboarding checklist.",
-    freePath: "Staging access needs a credentialed business account. Weft ships a simulator that follows the published API and never calls production.",
+    freePath: "Staging access needs a credentialed business account. Until then a simulator that follows the published API runs; the real adapter uses staging and reaches production only with CHECKR_ENV=production and WEFT_LIVE_CHECKR=1.",
     connect: "Connect Checkr",
   },
   hireright: {

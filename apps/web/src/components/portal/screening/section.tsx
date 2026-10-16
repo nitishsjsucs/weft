@@ -40,7 +40,7 @@ function ScreeningCard({ row, api, onDone }: { row: Row; api: ReturnType<typeof 
     <Card className="p-4" data-testid="portal-screening-order" data-status={row.status}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex-1 text-2 font-medium">{row.packageName} with {row.vendorLabel}</span>
-        {row.mode === "simulated" ? <Badge tone="gray">Simulated</Badge> : null}
+        {row.mode === "simulated" ? <Badge tone="gray">{row.vendor === "hireright" ? "Simulated, API shape not published" : "Simulated"}</Badge> : null}
         <span data-testid="portal-screening-status" className="text-1 text-gray-11">{STATUS[row.status] ?? row.status}</span>
       </div>
       {row.consentNeeded ? (

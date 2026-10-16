@@ -19,6 +19,7 @@ import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { applyWorkdayDetected, deliverSimWebhooks, webhookReceivers, type WebhookReceiver } from "../integrations/poll";
 import { ingestVendorDelivery } from "../integrations/poll-screening";
+import { canSeeComp } from "./workers";
 
 const DEFAULT_OWNERSHIP = { people: "weft", compensation: "weft", time_off: "weft" } as const;
 const vendorOf = (c: Context<WeftEnv>) => {
@@ -107,8 +108,10 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     if (!c.var.session) throw new Unauthorized();
     const vendor = vendorOf(c);
     const conn = weft.sims.vendors[vendor] as unknown as { testConnection?: () => Promise<unknown>; status(): Promise<unknown> };
-    const s = (vendor === "greenhouse" || vendor === "workday") && conn.testConnection ? await conn.testConnection() : await conn.status();
-    return c.json(s);
+    const canTest = (vendor === "greenhouse" || vendor === "workday") && !!conn.testConnection;
+    const s = (canTest ? await conn.testConnection!() : await conn.status()) as { mode?: string };
+    // A real adapter without a connection test only reports its configured status; the card says "not tested".
+    return c.json({ ...s, tested: canTest || s.mode !== "real" });
   });
   r.post("/v1/integrations/:vendor/sync", async (c) => {
     const session = c.var.session;
@@ -173,8 +176,14 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     const status = c.req.query("status") ?? "open", vendor = c.req.query("vendor");
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
     const rows = await weft.db.select().from(syncItems).where(eq(syncItems.companyId, companyId)).orderBy(desc(syncItems.id));
+    // Pay values follow the workers route: hidden from people without compensation access.
+    const comp = await canSeeComp(weft, c.var.session?.principalId);
+    const detailOf = (json: string) => {
+      const d = JSON.parse(json) as Record<string, unknown>;
+      return !comp && (d.field === "base_cents" || d.field === "salary") ? { ...d, weft_value: null, vendor_value: null } : d;
+    };
     return c.json(rows.filter((x) => (status === "all" || x.status === status) && (!vendor || x.vendor === vendor)).map((x) => ({
-      id: x.id, vendor: x.vendor, kind: x.kind, subjectRef: x.subjectRef, status: x.status, detail: JSON.parse(x.detailJson), createdAt: x.createdAt, resolvedAt: x.resolvedAt,
+      id: x.id, vendor: x.vendor, kind: x.kind, subjectRef: x.subjectRef, status: x.status, detail: detailOf(x.detailJson), createdAt: x.createdAt, resolvedAt: x.resolvedAt,
     })));
   });
   r.post("/v1/sync-items/:id/resolve", async (c) => {
