@@ -10,6 +10,7 @@ import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 
 interface Row { id: string; workerId: string; name: string; planYear: number; status: string; nudges: number; lastNudgedAt: string | null }
 const TONE: Record<string, "green" | "gray" | "amber" | "blue"> = { elected: "green", waived: "gray", in_progress: "blue", not_started: "amber" };
+const OE_LABEL: Record<string, string> = { elected: "Elected", waived: "Waived", in_progress: "In progress", not_started: "Not started" };
 
 export function OpenEnrollmentTab() {
   const q = useGet("/v1/benefits/open-enrollment");
@@ -23,7 +24,7 @@ export function OpenEnrollmentTab() {
     <section>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-[13px] text-gray-11">Plan year 2027, closes 2026-11-13.</span>
-        {(["elected", "waived", "in_progress", "not_started"] as const).map((s) => <Badge key={s} tone={TONE[s]}>{counts[s] ?? 0} {s.replace("_", " ")}</Badge>)}
+        {(["elected", "waived", "in_progress", "not_started"] as const).map((s) => <Badge key={s} tone={TONE[s]}>{counts[s] ?? 0} {OE_LABEL[s]!.toLowerCase()}</Badge>)}
         <Button data-testid={TID.enrollmentNudge} size="sm" className="ml-auto" disabled={nudge.pending || left.length === 0} onClick={() => void onNudge()}>Remind {left.length} in #general</Button>
       </div>
       {q.error ?? nudge.error ? <div role="alert" className="mb-3 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText((q.error ?? nudge.error)!)}</div> : null}
@@ -38,7 +39,7 @@ export function OpenEnrollmentTab() {
                 {[...left, ...rows.filter((r) => !left.includes(r))].map((r) => (
                   <TR key={r.id} data-testid={TID.enrollmentRow(r.workerId)} data-status={r.status}>
                     <TD className="h-9 whitespace-nowrap"><Link href={`/app/people/${r.workerId}`} className="hover:underline">{r.name}</Link></TD>
-                    <TD className="h-9"><Badge tone={TONE[r.status] ?? "gray"}>{r.status.replace("_", " ")}</Badge></TD>
+                    <TD className="h-9"><Badge tone={TONE[r.status] ?? "gray"} data-status={r.status}>{OE_LABEL[r.status] ?? r.status.replace("_", " ")}</Badge></TD>
                     <TD numeric className="h-9">{r.nudges}</TD>
                     <TD className="h-9 text-gray-10">{r.lastNudgedAt ? r.lastNudgedAt.slice(0, 16).replace("T", " ") + " UTC" : "-"}</TD>
                   </TR>

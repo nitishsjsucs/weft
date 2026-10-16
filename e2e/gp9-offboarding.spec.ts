@@ -34,7 +34,7 @@ test("GP9: terminating Imani opens an offboarding case that revokes access and c
     const c = await weft.get<OffboardingCase>(`/v1/offboarding/${caseId}`);
     expect(c.steps.map((s) => s.kind)).toEqual([...OFFBOARDING_STEP_ORDER]);
     for (const kind of PROPOSAL_STEPS) {
-      await expect(page.getByTestId(ot.stepStatus(kind))).toHaveText("proposed");
+      await expect(page.getByTestId(ot.stepStatus(kind))).toHaveAttribute("data-status", "proposed");
       const s = c.steps.find((x) => x.kind === kind)!;
       expect(s.proposalId).toMatch(/^prp_/);
       proposalIds[kind] = s.proposalId!;
@@ -50,7 +50,7 @@ test("GP9: terminating Imani opens an offboarding case that revokes access and c
     for (const kind of PROPOSAL_STEPS) {
       const decided: Proposal = await approveCard(page, weft, proposalIds[kind]!);
       expect(decided.status).toBe("executed");
-      await expect(page.getByTestId(ot.stepStatus(kind))).toHaveText("done");
+      await expect(page.getByTestId(ot.stepStatus(kind))).toHaveText("Done");
     }
     const runs = await weft.payrolls();
     const dismissal = runs.filter((r) => r.subtype === "dismissal");
@@ -73,6 +73,6 @@ test("GP9: terminating Imani opens an offboarding case that revokes access and c
 
   await test.step("the list shows the completed case", async () => {
     await openApp(page, "/app/offboarding");
-    await expect(page.getByTestId(ot.caseRow(caseId))).toContainText("complete");
+    await expect(page.getByTestId(ot.caseRow(caseId))).toContainText("Complete");
   });
 });

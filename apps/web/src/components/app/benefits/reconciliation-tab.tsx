@@ -19,6 +19,7 @@ const KIND_LABEL: Record<string, string> = {
   amount_mismatch: "Amount mismatch",
 };
 const STATUS_TONE: Record<string, "amber" | "blue" | "green" | "gray"> = { open: "amber", disputed: "blue", resolved: "green", dismissed: "gray" };
+const FINDING_LABEL: Record<string, string> = { open: "Open", disputed: "Disputed", resolved: "Resolved" };
 export const dollars = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function ReconciliationTab({ names, plans }: { names: Map<string, string>; plans: Map<string, string> }) {
@@ -70,7 +71,7 @@ export function ReconciliationTab({ names, plans }: { names: Map<string, string>
                       <TD numeric className="h-10">{dollars(f.billedCents)}</TD>
                       <TD numeric className="h-10">{dollars(f.expectedCents)}</TD>
                       <TD numeric className="h-10">{dollars(f.deductedCents)}</TD>
-                      <TD className="h-10"><Badge tone={STATUS_TONE[f.status] ?? "gray"}>{f.status}</Badge></TD>
+                      <TD className="h-10"><Badge tone={STATUS_TONE[f.status] ?? "gray"} data-status={f.status}>{FINDING_LABEL[f.status] ?? f.status}</Badge></TD>
                       <TD className="h-10 whitespace-nowrap text-right">
                         {f.status !== "open" ? null : confirm === f.id ? (
                           <span className="inline-flex items-center gap-1">

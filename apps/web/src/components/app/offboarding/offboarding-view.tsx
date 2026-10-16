@@ -22,6 +22,9 @@ const STEP_COMMAND: Partial<Record<OffboardingStep["kind"], string>> = {
 const DIRECT_STEPS = ["group_removal", "app_removal", "cobra_notice", "benefits_terminate"] as const;
 const STEP_TONE: Record<OffboardingStep["status"], "gray" | "amber" | "green" | "red" | "blue"> = { pending: "gray", proposed: "amber", done: "green", skipped: "gray", failed: "red" };
 const CASE_TONE: Record<OffboardingCase["status"], "blue" | "green" | "gray"> = { open: "blue", complete: "green", cancelled: "gray" };
+/** Words for each enum value; the raw value stays in data-status for tests and styling. */
+const STEP_STATUS_LABEL: Record<OffboardingStep["status"], string> = { pending: "To do", proposed: "Waiting for approval", done: "Done", skipped: "Skipped", failed: "Failed" };
+const CASE_LABEL: Record<OffboardingCase["status"], string> = { open: "Open", complete: "Complete", cancelled: "Cancelled" };
 const human = (s: string) => s.replaceAll("_", " ");
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -51,7 +54,7 @@ export function OffboardingList() {
                   <TD className="capitalize">{human(c.kind)}</TD>
                   <TD>{fmtDate(c.lastDay, { month: "short", day: "numeric", year: "numeric" })}</TD>
                   <TD>{finished} of {c.steps.length}</TD>
-                  <TD><Badge tone={CASE_TONE[c.status]}>{c.status}</Badge></TD>
+                  <TD><Badge tone={CASE_TONE[c.status]} data-status={c.status}>{CASE_LABEL[c.status]}</Badge></TD>
                 </TR>
               );
             })}
@@ -95,7 +98,7 @@ export function OffboardingCaseView({ id }: { id: string }) {
   return (
     <div className="mx-auto w-full max-w-[1000px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title={`Offboarding ${name}`} subtitle={`${capitalize(human(c.kind))} termination, last day ${fmtDate(c.lastDay, { month: "short", day: "numeric", year: "numeric" })}. Opened ${fmtDateTime(c.createdAt)}.`}
-        meta={<span className="flex items-center gap-3"><Badge data-testid={W2_OFFBOARDING_TID.caseStatus} tone={CASE_TONE[c.status]} size="md">{c.status === "complete" ? "Complete" : c.status === "open" ? "Open" : "Cancelled"}</Badge><Link href={`/app/people/${c.workerId}`} className="text-2 text-accent-11 hover:underline">View person</Link></span>}
+        meta={<span className="flex items-center gap-3"><Badge data-testid={W2_OFFBOARDING_TID.caseStatus} tone={CASE_TONE[c.status]} size="md">{CASE_LABEL[c.status]}</Badge><Link href={`/app/people/${c.workerId}`} className="text-2 text-accent-11 hover:underline">View person</Link></span>}
         actions={c.status === "open" ? (
           <Button data-testid={W2_OFFBOARDING_TID.runRemaining} variant="primary" size="sm" disabled={!finalPayDone || pendingDirect.length === 0 || runRemaining.pending}
             title={finalPayDone ? undefined : "Approve final pay first"} onClick={() => void runRemaining.run([...pendingDirect]).then((n) => { if (n !== undefined) setRan(`Ran ${n} step${n === 1 ? "" : "s"}`); })}>
@@ -123,7 +126,7 @@ export function OffboardingCaseView({ id }: { id: string }) {
               <TR key={s.id} data-testid={w2OffboardingTid.step(s.kind)} data-status={s.status}>
                 <TD className="text-gray-10 tabular-nums">{i + 1}</TD>
                 <TD className="font-medium">{STEP_LABEL[s.kind]}{PROPOSAL_STEPS.has(s.kind) ? <span className="ml-1.5 text-0 text-gray-10">approval</span> : null}</TD>
-                <TD><Badge data-testid={w2OffboardingTid.stepStatus(s.kind)} tone={STEP_TONE[s.status]}>{s.status}</Badge></TD>
+                <TD><Badge data-testid={w2OffboardingTid.stepStatus(s.kind)} data-status={s.status} tone={STEP_TONE[s.status]}>{STEP_STATUS_LABEL[s.status]}</Badge></TD>
                 <TD className="max-w-[420px] text-[13px] break-words text-gray-11">{s.detail}{s.actionSeq !== null ? <> · <Link href="/app/audit" className="hover:underline">action {s.actionSeq}</Link></> : null}</TD>
                 <TD>
                   <span className="flex flex-wrap items-center gap-2">

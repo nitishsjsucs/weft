@@ -71,7 +71,7 @@ function OfferCard({ o }: { o: Offer }) {
         {accept.error ? <div role="alert" className="mt-1 text-1 text-red-11">{errorText(accept.error)}</div> : null}
         {o.workerId ? <Link href={`/app/people/${o.workerId}`} className="mt-1 inline-block text-1 text-blue-11 hover:underline">Open onboarding</Link> : null}
       </div>
-      <Badge tone={o.status === "accepted" ? "green" : o.status === "sent" ? "blue" : "gray"} size="md">{o.status}</Badge>
+      <Badge tone={o.status === "accepted" ? "green" : o.status === "sent" ? "blue" : "gray"} size="md" data-status={o.status}>{o.status.charAt(0).toUpperCase() + o.status.slice(1)}</Badge>
       {o.status === "sent" ? (
         <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={async () => setOut((await accept.run()) ?? null)} title="Demo action: records the candidate's acceptance">Mark accepted</Button>
       ) : null}

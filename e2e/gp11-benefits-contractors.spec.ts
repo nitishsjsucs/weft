@@ -28,7 +28,7 @@ test("GP11: reconciliation finds the three planted errors, a dispute goes out, p
     const [f] = (await weft.get<ReconFinding[]>("/v1/benefits/reconciliation", { month: "2026-10" })).filter((x) => x.kind === "missing_dependent");
     await page.getByTestId(BT.reconDispute(f!.id)).click();
     await page.getByTestId(BT.reconDisputeConfirm).click();
-    await expect(page.getByTestId(BT.reconRow(f!.id))).toContainText("disputed");
+    await expect(page.getByTestId(BT.reconRow(f!.id))).toContainText("Disputed");
     const after = await weft.get<ReconFinding[]>("/v1/benefits/reconciliation", { status: "disputed" });
     expect(after.map((x) => x.id)).toEqual([f!.id]);
   });
