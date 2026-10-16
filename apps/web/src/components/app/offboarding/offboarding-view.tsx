@@ -87,7 +87,8 @@ export function OffboardingCaseView({ id }: { id: string }) {
   });
   if (q.error) return <div className="mx-auto w-full max-w-[1000px] px-4 py-8"><div role="alert" className="text-1 text-red-11">{errorText(q.error)}</div></div>;
   if (!c) return <div className="mx-auto w-full max-w-[1000px] px-4 py-8 text-gray-10">Loading case...</div>;
-  const finalPayDone = c.steps.find((s) => s.kind === "final_pay")?.status === "done";
+  const fpStatus = c.steps.find((s) => s.kind === "final_pay")?.status;
+  const finalPayDone = fpStatus === "done" || fpStatus === "skipped";
   const pendingDirect = DIRECT_STEPS.filter((k) => c.steps.find((s) => s.kind === k)?.status === "pending");
   const proposed = c.steps.filter((s) => s.status === "proposed" && s.proposalId);
   const name = names.get(c.workerId) ?? c.workerId;
@@ -101,6 +102,7 @@ export function OffboardingCaseView({ id }: { id: string }) {
             Run remaining steps
           </Button>
         ) : null} />
+      {c.status === "open" && !finalPayDone && pendingDirect.length ? <p data-testid="run-remaining-hint" className="mb-3 text-1 text-gray-11">Approve or skip final pay below to run the remaining steps.</p> : null}
       {runRemaining.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(runRemaining.error)}</div> : null}
       {runNow.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(runNow.error)}</div> : null}
       {skip.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(skip.error)}</div> : null}

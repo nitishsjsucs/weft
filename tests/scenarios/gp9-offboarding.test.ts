@@ -59,8 +59,8 @@ describe("GP9 termination with access revocation", () => {
     const ds = await proposalOf("directory_suspend");
     expect(ds.diff).toEqual([{ label: "google_ws imani.ferreira", before: "active", after: "suspended" }]);
 
-    // Direct steps refuse before final pay is approved.
-    const early = await call("POST", "/v1/tools/offboarding.run_step", { case_id: caseId, step: "group_removal" });
+    // COBRA and benefits steps refuse before final pay is approved; access removal never waits on pay.
+    const early = await call("POST", "/v1/tools/offboarding.run_step", { case_id: caseId, step: "cobra_notice" });
     expect(early.status).toBe(422);
     expect((early.json as { code: string }).code).toBe("DOMAIN_FINAL_PAY_PENDING");
 
@@ -146,5 +146,24 @@ describe("GP9 termination with access revocation", () => {
     const c = await call("POST", `/v1/workers/${contractor}/terminate`, { kind: "end_of_contract", lastDay: "2026-10-30" });
     expect(c.status).toBe(422);
     expect((c.json as { code: string }).code).toBe("DOMAIN_NOT_EMPLOYEE");
+  });
+  it("a skipped final pay still lets access removal, the COBRA notice and the benefits end run", async () => {
+    const [w] = await weft.db.all<{ worker_id: string }>(sql`SELECT a.worker_id FROM it_accounts a JOIN workers w ON w.id = a.worker_id WHERE a.system = 'github' AND a.status = 'active' AND w.status = 'active' AND w.type = 'employee' AND a.worker_id != ${WORKER} ORDER BY a.worker_id LIMIT 1`);
+    if (!w) return expect.unreachable("an active employee with a GitHub account");
+    const t = await call("POST", `/v1/workers/${w.worker_id}/terminate`, { kind: "voluntary", lastDay: "2026-10-30", reasonNote: "Leaving", payUnusedPto: false });
+    expect(t.status, JSON.stringify(t.json)).toBe(200);
+    const caseId = (t.json as { data: { case_id: string } }).data.case_id;
+    // Access removal does not wait on pay.
+    const early = await call("POST", "/v1/tools/offboarding.run_step", { case_id: caseId, step: "app_removal" });
+    expect(early.status, JSON.stringify(early.json)).toBe(200);
+    const skip = await call("POST", "/v1/tools/offboarding.skip_step", { case_id: caseId, step: "final_pay", reason: "Paid by hand" });
+    expect(skip.status, JSON.stringify(skip.json)).toBe(200);
+    for (const step of ["group_removal", "cobra_notice", "benefits_terminate"]) {
+      const res = await call("POST", "/v1/tools/offboarding.run_step", { case_id: caseId, step });
+      expect(res.status, `${step}: ${JSON.stringify(res.json)}`).toBe(200);
+    }
+    const accts = await weft.db.all<{ system: string; status: string }>(sql`SELECT system, status FROM it_accounts WHERE worker_id = ${w.worker_id} AND system IN ('github', 'chat')`);
+    expect(accts.length).toBeGreaterThan(0);
+    for (const a of accts) expect(a.status, a.system).toBe("suspended");
   });
 });

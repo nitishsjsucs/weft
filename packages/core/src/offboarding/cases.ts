@@ -54,10 +54,13 @@ export async function openStep(tx: DbTx, companyId: string, caseId: string, kind
   return { c, step, worker };
 }
 
-/** Steps after final pay run only once final pay is done. */
+/** Steps that wait for final pay: the COBRA notice and the benefits end date. Access removal never waits on pay. */
+export const AFTER_FINAL_PAY: readonly OffboardingStepKind[] = ["cobra_notice", "benefits_terminate"];
+
+/** COBRA and benefits steps run once final pay is finished: done, or skipped (nothing to pay, no bank, expired). */
 export async function requireFinalPayDone(tx: DbTx, caseId: string): Promise<void> {
   const fp = await stepOf(tx, caseId, "final_pay");
-  if (fp.status !== "done") throw new DomainRefusal("DOMAIN_FINAL_PAY_PENDING", `Final pay on ${caseId} is ${fp.status}; approve it first`, "Approve the final pay proposal, then run this step", { case_id: caseId });
+  if (fp.status !== "done" && fp.status !== "skipped") throw new DomainRefusal("DOMAIN_FINAL_PAY_PENDING", `Final pay on ${caseId} is ${fp.status}; approve it first`, "Approve the final pay proposal, then run this step", { case_id: caseId });
 }
 
 export async function openCaseFor(tx: DbTx, workerId: string): Promise<CaseRow | null> {

@@ -17,7 +17,7 @@ import { createSpecialRun, periodEndContaining, specialSettleAt } from "../payro
 import { semimonthlyPeriod } from "../payroll/calendar";
 import { BANK_CREDENTIAL_REF, PAYROLL_RUN_CEILING, proposeOffCycleCommand } from "./payroll";
 import {
-  caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL,
+  AFTER_FINAL_PAY, caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL,
   type CaseRow, type StepRow,
 } from "../offboarding/cases";
 import {
@@ -255,7 +255,7 @@ type RunStepInput = z.infer<typeof RunStepInput>;
 
 export const runStepCommand = writeCommand({
   name: "offboarding.run_step", summary: "Run a direct offboarding step after final pay.",
-  description: "Runs one direct step of an offboarding case_id once final pay is done: group_removal (clear IdP groups), app_removal (GitHub and chat), cobra_notice (email through the email simulator) or benefits_terminate (end enrollments at month end). An agent's call is a proposal; a person runs it directly.",
+  description: "Runs one direct step of an offboarding case_id: group_removal (clear IdP groups), app_removal (GitHub and chat), cobra_notice (email through the email simulator) or benefits_terminate (end enrollments at month end). cobra_notice and benefits_terminate wait until final pay is done or skipped; access removal never waits. An agent's call is a proposal; a person runs it directly.",
   input: RunStepInput, domain: "people", needs: "edit", effect: "external", risk: (i) => (i.step === "benefits_terminate" ? "R2" : "R3"), approval: "always", reversible: false,
   lease: (i) => `offboarding:${i.case_id}:${i.step}`,
   async preview(i, ctx, deps) {
@@ -267,7 +267,8 @@ export const runStepCommand = writeCommand({
   },
   async run(i, ctx, deps) {
     const { c, step, worker } = await openStep(deps.tx, ctx.companyId, i.case_id, i.step);
-    await requireFinalPayDone(deps.tx, c.id);
+    // Access removal runs at once; only the COBRA notice and the benefits end date wait for final pay.
+    if (AFTER_FINAL_PAY.includes(i.step)) await requireFinalPayDone(deps.tx, c.id);
     let detail: string;
     let data: Record<string, unknown> = {};
     if (i.step === "group_removal") {
