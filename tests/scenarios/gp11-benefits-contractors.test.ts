@@ -54,7 +54,7 @@ describe("GP11 benefits reconciliation and contractor payouts", () => {
     expect(p).toMatchObject({ command: "benefits.dispute_finding", status: "pending", subjectRef: findings[0]!.id });
   });
 
-  it("the open enrollment chase routine reminds non-electors in #general", async () => {
+  it("the open enrollment chase routine reminds non-electors in #general without naming anyone", async () => {
     const rows = (await (await get("/v1/benefits/open-enrollment")).json()) as { name: string; status: string }[];
     const waiting = rows.filter((r) => r.status === "not_started" || r.status === "in_progress");
     expect(waiting.length).toBeGreaterThan(0);
@@ -76,8 +76,8 @@ describe("GP11 benefits reconciliation and contractor payouts", () => {
     const chat = await weft.db.select().from(simChatMessages).where(eq(simChatMessages.channel, "#general"));
     const reminder = chat.find((m) => m.text.startsWith("Open enrollment reminder:"));
     expect(reminder, JSON.stringify(chat.map((m) => m.text))).toBeTruthy();
-    for (const w of waiting) expect(reminder!.text).toContain(w.name);
-    expect(rows.filter((x) => x.status === "elected").some((x) => reminder!.text.includes(x.name))).toBe(false);
+    // Benefits participation is personal: the company channel names nobody.
+    expect(rows.some((x) => reminder!.text.includes(x.name))).toBe(false);
     expect(OPEN_ENROLLMENT_CLOSES).toBe("2026-11-13");
   });
 

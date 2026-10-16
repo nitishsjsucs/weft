@@ -1,6 +1,6 @@
 // benefits.* commands. Owner: t2-world (wave 2 additions: w2-benefits-contractors). Append WeftCommand definitions to this array; commands/index.ts concatenates it.
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { benefitReconFindings, workers } from "@weft/db";
 import { formatCents } from "@weft/contracts";
 import type { WeftCommand } from "../shared/deps";
@@ -157,25 +157,32 @@ const listOpenEnrollmentCmd = readCommand({
   },
 });
 
-const nudgeText = (names: string[]) => `Open enrollment for ${OPEN_ENROLLMENT_PLAN_YEAR} closes ${OPEN_ENROLLMENT_DEADLINE}. Still to choose: ${names.join(", ")}. Elect or waive in Benefits.`;
+/** The channel line is anonymous (benefits participation is personal); each person gets their own email. */
+const nudgeText = (n: number) => `Open enrollment for ${OPEN_ENROLLMENT_PLAN_YEAR} closes ${OPEN_ENROLLMENT_DEADLINE}. ${n} ${n === 1 ? "person still needs" : "people still need"} to choose; each has a personal reminder by email. Elect or waive in Benefits.`;
+const personalText = (name: string) => `Hi ${name}, open enrollment for ${OPEN_ENROLLMENT_PLAN_YEAR} closes ${OPEN_ENROLLMENT_DEADLINE} and you have not chosen yet. Elect or waive your benefits in Weft Benefits.`;
 const NudgeInput = z.object({});
 type NudgeInput = z.infer<typeof NudgeInput>;
 const nudgeOpenEnrollmentCmd = writeCommand({
-  name: "benefits.nudge_open_enrollment", summary: "Post one open enrollment reminder in #general naming who has not elected.",
-  description: "Post one plain-text reminder in the #general chat channel naming every employee whose 2027 open enrollment is not started or in progress, with the 2026-11-13 deadline, and count one nudge for each. Does nothing when everyone has chosen.",
+  name: "benefits.nudge_open_enrollment", summary: "Remind each person who has not elected, privately, plus an anonymous count in #general.",
+  description: "Email a personal reminder to every employee whose 2027 open enrollment is not started or in progress, with the 2026-11-13 deadline, post one anonymous count in #general (no names), and count one nudge for each. Does nothing when everyone has chosen.",
   input: NudgeInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", reversible: false,
   async preview(_i: NudgeInput, ctx, deps) {
     const left = await openEnrollmentStragglers(deps.tx, ctx.companyId);
-    const text = nudgeText(left.map((r) => r.name));
-    return { title: `Post an open enrollment reminder to #general for ${left.length} people`, diff: [], content: [{ label: "Content to be sent", text }], moneyCents: null, subjectRef: "chat:#general", subjectHash: sha256Hex(canonicalJson({ ids: left.map((r) => r.id), at: ctx.now.slice(0, 10) })), evidence: [] };
+    const text = nudgeText(left.length);
+    return { title: `Remind ${left.length} people about open enrollment by email, with an anonymous count in #general`, diff: [], content: [{ label: "Content to be sent", text }, ...(left[0] ? [{ label: "Each personal email reads like", text: personalText(left[0].name) }] : [])], moneyCents: null, subjectRef: "chat:#general", subjectHash: sha256Hex(canonicalJson({ ids: left.map((r) => r.id), at: ctx.now.slice(0, 10) })), evidence: [] };
   },
   async run(_i: NudgeInput, ctx, deps) {
     const left = await openEnrollmentStragglers(deps.tx, ctx.companyId);
     if (left.length === 0) return { data: { nudged: 0, message_id: null }, summary: "Everyone has chosen; no nudge sent" };
-    const text = nudgeText(left.map((r) => r.name));
-    const { id } = await deps.sims.chat.post({ channel: "#general", author: "Weft agent", text: text.slice(0, 1500) });
+    const emails = new Map((await deps.tx.select({ id: workers.id, workEmail: workers.workEmail }).from(workers).where(inArray(workers.id, left.map((r) => r.workerId)))).map((w) => [w.id, w.workEmail]));
+    const emailIds: string[] = [];
+    for (const r of left) {
+      const to = emails.get(r.workerId);
+      if (to) emailIds.push((await deps.sims.email.send({ to, from: "benefits@larkspur.example", subject: `Choose your ${OPEN_ENROLLMENT_PLAN_YEAR} benefits by ${OPEN_ENROLLMENT_DEADLINE}`, body: personalText(r.name), kind: "nudge", relatedRef: r.workerId })).id);
+    }
+    const { id } = await deps.sims.chat.post({ channel: "#general", author: "Weft agent", text: nudgeText(left.length) });
     await recordNudges(deps.tx, left.map((r) => r.id), ctx.now);
-    return { data: { nudged: left.length, message_id: id, workers: left.map((r) => r.workerId) }, summary: `Nudged ${left.length} people in #general (${id})` };
+    return { data: { nudged: left.length, message_id: id, email_ids: emailIds, workers: left.map((r) => r.workerId) }, summary: `Reminded ${left.length} people by email, with an anonymous count in #general` };
   },
 });
 

@@ -26,9 +26,13 @@ export const RT_OPEN_ENROLLMENT: RoutineDef = {
 
 type OeRow = { worker: string; status: string; last_nudged_at: string | null };
 
-/** The reminder text: names only (the worker refs carry ids with digits, so they are stripped). */
-export function openEnrollmentReminder(names: string[]): string {
-  return `Open enrollment reminder: ${names.join(", ")} still need to elect or waive next year's benefits. Please choose in Weft Benefits before enrollment closes.`;
+/**
+ * The reminder text. Benefits participation is personal, so the company channel never names anyone: the post is
+ * anonymous and has no digits (comms.send_message grounding). Each person gets their own reminder from
+ * benefits.nudge_open_enrollment.
+ */
+export function openEnrollmentReminder(_names: string[]): string {
+  return "Open enrollment reminder: some people still need to elect or waive next year's benefits. If that is you, please choose in Weft Benefits before enrollment closes.";
 }
 
 export const openEnrollmentPrecheck: Precheck = async (ctx, exec) => {
