@@ -16,6 +16,9 @@ const STEP_LABEL: Record<OffboardingStep["kind"], string> = {
   app_removal: "App removal", device_lock: "Device lock", cobra_notice: "COBRA notice", benefits_terminate: "Benefits termination",
 };
 const PROPOSAL_STEPS = new Set(["final_pay", "directory_suspend", "sso_deactivate", "device_lock"]);
+const STEP_COMMAND: Partial<Record<OffboardingStep["kind"], string>> = {
+  final_pay: "offboarding.final_pay", directory_suspend: "offboarding.suspend_directory", sso_deactivate: "offboarding.deactivate_sso", device_lock: "offboarding.lock_device",
+};
 const DIRECT_STEPS = ["group_removal", "app_removal", "cobra_notice", "benefits_terminate"] as const;
 const STEP_TONE: Record<OffboardingStep["status"], "gray" | "amber" | "green" | "red" | "blue"> = { pending: "gray", proposed: "amber", done: "green", skipped: "gray", failed: "red" };
 const CASE_TONE: Record<OffboardingCase["status"], "blue" | "green" | "gray"> = { open: "blue", complete: "green", cancelled: "gray" };
@@ -69,6 +72,11 @@ export function OffboardingCaseView({ id }: { id: string }) {
   const names = useWorkerNames();
   const c = q.data as OffboardingCase | undefined;
   const [ran, setRan] = useState<string | null>(null);
+  // A proposal step left pending (its proposal was refused, denied or expired) can be run by the person directly.
+  const runNow = useMutation(async (step: OffboardingStep) => {
+    const body = step.kind === "final_pay" ? { case_id: id, pay_unused_pto: !step.detail.includes("no PTO payout") } : { case_id: id };
+    return client.post("/v1/tools/:name", { params: { name: STEP_COMMAND[step.kind]! }, body });
+  });
   const runRemaining = useMutation(async (steps: string[]) => {
     for (const step of steps) await client.post("/v1/tools/:name", { params: { name: "offboarding.run_step" }, body: { case_id: id, step } });
     return steps.length;
@@ -90,6 +98,7 @@ export function OffboardingCaseView({ id }: { id: string }) {
           </Button>
         ) : null} />
       {runRemaining.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(runRemaining.error)}</div> : null}
+      {runNow.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(runNow.error)}</div> : null}
       {ran ? <div className="mb-3 text-1 text-gray-11" role="status">{ran}</div> : null}
       <Card className="overflow-x-auto">
         <Table data-testid={W2_OFFBOARDING_TID.caseSteps}>
@@ -101,7 +110,14 @@ export function OffboardingCaseView({ id }: { id: string }) {
                 <TD className="font-medium">{STEP_LABEL[s.kind]}{PROPOSAL_STEPS.has(s.kind) ? <span className="ml-1.5 text-0 text-gray-10">approval</span> : null}</TD>
                 <TD><Badge data-testid={w2OffboardingTid.stepStatus(s.kind)} tone={STEP_TONE[s.status]}>{s.status}</Badge></TD>
                 <TD className="max-w-[420px] text-[13px] break-words text-gray-11">{s.detail}{s.actionSeq !== null ? <> · <Link href="/app/audit" className="hover:underline">action {s.actionSeq}</Link></> : null}</TD>
-                <TD>{s.proposalId ? <Link data-testid={w2OffboardingTid.stepProposal(s.kind)} href={`/app/inbox?proposal=${s.proposalId}`} className="font-mono text-0 text-accent-11 hover:underline">{s.proposalId}</Link> : <span className="text-gray-10">-</span>}</TD>
+                <TD>
+                  <span className="flex flex-wrap items-center gap-2">
+                    {s.proposalId ? <Link data-testid={w2OffboardingTid.stepProposal(s.kind)} href={`/app/inbox?proposal=${s.proposalId}`} className="font-mono text-0 text-accent-11 hover:underline">{s.proposalId}</Link> : <span className="text-gray-10">-</span>}
+                    {c.status === "open" && s.status === "pending" && PROPOSAL_STEPS.has(s.kind) ? (
+                      <Button data-testid={w2OffboardingTid.stepRunNow(s.kind)} size="xs" disabled={runNow.pending} title="No pending proposal: run this step now, as you" onClick={() => void runNow.run(s)}>Run now</Button>
+                    ) : null}
+                  </span>
+                </TD>
               </TR>
             ))}
           </TBody>

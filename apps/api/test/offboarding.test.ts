@@ -45,6 +45,19 @@ describe("offboarding routes", () => {
     expect(rows.every((r) => r.tainted_by === null && r.on_behalf_of === "usr_dana")).toBe(true);
   });
 
+  it("a denied step proposal leaves the step pending, and the person can run it directly", async () => {
+    const [c] = OffboardingCase.array().parse(await (await call("GET", "/v1/offboarding")).json());
+    const ds = c!.steps.find((s) => s.kind === "directory_suspend")!;
+    const denied = await call("POST", `/v1/proposals/${ds.proposalId}/deny`, { reasonCode: "wrong", note: null });
+    expect(denied.status).toBe(200);
+    let again = OffboardingCase.parse(await (await call("GET", `/v1/offboarding/${c!.id}`)).json());
+    expect(again.steps.find((s) => s.kind === "directory_suspend")).toMatchObject({ status: "pending", proposalId: ds.proposalId });
+    const run = await call("POST", "/v1/tools/offboarding.suspend_directory", { case_id: c!.id });
+    expect(run.status).toBe(200);
+    again = OffboardingCase.parse(await (await call("GET", `/v1/offboarding/${c!.id}`)).json());
+    expect(again.steps.find((s) => s.kind === "directory_suspend")).toMatchObject({ status: "done", proposalId: ds.proposalId });
+  });
+
   it("final pay skips wages a submitted regular run already paid, and still pays unused PTO", async () => {
     const submit = await call("POST", "/v1/tools/payroll.submit_run", { run_id: "pay_2026_10_30", exclude_blocked: true });
     expect(submit.status).toBe(200);

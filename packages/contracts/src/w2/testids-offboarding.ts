@@ -14,4 +14,5 @@ export const w2OffboardingTid = {
   step: (kind: string) => `offboarding-step-${kind}`,
   stepStatus: (kind: string) => `offboarding-step-status-${kind}`,
   stepProposal: (kind: string) => `offboarding-step-proposal-${kind}`,
+  stepRunNow: (kind: string) => `offboarding-step-run-now-${kind}`,
 };
