@@ -8,6 +8,7 @@ import { TID } from "@weft/contracts";
 import { watchRun, type RunWatch } from "@/lib/api/sse";
 import { invalidate } from "@/lib/api/hooks";
 import { isChipStep, outcomeTone, stepSummary, toolLabel } from "./run-steps";
+import { humanTimes } from "../format";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
 export function RunFeed({ runId, label, latest = true }: { runId: string; label?: string; latest?: boolean }) {
@@ -46,7 +47,7 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
           : <span className="text-red-11">{status}{w.run?.terminalReason ? `: ${w.run.terminalReason}` : ""}</span>}
       </div>
       {w.run?.summary && !working ? (
-        <p data-testid={TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{w.run.summary}</p>
+        <p data-testid={TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{humanTimes(w.run.summary)}</p>
       ) : null}
       <Link href={`/app/runs/${runId}`} className={cn("inline-flex w-fit items-center gap-1 text-1 text-gray-10 hover:text-foreground")}>Open run <ExternalLink className="size-3" /></Link>
     </div>

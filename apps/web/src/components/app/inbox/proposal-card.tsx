@@ -6,7 +6,7 @@ import { Badge, Button, Card, DiffTable } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TID, tid, type DecisionResult, type Proposal } from "@weft/contracts";
 import { client, errorText, useMutation, useSimClock } from "@/lib/api/hooks";
-import { cents, fmtDateTime, relative } from "../format";
+import { cents, fmtDateTime, humanTimes, relative } from "../format";
 import { principalName, refHref } from "../refs";
 import { RiskChip } from "../risk";
 
@@ -70,7 +70,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             </span>
           ) : <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "denied" || p.status === "failed" ? "red" : "gray"}>{p.status}</Badge>}
         </div>
-        <h3 className="text-3 font-medium leading-6 text-balance break-words">{p.headline}</h3>
+        <h3 className="text-3 font-medium leading-6 text-balance break-words">{humanTimes(p.headline)}</h3>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 tablet:grid-cols-4">
           <Field label="On behalf of">{principalName(p.onBehalfOf)}</Field>
           <Field label="Money">{p.moneyCents === null ? "None" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
@@ -84,7 +84,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             ) : p.kind === "routine_enable" ? "Routine draft" : p.kind === "suggestion" ? "Agent suggestion" : "No run recorded"}
           </Field>
         </dl>
-        {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} rows={p.diff} /> : null}
+        {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} rows={p.diff.map((r) => ({ ...r, before: humanTimes(r.before), after: humanTimes(r.after) }))} /> : null}
         {p.content.length ? (
           <div data-testid={TID.proposalContent} className="flex flex-col gap-2">
             {p.content.map((c, i) => (
@@ -98,7 +98,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
         {p.agentNote ? (
           <div className="rounded-lg bg-gray-2 px-3 py-2">
             <div className="text-1 font-medium text-gray-11">Agent&apos;s note</div>
-            <p className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12">{p.agentNote}</p>
+            <p className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12">{humanTimes(p.agentNote)}</p>
           </div>
         ) : null}
         {p.evidence.length ? (
@@ -154,7 +154,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             )}
             <span className="flex-1" />
             {m.error ? <span role="alert" className="text-1 text-red-11">{errorText(m.error)}</span> : null}
-            {result && !result.ok ? <span role="alert" className="text-1 text-red-11">{result.code}: {result.message}</span> : null}
+            {result && !result.ok ? <span role="alert" className="text-1 text-red-11">{result.code}: {humanTimes(result.message)}</span> : null}
           </div>
         </div>
       ) : null}

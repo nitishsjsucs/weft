@@ -5,7 +5,7 @@ import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/c
 import { cn } from "@weft/ui";
 import { TID, tid, type Action, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDateTime, notReversibleText } from "../format";
+import { fmtDateTime, humanTimes, notReversibleText } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +16,7 @@ function actor(a: Action): string {
   return principalName(a.actorId);
 }
 
-const notReversible = (a: Action) => notReversibleText(a.notReversibleReason);
+const notReversible = (a: Action) => humanTimes(notReversibleText(a.notReversibleReason));
 
 export function AuditView() {
   const actions = useGet("/v1/actions", { query: { limit: 100 }, refreshMs: 5_000 });
@@ -47,8 +47,8 @@ export function AuditView() {
         }
       />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
-      {result && !result.ok ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{result.refusal.code}: {result.refusal.message}</div> : null}
-      {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{result.summary}</div> : null}
+      {result && !result.ok ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{result.refusal.code}: {humanTimes(result.refusal.message)}</div> : null}
+      {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{humanTimes(result.summary)}</div> : null}
       <Card className="overflow-hidden">
         <Table className="min-w-[980px] text-[13px]">
           <THead><TR><TH>Seq</TH><TH>Time</TH><TH>Actor</TH><TH>Command</TH><TH className="min-w-[320px]">Summary</TH><TH>Run</TH><TH /></TR></THead>
@@ -63,7 +63,7 @@ export function AuditView() {
                 </TD>
                 <TD className="h-11 whitespace-nowrap"><code className="font-mono text-[12px]">{a.command}</code></TD>
                 <TD className="h-11 min-w-[320px] whitespace-normal">
-                  <div>{a.summary}</div>
+                  <div>{humanTimes(a.summary)}</div>
                   <div className="text-1 text-gray-10">
                     {a.reversesSeq !== null ? <>Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></> : null}
                     {a.reversedBySeq !== null ? <>Reversed by <a href={`#audit-${a.reversedBySeq}`} className="text-blue-11 hover:underline">#{a.reversedBySeq}</a></> : null}

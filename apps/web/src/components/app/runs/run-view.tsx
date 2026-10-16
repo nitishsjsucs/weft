@@ -6,7 +6,7 @@ import { Badge, Card, ShimmerText, TBody, TD, TH, THead, TR, Table } from "@weft
 import { cn } from "@weft/ui";
 import { TID, type RunStepRow } from "@weft/contracts";
 import { watchRun, type RunWatch } from "@/lib/api/sse";
-import { fmtDateTime, usd } from "../format";
+import { fmtDateTime, humanTimes, usd } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { outcomeTone, stepSummary, toolLabel } from "../agent/run-steps";
@@ -58,7 +58,7 @@ export function RunView({ id }: { id: string }) {
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
         title={<span className="font-mono text-5">{run.id}</span>}
-        subtitle={run.summary ?? undefined}
+        subtitle={run.summary ? humanTimes(run.summary) : undefined}
         meta={
           <>
             <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{run.status}</ShimmerText> : run.status}</Badge>
@@ -136,7 +136,7 @@ export function RunView({ id }: { id: string }) {
             {w.trace.proposals.map((p) => (
               <Link key={p.id} href="/app/inbox" className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
                 <code className="font-mono text-0 text-gray-10">{p.id}</code>
-                <span className="min-w-0 flex-1 truncate">{p.headline}</span>
+                <span className="min-w-0 flex-1 truncate">{humanTimes(p.headline)}</span>
                 <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "pending" ? "amber" : "red"}>{p.status}</Badge>
                 {p.decidedBy ? <span className="hidden text-1 text-gray-10 tablet:inline">{principalName(p.decidedBy)}</span> : null}
               </Link>
@@ -150,7 +150,7 @@ export function RunView({ id }: { id: string }) {
           <Card className="divide-y divide-[var(--app-border)]">
             {w.trace.actions.map((a) => (
               <Link key={a.seq} href="/app/audit" className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
-                <span className="tabular text-gray-10">#{a.seq}</span><code className="font-mono text-0">{a.command}</code><span className="min-w-0 flex-1 truncate">{a.summary}</span>
+                <span className="tabular text-gray-10">#{a.seq}</span><code className="font-mono text-0">{a.command}</code><span className="min-w-0 flex-1 truncate">{humanTimes(a.summary)}</span>
               </Link>
             ))}
           </Card>

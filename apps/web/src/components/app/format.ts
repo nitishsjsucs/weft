@@ -12,6 +12,15 @@ export function fmtDateTime(iso: string): string {
 export function fmtClock(iso: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 }
+/** A full ISO instant inside free text (date, time and a Z or offset); plain dates and ids never match. */
+const ISO_INSTANT = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})/g;
+/**
+ * Server text (audit summaries, tool outcomes, refusals, headlines) can carry raw ISO instants such as
+ * "settles 2026-10-30T13:00:00.000Z"; people see them as fmtDateTime does. The stored text stays as written.
+ */
+export function humanTimes(text: string): string {
+  return text.replace(ISO_INSTANT, (m) => (Number.isNaN(Date.parse(m)) ? m : fmtDateTime(m)));
+}
 export function fmtShortClock(iso: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 }
