@@ -13,6 +13,8 @@ import {
 } from "./compute";
 import { flagsFor, isBlocked, loadFlagContext, reviewGroupOf } from "./anomalies";
 import { writeRunSummary, type RunRow } from "./lifecycle";
+import { finalVacationMinutes, minutesToHoursX100 } from "../time-off/engine";
+import { periodAccrual, vacationPosition } from "../time-off/store";
 
 export type SpecialSubtype = "dismissal" | "off_cycle";
 /** Engine earning type for each stored earning line type. PTO payout is paid as regular wages (aggregate method). */
@@ -20,20 +22,17 @@ const ENGINE_TYPE: Record<string, EarningLine["type"]> = { salary: "salary", reg
 
 export interface SpecialEarning extends EarningJson { note: string }
 
-/** Simulated PTO policy (Time Off is a stub in wave 2): 10 hours per completed month in the calendar year, cap 120. */
-export const PTO_HOURS_PER_MONTH_X100 = 1_000;
-export const PTO_CAP_X100 = 12_000;
 export const HOURS_PER_YEAR = 2_080;
 
-/** Unused PTO hours (x100) on `lastDay`: whole calendar months worked from max(Jan 1, start date) through last day. */
-export function unusedPtoHoursX100(startDate: string, lastDay: string): number {
-  const year = Number(lastDay.slice(0, 4));
-  const from = startDate > `${year}-01-01` ? startDate : `${year}-01-01`;
-  let months = 0;
-  for (let m = 1; m <= Number(lastDay.slice(5, 7)); m++) {
-    if (ymd(year, m, 1) >= from && ymd(year, m, lastDayOfMonth(year, m)) <= lastDay) months++;
-  }
-  return Math.min(PTO_CAP_X100, months * PTO_HOURS_PER_MONTH_X100);
+/** The vacation position final pay reads from the time-off ledger (wave 3): the posted balance on the last day and
+ * the final period's per-period accrual, which is prorated by calendar days through the last day. */
+export interface FinalVacation { postedMinutes: number; minutesPerPeriod: number; policyId: string }
+
+/** Loads the worker's vacation-kind balance for final pay; null when no paid-out vacation policy is assigned. */
+export async function finalVacationFor(tx: DbTx, w: WorkerRow, lastDay: string): Promise<FinalVacation | null> {
+  const pos = await vacationPosition(tx, w.id, lastDay);
+  if (!pos) return null;
+  return { postedMinutes: pos.postedMinutes, minutesPerPeriod: periodAccrual(pos.policy, w, periodEndContaining(lastDay)), policyId: pos.policy.id };
 }
 
 /** The semi-monthly period end (15th or month end) of the period containing `date`. */
@@ -55,7 +54,7 @@ export function businessDayOnOrAfter(date: string): string {
 }
 
 /** Final pay earning lines: wages from the period start through the last day, plus unused PTO when asked. */
-export function finalPayEarnings(w: WorkerRow, rates: PayRateRow[], lastDay: string, payUnusedPto: boolean, hoursX100: number | null): { period: { periodStart: string; periodEnd: string }; earnings: SpecialEarning[]; ptoHoursX100: number } {
+export function finalPayEarnings(w: WorkerRow, rates: PayRateRow[], lastDay: string, payUnusedPto: boolean, hoursX100: number | null, vacation: FinalVacation | null = null): { period: { periodStart: string; periodEnd: string }; earnings: SpecialEarning[]; ptoHoursX100: number } {
   const period = semimonthlyPeriod(periodEndContaining(lastDay));
   const rate = rateOn(rates, lastDay) ?? rateOn(rates, period.periodStart);
   const earnings: SpecialEarning[] = [];
@@ -69,9 +68,12 @@ export function finalPayEarnings(w: WorkerRow, rates: PayRateRow[], lastDay: str
     const cents = roundCents(dec(rate.amountCents).dividedBy(SEMIMONTHLY_PERIODS).times(worked).dividedBy(total));
     earnings.push({ type: "salary", amountCents: cents, hoursX100: null, note: `${worked} of ${total} working days, ${period.periodStart} to ${lastDay}` });
   }
-  const ptoHoursX100 = payUnusedPto ? unusedPtoHoursX100(w.startDate, lastDay) : 0;
-  if (rate && ptoHoursX100 > 0) {
-    earnings.push({ type: "pto_payout", amountCents: roundCents(hourlyRateOf(rate).times(ptoHoursX100).dividedBy(100)), hoursX100: ptoHoursX100, note: `${(ptoHoursX100 / 100).toFixed(2)} h unused PTO` });
+  // Unused vacation from the ledger: posted balance plus the prorated final accrual, paid at the final rate.
+  const vac = payUnusedPto && vacation ? finalVacationMinutes(vacation.postedMinutes, vacation.minutesPerPeriod, period, lastDay) : null;
+  const ptoMinutes = vac?.minutes ?? 0;
+  const ptoHoursX100 = minutesToHoursX100(ptoMinutes);
+  if (rate && ptoMinutes > 0) {
+    earnings.push({ type: "pto_payout", amountCents: roundCents(hourlyRateOf(rate).times(ptoMinutes).dividedBy(60)), hoursX100: ptoHoursX100, note: `${(ptoMinutes / 60).toFixed(2)} h unused PTO` });
   }
   return { period, earnings, ptoHoursX100 };
 }

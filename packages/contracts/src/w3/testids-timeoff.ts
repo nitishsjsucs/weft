@@ -8,4 +8,8 @@ export const W3_TIMEOFF_TID = {
   calendarDay: (date: string) => `time-off-day-${date}`,
   balance: (workerId: string, policyId: string) => `time-off-balance-${workerId}-${policyId}`,
   submit: "time-off-submit",
+  source: (id: string) => `time-off-source-${id}`,
+  policy: (id: string) => `time-off-policy-${id}`,
+  holiday: (date: string) => `time-off-holiday-${date}`,
+  personTab: "person-tab-time-off",
 } as const;

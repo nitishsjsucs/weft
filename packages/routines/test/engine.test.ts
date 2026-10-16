@@ -58,10 +58,10 @@ let runN = 0;
 const runs = { openRoutineRun: async () => ({ runId: `run_${String(++runN).padStart(4, "0")}`, token: "t" }) };
 
 describe("routines engine", () => {
-  it("seeds the 7 prebuilt routines (4 wave 1, 3 wave 2) with at most 8 tools each and rt_pre_payroll on 0 9 * * 1-5", async () => {
+  it("seeds the 8 prebuilt routines (4 wave 1, 3 wave 2, 1 wave 3) with at most 8 tools each and rt_pre_payroll on 0 9 * * 1-5", async () => {
     const eng = createRoutines({ db, clock: mutableClock("2026-10-26T15:30:00.000Z"), agent: fakeAgent(), runs, readOnly: fakeRead() });
     const all = await eng.list();
-    expect(all.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_contractor_forms", "rt_exec_briefing", "rt_memory_digest", "rt_milestones", "rt_monthly_exec_report", "rt_new_hire", "rt_new_hire_ready", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll", "rt_thirty_day_checkin"]);
+    expect(all.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_contractor_forms", "rt_exec_briefing", "rt_memory_digest", "rt_milestones", "rt_monthly_exec_report", "rt_new_hire", "rt_new_hire_ready", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll", "rt_thirty_day_checkin", "rt_time_off_requests"]);
     for (const r of PREBUILT) expect(r.tools.length).toBeLessThanOrEqual(8);
     expect(all.find((r) => r.id === "rt_pre_payroll")!.trigger).toEqual({ type: "cron", cron: "0 9 * * 1-5", tz: "America/Los_Angeles" });
   });

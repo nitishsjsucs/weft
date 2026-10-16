@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "comms__send_message", "arguments": "{{derived.comms.send_message}}" },
+          { "type": "function_call", "name": "time_off__decide", "arguments": "{{derived.time_off.decide}}" }
+        ]
+      },
+      {
+        "output": [{ "type": "text", "text": "Posted the notice in #people-ops and proposed a decision on the time-off request for its approver." }]
+      }
+    ]
+  }
+}

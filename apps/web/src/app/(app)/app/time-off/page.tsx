@@ -1,5 +1,5 @@
-import { Placeholder } from "@/components/app/page";
+import { TimeOffView } from "@/components/app/time-off/time-off-view";
 
 export default function TimeOffPage() {
-  return <Placeholder title="Time Off" note="Coming soon." />;
+  return <TimeOffView />;
 }

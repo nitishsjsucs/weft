@@ -1,7 +1,7 @@
 // Off-cycle and final pay arithmetic (wave 2, w2-offboarding), exact to the cent on synthetic inputs.
 import { describe, expect, it } from "vitest";
 import { calculatePaycheck, federalIncomeTax, TAX_2026, type PaycheckInput } from "@weft/payroll-tax";
-import { calendarDays, finalPayEarnings, proratedHourlyLines, proratedSalaryLines, unusedPtoHoursX100 } from "../../src/payroll/offcycle";
+import { calendarDays, finalPayEarnings, proratedHourlyLines, proratedSalaryLines } from "../../src/payroll/offcycle";
 import type { PayRateRow, WorkerRow } from "../../src/payroll/compute";
 
 const rate = (id: string, amountCents: number, effectiveFrom: string, effectiveTo: string | null = null, kind = "salary"): PayRateRow =>
@@ -60,15 +60,22 @@ describe("off-cycle proration by calendar days", () => {
 });
 
 describe("final pay", () => {
-  it("counts unused PTO as whole calendar months in the year, 10 hours each, capped at 120", () => {
-    expect(unusedPtoHoursX100("2024-03-04", "2026-10-30")).toBe(9_000);   // Jan to Sep
-    expect(unusedPtoHoursX100("2024-03-04", "2026-10-31")).toBe(10_000);  // Oct complete too
-    expect(unusedPtoHoursX100("2026-06-15", "2026-10-30")).toBe(3_000);   // Jul, Aug, Sep
-    expect(unusedPtoHoursX100("2026-10-20", "2026-10-30")).toBe(0);
+  // Wave 3 (w3-timeoff): unused PTO comes from the time-off ledger, not a month rule (research/wave3/expenses-timeoff.md T13).
+  it("pays the ledger balance plus the final accrual prorated by calendar days, and nothing without a vacation policy", () => {
+    const vac = { postedMinutes: 5_119, minutesPerPeriod: 300, policyId: "top_vac_us" };
+    const out = finalPayEarnings(worker, [rate("prt_a", 23_200_000, "2025-01-01")], "2026-10-30", true, null, vac);
+    // floor(300 x 15 / 16) = 281; 5,119 + 281 = 5,400 minutes = 90.00 h.
+    expect(out.ptoHoursX100).toBe(9_000);
+    expect(out.earnings.find((e) => e.type === "pto_payout")).toMatchObject({ amountCents: 1_003_846, hoursX100: 9_000, note: "90.00 h unused PTO" });
+    expect(finalPayEarnings(worker, [rate("prt_a", 23_200_000, "2025-01-01")], "2026-10-30", true, null, null).earnings.map((e) => e.type)).toEqual(["salary"]);
+    // T14: a negative balance pays nothing and is never deducted.
+    const neg = finalPayEarnings(worker, [rate("prt_a", 23_200_000, "2025-01-01")], "2026-10-30", true, null, { ...vac, postedMinutes: -480 });
+    expect(neg.earnings.map((e) => e.type)).toEqual(["salary"]);
   });
 
   it("prorates the last period by working days and pays PTO at salary / 2,080", () => {
-    const out = finalPayEarnings(worker, [rate("prt_a", 23_200_000, "2025-01-01")], "2026-10-30", true, null);
+    // Imani's seeded import is 5,063 minutes; her 42 months of service give the 360-minute tier: floor(360 x 15 / 16) = 337.
+    const out = finalPayEarnings(worker, [rate("prt_a", 23_200_000, "2025-01-01")], "2026-10-30", true, null, { postedMinutes: 5_063, minutesPerPeriod: 360, policyId: "top_vac_us" });
     expect(out.period).toEqual({ periodStart: "2026-10-16", periodEnd: "2026-10-31" });
     // Oct 16 to 30 has 11 working days and Oct 16 to 31 has 11 (Oct 31 is a Saturday): the full 23,200,000 / 24.
     expect(out.earnings.map((e) => [e.type, e.amountCents, e.hoursX100])).toEqual([["salary", 966_667, null], ["pto_payout", 1_003_846, 9_000]]);

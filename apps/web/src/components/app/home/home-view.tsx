@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Banknote, ChevronRight, Inbox, Landmark, Users } from "lucide-react";
+import { Banknote, CalendarDays, ChevronRight, Inbox, Landmark, Users } from "lucide-react";
 import { Badge, Card, CardHeading } from "@weft/ui/components";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
 import { AGENCY, fmtDate, period, relative, runKind } from "../format";
@@ -21,7 +21,7 @@ function Widget({ icon, title, href, children, footer, testid }: { icon: React.R
   );
 }
 
-/** Home: exactly 4 widgets (SPEC 11.3). */
+/** Home: the four SPEC 11.3 widgets plus Time Off (wave 3, w3-timeoff). */
 export function HomeView() {
   const who = usePrincipal();
   const clock = useSimClock();
@@ -32,6 +32,7 @@ export function HomeView() {
   const accounts = useGet("/v1/tax/accounts");
   const workers = useGet("/v1/workers", { query: { type: "employee", limit: 100 } });
   const upcoming = (runs.data?.data ?? []).filter((r) => r.status !== "processed").slice(0, 3);
+  const timeOff = useGet("/v1/time-off/requests", { query: { limit: 100 }, refreshMs: 10_000 });
   const approvals = (props.data?.data ?? []).filter((p) => p.kind !== "suggestion");
   // Headcount (gate report item 5): active employees, with onboarding counted apart; together with offboarding they
   // make GET /v1/stats `employees`. Contractors are not headcount.
@@ -39,6 +40,13 @@ export function HomeView() {
   const active = ws.filter((w) => w.status === "active");
   const onboarding = ws.filter((w) => w.status === "onboarding").length;
   const in30 = now ? active.filter((w) => new Date(`${w.startDate}T12:00:00Z`).getTime() >= new Date(now).getTime() - 30 * 86_400_000).length : 0;
+  // Time Off: out today, pending decisions and approved time off starting in the next 30 days.
+  const today = now ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(now)) : null;
+  const in30Days = today ? new Date(Date.parse(`${today}T12:00:00Z`) + 30 * 86_400_000).toISOString().slice(0, 10) : null;
+  const tor = ((timeOff.data as { data?: { id: string; workerName: string; status: string; startAt: string; endAt: string; days: { date: string; minutes: number }[] }[] } | undefined)?.data ?? []);
+  const outToday = today ? tor.filter((r) => r.status === "approved" && r.days.some((d) => d.date === today && d.minutes > 0)) : [];
+  const pendingTor = tor.filter((r) => r.status === "pending");
+  const soon = today && in30Days ? tor.filter((r) => r.status === "approved" && r.startAt > today && r.startAt <= in30Days).sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) : [];
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
       <h1 className="mb-8 text-7 font-semibold tracking-tight">{greeting(now)}, {first}</h1>
@@ -67,6 +75,15 @@ export function HomeView() {
                 <Badge tone={a.status === "active" ? "green" : a.status === "awaiting_state" ? "amber" : "gray"}>{humanStatus(a.status)}</Badge>
               </li>
             ))}
+          </ul>
+        </Widget>
+        <Widget testid="home-widget-time-off" icon={<CalendarDays />} title="Time off" href="/app/time-off" footer={<><span>{timeOff.data ? `${soon.length} approved in the next 30 days` : ""}</span><Link href="/app/time-off" className="hover:text-foreground">Review</Link></>}>
+          <div className="grid grid-cols-2 gap-2 px-4 pt-4 pb-3">
+            <div><div data-testid="home-time-off-out" className="text-7 font-semibold tabular">{timeOff.data ? outToday.length : "-"}</div><div className="text-1 text-gray-10">out today</div></div>
+            <div><div data-testid="home-time-off-pending" className="text-7 font-semibold tabular">{timeOff.data ? pendingTor.length : "-"}</div><div className="text-1 text-gray-10">waiting for a decision</div></div>
+          </div>
+          <ul className="px-2 pb-2">
+            {soon.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
           </ul>
         </Widget>
         <Widget testid="home-widget-headcount" icon={<Users />} title="Headcount" href="/app/people">
