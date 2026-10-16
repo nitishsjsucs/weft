@@ -24,7 +24,7 @@ test.describe("landing page", () => {
     await expect(stats).toHaveAttribute("data-source", live ? "live" : "fallback");
     const expected = live ? [body!.employees, body!.simulatedAgencies] : [48, 7];
     for (const v of expected) await expect(stats).toContainText(String(v));
-    await expect(page.locator("#numbers")).toContainText(live ? "Read live from GET /v1/stats." : "the seed's numbers");
+    await expect(page.locator("#numbers")).toContainText(live ? "Counted from the demo database as it runs." : "the seed's numbers");
   });
 
   test("has no horizontal scroll at 390 px", async ({ page }) => {

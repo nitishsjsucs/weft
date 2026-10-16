@@ -26,7 +26,7 @@ export function Announcement() {
         <span className="text-[var(--accent-8)]">New</span>
         <span className="h-4 w-px bg-white/20" aria-hidden />
         <a href="#how-it-works" className="flex min-w-0 items-center gap-1 text-white/85 hover:text-white">
-          <span className="truncate">Weft 0.1 runs a whole fictional company on your laptop</span>
+          <span className="truncate">Weft runs a whole fictional company on your laptop</span>
           <ChevronRight className="size-4 shrink-0" strokeWidth={1.5} />
         </a>
       </Container>
@@ -215,7 +215,7 @@ export function SimulatorsMarquee() {
 
 function SectionHeading({ lead, rest, id }: { lead: string; rest: string; id?: string }) {
   return (
-    <h2 id={id} className="weft-rule max-w-[860px] scroll-mt-20 pl-6 text-[28px] leading-[34px] font-book tracking-[-0.35px] tablet:text-8">
+    <h2 id={id} className="weft-rule max-w-[860px] scroll-mt-20 pl-6 text-[28px] leading-[34px] font-book tracking-[-0.35px] tablet:text-8 tablet:leading-[40px]">
       <span className="text-gray-12">{lead}</span> <span className="text-gray-10">{rest}</span>
     </h2>
   );
@@ -239,7 +239,7 @@ export function ProductsSection() {
 const STEPS = [
   {
     n: "01", title: "Seed a company",
-    body: "One command builds Larkspur Robotics (demo): 48 employees across four states, three contractors, benefits, tax accounts and an open payroll draft. The same seed gives the same bytes every time.",
+    body: "One command builds Larkspur Robotics (demo): 48 employees across California, New York and Texas, a Colorado hire on the way, three contractors, benefits, tax accounts and an open payroll draft. The same seed gives the same bytes every time.",
   },
   {
     n: "02", title: "Let the agent work",
@@ -274,7 +274,7 @@ export function HowItWorks() {
 
 const GUARDS = [
   { icon: ShieldCheck, title: "Proposals, not surprises", body: "The agent has no approve tool. Every write above the risk line waits for a person, and a decision is checked again when it runs." },
-  { icon: ScrollText, title: "Untrusted text stays quarantined", body: "A run that reads a notice or a message is marked tainted. From then on it can only propose; it never sends on its own." },
+  { icon: ScrollText, title: "Untrusted text stays quarantined", body: "A run that reads untrusted free text, such as a notice body or a chat message, is marked tainted. From then on every message, filing or pay change it makes is only a proposal, and it never sends on its own." },
   { icon: Undo2, title: "A log you can verify", body: "Each action lands in a hash-chained log you can check from the Audit page, with one-click undo for changes that can be reversed." },
 ];
 
@@ -320,7 +320,7 @@ export function StatsTiles({ stats }: { stats: LandingStats }) {
   return (
     <section className="pb-12 tablet:pb-16 laptop:pb-24">
       <Container className="flex flex-col gap-12">
-        <SectionHeading id="numbers" lead="Numbers from this running demo." rest={stats.source === "live" ? "Read live from GET /v1/stats." : "The API is not reachable, so these are the seed's numbers."} />
+        <SectionHeading id="numbers" lead="Numbers from this running demo." rest={stats.source === "live" ? "Counted from the demo database as it runs." : "The API is not reachable, so these are the seed's numbers."} />
         <dl data-testid="marketing-stats" data-source={stats.source} className="grid grid-cols-2 border-t border-l border-border laptop:grid-cols-4">
           {tiles.map((t) => (
             <div key={t.label} className="flex min-h-[132px] flex-col justify-between gap-6 border-r border-b border-border p-4 tablet:min-h-[176px] tablet:p-6">

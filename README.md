@@ -60,7 +60,7 @@ More in [docs/architecture.md](docs/architecture.md).
 ## What works
 
 Verified on main on 2026-10-15 with the scripted provider (`pnpm test`: 394 passed, 0 failed; `pnpm e2e`: 23 passed),
-and live on `gpt-5.6-luna` (L1 to L4 pass for $0.0068 in total):
+and live on `gpt-5.6-luna` (L1 to L4 pass; this round's live spend was $0.0068, about $0.0143 cumulative against the $0.50 cap):
 
 | Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | Live Luna (`pnpm eval:live`) |
 |---|---|---|---|
@@ -123,7 +123,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm typecheck` | `tsc --noEmit` in every package |
 | `pnpm e2e` | Playwright golden paths GP1 to GP5 and the site specs against a fresh seed on ports 3170 and 4170, one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
-| `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files |
+| `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |
 | `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world and print its digest (stable across runs) |
 | `pnpm eval:live` | Live Luna gate, opt-in (see docs/models.md) |
 

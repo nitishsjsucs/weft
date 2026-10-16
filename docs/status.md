@@ -4,8 +4,8 @@
 
 Every golden path passes on main. `pnpm test` passes 394 of 394 (69 files, no skips), `pnpm typecheck` passes 15 of
 15, lint:prose and lint:brand pass, and `pnpm e2e` passes all 23 specs: GP1 to GP5 in the browser, the 4 dev runner
-specs, the 3 landing specs and the 11 lint specs. The live Luna gate on main passes L1, L2, L3 and L4 for $0.0068 in
-total (ledger in `.data/eval-live/spend/`, results in `evals/results/`, both gitignored). `pnpm demo` walks GP1 to GP5
+specs, the 3 landing specs and the 11 lint specs. The live Luna gate on main passes L1, L2, L3 and L4; this round's live spend was
+$0.0068, about $0.0143 cumulative against the $0.50 cap (ledger in `.data/eval-live/spend/`, results in `evals/results/`, both gitignored). `pnpm demo` walks GP1 to GP5
 on one seeded world in `.data-demo/` and leaves it browsable with `WEFT_DATA_DIR=.data-demo pnpm dev`. The track
 worktrees are removed; the `track/*` branches are kept.
 
@@ -40,9 +40,11 @@ routines and resets the cron cursor; the filing's not-reversible reason matches 
 also reads people.get; the seed test uses the real executor and bank simulator.
 
 
-Snapshot of the foundation build on 2026-10-15. The integrator updates this file at the end of integration. Until then it reflects the t6-site branch after Round 2, plus a merge rehearsal of all six track branches done in a throwaway clone (see `docs/testing.md`, "Rehearsing a merge").
+## Merge rehearsal (historical, 15:45 PDT, superseded)
 
-## Works today
+Everything below this heading is the pre-integration snapshot, kept for the record. The round 2 section above is the current status.
+
+### Worked at the rehearsal
 
 - `pnpm dev`: API and web on 127.0.0.1 after lsof and bind checks, first-run seed, each service in its own process group led by a guard, clean stop on Ctrl+C or when the runner is killed. A busy port is refused before the seed runs. The secrets variables reach only the API, and never in `--e2e`.
 - `pnpm lint:prose` and `pnpm lint:brand`: em and en dashes (files and, with `--commits`, commit messages); the reference name and domains, the phrase denylist, byte-identical copies of reference files, and the reference font names. `e2e/site-lints.spec.ts` plants each case in a throwaway repo and checks that it fails.
@@ -50,7 +52,7 @@ Snapshot of the foundation build on 2026-10-15. The integrator updates this file
 - The landing page `/` with original copy and art (hero with the simulated clock ticker, simulators marquee, product grid, how it works, agent island, stats, CTA band, footer). Stats come from `GET /v1/stats`, with a labeled seed fallback. No horizontal scroll at 390 px.
 - Docs: README quickstart, architecture, API, simulators, models (providers, spend caps, live gate, the sandbox and Cloudflare Workers Free decision), testing.
 
-## Merge rehearsal (all six tracks on main, 2026-10-15 about 15:45 PDT)
+### Merge rehearsal (all six tracks on main, 2026-10-15 about 15:45 PDT)
 
 Branches merged in the order t2-world, t1-payroll, t3-governance, t4-agent, t5-app, t6-site.
 
@@ -72,7 +74,7 @@ Unit failures on the merged tree:
 | `apps/api/test/sim.test.ts` (3 tests) | `SQLITE_BUSY_SNAPSHOT` on the `id_counters` insert in `sim.deliver_notice`; clock and fault assertions read `undefined` and an `Internal` error | T2 with T3 (writes outside the write lock once auth and the redactor run) |
 | `tests/scenarios/s2-pre-payroll.test.ts` (2 tests) | 501 from the routines routes | T4 |
 
-## Golden paths (E2E)
+### Golden paths at the rehearsal (E2E)
 
 | Path | Spec | Where it stops on the rehearsal | Waiting on |
 |---|---|---|---|
@@ -84,7 +86,7 @@ Unit failures on the merged tree:
 
 The steps before each stop pass on the merged tree: reset and the frozen clock, "Viewing as", the Simulators panel deliver button, the People Offers tab, the agent panel toggle and composer. Steps after each stop are written against SPEC 12 and the SPEC 11.4 test ids but not yet exercised.
 
-## Left (known)
+### Left at the rehearsal
 
 - T4: replace the 501 stubs in `apps/api/src/routes/agent.ts` and `apps/api/src/routes/routines.ts`; check that delivering the DE 2088 notice starts the agency notice routine. T2: wire `POST /v1/offers/:id/accept`. T1: send the vault credential ref in bank batch entries. Then run `pnpm e2e` and fix what the later steps find.
 - Spec assumptions checked in the merged code, to confirm at runtime once the routes answer: `tax.update_rate` takes `rate: "0.015"`, `effective_from: "2026-01-01"`, `code: "sui"` and its diff has a "YTD employer sui" row (T2); `payroll.submit_run` takes `exclude_blocked: true` (T1's API test expects it); the filing's reason is "Not reversible: filed with the agency simulator" (T2's notice writes) and the audit view prints it as is (T5).

@@ -28,5 +28,5 @@ OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Weft mirrors the visual layout conventions of a commercial payroll product's public website (called
-"the reference site" in this repository). Weft uses none of its name, logos, illustrations, photos,
+"the reference site" in this repository). Weft's product code, UI and docs use none of its name, logos, illustrations, photos,
 customer logos, testimonials or marketing copy. Fonts: Inter and JetBrains Mono, SIL Open Font License 1.1.
