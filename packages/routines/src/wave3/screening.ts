@@ -8,8 +8,8 @@
 // return status, result, ETA and timestamps only) and never touches a review or adverse step (human_only, absent from
 // every model surface). It ships disabled.
 //
-// RT_SCREENING_FOLLOW_UP joins PREBUILT at the wave 3 merge (the engine test pins the wave 1 and 2 ids, owned elsewhere),
-// the same way the wave 2 routines did; tests/scenarios/gp18-follow-up.test.ts inserts its row and pins its script.
+// RT_SCREENING_FOLLOW_UP joined PREBUILT at the wave 3 merge; its script is scenarios/rt_screening_follow_up.json, and
+// tests/scenarios/gp18-follow-up.test.ts still pins the same script in its own scripts dir.
 import type { Precheck, RoutineDef } from "@weft/contracts";
 import type { Predicate } from "../checks";
 
@@ -55,6 +55,6 @@ export const screeningFollowUp: Precheck = async (ctx, exec) => {
   };
 };
 
-export const routines: RoutineDef[] = [];
+export const routines: RoutineDef[] = [RT_SCREENING_FOLLOW_UP];
 export const prechecks: Record<string, Precheck> = { screening_follow_up: screeningFollowUp };
 export const predicates: Record<string, Predicate> = {};

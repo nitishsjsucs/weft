@@ -8,6 +8,7 @@ export const PRINCIPALS = [
   { id: "usr_dana", name: "Dana Whitfield (demo)", title: "Head of People", role: "admin" },
   { id: "usr_theo", name: "Theo Marsh (demo)", title: "Payroll Lead", role: "payroll_admin" },
   { id: "usr_sam", name: "Sam Okafor (demo)", title: "HR Generalist", role: "hr_manager" },
+  { id: "usr_imani", name: "Imani Ferreira (demo)", title: "Hardware Lead", role: "manager" },
 ] as const;
 
 const FIRST = ["Avery", "Bram", "Celia", "Dario", "Esme", "Farid", "Greta", "Hollis", "Ines", "Jonah", "Kaia", "Lionel", "Mira", "Nils", "Odette", "Pavel", "Quinn", "Rosa", "Silas", "Tamsin", "Ulric", "Vera", "Wes", "Xenia", "Yusuf", "Zora"];

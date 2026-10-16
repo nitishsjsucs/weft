@@ -41,7 +41,9 @@ class Window {
 
 export function auth(): MiddlewareHandler<WeftEnv> {
   const keyLimit = new Window(60);
-  const uiLimit = new Window(1200);
+  // The Playwright runner (WEFT_E2E=1) drives one principal through every golden path spec in a few minutes, and the
+  // app shell polls; with the wave 3 specs the suite sat at 1,200 a minute and failed with 429. Real use keeps 1,200.
+  const uiLimit = new Window(process.env.WEFT_E2E === "1" ? 6000 : 1200);
   const primed = new WeakSet<object>();
   return async (c, next) => {
     const weft = c.var.weft;

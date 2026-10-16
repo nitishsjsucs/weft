@@ -40,7 +40,7 @@ export async function portalView(tx: DbTx, companyId: string, principalId: strin
   const plans = await tx.select().from(benefitPlans).where(eq(benefitPlans.companyId, companyId));
   const [bank] = w ? await tx.select().from(bankAccounts).where(and(eq(bankAccounts.workerId, w.id), eq(bankAccounts.status, "active"))).orderBy(desc(bankAccounts.id)).limit(1) : [];
   const [profile] = w ? await tx.select().from(taxProfiles).where(eq(taxProfiles.workerId, w.id)).limit(1) : [];
-  const [upload] = w ? await tx.select().from(uploads).where(eq(uploads.workerId, w.id)).orderBy(desc(uploads.id)).limit(1) : [];
+  const [upload] = w ? await tx.select().from(uploads).where(and(eq(uploads.workerId, w.id), eq(uploads.purpose, "i9_id_image"))).orderBy(desc(uploads.id)).limit(1) : [];
   return {
     worker: { id: p.workerId, displayName: displayName(o.candidateFirst, o.candidateLast), title: o.title, workState: o.workState, startDate: o.startDate },
     offerId: o.id, tasks, done, total: tasks.length,

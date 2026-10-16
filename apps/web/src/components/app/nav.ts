@@ -17,8 +17,8 @@ export const NAV: NavGroup[] = [
     { slug: "benefits", label: "Benefits", href: "/app/benefits", icon: HeartPulse, badge: "simulated" },
     { slug: "it", label: "IT", href: "/app/it", icon: Laptop, badge: "simulated" },
     { slug: "contractors", label: "Contractors", href: "/app/contractors", icon: Globe, badge: "simulated" },
-    { slug: "expenses", label: "Expenses", href: "/app/expenses", icon: Receipt, badge: "soon" },
-    { slug: "time-off", label: "Time Off", href: "/app/time-off", icon: Plane, badge: "soon" },
+    { slug: "expenses", label: "Expenses", href: "/app/expenses", icon: Receipt },
+    { slug: "time-off", label: "Time Off", href: "/app/time-off", icon: Plane },
   ] },
   { label: "Company", items: [
     { slug: "compliance", label: "Taxes & Compliance", href: "/app/compliance", icon: Landmark },

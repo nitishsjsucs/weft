@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "screening__order", "arguments": "{{derived.screening.order}}" }] },
+      { "output": [{ "type": "text", "text": "Proposed the background check; it waits for approval in the inbox." }] }
+    ]
+  }
+}
