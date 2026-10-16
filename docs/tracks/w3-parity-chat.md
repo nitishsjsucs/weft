@@ -24,6 +24,10 @@ behind `agent.chat_can_propose` (off by default). Task agents and learning from 
   `apps/api/test/agent-artifacts.test.ts` (artifacts route, intent check, both lists within 16, setting gate, card from
   the preview), `tests/scenarios/gp15-chat-chart.test.ts` (GP15), and the e2e
   `WEFT_E2E_WEB_PORT=4620 WEFT_E2E_API_PORT=4621 pnpm e2e e2e/gp15-chat-chart.spec.ts`.
+- Verified on this branch (2026-10-16): `pnpm test` 656 passed (624 before), `pnpm typecheck`, `pnpm lint:prose`,
+  `pnpm lint:brand`, `pnpm brand:overlap`, and the full e2e suite on 4620 and 4621 (32 specs with GP15). Run
+  `site-dev-runner.spec.ts` with `WEFT_E2E_RUNNER_PORT=4624` while other tracks run e2e: its default port 4216 and
+  its `pgrep -f "api-port 4216"` leftovers check see another worktree's runner and fail.
 - Turn chat proposals on for a world: insert `settings (key 'agent.chat_can_propose', value_json 'true')`. The
   settings screen and `PUT /v1/settings/agent` belong to w3-parity-routines; the GP15 e2e uses that route when it
   answers and otherwise writes the row in the e2e world's own database.
