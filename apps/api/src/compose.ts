@@ -129,7 +129,11 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
     if (v) executorInternals(executor)?.addSecret(v);
   }
   const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
-  const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({ env: process.env, ledger, testMode, scriptVariant: scriptVariant(db) }), () => placeholderProvider));
+  const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({
+    env: process.env, ledger, testMode, scriptVariant: scriptVariant(db),
+    // The local chat-completions providers send each tool's compact description (wave 2, w2-providers-sandbox request 1).
+    compactDescriptions: (wire) => executorInternals(executor)?.engine.registry.def(wire)?.compactDescription || null,
+  }), () => placeholderProvider));
   const routinesRef: { current: RoutinesEngine | null } = { current: null };
   const agent = await tolerate<AgentRuntime>("agent", () => createAgentRuntime({
     db, clock, executor: executor.agent, provider, ledger,

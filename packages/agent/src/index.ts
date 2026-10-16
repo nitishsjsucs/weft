@@ -12,7 +12,7 @@ export { buildTrace, summarize, stageLabel, type TraceSummary, type StageRow } f
 export { createRunQueue, concurrencyFor, type RunQueue } from "./queue";
 export { routinePack, chatPack, routineDraftPack, approxTokens, ROUTINE_BUDGET_TOKENS, CHAT_BUDGET_TOKENS, type OpenLoop } from "./context";
 export { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
-export { LUNA, stepCostUsd, reserveUsd, usdToMicros, pricesFromEnv, type Prices } from "./cost";
+export { LUNA, CLAUDE_OPUS_5_5, PRICES_BY_PROVIDER, stepCostUsd, reserveUsd, usdToMicros, pricesFromEnv, pricesFor, type Prices } from "./cost";
 export { loadSecret, parseSecretsFile } from "./secrets";
 export { canonicalJson, sha256, newNonce, escapeTagText } from "./canonical";
 export { lockedWrite, isBusy } from "./busy";

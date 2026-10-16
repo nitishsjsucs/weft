@@ -8,7 +8,7 @@ import type {
 import type { Db } from "@weft/db";
 import { newNonce } from "./canonical";
 import { chatPack, routineDraftPack, routinePack, type OpenLoop } from "./context";
-import { LUNA, pricesFromEnv, ZERO_USAGE, type Prices } from "./cost";
+import { LUNA, pricesFor, ZERO_USAGE, type Prices } from "./cost";
 import { BUDGETS, MAX_REQUEUES, runLoop, type ChecklistState, type RunSetup } from "./loop";
 import type { PromptKind } from "./prompts/index";
 import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
@@ -79,7 +79,7 @@ export interface WeftAgentRuntime extends AgentRuntime {
 
 export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRuntime {
   const env = opts.env ?? process.env;
-  const prices: Prices = opts.provider.live ? pricesFromEnv(env) : LUNA;
+  const prices: Prices = opts.provider.live ? pricesFor(opts.provider.id, env) : LUNA;
   const listeners = new Map<string, Set<(s: RunStepRow) => void>>();
   const store = createRunStore(opts.db, {
     onStep: (s) => { for (const cb of listeners.get(s.runId) ?? []) { try { cb(s); } catch { /* a listener never breaks a run */ } } },
