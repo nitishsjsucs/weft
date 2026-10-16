@@ -9,7 +9,7 @@ import { Hono, type Context } from "hono";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
-  Conflict, IntegrationVendor, NotFound, Unauthorized, ValidationError, VENDOR_APPLY_COMMAND, VENDOR_CATEGORY, W3_INTEGRATIONS_HR_SIMULATE, W3_WEBHOOK_MAX_BYTES,
+  Conflict, IntegrationVendor, NotFound, Unauthorized, ValidationError, VENDOR_CATEGORY, W3_INTEGRATIONS_HR_SIMULATE, W3_WEBHOOK_MAX_BYTES,
   type IntegrationCard, type ToolOutcome, type W3GreenhouseSimControls, type W3WorkdaySimControls,
 } from "@weft/contracts";
 import { extLinks, integrationConnections, integrationDeliveries, offers, syncItems, timeOffRequests, withWriteLock, workers } from "@weft/db";
@@ -18,6 +18,7 @@ import { secretsReport, VENDOR_COPY } from "@weft/integrations";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { applyWorkdayDetected, deliverSimWebhooks, webhookReceivers, type WebhookReceiver } from "../integrations/poll";
+import { ingestVendorDelivery } from "../integrations/poll-screening";
 
 const DEFAULT_OWNERSHIP = { people: "weft", compensation: "weft", time_off: "weft" } as const;
 const vendorOf = (c: Context<WeftEnv>) => {
@@ -49,6 +50,15 @@ export function createWebhookReceiver(weft: Weft): WebhookReceiver {
     if (raw.byteLength > W3_WEBHOOK_MAX_BYTES) return { status: 413 };
     const h = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
     const connector = weft.sims.vendors[vendor] as unknown as { verifyWebhook(raw: Uint8Array, h: Record<string, string>): { ok: boolean; dedupeKey: string | null }; parseWebhook(raw: Uint8Array): unknown };
+    if (vendor === "checkr" || vendor === "hireright" || vendor === "docusign") {
+      // Screening and e-signature vendors share the simulators' ingest path: verify, store ids only, dedupe, then apply
+      // with the args their apply command expects. A failed apply frees the dedupe key so the vendor's retry can land.
+      const r = await ingestVendorDelivery({ db: weft.db, executor: weft.executor, now: weft.clock.now() }, vendor, weft.sims.vendors[vendor], raw, h);
+      if (r.status === "rejected") return { status: 401 };
+      if (r.status === "failed") return { status: 500 };
+      if (!weft.testMode && r.status === "applied") void weft.scheduler.kick();
+      return { status: 200, duplicate: r.status === "duplicate", deliveryId: r.deliveryId ?? undefined };
+    }
     const verdict = connector.verifyWebhook(raw, h);
     if (!verdict.ok || !verdict.dedupeKey) return { status: 401 };
     const [dup] = await weft.db.select().from(integrationDeliveries).where(and(eq(integrationDeliveries.vendor, vendor), eq(integrationDeliveries.dedupeKey, verdict.dedupeKey))).limit(1);
@@ -60,14 +70,28 @@ export function createWebhookReceiver(weft: Weft): WebhookReceiver {
     if (!out.ok || out.status !== "done") return { status: 500 };
     const data = out.data as { delivery_id: string; duplicate: boolean };
     if (data.duplicate) return { status: 200, duplicate: true, deliveryId: data.delivery_id };
-    if (vendor !== "greenhouse" && vendor !== "workday") {
-      // Screening and e-signature vendors: ids-only items to their own apply command (W3VendorApplyArgs).
-      const items = Array.isArray(parsedBody) ? (parsedBody as Record<string, unknown>[]).map((x) => Object.fromEntries(Object.entries(x).filter(([, v]) => typeof v === "string"))) : [];
-      await weft.executor.system.exec("svc_events", VENDOR_APPLY_COMMAND[vendor], { vendor, delivery_id: data.delivery_id, items }, { eventId: null, attended: false, requestedBy: null });
-    }
     if (!weft.testMode) void weft.scheduler.kick();
     return { status: 200, duplicate: false, deliveryId: data.delivery_id };
   };
+}
+
+/** The body's bytes, or null once more than `max` bytes arrive (the reader is cancelled at that point). */
+async function readCapped(body: ReadableStream<Uint8Array> | null, max: number): Promise<Uint8Array | null> {
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) { await reader.cancel().catch(() => undefined); return null; }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const ch of chunks) { out.set(ch, at); at += ch.byteLength; }
+  return out;
 }
 
 const SimulateBody = z.object({ kind: z.string(), applicationId: z.string().optional(), employeeId: z.string().regex(/^\d{1,10}$/).optional() });
@@ -134,8 +158,9 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     const len = Number(c.req.header("content-length") ?? "0");
     const tooLarge = () => c.json({ _tag: "ValidationError", message: `Webhook body over ${W3_WEBHOOK_MAX_BYTES} bytes`, ok: false }, 413);
     if (len > W3_WEBHOOK_MAX_BYTES) return tooLarge();
-    const raw = new Uint8Array(await c.req.arrayBuffer());
-    if (raw.byteLength > W3_WEBHOOK_MAX_BYTES) return tooLarge();
+    // Read the body as a stream and stop at the cap, so a chunked body with no Content-Length is never buffered whole.
+    const raw = await readCapped(c.req.raw.body, W3_WEBHOOK_MAX_BYTES);
+    if (!raw) return tooLarge();
     const headers: Record<string, string> = {};
     c.req.raw.headers.forEach((v, k) => { headers[k] = v; });
     const res = await receive(c.req.param("vendor"), raw, headers);

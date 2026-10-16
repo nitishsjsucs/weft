@@ -44,7 +44,9 @@ export async function ingestVendorDelivery(d: Pick<PollDeps, "db" | "executor" |
   const args = vendor === "docusign" ? { envelope_id: parsed.envelopeId, event: action ?? undefined, dedupe_key: dedupeKey } : { vendor, vendor_order_id: parsed.vendorOrderId, kind: action ?? undefined, dedupe_key: dedupeKey };
   const out = await d.executor.system.exec("svc_events", command, args, { eventId: null, attended: false, requestedBy: null });
   const error = out.ok ? null : `${out.refusal.code}`.slice(0, 120);
-  await withWriteLock(() => d.db.update(integrationDeliveries).set(error ? { error } : { appliedAt: d.now }).where(eq(integrationDeliveries.id, deliveryId)));
+  // A failed apply keeps its row (with the error) but releases the dedupe key, so the vendor's retry is applied, not
+  // dropped as a duplicate.
+  await withWriteLock(() => d.db.update(integrationDeliveries).set(error ? { error, dedupeKey: `${dedupeKey}#failed#${deliveryId}` } : { appliedAt: d.now }).where(eq(integrationDeliveries.id, deliveryId)));
   return { status: out.ok ? "applied" : "failed", deliveryId, dedupeKey, detail: error };
 }
 

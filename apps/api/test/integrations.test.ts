@@ -78,6 +78,20 @@ describe("POST /v1/integrations/:vendor/webhook", () => {
     expect(big.status).toBe(413);
     expect((await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM integration_deliveries`))[0]!.n).toBe(0);
   });
+  it("applies signed Checkr and DocuSign deliveries through their apply commands and dedupes the retry", async () => {
+    const checkr = '{"id":"sim_evt_000001","object":"event","type":"report.completed","created_at":"2026-10-27T15:30:00.000Z","data":{"object":{"id":"sim_rpt_000003","object":"report","status":"complete","result":"clear"}}}';
+    const ds = '{"event":"envelope-completed","apiVersion":"v2.1","generatedDateTime":"2026-10-27T15:30:00.000Z","data":{"accountId":"sim-account-0001","envelopeId":"sim-env-000001"}}';
+    const cSig = { "X-Checkr-Signature": "3babe9f9d6561e6b2b48194a200ba640412304881fd0aa66764d3db3b6b8b8fb" };
+    const dSig = { "X-DocuSign-Signature-1": "mJrSEMlywVvSNoALGrJ0EgWk8r81rHCZGwmDUPfbda0=" };
+    const first = await post("checkr", checkr, cSig);
+    expect([first.status, await first.json()]).toEqual([200, { ok: true, duplicate: false }]);
+    expect(await (await post("checkr", checkr, cSig)).json()).toEqual({ ok: true, duplicate: true });
+    expect((await post("docusign", ds, dSig)).status).toBe(200);
+    const acts = await weft.db.all<{ command: string }>(sql`SELECT command FROM actions WHERE command IN ('screening.apply_vendor_event', 'documents.apply_esign_event') ORDER BY seq`);
+    expect(acts.map((a) => a.command)).toEqual(["screening.apply_vendor_event", "documents.apply_esign_event"]);
+    const rows = await weft.db.all<{ vendor: string; applied_at: string | null; error: string | null }>(sql`SELECT vendor, applied_at, error FROM integration_deliveries ORDER BY id`);
+    expect(rows.map((r) => [r.vendor, !!r.applied_at, r.error])).toEqual([["checkr", true, null], ["docusign", true, null]]);
+  });
 });
 
 describe("sync and polling", () => {
@@ -102,7 +116,7 @@ describe("sync and polling", () => {
     const [row] = await weft.db.all<{ status: string; attempt: number }>(sql`SELECT status, attempt FROM sim_webhook_outbox ORDER BY id DESC LIMIT 1`);
     expect(row).toEqual({ status: "delivered", attempt: 2 });
     expect((await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM ext_links WHERE vendor = 'greenhouse'`))[0]!.n).toBe(1);
-    const [d] = await weft.db.all<{ applied_at: string | null; action: string }>(sql`SELECT applied_at, action FROM integration_deliveries`);
+    const [d] = await weft.db.all<{ applied_at: string | null; action: string }>(sql`SELECT applied_at, action FROM integration_deliveries WHERE vendor = 'greenhouse'`);
     expect(d).toMatchObject({ action: "hire_candidate" });
     expect(d!.applied_at).toBeTruthy();
   });
