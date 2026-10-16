@@ -113,8 +113,12 @@ const bin = (rel: string, name: string): [string, string[]] => {
 
 if (e2e || args.includes("--fresh") || !existsSync(join(dataDir, "weft.db"))) {
   const [tsx, pre] = bin("", "tsx");
+  // Seeding never calls a model and gets no secrets, so it always composes with the scripted provider. Without this,
+  // WEFT_LLM=openai reached the seed step and it failed with PROVIDER_CONFIG before the API ever started.
+  const { WEFT_BACKGROUND_LLM: _background, ...seedBase } = shared;
+  const seedEnv: NodeJS.ProcessEnv = { ...seedBase, WEFT_LLM: "scripted" };
   for (const cmd of ["reset", "seed"]) {
-    const r = spawnSync(tsx, [...pre, "packages/seed/src/cli.ts", cmd], { cwd: root, env: shared, stdio: "inherit" });
+    const r = spawnSync(tsx, [...pre, "packages/seed/src/cli.ts", cmd], { cwd: root, env: seedEnv, stdio: "inherit" });
     if (r.status !== 0) { log(`db ${cmd} failed (${r.status ?? r.signal})`); process.exit(r.status ?? 1); }
   }
 }
