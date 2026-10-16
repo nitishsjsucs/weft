@@ -154,3 +154,15 @@ describe("reimbursementsFor (the payroll seam)", () => {
     expect(reimbursementsFor(w, p, { scheduled: [] })).toEqual({ reimbursementsCents: 0, lines: [], taxableEarnings: [] });
   });
 });
+
+describe("REIMBURSEMENT_SPIKE", () => {
+  const cp = (cents: number) => ({ workerId: "wrk_0005", reimbursementsCents: cents, reimbursementLines: [{ expenseId: "exp_0001", category: "travel", amountCents: cents }] }) as never;
+  it("flags over $2,500, or over 3 times a nonzero recent average; zero history uses only the cap", async () => {
+    const { expenseFlags } = await import("../../src/expenses/flags");
+    expect(expenseFlags(cp(47_622), { recent: new Map() })).toEqual([]);
+    expect(expenseFlags(cp(250_001), { recent: new Map() }).map((f) => [f.rule, f.severity])).toEqual([["REIMBURSEMENT_SPIKE", "review"]]);
+    expect(expenseFlags(cp(30_001), { recent: new Map([["wrk_0005", [10_000, 10_000, 10_000]]]) })).toHaveLength(1);
+    expect(expenseFlags(cp(30_000), { recent: new Map([["wrk_0005", [10_000, 10_000, 10_000]]]) })).toEqual([]);
+    expect(expenseFlags(cp(0), null)).toEqual([]);
+  });
+});
