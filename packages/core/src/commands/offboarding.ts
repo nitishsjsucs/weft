@@ -17,7 +17,7 @@ import { createSpecialRun, periodEndContaining, specialSettleAt } from "../payro
 import { semimonthlyPeriod } from "../payroll/calendar";
 import { BANK_CREDENTIAL_REF, PAYROLL_RUN_CEILING, proposeOffCycleCommand } from "./payroll";
 import {
-  AFTER_FINAL_PAY, caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL,
+  accountLabel, AFTER_FINAL_PAY, caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL,
   type CaseRow, type StepRow,
 } from "../offboarding/cases";
 import {
@@ -200,7 +200,7 @@ function idpStep(spec: { name: `offboarding.${string}`; kind: OffboardingStepKin
     async run(i, ctx, deps) {
       const { c, step, worker, rows } = await facts(i, ctx.companyId, deps);
       const done = await suspendAccounts(deps, rows);
-      const { completed } = await finish(deps, ctx, c, step, done.length ? `Suspended ${done.join(", ")} in the IdP simulator` : "No accounts to suspend");
+      const { completed } = await finish(deps, ctx, c, step, done.length ? `Suspended ${done.map(accountLabel).join(", ")}` : "No accounts to suspend");
       return {
         data: { case_id: c.id, step_id: step.id, suspended: done, case_complete: completed },
         summary: `${STEP_LABEL[spec.kind]} for ${nameRef(worker.firstName, worker.lastName, worker.id)}: ${done.length ? done.join(", ") : "nothing to suspend"}`,
@@ -242,7 +242,7 @@ export const lockDeviceCommand = writeCommand({
   async run(i, ctx, deps) {
     const { c, step, worker } = await lockFacts(i, ctx.companyId, deps);
     const locks = await lockDevices(deps, worker.id, c.id);
-    const { completed } = await finish(deps, ctx, c, step, locks.length ? `Locked ${locks.map((l) => `${l.deviceId} (${l.lockRef})`).join(", ")}` : "No devices to lock");
+    const { completed } = await finish(deps, ctx, c, step, locks.length ? `Locked ${locks.length} device${locks.length === 1 ? "" : "s"} through the device simulator (sim)` : "No devices to lock");
     return { data: { case_id: c.id, step_id: step.id, locks, case_complete: completed }, summary: `Locked ${locks.length} device(s) for ${nameRef(worker.firstName, worker.lastName, worker.id)}`, events: [stepDone(c, step)] };
   },
 });
@@ -273,11 +273,11 @@ export const runStepCommand = writeCommand({
     let data: Record<string, unknown> = {};
     if (i.step === "group_removal") {
       const cleared = await clearAllGroups(deps, worker.id);
-      detail = cleared.length ? `Removed ${cleared.reduce((s, x) => s + x.removed.length, 0)} group memberships across ${cleared.map((x) => `${x.system} ${x.handle}`).join(", ")}` : "No group memberships";
+      detail = cleared.length ? `Removed ${cleared.reduce((s, x) => s + x.removed.length, 0)} group memberships across ${cleared.map((x) => accountLabel(`${x.system} ${x.handle}`)).join(", ")}` : "No group memberships";
       data = { cleared };
     } else if (i.step === "app_removal") {
       const done = await suspendAccounts(deps, await accountsOf(deps.tx, worker.id, ["github", "chat"]));
-      detail = done.length ? `Removed ${done.join(", ")} in the IdP simulator` : "No app accounts";
+      detail = done.length ? `Removed ${done.map(accountLabel).join(", ")}` : "No app accounts";
       data = { removed: done };
     } else if (i.step === "benefits_terminate") {
       const effectiveTo = endOfMonth(c.lastDay);
@@ -287,7 +287,7 @@ export const runStepCommand = writeCommand({
     } else {
       const n = await cobraNotice(deps.tx, worker, c);
       const sent = await deps.sims.email.send({ to: n.to, from: COBRA_FROM, subject: n.subject, body: n.body, kind: "cobra_notice", relatedRef: c.id });
-      detail = `COBRA notice ${sent.id} emailed to ${n.to}`;
+      detail = `COBRA notice emailed to ${n.to}`;
       data = { email_id: sent.id, to: n.to, plans: n.plans };
     }
     const { completed } = await finish(deps, ctx, c, step, detail);

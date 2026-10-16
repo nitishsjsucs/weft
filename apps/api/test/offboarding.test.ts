@@ -35,7 +35,7 @@ describe("offboarding routes", () => {
     expect(c).toMatchObject({ workerId: "wrk_0005", kind: "layoff", lastDay: "2026-10-30", status: "open" });
     expect(c.steps.map((s) => s.kind)).toEqual([...OFFBOARDING_STEP_ORDER]);
     const sso = c.steps.find((s) => s.kind === "sso_deactivate")!;
-    expect(sso).toMatchObject({ status: "skipped", detail: "No SSO account on file", proposalId: null });
+    expect(sso).toMatchObject({ status: "skipped", detail: "No SSO (sim) account on file", proposalId: null });
     expect(c.steps.find((s) => s.kind === "final_pay")).toMatchObject({ status: "proposed", detail: "Dismissal run through the last day, no PTO payout" });
     const list = OffboardingCase.array().parse(await (await call("GET", "/v1/offboarding")).json());
     expect(list.map((x) => x.id)).toEqual([c.id]);

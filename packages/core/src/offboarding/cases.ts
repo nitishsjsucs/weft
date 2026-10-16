@@ -54,6 +54,11 @@ export async function openStep(tx: DbTx, companyId: string, caseId: string, kind
   return { c, step, worker };
 }
 
+/** Simulated systems in words, always marked (sim) like the rest of the app. */
+export const SYSTEM_LABEL: Record<string, string> = { google_ws: "Google Workspace (sim)", github: "GitHub (sim)", chat: "Team chat (sim)", sso: "SSO (sim)" };
+/** "google_ws imani.ferreira" (the suspend and remove results) as "Google Workspace (sim) imani.ferreira". */
+export const accountLabel = (systemHandle: string) => { const [sys, ...rest] = systemHandle.split(" "); return [SYSTEM_LABEL[sys!] ?? sys, ...rest].join(" "); };
+
 /** Steps that wait for final pay: the COBRA notice and the benefits end date. Access removal never waits on pay. */
 export const AFTER_FINAL_PAY: readonly OffboardingStepKind[] = ["cobra_notice", "benefits_terminate"];
 
@@ -77,10 +82,10 @@ export async function insertCase(tx: DbTx, deps: { newId(p: "ofb_" | "ofs_"): Pr
   const has = (sys: string) => accts.some((a) => a.system === sys && a.status !== "suspended");
   const initial: Record<OffboardingStepKind, { status: "pending" | "skipped"; detail: string }> = {
     final_pay: { status: "pending", detail: input.payUnusedPto ? "Dismissal run through the last day, with unused PTO" : "Dismissal run through the last day, no PTO payout" },
-    directory_suspend: has("google_ws") ? { status: "pending", detail: "Suspend the Google Workspace account" } : { status: "skipped", detail: "No active Google Workspace account" },
-    sso_deactivate: has("sso") ? { status: "pending", detail: "Deactivate the SSO account" } : { status: "skipped", detail: "No SSO account on file" },
+    directory_suspend: has("google_ws") ? { status: "pending", detail: "Suspend the Google Workspace (sim) account" } : { status: "skipped", detail: "No active Google Workspace (sim) account" },
+    sso_deactivate: has("sso") ? { status: "pending", detail: "Deactivate the SSO (sim) account" } : { status: "skipped", detail: "No SSO (sim) account on file" },
     group_removal: { status: "pending", detail: "Remove every group membership" },
-    app_removal: has("github") || has("chat") ? { status: "pending", detail: "Remove GitHub and chat accounts" } : { status: "skipped", detail: "No app accounts" },
+    app_removal: has("github") || has("chat") ? { status: "pending", detail: "Remove GitHub (sim) and team chat (sim) accounts" } : { status: "skipped", detail: "No app accounts" },
     device_lock: devs.length ? { status: "pending", detail: `Lock ${devs.length} device${devs.length === 1 ? "" : "s"}` } : { status: "skipped", detail: "No device assigned" },
     cobra_notice: { status: "pending", detail: "Email the COBRA continuation notice" },
     benefits_terminate: { status: "pending", detail: "End enrollments at the end of the month" },
