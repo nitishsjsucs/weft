@@ -7,6 +7,7 @@
 import type { Page } from "@playwright/test";
 import { expect, openApp, test, TID, viewAs } from "./fixtures";
 import { W3_SHELL_TID as S } from "../packages/contracts/src/w3/testids-shell";
+import { W3_TOPBAR_SHELL_DOM as DOM } from "../packages/contracts/src/ext/w3-topbar-shell";
 
 const LAYOUTS = [
   { name: "1440 docked", width: 1440, height: 900, docked: true },
@@ -30,7 +31,7 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
       await expect(bar).toBeVisible();
       if (l.docked) {
         await expect(page.getByTestId(S.agentToggle)).toHaveAttribute("aria-pressed", "true");
-        await expect(page.locator("#weft-agent-panel")).toBeVisible();
+        await expect(page.locator(`#${DOM.agentPanel}`)).toBeVisible();
       }
       const m = await bar.evaluate((h) => {
         const box = (e: Element) => e.getBoundingClientRect();

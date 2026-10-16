@@ -1,5 +1,6 @@
 // Pure helpers for the top bar's environment pill (research/wave3/topbar-design.md 5.3 to 5.7). Owner: w3-topbar-shell.
 // No React here, so the unit tests can read every label the bar shows.
+import { W3_TOPBAR_SHELL_TIERS } from "@weft/contracts";
 
 /** Model status as the bar shows it: the dot color and the Mode row of the model popover come from this. */
 export type ModelState = "live" | "local" | "scripted" | "offline" | "loading";
@@ -115,8 +116,8 @@ export function groupPersonas<P extends Persona>(people: readonly P[]): { group:
 }
 
 /** The header's three width tiers (by the header's own container width, not the window). */
-export const TIER_FULL_MIN = 760;
-export const TIER_COMPACT_MIN = 480;
+export const TIER_FULL_MIN = W3_TOPBAR_SHELL_TIERS.fullMin;
+export const TIER_COMPACT_MIN = W3_TOPBAR_SHELL_TIERS.compactMin;
 export function tierFor(width: number): "full" | "compact" | "mini" {
   return width >= TIER_FULL_MIN ? "full" : width >= TIER_COMPACT_MIN ? "compact" : "mini";
 }

@@ -8,15 +8,15 @@ import { usePathname } from "next/navigation";
 import { ChevronRight, PanelLeft, PanelRight, Search } from "lucide-react";
 import { Button } from "@weft/ui/components";
 import { cn } from "@weft/ui";
-import { W3_SHELL_TID } from "@weft/contracts";
+import { W3_SHELL_TID, W3_TOPBAR_SHELL_DOM } from "@weft/contracts";
 import { crumbs } from "../nav";
 import { useAgent } from "../agent-context";
 import { useCrumbTitle } from "./crumbs";
 import { EnvPill } from "./env-pill";
 import { barIconClass } from "./segment";
 
-export const SIDEBAR_ID = "weft-sidebar";
-export const AGENT_PANEL_ID = "weft-agent-panel";
+export const SIDEBAR_ID = W3_TOPBAR_SHELL_DOM.sidebar;
+export const AGENT_PANEL_ID = W3_TOPBAR_SHELL_DOM.agentPanel;
 
 function Breadcrumb() {
   const pathname = usePathname();
