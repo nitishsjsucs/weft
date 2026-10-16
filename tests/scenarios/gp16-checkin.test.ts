@@ -57,7 +57,7 @@ describe("GP16 first-month check-in", () => {
   });
 
   it("day 30 sends the check-in to the hire; a day 30 more than a week back is not sent", async () => {
-    [manager] = (await weft.db.select({ id: workers.id, workEmail: workers.workEmail }).from(workers).where(eq(workers.id, "wrk_0001")));
+    manager = (await weft.db.select({ id: workers.id, workEmail: workers.workEmail }).from(workers).where(eq(workers.id, "wrk_0001")))[0]!;
     await employee("wrk_0961", "Juno", "2026-10-03", manager!.id);   // day 30 is Mon Nov 2
     await employee("wrk_0962", "Ravi", "2026-09-20", manager!.id);   // day 30 was Oct 20, outside the week
     await weft.clock.set("2026-11-02T17:00:00.000Z", 0);              // Mon Nov 2, 09:00 PT
