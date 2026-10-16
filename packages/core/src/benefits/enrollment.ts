@@ -23,7 +23,9 @@ export async function eligibleForOpenEnrollment(tx: DbTx, companyId: string) {
 }
 
 export async function listOpenEnrollment(tx: DbTx, companyId: string, opts: { planYear?: number; status?: string } = {}): Promise<OpenEnrollmentDto[]> {
-  const people = await tx.select({ id: workers.id, first: workers.firstName, last: workers.lastName }).from(workers).where(eq(workers.companyId, companyId));
+  // Leavers drop out: a worker terminated after the rows were seeded (offboarding sets the end date) is not chased.
+  const people = (await tx.select({ id: workers.id, first: workers.firstName, last: workers.lastName, status: workers.status, endDate: workers.endDate }).from(workers).where(eq(workers.companyId, companyId)))
+    .filter((w) => (w.status === "active" || w.status === "onboarding") && w.endDate === null);
   if (people.length === 0) return [];
   const names = new Map(people.map((p) => [p.id, `${p.first} ${p.last} (demo)`]));
   const conds = [inArray(openEnrollment.workerId, people.map((p) => p.id)), eq(openEnrollment.planYear, opts.planYear ?? OPEN_ENROLLMENT_PLAN_YEAR)];

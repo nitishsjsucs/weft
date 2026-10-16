@@ -132,6 +132,12 @@ describe("GP9 termination with access revocation", () => {
     expect(findings.map((f) => f.kind).sort()).toEqual(["missing_dependent", "terminated_but_billed", "wrong_tier"]);
   });
 
+  it("the leaver drops out of the 2027 open enrollment list, so the chase routine never reminds them", async () => {
+    const rows = (await call("GET", "/v1/benefits/open-enrollment")).json as { workerId: string }[];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((r) => r.workerId === WORKER)).toBe(false);
+  });
+
   it("refuses a second termination and a contractor", async () => {
     const again = await call("POST", `/v1/workers/${WORKER}/terminate`, { kind: "voluntary", lastDay: "2026-10-30" });
     expect(again.status).toBe(422);
