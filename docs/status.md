@@ -5,7 +5,9 @@
 On a fresh clone of main at `d62153c`, after the final review fixes: `pnpm test` 596 of 596 (112 files), `pnpm typecheck`
 15 of 15, build ok, `pnpm e2e` 30 of 30, `pnpm demo` walks GP1 to GP12 and the audit chain verifies, `pnpm demo:tests`
 78 of 78, both lints ok, and `pnpm dev --fresh` serves every wave 2 screen. Live L1, L2, L4 and L3 three times pass on
-Luna for $0.0078 (ledger $0.0431 of $0.50). Screenshots were retaken with the new `pnpm screenshots`. The numbers, the
+Luna for $0.0078 (ledger $0.0431 of $0.50). Screenshots were retaken with the new `pnpm screenshots`. A rerun at `583333d`
+under heavy machine load passed `pnpm e2e` 27 of 30 (the fixture's `POST /v1/sim/reset` answered 500 three times) and
+then 30 of 30; the cause is open. The numbers, the
 live table and what is still left are in the README under Results and What is stubbed or left.
 
 ## Wave 2 integration (2026-10-15, 20:00 PDT)

@@ -94,6 +94,13 @@ the Quickstart. Every command below was run on that clone; nothing is carried ov
 | `pnpm lint:prose --commits 213229e..HEAD`, `pnpm lint:brand` | ok; the 37 commits since the first wave 2 gate are by nitishsjsucs (noreply), none with a co-author trailer |
 | `pnpm dev --fresh --api-port 4475 --web-port 3475` | both servers up; `/`, `/app`, `/app/hiring`, `/app/offboarding`, `/app/memory`, `/app/benefits`, `/app/contractors`, `/portal` and the Oct 30 draft answered 200; SIGINT stopped both process groups and freed both ports |
 
+After committing the results, the gate reran the suite on a second fresh clone at `583333d` (only docs, the
+screenshot capture and its `package.json` script changed) while another project's build held the load average between
+14 and 38. `pnpm test` passed 596 of 596 (181 s), `pnpm typecheck` 15 of 15, `pnpm demo` exited 0 and `pnpm lint:brand`
+passed, but the first `pnpm e2e` passed 27 of 30: the fixture's `POST /v1/sim/reset` answered 500 before GP7, GP9 and
+the 1440 px spec. A second `pnpm e2e` on that clone, still under load, passed 30 of 30 (175 s). The cause is not known:
+in test mode the API does not log a 500's stack (`apps/api/src/http/errors.ts`), so nothing was recorded.
+
 Live on `gpt-5.6-luna` (Responses API), on the same clone. Wave 2 added no live case, so L1 to L4 are the whole live
 suite:
 
@@ -203,6 +210,8 @@ time; the action chain verifies at the end of every scenario.
   portal has no way back to the admin view; the direct deposit error is not tied to its input with `aria-invalid`; the
   document library does not show the per-signature verify result.
 - A run still queued when the API stops is failed with `PROCESS_RESTART` at the next boot, not resumed.
+- `POST /v1/sim/reset` can answer 500 under heavy machine load (3 of 30 e2e resets once in the final gate), and in test
+  mode the API drops the stack, so the cause is not yet known.
 - Track notes with the full lists live in `docs/tracks/` and `docs/wave2.md`.
 
 ## Sandboxes and a free hosted option
