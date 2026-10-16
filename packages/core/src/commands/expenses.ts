@@ -123,7 +123,9 @@ const explainCmd = writeCommand({
         results.push({ expense_id: r.id, status: "saved", source, code: null, offending: [], explanation: text });
       };
       const text = item.explanation?.trim() ?? "";
-      if (!text) { await save(templateExpenseExplanation(pi, checks), "template"); continue; }
+      // A tainted run saw employee-entered text, so its prose could carry an injection into later untainted runs that
+      // read the explanation as trusted: only the template is saved there (harness 6.2, laundering channels).
+      if (!text || ctx.tainted) { await save(templateExpenseExplanation(pi, checks), "template"); continue; }
       const g = groundExpenseExplanation(text, pi, checks);
       if (g.ok) { await save(text, "agent"); delete attempts[r.id]; continue; }
       if ((attempts[r.id] ?? 0) >= 1) {
@@ -171,6 +173,13 @@ async function decidable(i: DecideInput, ctx: ExecContext, deps: CommandDeps): P
   if (i.decision === "decline" && !i.reason_code) throw new DomainRefusal("DOMAIN_REASON_REQUIRED", "A decline needs a reason_code", "reason_code is one of no_receipt, duplicate, personal, over_policy, late, other", { expense_id: r.id, decision: "decline", reason_code: res.suggestion.reasonCode ?? "other" });
   if (i.decision === "return" && !i.note?.trim()) throw new DomainRefusal("DOMAIN_NOTE_REQUIRED", "A return needs a note the employee will read", "Say what the employee should fix", { expense_id: r.id, decision: "return", note: res.suggestion.note });
   const w = (await deps.tx.select().from(workers).where(eq(workers.id, r.workerId)))[0]!;
+  // Separation of duties: the person deciding (the proposal's approver when one is being executed) never decides
+  // their own expense.
+  const decider = ctx.approvedProposalId ? ((await deps.tx.select({ by: proposals.decidedBy }).from(proposals).where(eq(proposals.id, ctx.approvedProposalId)))[0]?.by ?? null) : ctx.principal.kind === "human" ? ctx.principal.id : null;
+  if (decider) {
+    const [dp] = await deps.tx.select({ workerId: principals.workerId }).from(principals).where(eq(principals.id, decider)).limit(1);
+    if (dp?.workerId && dp.workerId === r.workerId) throw new DomainRefusal("DOMAIN_SELF_APPROVAL", `${r.id} is your own expense; another approver decides it`, "Ask another payroll admin or the People admin to decide it", null);
+  }
   return { r, res, who: nameRef(w.firstName, w.lastName, w.id) };
 }
 
@@ -369,11 +378,18 @@ const markPaidCmd = writeCommand({
   name: "expenses.mark_paid", summary: "Mark a processed run's reimbursements paid (system record).",
   description: "System record on payroll.processed: expenses on that run whose paycheck was processed become paid; items on an excluded paycheck go back to approved for the next draft.",
   input: RunInput, domain: "payroll", needs: "edit", effect: "write", risk: () => "R1", approval: "never", reversible: false, preview: null, access: "system_only",
-  async run(i: RunInput, _ctx, deps) {
+  async run(i: RunInput, ctx, deps) {
     const out = await markPaidForRun(deps.tx, i.payroll_run_id);
+    // A released item rides the earliest open draft now, even when that draft was created before this run processed
+    // (expenses.schedule only fires on payroll.draft_created).
+    const reattached: string[] = [];
+    for (const id of out.released) {
+      const row = await getExpenseRow(deps.tx, ctx.companyId, id);
+      if (row && await attachToDraft(deps.tx, { newId: deps.newId, now: ctx.now }, row)) reattached.push(id);
+    }
     return {
-      data: { payroll_run_id: i.payroll_run_id, paid: out.paid, released: out.released },
-      summary: `Marked ${out.paid.length} expenses paid in ${i.payroll_run_id}${out.released.length ? `; ${out.released.length} back to approved` : ""}`,
+      data: { payroll_run_id: i.payroll_run_id, paid: out.paid, released: out.released, reattached },
+      summary: `Marked ${out.paid.length} expenses paid in ${i.payroll_run_id}${out.released.length ? `; ${out.released.length} back to approved` : ""}${reattached.length ? `, ${reattached.length} moved to the next open draft` : ""}`,
       events: out.paid.map((id) => ({ type: "expense.paid", subjectRef: id, payload: { expense_id: id, payroll_run_id: i.payroll_run_id } })),
     };
   },
