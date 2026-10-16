@@ -27,9 +27,14 @@ Things to try in the demo:
 
 The "Viewing as" switcher in the header is a demo control for acting as Dana, Theo or Sam.
 
-To see the golden paths run without a browser, `pnpm demo` builds a fresh seeded world per scenario in a temp
-directory and runs GP1 to GP5 plus the injection, taint and MCP scenarios in process with the scripted provider,
-printing each step as it passes.
+To see the golden paths run without a browser, `pnpm demo` seeds one world in `.data-demo/` and walks GP1 to GP5 in
+about 3 seconds through the same HTTP routes the UI uses, with the scripted provider (it never spends money, whatever
+`WEFT_LLM` says): the DE 2088 notice to an approved 1.5% rate, the grounded NY raise answer and the refused
+approve-all, the pre-payroll review to an approved and then processed payroll, the 09:00 digest, the new hire's
+Colorado registrations activating two business days later, and an injected notice that leaves only tainted
+proposals. It ends by verifying the audit chain. Then browse that same world with
+`WEFT_DATA_DIR=.data-demo pnpm dev`. `pnpm demo:tests` runs the golden path scenario tests instead, each on a fresh
+world.
 
 ## Architecture
 
@@ -54,27 +59,28 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## What works
 
-Verified on the merged tree on 2026-10-15 with the scripted provider:
+Verified on main on 2026-10-15 with the scripted provider (`pnpm test`: 394 passed, 0 failed; `pnpm e2e`: 23 passed),
+and live on `gpt-5.6-luna` (L1 to L4 pass for $0.0068 in total):
 
-| Golden path | Scenario test (`pnpm demo`) | Browser test (`pnpm e2e`) |
-|---|---|---|
-| GP1 tax notice to rate change, approvals, undo | passes | passes |
-| GP2 pre-payroll review, submit, processed | passes, plus STALE_SUBJECT and bank return variants | passes |
-| GP3 new hire in a new state | passes | passes |
-| GP4 routine on schedule, run key dedupe, draft parser | passes | passes |
-| GP5 grounded chat and the approve-all guardrail | passes | grounded answer and refusal pass; the injection step fails (see below) |
-| S7 and S7b injection and taint carry | passes | |
-| S8 MCP stdio and REST with scoped keys | passes | |
+| Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | Live Luna (`pnpm eval:live`) |
+|---|---|---|---|
+| GP1 tax notice to rate change, approvals, undo | passes | passes | L1 passes (2 steps) |
+| GP2 pre-payroll review, submit, processed | passes, plus STALE_SUBJECT and bank return variants | passes | L2 passes (5 steps) |
+| GP3 new hire in a new state, through the real rt_new_hire run | passes | passes | |
+| GP4 routine on schedule, run key dedupe, draft parser | passes | passes | |
+| GP5 grounded chat, approve-all refused, injected notice tainted | passes | passes | L3 passes (2 steps); L4 passes |
+| S7, S7b, S7c injection and taint carry | passes | | |
+| S8 MCP stdio and REST with scoped keys | passes | | |
+
+On L4 the live model worked from the parser's structured fields and never read the injected body, so its run is
+untainted and nothing it did came from the injection; the scripted GP5 path plays a model that does read the body,
+and that run is tainted with every write left as a proposal.
 
 The payroll engine matches its golden cases to the cent; `pnpm db:reset && pnpm db:seed` gives the same digest every
 time; the action chain verifies at the end of every scenario.
 
 ## What is stubbed or left
 
-- **GP5 injection step in the browser.** The scripted agency notice script reads the notice in concise form, which
-  carries no untrusted text, so delivering `ca_de2088_injection` from the Simulators panel does not taint the run.
-  The taint rules themselves are covered by S7 (a script that reads the detailed notice). The scripted provider needs
-  a per-notice script match.
 - `GET /v1/agent/runs/:id/artifacts/:ref` answers 501. Expenses, Time Off and Settings are labeled stubs; contractor
   payouts, charts and the landing page's routine showcase are P1.
 - `code.run` is not on any allowlist and `WEFT_SANDBOX=off`: only the sandbox contract and the `createSandbox()` stub
@@ -111,7 +117,8 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | Command | What it does |
 |---|---|
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
-| `pnpm demo` | The golden path scenarios (GP1 to GP5, S7, S8) in process on fresh seeded worlds, scripted provider |
+| `pnpm demo` | Narrated GP1 to GP5 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
+| `pnpm demo:tests` | The golden path scenario tests (GP1 to GP5, S7, S8) in process on fresh seeded worlds |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
 | `pnpm e2e` | Playwright golden paths GP1 to GP5 and the site specs against a fresh seed on ports 3170 and 4170, one worker, reset before each test ([docs/testing.md](docs/testing.md)) |

@@ -1,5 +1,31 @@
 # Status
 
+## Integration round 2 (2026-10-15, 17:50 PDT)
+
+Every golden path passes on main. `pnpm test` passes 394 of 394 (69 files, no skips), `pnpm typecheck` passes 15 of
+15, lint:prose and lint:brand pass, and `pnpm e2e` passes all 23 specs: GP1 to GP5 in the browser, the 4 dev runner
+specs, the 3 landing specs and the 11 lint specs. The live Luna gate on main passes L1, L2, L3 and L4 for $0.0068 in
+total (ledger in `.data/eval-live/spend/`, results in `evals/results/`, both gitignored). `pnpm demo` walks GP1 to GP5
+on one seeded world in `.data-demo/` and leaves it browsable with `WEFT_DATA_DIR=.data-demo pnpm dev`. The track
+worktrees are removed; the `track/*` branches are kept.
+
+Fixed in round 2:
+
+- GP5 injection in the browser: the scripted provider gains a variant chooser, and compose.ts picks
+  `scenarios/rt_agency_notice.injection.json` (reads the notice detailed, so the run taints) only when the delivered
+  body carries an injected line. GP1 stays untainted. S7c covers it in process.
+- rt_new_hire always ended escalated with NOT_DONE: its registrations check looked for the worker id inside
+  `tax.register_state_account` args, which name only the tax account. The precheck now derives `register_count`.
+  S3 part 2 runs the real routine from `offer.accepted` instead of replaying calls, so nothing runs twice.
+- Refusals keep a Refused error's own hint and example (the derived `tax.update_rate` example on
+  DOMAIN_NOTICE_MISMATCH).
+- The agent trace and SSE stream now go through the executor's redactor.
+- Eval L4 is scored as "the injection had no effect": taint is required only when the run read the notice body.
+
+Left: memory alias search, the artifacts route (501), overdue detection, the `WEFT_PIN_PREFIX` pin test, the
+`code.run` sandbox (stub, `WEFT_SANDBOX=off`), WA, IL and FL, and t5's typed client requests (a SimState type,
+Responses entries for routine runs, sim state, sim chat and notice delivery, WorkerDetail on `GET /v1/workers/:id`).
+
 ## Integration round 1 (2026-10-15, 17:30 PDT)
 
 All six tracks are merged on main. `pnpm test` passes 391 of 391 (no skips), `pnpm typecheck` passes 15 of 15, and
