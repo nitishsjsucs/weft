@@ -26,8 +26,8 @@ WEFT_SECRETS_FILE=~/Developer/projects/.weft.secrets.env WEFT_LIVE_OPENAI=1 WEFT
 WEFT_SECRETS_FILE=~/Developer/projects/.weft.secrets.env WEFT_LIVE_OPENAI=1 WEFT_LLM=openai node_modules/.bin/tsx evals/live/l5-chat-propose.ts
 ```
 
-Last wave 3 run, 2026-10-16 on the round 2 integration branch: L5 to L10 all pass on gpt-5.6-luna (4, 3, 2, 2 and 2
-model steps; L10 needs none), about $0.016 for the round including reruns. The numbers and the harness fixes the runs led to are in
-README "Live wave 3 agent golden paths" and docs/wave3.md section 11.
+Last run, the final wave 3 gate on 2026-10-16 at `a0a8a4a`: L1 to L10 all pass on gpt-5.6-luna on the first attempt,
+$0.0166 in all by the spend ledgers. The per-case numbers are in README "Live wave 3 agent golden paths"; the round 2
+run and the harness fixes it led to are in docs/gates.md and docs/wave3.md section 11.
 
 `smoke.ts` holds the 5 builder smoke calls of harness 11.2 (run once; results in `.scratch/t4-agent/smoke.md`).
