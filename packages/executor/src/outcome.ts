@@ -25,7 +25,8 @@ export function hintsOfError(err: unknown): { hint?: string | null; example?: un
 
 const KNOWN = new Set<string>(["UNKNOWN_COMMAND", "UNAVAILABLE", "DELEGATED_ONLY", "INVALID_INPUT", "UNKNOWN_REFERENCE", "NOT_PERMITTED", "OVER_CEILING",
   "LEASE_HELD", "PLAN_REQUIRED", "OUT_OF_PHASE", "NOT_DONE", "SKIPPED_AFTER_BLOCK", "SKIPPED_AFTER_PENDING", "TAINTED_WRITE", "BLOCKED_LINES",
-  "UNGROUNDED", "BUDGET_EXCEEDED", "PII_IN_MEMORY", "SECRET_IN_MEMORY", "MISSING_SOURCE", "STALE_SUBJECT", "INTERNAL"]);
+  "UNGROUNDED", "BUDGET_EXCEEDED", "PII_IN_MEMORY", "SECRET_IN_MEMORY", "MISSING_SOURCE", "STALE_SUBJECT", "INTERNAL",
+  "SANDBOX_NOT_ALLOWED", "SANDBOX_TIMEOUT", "SANDBOX_OOM", "CALL_BUDGET"]);
 
 /** A command may throw a Refused WeftError, or any error with a string `code`, to refuse with that code. */
 export function codeOfError(err: unknown): RefusalCode | null {
