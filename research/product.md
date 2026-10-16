@@ -77,7 +77,7 @@ Caveat: almost every number on warp.co is a vendor marketing claim (for example 
 - Directory cards show: name, title, department icon, manager, location (city), start date, annual compensation, employee ID (format EMP-0042). [hris]
 - Features listed: custom fields, org chart, reporting lines, job history, compensation, company directory, PTO, document storage, self-service onboarding. [hris]
 - Onboarding: HR sends an invite (an onboarding card with an email field and an invite button); new hire completes a self-service checklist before day one, claimed under 10 minutes. [hris] [payroll]
-- Canonical onboarding checklist (8 to 9 tasks with a done over total progress counter, for example 2 of 8): sign up, sign offer letter, sign confidentiality agreement, federal W-4, state withholding form, direct deposit, I-9, upload government ID, benefits selection. [hris] [home]
+- Canonical onboarding checklist (8 to 9 tasks with a done over total progress counter, for example 2 of 8): create an account, e-sign the offer and the confidentiality agreement, federal W-4, state withholding form, direct deposit, I-9, upload government ID, benefits selection. [hris] [home]
 - Documents: per-employee library with tabs Tax Forms, Agreements, Benefits, Finance; each document has a date and a status Signed, Sent or Pending; built-in e-signature, versioning. Example doc types: W-4, state withholding (CA), W-9, 1099-NEC copy, I-9, State Disability Insurance, Local Tax Registration, Tax Residency Declaration. [hris]
 - Offers: created with candidate, position, worker type, compensation (base, sign-on, relocation, stock options, vesting, cliff), department, workplace, manager, level, expiration; lifecycle draft, sent, viewed, signature requested, accepted, voided, expired. [api-offer] [docs-llms]
 - Offer letter generator (free tool): company, candidate name and email, title, base salary, start date, manager, expiration, plus editor for benefits, equity, PTO; output sections include title, comp, start date, reporting line, at-will language, expiration, signature lines. [offerletter]
@@ -235,7 +235,7 @@ From [agent], [blog-agent], [fortune], [blog-10tasks]:
 7. Benefits: two of two programs live, 736 people enrolled in health coverage, the 401(k) live.
 8. IT: 3/3 connected, accounts linked %, devices compliant %, per-system x/y counts, unlinked and non-compliant counts, Review.
 9. State Tax Registrations: state, age in days, status (Needs info, Awaiting state, Active).
-10. Compliance Status: 28 of 34 states registered, with a breakdown Active 28, Filing started 3, Awaiting state 2, Needs info 1.
+10. Compliance Status: a registered-out-of-total states counter and a count per registration status (most states Active, a few still filing or waiting on the agency, the odd one missing information).
 11. Agent panel: the user points the agent at a CA EDD notice waiting in the inbox; the agent replies, shows step chips (it opens the notice file, then verifies tax rates for 30 California employees), and concludes that the SUI rate on file is stale, so 33 employees should get 1.5% in place of 3.4%; a working status. (30 verified vs 33 updated is an inconsistency in their mockup.)
 
 ### 4.3 Other key screens seen in mockups
