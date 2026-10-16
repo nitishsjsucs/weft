@@ -5,7 +5,7 @@ import { FilePlus2 } from "lucide-react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { TID } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDate, nextPeriodEnd, period } from "../format";
+import { fmtDate, nextPeriodEnd, period, plural, runKind } from "../format";
 import { PageHeader } from "../page";
 
 export function PayrollList() {
@@ -31,8 +31,8 @@ export function PayrollList() {
         {(runs.data?.data ?? []).map((r) => (
           <Link key={r.id} href={`/app/payroll/${r.id}`} data-testid={`payroll-run-${r.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-2">
             <div className="min-w-0 flex-1">
-              <div className="text-2 font-medium">{period(r.periodStart, r.periodEnd)}</div>
-              <div className="text-1 text-gray-10">US · Semi-monthly · payday {fmtDate(r.payday)} · {r.paycheckCount} paychecks</div>
+              <div className="flex items-center gap-2 text-2 font-medium">{period(r.periodStart, r.periodEnd)}{runKind(r.subtype).badge ? <Badge tone="outline" data-testid={`payroll-run-kind-${r.id}`}>{runKind(r.subtype).badge}</Badge> : null}</div>
+              <div className="text-1 text-gray-10">US · {runKind(r.subtype).label} · payday {fmtDate(r.payday)} · {plural(r.paycheckCount, "paycheck")}</div>
             </div>
             {r.anomalySummary && r.status === "draft" ? <span className="hidden text-1 text-amber-11 tablet:inline">{r.anomalySummary.needsReview} need review</span> : null}
             <span className="hidden text-2 tabular tablet:inline">{r.totals?.cashRequirement.display ?? ""}</span>

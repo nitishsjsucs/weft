@@ -60,3 +60,12 @@ export function notReversibleText(reason: string | null): string {
   const r = (reason ?? "no reverse command").trim();
   return /not reversible|cannot be (undone|reversed)/i.test(r) ? r : `Not reversible: ${r}`;
 }
+
+/** How a payroll run reads in lists: final pay and off-cycle runs never look like the regular semi-monthly run. */
+export function runKind(subtype: string | null | undefined): { label: string; badge: string | null } {
+  if (subtype === "dismissal") return { label: "Final pay (dismissal run)", badge: "Final pay" };
+  if (subtype === "off_cycle") return { label: "Off-cycle run", badge: "Off-cycle" };
+  return { label: "Semi-monthly", badge: null };
+}
+
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

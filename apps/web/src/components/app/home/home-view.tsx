@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Banknote, ChevronRight, Inbox, Landmark, Users } from "lucide-react";
 import { Badge, Card, CardHeading } from "@weft/ui/components";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
-import { AGENCY, fmtDate, period, relative } from "../format";
+import { AGENCY, fmtDate, period, relative, runKind } from "../format";
 
 function greeting(iso: string | undefined): string {
   if (!iso) return "Hello";
@@ -47,7 +47,7 @@ export function HomeView() {
           {upcoming.length === 0 ? <div className="p-4 text-2 text-gray-10">{runs.error ? "Payroll is not available yet." : "No upcoming payrolls."}</div> : null}
           {upcoming.map((r) => (
             <Link key={r.id} href={`/app/payroll/${r.id}`} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-3 last:border-0 hover:bg-gray-2">
-              <div className="min-w-0 flex-1"><div className="text-2 font-medium">{period(r.periodStart, r.periodEnd)}</div><div className="text-1 text-gray-10">US · Semi-monthly · payday {fmtDate(r.payday)}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-2 font-medium">{period(r.periodStart, r.periodEnd)}</div><div className="text-1 text-gray-10">US · {runKind(r.subtype).label} · payday {fmtDate(r.payday)}</div></div>
               <span className={`text-2 font-medium whitespace-nowrap ${r.status === "draft" ? "text-amber-11" : "text-blue-11"}`}>{r.status === "draft" ? (now ? `Due ${relative(r.approvalDeadline, now)}` : "Draft") : r.status}</span>
             </Link>
           ))}
