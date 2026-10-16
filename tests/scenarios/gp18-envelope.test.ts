@@ -99,4 +99,27 @@ describe("GP18 offer as one e-signature envelope (WEFT_ESIGN=docusign, simulated
     expect(v.json.data).toMatchObject({ status: "voided", voided_envelope_id: env.id });
     expect((await call("usr_dana", "GET", `/v1/offers/${c.offerId}/envelope`)).json.status).toBe("voided");
   });
+
+  it("the simulated signing page: the link opens it, finish signs (or declines) for the signer only, and the offer updates before the redirect back", async () => {
+    const d = await send("Kit", "kit.ellery@candidate.example");
+    const e = await send("Lane", "lane.ellery@candidate.example");
+    const link = (await call(d.persona, "POST", "/v1/portal/esign/url", {})).json as { url: string };
+    const u = new URL(link.url, "http://portal.test");
+    expect(u.pathname).toBe("/portal");
+    const envelopeId = u.searchParams.get("esign")!;
+    expect(u.searchParams.get("return")).toBe(`/portal?as=${d.persona}&esign_return=1`);
+    // Only the envelope's own signer can finish it, with a known outcome.
+    expect((await call(e.persona, "POST", "/v1/portal/esign/finish", { envelopeId, outcome: "signed" })).status).toBe(404);
+    expect((await call(d.persona, "POST", "/v1/portal/esign/finish", { envelopeId, outcome: "maybe" })).status).toBe(400);
+    const signed = await call(d.persona, "POST", "/v1/portal/esign/finish", { envelopeId, outcome: "signed" });
+    expect(signed.json).toEqual({ ok: true, envelopeId, outcome: "signed", offerStatus: "accepted" });
+    expect((await call("usr_dana", "GET", `/v1/offers/${d.offerId}/envelope`)).json.status).toBe("completed");
+    const again = await call(d.persona, "POST", "/v1/portal/esign/finish", { envelopeId, outcome: "declined" });
+    expect([again.status, again.json.message]).toEqual([400, expect.stringContaining("is completed")]);
+    expect((await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM events WHERE type = 'offer.accepted' AND subject_ref = ${d.offerId}`))[0]!.n).toBe(1);
+
+    const eLink = new URL(((await call(e.persona, "POST", "/v1/portal/esign/url", {})).json as { url: string }).url, "http://portal.test");
+    const declined = await call(e.persona, "POST", "/v1/portal/esign/finish", { envelopeId: eLink.searchParams.get("esign"), outcome: "declined" });
+    expect(declined.json).toMatchObject({ ok: true, outcome: "declined", offerStatus: "declined" });
+  });
 });
