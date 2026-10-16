@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNo
 import { CircleCheck, CircleDashed, Lock } from "lucide-react";
 import { Button, Card } from "@weft/ui/components";
 import { formatCents, W2_ONBOARDING_TID as T, type PortalTaskKind, type W2OnboardingPortalView } from "@weft/contracts";
+import { fmtDate } from "../app/format";
 import { ApiError, createClient } from "@/lib/api/client";
 import { WeftMark } from "@/components/app/weft-mark";
 
@@ -75,7 +76,7 @@ export function PortalView() {
         <div>
           <p className="text-1 font-medium uppercase tracking-wide text-gray-10">New-hire portal (simulated)</p>
           <h1 className="mt-1 text-7 font-semibold tracking-tight text-balance">Welcome aboard, {view.worker.displayName.replace(/ \(demo\)$/, "")}</h1>
-          <p className="mt-2 text-3 text-gray-11">{view.worker.title} · starts {view.worker.startDate}{view.worker.workState ? ` · ${view.worker.workState}` : ""}. A few things to finish before your first day.</p>
+          <p className="mt-2 text-3 text-gray-11">{view.worker.title} · starts {fmtDate(view.worker.startDate, { month: "short", day: "numeric", year: "numeric" })}{view.worker.workState ? ` · ${view.worker.workState}` : ""}. A few things to finish before your first day.</p>
         </div>
         {closed ? <Card className="p-4"><p role="alert" className="text-2 text-amber-11">This offer is {view.offer!.status === "voided" ? "no longer active" : "past its expiry date"}. Reach out to the hiring team with any questions.</p></Card> : null}
         <Card className="p-4">
@@ -83,7 +84,7 @@ export function PortalView() {
             <span data-testid={T.portalCounter} data-done={view.done} data-total={view.total} className="text-3 font-semibold">{view.done} of {view.total} done</span>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-a3"><div className="h-full rounded-full bg-gray-12 transition-[width]" style={{ width: `${pct}%` }} /></div>
           </div>
-          {view.done === view.total ? <p data-testid={T.portalDone} className="mt-3 text-2 text-green-11">All set. You are ready for payday; see you on {view.worker.startDate}.</p> : null}
+          {view.done === view.total ? <p data-testid={T.portalDone} className="mt-3 text-2 text-green-11">All set. You are ready for payday; see you on {fmtDate(view.worker.startDate, { weekday: "long", month: "short", day: "numeric" })}.</p> : null}
         </Card>
         <ol className="flex flex-col gap-3">
           {view.tasks.map((t, n) => (

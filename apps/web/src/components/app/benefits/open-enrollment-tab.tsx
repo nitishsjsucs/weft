@@ -23,7 +23,7 @@ export function OpenEnrollmentTab() {
   return (
     <section>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-[13px] text-gray-11">Plan year 2027, closes 2026-11-13.</span>
+        <span className="text-[13px] text-gray-11">Plan year 2027, closes Nov 13, 2026.</span>
         {(["elected", "waived", "in_progress", "not_started"] as const).map((s) => <Badge key={s} tone={TONE[s]}>{counts[s] ?? 0} {OE_LABEL[s]!.toLowerCase()}</Badge>)}
         <Button data-testid={TID.enrollmentNudge} size="sm" className="ml-auto" disabled={nudge.pending || left.length === 0} onClick={() => void onNudge()}>Remind {left.length} in #general</Button>
       </div>

@@ -8,11 +8,12 @@ import { ArrowLeftRight, Banknote } from "lucide-react";
 import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { W2_BENEFITS_TID as TID, type ContractorPayout, type ToolOutcome, type Worker } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
+import { fmtDate, fmtDateTime } from "../format";
 
 const TONE: Record<string, "amber" | "blue" | "green" | "red"> = { pending: "amber", sent: "blue", delivered: "green", returned: "red" };
 const usd = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const minor = (m: number, cur: string) => `${(m / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
-const when = (iso: string | null) => (iso ? iso.slice(5, 16).replace("T", " ") + " UTC" : "-");
+const when = (iso: string | null) => (iso ? fmtDateTime(iso) : "-");
 
 /** The last business day of the sim month (the global monthly payday). */
 function monthEnd(nowIso: string | undefined): string {
@@ -44,7 +45,7 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <CardHeading icon={<Banknote />}>Payouts</CardHeading>
           <Button data-testid={TID.payoutsSchedule} size="sm" variant="primary" className="ml-auto" disabled={schedule.pending || already || active.length === 0} onClick={() => void onSchedule()}>
-            {already ? `Scheduled for ${payday}` : `Pay ${active.length} contractors on ${payday}`}
+            {already ? `Scheduled for ${fmtDate(payday)}` : `Pay ${active.length} contractor${active.length === 1 ? "" : "s"} on ${fmtDate(payday)}`}
           </Button>
         </div>
         <Card className="overflow-hidden">
@@ -56,7 +57,7 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
                   {rows.map((p) => (
                     <TR key={p.id} data-testid={TID.payoutRow(p.id)} data-rail={p.railStatus}>
                       <TD className="h-10 whitespace-nowrap">{names.get(p.workerId) ?? p.workerId}</TD>
-                      <TD className="h-10 whitespace-nowrap">{p.scheduledFor}</TD>
+                      <TD className="h-10 whitespace-nowrap">{fmtDate(p.scheduledFor)}</TD>
                       <TD numeric className="h-10 whitespace-nowrap">{minor(p.amountMinor, p.currency)}</TD>
                       <TD numeric className="h-10 font-mono text-1">{p.fxRate}</TD>
                       <TD numeric className="h-10 whitespace-nowrap">{usd(p.usdCents)}</TD>

@@ -164,7 +164,7 @@ export const finalPayCommand = writeCommand({
     }
     // The open regular drafts of the period drop the worker now that final pay covers it (dismissedWorkerIds).
     const refreshed = await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, c.companyId, plan.periodStart);
-    const { completed } = await finish(deps, ctx, c, step, `Dismissal run ${run.id}: net ${formatCents(plan.netCents)} to the bank, settles ${res.settleAt}`);
+    const { completed } = await finish(deps, ctx, c, step, `Dismissal run ${run.id}: net ${formatCents(plan.netCents)} to the bank, settles ${settleText(res.settleAt)}`);
     return {
       data: { case_id: c.id, step_id: step.id, run_id: run.id, subtype: "dismissal", refreshed_drafts: refreshed, batch_id: res.batchId, settle_at: res.settleAt, net_cents: plan.netCents, net_display: formatCents(plan.netCents), total_cost_cents: res.moneyCents, earnings: plan.earnings, case_complete: completed },
       summary: `Final pay for ${nameRef(worker.firstName, worker.lastName, worker.id)}: ${run.id} submitted, ${formatCents(res.bankTotalCents)} to the bank`,
@@ -326,3 +326,8 @@ export const offboardingCommands: WeftCommand[] = [
   listCases, getCase, terminateCommand, finalPayCommand, suspendDirectoryCommand, deactivateSsoCommand, lockDeviceCommand, runStepCommand, skipStepCommand,
   proposeOffCycleCommand,   // payroll.propose_off_cycle, defined in commands/payroll.ts
 ];
+
+/** "Fri, Oct 30, 6:00 AM PT" for a step detail an agent and a person read; never a raw ISO instant. */
+function settleText(iso: string): string {
+  return `${new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(iso))} PT`;
+}

@@ -8,6 +8,7 @@ import { Badge, Card } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { getPrincipal, rawFetch, usePrincipal } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
+import { fmtDateTime } from "../format";
 
 interface Frontmatter { id: string; type: string; aliases: string[]; links: string[]; sources: string[]; updated: string; taintedBy: string | null }
 interface Links { outgoing: { target: string; path: string; resolved: boolean }[]; backlinks: string[] }
@@ -115,7 +116,7 @@ function History({ path }: { path: string }) {
           <li key={c.commit} className="py-2">
             <button type="button" className="w-full text-left" onClick={() => setOpenSha((s) => (s === c.commit ? null : c.commit))} aria-expanded={openSha === c.commit} data-testid="memory-history-entry">
               <div className="truncate text-1 font-medium">{c.subject}</div>
-              <div className="text-0 text-gray-10"><code className="font-mono">{c.commit.slice(0, 10)}</code> by {c.author}, {c.date.replace("T", " ").slice(0, 16)} UTC</div>
+              <div className="text-0 text-gray-10"><code className="font-mono">{c.commit.slice(0, 10)}</code> by {c.author}, {fmtDateTime(c.date)}</div>
             </button>
             {openSha === c.commit ? <pre className="mt-2 max-h-[320px] overflow-auto rounded-md bg-gray-2 p-2 font-mono text-[11px] leading-snug">{c.diff.split("\n").map((l, i) => (
               <div key={i} className={cn(l.startsWith("+") && !l.startsWith("+++") && "text-green-11", l.startsWith("-") && !l.startsWith("---") && "text-red-11")}>{l || " "}</div>
