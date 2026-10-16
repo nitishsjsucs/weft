@@ -83,6 +83,10 @@ describe("GP9 termination with access revocation", () => {
     expect(pyc.map((p) => p.worker_id)).toEqual([WORKER]);
     expect((JSON.parse(pyc[0]!.earnings_json) as { type: string }[]).map((e) => e.type)).toEqual(["salary", "pto_payout"]);
 
+    // Final pay covers the period, so the open regular draft for Oct 16 to 31 no longer pays Imani.
+    const regular = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' AND worker_id = ${WORKER}`);
+    expect(regular[0]!.n).toBe(0);
+
     // The IdP simulator suspended the directory and SSO accounts.
     const idp = await weft.db.all<{ system: string; status: string }>(sql`SELECT system, status FROM sim_idp_accounts WHERE worker_id = ${WORKER} ORDER BY system`);
     expect(Object.fromEntries(idp.map((a) => [a.system, a.status]))).toMatchObject({ google_ws: "suspended", sso: "suspended" });

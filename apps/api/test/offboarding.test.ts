@@ -45,6 +45,18 @@ describe("offboarding routes", () => {
     expect(rows.every((r) => r.tainted_by === null && r.on_behalf_of === "usr_dana")).toBe(true);
   });
 
+  it("final pay skips wages a submitted regular run already paid, and still pays unused PTO", async () => {
+    const submit = await call("POST", "/v1/tools/payroll.submit_run", { run_id: "pay_2026_10_30", exclude_blocked: true });
+    expect(submit.status).toBe(200);
+    const res = await call("POST", "/v1/workers/wrk_0004/terminate", { kind: "voluntary", lastDay: "2026-10-30" });
+    expect(res.status).toBe(200);
+    const caseId = ((await res.json()) as { data: { case_id: string } }).data.case_id;
+    const c = OffboardingCase.parse(await (await call("GET", `/v1/offboarding/${caseId}`)).json());
+    const p = (await (await call("GET", `/v1/proposals/${c.steps[0]!.proposalId}`)).json()) as { diff: { label: string; after: string }[] };
+    expect(p.diff.some((d) => d.label.startsWith("Salary"))).toBe(false);
+    expect(p.diff.find((d) => d.label.startsWith("Unused PTO payout"))?.after).toBe("$10,038.46");
+  });
+
   it("off-cycle validates OffCycleRequest and answers a pending proposal", async () => {
     expect((await call("POST", "/v1/payrolls/off-cycle", { workerIds: [], periodStart: "2026-10-01", periodEnd: "2026-10-15", payday: "2026-10-27", reason: "bonus" })).status).toBe(400);
     const res = await call("POST", "/v1/payrolls/off-cycle", { workerIds: ["wrk_0006"], periodStart: "2026-10-01", periodEnd: "2026-10-15", payday: "2026-10-27", reason: "bonus", bonusCents: { wrk_0006: 120_000 } });

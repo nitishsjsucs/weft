@@ -2,7 +2,7 @@
 // so an approval re-renders the same subject; each effect goes through a simulator and mirrors the result locally.
 import { and, eq, inArray } from "drizzle-orm";
 import { formatCents, type IdpSim, type DeviceSim } from "@weft/contracts";
-import { benefitEnrollments, benefitPlans, devices, itAccounts, timeEntries, type DbTx } from "@weft/db";
+import { benefitEnrollments, benefitPlans, devices, itAccounts, paychecks, payrollRuns, timeEntries, type DbTx } from "@weft/db";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import type { CommandDeps } from "../shared/deps";
@@ -39,8 +39,13 @@ export async function finalPayPlan(tx: DbTx, c: CaseRow, w: WorkerRow, payUnused
     const [t] = await tx.select().from(timeEntries).where(and(eq(timeEntries.workerId, w.id), eq(timeEntries.periodStart, pre.period.periodStart)));
     hours = t ? t.regularHoursX100 + t.overtimeHoursX100 : 0;
   }
-  const { period, earnings, ptoHoursX100 } = finalPayEarnings(w, rates, c.lastDay, payUnusedPto, hours);
-  if (!earnings.length) throw new DomainRefusal("DOMAIN_NO_PAY_RATE", `${w.id} has no pay rate on ${c.lastDay}`, null, null);
+  const fp = finalPayEarnings(w, rates, c.lastDay, payUnusedPto, hours);
+  const { period, ptoHoursX100 } = fp;
+  if (!fp.earnings.length) throw new DomainRefusal("DOMAIN_NO_PAY_RATE", `${w.id} has no pay rate on ${c.lastDay}`, null, null);
+  // Wages a submitted regular run already paid for this period are not paid again; the PTO payout still is.
+  const paidIn = await submittedRegularRunFor(tx, w.id, period.periodStart, period.periodEnd);
+  const earnings = paidIn ? fp.earnings.filter((e) => e.type === "pto_payout") : fp.earnings;
+  if (!earnings.length) throw new DomainRefusal("DOMAIN_NOTHING_TO_PAY", `${w.id}'s wages through ${c.lastDay} were paid in ${paidIn} and there is no PTO payout`, "Skip final pay or propose it with pay_unused_pto true", { case_id: c.id, pay_unused_pto: true });
   const today = ptToday(now);
   const payday = businessDayOnOrAfter(c.lastDay > today ? c.lastDay : today);
   const plan = await planSpecialRun(tx, { companyId: c.companyId, subtype: "dismissal", periodStart: period.periodStart, periodEnd: period.periodEnd, payday, lines: [{ workerId: w.id, earnings }], benefits: true });
@@ -54,6 +59,17 @@ export async function finalPayPlan(tx: DbTx, c: CaseRow, w: WorkerRow, payUnused
     employeeTaxesCents: calc.employee_taxes_cents, employerTaxesCents: calc.employer_taxes_cents, deductionsCents, ptoHoursX100,
     hasBank: p.paycheck.bank !== null, hash: sha256Hex(canonicalJson(material)),
   };
+}
+
+/** A regular run already submitted (processing or processed) that pays this worker for an overlapping period. */
+export async function submittedRegularRunFor(tx: DbTx, workerId: string, periodStart: string, periodEnd: string): Promise<string | null> {
+  const rows = await tx.select({ runId: paychecks.payrollRunId, status: paychecks.status }).from(paychecks).where(eq(paychecks.workerId, workerId));
+  if (!rows.length) return null;
+  const live = rows.filter((r) => r.status === "processing" || r.status === "processed");
+  if (!live.length) return null;
+  const runs = await tx.select().from(payrollRuns).where(inArray(payrollRuns.id, live.map((r) => r.runId)));
+  const hit = runs.find((r) => r.subtype === "regular" && r.periodStart <= periodEnd && r.periodEnd >= periodStart);
+  return hit?.id ?? null;
 }
 
 export function finalPayDiff(plan: FinalPayPlan): { label: string; before: string; after: string }[] {

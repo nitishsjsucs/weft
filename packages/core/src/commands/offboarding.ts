@@ -12,7 +12,7 @@ import { sha256Hex } from "../shared/hash";
 import { DomainRefusal, nextActionSeq, notFound, readCommand, writeCommand } from "../demo/define";
 import { nameRef } from "../people/names";
 import { getWorker } from "../people/queries";
-import { PayrollRefusal, submitRun } from "../payroll/lifecycle";
+import { PayrollRefusal, refreshOpenDrafts, submitRun } from "../payroll/lifecycle";
 import { createSpecialRun } from "../payroll/offcycle";
 import { BANK_CREDENTIAL_REF, PAYROLL_RUN_CEILING, proposeOffCycleCommand } from "./payroll";
 import {
@@ -159,9 +159,11 @@ export const finalPayCommand = writeCommand({
       if (e instanceof PayrollRefusal) throw new Refused(e.code, e.message, e.details);
       throw e;
     }
+    // The open regular drafts of the period drop the worker now that final pay covers it (dismissedWorkerIds).
+    const refreshed = await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, c.companyId, plan.periodStart);
     const { completed } = await finish(deps, ctx, c, step, `Dismissal run ${run.id}: net ${formatCents(plan.netCents)} to the bank, settles ${res.settleAt}`);
     return {
-      data: { case_id: c.id, step_id: step.id, run_id: run.id, subtype: "dismissal", batch_id: res.batchId, settle_at: res.settleAt, net_cents: plan.netCents, net_display: formatCents(plan.netCents), total_cost_cents: res.moneyCents, earnings: plan.earnings, case_complete: completed },
+      data: { case_id: c.id, step_id: step.id, run_id: run.id, subtype: "dismissal", refreshed_drafts: refreshed, batch_id: res.batchId, settle_at: res.settleAt, net_cents: plan.netCents, net_display: formatCents(plan.netCents), total_cost_cents: res.moneyCents, earnings: plan.earnings, case_complete: completed },
       summary: `Final pay for ${nameRef(worker.firstName, worker.lastName, worker.id)}: ${run.id} submitted, ${formatCents(res.bankTotalCents)} to the bank`,
       moneyCents: res.moneyCents,
       events: [stepDone(c, step), { type: "payroll.submitted", subjectRef: run.id, payload: { payroll_run_id: run.id } }],
