@@ -52,6 +52,13 @@ export interface WeftRoutinesEngine extends RoutinesEngine {
   /** Fire one trigger now (tests and the scheduler use tick; this is the shared path). */
   fire(routine: RoutineDef, input: { triggerRef: string; payload: Record<string, unknown>; attended: boolean; event: WeftEvent | null; at?: string }): Promise<RoutineRun>;
   settled(routineRunId: string): Promise<RoutineRun>;
+  /**
+   * Waits for routine finalizations already in flight (each started when an agent run wrote its terminal step), up to
+   * `timeoutMs`. weft.close() calls it before closing the database. Resolves true when nothing was left pending.
+   */
+  drain(timeoutMs?: number): Promise<boolean>;
+  /** Number of finalizations in flight (tests and the close drain). */
+  pendingFinalizations(): number;
 }
 
 export function runKey(routineId: string, triggerRef: string): string {
@@ -88,6 +95,29 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
   let seeded = false;
   const decisions = new Map<string, string>();
   const waiters = new Map<string, ((r: RoutineRun) => void)[]>();
+
+  const pending = new Set<Promise<void>>();
+  const watched = new Set<string>();
+  let closing = false;
+  const report = (e: unknown) => {
+    // A finalization that lands after close() gave up (or after the database closed) is dropped, never unhandled.
+    if (closing) return;
+    console.error(`routines: finalization failed: ${String(e).slice(0, 300)}`);
+  };
+  /** Runs one finalization in the background, tracked for drain() and never left as an unhandled rejection. */
+  const track = (job: () => Promise<void>) => {
+    const p: Promise<void> = Promise.resolve().then(job).catch(report).finally(() => { pending.delete(p); });
+    pending.add(p);
+    return p;
+  };
+  /** Finalizes the routine run when its agent run writes a terminal step. Idempotent per agent run, so a rehydrated run is watched once. */
+  const watch = (routineRunId: string, agentRunId: string) => {
+    if (watched.has(agentRunId)) return;
+    watched.add(agentRunId);
+    agent.subscribe(agentRunId, (step) => {
+      if (step.stage === "terminal") void track(() => finalizeFromAgent(routineRunId, agentRunId));
+    });
+  };
 
   const newId = () => `rtr_${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
 
@@ -206,10 +236,7 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     await updateRun(id, { precheckJson: JSON.stringify(pre), surfaceHash: hash });
     const handle = await runs.openRoutineRun({ routineId: routine.id, routineRunId: id, triggerRef: input.triggerRef, attended: input.attended });
     await updateRun(id, { agentRunId: handle.runId });
-    const unsubscribe = agent.subscribe(handle.runId, (step) => {
-      if (step.stage === "terminal") void finalizeFromAgent(id, handle.runId);
-    });
-    void unsubscribe;
+    watch(id, handle.runId);
     const run = (await getRun(id))!;
     await agent.startRoutineRun(handle, { routine, routineRun: run, trigger: input.event ? { ...input.event, payload: { ...input.event.payload } } : null, precheck: pre });
     return (await getRun(id))!;
@@ -263,13 +290,29 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     },
     async onProposalDecided(p: ProposalDecided) {
       decisions.set(p.proposalId, p.status);
-      if (!p.runId) return;
-      const rr = (await db.select().from(routineRuns).where(eq(routineRuns.agentRunId, p.runId)).limit(1))[0];
+      const runId = p.runId;
+      if (!runId) return;
+      const rr = (await db.select().from(routineRuns).where(eq(routineRuns.agentRunId, runId)).limit(1))[0];
+      // After an API restart the terminal-step subscription made by fire() is gone; watch again before waking the run.
+      if (rr) watch(rr.id, runId);
       const notice = { kind: "decision" as const, attrs: { proposal_id: p.proposalId, status: p.status, decider_role: p.deciderRole, reason_code: p.reasonCode ?? "none" }, text: `Proposal ${p.proposalId} is ${p.status}.` };
       const wake = (agent as AgentRuntime & { wake?: (id: string, n: typeof notice) => Promise<string> }).wake;
-      if (wake) await wake.call(agent, p.runId, notice);
-      else await agent.requeue(p.runId, notice);
-      if (rr) await finalizeFromAgent(rr.id, p.runId);
+      if (wake) await wake.call(agent, runId, notice);
+      else await agent.requeue(runId, notice);
+      if (rr) await track(() => finalizeFromAgent(rr.id, runId));
+    },
+    pendingFinalizations: () => pending.size,
+    async drain(timeoutMs = 5_000) {
+      closing = true;
+      const deadline = Date.now() + timeoutMs;
+      while (pending.size > 0) {
+        const left = deadline - Date.now();
+        if (left <= 0) return false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([Promise.allSettled([...pending]), new Promise((r) => { timer = setTimeout(r, left); })]);
+        clearTimeout(timer);
+      }
+      return true;
     },
     async settled(routineRunId) {
       const r = await getRun(routineRunId);

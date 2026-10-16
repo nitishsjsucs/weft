@@ -127,6 +127,13 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
       if (closed) return;
       closed = true;
       await scheduler.stop();
+      // Drain (gate report item 1): let in-flight agent runs settle, then let the routine finalizations their terminal
+      // steps started write, each within a bound, before the database closes. A run still going after the bound is
+      // left as running; the boot rule fails it with PROCESS_RESTART on the next start, and its late writes are caught.
+      const bound = Number(process.env.WEFT_CLOSE_DRAIN_MS ?? 5_000);
+      const quiet = async (fn: () => Promise<unknown> | undefined) => { try { await fn(); } catch { /* a stubbed part has nothing to drain */ } };
+      await quiet(() => (agent as { drain?: (ms: number) => Promise<boolean> }).drain?.(bound));
+      await quiet(() => (routines as { drain?: (ms: number) => Promise<boolean> }).drain?.(bound));
       try { await executor.close(); } catch (e) { if (!isStubError(e)) throw e; }
       await closeDb(db);
     },

@@ -59,6 +59,8 @@ export interface WeftAgentRuntime extends AgentRuntime {
   /** Zero-token wake: evaluate the checklist and pending proposals in code; requeue only when work is left. */
   wake(runId: string, notice: { kind: NoticeKind; attrs: Record<string, string>; text: string }): Promise<"done" | "waiting" | "requeued" | "escalated" | "ignored">;
   idle(): Promise<void>;
+  /** Waits up to `timeoutMs` for queued and running runs to settle (weft.close() calls it). Resolves true when the queue went idle. */
+  drain(timeoutMs?: number): Promise<boolean>;
 }
 
 export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRuntime {
@@ -245,6 +247,12 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       return new Promise((r) => settledWaiters.set(runId, [...(settledWaiters.get(runId) ?? []), r]));
     },
     idle: () => queue.idle(),
+    async drain(timeoutMs = 5_000) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const idle = await Promise.race([queue.idle().then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timeoutMs); })]);
+      clearTimeout(timer);
+      return idle;
+    },
   };
   return runtime;
 }
