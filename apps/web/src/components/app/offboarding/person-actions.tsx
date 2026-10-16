@@ -16,12 +16,16 @@ const field = "h-8 w-full rounded-lg border border-[var(--app-border)] bg-card p
 
 export function PersonActions({ workerId, status }: { workerId: string; status: string }): ReactNode {
   const [open, setOpen] = useState(false);
+  // The same query people-view.tsx makes (shared cache); WorkerDetail carries the worker under `worker`.
+  const detail = useGet("/v1/workers/:id", { params: { id: workerId } });
+  const type = ((detail.data as { worker?: { type?: string } } | undefined)?.worker?.type) ?? null;
   const cases = useGet("/v1/offboarding", { enabled: status === "offboarding" || status === "inactive" });
   const mine = ((cases.data ?? []) as OffboardingCase[]).filter((c) => c.workerId === workerId).at(-1);
   if (mine) {
     return <Link data-testid={W2_OFFBOARDING_TID.personCaseLink} href={`/app/offboarding/${mine.id}`} className="text-2 text-accent-11 underline-offset-2 hover:underline">Offboarding case ({mine.status})</Link>;
   }
   if (status !== "active" && status !== "onboarding") return null;
+  if (type !== null && type !== "employee") return null;   // contractors end through their contract
   return (
     <>
       <Button data-testid={W2_OFFBOARDING_TID.personTerminate} variant="danger" size="xs" onClick={() => setOpen(true)}>Terminate</Button>
