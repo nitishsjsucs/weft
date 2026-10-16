@@ -147,6 +147,17 @@ describe("GP9 termination with access revocation", () => {
     expect(c.status).toBe(422);
     expect((c.json as { code: string }).code).toBe("DOMAIN_NOT_EMPLOYEE");
   });
+
+  it("a leaver is never provisioned again: no new account, no device", async () => {
+    await weft.db.run(sql`DELETE FROM it_accounts WHERE worker_id = ${WORKER} AND system = 'sso'`);
+    const acct = await call("POST", "/v1/tools/it.create_account", { worker_id: WORKER, system: "sso" });
+    expect(acct.status, JSON.stringify(acct.json)).toBe(422);
+    expect((acct.json as { code: string }).code).toBe("DOMAIN_NOT_ACTIVE");
+    const dev = await call("POST", "/v1/tools/it.order_device", { worker_id: WORKER });
+    expect(dev.status, JSON.stringify(dev.json)).toBe(422);
+    expect((dev.json as { code: string }).code).toBe("DOMAIN_NOT_ACTIVE");
+  });
+
   it("a skipped final pay still lets access removal, the COBRA notice and the benefits end run", async () => {
     const [w] = await weft.db.all<{ worker_id: string }>(sql`SELECT a.worker_id FROM it_accounts a JOIN workers w ON w.id = a.worker_id WHERE a.system = 'github' AND a.status = 'active' AND w.status = 'active' AND w.type = 'employee' AND a.worker_id != ${WORKER} ORDER BY a.worker_id LIMIT 1`);
     if (!w) return expect.unreachable("an active employee with a GitHub account");

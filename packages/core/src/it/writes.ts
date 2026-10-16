@@ -31,12 +31,21 @@ async function completeTaskIf(tx: DbTx, workerId: string, kind: string, now: str
   if (t && t.status !== "done") await tx.update(onboardingTasks).set({ status: "done", doneAt: now, blockedReason: null }).where(eq(onboardingTasks.id, t.id));
 }
 
+/** A leaver (offboarding, inactive or terminated, or past their end date) is never provisioned again. */
+function refuseLeaver(w: { id: string; status: string; endDate: string | null }, now: string) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(now));
+  if (w.status === "offboarding" || w.status === "inactive" || w.status === "terminated" || (w.endDate !== null && w.endDate <= today)) {
+    throw new DomainRefusal("DOMAIN_NOT_ACTIVE", `${w.id} is ${w.status}${w.endDate ? ` with end date ${w.endDate}` : ""}; a leaver gets no new accounts or devices`, null, null);
+  }
+}
+
 const CreateInput = z.object({ worker_id: z.string(), system: ItSystem, groups: z.array(z.string().regex(/^[a-z0-9-]{2,40}$/)).max(8).optional() });
 type CreateInput = z.infer<typeof CreateInput>;
-async function createPlan(i: CreateInput, companyId: string, tx: DbTx) {
+async function createPlan(i: CreateInput, companyId: string, tx: DbTx, now: string) {
   const w = await getWorker(tx, companyId, i.worker_id);
   if (!w) throw notFound("worker", i.worker_id);
   if (w.type !== "employee") throw new DomainRefusal("DOMAIN_NOT_EMPLOYEE", `${w.id} is a ${w.type}`, null, null);
+  refuseLeaver(w, now);
   const handle = handleFor(i.system, w.firstName, w.lastName);
   const groups = i.groups ?? defaultGroups(i.system, await deptSlug(tx, w.departmentId));
   const [existing] = await tx.select().from(itAccounts).where(and(eq(itAccounts.workerId, w.id), eq(itAccounts.system, i.system))).limit(1);
@@ -49,12 +58,12 @@ export const createAccount = writeCommand({
   risk: (i) => (hasAdminGroup(i.groups ?? []) ? "R4" : "R3"), approval: "always", autoAllow: "untainted", reversible: false,
   lease: (i) => `it:${i.worker_id}:${i.system}`,
   async preview(i, ctx, deps) {
-    const { w, handle, groups, existing } = await createPlan(i, ctx.companyId, deps.tx);
+    const { w, handle, groups, existing } = await createPlan(i, ctx.companyId, deps.tx, ctx.now);
     return { title: `Create ${i.system} account ${handle} for ${nameRef(w.firstName, w.lastName, w.id)}${hasAdminGroup(groups) ? " with admin groups" : ""}`, diff: [{ label: `${i.system} account`, before: existing ? existing.status : "none", after: `active (${groups.join(", ")})` }], content: [], moneyCents: null, subjectRef: `${w.id}:${i.system}`, subjectHash: sha256Hex(canonicalJson({ worker: w.id, system: i.system, existing: existing?.id ?? null })), evidence: [{ label: "Worker", ref: w.id }] };
   },
   async run(i, ctx, deps) {
     const tx = deps.tx;
-    const { w, handle, groups, existing } = await createPlan(i, ctx.companyId, tx);
+    const { w, handle, groups, existing } = await createPlan(i, ctx.companyId, tx, ctx.now);
     if (existing) return { data: { it_account_id: existing.id, worker_id: w.id, system: i.system, handle: existing.handle, status: existing.status, created: false }, summary: `${i.system} account ${existing.handle} already exists for ${nameRef(w.firstName, w.lastName, w.id)}` };
     const credential = await deps.resolveCredential(IDP_ADMIN_REF);
     const res = await deps.sims.idp.createAccount({ workerId: w.id, system: i.system, handle, groups, credential });
@@ -68,9 +77,10 @@ export const createAccount = writeCommand({
 
 const OrderInput = z.object({ worker_id: z.string(), sku: z.string().optional() });
 type OrderInput = z.infer<typeof OrderInput>;
-async function orderPlan(i: OrderInput, companyId: string, deps: Parameters<WeftCommand["run"]>[2]) {
+async function orderPlan(i: OrderInput, companyId: string, deps: Parameters<WeftCommand["run"]>[2], now: string) {
   const w = await getWorker(deps.tx, companyId, i.worker_id);
   if (!w) throw notFound("worker", i.worker_id);
+  refuseLeaver(w, now);
   const sku = i.sku ?? DEFAULT_DEVICE_SKU;
   const item = deps.sims.devices.catalog().find((c) => c.sku === sku);
   if (!item) throw new DomainRefusal("DOMAIN_UNKNOWN_SKU", `No catalog item ${sku}`, "Use a sku from it.list_devices catalog", { worker_id: w.id, sku: DEFAULT_DEVICE_SKU });
@@ -82,14 +92,14 @@ export const orderDevice = writeCommand({
   name: "it.order_device", summary: "Order a laptop from the simulated vendor.",
   description: "Propose ordering a device for worker_id from the simulated vendor catalog (default sku lrk-laptop-std, the standard laptop at $1,899.00). R4: always needs approval; the amount comes from the catalog and counts against the agent device ceilings. Not reversible once ordered.",
   input: OrderInput, domain: "it", needs: "edit", effect: "external", risk: () => "R4", approval: "always", reversible: false,
-  amountCents: async (i, ctx, deps) => (await orderPlan(i, ctx.companyId, deps)).item.priceCents,
+  amountCents: async (i, ctx, deps) => (await orderPlan(i, ctx.companyId, deps, ctx.now)).item.priceCents,
   ceilingKey: "agent.device_cents", lease: (i) => `device:${i.worker_id}`,
   async preview(i, ctx, deps) {
-    const { w, item, shipTo } = await orderPlan(i, ctx.companyId, deps);
+    const { w, item, shipTo } = await orderPlan(i, ctx.companyId, deps, ctx.now);
     return { title: `Order ${item.name} for ${nameRef(w.firstName, w.lastName, w.id)} at ${formatCents(item.priceCents)}`, diff: [{ label: "Device", before: "none", after: `${item.name}, ${formatCents(item.priceCents)}, ships to ${shipTo}` }], content: [], moneyCents: item.priceCents, subjectRef: `${w.id}:device`, subjectHash: sha256Hex(canonicalJson({ worker: w.id, sku: item.sku, price: item.priceCents })), evidence: [{ label: "Worker", ref: w.id }] };
   },
   async run(i, ctx, deps) {
-    const { w, item, shipTo } = await orderPlan(i, ctx.companyId, deps);
+    const { w, item, shipTo } = await orderPlan(i, ctx.companyId, deps, ctx.now);
     const o = await deps.sims.devices.order({ workerId: w.id, sku: item.sku, shipTo });
     const id = await deps.newId("dev_");
     await deps.tx.insert(devices).values({ id, workerId: w.id, model: item.name, status: "ordered", orderRef: o.orderRef, priceCents: o.priceCents });
