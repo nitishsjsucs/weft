@@ -62,7 +62,9 @@ export async function digestSources(db: Db, companyId: string, now: string, work
       ...(w.departmentId && depts.get(w.departmentId) ? [{ text: `Department ${depts.get(w.departmentId)}`, date: d, src }] : []),
       ...(w.managerId ? [{ text: `Manager ${w.managerId}`, date: d, src }] : []),
     ];
-    return { id: w.id, name: `${w.firstName} ${w.lastName}`, aliases: [`${w.firstName} ${w.lastName}`, ...(w.preferredName ? [`${w.preferredName} ${w.lastName}`] : [])], facts };
+    // Aliases come from the legal name only: preferred_name is employee-entered and untrusted (people.get
+    // untrustedFields, harness 6.2 and 18), and a dossier is written untainted, so it never carries it.
+    return { id: w.id, name: `${w.firstName} ${w.lastName}`, aliases: [`${w.firstName} ${w.lastName}`], facts };
   });
 
   const stateCodes = [...new Set([...ws.filter((w) => w.workState && w.status !== "terminated").map((w) => w.workState!), ...accounts.map((a) => a.jurisdiction).filter((j) => /^[A-Z]{2}$/.test(j))])].sort();
