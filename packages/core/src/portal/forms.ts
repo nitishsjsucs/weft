@@ -16,7 +16,8 @@ import { DomainRefusal, nextActionSeq, notFound, riskOf, writeCommand } from "..
 import { displayName, workEmail } from "../people/names";
 import { docSha, formRecordText } from "../documents/templates";
 import { assertTransition, isPastExpiry } from "./offers";
-import { legalName, normName, requirePersona, type Persona } from "./persona";
+import { legalName, loadPersona, normName, requirePersona, type Persona } from "./persona";
+import { envelopeSignatures, refuseBuiltinWhenEnveloped } from "../esign/envelopes";
 
 type Event = { type: string; subjectRef: string; payload: Record<string, string> };
 const STATE_TZ: Record<string, string> = { CA: "America/Los_Angeles", NY: "America/New_York", TX: "America/Chicago", CO: "America/Denver" };
@@ -109,6 +110,23 @@ async function acceptOffer(deps: CommandDeps, ctx: ExecContext, p: Persona): Pro
   ];
 }
 
+/**
+ * Wave 3 (w3-integrations-screening-esign): acceptance from a completed e-signature envelope. The same acceptance as the
+ * built-in signature (worker, pay rate, checklist), then one signature row per document with the envelope as evidence.
+ * Called only by documents.apply_esign_event after a re-read shows the envelope completed.
+ */
+export async function acceptFromEnvelope(deps: CommandDeps, ctx: ExecContext, offerId: string, personaId: string): Promise<Event[]> {
+  const p = await loadPersona(deps.tx, ctx.companyId, personaId);
+  if (!p || p.offer.id !== offerId) throw new DomainRefusal("DOMAIN_ESIGN_SIGNER", `The envelope signer ${personaId} is not the persona of ${offerId}`, null, null);
+  const events = await acceptOffer(deps, ctx, p);
+  const sigs = await envelopeSignatures(deps, ctx, offerId, personaId, legalName(p.offer));
+  for (const kind of ["sign_offer", "sign_confidentiality"] as const) events.push(...(await completePortalTask(deps.tx, p.workerId, kind, ctx.now)).events);
+  const docs = await deps.tx.select().from(documents).where(eq(documents.offerId, offerId));
+  for (const d of docs.filter((x) => x.kind === "offer_letter" || x.kind === "confidentiality_agreement")) events.push({ type: "document.signed", subjectRef: d.id, payload: { document_id: d.id, worker_id: p.workerId } });
+  void sigs;
+  return events;
+}
+
 export const signDocument = writeCommand({
   name: "documents.sign", summary: "Sign a document by typing your name (new hire portal only).",
   description: "Human only, new hire persona: signs document_id with typed_name (the legal name on the offer) and document_sha256, the hash of the text the signer saw. The server recomputes the hash and refuses STALE_SUBJECT on a mismatch. Signing the offer letter accepts the offer and creates the worker as onboarding.",
@@ -132,6 +150,8 @@ export const signDocument = writeCommand({
       throw new Refused("STALE_SUBJECT", `The document text changed: the signer saw sha256 ${i.document_sha256}, the server has ${recomputed}`, { hint: "Reload the document and sign again" });
     }
     checkTypedName(p, i.typed_name);
+    // Wave 3: an offer sent as an e-signature envelope is accepted only from the completed envelope.
+    await refuseBuiltinWhenEnveloped(tx, p.offer.id);
     const events: Event[] = [];
     if (d.kind === "offer_letter") {
       if (isPastExpiry(p.offer, ctx.now) || p.offer.status === "expired") throw new DomainRefusal("DOMAIN_OFFER_EXPIRED", `Offer ${p.offer.id} expired on ${p.offer.expiresOn}`, null, null);

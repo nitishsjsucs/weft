@@ -11,6 +11,7 @@ import { DomainRefusal, notFound, ptDateOf, riskOf, writeCommand } from "../demo
 import { displayName, nameRef } from "../people/names";
 import { confidentialityText, docSha, offerLetterText } from "../documents/templates";
 import { PERSONA_GRANTS, PERSONA_ROLE, REVOKED_GRANTS, personaOfOffer, requirePersona, type OfferRow } from "./persona";
+import { esignEnabled, sendOfferEnvelope, voidOfferEnvelope } from "../esign/envelopes";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const EXAMPLE_EMAIL = /^[^@\s]+@([a-z0-9-]+\.)*example$/i;
@@ -129,8 +130,10 @@ export const sendOffer = writeCommand({
       subject: `Your offer from Larkspur Robotics (demo): ${o.title}`,
       body: `Hi ${o.candidateFirst} (demo),\n\nYour offer for ${o.title} is ready. Open your new-hire portal to read and sign it, then finish your onboarding checklist:\n${link}\n\nThe offer stays open until ${o.expiresOn ?? o.startDate}.\n\nThis is a simulated email from a fictional company.`,
     });
+    // Wave 3: with WEFT_ESIGN=docusign the documents also go out as one envelope with the persona as embedded signer.
+    const envelope = esignEnabled() ? await sendOfferEnvelope(deps, ctx, { ...o, status: "sent", sentAt: ctx.now, documentId: letterId }, [letterId, ndaId], principalId) : null;
     return {
-      data: { offer_id: o.id, status: "sent", document_ids: [letterId, ndaId], persona_principal_id: principalId, reserved_worker_id: reservedWorker, email_id: email.id, portal_link: link },
+      data: { offer_id: o.id, status: "sent", document_ids: [letterId, ndaId], persona_principal_id: principalId, reserved_worker_id: reservedWorker, email_id: email.id, portal_link: link, ...(envelope ? { envelope_id: envelope.id } : {}) },
       summary: `Sent offer ${o.id} to ${displayName(o.candidateFirst, o.candidateLast)}: invite ${email.id}, documents ${letterId} and ${ndaId}`,
       events: [{ type: "offer.sent", subjectRef: o.id, payload: { offer_id: o.id } }],
     };
@@ -162,7 +165,8 @@ export const voidOffer = writeCommand({
     const o = await loadOffer(deps.tx, ctx.companyId, i.offer_id);
     assertTransition(o, "voided");
     const r = await closeOffer(deps.tx, o, "voided", ctx);
-    return { data: { offer_id: o.id, status: "voided", previous_status: o.status, voided_document_ids: r.voidedDocuments, persona_revoked: r.persona }, summary: `Voided offer ${o.id} (was ${o.status})` };
+    const envelope = await voidOfferEnvelope(deps, ctx, o.id);   // wave 3: no-op without an envelope
+    return { data: { offer_id: o.id, status: "voided", previous_status: o.status, voided_document_ids: r.voidedDocuments, persona_revoked: r.persona, ...(envelope ? { voided_envelope_id: envelope } : {}) }, summary: `Voided offer ${o.id} (was ${o.status})` };
   },
 });
 
@@ -174,7 +178,7 @@ export const expireOffers = writeCommand({
   async run(_i, ctx, deps) {
     const rows = await deps.tx.select().from(offers).where(and(eq(offers.companyId, ctx.companyId), inArray(offers.status, ["sent", "viewed"])));
     const due = rows.filter((o) => isPastExpiry(o, ctx.now)).sort((a, b) => (a.id < b.id ? -1 : 1));
-    for (const o of due) { assertTransition(o, "expired"); await closeOffer(deps.tx, o, "expired", ctx); }
+    for (const o of due) { assertTransition(o, "expired"); await closeOffer(deps.tx, o, "expired", ctx); await voidOfferEnvelope(deps, ctx, o.id); }
     return { data: { expired_offer_ids: due.map((o) => o.id), as_of: ptDateOf(ctx.now) }, summary: due.length ? `Expired ${due.length} offer(s): ${due.map((o) => o.id).join(", ")}` : "No offers past their expiry" };
   },
 });

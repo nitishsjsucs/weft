@@ -10,6 +10,7 @@ import { fmtDate } from "../app/format";
 import { ApiError, createClient } from "@/lib/api/client";
 import { WeftMark } from "@/components/app/weft-mark";
 import { PortalW3Sections } from "./w3-sections";
+import { EsignSigningPage, esignParams, signOrRedirect } from "./screening/esign";
 
 const KEY = "weft.portalAs";
 const field = "h-9 w-full rounded-lg border border-[var(--app-border)] bg-card px-3 text-2 outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]";
@@ -67,6 +68,8 @@ export function PortalView() {
   if (as === null) return <Shell><p className="text-2 text-gray-10">Loading...</p></Shell>;
   if (!as) return <Shell><Card className="p-6"><h1 className="text-5 font-semibold">Welcome</h1><p className="mt-2 text-2 text-gray-11">Open the portal link from your offer email to sign in.</p></Card></Shell>;
   if (error && !view) return <Shell><Card className="p-6" data-testid={T.portalError}><p role="alert" className="text-2 text-red-11">{error}</p></Card></Shell>;
+  const esign = esignParams();   // the simulated e-signature signing page (WEFT_ESIGN=docusign only)
+  if (esign) return <Shell><EsignSigningPage api={api} envelopeId={esign.envelopeId} returnUrl={esign.returnUrl} /></Shell>;
   if (!view) return <Shell><p className="text-2 text-gray-10">Loading your checklist...</p></Shell>;
 
   const closed = view.offer && (view.offer.status === "voided" || view.offer.status === "expired");
@@ -145,7 +148,7 @@ function TaskPanel({ task, view, api, onDone }: { task: Task; view: View; api: A
     const doc = view.documents.find((d) => d.kind === (task.kind === "sign_offer" ? "offer_letter" : "confidentiality_agreement"));
     if (!doc) return <p className="text-2 text-gray-10">This document is not available.</p>;
     return (
-      <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void run(() => api.post("/v1/portal/documents/:id/sign", { params: { id: doc.id }, body: { typedName: name, documentSha256: doc.sha256 } })); }}>
+      <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void run(() => signOrRedirect(api, doc, name)); }}>
         <pre data-testid={T.docBody} className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-gray-2 p-4 font-sans text-2 leading-relaxed text-gray-12">{doc.bodyText}</pre>
         <p className="text-1 text-gray-10">Document fingerprint (sha256) <code className="font-mono">{doc.sha256.slice(0, 16)}</code>. Your signature records this fingerprint, your name and the time.</p>
         {nameField}

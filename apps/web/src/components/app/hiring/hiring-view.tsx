@@ -7,6 +7,7 @@ import { formatCents, W2_ONBOARDING_TID as T, type W2OnboardingOfferDetail } fro
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
+import { OfferScreening } from "../screening/offer-screening";
 
 const DEPTS = [["dpt_engineering", "Engineering"], ["dpt_hardware", "Hardware"], ["dpt_operations", "Operations"], ["dpt_people", "People"], ["dpt_finance", "Finance"], ["dpt_gtm", "Go-to-market"]] as const;
 const STATES = ["CO", "CA", "NY", "TX"] as const;
@@ -75,6 +76,7 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
       ) : null}
       {o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted") ? <a data-testid={T.offerPortalLink} className="text-1 text-blue-11 hover:underline" href={`/portal?as=${o.personaPrincipalId}`}>Open portal as new hire</a> : null}
       {err ? <span role="alert" className="w-full text-1 text-red-11">{errorText(err)}</span> : null}
+      <OfferScreening offerId={o.id} accepted={o.status === "accepted"} />
     </li>
   );
 }
