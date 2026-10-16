@@ -18,7 +18,7 @@ export const RT_EXPENSE_REVIEW: RoutineDef = {
   ownerPrincipalId: "usr_dana", enabled: false, autonomy: "approve", trigger: { type: "cron", cron: "0 9 * * 1-5", tz: TZ }, filter: null,
   instructions: [
     "For each expense in the derived list, in order: save one explanation with expenses.explain (numbers and dates only from that item's claim and checks; never quote the merchant or purpose),",
-    "then propose exactly one decision with expenses.decide for that one expense_id. Never put several items in one decision; there is no bulk approval.",
+    "then file exactly one decision proposal for that one expense_id (one item per call). Never put several items in one decision; there is no bulk approval.",
     "Follow the derived suggestion unless the checks say otherwise: a duplicate is declined as duplicate, a missing receipt is returned with a note, past 60 days is approve_taxable or decline,",
     "and a California item over a category limit is proposed as approve with the note that a person must judge whether it was necessary (never decline it for the limit alone).",
     "Then write a one-line summary of what you proposed.",
