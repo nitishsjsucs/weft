@@ -19,5 +19,8 @@ export const W3_INTEGRATIONS_HR_TID = {
   jobs: "integration-jobs",
   importedOffers: "integration-imported-offers",
   notice: "integration-notice",
+  ownership: (vendor: string) => `integration-ownership-${vendor}`,
+  sync: (vendor: string) => `integration-sync-${vendor}`,
+  workdayTimeOff: "integration-workday-time-off",
 } as const;
 export * from "../ext/w3-integrations-hr";

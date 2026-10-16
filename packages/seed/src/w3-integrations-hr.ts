@@ -5,9 +5,13 @@
 // 15-minute poll stays idle until someone simulates one. The simulated Workday tenant mirrors the seeded employees
 // (same work email, title, state and pay, so a first sync links everyone with no conflict) and the Workday connection
 // row carries the absence type map read from the tenant (Vacation and Sick). Workday stays unsynced until someone
-// presses Sync now, so time off keeps Weft as its system of record. Never changes wave 1 or wave 2 seed counts.
+// presses Sync now, so time off keeps Weft as its system of record. When the Time Off seed (w3_timeoff, which runs
+// first) has created no vacation type, a fallback adds the same tot_vacation and top_vac_us rows it seeds, so Workday
+// vacation has a native policy to land on; with the Time Off seed present it adds nothing. Never changes wave 1 or
+// wave 2 seed counts.
 import type { W3GreenhouseSimControls, W3WorkdaySimControls } from "@weft/contracts";
-import { integrationConnections } from "@weft/db";
+import { eq } from "drizzle-orm";
+import { integrationConnections, timeOffPolicies, timeOffTypes } from "@weft/db";
 import type { SeedContext } from "./context";
 
 export const GREENHOUSE_VALUE_MAPS = {
@@ -30,6 +34,11 @@ export async function seedW3IntegrationsHr(ctx: SeedContext): Promise<void> {
     const types = first.data[0] ? ((await wd.rest(`/absenceManagement/v5/workers/${first.data[0].id}/eligibleAbsenceTypes`, { limit: "100" })).body as { data: { id: string; descriptor: string }[] }).data : [];
     const KINDS: Record<string, string> = { vacation: "vacation", sick: "sick" };
     const map = Object.fromEntries(types.flatMap((t) => (KINDS[t.descriptor.toLowerCase()] ? [[t.id, KINDS[t.descriptor.toLowerCase()]!]] : [])));
+    const [vac] = await ctx.db.select().from(timeOffTypes).where(eq(timeOffTypes.kind, "vacation")).limit(1);
+    if (!vac) {
+      await ctx.db.insert(timeOffTypes).values({ id: "tot_vacation", companyId: ctx.companyId, kind: "vacation", name: "Vacation", paid: true, countsAsVacation: true }).onConflictDoNothing();
+      await ctx.db.insert(timeOffPolicies).values({ id: "top_vac_us", companyId: ctx.companyId, typeId: "tot_vacation", name: "Larkspur Vacation", jurisdiction: "US", schedule: "per_pay_period", minutesPerPeriod: 300, effectiveFrom: "2023-01-01" }).onConflictDoNothing();
+    }
     await ctx.db.insert(integrationConnections).values({
       id: "intc_workday", companyId: ctx.companyId, vendor: "workday", mode: "simulated", lastSyncAt: null, cursor: null, health: "ok", detail: null,
       ownershipJson: null, settingsJson: JSON.stringify({ time_off_types: map }), updatedAt: now,

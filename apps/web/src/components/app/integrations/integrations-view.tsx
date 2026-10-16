@@ -2,8 +2,8 @@
 // Integrations (docs/wave3.md 3.1, research/wave3/integrations-hr.md 3.7). Owner: w3-integrations-hr.
 // Five cards from GET /v1/integrations: the mode (Simulated or Connected), health, the secret names the real adapter
 // needs with present or missing (never a value), the free path, a connection test and, for Greenhouse, the simulator
-// demo controls. Below: the sync items people decide (keep the Weft value or take the vendor value), the hires
-// imported as draft offers and the open roles. Vendor names say what Weft connects to; no logos.
+// and Workday simulator demo controls. Below: the sync items people decide (keep the Weft value or take the vendor
+// value), the hires imported as draft offers, the time off imported from Workday and the open roles. Vendor names say what Weft connects to; no logos.
 import { useState } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { W3_INTEGRATIONS_HR_TID as H, W3_INTEGRATIONS_TID as T, type ConnectorStatus, type IntegrationCard, type SyncItem } from "@weft/contracts";
@@ -16,10 +16,14 @@ const HEALTH_LABEL: Record<string, string> = { ok: "Healthy", auth_failed: "Sign
 const KIND_LABEL: Record<string, string> = { sync_conflict: "Conflict", unmapped_value: "Unmapped value", orphaned: "Orphaned", permission_gap: "Permission gap" };
 const SIMULATE: Record<string, { kind: string; label: string }[]> = {
   greenhouse: [{ kind: "hire", label: "Simulate a hire" }, { kind: "start_date_change", label: "Change the start date" }, { kind: "redeliver", label: "Resend the last delivery" }],
+  workday: [{ kind: "worker_change", label: "Promote someone in Workday" }, { kind: "time_off", label: "Approve two days off" }],
 };
+const VENDOR_LABEL: Record<string, string> = { greenhouse: "Greenhouse", workday: "Workday", checkr: "Checkr", hireright: "HireRight", docusign: "DocuSign" };
+const FIELD_LABEL: Record<string, string> = { start_date: "Start date", base_cents: "Base pay (cents)", title: "Title", work_state: "Work state", termination_date: "Termination date", office: "Office", department: "Department", worker: "Worker", time_off_type: "Time-off type" };
 const OWNER_LABEL: Record<string, string> = { people: "People", compensation: "Compensation", time_off: "Time off" };
 
 interface Imported { applicationRef: string; offerVersion: number | null; offerId: string; status: string | null; candidate: string | null; title: string | null; startDate: string | null; workState: string | null }
+interface WorkdayTimeOff { requestId: string; workerId: string; worker: string; date: string; minutes: number; status: string; entryRef: string }
 interface Job { id: string; name: string; departmentName: string | null; officeName: string | null; location: string | null; url: string | null }
 
 function VendorCard({ card }: { card: IntegrationCard }) {
@@ -27,7 +31,7 @@ function VendorCard({ card }: { card: IntegrationCard }) {
   const [note, setNote] = useState<string | null>(null);
   const test = useMutation(async () => (await client.post("/v1/integrations/:vendor/test", { params: { vendor: v } })) as ConnectorStatus);
   const sim = useMutation(async (kind: string) => (await client.post("/v1/integrations/:vendor/simulate", { params: { vendor: v }, body: { kind } })) as { summary?: string; data?: { weft_offer_id?: string | null } });
-  const sync = useMutation(async () => client.post("/v1/integrations/:vendor/sync", { params: { vendor: v } }));
+  const sync = useMutation(async () => (await client.post("/v1/integrations/:vendor/sync", { params: { vendor: v } })) as { summary?: string; data?: { applied?: { summary?: string } | null } });
   const connected = card.status.mode === "real";
   const required = card.secrets.filter((s) => !s.optional), optional = card.secrets.filter((s) => s.optional);
   const err = test.error ?? sim.error ?? sync.error;
@@ -45,7 +49,13 @@ function VendorCard({ card }: { card: IntegrationCard }) {
       </div>
       <p className="text-2 text-gray-12">{card.body}</p>
       {card.ownership ? (
-        <p className="text-1 text-gray-11">Owned by {connected ? "Workday" : "Weft"} today: {Object.keys(card.ownership).map((k) => OWNER_LABEL[k] ?? k).join(", ")}.</p>
+        <p data-testid={H.ownership(v)} data-owner={Object.values(card.ownership).includes("vendor") ? "vendor" : "weft"} className="text-1 text-gray-11">
+          {(["vendor", "weft"] as const).map((who) => {
+            const keys = Object.entries(card.ownership!).filter(([, o]) => o === who).map(([k]) => OWNER_LABEL[k] ?? k);
+            return keys.length ? <span key={who} className="block">{who === "vendor" ? `${card.title} owns` : "Weft owns"}: {keys.join(", ")}.</span> : null;
+          })}
+          {Object.values(card.ownership).includes("vendor") ? <span className="block text-gray-10">Owned fields are read-only in Weft; time off from {card.title} lands as approved requests.</span> : <span className="block text-gray-10">The first Sync now links people by work email and hands these to {card.title}.</span>}
+        </p>
       ) : null}
       <div className="rounded-lg bg-gray-2 p-3 text-1 text-gray-11">
         <div className="mb-1 font-medium text-gray-12">Free path</div>
@@ -67,7 +77,7 @@ function VendorCard({ card }: { card: IntegrationCard }) {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="secondary" data-testid={T.test(v)} disabled={test.pending} onClick={() => void test.run().then((s) => s && setNote(`Test: ${HEALTH_LABEL[s.health] ?? s.health}${s.detail ? ` (${s.detail.replace(/_/g, " ")})` : ""}`))}>Test connection</Button>
-        {v === "greenhouse" || v === "workday" ? <Button size="sm" variant="ghost" disabled={sync.pending} onClick={() => void sync.run().then(() => setNote("Synced"))}>Sync now</Button> : null}
+        {v === "greenhouse" || v === "workday" ? <Button size="sm" variant="ghost" data-testid={H.sync(v)} disabled={sync.pending} onClick={() => void sync.run().then((r) => r && setNote(r.summary ?? "Synced"))}>Sync now</Button> : null}
         {!connected ? (SIMULATE[v] ?? []).map((s) => (
           <Button key={s.kind} size="sm" variant={s.kind === "hire" ? "primary" : "secondary"} data-testid={T.simulate(v, s.kind)} disabled={sim.pending}
             onClick={() => void sim.run(s.kind).then((r) => r && setNote(r.summary ?? "Done"))}>{s.label}</Button>
@@ -82,19 +92,22 @@ function VendorCard({ card }: { card: IntegrationCard }) {
 function SyncItemRow({ s }: { s: SyncItem }) {
   const resolve = useMutation(async (take: "weft" | "vendor") => client.post("/v1/sync-items/:id/resolve", { params: { id: s.id }, body: { take } }));
   const d = s.detail;
+  const vendor = VENDOR_LABEL[s.vendor] ?? s.vendor;
+  const field = d.label ?? FIELD_LABEL[d.field ?? ""] ?? d.field;
+  const payChange = d.reason === "pay_affecting";
   const text = s.kind === "sync_conflict"
-    ? `${d.label ?? d.field} changed in Greenhouse (version ${d.offer_version}): Weft has ${d.weft_value}, Greenhouse has ${d.vendor_value}.`
-    : s.kind === "unmapped_value" ? `${d.field === "office" ? "Office" : d.field === "department" ? "Department" : d.field} ${d.ext_name ? `"${d.ext_name}"` : ""} is not mapped. ${d.reason ?? ""}`
+    ? `${field} changed in ${vendor}${d.offer_version ? ` (version ${d.offer_version})` : ""}: Weft has ${d.weft_value || "nothing"}, ${vendor} has ${d.vendor_value || "nothing"}.${payChange ? " Pay changes are applied from People so payroll previews them." : ""}`
+    : s.kind === "unmapped_value" ? `${field} ${d.ext_name ? `"${d.ext_name}"` : ""} is not mapped. ${d.reason ?? ""}`
       : d.reason ?? KIND_LABEL[s.kind];
   return (
     <li data-testid={H.syncItem(s.id)} data-kind={s.kind} data-subject={s.subjectRef} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
       <Badge tone={s.kind === "sync_conflict" ? "amber" : "gray"} size="md">{KIND_LABEL[s.kind] ?? s.kind}</Badge>
       <div className="min-w-[220px] flex-1">
         <div>{text}</div>
-        <div className="text-1 text-gray-10">{s.vendor === "greenhouse" ? "Greenhouse (sim)" : s.vendor} · {s.subjectRef} · opened {fmtDateTime(s.createdAt)}</div>
+        <div className="text-1 text-gray-10">{vendor} (sim) · {s.subjectRef} · opened {fmtDateTime(s.createdAt)}</div>
       </div>
       <Button size="sm" variant="secondary" data-testid={H.syncResolve(s.id, "weft")} disabled={resolve.pending} onClick={() => void resolve.run("weft")}>Keep Weft value</Button>
-      {s.kind === "sync_conflict" ? <Button size="sm" variant="primary" data-testid={H.syncResolve(s.id, "vendor")} disabled={resolve.pending} onClick={() => void resolve.run("vendor")}>Take Greenhouse value</Button> : null}
+      {s.kind === "sync_conflict" && !payChange ? <Button size="sm" variant="primary" data-testid={H.syncResolve(s.id, "vendor")} disabled={resolve.pending} onClick={() => void resolve.run("vendor")}>Take {vendor} value</Button> : null}
       {resolve.error ? <span role="alert" className="w-full text-1 text-red-11">{errorText(resolve.error)}</span> : null}
     </li>
   );
@@ -107,6 +120,8 @@ export function IntegrationsView() {
   // Not in the typed route table: the same proxy and principal, cast at the edge.
   const importedQ = useGet("/v1/integrations/greenhouse/imported" as never, { refreshMs: 5_000 }) as unknown as { data: Imported[] | undefined };
   const imported = importedQ.data ?? [];
+  const wdQ = useGet("/v1/integrations/workday/imported" as never, { refreshMs: 5_000 }) as unknown as { data: WorkdayTimeOff[] | undefined };
+  const wdTimeOff = wdQ.data ?? [];
   const list = (cards.data ?? []) as IntegrationCard[];
   const open = (items.data ?? []) as SyncItem[];
   const roles = (jobs.data ?? []) as Job[];
@@ -137,6 +152,24 @@ export function IntegrationsView() {
                     </div>
                     <Badge size="md" tone={o.status === "accepted" ? "green" : o.status === "draft" ? "gray" : "blue"}>{o.status ?? "unknown"}</Badge>
                     <a className="text-1 text-blue-11 hover:underline" href="/app/hiring">Open in Hiring</a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+          <Card className="p-4" data-testid={H.workdayTimeOff}>
+            <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Time off from Workday</h2>
+            <p className="mb-2 text-1 text-gray-10">Approved in Workday, read-only in Weft, paid through the same Time Off path as requests made here.</p>
+            {wdTimeOff.length === 0 ? <p className="text-[13px] text-gray-10">Nothing imported yet. Approve two days off on the Workday card, then Sync now.</p> : (
+              <ul className="flex flex-col divide-y divide-[var(--app-border)]">
+                {wdTimeOff.map((t) => (
+                  <li key={t.requestId} data-request={t.requestId} data-source="workday" className="flex flex-wrap items-center gap-x-3 py-2 text-[13px]">
+                    <div className="min-w-[200px] flex-1">
+                      <div className="font-medium">{t.worker}</div>
+                      <div className="text-gray-10">{fmtDate(t.date)} · {(t.minutes / 60).toFixed(2)} h · Workday entry {t.entryRef.slice(0, 8)}</div>
+                    </div>
+                    <Badge size="md" tone="green">{t.status}</Badge>
+                    <Badge size="md" tone="outline">Read-only</Badge>
                   </li>
                 ))}
               </ul>

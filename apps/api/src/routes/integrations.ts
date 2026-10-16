@@ -12,7 +12,7 @@ import {
   Conflict, IntegrationVendor, NotFound, Unauthorized, ValidationError, VENDOR_APPLY_COMMAND, VENDOR_CATEGORY, W3_INTEGRATIONS_HR_SIMULATE, W3_WEBHOOK_MAX_BYTES,
   type IntegrationCard, type ToolOutcome, type W3GreenhouseSimControls, type W3WorkdaySimControls,
 } from "@weft/contracts";
-import { extLinks, integrationConnections, integrationDeliveries, offers, syncItems, withWriteLock } from "@weft/db";
+import { extLinks, integrationConnections, integrationDeliveries, offers, syncItems, timeOffRequests, withWriteLock, workers } from "@weft/db";
 import { createSimulators } from "@weft/sim";
 import { secretsReport, VENDOR_COPY } from "@weft/integrations";
 import type { Weft, WeftEnv } from "../http/context";
@@ -94,7 +94,10 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     const out = await weft.executor.human.exec(session, "integrations.sync_now", { vendor });
     const applied = vendor === "workday" ? await applyWorkdayDetected(weft.executor, out) : null;
     await weft.scheduler.kick();
-    if (applied && out.ok && out.status === "done") return c.json({ ...out, data: { ...(out.data as object), applied: applied.ok && applied.status === "done" ? applied.data : null } });
+    if (applied && out.ok && out.status === "done") {
+      const ok = applied.ok && applied.status === "done";
+      return c.json({ ...out, summary: ok ? applied.summary : out.summary, data: { ...(out.data as object), applied: ok ? applied.data : null } });
+    }
     return outcomeJson(c, out);
   });
   r.post("/v1/integrations/:vendor/simulate", async (c) => {
@@ -168,6 +171,18 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     for (const l of links) {
       const [o] = await weft.db.select().from(offers).where(eq(offers.id, l.weftId)).limit(1);
       out.push({ applicationRef: l.extId, offerVersion: l.extVersion, offerId: l.weftId, status: o?.status ?? null, candidate: o ? `${o.candidateFirst} ${o.candidateLast} (demo)` : null, title: o?.title ?? null, startDate: o?.startDate ?? null, workState: o?.workState ?? null });
+    }
+    return c.json(out);
+  });
+  // Time off imported from Workday (read-only requests with source workday), for the Integrations screen.
+  r.get("/v1/integrations/workday/imported", async (c) => {
+    const s = c.var.session;
+    if (!s) throw new Unauthorized();
+    const rows = await weft.db.select().from(timeOffRequests).where(and(eq(timeOffRequests.companyId, s.companyId), eq(timeOffRequests.source, "workday"))).orderBy(desc(timeOffRequests.id));
+    const out = [];
+    for (const t of rows) {
+      const [w] = await weft.db.select().from(workers).where(eq(workers.id, t.workerId)).limit(1);
+      out.push({ requestId: t.id, workerId: t.workerId, worker: w ? `${w.preferredName ?? w.firstName} ${w.lastName}` : t.workerId, date: t.startAt, minutes: t.requestedMinutes, status: t.status, entryRef: t.extRef ?? "" });
     }
     return c.json(out);
   });
