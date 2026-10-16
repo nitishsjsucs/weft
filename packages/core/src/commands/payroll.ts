@@ -291,6 +291,7 @@ export const markFailedCommand: WeftCommand<MarkFailedInput> = {
 
 /** Harness 5.4 ceilings: $10,000.00 per call and $20,000.00 per day of off-cycle total cost (agent.off_cycle_day_cents). */
 export const OFF_CYCLE_CEILING = "agent.off_cycle_cents";
+const OFF_CYCLE_LABEL: Record<string, string> = { salary: "Salary", regular: "Regular hours", overtime: "Overtime", bonus: "Bonus" };
 
 const OffCycleInput = z.object({
   worker_ids: z.array(z.string().startsWith("wrk_")).min(1).max(50), period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), period_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -327,7 +328,7 @@ export const proposeOffCycleCommand: WeftCommand<OffCycleInput> = {
     return {
       title: `Off-cycle pay (${i.reason.replaceAll("_", " ")}) for ${plan.lines.length} worker${plan.lines.length === 1 ? "" : "s"}, ${i.period_start} to ${i.period_end}, payday ${i.payday}: net ${formatCents(totals.netPay)}, total cost ${formatCents(totals.totalCost)}`,
       diff: plan.lines.flatMap((l) => [
-        ...l.earnings.map((e) => ({ label: `${who(l.workerId)}: ${e.type === "bonus" ? "Bonus" : "Salary"} (${e.note})`, before: "$0.00", after: formatCents(e.amountCents) })),
+        ...l.earnings.map((e) => ({ label: `${who(l.workerId)}: ${OFF_CYCLE_LABEL[e.type] ?? e.type} (${e.note})`, before: "$0.00", after: formatCents(e.amountCents) })),
         { label: `${who(l.workerId)}: federal income tax`, before: "$0.00", after: formatCents(l.paycheck.calc.taxes.find((t) => t.code === "fit")?.amount_cents ?? 0) },
         { label: `${who(l.workerId)}: net pay`, before: "$0.00", after: formatCents(l.paycheck.calc.net_cents) },
       ]),

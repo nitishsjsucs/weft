@@ -76,6 +76,12 @@ export function finalPayEarnings(w: WorkerRow, rates: PayRateRow[], lastDay: str
   return { period, earnings, ptoHoursX100 };
 }
 
+/** Hours worked on the check (regular plus overtime lines), or null for salaried pay; a PTO payout is not worked time. */
+function workedHoursX100(earnings: SpecialEarning[]): number | null {
+  const worked = earnings.filter((e) => (e.type === "regular" || e.type === "overtime") && e.hoursX100 !== null);
+  return worked.length ? worked.reduce((s, e) => s + (e.hoursX100 ?? 0), 0) : null;
+}
+
 /** One worker's paycheck with explicit earning lines; benefits, W-4, employer rates and YTD as in a regular run. */
 export function specialPaycheck(w: WorkerRow, spec: { periodStart: string; periodEnd: string; payday: string }, world: WorldSnapshot, ytd: Record<string, number>, earnings: SpecialEarning[], opts: { tables?: TaxTables; benefits: boolean }): ComputedPaycheck {
   const t = opts.tables ?? TAX_2026;
@@ -109,7 +115,7 @@ export function specialPaycheck(w: WorkerRow, spec: { periodStart: string; perio
   if (supplementalCents > 0) input.supplementalCents = supplementalCents;
   const calc = calculatePaycheck(input, t);
   return {
-    workerId: w.id, worker: w, rate, hoursX100: earnings.find((e) => e.hoursX100 !== null && e.type !== "pto_payout")?.hoursX100 ?? null,
+    workerId: w.id, worker: w, rate, hoursX100: workedHoursX100(earnings),
     earnings: earnings.map(({ type, amountCents, hoursX100 }) => ({ type, amountCents, hoursX100 })), benefits, calc, reimbursementsCents: 0,
     deductions: pretax.map((d) => ({ code: d.code, pretax: true, amountCents: d.amount_cents })),
     bank: activeBank(world, w.id), hasW4: profile !== undefined, stateRegistered: stateRegistered(world.accounts, state), prorated: null,
@@ -187,6 +193,17 @@ export function calendarDays(from: string, to: string): number {
  * end date earn nothing. Returns one line per rate in effect.
  */
 export function proratedSalaryLines(w: Pick<WorkerRow, "startDate" | "endDate">, rates: PayRateRow[], periodStart: string, periodEnd: string): SpecialEarning[] {
+  const { total, segs } = rateSegments(w, rates, periodStart, periodEnd);
+  return segs.map((s) => ({
+    type: "salary", hoursX100: null,
+    // One division at the end, so a half-cent boundary is exact: annual x days / (24 x period days).
+    amountCents: roundCents(dec(s.rate.amountCents).times(s.days).dividedBy(SEMIMONTHLY_PERIODS * total)),
+    note: s.days === total ? `${total} of ${total} days at ${(s.rate.amountCents / 100).toFixed(2)} a year` : `${s.days} of ${total} days, ${s.from} to ${s.to}, at ${(s.rate.amountCents / 100).toFixed(2)} a year`,
+  }));
+}
+
+/** Consecutive calendar days of the period at one pay rate, inside the worker's employment. */
+export function rateSegments(w: Pick<WorkerRow, "startDate" | "endDate">, rates: PayRateRow[], periodStart: string, periodEnd: string) {
   const total = calendarDays(periodStart, periodEnd);
   const segs: { rate: PayRateRow; from: string; to: string; days: number }[] = [];
   for (let d = periodStart; d <= periodEnd; d = addDays(d, 1)) {
@@ -197,11 +214,30 @@ export function proratedSalaryLines(w: Pick<WorkerRow, "startDate" | "endDate">,
     if (last && last.rate.id === r.id && addDays(last.to, 1) === d) { last.to = d; last.days++; }
     else segs.push({ rate: r, from: d, to: d, days: 1 });
   }
-  return segs.map((s) => ({
-    type: "salary", hoursX100: null,
-    amountCents: roundCents(dec(s.rate.amountCents).dividedBy(SEMIMONTHLY_PERIODS).times(s.days).dividedBy(total)),
-    note: s.days === total ? `${total} of ${total} days at ${(s.rate.amountCents / 100).toFixed(2)} a year` : `${s.days} of ${total} days, ${s.from} to ${s.to}, at ${(s.rate.amountCents / 100).toFixed(2)} a year`,
-  }));
+  return { total, segs };
+}
+
+/**
+ * Hourly pay for one period from its time entry, split by calendar days when the rate changes inside it: each rate
+ * gets its share of the regular and overtime hours (its days / period days), overtime at the engine's multiplier,
+ * one half-up rounding per line.
+ */
+export function proratedHourlyLines(w: Pick<WorkerRow, "startDate" | "endDate">, rates: PayRateRow[], periodStart: string, periodEnd: string, regularX100: number, overtimeX100: number, t: TaxTables = TAX_2026): SpecialEarning[] {
+  const { total, segs } = rateSegments(w, rates, periodStart, periodEnd);
+  const out: SpecialEarning[] = [];
+  for (const s of segs) {
+    const span = s.days === total ? `${total} of ${total} days` : `${s.days} of ${total} days, ${s.from} to ${s.to}`;
+    const rate = `${(s.rate.amountCents / 100).toFixed(2)} an hour`;
+    if (regularX100 > 0) {
+      const h = roundCents(dec(regularX100).times(s.days).dividedBy(total));
+      out.push({ type: "regular", hoursX100: h, amountCents: roundCents(dec(s.rate.amountCents).times(regularX100).times(s.days).dividedBy(100 * total)), note: `${span}, ${(h / 100).toFixed(2)} h at ${rate}` });
+    }
+    if (overtimeX100 > 0) {
+      const h = roundCents(dec(overtimeX100).times(s.days).dividedBy(total));
+      out.push({ type: "overtime", hoursX100: h, amountCents: roundCents(dec(s.rate.amountCents).times(t.overtime.multiplier).times(overtimeX100).times(s.days).dividedBy(100 * total)), note: `${span}, ${(h / 100).toFixed(2)} h overtime at ${rate}` });
+    }
+  }
+  return out;
 }
 
 /** The earning lines of an off-cycle run: prorated salary (unless reason is bonus only) plus the bonus as supplemental wages. */
@@ -216,8 +252,17 @@ export async function offCycleLines(tx: DbTx, req: OffCycleInput): Promise<Speci
     const rates = world.rates.get(id) ?? [];
     const earnings: SpecialEarning[] = [];
     if (req.reason !== "bonus") {
-      if (rates.some((r) => r.kind === "hourly" && r.effectiveFrom <= req.periodEnd)) throw new OffCycleRefusal("DOMAIN_UNSUPPORTED_HOURLY", `${id} is paid hourly; off-cycle runs prorate salaried pay only`);
-      earnings.push(...proratedSalaryLines(w, rates, req.periodStart, req.periodEnd));
+      const hourly = rateSegments(w, rates, req.periodStart, req.periodEnd).segs.some((x) => x.rate.kind === "hourly");
+      if (hourly) {
+        if (rates.some((r) => r.kind !== "hourly" && r.effectiveFrom <= req.periodEnd && (r.effectiveTo === null || r.effectiveTo >= req.periodStart))) {
+          throw new OffCycleRefusal("DOMAIN_MIXED_PAY_KINDS", `${id} changed between salary and hourly pay inside ${req.periodStart} to ${req.periodEnd}`);
+        }
+        const entry = (world.time.get(id) ?? []).find((e) => e.periodStart === req.periodStart && e.periodEnd === req.periodEnd);
+        if (!entry) throw new OffCycleRefusal("DOMAIN_NO_TIME_ENTRY", `${id} is paid hourly and has no time entry for ${req.periodStart} to ${req.periodEnd}`);
+        earnings.push(...proratedHourlyLines(w, rates, req.periodStart, req.periodEnd, entry.regularHoursX100, entry.overtimeHoursX100));
+      } else {
+        earnings.push(...proratedSalaryLines(w, rates, req.periodStart, req.periodEnd));
+      }
     }
     const bonus = req.bonusCents[id] ?? 0;
     if (bonus > 0) earnings.push({ type: "bonus", amountCents: bonus, hoursX100: null, note: "supplemental wages, federal flat 22 percent" });

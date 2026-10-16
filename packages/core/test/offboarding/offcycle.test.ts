@@ -1,7 +1,7 @@
 // Off-cycle and final pay arithmetic (wave 2, w2-offboarding), exact to the cent on synthetic inputs.
 import { describe, expect, it } from "vitest";
 import { calculatePaycheck, federalIncomeTax, TAX_2026, type PaycheckInput } from "@weft/payroll-tax";
-import { calendarDays, finalPayEarnings, proratedSalaryLines, unusedPtoHoursX100 } from "../../src/payroll/offcycle";
+import { calendarDays, finalPayEarnings, proratedHourlyLines, proratedSalaryLines, unusedPtoHoursX100 } from "../../src/payroll/offcycle";
 import type { PayRateRow, WorkerRow } from "../../src/payroll/compute";
 
 const rate = (id: string, amountCents: number, effectiveFrom: string, effectiveTo: string | null = null, kind = "salary"): PayRateRow =>
@@ -24,6 +24,18 @@ describe("off-cycle proration by calendar days", () => {
   it("pays a full period at one rate as one line", () => {
     const lines = proratedSalaryLines(worker, [rate("prt_a", 11_750_000, "2025-01-01")], "2026-10-01", "2026-10-15");
     expect(lines.map((l) => l.amountCents)).toEqual([489_583]);   // 11,750,000 / 24 = 489,583.33
+  });
+
+  it("splits an hourly period's regular and overtime hours by calendar days between the two rates", () => {
+    // Oct 1 to 15 is 15 days; $31.17 an hour through Oct 5, $33.33 from Oct 6; 81.50 regular and 5.00 overtime hours.
+    const rates = [rate("prt_h1", 3_117, "2025-01-01", "2026-10-05", "hourly"), rate("prt_h2", 3_333, "2026-10-06", null, "hourly")];
+    const lines = proratedHourlyLines(worker, rates, "2026-10-01", "2026-10-15", 8_150, 500);
+    // 3,117 x 81.50 x 5/15 = 84,678.5 -> 84,679; 3,117 x 1.5 x 5.00 x 5/15 = 7,792.5 -> 7,793;
+    // 3,333 x 81.50 x 10/15 = 181,093; 3,333 x 1.5 x 5.00 x 10/15 = 16,665.
+    expect(lines.map((l) => [l.type, l.amountCents, l.hoursX100])).toEqual([
+      ["regular", 84_679, 2_717], ["overtime", 7_793, 167], ["regular", 181_093, 5_433], ["overtime", 16_665, 333],
+    ]);
+    expect(lines[0]!.note).toBe("5 of 15 days, 2026-10-01 to 2026-10-05, 27.17 h at 31.17 an hour");
   });
 
   it("taxes the bonus at the federal flat 22 percent and the salary by the regular method", () => {

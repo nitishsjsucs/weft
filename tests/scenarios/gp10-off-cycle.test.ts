@@ -74,14 +74,18 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     expect(((await res.json()) as { code: string }).code).toBe("OVER_CEILING");
   });
 
-  it("the person route proposes too, and refuses hourly workers", async () => {
+  it("the person route proposes too; hourly pay comes from the period's time entry", async () => {
     const dana = weft.uiHeaders("usr_dana");
     const res = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [WORKER], periodStart: "2026-10-16", periodEnd: "2026-10-31", payday: "2026-10-30", reason: "bonus", bonusCents: { [WORKER]: 100_000 } });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, status: "pending_approval" });
-    const hourly = (await weft.db.all<{ worker_id: string }>(sql`SELECT worker_id FROM pay_rates WHERE kind = 'hourly' ORDER BY worker_id LIMIT 1`))[0]!.worker_id;
-    const bad = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [hourly], periodStart: "2026-10-16", periodEnd: "2026-10-31", payday: "2026-10-30", reason: "missed_payroll" });
-    expect(bad.status).toBe(422);
-    expect(((await bad.json()) as { code: string }).code).toBe("DOMAIN_UNSUPPORTED_HOURLY");
+    const [hourly] = await weft.db.all<{ worker_id: string; period_start: string; period_end: string }>(sql`SELECT t.worker_id, t.period_start, t.period_end FROM time_entries t JOIN pay_rates r ON r.worker_id = t.worker_id AND r.kind = 'hourly' AND r.effective_to IS NULL WHERE t.period_start = '2026-10-01' ORDER BY t.worker_id LIMIT 1`);
+    const ok = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [hourly!.worker_id], periodStart: hourly!.period_start, periodEnd: hourly!.period_end, payday: "2026-10-30", reason: "correction" });
+    expect(ok.status).toBe(200);
+    const p = (await (await req("GET", `/v1/proposals/${((await ok.json()) as { proposalId: string }).proposalId}`, dana)).json()) as Proposal;
+    expect(p.diff.some((d) => d.label.includes(": Regular hours (15 of 15 days"))).toBe(true);
+    const none = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [hourly!.worker_id], periodStart: "2026-11-01", periodEnd: "2026-11-15", payday: "2026-11-20", reason: "missed_payroll" });
+    expect(none.status).toBe(422);
+    expect(((await none.json()) as { code: string }).code).toBe("DOMAIN_NO_TIME_ENTRY");
   });
 });
