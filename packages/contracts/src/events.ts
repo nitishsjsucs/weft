@@ -20,6 +20,8 @@ export const EventBody = z.discriminatedUnion("type", [
   ev("proposal.created", { proposal_id: ref("prp_") }),
   ev("proposal.decided", { proposal_id: ref("prp_"), status: z.string() }),
   ev("routine.drafted", { routine_id: ref("rt_") }),
+  ev("routine.enabled", { routine_id: ref("rt_") }),
+  ev("routine.disabled", { routine_id: ref("rt_") }),
   ev("routine_run.finished", { routine_run_id: ref("rtr_"), routine_id: ref("rt_"), status: z.string() }),
   ev("run.finished", { run_id: ref("run_"), status: z.string() }),
   ev("clock.advanced", { from: z.string(), to: z.string() }),

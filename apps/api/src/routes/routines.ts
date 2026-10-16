@@ -5,7 +5,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
-import { NotFound, Refused, Unauthorized, type RoutineDef, type RoutineRun, type WeftEvent } from "@weft/contracts";
+import { DRAFT_TOOLS, NotFound, Refused, Unauthorized, type RoutineDef, type RoutineRun, type WeftEvent } from "@weft/contracts";
 import { events, type Db } from "@weft/db";
 // Relative on purpose: @weft/core exports only "." and its index is shared; the integrator may re-export it there.
 import { parseRoutineDraft } from "../../../../packages/core/src/routines/draft-parser";
@@ -86,7 +86,7 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
     if (!p.ok) {
       // Only a live provider gets the model-backed routine_draft recipe (attended); otherwise ask for a clearer prompt.
       if (!weft.provider.live) throw new Refused(p.reason, p.hint);
-      const handle = await weft.executor.runs.openChatRun(s, { threadId: null, surface: "human_ui" });
+      const handle = await weft.executor.runs.openChatRun(s, { threadId: null, surface: "human_ui", allowlist: DRAFT_TOOLS });
       await weft.agent.startChat(handle, { text: body.prompt, recipe: "routine_draft", pageContext: null });
       return c.json({ runId: handle.runId, parser: { reason: p.reason } }, 202);
     }
@@ -101,6 +101,7 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
       await getRoutine(c.req.param("id"));
       const outcome = await weft.executor.human.exec(s, `routines.${action}`, { routine_id: c.req.param("id") });
       await kick();
+      if (!outcome.ok) return c.json({ ...outcome, _tag: "Refused", code: outcome.refusal.code, message: outcome.refusal.message }, 422);
       return c.json(outcome);
     });
   }
