@@ -90,7 +90,8 @@ function paycheckValues(cp: ComputedPaycheck, flags: Flag[]) {
 
 async function writePaychecks(tx: DbTx, deps: LifecycleDeps, run: RunRow): Promise<void> {
   const spec: PeriodSpec = { companyId: run.companyId, payScheduleId: run.payScheduleId, periodStart: run.periodStart, periodEnd: run.periodEnd, payday: run.payday };
-  const computed = await computePeriod(tx, spec, { tables: deps.tables, excludeYtdSources: [`payroll:${run.id}`] });
+  const dismissed = await dismissedWorkerIds(tx, run.companyId, run.periodStart, run.periodEnd);
+  const computed = (await computePeriod(tx, spec, { tables: deps.tables, excludeYtdSources: [`payroll:${run.id}`] })).filter((c) => !dismissed.has(c.workerId));
   const ctx = await loadFlagContext(tx, { payScheduleId: run.payScheduleId, periodStart: run.periodStart, periodEnd: run.periodEnd, previousRunId: run.previousRunId, workerIds: computed.map((c) => c.workerId) });
   const existing = await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, run.id));
   const byWorker = new Map(existing.map((p) => [p.workerId, p]));
@@ -110,6 +111,19 @@ async function writePaychecks(tx: DbTx, deps: LifecycleDeps, run: RunRow): Promi
   const stale = existing.filter((p) => !keep.has(p.id)).map((p) => p.id);
   if (stale.length) await tx.delete(paychecks).where(inArray(paychecks.id, stale));
   await writeRunSummary(tx, deps, run.id, runFlags({ included: computed, ctx, previousRunGrossCents: ctx.previousRunGrossCents }));
+}
+
+/**
+ * Workers whose final pay (wave 2, w2-offboarding) already covers this period: a dismissal paycheck that is not
+ * excluded or failed, in a run of the company whose period overlaps. A regular draft leaves them out, so the
+ * period's wages are paid once. Empty (and a no-op) when no dismissal run exists.
+ */
+export async function dismissedWorkerIds(tx: DbTx, companyId: string, periodStart: string, periodEnd: string): Promise<Set<string>> {
+  const runs = (await tx.select().from(payrollRuns).where(and(eq(payrollRuns.companyId, companyId), eq(payrollRuns.subtype, "dismissal"))))
+    .filter((r) => r.status !== "failed" && r.periodStart <= periodEnd && r.periodEnd >= periodStart);
+  if (!runs.length) return new Set();
+  const rows = await tx.select({ workerId: paychecks.workerId, status: paychecks.status }).from(paychecks).where(inArray(paychecks.payrollRunId, runs.map((r) => r.id)));
+  return new Set(rows.filter((p) => p.status !== "excluded" && p.status !== "failed").map((p) => p.workerId));
 }
 
 /** Recomputes totals, the anomaly summary and the stored subject hash from the paycheck rows. */
@@ -184,6 +198,8 @@ export async function markProcessed(tx: DbTx, deps: Pick<LifecycleDeps, "now">, 
     const deltas = ytdDeltasFromLines({
       state: workerStates.get(p.workerId) ?? "CA", grossCents: p.grossCents, taxes: JSON.parse(p.taxesJson) as TaxCalcLine[],
       deductions: (JSON.parse(p.deductionsJson) as DeductionJson[]).filter((d) => d.pretax).map((d) => ({ code: d.code, amount_cents: d.amountCents })),
+      // Off-cycle runs (wave 2): bonus lines are supplemental wages, counted toward the $1,000,000 flat-rate threshold.
+      ...(run.subtype === "off_cycle" ? { supplementalCents: (JSON.parse(p.earningsJson) as { type: string; amountCents: number }[]).filter((e) => e.type === "bonus").reduce((s, e) => s + e.amountCents, 0) } : {}),
     });
     const values = Object.entries(deltas).sort(([a], [b]) => (a < b ? -1 : 1)).map(([code, amountCents]) => ({ workerId: p.workerId, year, code, amountCents, source: `payroll:${run.id}` }));
     if (values.length) await tx.insert(ytdLedger).values(values);

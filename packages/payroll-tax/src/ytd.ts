@@ -3,7 +3,7 @@
 // (the basis of a rate-change credit). The engine and the processed-run writer both use this one function.
 import type { TaxCalcLine } from "./types";
 
-export function ytdDeltasFromLines(input: { state: string; grossCents: number; taxes: TaxCalcLine[]; deductions: { code: string; amount_cents: number }[]; supplemental?: boolean }): Record<string, number> {
+export function ytdDeltasFromLines(input: { state: string; grossCents: number; taxes: TaxCalcLine[]; deductions: { code: string; amount_cents: number }[]; supplemental?: boolean; supplementalCents?: number }): Record<string, number> {
   const out: Record<string, number> = { gross: input.grossCents };
   const add = (k: string, v: number) => { out[k] = (out[k] ?? 0) + v; };
   const find = (code: string, payer: "employee" | "employer", j?: string) => input.taxes.find((x) => x.code === code && x.payer === payer && (!j || x.jurisdiction === j));
@@ -31,6 +31,7 @@ export function ytdDeltasFromLines(input: { state: string; grossCents: number; t
   const k401 = input.deductions.filter((d) => d.code === "401k_traditional").reduce((s, d) => s + d.amount_cents, 0);
   if (k401) add("k401_deferral", k401);
   if (input.supplemental) add("supplemental", input.grossCents);
+  else if (input.supplementalCents) add("supplemental", input.supplementalCents);
   for (const x of input.taxes) add(`tax:${x.jurisdiction}:${x.code}:${x.payer}`, x.amount_cents);
   return out;
 }

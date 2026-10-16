@@ -9,7 +9,9 @@ import { mintId } from "./ids";
 export const IDP_VAULT = "vault:idp-admin" as const;
 const HANDLE = /^[a-z0-9][a-z0-9._-]{1,62}$/;
 
-export interface IdpSimInternal extends IdpSim { tick(now: string): Promise<void> }
+/** Wave 2 offboarding additions (w2-offboarding): fault targets `idp.suspend` and `idp.clearGroups`. */
+export interface IdpSimOffboarding { clearGroups(ref: string): Promise<{ removed: string[] }> }
+export interface IdpSimInternal extends IdpSim, IdpSimOffboarding { tick(now: string): Promise<void> }
 
 export function createIdpSim(db: DbTx, clock: SimClock, faults: FaultInjector): IdpSimInternal {
   const toAccount = (r: typeof simIdpAccounts.$inferSelect): IdpAccount => ({
@@ -29,7 +31,17 @@ export function createIdpSim(db: DbTx, clock: SimClock, faults: FaultInjector): 
       return { ref, status };
     },
     async suspend(ref) {
+      const fault = await firstFault(faults, ["idp.suspend"]);
+      if (fault === "error") throw new SimFaultError("idp.suspend");
       await db.update(simIdpAccounts).set({ status: "suspended" }).where(eq(simIdpAccounts.id, ref));
+    },
+    async clearGroups(ref) {
+      const fault = await firstFault(faults, ["idp.clearGroups"]);
+      if (fault === "error") throw new SimFaultError("idp.clearGroups");
+      const [row] = await db.select().from(simIdpAccounts).where(eq(simIdpAccounts.id, ref)).limit(1);
+      if (!row) throw new Error(`idp.clearGroups: no account ${ref}`);
+      await db.update(simIdpAccounts).set({ groupsJson: "[]" }).where(eq(simIdpAccounts.id, ref));
+      return { removed: JSON.parse(row.groupsJson) as string[] };
     },
     async list(workerId) {
       const rows = workerId

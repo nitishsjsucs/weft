@@ -10,6 +10,10 @@ import {
   concisePayrollRun, createDraft, getRun, groundExplanation, listRuns, markFailed, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
   readAttempts, runSubjectHash, submitRun, templateExplanation, totalsFromDto, workerNames, writeAttempts, writeRunSummary, type TotalsCents,
 } from "../payroll/index";
+import { createSpecialRun, offCycleLines, OffCycleRefusal, planSpecialRun, specialSettleAt, type OffCycleInput as OffCycleSpecInput } from "../payroll/offcycle";
+import { computeTotals } from "../payroll/totals";
+import { canonicalJson } from "../shared/canonical-json";
+import { sha256Hex } from "../shared/hash";
 
 export const BANK_CREDENTIAL_REF = "vault:sim-bank-operating" as const;
 export const PAYROLL_RUN_CEILING = "agent.payroll_run_cents";
@@ -283,9 +287,81 @@ export const markFailedCommand: WeftCommand<MarkFailedInput> = {
   },
 };
 
+// ---------------------------------------------------------------- off-cycle (wave 2, w2-offboarding)
+
+/** Harness 5.4 ceilings: $10,000.00 per call and $20,000.00 per day of off-cycle total cost (agent.off_cycle_day_cents). */
+export const OFF_CYCLE_CEILING = "agent.off_cycle_cents";
+const OFF_CYCLE_LABEL: Record<string, string> = { salary: "Salary", regular: "Regular hours", overtime: "Overtime", bonus: "Bonus" };
+
+const OffCycleInput = z.object({
+  worker_ids: z.array(z.string().startsWith("wrk_")).min(1).max(50), period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), period_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  payday: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), reason: z.enum(["missed_payroll", "bonus", "correction", "final_pay"]),
+  bonus_cents: z.record(z.string(), z.number().int().min(0)).optional(), agent_note: z.string().max(600).optional(),
+}).refine((i) => i.period_start <= i.period_end, { message: "period_start must be on or before period_end" });
+type OffCycleInput = z.infer<typeof OffCycleInput>;
+
+async function offCyclePlan(i: OffCycleInput, ctx: ExecContext, deps: CommandDeps) {
+  const req: OffCycleSpecInput = { companyId: ctx.companyId, workerIds: i.worker_ids, periodStart: i.period_start, periodEnd: i.period_end, payday: i.payday, reason: i.reason, bonusCents: i.bonus_cents ?? {} };
+  let lines;
+  try { lines = await offCycleLines(deps.tx, req); } catch (e) { if (e instanceof OffCycleRefusal) throw new Refused(e.code, e.message); throw e; }
+  const spec = { companyId: ctx.companyId, subtype: "off_cycle" as const, periodStart: i.period_start, periodEnd: i.period_end, payday: i.payday, lines, benefits: false };
+  const plan = await planSpecialRun(deps.tx, spec);
+  const blocked = plan.lines.filter((l) => l.flags.length).map((l) => l.workerId);
+  if (blocked.length) throw new Refused("BLOCKED_LINES", `Off-cycle pay is blocked for ${blocked.join(", ")} (${plan.lines.flatMap((l) => l.flags.map((f) => f.rule)).join(", ")})`, { blockedWorkerIds: blocked });
+  const totals = computeTotals(plan.lines.map((l) => ({ status: "draft", grossCents: l.paycheck.calc.gross_cents, netCents: l.paycheck.calc.net_cents, reimbursementsCents: 0, taxes: l.paycheck.calc.taxes, deductions: l.paycheck.deductions, benefits: l.paycheck.benefits })));
+  const hash = sha256Hex(canonicalJson({ req, lines: plan.lines.map((l) => ({ w: l.workerId, e: l.earnings, net: l.paycheck.calc.net_cents, taxes: l.paycheck.calc.taxes, bank: l.paycheck.bank?.id ?? null })) }));
+  return { spec, plan, totals, hash };
+}
+
+export const proposeOffCycleCommand: WeftCommand<OffCycleInput> = {
+  ...base, name: "payroll.propose_off_cycle", summary: "Propose an off-cycle pay run",
+  description: "Proposes an off_cycle run: salary for period_start to period_end prorated by calendar days when the rate changed mid-period, plus bonus_cents per worker as supplemental wages (federal flat 22%). Each line is in the preview; approval submits it to the bank like a regular run. Always needs approval; total cost counts against agent.off_cycle_cents.",
+  compactDescription: "Propose an off-cycle pay run with a prorated raise and a bonus (needs approval).",
+  input: OffCycleInput, needs: "edit", effect: "external", risk: () => "R4", approval: "always",
+  amountCents: async (i, ctx, deps) => (await offCyclePlan(i, ctx, deps)).totals.totalCost,
+  ceilingKey: OFF_CYCLE_CEILING, lease: (i) => `payroll:off_cycle:${[...i.worker_ids].sort().join(",")}:${i.period_end}`,
+  tiers: { main: "executable", task: "unavailable" }, mcp: "propose", untrustedFields: [],
+  async preview(i, ctx, deps): Promise<Preview> {
+    const { plan, totals, hash } = await offCyclePlan(i, ctx, deps);
+    const names = await workerNames(deps.tx, plan.lines.map((l) => l.workerId));
+    const who = (w: string) => `${names.get(w)?.name ?? w} (${w})`;
+    return {
+      title: `Off-cycle pay (${i.reason.replaceAll("_", " ")}) for ${plan.lines.length} worker${plan.lines.length === 1 ? "" : "s"}, ${i.period_start} to ${i.period_end}, payday ${i.payday}: net ${formatCents(totals.netPay)}, total cost ${formatCents(totals.totalCost)}`,
+      diff: plan.lines.flatMap((l) => [
+        ...l.earnings.map((e) => ({ label: `${who(l.workerId)}: ${OFF_CYCLE_LABEL[e.type] ?? e.type} (${e.note})`, before: "$0.00", after: formatCents(e.amountCents) })),
+        { label: `${who(l.workerId)}: federal income tax`, before: "$0.00", after: formatCents(l.paycheck.calc.taxes.find((t) => t.code === "fit")?.amount_cents ?? 0) },
+        { label: `${who(l.workerId)}: net pay`, before: "$0.00", after: formatCents(l.paycheck.calc.net_cents) },
+      ]),
+      content: [], moneyCents: totals.totalCost, subjectRef: `off_cycle:${[...i.worker_ids].sort().join(",")}:${i.period_start}:${i.period_end}`, subjectHash: hash,
+      evidence: plan.lines.map((l) => ({ label: "Worker", ref: l.workerId })),
+    };
+  },
+  async run(i, ctx, deps) {
+    const { spec, totals } = await offCyclePlan(i, ctx, deps);
+    const approvedBy = ctx.approvedProposalId
+      ? ((await deps.tx.select({ by: proposals.decidedBy }).from(proposals).where(eq(proposals.id, ctx.approvedProposalId)))[0]?.by ?? ctx.principal.id)
+      : ctx.principal.id;
+    const run = await createSpecialRun(deps.tx, { newId: deps.newId, now: ctx.now }, spec);
+    const head = (await deps.tx.select({ m: max(actions.seq) }).from(actions))[0]?.m ?? 0;
+    const credential = await deps.resolveCredential(BANK_CREDENTIAL_REF);
+    const res = await domain(() => submitRun(deps.tx, { newId: deps.newId, now: ctx.now }, {
+      runId: run.id, excludeBlocked: false, approvedBy, actionSeq: head + 1, bank: deps.sims.bank, credential, settleAt: specialSettleAt(i.payday, ctx.now),
+    }));
+    if (res.moneyCents !== totals.totalCost) throw new Error(`off-cycle total ${res.moneyCents} != planned ${totals.totalCost}`);
+    return {
+      data: { run_id: res.runId, subtype: "off_cycle", status: "processing", batch_id: res.batchId, settle_at: res.settleAt, included: res.includedCount, bank_total_cents: res.bankTotalCents, bank_total_display: formatCents(res.bankTotalCents), totals: totalsOut(res.totals) },
+      summary: `Submitted off-cycle run ${res.runId}: ${res.includedCount} paycheck(s), ${formatCents(res.bankTotalCents)} to the bank, settles ${res.settleAt}`,
+      moneyCents: res.moneyCents,
+      events: [{ type: "payroll.submitted", subjectRef: res.runId, payload: { payroll_run_id: res.runId } }],
+    };
+  },
+};
+
 export const payrollCommands: WeftCommand[] = [
   listRunsCommand, getRunCommand, previewRunCommand, createDraftCommand, explainFlagsCommand, submitRunCommand, markProcessedCommand, markFailedCommand,
 ];
+// proposeOffCycleCommand is registered through offboardingCommands (commands/offboarding.ts), which keeps this
+// wave 1 array, and the registry test that pins it, unchanged.
 
 /** For tests and the precheck: the deps-free view of a run's submit amount. */
 export async function submitPreviewFor(deps: CommandDeps, runId: string, excludeBlocked: boolean) { return submitAmount({ run_id: runId, exclude_blocked: excludeBlocked }, deps); }
