@@ -5,7 +5,7 @@
 On `track/w2-reliability`: every wave 1 gate report item is fixed with tests (close drain, restart survival, live L3,
 the 1440 px table clipping, the Headcount tile, the (live) label, grounding identifiers, the research paraphrases),
 plus a reset-world routine finalization bug that e2e GP4 found on the branch. `pnpm test` and `pnpm typecheck` pass,
-`pnpm e2e` passes 23 of 23, and live L3 passed 6 of 6 twice ($0.016 spent in all). Details in
+`pnpm e2e` passes 23 of 23, live L3 passed 6 of 6 twice, and L1, L2 and L4 pass once more ($0.021 spent in all). Details in
 `docs/tracks/w2-reliability.md`; the fix list is at the top of `docs/review-log.md`.
 
 ## Integration round 2 (2026-10-15, 17:50 PDT)

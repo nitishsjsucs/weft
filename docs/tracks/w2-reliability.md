@@ -34,7 +34,9 @@ Live L3 on gpt-5.6-luna, 2026-10-15 (results in `evals/results/`, gitignored):
 | After the concise-read prompt (uncommitted, same tree as abdf29f) | 52097a3 plus prompt | 6 of 6, 2 to 3 steps, no action rows | $0.0054 |
 | Record run | abdf29f | 6 of 6, 2 steps each, no action rows | $0.0047 |
 
-Total live spend for this track: $0.016 of the $0.25 allowance.
+| L1, L2 and L4 once, as a regression check of the routine path with persisted handles | e522c57 | L1, L2 and L4 pass (2, 5 and 2 steps) | $0.0052 |
+
+Total live spend for this track: $0.021 of the $0.25 allowance.
 
 ## What is stubbed or left
 
