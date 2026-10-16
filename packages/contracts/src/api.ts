@@ -113,6 +113,10 @@ export const ROUTES = [
   r("POST", "/v1/expenses/:id/decide", "expenses", "w3-expenses", "ToolOutcome", { auth: "not_mcp", body: "ExpenseDecideBody" }),
   r("POST", "/v1/expenses/:id/reopen", "expenses", "w3-expenses", "ToolOutcome", { auth: "ui_only" }),
   r("GET", "/v1/expense-policy", "expenses", "w3-expenses", "ExpensePolicy"),
+  // The new hire persona reaches only /v1/portal/* (auth.ts): its own claims, a submission and a resubmission of a returned item.
+  r("GET", "/v1/portal/expenses", "expenses", "w3-expenses", "Page<Expense> (the caller's own)", { auth: "ui_only" }),
+  r("POST", "/v1/portal/expenses", "expenses", "w3-expenses", "ToolOutcome", { auth: "ui_only", body: "ExpenseSubmission plus multipart receipt" }),
+  r("POST", "/v1/portal/expenses/:id/resubmit", "expenses", "w3-expenses", "ToolOutcome", { auth: "ui_only", body: "ExpenseSubmission plus multipart receipt" }),
   r("GET", "/v1/time-off/policies", "time-off", "w3-timeoff", "TimeOffPolicy[]"),
   r("GET", "/v1/time-off/balances", "time-off", "w3-timeoff", "TimeOffBalance[]", { query: ["workerId", "asOf"] }),
   r("GET", "/v1/time-off/ledger", "time-off", "w3-timeoff", "TimeOffLedgerRow[]", { query: ["workerId", "policyId"] }),

@@ -3,4 +3,5 @@ export { commands } from "./commands/index";
 export { handlers } from "./handlers/index";
 export * as payroll from "./payroll/index";
 export * as offboarding from "./offboarding/cases";
+export * as expenses from "./expenses/index";   // wave 3 (w3-expenses)
 export * from "./demo/index";

@@ -1,5 +1,5 @@
-import { Placeholder } from "@/components/app/page";
+import { ExpensesView } from "@/components/app/expenses/expenses-view";
 
 export default function ExpensesPage() {
-  return <Placeholder title="Expenses" note="Coming soon." />;
+  return <ExpensesView />;
 }
