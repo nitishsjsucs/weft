@@ -92,6 +92,21 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
 
+### Final wave 3 gate
+
+Fresh clone of the merged tree on 2026-10-16, ports 4740, 4741 and 4744, scripted provider, no live spend:
+
+| Command | Outcome |
+|---|---|
+| `pnpm test` | 880 passed, 1 skipped (the opt-in public job board smoke), 158 files, 154 s |
+| `pnpm typecheck` | 16 of 16 tasks clean, 13 s |
+| `pnpm build` | ok in 9 s |
+| `pnpm e2e` | 44 passed, 1 skipped (the DocuSign envelope test, which runs on its own), 2.1 min |
+| `WEFT_ESIGN=docusign` Playwright run of `e2e/gp18-screening.spec.ts` | the envelope test passes (the built-in test skips under DocuSign) |
+| `pnpm demo` | exit 0 in 9 s; GP1 to GP18 on one world, GP9 still pays 90.00 h, audit chain verifies |
+| `pnpm demo:tests` | 147 passed (37 files), 75 s |
+| `pnpm lint:prose --commits origin/main..HEAD`, `pnpm lint:brand`, `pnpm brand:overlap` | ok |
+
 ### Final wave 2 gate
 
 2026-10-15 from 21:08 to 21:17 PDT, on a fresh clone of main at `d62153c` (wave 2 with every review fix), following
