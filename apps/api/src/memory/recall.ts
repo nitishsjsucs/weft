@@ -18,9 +18,12 @@ export function createMemoryRecall(db: Db): (input: RecallInput) => Promise<stri
     if ((await db.select({ id: memoryRecalls.id }).from(memoryRecalls).where(eq(memoryRecalls.runId, input.runId)).limit(1)).length) return "";
     const out = await b.memory.recall({ request: input.query, subjectRefs: input.subjectRefs }).catch(() => null);
     if (!out || !out.block) return "";
-    await db.insert(memoryRecalls).values({ runId: input.runId, pathsJson: JSON.stringify(out.items.map((i) => i.path)), chars: out.block.length, ts: b.clock.now() });
+    // Taint first: if the run cannot be marked, the untrusted text never reaches the pack.
     const tainted = out.items.find((i) => i.taintedBy);
-    if (tainted) await b.taintRun(input.runId, `memory:${tainted.path.split("#")[0]}`);
+    if (tainted) {
+      try { await b.taintRun(input.runId, `memory:${tainted.path.split("#")[0]}`); } catch { return ""; }
+    }
+    await db.insert(memoryRecalls).values({ runId: input.runId, pathsJson: JSON.stringify(out.items.map((i) => i.path)), chars: out.block.length, ts: b.clock.now() });
     return out.block;
   };
 }
