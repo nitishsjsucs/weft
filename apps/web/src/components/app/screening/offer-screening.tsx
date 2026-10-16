@@ -16,6 +16,9 @@ const LABEL: Record<string, string> = {
   invited: "Invited", consented: "Consented", in_progress: "In progress", suspended: "Needs information", disputed: "Disputed", complete_clear: "Clear",
   complete_review: "Review required", canceled: "Canceled", expired: "Expired",
 };
+/** The screening company, by name only. HireRight publishes no public API shape, so its simulator says so. */
+const VENDOR: Record<string, string> = { checkr: "Checkr", hireright: "HireRight" };
+const simLabel = (vendor: string) => (vendor === "hireright" ? "Simulated, API shape not published" : "Simulated");
 const TONE: Record<string, "gray" | "blue" | "green" | "amber"> = { complete_clear: "green", complete_review: "amber", suspended: "amber", disputed: "amber", invited: "blue", consented: "blue", in_progress: "blue" };
 const STEP: Record<string, { label: string; variant: "primary" | "secondary" | "danger" }> = {
   engage: { label: "Proceed with hire", variant: "primary" }, pre_adverse: { label: "Start pre-adverse notice", variant: "danger" },
@@ -53,7 +56,8 @@ function OrderLine({ r }: { r: View }) {
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-gray-12">Background check</span>
         <Badge data-testid="offer-screening-status" data-status={r.status} tone={TONE[r.status] ?? "gray"}>{LABEL[r.status] ?? r.status}</Badge>
-        {r.mode === "simulated" ? <Badge tone="gray">Simulated</Badge> : null}
+        <span data-testid="offer-screening-vendor" className="text-gray-11">with {VENDOR[r.vendor] ?? r.vendor}</span>
+        {r.mode === "simulated" ? <Badge tone="gray" data-testid="offer-screening-mode">{simLabel(r.vendor)}</Badge> : null}
         <span className="text-gray-10">{r.packageName}, {formatCents(r.priceCents)}{r.phase !== "full" ? ` (${r.phase.replace("_", "-")} phase)` : ""}{r.etaOn ? ` · ETA ${fmtDate(r.etaOn)}` : ""}{r.completedAt ? ` · done ${fmtDate(r.completedAt.slice(0, 10))}` : ""}</span>
         {r.adjudication !== "none" ? <span className="text-gray-11">· {r.adjudication.replace("_", "-")}{r.timerPaused ? " (paused)" : ""}</span> : null}
       </div>

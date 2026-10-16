@@ -35,6 +35,8 @@ test("GP18: a background check is ordered after acceptance, authorized in the po
     const row = page.locator(`[data-testid="offer-row"][data-offer="${offer.id}"]`);
     await row.getByTestId("offer-screening-order").click();
     await expect(row.getByTestId("offer-screening-status")).toHaveText("Invited");
+    await expect(row.getByTestId("offer-screening-vendor")).toHaveText("with Checkr");
+    await expect(row.getByTestId("offer-screening-mode")).toHaveText("Simulated");
     const orders = await weft.get<{ data: Order[] }>("/v1/screening/orders", { offerId: offer.id });
     expect(orders.data).toEqual([expect.objectContaining({ status: "invited", priceCents: 3_500, mode: "simulated" })]);
   });
