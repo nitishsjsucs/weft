@@ -81,8 +81,8 @@ describe("persona menu", () => {
   });
 
   it("groups admins, managers and employees in that order and drops empty groups", () => {
-    expect(groupPersonas(PRINCIPALS).map((g) => [g.group, g.people.map((p) => p.id)])).toEqual([["Admins", ["usr_dana", "usr_theo", "usr_sam"]]]);
-    const withManager = [...PRINCIPALS, { id: "usr_imani", name: "Imani (demo)", title: "Engineering Manager", role: "manager" }, { id: "usr_e", name: "E (demo)", title: "Engineer", role: "employee" }];
+    expect(groupPersonas(PRINCIPALS).map((g) => [g.group, g.people.map((p) => p.id)])).toEqual([["Admins", ["usr_dana", "usr_theo", "usr_sam"]], ["Managers", ["usr_imani"]]]);
+    const withManager = [...PRINCIPALS, { id: "usr_e", name: "E (demo)", title: "Engineer", role: "employee" }];
     expect(groupPersonas(withManager).map((g) => g.group)).toEqual(["Admins", "Managers", "Employees"]);
     expect(roleLabel("payroll_admin")).toBe("payroll admin");
     expect(roleLabel("hr_manager")).toBe("HR manager");
