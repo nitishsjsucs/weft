@@ -51,7 +51,7 @@ describe("GP9 termination with access revocation", () => {
       return (await call("GET", `/v1/proposals/${id}`)).json as Proposal;
     };
     const fp = await proposalOf("final_pay");
-    expect(fp).toMatchObject({ status: "pending", command: "offboarding.final_pay", risk: "R4" });
+    expect(fp).toMatchObject({ status: "pending", command: "offboarding.final_pay", risk: "R4", taintedBy: null, onBehalfOf: "usr_dana" });
     expect(fp.headline).toMatch(/^Final pay for Imani Ferreira \(demo\) \(wrk_0004\): dismissal run, net \$[\d,]+\.\d\d/);
     expect(fp.diff.map((d) => d.label)).toEqual(expect.arrayContaining(["Gross pay", "Net pay to bank"]));
     expect(fp.diff.some((d) => d.label.startsWith("Salary (") )).toBe(true);

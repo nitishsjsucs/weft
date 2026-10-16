@@ -1,7 +1,7 @@
 // /v1 offboarding routes (wave 2, docs/wave2.md). Owner: w2-offboarding. Paths come from packages/contracts/src/api.ts.
 // POST /v1/workers/:id/terminate runs offboarding.terminate as the person, then files the four proposal steps
-// (final pay, directory suspend, SSO deactivation, device lock) as proposals on the person's behalf: the executor's
-// proposal path for a person is the mcp surface, so each one is a gated call with its own preview and approval.
+// (final pay, directory suspend, SSO deactivation, device lock) through HumanExecutor.propose: each one is a gated
+// call with its own preview that waits for an approval, untainted, on the person's behalf.
 // Reads build OffboardingCase straight from the tables, like the other read routes.
 import { Hono, type Context } from "hono";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
@@ -66,12 +66,13 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
     if (bad) { await weft.scheduler.kick(); return bad; }
     if (out.ok && out.status === "done") {
       const data = out.data as { case_id: string; steps: { kind: OffboardingStepKind; status: string }[] };
-      const proposer: HumanSession = { ...s, via: "api_key", keyScope: "mcp" };
+      const propose = weft.executor.human.propose;
+      if (!propose) throw new Error("offboarding: the executor has no HumanExecutor.propose");
       for (const kind of OFFBOARDING_PROPOSAL_STEPS) {
         const step = data.steps.find((x) => x.kind === kind);
         if (!step || step.status !== "pending") continue;
         const args = kind === "final_pay" ? { case_id: data.case_id, pay_unused_pto: input.payUnusedPto } : { case_id: data.case_id };
-        await weft.executor.human.exec(proposer, PROPOSAL_COMMAND[kind]!, args);
+        await propose.call(weft.executor.human, s, PROPOSAL_COMMAND[kind]!, args);
       }
     }
     await weft.scheduler.kick();
