@@ -115,6 +115,18 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+/** A field error in sentence case, without the "routing: " path prefix the API puts in front. */
+const FIELD_COPY: Record<string, (m: string) => string> = {
+  routing: (m) => (/ABA checksum/.test(m) ? "This routing number fails the ABA checksum. Check the 9 digits." : `Routing number: ${m}`),
+  account: (m) => `Account number: ${m}`,
+};
+function fieldText(field: string | null, text: string): string {
+  if (!field) return text;
+  const bare = text.startsWith(`${field}: `) ? text.slice(field.length + 2) : text;
+  const copy = FIELD_COPY[field];
+  return copy ? copy(bare) : bare.charAt(0).toUpperCase() + bare.slice(1);
+}
+
 type Api = ReturnType<typeof createClient>;
 function TaskPanel({ task, view, api, onDone }: { task: Task; view: View; api: Api; onDone: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
@@ -122,7 +134,7 @@ function TaskPanel({ task, view, api, onDone }: { task: Task; view: View; api: A
   const [name, setName] = useState("");
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true); setErr(null);
-    try { await fn(); await onDone(); } catch (e) { setErr({ text: msg(e), field: e instanceof ApiError ? ((e.body as { field?: string | null }).field ?? null) : null }); } finally { setBusy(false); }
+    try { await fn(); await onDone(); } catch (e) { const f = e instanceof ApiError ? ((e.body as { field?: string | null }).field ?? null) : null; setErr({ text: fieldText(f, msg(e)), field: f }); } finally { setBusy(false); }
   };
   const nameField = <Field label="Type your full legal name to sign" hint={`As on your offer: ${view.signer.legalName}`}><input required data-testid={T.typedName} className={field} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></Field>;
   const errorLine = err ? <p role="alert" data-testid={err.field === "routing" ? T.ddError : T.portalError} className="text-2 text-red-11">{err.text}</p> : null;
