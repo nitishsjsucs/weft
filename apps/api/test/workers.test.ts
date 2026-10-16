@@ -110,6 +110,12 @@ describe("people and onboarding read commands", () => {
     expect(JSON.stringify(out)).not.toMatch(/preferred|personal_email|home_address/);
     const q = await runDirect("people.search", { query: "Ferreira" }, directCtx(weft.clock), deps());
     expect(q.data.workers.map((w: { id: string }) => w.id)).toEqual(["wrk_0004"]);
+    // A full name, the readable name with its (demo) suffix, and a short id all find the one worker (live L5 searched
+    // "Hollis Grey" and found nobody when only single fields were matched).
+    for (const query of ["Imani Ferreira", "Imani Ferreira (demo)", "wrk_0004"]) {
+      const r = await runDirect("people.search", { query }, directCtx(weft.clock), deps());
+      expect(r.data.workers.map((w: { id: string }) => w.id), query).toEqual(["wrk_0004"]);
+    }
   });
 
   it("concise people.get and onboarding.get_checklist return no non-empty untrustedFields; detailed profile text taints", async () => {

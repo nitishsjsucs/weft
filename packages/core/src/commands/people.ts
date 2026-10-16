@@ -12,6 +12,11 @@ import { bankSummary, currentPayRate, getWorker, homeAddressText, lookups, payRa
 const WorkerStatus = z.enum(["draft", "invited", "onboarding", "active", "offboarding", "inactive"]);
 const State = z.enum(["CA", "NY", "TX", "CO"]);
 
+/** Query words for people.search: split on spaces, parentheses and commas, without the "(demo)" name suffix. */
+export function searchWords(q: string | undefined): string[] {
+  return (q ?? "").split(/[\s(),]+/).filter((w) => w && w.toLowerCase() !== "demo");
+}
+
 const SearchInput = z.object({
   query: z.string().max(100).optional(),
   state: State.optional(),
@@ -31,7 +36,10 @@ const peopleSearch = readCommand({
     const tx = deps.tx;
     const where = workerWhere(ctx.companyId, { state: i.state, status: i.status, departmentId: i.department_id });
     const q = i.query?.trim();
-    const filtered = q ? and(where, or(like(workers.firstName, `%${q}%`), like(workers.lastName, `%${q}%`), like(workers.title, `%${q}%`), like(workers.employeeNumber, `%${q}%`))) : where;
+    // Every word must match a name, title or employee number, so a full name ("Hollis Grey") or the readable name with
+    // its fictional-data suffix ("Hollis Grey (demo)") finds the worker; a single word behaves as before.
+    const words = searchWords(q);
+    const filtered = words.length ? and(where, ...words.map((w) => or(like(workers.firstName, `%${w}%`), like(workers.lastName, `%${w}%`), like(workers.title, `%${w}%`), like(workers.employeeNumber, `%${w}%`), like(workers.id, w)))) : where;
     const rows = await tx.select().from(workers).where(filtered).orderBy(asc(workers.id));
     const limit = Math.min(Math.max(i.limit ?? 20, 1), 50);
     const L = await lookups(tx, ctx.companyId);
