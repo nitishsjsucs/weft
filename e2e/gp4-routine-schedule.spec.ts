@@ -16,7 +16,8 @@ test("GP4: the weekly digest fires at 09:00 once, and a custom routine is drafte
     await expect(page.getByTestId(TID.simClock)).toContainText(/9:00/);
     const run = await eventually(() => weft.routineRuns(SEED.digestRoutine), (rs) => (rs.length > runsBefore ? rs.find((r) => r.status === "done") : null), "a done digest run");
     expect(run.triggerRef).toMatch(/cron/);
-    expect(run.triggerRef).toContain("2026-10-26T09:00");
+    // Run keys use the UTC instant of the slot: 16:00Z is Mon 09:00 PT (PDT).
+    expect(run.triggerRef).toBe("cron:2026-10-26T16:00:00.000Z");
     expect(run.attended).toBe(false);
     expect(run.leftForHuman).toEqual([]);
     expect((await weft.proposals("pending")).filter((p) => p.routineRunId === run.id)).toHaveLength(0);

@@ -12,7 +12,7 @@ type ActionRow = typeof actions.$inferSelect;
 
 function notReversibleReason(command: string): string {
   if (command.startsWith("payroll.submit")) return "A funded payroll cannot be undone; run an off-cycle correction instead.";
-  if (command.startsWith("notices.send") || command.startsWith("tax.register")) return "Agency filings cannot be withdrawn once sent.";
+  if (command.startsWith("notices.send") || command.startsWith("tax.register")) return "filed with the agency simulator";
   if (command.startsWith("comms.")) return "A sent message cannot be unsent.";
   return `${command} is not reversible.`;
 }
