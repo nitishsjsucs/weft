@@ -11,7 +11,7 @@ import { PageHeader } from "../page";
 const DEPTS = [["dpt_engineering", "Engineering"], ["dpt_hardware", "Hardware"], ["dpt_operations", "Operations"], ["dpt_people", "People"], ["dpt_finance", "Finance"], ["dpt_gtm", "Go-to-market"]] as const;
 const STATES = ["CO", "CA", "NY", "TX"] as const;
 const STATUS_LABEL: Record<string, string> = { draft: "Draft", sent: "Sent", viewed: "Viewed", accepted: "Accepted", voided: "Void", expired: "Expired" };
-const STATUS_CLASS: Record<string, string> = { draft: "text-gray-10", sent: "text-blue-11", viewed: "text-blue-11", accepted: "text-green-11", voided: "text-gray-10", expired: "text-amber-11" };
+const STATUS_TONE: Record<string, "gray" | "blue" | "green" | "amber"> = { draft: "gray", sent: "blue", viewed: "blue", accepted: "green", voided: "gray", expired: "amber" };
 interface Email { id: string; to: string; subject: string; body: string; kind: string; relatedRef: string | null; ts: string }
 
 const field = "h-8 w-full rounded-lg border border-[var(--app-border)] bg-card px-2.5 text-2 outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]";
@@ -63,7 +63,7 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
         <div className="font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
         <div className="text-gray-10">{o.title} · {o.workState} · {formatCents(o.baseCents)} · starts {fmtDate(o.startDate)}{o.expiresOn ? ` · open until ${fmtDate(o.expiresOn)}` : ""}</div>
       </div>
-      <span data-testid={T.offerStatus} className={`font-medium ${STATUS_CLASS[o.status] ?? ""}`}>{STATUS_LABEL[o.status] ?? o.status}</span>
+      <Badge data-testid={T.offerStatus} data-status={o.status} tone={STATUS_TONE[o.status] ?? "gray"} size="md">{STATUS_LABEL[o.status] ?? o.status}</Badge>
       {o.allowed.includes("sent") ? <Button size="sm" variant="primary" data-testid={T.offerSend} disabled={send.pending} onClick={() => void send.run()}>Send</Button> : null}
       {o.allowed.includes("voided") && !confirmVoid ? <Button size="sm" variant="secondary" data-testid={T.offerVoid} onClick={() => setConfirmVoid(true)}>Void</Button> : null}
       {o.allowed.includes("voided") && confirmVoid ? (
