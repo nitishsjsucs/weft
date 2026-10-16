@@ -108,7 +108,7 @@ export function specialPaycheck(w: WorkerRow, spec: { periodStart: string; perio
     payDate: spec.payday, payPeriodsPerYear: SEMIMONTHLY_PERIODS, jurisdiction: state,
     earnings: earnings.map((e) => ({ type: ENGINE_TYPE[e.type] ?? "regular", amount_cents: e.amountCents, hours_x100: e.hoursX100 })),
     pretax, posttax: [], reimbursements_cents: 0, w4: w4Of(profile),
-    state: { filingStatus: profile?.stateFilingStatus ?? null, allowances: profile?.stateAllowances ?? 0 },
+    state: { filingStatus: profile?.stateFilingStatus ?? null, allowances: profile?.stateAllowances ?? 0, extraCents: profile?.stateExtraCents ?? 0 },
     ytd, employerRates: { sui: employerRateOn(world.employerRates, state, "sui", spec.payday), ett: state === "CA" ? employerRateOn(world.employerRates, state, "ett", spec.payday) : null },
   };
   const supplementalCents = earnings.filter((e) => e.type === "bonus").reduce((s, e) => s + e.amountCents, 0);

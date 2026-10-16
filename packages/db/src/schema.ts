@@ -49,6 +49,7 @@ export const taxProfiles = sqliteTable("tax_profiles", {
   step2Checkbox: bool("step2_checkbox").notNull().default(false), step3Cents: integer("step3_cents").notNull().default(0),
   step4aCents: integer("step4a_cents").notNull().default(0), step4bCents: integer("step4b_cents").notNull().default(0), step4cCents: integer("step4c_cents").notNull().default(0),
   allowances: integer("allowances").notNull().default(0), stateFilingStatus: text("state_filing_status"), stateAllowances: integer("state_allowances").notNull().default(0),
+  stateExtraCents: integer("state_extra_cents").notNull().default(0),
   exempt: bool("exempt").notNull().default(false), source: text("source").notNull(),
 });
 export const bankAccounts = sqliteTable("bank_accounts", {

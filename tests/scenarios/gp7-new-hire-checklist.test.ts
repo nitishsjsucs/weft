@@ -154,5 +154,20 @@ describe("GP7 new-hire checklist unblocks payroll", () => {
     await weft.db.run(sql`UPDATE tax_profiles SET step4c_cents = 5000 WHERE worker_id = ${workerId}`);
     const fitWithout = (without.calc.taxes as { code: string; amount_cents: number }[]).find((t) => t.code === "fit")!;
     expect(fit.amount_cents - fitWithout.amount_cents).toBe(5_000);
+    // The state certificate's extra withholding per period reaches the state PIT line too.
+    const pit = (c: { calc: { taxes: unknown } }) => (c.calc.taxes as { code: string; jurisdiction: string; amount_cents: number }[]).find((t) => t.code === "pit" && t.jurisdiction === "CO")!.amount_cents;
+    await weft.db.run(sql`UPDATE tax_profiles SET state_extra_cents = 2500 WHERE worker_id = ${workerId}`);
+    const withExtra = (await payroll.computePeriod(weft.db, { companyId: "cmp_larkspur", payScheduleId: "ps_us_semimonthly", periodStart: run!.period_start, periodEnd: run!.period_end, payday: run!.payday })).find((c) => c.workerId === workerId)!;
+    await weft.db.run(sql`UPDATE tax_profiles SET state_extra_cents = 0 WHERE worker_id = ${workerId}`);
+    expect(pit(withExtra) - pit(without)).toBe(2_500);
+  });
+
+  it("an exempt state certificate is refused rather than signed and ignored by payroll", async () => {
+    const [t] = await weft.db.all<{ id: string }>(sql`SELECT id FROM onboarding_tasks WHERE worker_id = ${workerId} AND kind = 'state_withholding'`);
+    await weft.db.run(sql`UPDATE onboarding_tasks SET status = 'pending' WHERE id = ${t!.id}`);
+    const res = await call(persona, "POST", "/v1/portal/state-withholding", { state: "CO", filingStatus: "single", allowances: 0, extraCents: 0, exempt: true, typedName: NAME });
+    expect(res.status, JSON.stringify(res.json)).toBe(422);
+    expect(res.json.code).toBe("DOMAIN_STATE_EXEMPT_UNSUPPORTED");
+    await weft.db.run(sql`UPDATE onboarding_tasks SET status = 'done' WHERE id = ${t!.id}`);
   });
 });

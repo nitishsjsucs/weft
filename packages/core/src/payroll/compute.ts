@@ -217,7 +217,7 @@ export function computeWorkerPaycheck(w: WorkerRow, p: PeriodSpec, world: WorldS
   const input: PaycheckInput = {
     payDate: p.payday, payPeriodsPerYear: SEMIMONTHLY_PERIODS, jurisdiction: state, earnings: earnings.map((e) => ({ type: e.type as "salary", amount_cents: e.amountCents, hours_x100: e.hoursX100 })),
     pretax, posttax: [], reimbursements_cents: 0, w4: w4Of(profile),
-    state: { filingStatus: profile?.stateFilingStatus ?? null, allowances: profile?.stateAllowances ?? 0 },
+    state: { filingStatus: profile?.stateFilingStatus ?? null, allowances: profile?.stateAllowances ?? 0, extraCents: profile?.stateExtraCents ?? 0 },
     ytd, employerRates: { sui: employerRateOn(world.employerRates, state, "sui", p.payday), ett: state === "CA" ? employerRateOn(world.employerRates, state, "ett", p.payday) : null },
   };
   const calc = calculatePaycheck(input, t);

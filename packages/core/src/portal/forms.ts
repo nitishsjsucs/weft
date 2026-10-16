@@ -199,7 +199,9 @@ export const submitStateWithholding = writeCommand({
     checkTypedName(p, i.typedName);
     const [profile] = await tx.select().from(taxProfiles).where(eq(taxProfiles.workerId, w.id)).limit(1);
     if (!profile) throw new DomainRefusal("DOMAIN_W4_FIRST", "Submit Form W-4 first", null, null);
-    await tx.update(taxProfiles).set({ stateFilingStatus: i.filingStatus, stateAllowances: i.allowances }).where(eq(taxProfiles.workerId, w.id));
+    // Payroll has no state-exempt path yet, so an exempt claim is refused rather than signed and then ignored.
+    if (i.exempt) throw new DomainRefusal("DOMAIN_STATE_EXEMPT_UNSUPPORTED", `Weft does not yet support an exempt ${form.form}; submit it without exempt`, null, null);
+    await tx.update(taxProfiles).set({ stateFilingStatus: i.filingStatus, stateAllowances: i.allowances, stateExtraCents: i.extraCents ?? 0 }).where(eq(taxProfiles.workerId, w.id));
     const rec = await signedRecord(deps, ctx, p, "state_withholding", `${form.form}: ${form.title}`, [
       ["State", i.state], ["Filing status", i.filingStatus], ["Allowances", String(i.allowances)], ["Extra withholding per period", dollars(i.extraCents ?? 0)], ["Exempt", i.exempt ? "yes" : "no"],
     ]);
