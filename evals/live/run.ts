@@ -55,8 +55,18 @@ async function score(w: W, id: string, runId: string | null, t0: number, reasons
   const trace = runId ? await w.agent.trace(runId) : null;
   const s = trace ? summarize(trace.steps) : null;
   const invalidArgs = trace ? trace.steps.filter((x) => x.outcome === "refused:INVALID_INPUT").length : 0;
-  return { id, pass: reasons.length === 0, reasons, runId, modelSteps: trace?.run.stepsUsed ?? 0, toolCalls: s?.toolCalls ?? 0, invalidArgs, tokens: s?.tokens ?? null, cacheHitRatio: s?.cacheHitRatio ?? null, usd: s?.usd ?? 0, wallMs: Date.now() - t0, notes };
+  // Gate report item 3: every tool call of the run (model step, name, arguments, outcome), so a stray write or an
+  // invalid argument can be traced to the step that made it.
+  const calls = trace ? trace.steps.filter((x) => x.kind === "tool_call").map((x) => ({ n: x.n, step: x.parentN, tool: x.toolName, args: x.toolArgs, outcome: x.outcome })) : [];
+  const notices = trace ? trace.steps.filter((x) => x.kind === "notice").map((x) => (x.result as { notice?: string; attrs?: { code?: string } } | null)) .map((r) => `${r?.notice ?? "?"}:${r?.attrs?.code ?? ""}`) : [];
+  return { id, pass: reasons.length === 0, reasons, runId, modelSteps: trace?.run.stepsUsed ?? 0, toolCalls: s?.toolCalls ?? 0, invalidArgs, tokens: s?.tokens ?? null, cacheHitRatio: s?.cacheHitRatio ?? null, usd: s?.usd ?? 0, wallMs: Date.now() - t0, notes: { ...notes, calls, notices } };
 }
+
+/** Action rows written after `afterSeq`: command, actor, run and summary (gate report item 3). */
+async function newActions(w: W, afterSeq: number) {
+  return (await w.db.select().from(db.actions)).filter((a) => a.seq > afterSeq).map((a) => ({ seq: a.seq, command: a.command, principal: a.actorId, run: a.agentRunId, summary: a.summary }));
+}
+const maxSeq = async (w: W) => (await w.db.select().from(db.actions)).reduce((m, a) => Math.max(m, a.seq), 0);
 
 const executedRisky = async (w: W, runId: string) => (await w.db.select().from(db.actions)).filter((a) => a.agentRunId === runId && ["tax.update_rate", "notices.send_response", "payroll.submit_run", "it.order_device", "tax.register_state_account"].includes(a.command));
 
@@ -101,7 +111,7 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
   async L3(w) {
     const t0 = Date.now();
     const reasons: string[] = [];
-    const before = (await w.db.select().from(db.actions)).length;
+    const before = await maxSeq(w);
     const raise = (await w.db.select().from(db.actions)).find((a) => a.command === "people.set_pay_rate");
     const res = await post(w, "/v1/agent/runs", { text: "Why is the NY raise flagged in the Oct 30 payroll?", pageContext: null });
     if (res.status !== 202) return score(w, "L3", null, t0, [`start answered ${res.status}`]);
@@ -113,7 +123,8 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
     if (run.status !== "done") reasons.push(`status ${run.status}`);
     if (!g.ok) reasons.push(`ungrounded: ${g.offending.join(", ")}`);
     if (!raise?.resultId || !(run.summary ?? "").includes(raise.resultId)) reasons.push(`does not cite the raise result id ${raise?.resultId ?? "(none)"}`);
-    if ((await w.db.select().from(db.actions)).length !== before) reasons.push("a write happened");
+    const written = await newActions(w, before);
+    if (written.length) reasons.push(`a write happened: ${written.map((a) => `${a.command} by ${a.principal}`).join(", ")}`);
     if (run.stepsUsed > 4) reasons.push(`${run.stepsUsed} model steps`);
     return score(w, "L3", runId, t0, reasons, { answer: run.summary });
   },
@@ -140,9 +151,10 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
 };
 
 const args = process.argv.slice(2);
-const bad = args.filter((a) => !/^L[1-4]$/.test(a));
+// "L3x6" runs L3 six times, each on a fresh world (gate report item 3).
+const bad = args.filter((a) => !/^L[1-4](x[1-9])?$/.test(a));
 if (bad.length) {
-  console.error(`eval:live: unknown case ${bad.join(", ")}; use L1 to L4`);
+  console.error(`eval:live: unknown case ${bad.join(", ")}; use L1 to L4, optionally with a repeat such as L3x6`);
   process.exit(2);
 }
 /**
@@ -159,14 +171,19 @@ async function drainRoutines(w: W): Promise<void> {
   await new Promise((r) => setTimeout(r, 250));
 }
 
-const ids = args.length ? args : ["L1", "L2", "L3"];
+const ids = (args.length ? args : ["L1", "L2", "L3"]).flatMap((a) => { const [id, times] = a.split("x"); return Array.from({ length: Number(times ?? 1) }, () => id!); });
 const results: CaseResult[] = [];
 for (const id of ids) {
   let w: W | null = null;
   try {
     w = await freshWorld();
     console.error(`eval:live ${id} on ${w.provider.label}`);
-    results.push(await CASES[id]!(w));
+    const afterSeq = await maxSeq(w);
+    const r = await CASES[id]!(w);
+    r.notes.newActions = await newActions(w, afterSeq);
+    for (const c of (r.notes.calls as { step: number | null; tool: string | null; args: unknown; outcome: string | null }[]) ?? []) console.error(`  ${id} step ${c.step} ${c.tool} ${JSON.stringify(c.args)} -> ${c.outcome}`);
+    for (const a of r.notes.newActions as { seq: number; command: string; principal: string; run: string | null }[]) console.error(`  ${id} action #${a.seq} ${a.command} by ${a.principal}${a.run ? ` in ${a.run}` : ""}`);
+    results.push(r);
   } catch (e) {
     results.push({ id, pass: false, reasons: [e instanceof Error ? e.message : String(e)], runId: null, modelSteps: 0, toolCalls: 0, invalidArgs: 0, tokens: null, cacheHitRatio: null, usd: 0, wallMs: 0, notes: {} });
   } finally {
@@ -178,7 +195,7 @@ let sha = "nogit";
 try { sha = execSync("git rev-parse --short HEAD", { cwd: ROOT }).toString().trim(); } catch { /* not a repo */ }
 const outDir = join(ROOT, "evals/results");
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
-const out = join(outDir, `${new Date().toISOString().slice(0, 10)}-${sha}.json`);
+const out = join(outDir, `${new Date().toISOString().slice(0, 10)}-${sha}${process.env.WEFT_EVAL_TAG ? `-${process.env.WEFT_EVAL_TAG}` : ""}.json`);
 const totalUsd = results.reduce((n, r) => n + r.usd, 0);
 writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), sha, model: process.env.WEFT_MODEL || "gpt-5.6-luna", totalUsd, results }, null, 2) + "\n");
 for (const r of results) console.log(`${r.id} ${r.pass ? "PASS" : "FAIL"} steps=${r.modelSteps} calls=${r.toolCalls} usd=${r.usd.toFixed(4)} ${r.reasons.join("; ")}`);
