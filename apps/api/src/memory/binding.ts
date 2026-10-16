@@ -1,0 +1,47 @@
+// Binds the memory repo, the executor's taint path and the routines precheck registry to one composed Weft
+// (w2-memory). createChatContextSource(db) only receives the Db, so recall finds its binding by that Db; the
+// rt_memory_digest precheck finds the digest by the ReadOnlyExecutor the routines engine hands it. memoryRoutes()
+// calls bindMemory() while buildApp() runs inside createWeft(), before any run can start.
+import type { Db } from "@weft/db";
+import type { SimClock } from "@weft/contracts";
+import { executorInternals } from "@weft/executor";
+import type { Weft } from "../http/context";
+import { runMemoryDigest, type MemoryW2 } from "./digest";
+
+export interface MemoryBinding {
+  db: Db; clock: SimClock; memory: MemoryW2;
+  /** The executor's taint path (run_taint plus the agent_runs mirror); never the brain. */
+  taintRun(runId: string, by: string): Promise<void>;
+  /** Digest hook used by the precheck and by tests. */
+  digest(input: { companyId: string; now: string }): Promise<Awaited<ReturnType<typeof runMemoryDigest>>>;
+  /** Tests that must keep wave 1 transcripts byte-identical can switch recall off for one world. */
+  recallEnabled: boolean;
+}
+
+const bindings = new WeakMap<Db, MemoryBinding>();
+
+interface Registry { hooks: WeakMap<object, (ctx: { companyId: string; now: string; triggerRef: string }) => Promise<{ commit: string | null; key: string; summary: string }>> }
+const registry = (): Registry | undefined => (globalThis as unknown as Record<symbol, Registry | undefined>)[Symbol.for("weft.w2-memory.registry")];
+
+export function bindMemory(weft: Weft): MemoryBinding | null {
+  const existing = bindings.get(weft.db);
+  if (existing) return existing;
+  const memory = weft.executor?.memory as unknown as MemoryW2 | undefined;
+  const internals = (() => { try { return executorInternals(weft.executor); } catch { return null; } })();
+  if (!memory || typeof memory.digest !== "function" || !internals) return null;
+  const b: MemoryBinding = {
+    db: weft.db, clock: weft.clock, memory, recallEnabled: true,
+    taintRun: (runId, by) => internals.taintRun(runId, by),
+    digest: (input) => runMemoryDigest(b, input),
+  };
+  bindings.set(weft.db, b);
+  registry()?.hooks.set(weft.executor.readOnly, async (ctx) => {
+    const out = await b.digest({ companyId: ctx.companyId, now: ctx.now });
+    return { commit: out.commit, key: out.key, summary: out.summary };
+  });
+  return b;
+}
+
+export function memoryBinding(db: Db): MemoryBinding | null {
+  return bindings.get(db) ?? null;
+}
