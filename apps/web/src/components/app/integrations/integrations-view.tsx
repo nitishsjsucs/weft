@@ -42,8 +42,8 @@ function VendorCard({ card }: { card: IntegrationCard }) {
           <h2 className="text-3 font-medium">{card.title}</h2>
           <p className="text-1 text-gray-10">{CATEGORY_LABEL[card.status.category] ?? card.status.category}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Badge data-testid={T.mode(v)} tone={connected ? "green" : "gray"} size="md">{connected ? "Connected" : "Simulated"}</Badge>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Badge data-testid={T.mode(v)} tone={connected ? "green" : "gray"} size="md">{connected ? "Connected" : v === "hireright" ? "Simulated, API shape not published" : "Simulated"}</Badge>
           <Badge data-testid={H.health(v)} tone={card.status.health === "ok" ? "outline" : "amber"} size="md">{HEALTH_LABEL[card.status.health] ?? card.status.health}</Badge>
         </div>
       </div>

@@ -16,7 +16,7 @@ test("GP17: a Greenhouse hire becomes a Weft draft offer, a proposal and a resol
     await viewAs(page, "dana");
     for (const v of ["greenhouse", "workday", "checkr", "hireright", "docusign"]) {
       await expect(page.getByTestId(T.card(v))).toBeVisible();
-      await expect(page.getByTestId(T.mode(v))).toHaveText("Simulated");
+      await expect(page.getByTestId(T.mode(v))).toHaveText(v === "hireright" ? "Simulated, API shape not published" : "Simulated");
     }
     await expect(page.getByTestId(H.secret("greenhouse", "WEFT_GREENHOUSE_CLIENT_ID"))).toBeVisible();
   });
