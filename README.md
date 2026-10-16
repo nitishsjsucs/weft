@@ -137,8 +137,7 @@ Screenshots were retaken with the new `pnpm screenshots` (`e2e/screens/capture.s
 
 - `01-landing`, `01b-landing-full` (full page) and `12-landing-mobile` (390 by 844).
 - `02-app-home` (Home as Dana: 48 active employees, 0 onboarding) and `03-simulators`.
-- `04-agent-run`: the agency notice run after the DE 2088 notice, waiting for approval. The Outcome column of its
-  Steps table is cut off at this width (see What is stubbed or left).
+- `04-agent-run`: the agency notice run after the DE 2088 notice, waiting for approval.
 - `05-inbox`: the SUI rate change and the filed response, waiting.
 - `06-payroll` and `07-payroll-draft`: the Oct 16 to 31 draft after the pre-payroll review (4 need review, 1 blocked),
   its submit waiting in the Inbox.
@@ -208,7 +207,15 @@ time; the action chain verifies at the end of every scenario.
 - The offer builder has no Manager or Workplace field: the manager defaults to the department lead and the hire lands
   as Remote US (the API accepts `manager_id` and `workplace_id`).
 - Open enrollment reminders go to each person by email; #general gets only an anonymous count.
-- Seen in the final gate: the company one-pager prints the payroll approve-by time as a raw UTC timestamp.
+- Times: memory files and the Inbox, run view, agent panel and audit log show Pacific time, but the stored text and
+  what the model and MCP clients receive stay ISO (tool summaries, signature lines, refusal messages, prompt context).
+  Routine trigger refs (`cron:<iso>`) are identifiers and stay raw in Routines, hourly summary titles keep their UTC
+  period key, and daily, weekly and monthly summaries are still UTC buckets.
+- The proposal notifier posts every chat approval card as the Weft agent, even for a proposal a person made; the
+  Inbox card itself names the proposer.
+- Brand: the working files pass `pnpm brand:overlap` against the 4 saved reference pages (home, agent, payroll,
+  pricing). Pages that were read but not saved were checked by hand only, and git history still holds the earlier
+  verbatim research lines, so a public release needs a history rewrite first.
 - Set aside in the final review (reasons in [docs/review-log.md](docs/review-log.md)): a person's UI session still runs
   R4 money movers through `POST /v1/tools` directly (SPEC 10; API keys now get proposals); `code.run` holds the write
   lock for the whole script; recall lines lack the untrusted wrapper and sit outside the pack budget; the memory digest

@@ -1,5 +1,16 @@
 # Status
 
+## Polish merge (2026-10-15, 22:32 PDT)
+
+`polish/reset` (the sim reset 500), `polish/brand` (reference copy restated, `pnpm brand:overlap`), `polish/times`
+(Pacific time in memory files and the app's run, Inbox, agent and audit views) and `polish/ui` (run and paycheck tables
+fit at 1440 docked and 390, the Inbox names who proposed) are merged on main. Integration fixes: a run's step numbers
+restart at 1 after a reset, a run minted with a reused id no longer inherits the earlier run's batch state (that bug
+failed GP3 and GP4 once step numbers restarted), and the two seed determinism tests get 30 s under load. On a fresh
+clone: `pnpm test` 624 of 624, typecheck 15 of 15, build ok, `pnpm e2e` 31 of 31 twice, `pnpm demo` exit 0, and
+lint:prose, lint:brand and brand:overlap ok. Screenshots retaken. Details and what is still open are in
+`docs/review-log.md` under "Polish round".
+
 ## Final wave 2 gate (2026-10-15, 21:17 PDT)
 
 On a fresh clone of main at `d62153c`, after the final review fixes: `pnpm test` 596 of 596 (112 files), `pnpm typecheck`
@@ -7,8 +18,9 @@ On a fresh clone of main at `d62153c`, after the final review fixes: `pnpm test`
 78 of 78, both lints ok, and `pnpm dev --fresh` serves every wave 2 screen. Live L1, L2, L4 and L3 three times pass on
 Luna for $0.0078 (ledger $0.0431 of $0.50). Screenshots were retaken with the new `pnpm screenshots`. A rerun at `583333d`
 under heavy machine load passed `pnpm e2e` 27 of 30 (the fixture's `POST /v1/sim/reset` answered 500 three times) and
-then 30 of 30. The cause, a reset racing a memory `git` process and other background work, is fixed on `polish/reset`.
-The numbers, the live table and what is still left are in the README under Results and What is stubbed or left.
+then 30 of 30. The cause, a reset racing a memory `git` process and other background work, is fixed by `polish/reset`,
+now merged. The numbers, the live table and what is still left are in the README under Results and What is stubbed
+or left.
 
 ## Wave 2 integration (2026-10-15, 20:00 PDT)
 

@@ -1,5 +1,34 @@
 # Review log
 
+## Polish round: four polish branches merged (2026-10-15, 22:07 to 22:32 PDT)
+
+`polish/reset`, `polish/brand`, `polish/times` and `polish/ui` were cut from main at 42e618f and merged in that order.
+Two conflicts, both resolved by keeping both sides: `packages/executor/src/index.ts` (the `serialGit` export and the
+time helpers) and `apps/web/src/components/app/inbox/proposal-card.tsx` (the proposer's note label with the note text
+in Pacific time).
+
+| Branch | Finding | Fix | Commit subject |
+|---|---|---|---|
+| polish/reset | `POST /v1/sim/reset` answered 500 under load: it dropped every table, then `rmSync` of `<dataDir>/companies` hit ENOTEMPTY from an in-flight memory `git` process, leaving no tables; concurrent resets and work started before a reset also corrupted the rebuilt world | Resets run one at a time on the scheduler's tick chain after agent runs and routine finalizations settle, remove the repos on the git queue first and seed under the write lock; a 500's stack goes to `<dataDir>/run/errors.log` under tests | fix(sim): settle background work and serialize POST /v1/sim/reset; fix(api): log a 500's stack to <dataDir>/run/errors.log under tests |
+| polish/brand | `research/` and `SPEC.md` still shared runs of 8 to 23 words with the saved reference pages (14 hits) | Restated in Weft's own words; new `pnpm brand:overlap` fails on any 8-word run shared with the saved pages, with an empty allowlist that needs a reason per entry; in CI it skips | docs(research): restate the remaining reference-site copy in our own words; scripts: add pnpm brand:overlap, a shared-run check against the reference pages |
+| polish/times | The one-pager printed the approve-by time as a raw UTC timestamp; dossiers, summaries, preferences and the Inbox, run view, agent panel and audit log showed raw ISO instants | Human-facing times read in Pacific time (`packages/executor/src/memory/time.ts`, `humanTimes()` in the web format module); stored text, keys and frontmatter stay ISO | fix(memory): human-facing times in memory files read in Pacific time; fix(web): inbox, run view and audit log show server times in Pacific time |
+| polish/ui | The run view's Outcome column was cut off at 1440 px with the panel docked, and the paycheck table needed a 640 px minimum | Step titles wrap and optional columns step aside by card width; the 1440 and 390 px layout spec now checks the scroll wrapper too | fix(web): run Steps and paycheck columns stay in view at 1440 docked and 390 |
+| polish/ui | The Inbox card called every note the agent's, even on Dana's own off-cycle proposal | The card reads who proposed (routine run, agent, or person) for the note label and a Proposed by field | fix(web): label Inbox notes and sources by who proposed the change |
+| Integration | Run step numbers kept counting after a reset (#88 on a fresh run), found on polish/ui: the run store cached each run id's next step number and run ids restart at run_0001 | `createRun` drops the cached counter for its id; `packages/agent/test/store.test.ts` | fix(agent): a run's steps count from 1 after POST /v1/sim/reset reuses its id |
+| Integration | With step numbers restarting, `pnpm e2e` failed GP3 and GP4 twice: the executor keeps each run's batch state in memory by run id and `step:<n>`, so GP4's digest (run_0001 again) inherited GP3's pending batch and its post became a proposal | The RunAuthority clears the batch state for every id it mints; `packages/executor/test/pipeline.test.ts` | fix(executor): a run minted with a reused id starts with a fresh batch |
+| Integration | The two seed determinism tests timed out at 5 s under a load average of 14 to 28 on polish/brand and polish/times | 30 s timeout for those two tests | test: the two seed determinism tests get 30 s under machine load |
+
+On a fresh scratch clone of the merged main (22:23 to 22:30 PDT, load average 4 to 11): install ok, `pnpm test` 624
+of 624 (118 files), `pnpm typecheck` 15 of 15, build ok, `pnpm e2e` 31 of 31 twice (ports 4560, 4561 and 4564),
+`pnpm demo` exit 0 (GP1 to GP12, audit chain verifies), `lint:prose --commits 42e618f..HEAD`, `lint:brand` and `brand:overlap`
+against the main checkout's reference folder all ok. Before the executor fix, both e2e runs failed GP3 and GP4 the
+same way. `pnpm screenshots` retook the run view, Inbox, audit, off-cycle, offboarding, memory and landing captures.
+
+Still open, recorded in the README's left list: the chat approval card is always posted as the Weft agent; routine
+trigger refs, hourly summary titles and server-side text stay ISO or UTC; `brand:overlap` covers only the 4 saved
+reference pages; and git history still holds the earlier verbatim research lines, which only a history rewrite
+removes (Nitish's call).
+
 ## Wave 2: final review of main at 5e30a37 (2026-10-15, 20:30 to 21:45 PDT)
 
 Three lenses (correctness and security, harness, product and brand) reviewed main at 5e30a37. Every finding below was
@@ -146,4 +175,4 @@ admin and cli keys on purpose, because their routes accept API keys.
 | Design | simulators: no staged run feed reveal when a run finishes before first paint; approve gives no result strip | Interaction work across three components; next design round |
 | Design | landing: no mobile menu, missing agent showcase and run log sections, hero mock reflows at 390, dark island density, stat tile spacing | New sections and responsive work; next design round. The heading line height and the API path in the Numbers heading are fixed |
 | Design | Bank batches raw headers, empty states without a next step, humanized enums and run id crumbs everywhere | Small but spread over many files; next design round |
-| Brand | research/ quotes reference marketing lines verbatim and they are in git history | The working files are paraphrased in wave 2 (w2-reliability); the history still holds the old lines. The repo is local only and never pushed. Before any publish, paraphrase research/product.md and research/agent.md or move them out of the tracked tree and rewrite history |
+| Brand | research/ quotes reference marketing lines verbatim and they are in git history | The working files are paraphrased (w2-reliability, then polish/brand) and pass `pnpm brand:overlap`, which fails on any 8-word run shared with the saved reference pages. The history still holds the old lines. The repo is local only and never pushed. Before any publish, rewrite history |
