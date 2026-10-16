@@ -141,6 +141,10 @@ describe("registry rules for the w3-integrations-hr commands", () => {
       if (c.access === "all" && c.risk({} as never) >= "R2") expect(c.preview, c.name).not.toBeNull();
       if (c.access !== "all") expect([c.mcp, c.tiers], c.name).toEqual(["hidden", { main: "unavailable", task: "unavailable" }]);
     }
-    expect(mine.find((c) => c.name === "ats.get_hire")!.untrustedFields).toEqual(["hire.first", "hire.last", "hire.email"]);
+    expect(mine.find((c) => c.name === "ats.get_hire")!.untrustedFields).toEqual(["hire.first", "hire.last", "hire.email", "hire.job_name"]);
+    // Vendor-entered text that reaches the model is wrapped and taints the run.
+    expect(mine.find((c) => c.name === "ats.list_jobs")!.untrustedFields).toEqual(["jobs.*.name", "jobs.*.department", "jobs.*.office", "jobs.*.location"]);
+    expect(mine.find((c) => c.name === "integrations.list_sync_items")!.untrustedFields).toEqual(["items.*.detail.ext_name", "items.*.detail.vendor_value"]);
+    expect(mine.find((c) => c.name === "hris.get_worker_external")!.untrustedFields).toEqual(["fields.*.workday"]);
   });
 });

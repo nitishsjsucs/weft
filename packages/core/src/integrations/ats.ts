@@ -109,8 +109,14 @@ export async function recordAtsHire(deps: CommandDeps, ctx: ExecContext, vendor:
   if (!m.departmentId) return block("department", { field: "department", ext_id: hire.departmentExtId ?? "", ext_name: m.job?.departmentName ?? "", reason: "No Weft department matches this Greenhouse department." });
   if (!m.workState || !(OFFER_STATES as readonly string[]).includes(m.workState)) return block("office", { field: "office", ext_id: hire.officeExtId ?? "", ext_name: m.job?.officeName ?? "", reason: "The work state could not be resolved from the office. Map the office to a Weft workplace." });
 
+  // Candidate-entered names and the job title land in trusted offer and worker columns, so only plain name and title
+  // text is imported; anything else waits for a human in the Integrations screen.
+  const title = hire.jobName.replace(/\s*\(demo\)\s*$/, "");
+  if (!plainText(hire.first, NAME_RE, 3) || !plainText(hire.last, NAME_RE, 4)) return block("candidate_name", { field: "candidate_name", reason: "The candidate name has characters Weft does not import. Enter the offer by hand." });
+  if (!plainText(title, TITLE_RE, 8)) return block("job_title", { field: "job_title", reason: "The job title has characters Weft does not import. Enter the offer by hand." });
+
   const args = createOffer.input.parse({
-    candidate_first: hire.first, candidate_last: hire.last, candidate_email: hire.email, title: hire.jobName.replace(/\s*\(demo\)\s*$/, ""), department_id: m.departmentId,
+    candidate_first: hire.first, candidate_last: hire.last, candidate_email: hire.email, title, department_id: m.departmentId,
     workplace_id: m.workplaceId, work_state: m.workState, base_cents: hire.salary.amountMinor, pay_kind: "salary", start_date: hire.startDate,
   });
   const created = (await createOffer.run(args, ctx, deps)) as unknown as { data: { offer_id: string } };
@@ -123,4 +129,12 @@ export async function recordAtsHire(deps: CommandDeps, ctx: ExecContext, vendor:
   events.unshift({ type: "offer.imported", subjectRef: offerId, payload: { offer_id: offerId, vendor } });
   await markDelivery(deps, deliveryId, now, null);
   return { outcome: "imported", offer_id: offerId, sync_item_ids: opened, application_ref: hire.applicationId, offer_version: hire.offerVersion, events };
+}
+
+const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} '\u2019.-]*$/u;
+const TITLE_RE = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} ,'\u2019&/().-]*$/u;
+/** Letters (and the punctuation names and titles use), at most `words` words: no colons, brackets or sentences. */
+function plainText(v: string, re: RegExp, words: number): boolean {
+  const t = v.trim();
+  return t.length > 0 && re.test(t) && t.split(/\s+/).length <= words;
 }

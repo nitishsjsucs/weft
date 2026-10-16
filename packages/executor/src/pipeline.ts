@@ -65,8 +65,14 @@ async function daySpent(tx: DbTx, e: Engine, companyId: string, key: string, now
   return rows.filter((r) => r.id !== excludeId).reduce((s, r) => s + (r.cents ?? 0), 0);
 }
 
-/** Human-only commands whose routes are ui_only (routine toggles, rollbacks): never from an API key. */
-const UI_ONLY_COMMANDS = new Set(["routines.enable", "routines.disable", "tax.revert_rate", "people.revert_pay_rate"]);
+/**
+ * Human-only commands whose routes are ui_only (routine toggles, rollbacks, the background check review and the
+ * adverse action steps): never from an API key.
+ */
+export const UI_ONLY_COMMANDS: ReadonlySet<string> = new Set([
+  "routines.enable", "routines.disable", "tax.revert_rate", "people.revert_pay_rate",
+  "screening.review", "screening.engage", "screening.start_pre_adverse", "screening.send_final_adverse", "screening.cancel_adverse", "screening.proceed_to_criminal",
+]);
 
 /** Runs one call inside the caller's transaction. Never opens a transaction or takes the write lock itself. */
 export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: string, rawArgs: unknown, opts: CallOptions = {}): Promise<{ outcome: ToolOutcome; def: WeftCommand | null }> {

@@ -41,7 +41,7 @@ const listSync = readCommand({
   name: "integrations.list_sync_items", domain: "people",
   summary: "Open integration sync items: conflicts and values Weft could not map.",
   description: "List sync items: kind (sync_conflict, unmapped_value, orphaned, permission_gap), vendor, subject (an offer id or a vendor record), status and detail (field, Weft value, vendor value, fallback). Default status open. Resolving a sync item is a human decision in the Integrations screen.",
-  input: ListSyncInput,
+  input: ListSyncInput, untrustedFields: ["items.*.detail.ext_name", "items.*.detail.vendor_value"],
   async run(i, ctx, deps) {
     const rows = await listSyncItems(deps.tx, ctx.companyId, { status: i.status ?? "open", vendor: i.vendor, subjectRef: i.subject_ref });
     const items = rows.map(toSyncItem).map((s) => ({ id: s.id, vendor: s.vendor, kind: s.kind, subject_ref: s.subjectRef, status: s.status, detail: s.detail, created_at: s.createdAt }));
@@ -59,7 +59,7 @@ const getHire = readCommand({
   summary: "One hire from the applicant tracking system, with the Weft offer it is linked to.",
   description: "Read a hired application from Greenhouse (simulated unless connected): candidate name and email (candidate-entered, untrusted), job, department and office ids, start date, salary in cents and the current offer version, plus the linked Weft offer id. Takes application_ref.",
   input: z.object({ application_ref: z.string().min(1).max(40) }),
-  untrustedFields: ["hire.first", "hire.last", "hire.email"],
+  untrustedFields: ["hire.first", "hire.last", "hire.email", "hire.job_name"],
   async run(i, _ctx, deps) {
     const h = await deps.sims.vendors.greenhouse.getHire(i.application_ref);
     if (!h) throw notFound("Greenhouse hire", i.application_ref);
@@ -72,7 +72,7 @@ const listJobs = readCommand({
   name: "ats.list_jobs", domain: "people",
   summary: "Open roles from the applicant tracking system or its public job board.",
   description: "List jobs from Greenhouse (simulated unless connected): id, name, department, office, location, last update and the public board link. source board (open roles, default) or harvest (all jobs).",
-  input: z.object({ source: z.enum(["board", "harvest"]).optional() }),
+  input: z.object({ source: z.enum(["board", "harvest"]).optional() }), untrustedFields: ["jobs.*.name", "jobs.*.department", "jobs.*.office", "jobs.*.location"],
   async run(i, _ctx, deps) {
     const page = await deps.sims.vendors.greenhouse.listJobs({ cursor: null, source: i.source ?? "board" });
     const jobs = page.items.map((j) => ({ id: j.id, name: j.name, department: j.departmentName, office: j.officeName, location: j.location, updated_at: j.updatedAt, url: j.url }));
@@ -224,7 +224,7 @@ const getWorkerExternal = readCommand({
   name: "hris.get_worker_external", domain: "people",
   summary: "Compare a worker's Weft record with Workday (simulated unless connected).",
   description: "Read the linked Workday worker for worker_id and compare title, work state, base pay (cents) and termination date with Weft, field by field. Takes worker_id.",
-  input: z.object({ worker_id: z.string().startsWith("wrk_") }),
+  input: z.object({ worker_id: z.string().startsWith("wrk_") }), untrustedFields: ["fields.*.workday"],
   async run(i, ctx, deps) {
     const ref = await workdayRefOf(deps, i.worker_id);
     const [w] = await deps.tx.select().from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.id, i.worker_id))).limit(1);
