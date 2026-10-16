@@ -61,3 +61,20 @@ describe("memory recall (w2-memory)", () => {
     } finally { b.recallEnabled = true; }
   });
 });
+
+describe("memory browser routes (w2-memory)", () => {
+  const get = (path: string) => weft.app.request(path, { headers: weft.uiHeaders("usr_dana") });
+  it("the file view returns links and backlinks; history returns commits with diffs", async () => {
+    await memoryBinding(weft.db)!.digest({ companyId: "cmp_larkspur", now: weft.clock.now() });
+    const file = (await (await get("/v1/memory/file?path=entities/people/wrk_0026.md")).json()) as { links: { outgoing: { path: string; resolved: boolean }[]; backlinks: string[] } };
+    expect(file.links.outgoing.every((o) => o.resolved)).toBe(true);
+    expect(file.links.backlinks).toContain("timeline/daily/2026-10-09.md");
+    const hist = (await (await get("/v1/memory/history?path=entities/people/wrk_0026.md")).json()) as { commit: string; author: string; subject: string; diff: string }[];
+    expect(hist[0]).toMatchObject({ author: "Weft Agent" });
+    expect(hist[0]!.subject).toMatch(/^memory digest: /);
+    expect(hist[0]!.diff).toContain("+## Backlinks");
+    expect(hist.at(-1)!.subject).toBe("memory: initialise");
+    expect((await get("/v1/memory/history?path=../x.md")).status).toBe(400);
+    expect((await weft.app.request("/v1/memory/history?path=a.md")).status).toBe(401);
+  });
+});

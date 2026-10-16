@@ -87,7 +87,10 @@ export interface LocalMemory extends MemoryStore {
    * <recall> block within RECALL_BUDGET that leads with the one-pager. `searches` is at most maxSearches.
    */
   recall(input: { request: string; subjectRefs: string[] }): Promise<RecallOutcome>;
+  /** Git log of one file, newest first, with each commit's diff for that file (clipped, redacted). */
+  history(path: string, limit?: number): Promise<MemoryHistoryEntry[]>;
 }
+export interface MemoryHistoryEntry { commit: string; date: string; author: string; subject: string; diff: string }
 export interface RecallOutcome { block: string; items: { path: string; kind: string; taintedBy: string | null }[]; searches: string[] }
 
 /** Extra fixed-string terms for a query that names an entity: its id and its wiki-link target (at most 5 entities). */
@@ -356,6 +359,20 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
       }
       const { block, kept } = renderRecall(cands, RECALL_BUDGET.maxTokens);
       return { block, items: kept.map((c) => ({ path: c.path, kind: c.kind, taintedBy: c.taintedBy })), searches: terms };
+    },
+    async history(path, limit = 20) {
+      const r = await ensureRoot();
+      const rel = normalizeMemoryPath(path);
+      const n = Math.max(1, Math.min(50, Math.floor(limit)));
+      return serialGit(async () => {
+        const out = await git(r, ["log", `-n${n}`, "--format=%x1e%H%x1f%cI%x1f%an%x1f%s", "-p", "--no-color", "--no-ext-diff", "--", rel]).catch(() => "");
+        return out.split("\x1e").filter((c) => c.trim()).map((chunk) => {
+          const nl = chunk.indexOf("\n");
+          const [commit, date, author, subject] = (nl >= 0 ? chunk.slice(0, nl) : chunk).split("\x1f");
+          const diff = nl >= 0 ? chunk.slice(nl + 1).trim() : "";
+          return { commit: commit!, date: date!, author: author!, subject: opts.redactor.redact(subject ?? ""), diff: opts.redactor.redact(diff.length > 8000 ? `${diff.slice(0, 8000)}\n[diff clipped]` : diff) };
+        });
+      });
     },
     async aliasIndex() {
       const r = await ensureRoot();

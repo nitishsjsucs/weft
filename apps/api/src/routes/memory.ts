@@ -29,6 +29,15 @@ export function memoryRoutes(weft: Weft): Hono<WeftEnv> {
     const links = bound && !c.req.query("at") ? await bound.memory.links(path).catch(() => null) : null;
     return c.json(redactJson(weft, { path, frontmatter: doc.frontmatter, body: doc.body, ...(links ? { links } : {}) }));
   });
+  // Wave 2 (w2-memory): per-file git log with diffs for the read-only memory browser. Route table row requested
+  // in .scratch/contract-requests/w2-memory.md.
+  r.get("/v1/memory/history", async (c) => {
+    if (!c.var.session) throw new Unauthorized();
+    if (!bound) return c.json({ _tag: "NotImplemented", message: "memory history is not available" }, 501);
+    const limit = Number(c.req.query("limit") ?? 20);
+    const path = c.req.query("path") ?? "";
+    return c.json(redactJson(weft, await guard(() => bound.memory.history(path, Number.isFinite(limit) ? limit : 20))));
+  });
   r.get("/v1/memory/search", async (c) => {
     if (!c.var.session) throw new Unauthorized();
     const folders = c.req.query("folders") ? (c.req.query("folders")!.split(",") as MemoryFolder[]) : null;
