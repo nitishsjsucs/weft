@@ -4,8 +4,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { PayrollRun } from "@weft/contracts";
-import { events, expenses, paychecks, payrollRuns, simBankBatches } from "@weft/db";
-import { W3ExpensesDetail, W3ExpensesPage } from "../../../packages/contracts/src/ext/w3-expenses";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { events, expenses, paychecks, payrollRuns, simBankBatches, uploads } from "@weft/db";
+import { W3ExpensesDetail, W3ExpensesPage, W3ExpensesPortalPage } from "../../../packages/contracts/src/ext/w3-expenses";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
 let weft: TestWeft;
@@ -136,16 +138,16 @@ describe("expenses (GP13)", () => {
     expect(PayrollRun.parse(await (await get(`/v1/payrolls/${next}`)).json()).totals!.reimbursements.amount).toBe(4_800 + 9_600 + 6_450 + 3_275 + 9_120);
   });
 
-  it("a submitted claim runs the engine at once and lands in needs review; people without payroll edit cannot submit", async () => {
+  it("a submitted claim runs the engine at once and lands in needs review; people without payroll edit file only their own", async () => {
     const res = await post("/v1/expenses", { workerId: "wrk_0005", category: "mileage", merchant: "Personal car (demo)", amountCents: 6_000, transactionDate: "2026-10-27", businessPurpose: "Supplier visit", milesX10: 840 });
     const out = (await res.json()) as { ok: boolean; data: { expense_id: string; status: string; checks: { rule: string; severity: string }[] } };
     expect(out).toMatchObject({ ok: true, data: { status: "needs_review" } });
     expect(out.data.checks).toEqual([expect.objectContaining({ rule: "MILEAGE_RATE", severity: "block" })]);
     expect((await detail(out.data.expense_id)).allowedDecisions).toEqual(["return", "decline"]);
     expect((await weft.db.select().from(events).where(eq(events.type, "expense.submitted"))).map((e) => e.subjectRef)).toContain(out.data.expense_id);
-    const sam = await post("/v1/expenses", { workerId: "wrk_0025", category: "office", merchant: "Paperworks Supply (demo)", amountCents: 1_200, transactionDate: "2026-10-27", businessPurpose: "Folders" }, "usr_sam");
+    const sam = await post("/v1/expenses", { workerId: "wrk_0005", category: "office", merchant: "Paperworks Supply (demo)", amountCents: 1_200, transactionDate: "2026-10-27", businessPurpose: "Folders" }, "usr_sam");
     expect(sam.status).toBe(422);
-    expect(await sam.json()).toMatchObject({ code: "NOT_PERMITTED" });
+    expect(await sam.json()).toMatchObject({ code: "DOMAIN_NOT_OWN_EXPENSE" });
     expect((await post("/v1/expenses", { workerId: "wrk_0005", category: "travel", merchant: "x", amountCents: 0, transactionDate: "2026-10-27", businessPurpose: "y" })).status).toBe(400);
   });
 
@@ -167,5 +169,93 @@ describe("expenses (GP13)", () => {
     expect(img.headers.get("content-type")).toBe("image/png");
     expect(Buffer.from(await img.arrayBuffer()).subarray(1, 4).toString()).toBe("PNG");
     expect((await get("/v1/expenses/exp_0003/receipt")).status).toBe(404);
+  });
+});
+
+// Self-service (portal): the caller files and resubmits only their own claims; receipts ride the I-9 upload path.
+describe("expenses self-service (portal)", () => {
+  let w: TestWeft;
+  beforeAll(async () => { w = await createTestWeft(); });
+  afterAll(async () => { await w.close(); });
+  const call = async (who: string, method: string, path: string, body?: unknown) => {
+    const res = await w.app.request(path, { method, headers: { ...w.uiHeaders(who), ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, json: (await res.json()) as any };
+  };
+  const PNG = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
+  const form = (fields: Record<string, string>, receipt?: { type: string; bytes?: Buffer; name?: string }) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.set(k, v);
+    if (receipt) f.set("receipt", new Blob([receipt.bytes ?? PNG], { type: receipt.type }), receipt.name ?? "lunch-receipt.png");
+    return f;
+  };
+  const multipart = async (who: string, path: string, f: FormData) => {
+    const res = await w.app.request(path, { method: "POST", headers: w.uiHeaders(who), body: f });
+    return { status: res.status, json: (await res.json()) as any };
+  };
+  const mine = async (who: string) => W3ExpensesPortalPage.parse((await call(who, "GET", "/v1/portal/expenses")).json);
+  const receiptRows = async () => (await w.db.select().from(uploads).where(eq(uploads.purpose, "receipt"))).length;
+
+  it("an employee files their own claim, reads the return note and resubmits with the fix; the checks rerun", async () => {
+    const before = await mine("usr_sam");
+    expect(before.workerId).toBe("wrk_0025");
+    const meal = { category: "meals", merchant: "Harbor Noodle (demo)", amountCents: 4_250, transactionDate: "2026-10-22", businessPurpose: "Lunch with a candidate" };
+    const filed = await call("usr_sam", "POST", "/v1/portal/expenses", meal);
+    expect(filed.status, JSON.stringify(filed.json)).toBe(200);
+    const id = filed.json.data.expense_id as string;
+    expect(filed.json.data.checks.map((c: { rule: string; severity: string }) => `${c.rule}:${c.severity}`).sort()).toEqual(["MEALS_DETAIL_MISSING:review", "RECEIPT_MISSING:info"]);
+    expect((await mine("usr_sam")).data[0]).toMatchObject({ id, workerId: "wrk_0025", status: "needs_review", hasReceipt: false });
+    // Dana returns it with a note Sam reads in the portal; it cannot be resubmitted until it is returned.
+    expect((await call("usr_sam", "POST", `/v1/portal/expenses/${id}/resubmit`, { ...meal, attendees: "x" })).json.code).toBe("DOMAIN_NOT_RETURNED");
+    expect((await call("usr_dana", "POST", `/v1/expenses/${id}/decide`, { decision: "return", note: "Add who joined the lunch." })).status).toBe(200);
+    expect((await mine("usr_sam")).data.find((e) => e.id === id)).toMatchObject({ status: "returned", band: "needs_review", decisionNote: "Add who joined the lunch." });
+    const again = await multipart("usr_sam", `/v1/portal/expenses/${id}/resubmit`, form({ ...meal, amountCents: "4250", attendees: "Sam Okafor, one candidate" }, { type: "image/png" }));
+    expect(again.status, JSON.stringify(again.json)).toBe(200);
+    expect(again.json.data).toMatchObject({ expense_id: id, before: "returned", status: "needs_review", has_receipt: true, checks: [] });
+    const row = (await mine("usr_sam")).data.find((e) => e.id === id)!;
+    expect(row).toMatchObject({ status: "needs_review", decisionNote: null, hasReceipt: true, attendees: "Sam Okafor, one candidate" });
+    // The receipt is stored on the I-9 path under a masked name and served to admins only.
+    const [u] = await w.db.select().from(uploads).where(eq(uploads.id, row.receiptUploadId!));
+    expect(u).toMatchObject({ purpose: "receipt", workerId: "wrk_0025", fileName: "lu***.png", storagePath: expect.stringMatching(/^uploads\/[0-9a-f]{64}\.bin$/) });
+    expect((await w.app.request(`/v1/expenses/${id}/receipt`, { headers: w.uiHeaders("usr_dana") })).status).toBe(200);
+    expect((await w.app.request(`/v1/expenses/${id}/receipt`, { headers: w.uiHeaders("usr_sam") })).status).toBe(403);
+    // Both submissions emitted expense.submitted; the audit trail holds submit, return and resubmit.
+    expect((await w.db.select().from(events).where(eq(events.type, "expense.submitted"))).filter((e) => e.subjectRef === id)).toHaveLength(2);
+    expect((await call("usr_dana", "GET", `/v1/expenses/${id}`)).json.trail.map((t: { command: string }) => t.command)).toEqual(["expenses.submit", "expenses.decide", "expenses.resubmit"]);
+  });
+
+  it("nobody files or resubmits for someone else from the portal; a bad receipt is refused and leaves no file", async () => {
+    const own = await call("usr_sam", "POST", "/v1/portal/expenses", { workerId: "wrk_0005", category: "office", merchant: "Paperworks Supply (demo)", amountCents: 1_200, transactionDate: "2026-10-22", businessPurpose: "Folders" });
+    // A workerId in the body is ignored: a portal claim is always filed on the caller's own record.
+    expect(own.status, JSON.stringify(own.json)).toBe(200);
+    expect((await w.db.select().from(expenses).where(eq(expenses.id, own.json.data.expense_id)))[0]!.workerId).toBe("wrk_0025");
+    expect((await call("usr_sam", "POST", "/v1/portal/expenses/exp_0001/resubmit", { category: "travel", merchant: "x", amountCents: 100, transactionDate: "2026-10-22", businessPurpose: "y" })).status).toBe(404);
+    const n = await receiptRows();
+    const files = readdirSync(join(w.dataDir, "uploads")).length;
+    const txt = await multipart("usr_sam", "/v1/portal/expenses", form({ category: "office", merchant: "Paperworks Supply (demo)", amountCents: "1200", transactionDate: "2026-10-22", businessPurpose: "Folders" }, { type: "text/plain", bytes: Buffer.from("not a receipt") }));
+    expect([txt.status, txt.json.code]).toEqual([422, "INVALID_INPUT"]);
+    const refused = await multipart("usr_sam", "/v1/portal/expenses", form({ category: "mileage", merchant: "Personal car (demo)", amountCents: "6384", transactionDate: "2026-10-22", businessPurpose: "Depot visit" }, { type: "image/png", bytes: Buffer.from("89504e47 unique refused receipt") }));
+    expect([refused.status, refused.json.code]).toEqual([422, "DOMAIN_MILES_REQUIRED"]);
+    expect(await receiptRows()).toBe(n);
+    expect(readdirSync(join(w.dataDir, "uploads")).length).toBe(files);
+  });
+
+  it("the new hire persona submits from the portal with a receipt; the engine flags a claim dated before the start date", async () => {
+    const offerId = (await call("usr_dana", "POST", "/v1/offers", { candidateFirst: "Ivo", candidateLast: "Brandt", candidateEmail: "ivo.brandt@candidate.example", title: "Test Technician", departmentId: "dpt_operations", workState: "CA", baseCents: 9_000_000, startDate: "2026-11-16" })).json.data.offer_id as string;
+    const sent = (await call("usr_dana", "POST", `/v1/offers/${offerId}/send`)).json.data as { persona_principal_id: string; reserved_worker_id: string };
+    const persona = sent.persona_principal_id;
+    expect((await call(persona, "POST", "/v1/portal/expenses", { category: "travel", merchant: "Skyway Air (demo)", amountCents: 21_000, transactionDate: "2026-10-20", businessPurpose: "Flight to the onsite interview" })).json.code).toBe("UNKNOWN_REFERENCE");
+    const letter = (await call(persona, "GET", "/v1/portal/me")).json.documents[0];
+    expect((await call(persona, "POST", `/v1/portal/documents/${letter.id}/sign`, { typedName: "Ivo Brandt", documentSha256: letter.sha256 })).status).toBe(200);
+    const filed = await multipart(persona, "/v1/portal/expenses", form({ category: "travel", merchant: "Skyway Air (demo)", amountCents: "21000", transactionDate: "2026-10-20", businessPurpose: "Flight to the onsite interview" }, { type: "image/jpeg", name: "boarding-pass.jpg" }));
+    expect(filed.status, JSON.stringify(filed.json)).toBe(200);
+    expect(filed.json.data.checks.map((c: { rule: string; severity: string }) => `${c.rule}:${c.severity}`)).toEqual(["OUTSIDE_EMPLOYMENT:block"]);
+    const page = await mine(persona);
+    expect(page).toMatchObject({ workerId: sent.reserved_worker_id, count: 1, bands: { needs_review: 1, approved: 0, paid_out: 0, declined: 0 } });
+    // The persona stays inside the portal: the admin list and detail answer 403 PORTAL_ONLY.
+    expect((await call(persona, "GET", "/v1/expenses")).status).toBe(403);
+    expect((await call(persona, "GET", `/v1/expenses/${page.data[0]!.id}`)).status).toBe(403);
+    // Dana sees it in Needs review with the block, and only return or decline are allowed.
+    const d = W3ExpensesDetail.parse((await call("usr_dana", "GET", `/v1/expenses/${page.data[0]!.id}`)).json);
+    expect(d.allowedDecisions).toEqual(["return", "decline"]);
   });
 });

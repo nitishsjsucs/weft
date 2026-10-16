@@ -7,4 +7,12 @@ export const W3_EXPENSES_TID = {
   check: (rule: string) => `expense-check-${rule}`,
   decide: (decision: string) => `expense-decide-${decision}`,
   submit: "expense-submit",
+  // Portal: My expenses
+  portal: "portal-expenses",
+  portalNew: "portal-expense-new",
+  portalForm: "portal-expense-form",
+  portalField: (name: string) => `portal-expense-field-${name}`,
+  portalSubmit: "portal-expense-submit",
+  portalNote: (id: string) => `portal-expense-note-${id}`,
+  portalResubmit: (id: string) => `portal-expense-resubmit-${id}`,
 } as const;

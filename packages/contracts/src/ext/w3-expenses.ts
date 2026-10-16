@@ -28,6 +28,12 @@ export const W3ExpensesDetail = W3ExpensesRow.extend({
 });
 export type W3ExpensesDetail = z.infer<typeof W3ExpensesDetail>;
 
+/** GET /v1/portal/expenses: the caller's own claims, with the approver's note the employee reads on a returned item. */
+export const W3ExpensesPortalRow = W3ExpensesRow.extend({ decisionNote: z.string().nullable() });
+export type W3ExpensesPortalRow = z.infer<typeof W3ExpensesPortalRow>;
+export const W3ExpensesPortalPage = W3ExpensesPage.extend({ data: z.array(W3ExpensesPortalRow), workerId: z.string().nullable() });
+export type W3ExpensesPortalPage = z.infer<typeof W3ExpensesPortalPage>;
+
 /** GET /v1/expense-policy */
 export const W3ExpensesPolicy = z.object({
   version: z.number().int(), effectiveFrom: date, rules: z.record(z.string(), z.number().int()), sources: z.array(z.object({ rules: z.array(z.string()), source: z.string() })),

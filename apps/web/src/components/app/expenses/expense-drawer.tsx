@@ -73,7 +73,8 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
                 {live.milesX10 !== null ? <Row k="Miles" v={(live.milesX10 / 10).toFixed(1)} /> : null}
               </dl>
             </div>
-            {ex ? <p className="mt-2 text-1 text-gray-10">Receipt reads {usd(ex.totalCents)} on {fmtDate(ex.date)} (simulated extraction).</p> : null}
+            {ex ? <p className="mt-2 text-1 text-gray-10">Receipt reads {usd(ex.totalCents)} on {fmtDate(ex.date)} (simulated extraction).</p>
+              : live.hasReceipt ? <p className="mt-2 text-1 text-gray-10">No extraction for this receipt: the simulated extractor reads only seeded receipts, so compare the image by eye.</p> : null}
             <dl className="mt-2 text-[13px]">
               <Row k="Purpose" v={<span className="break-words">{live.businessPurpose}</span>} />
               {live.category === "meals" ? <Row k="Attendees" v={live.attendees ?? <span className="text-gray-9">none listed</span>} /> : null}
