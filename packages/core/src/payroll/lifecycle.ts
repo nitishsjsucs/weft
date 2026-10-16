@@ -184,6 +184,8 @@ export async function markProcessed(tx: DbTx, deps: Pick<LifecycleDeps, "now">, 
     const deltas = ytdDeltasFromLines({
       state: workerStates.get(p.workerId) ?? "CA", grossCents: p.grossCents, taxes: JSON.parse(p.taxesJson) as TaxCalcLine[],
       deductions: (JSON.parse(p.deductionsJson) as DeductionJson[]).filter((d) => d.pretax).map((d) => ({ code: d.code, amount_cents: d.amountCents })),
+      // Off-cycle runs (wave 2): bonus lines are supplemental wages, counted toward the $1,000,000 flat-rate threshold.
+      ...(run.subtype === "off_cycle" ? { supplementalCents: (JSON.parse(p.earningsJson) as { type: string; amountCents: number }[]).filter((e) => e.type === "bonus").reduce((s, e) => s + e.amountCents, 0) } : {}),
     });
     const values = Object.entries(deltas).sort(([a], [b]) => (a < b ? -1 : 1)).map(([code, amountCents]) => ({ workerId: p.workerId, year, code, amountCents, source: `payroll:${run.id}` }));
     if (values.length) await tx.insert(ytdLedger).values(values);

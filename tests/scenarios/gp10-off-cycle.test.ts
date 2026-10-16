@@ -57,6 +57,15 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     expect(pyc!.gross_cents).toBe(1_516_666);
     const [batch] = await weft.db.all<{ total_cents: number; status: string }>(sql`SELECT total_cents, status FROM sim_bank_batches WHERE id = ${runs[0]!.bank_batch_id}`);
     expect(batch!.total_cents).toBe(pyc!.net_cents);
+
+    // Payday 06:00 PT: the batch settles, the run is processed and the bonus counts as supplemental YTD wages.
+    await weft.clock.set("2026-10-27T14:00:00.000Z", 0);
+    await weft.scheduler.tick();
+    await weft.scheduler.tick();
+    const [after] = await weft.db.all<{ status: string }>(sql`SELECT status FROM payroll_runs WHERE id = ${runs[0]!.id}`);
+    expect(after!.status).toBe("processed");
+    const ytd = await weft.db.all<{ amount_cents: number }>(sql`SELECT amount_cents FROM ytd_ledger WHERE worker_id = ${WORKER} AND code = 'supplemental' AND source = ${`payroll:${runs[0]!.id}`}`);
+    expect(ytd.map((r) => r.amount_cents)).toEqual([500_000]);
   });
 
   it("the person route proposes too, and refuses hourly workers", async () => {
