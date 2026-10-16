@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { payRates } from "@weft/db";
-import type { Proposal } from "@weft/contracts";
+import { formatCents, type Proposal } from "@weft/contracts";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 const WORKER = "wrk_0042";   // Hollis Grey (demo), TX, $76,000.00 a year
@@ -17,6 +17,8 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
   beforeAll(async () => {
     weft = await createTestWeft();
     mcpKey = readFileSync(join(weft.dataDir, "demo-mcp-key.txt"), "utf8").trim();
+    // Hollis's paycheck was held out of the Oct 1 to 15 run (excluded), so that period really was missed.
+    await missPeriod(WORKER);
     // The raise to $82,000.00 took effect Oct 6, inside the Oct 1 to 15 period that was missed.
     const [current] = await weft.db.all<{ id: string; amount_cents: number }>(sql`SELECT id, amount_cents FROM pay_rates WHERE worker_id = ${WORKER} AND effective_to IS NULL`);
     expect(current!.amount_cents).toBe(7_600_000);
@@ -24,6 +26,13 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     await weft.db.insert(payRates).values({ id: "prt_9001", workerId: WORKER, kind: "salary", amountCents: 8_200_000, currency: "USD", effectiveFrom: "2026-10-06", effectiveTo: null, createdActionSeq: null });
   });
   afterAll(async () => { await weft.close(); });
+
+  /** Excludes the worker from the processed Oct 1 to 15 regular run and drops its YTD rows, as if never paid. */
+  async function missPeriod(workerId: string) {
+    const [run] = await weft.db.all<{ id: string }>(sql`SELECT id FROM payroll_runs WHERE subtype = 'regular' AND period_start = '2026-10-01' AND period_end = '2026-10-15'`);
+    await weft.db.run(sql`UPDATE paychecks SET status = 'excluded' WHERE payroll_run_id = ${run!.id} AND worker_id = ${workerId}`);
+    await weft.db.run(sql`DELETE FROM ytd_ledger WHERE worker_id = ${workerId} AND source = ${`payroll:${run!.id}`}`);
+  }
 
   const req = (method: string, path: string, headers: Record<string, string>, body?: unknown) =>
     weft.app.request(path, { method, headers: { ...headers, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -68,6 +77,25 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     expect(ytd.map((r) => r.amount_cents)).toEqual([150_000]);
   });
 
+  it("a correction of a paid period pays only the raise difference", async () => {
+    const [other] = await weft.db.all<{ worker_id: string; id: string; amount_cents: number; earnings_json: string }>(sql`SELECT p.worker_id, r.id, r.amount_cents, p.earnings_json FROM paychecks p JOIN payroll_runs pr ON pr.id = p.payroll_run_id JOIN pay_rates r ON r.worker_id = p.worker_id AND r.kind = 'salary' AND r.effective_to IS NULL WHERE pr.subtype = 'regular' AND pr.period_end = '2026-10-15' AND p.status = 'processed' AND p.worker_id != ${WORKER} ORDER BY p.worker_id LIMIT 1`);
+    if (!other) return expect.unreachable("a salaried worker paid on Oct 15");
+    const raised = other.amount_cents + 2_400_000;
+    await weft.db.run(sql`UPDATE pay_rates SET effective_to = '2026-10-05' WHERE id = ${other.id}`);
+    await weft.db.insert(payRates).values({ id: "prt_9002", workerId: other.worker_id, kind: "salary", amountCents: raised, currency: "USD", effectiveFrom: "2026-10-06", effectiveTo: null, createdActionSeq: null });
+    const dana = weft.uiHeaders("usr_dana");
+    const res = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [other.worker_id], periodStart: "2026-10-01", periodEnd: "2026-10-15", payday: "2026-10-30", reason: "correction" });
+    expect(res.status).toBe(200);
+    const p = (await (await req("GET", `/v1/proposals/${((await res.json()) as { proposalId: string }).proposalId}`, dana)).json()) as Proposal;
+    const salary = p.diff.filter((d) => d.label.includes(": Salary ("));
+    // Due: 5 of 15 days at the old rate plus 10 of 15 at the raised one, one rounding per line; less what Oct 15 paid.
+    const due = Math.round((other.amount_cents * 5) / 360) + Math.round((raised * 10) / 360);
+    const paid = (JSON.parse(other.earnings_json) as { type: string; amountCents: number }[]).filter((e) => e.type === "salary").reduce((n, e) => n + e.amountCents, 0);
+    expect(salary).toHaveLength(1);
+    expect(salary[0]!.label).toContain(`correction, ${formatCents(due)} due less ${formatCents(paid)} paid`);
+    expect(salary[0]!.after).toBe(formatCents(due - paid));
+  });
+
   it("an off-cycle over the $10,000.00 per-call ceiling is refused, not proposed", async () => {
     const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": mcpKey }, { worker_ids: [WORKER], period_start: "2026-10-16", period_end: "2026-10-31", payday: "2026-10-30", reason: "bonus", bonus_cents: { [WORKER]: 2_000_000 } });
     expect(res.status).toBe(422);
@@ -80,7 +108,15 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, status: "pending_approval" });
     const [hourly] = await weft.db.all<{ worker_id: string; period_start: string; period_end: string }>(sql`SELECT t.worker_id, t.period_start, t.period_end FROM time_entries t JOIN pay_rates r ON r.worker_id = t.worker_id AND r.kind = 'hourly' AND r.effective_to IS NULL WHERE t.period_start = '2026-10-01' ORDER BY t.worker_id LIMIT 1`);
-    const ok = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [hourly!.worker_id], periodStart: hourly!.period_start, periodEnd: hourly!.period_end, payday: "2026-10-30", reason: "correction" });
+    // Paid in the Oct 15 run: missed_payroll is refused and a correction with nothing more due is empty.
+    const paid = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [hourly!.worker_id], periodStart: hourly!.period_start, periodEnd: hourly!.period_end, payday: "2026-10-30", reason: "missed_payroll" });
+    expect(paid.status).toBe(422);
+    expect(((await paid.json()) as { code: string }).code).toBe("DOMAIN_ALREADY_PAID");
+    const same = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [hourly!.worker_id], periodStart: hourly!.period_start, periodEnd: hourly!.period_end, payday: "2026-10-30", reason: "correction" });
+    expect(same.status).toBe(422);
+    expect(((await same.json()) as { code: string }).code).toBe("DOMAIN_EMPTY_RUN");
+    await missPeriod(hourly!.worker_id);
+    const ok = await req("POST", "/v1/payrolls/off-cycle", dana, { workerIds: [hourly!.worker_id], periodStart: hourly!.period_start, periodEnd: hourly!.period_end, payday: "2026-10-30", reason: "missed_payroll" });
     expect(ok.status).toBe(200);
     const p = (await (await req("GET", `/v1/proposals/${((await ok.json()) as { proposalId: string }).proposalId}`, dana)).json()) as Proposal;
     expect(p.diff.some((d) => d.label.includes(": Regular hours (15 of 15 days"))).toBe(true);

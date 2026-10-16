@@ -17,8 +17,8 @@ describe("off-cycle proration by calendar days", () => {
     expect(calendarDays("2026-10-16", "2026-10-31")).toBe(16);
     // 12,000,000 / 24 x 5 / 16 = 156,250 exactly; 13,000,000 / 24 x 11 / 16 = 372,395.833... -> 372,396.
     expect(lines.map((l) => [l.type, l.amountCents])).toEqual([["salary", 156_250], ["salary", 372_396]]);
-    expect(lines[0]!.note).toBe("5 of 16 days, 2026-10-16 to 2026-10-20, at 120000.00 a year");
-    expect(lines[1]!.note).toBe("11 of 16 days, 2026-10-21 to 2026-10-31, at 130000.00 a year");
+    expect(lines[0]!.note).toBe("5 of 16 days, 2026-10-16 to 2026-10-20, at $120,000.00 a year");
+    expect(lines[1]!.note).toBe("11 of 16 days, 2026-10-21 to 2026-10-31, at $130,000.00 a year");
   });
 
   it("pays a full period at one rate as one line", () => {
@@ -35,7 +35,7 @@ describe("off-cycle proration by calendar days", () => {
     expect(lines.map((l) => [l.type, l.amountCents, l.hoursX100])).toEqual([
       ["regular", 84_679, 2_717], ["overtime", 7_793, 167], ["regular", 181_093, 5_433], ["overtime", 16_665, 333],
     ]);
-    expect(lines[0]!.note).toBe("5 of 15 days, 2026-10-01 to 2026-10-05, 27.17 h at 31.17 an hour");
+    expect(lines[0]!.note).toBe("5 of 15 days, 2026-10-01 to 2026-10-05, 27.17 h at $31.17 an hour");
   });
 
   it("taxes the bonus at the federal flat 22 percent and the salary by the regular method", () => {

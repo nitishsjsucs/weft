@@ -2,8 +2,8 @@
 // for missed pay. Both reuse the regular engine inputs (W-4, benefits, employer rates, YTD) but take their earning
 // lines explicitly, then go through the same submitRun path to the bank simulator as a regular run.
 // Integer cents throughout; decimal.js with one half-up rounding per earning line.
-import { and, eq } from "drizzle-orm";
-import type { Flag, IdPrefix } from "@weft/contracts";
+import { and, eq, inArray } from "drizzle-orm";
+import { formatCents, type Flag, type IdPrefix } from "@weft/contracts";
 import { paychecks, payrollRuns, workers, type DbTx } from "@weft/db";
 import { calculatePaycheck, dec, roundCents, TAX_2026, TAX_DATA_VERSION, type EarningLine, type PaycheckInput, type TaxTables } from "@weft/payroll-tax";
 import { addDays, isBusinessDay, lastDayOfMonth, ptToUtc, semimonthlyPeriod, workingDays, ymd } from "./calendar";
@@ -198,7 +198,7 @@ export function proratedSalaryLines(w: Pick<WorkerRow, "startDate" | "endDate">,
     type: "salary", hoursX100: null,
     // One division at the end, so a half-cent boundary is exact: annual x days / (24 x period days).
     amountCents: roundCents(dec(s.rate.amountCents).times(s.days).dividedBy(SEMIMONTHLY_PERIODS * total)),
-    note: s.days === total ? `${total} of ${total} days at ${(s.rate.amountCents / 100).toFixed(2)} a year` : `${s.days} of ${total} days, ${s.from} to ${s.to}, at ${(s.rate.amountCents / 100).toFixed(2)} a year`,
+    note: s.days === total ? `${total} of ${total} days at ${formatCents(s.rate.amountCents)} a year` : `${s.days} of ${total} days, ${s.from} to ${s.to}, at ${formatCents(s.rate.amountCents)} a year`,
   }));
 }
 
@@ -227,7 +227,7 @@ export function proratedHourlyLines(w: Pick<WorkerRow, "startDate" | "endDate">,
   const out: SpecialEarning[] = [];
   for (const s of segs) {
     const span = s.days === total ? `${total} of ${total} days` : `${s.days} of ${total} days, ${s.from} to ${s.to}`;
-    const rate = `${(s.rate.amountCents / 100).toFixed(2)} an hour`;
+    const rate = `${formatCents(s.rate.amountCents)} an hour`;
     if (regularX100 > 0) {
       const h = roundCents(dec(regularX100).times(s.days).dividedBy(total));
       out.push({ type: "regular", hoursX100: h, amountCents: roundCents(dec(s.rate.amountCents).times(regularX100).times(s.days).dividedBy(100 * total)), note: `${span}, ${(h / 100).toFixed(2)} h at ${rate}` });
@@ -240,7 +240,29 @@ export function proratedHourlyLines(w: Pick<WorkerRow, "startDate" | "endDate">,
   return out;
 }
 
-/** The earning lines of an off-cycle run: prorated salary (unless reason is bonus only) plus the bonus as supplemental wages. */
+/** A regular run already submitted (processing or processed) that pays this worker for an overlapping period. */
+export async function submittedRegularRunFor(tx: DbTx, workerId: string, periodStart: string, periodEnd: string): Promise<string | null> {
+  const rows = await tx.select({ runId: paychecks.payrollRunId, status: paychecks.status }).from(paychecks).where(eq(paychecks.workerId, workerId));
+  if (!rows.length) return null;
+  const live = rows.filter((r) => r.status === "processing" || r.status === "processed");
+  if (!live.length) return null;
+  const runs = await tx.select().from(payrollRuns).where(inArray(payrollRuns.id, live.map((r) => r.runId)));
+  const hit = runs.find((r) => r.subtype === "regular" && r.periodStart <= periodEnd && r.periodEnd >= periodStart);
+  return hit?.id ?? null;
+}
+
+/** Salary and hourly cents a submitted regular paycheck already paid this worker for the run's period. */
+async function paidWageCents(tx: DbTx, runId: string, workerId: string): Promise<number> {
+  const [p] = await tx.select({ earningsJson: paychecks.earningsJson }).from(paychecks).where(and(eq(paychecks.payrollRunId, runId), eq(paychecks.workerId, workerId)));
+  const lines = JSON.parse(p?.earningsJson ?? "[]") as { type: string; amountCents: number }[];
+  return lines.filter((e) => e.type === "salary" || e.type === "regular" || e.type === "overtime").reduce((n, e) => n + e.amountCents, 0);
+}
+
+/**
+ * The earning lines of an off-cycle run: prorated salary (unless reason is bonus only) plus the bonus as supplemental
+ * wages. A period a submitted regular run already paid is never paid twice: missed_payroll is refused with
+ * DOMAIN_ALREADY_PAID, and correction pays only what the prorated pay exceeds the wages already paid.
+ */
 export async function offCycleLines(tx: DbTx, req: OffCycleInput): Promise<SpecialLine[]> {
   const ids = [...new Set(req.workerIds)].sort();
   const world = await loadWorld(tx, req.companyId, ids);
@@ -251,6 +273,10 @@ export async function offCycleLines(tx: DbTx, req: OffCycleInput): Promise<Speci
     if (!w || w.type !== "employee") throw new OffCycleRefusal("DOMAIN_NOT_EMPLOYEE", `${id} is not an employee of this company`);
     const rates = world.rates.get(id) ?? [];
     const earnings: SpecialEarning[] = [];
+    const paidBy = req.reason === "bonus" ? null : await submittedRegularRunFor(tx, id, req.periodStart, req.periodEnd);
+    if (paidBy && req.reason !== "correction") {
+      throw new OffCycleRefusal("DOMAIN_ALREADY_PAID", `${id} was already paid for ${req.periodStart} to ${req.periodEnd} in ${paidBy}; use reason correction to pay only a difference, or bonus`);
+    }
     if (req.reason !== "bonus") {
       const hourly = rateSegments(w, rates, req.periodStart, req.periodEnd).segs.some((x) => x.rate.kind === "hourly");
       if (hourly) {
@@ -263,6 +289,13 @@ export async function offCycleLines(tx: DbTx, req: OffCycleInput): Promise<Speci
       } else {
         earnings.push(...proratedSalaryLines(w, rates, req.periodStart, req.periodEnd));
       }
+      if (paidBy) {
+        // Correction of a paid period: one line for what the prorated pay exceeds the wages already paid.
+        const due = earnings.reduce((n, e) => n + e.amountCents, 0);
+        const paid = await paidWageCents(tx, paidBy, id);
+        earnings.length = 0;
+        if (due > paid) earnings.push({ type: earningKindOf(rates, req), amountCents: due - paid, hoursX100: null, note: `correction, ${formatCents(due)} due less ${formatCents(paid)} paid in ${paidBy}` });
+      }
     }
     const bonus = req.bonusCents[id] ?? 0;
     if (bonus > 0) earnings.push({ type: "bonus", amountCents: bonus, hoursX100: null, note: "supplemental wages, federal flat 22 percent" });
@@ -270,6 +303,10 @@ export async function offCycleLines(tx: DbTx, req: OffCycleInput): Promise<Speci
     lines.push({ workerId: id, earnings });
   }
   return lines;
+}
+
+function earningKindOf(rates: PayRateRow[], req: OffCycleInput): "salary" | "regular" {
+  return rates.some((r) => r.kind === "hourly" && r.effectiveFrom <= req.periodEnd && (r.effectiveTo === null || r.effectiveTo >= req.periodStart)) ? "regular" : "salary";
 }
 
 export class OffCycleRefusal extends Error {

@@ -208,7 +208,11 @@ const early = (await weft.db.select().from(routineRuns).where(eq(routineRuns.rou
 say(`   Tessa signed the offer and stopped; before the due date rt_onboarding_nudge is ${early.map((r) => r.status).join(", ")}: ${early[0]?.summary ?? ""}`);
 
 head("GP10 off-cycle pay");
-// Fixture, as in the scenario test: Hollis Grey's raise from $76,000.00 to $82,000.00 took effect Oct 6, mid-period.
+// Fixture, as in the scenario test: Hollis Grey's paycheck was held out of the Oct 1 to 15 run, so that period was
+// really missed, and his raise from $76,000.00 to $82,000.00 took effect Oct 6, mid-period.
+const [oct15] = await weft.db.all<{ id: string }>(sql`SELECT id FROM payroll_runs WHERE subtype = 'regular' AND period_start = '2026-10-01' AND period_end = '2026-10-15'`);
+await weft.db.run(sql`UPDATE paychecks SET status = 'excluded' WHERE payroll_run_id = ${oct15!.id} AND worker_id = 'wrk_0042'`);
+await weft.db.run(sql`DELETE FROM ytd_ledger WHERE worker_id = 'wrk_0042' AND source = ${`payroll:${oct15!.id}`}`);
 const [hollis] = await weft.db.all<{ id: string }>(sql`SELECT id FROM pay_rates WHERE worker_id = 'wrk_0042' AND effective_to IS NULL`);
 await weft.db.run(sql`UPDATE pay_rates SET effective_to = '2026-10-05' WHERE id = ${hollis!.id}`);
 await weft.db.insert(payRates).values({ id: "prt_9001", workerId: "wrk_0042", kind: "salary", amountCents: 8_200_000, currency: "USD", effectiveFrom: "2026-10-06", effectiveTo: null, createdActionSeq: null });

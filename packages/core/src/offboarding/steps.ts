@@ -8,7 +8,8 @@ import { sha256Hex } from "../shared/hash";
 import type { CommandDeps } from "../shared/deps";
 import { DomainRefusal } from "../demo/define";
 import { lastDayOfMonth, ymd } from "../payroll/calendar";
-import { businessDayOnOrAfter, finalPayEarnings, planSpecialRun, type SpecialEarning } from "../payroll/offcycle";
+import { businessDayOnOrAfter, finalPayEarnings, planSpecialRun, submittedRegularRunFor, type SpecialEarning } from "../payroll/offcycle";
+export { submittedRegularRunFor };
 import { computeTotals } from "../payroll/totals";
 import type { CaseRow } from "./cases";
 import type { WorkerRow } from "../payroll/compute";
@@ -61,17 +62,6 @@ export async function finalPayPlan(tx: DbTx, c: CaseRow, w: WorkerRow, payUnused
     employeeTaxesCents: calc.employee_taxes_cents, employerTaxesCents: calc.employer_taxes_cents, deductionsCents, ptoHoursX100,
     hasBank: p.paycheck.bank !== null, hash: sha256Hex(canonicalJson(material)),
   };
-}
-
-/** A regular run already submitted (processing or processed) that pays this worker for an overlapping period. */
-export async function submittedRegularRunFor(tx: DbTx, workerId: string, periodStart: string, periodEnd: string): Promise<string | null> {
-  const rows = await tx.select({ runId: paychecks.payrollRunId, status: paychecks.status }).from(paychecks).where(eq(paychecks.workerId, workerId));
-  if (!rows.length) return null;
-  const live = rows.filter((r) => r.status === "processing" || r.status === "processed");
-  if (!live.length) return null;
-  const runs = await tx.select().from(payrollRuns).where(inArray(payrollRuns.id, live.map((r) => r.runId)));
-  const hit = runs.find((r) => r.subtype === "regular" && r.periodStart <= periodEnd && r.periodEnd >= periodStart);
-  return hit?.id ?? null;
 }
 
 export function finalPayDiff(plan: FinalPayPlan): { label: string; before: string; after: string }[] {
