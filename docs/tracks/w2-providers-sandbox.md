@@ -47,6 +47,8 @@ wiring (the cut line), and `code.run` on QuickJS.
     `SANDBOX_NOT_ALLOWED` data before the pipeline. No batch state is touched. `memory.search` and `memory.read`
     get `at: <HEAD captured at start>` unless the script names a commit, so one script sees one memory commit.
   - `select.ts`: `WEFT_SANDBOX` (`off` default, `quickjs` or `on`, anything else is not built).
+  - `files.ts`: each run's source and redacted output go to the run workspace,
+    `companies/<id>/runs/<run id>/code/<step>.js` and `<step>.out.json`.
   - `code.run` in `builtins.ts`: R0 read, `mcp: "hidden"`, `sandbox: "hidden"` (cannot nest), tiers executable,
     refused outside an agent run, `UNAVAILABLE` with the reason when the sandbox is off. Input `{ source, purpose,
     inputs_json? }`. `SANDBOX_TIMEOUT`, `SANDBOX_OOM` and `CALL_BUDGET` are refusals; a script error is data
@@ -123,8 +125,8 @@ is in `.scratch/w2-providers-sandbox/left.md` (both in the main checkout; the le
 - A return value over the 8,000 character observation cap is offloaded by the pipeline to a run artifact the model
   pages with `agent.read_artifact` (tested); over 64 KiB it is a `SANDBOX_ERROR` asking for a smaller summary,
   where harness 3.5 wants `runs/<id>/code/<n>.out.json` with an `artifact_ref` at any size.
-- Source and output are not written to the run workspace; inner calls are listed in the result, not as nested
-  `run_steps` rows (the executor does not write `run_steps`).
+- Inner calls are listed in the code.run result, not as nested `run_steps` rows with `parent_step_n` (the executor
+  does not write `run_steps`; the loop would have to expand them).
 - QuickJS runs on the API thread, so a long script can hold the event loop for up to the 2 s CPU deadline; a worker
   thread is the fix.
 - Per-provider pricing in the loop (Claude at $4 and $20 per million, local at zero) and the compose wiring of

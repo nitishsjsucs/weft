@@ -8,6 +8,7 @@ import { DEFAULT_CODE_LIMITS, type Preview } from "@weft/contracts";
 import type { WeftCommand } from "@weft/core";
 import { actions, execRuns, proposals, runArtifacts } from "@weft/db";
 import type { Engine } from "./engine";
+import { codeFiles } from "./sandbox/files";
 import { sandboxCall } from "./sandbox/host";
 import { sandboxFromEnv } from "./sandbox/select";
 
@@ -127,7 +128,9 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       // Memory reads in the box are pinned to the commit at start (harness 3.3).
       let memoryAt = "";
       try { memoryAt = await e.memory.head(); } catch { /* no memory repo in this world */ }
+      const files = codeFiles(e, ctx, i.source);
       const res = await s.engine.run({ language: "js", source: i.source, purpose: i.purpose, inputs }, DEFAULT_CODE_LIMITS, sandboxCall(e, deps.tx, ctx, { memoryAt }));
+      files.writeOutput({ purpose: i.purpose, ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, tainted: res.tainted, memory_at: memoryAt });
       // Resource failures are refusals the model can act on; a script error comes back as data so it can be fixed.
       if (res.error && res.error.code !== "SANDBOX_ERROR") throw Object.assign(new Error(res.error.message), { code: res.error.code });
       const data = { ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, memory_at: memoryAt };

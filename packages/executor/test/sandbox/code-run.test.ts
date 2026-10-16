@@ -1,13 +1,15 @@
 // code.run through the real executor (harness 3.4 and 3.6): weft.call routes read commands through the pipeline
 // with the run handle, writes and proposals are SANDBOX_NOT_ALLOWED, taint is the OR of the inner calls and a
 // tainted result is wrapped with the run nonce, limits come back as refusals, and WEFT_SANDBOX=off refuses.
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { RunHandle, ToolOutcome } from "@weft/contracts";
 import { z } from "zod";
 import type { WeftCommand } from "@weft/core";
 import { createSandbox, encodings } from "../../src/index";
 import { nonceFromToken } from "../../src/untrusted";
-import { count, fixtureCommands, makeWorld, type World } from "../fixtures";
+import { CMP, count, fixtureCommands, makeWorld, type World } from "../fixtures";
 
 // The fixture reads are sandbox "hidden"; the real read commands mark themselves "read". Two of them do here.
 const SECRET = "sim-portal-Sandbox/Leak+7a1b?=&";
@@ -49,6 +51,11 @@ describe("code.run", () => {
     expect(d.calls.map((c) => [c.command, c.outcome])).toEqual([["people__search", "done"], ["people.search", "done"]]);
     expect(await count(w.db, "actions")).toBe(actionsBefore);
     expect((await w.executor.agent.runState(h)).tainted).toBe(false);
+    // Source and output are kept in the run workspace (harness 3.5).
+    const dir = join(w.dir, "companies", CMP, "runs", h.runId, "code");
+    expect(readFileSync(join(dir, "1.js"), "utf8")).toContain("weft.call('people__search'");
+    expect(JSON.parse(readFileSync(join(dir, "1.out.json"), "utf8"))).toMatchObject({ ok: true, value: { hits: 0 } });
+    expect(existsSync(join(dir, "2.js"))).toBe(false);
   });
 
   it("acceptance: a write command gives SANDBOX_NOT_ALLOWED as data and creates no proposal", async () => {
