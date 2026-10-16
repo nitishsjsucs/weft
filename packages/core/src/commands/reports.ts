@@ -8,7 +8,7 @@
 // GET /v1/agent/runs/:id/artifacts/:ref.
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { ReportMetric, Refused, type ExecContext } from "@weft/contracts";
+import { formatCents, ReportMetric, Refused, type ExecContext } from "@weft/contracts";
 import { principals, type DbTx } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { ptDateOf } from "../demo/define";
@@ -36,9 +36,21 @@ async function assertMetricGrant(tx: DbTx, ctx: ExecContext, metric: ReportMetri
   if (!level || level === "none") throw new Refused("NOT_PERMITTED", `${metric} needs view access to ${domain}, which ${who} does not have`);
 }
 
+/**
+ * The sum of every money column over the whole range, with display strings. A person asking for cost by month often
+ * wants the total as well; without it the model adds the rows itself and the grounding check rejects the sum
+ * (live L7, wave 3). Only *_cents columns are summed: counts, minutes and rates do not add up across rows.
+ */
+export function rangeTotals(rows: Record<string, unknown>[]): Record<string, number | string> {
+  const out: Record<string, number | string> = {};
+  for (const row of rows) for (const [k, v] of Object.entries(row)) if (k.endsWith("_cents") && typeof v === "number") out[k] = Number(out[k] ?? 0) + v;
+  for (const k of Object.keys(out)) out[`${k.slice(0, -"_cents".length)}_display`] = formatCents(out[k] as number);
+  return out;
+}
+
 export const reportsQueryCommand: WeftCommand<ReportsQueryInput> = {
   name: "reports.query", namespace: "reports", summary: "Run a report and return rows plus a chart",
-  description: "Aggregates company data into a report with rows and a chart the panel draws. Metrics: payroll_cost_by_month (gross, employer taxes, benefits, reimbursements, contractor payouts), headcount_by_state, headcount_by_department, hires_and_departures_by_month, turnover_rate, time_off_minutes_by_month, expenses_by_category. Example: {\"metric\": \"payroll_cost_by_month\"}.",
+  description: "Aggregates company data into a report with rows and a chart the panel draws. Metrics: payroll_cost_by_month (gross, employer taxes, benefits, reimbursements, contractors), headcount_by_state, headcount_by_department, hires_and_departures_by_month, turnover_rate, time_off_minutes_by_month, expenses_by_category. range_totals sums money columns. Example: {\"metric\": \"payroll_cost_by_month\"}.",
   compactDescription: "Report rows plus a chart for one of seven company metrics.",
   input: ReportsQueryInput, domain: "company", needs: "view", effect: "read", risk: () => "R0", approval: "never", autoAllow: "never",
   amountCents: null, ceilingKey: null, reversible: false, lease: null, tiers: { main: "executable", task: "executable" }, mcp: "read", sandbox: "read",
@@ -52,7 +64,7 @@ export const reportsQueryCommand: WeftCommand<ReportsQueryInput> = {
     const today = ptDateOf(ctx.now);
     const range = defaultRange(i.to ?? today);
     const r = await runReport(deps.tx, { companyId: ctx.companyId, metric: i.metric, from: i.from ?? range.from, to: i.to ?? today, groupBy: (i.group_by ?? "month") as ReportGroupBy });
-    const data = { metric: r.metric, from: r.from, to: r.to, group_by: r.groupBy, rows: r.rows, chart: r.chart, artifactRef: r.artifactRef };
+    const data = { metric: r.metric, from: r.from, to: r.to, group_by: r.groupBy, rows: r.rows, range_totals: rangeTotals(r.rows), chart: r.chart, artifactRef: r.artifactRef };
     return { data, summary: r.summary };
   },
 };
