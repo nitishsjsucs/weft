@@ -35,7 +35,7 @@ pnpm exec vitest run --project @weft/core packages/core/test/offboarding
 WEFT_E2E_WEB_PORT=4320 WEFT_E2E_API_PORT=4321 pnpm exec playwright test e2e/gp9-offboarding.spec.ts e2e/gp10-off-cycle.spec.ts
 ```
 
-In the app: open a person (for example `/app/people/wrk_0004`), click Terminate, approve the four cards in the case view, then Run remaining steps. GP9 gives Imani an SSO account first (`POST /v1/tools/it.create_account` with `system: "sso"`), because the seed has none.
+In the app: open a person (for example `/app/people/wrk_0004`), click Terminate, approve the cards in the case view (three, or four once the person has an SSO account), then Run remaining steps. For off-cycle pay, open `/app/people/wrk_0042` and use Off-cycle pay. GP9 gives Imani an SSO account first (`POST /v1/tools/it.create_account` with `system: "sso"`), because the seed has none.
 
 ## Tests
 
