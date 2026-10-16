@@ -31,7 +31,7 @@ Branch `track/w2-offboarding`, cut from main at 9b88e26. Golden paths GP9 (termi
 pnpm exec vitest run --project @weft/tests tests/scenarios/gp9-offboarding.test.ts tests/scenarios/gp10-off-cycle.test.ts
 pnpm exec vitest run --project @weft/api apps/api/test/offboarding.test.ts
 pnpm exec vitest run --project @weft/core packages/core/test/offboarding
-WEFT_E2E_WEB_PORT=4320 WEFT_E2E_API_PORT=4321 pnpm exec playwright test e2e/gp9-offboarding.spec.ts
+WEFT_E2E_WEB_PORT=4320 WEFT_E2E_API_PORT=4321 pnpm exec playwright test e2e/gp9-offboarding.spec.ts e2e/gp10-off-cycle.spec.ts
 ```
 
 In the app: open a person (for example `/app/people/wrk_0004`), click Terminate, approve the four cards in the case view, then Run remaining steps. GP9 gives Imani an SSO account first (`POST /v1/tools/it.create_account` with `system: "sso"`), because the seed has none.
@@ -43,6 +43,7 @@ In the app: open a person (for example `/app/people/wrk_0004`), click Terminate,
 - `packages/core/test/offboarding/offcycle.test.ts`: proration, the 22 percent split and the PTO accrual, exact to the cent.
 - `apps/api/test/offboarding.test.ts`: route validation, the `not_mcp` refusal, skipped steps, untainted proposals on the person's behalf, final pay after a submitted regular run.
 - `e2e/gp9-offboarding.spec.ts`: the GP9 path in the browser.
+- `e2e/gp10-off-cycle.spec.ts`: an off-cycle request becomes a proposal whose inbox card lists the earning lines; approving it there submits the `off_cycle` run.
 
 ## Stubbed or simplified
 

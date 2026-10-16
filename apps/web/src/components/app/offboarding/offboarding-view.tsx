@@ -20,6 +20,7 @@ const DIRECT_STEPS = ["group_removal", "app_removal", "cobra_notice", "benefits_
 const STEP_TONE: Record<OffboardingStep["status"], "gray" | "amber" | "green" | "red" | "blue"> = { pending: "gray", proposed: "amber", done: "green", skipped: "gray", failed: "red" };
 const CASE_TONE: Record<OffboardingCase["status"], "blue" | "green" | "gray"> = { open: "blue", complete: "green", cancelled: "gray" };
 const human = (s: string) => s.replaceAll("_", " ");
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function useWorkerNames(): Map<string, string> {
   const w = useGet("/v1/workers", { query: { limit: 100 } });
@@ -80,7 +81,7 @@ export function OffboardingCaseView({ id }: { id: string }) {
   const name = names.get(c.workerId) ?? c.workerId;
   return (
     <div className="mx-auto w-full max-w-[1000px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title={`Offboarding ${name}`} subtitle={`${human(c.kind)} termination, last day ${fmtDate(c.lastDay, { month: "short", day: "numeric", year: "numeric" })}. Opened ${fmtDateTime(c.createdAt)}.`}
+      <PageHeader title={`Offboarding ${name}`} subtitle={`${capitalize(human(c.kind))} termination, last day ${fmtDate(c.lastDay, { month: "short", day: "numeric", year: "numeric" })}. Opened ${fmtDateTime(c.createdAt)}.`}
         meta={<span className="flex items-center gap-3"><Badge data-testid={W2_OFFBOARDING_TID.caseStatus} tone={CASE_TONE[c.status]} size="md">{c.status === "complete" ? "Complete" : c.status === "open" ? "Open" : "Cancelled"}</Badge><Link href={`/app/people/${c.workerId}`} className="text-2 text-accent-11 hover:underline">View person</Link></span>}
         actions={c.status === "open" ? (
           <Button data-testid={W2_OFFBOARDING_TID.runRemaining} variant="primary" size="sm" disabled={!finalPayDone || pendingDirect.length === 0 || runRemaining.pending}
