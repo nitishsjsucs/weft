@@ -11,6 +11,9 @@
 // - rt_milestones: weekday 09:00 PT, anniversaries and opted-in birthdays (month and day only) to #general. Disabled.
 // - rt_contractor_forms: Mondays 09:00 PT. Contractors whose W-9 or W-8 is missing, expired or lapses within 60 days
 //   get an email asking for a new one (contractors.request_tax_forms). Disabled.
+// - rt_thirty_day_checkin: weekday 09:00 PT. Day 30 after the start date the hire gets a four-question check-in by
+//   email, and one nudge three days later if it is still open (onboarding.send_checkins). The manager's summary is sent
+//   when the hire submits (onboarding.submit_checkin, human only). Disabled.
 import type { Precheck, ReadOnlyExecutor, RoutineDef } from "@weft/contracts";
 import type { Predicate } from "../checks";
 
@@ -73,6 +76,17 @@ export const RT_CONTRACTOR_FORMS: RoutineDef = {
   tools: ["contractors.list_tax_forms", "contractors.request_tax_forms"],
   precheck: "contractor_forms",
   checklist: [{ id: "requested", label: "ask for each missing or lapsing form", check: "tax_forms_requested:{request_count}" }],
+  budget, surface: { worthSurfacing: false, channel: null }, source: "prebuilt", taintedBy: null,
+};
+
+export const RT_THIRTY_DAY_CHECKIN: RoutineDef = {
+  id: "rt_thirty_day_checkin", name: "First-month check-in",
+  description: "Weekday mornings, send each hire who reached day 30 a short four-question check-in, nudge once three days later if it is still open, and email the manager a summary when it comes back.",
+  ownerPrincipalId: OWNER, enabled: false, autonomy: "approve", trigger: { type: "cron", cron: "0 9 * * 1-5", tz: TZ }, filter: null,
+  instructions: "Call onboarding.send_checkins with the derived arguments; it writes each email itself. Then write a one-line final message.",
+  tools: ["onboarding.list_checkins", "onboarding.send_checkins"],
+  precheck: "thirty_day_checkin",
+  checklist: [{ id: "sent", label: "send due check-ins and nudges", check: "checkins_sent:{send_count}:{nudge_count}" }],
   budget, surface: { worthSurfacing: false, channel: null }, source: "prebuilt", taintedBy: null,
 };
 
@@ -161,11 +175,27 @@ export const contractorForms: Precheck = async (ctx, exec) => {
   };
 };
 
+export const thirtyDayCheckin: Precheck = async (ctx, exec) => {
+  const asOf = ptDate(ctx.now);
+  const p = await read(exec, ctx.companyId, "onboarding.list_checkins", { as_of: asOf });
+  if (!p) return { action: "skip", reason: "The check-ins could not be read." };
+  const send = ((Array.isArray(p.to_send) ? p.to_send : []) as { worker_id: string; due_on: string }[]);
+  const nudge = ((Array.isArray(p.to_nudge) ? p.to_nudge : []) as { worker_id: string; checkin_id: string }[]);
+  if (!send.length && !nudge.length) return { action: "skip", reason: `No first-month check-in to send or nudge on ${asOf}.` };
+  return {
+    action: "run", severity: "digest", subjectRefs: [...send.map((r) => r.worker_id), ...nudge.map((r) => r.worker_id)],
+    // Statuses only: the hire's written answers never reach the routine.
+    findings: { as_of: asOf, send: send.map((r) => ({ worker_id: r.worker_id, due_on: r.due_on })), nudge: nudge.map((r) => ({ worker_id: r.worker_id, checkin_id: r.checkin_id })) },
+    derivedArgs: { as_of: asOf, send_count: send.length, nudge_count: nudge.length,
+      "onboarding.send_checkins": { send: send.map((r) => r.worker_id), nudge: nudge.map((r) => r.checkin_id), as_of: asOf } },
+  };
+};
+
 const callsTo = (facts: Parameters<Predicate>[1], command: string) => facts.calls.filter((c) => c.command.replace("__", ".") === command);
 
-export const routines: RoutineDef[] = [RT_NEW_HIRE_READY, RT_MONTHLY_EXEC_REPORT, RT_EXEC_BRIEFING, RT_MILESTONES, RT_CONTRACTOR_FORMS];
+export const routines: RoutineDef[] = [RT_NEW_HIRE_READY, RT_MONTHLY_EXEC_REPORT, RT_EXEC_BRIEFING, RT_MILESTONES, RT_CONTRACTOR_FORMS, RT_THIRTY_DAY_CHECKIN];
 export const prechecks: Record<string, Precheck> = {
-  new_hire_ready: newHireReady, monthly_exec_report: reportPrecheck("monthly"), exec_briefing: reportPrecheck("weekly"), milestones, contractor_forms: contractorForms,
+  new_hire_ready: newHireReady, monthly_exec_report: reportPrecheck("monthly"), exec_briefing: reportPrecheck("weekly"), milestones, contractor_forms: contractorForms, thirty_day_checkin: thirtyDayCheckin,
 };
 export const predicates: Record<string, Predicate> = {
   /** Every blocked hire got a suggestion (a count of 0 passes without a call). */
@@ -180,6 +210,15 @@ export const predicates: Record<string, Predicate> = {
     if (want === 0) return true;
     return callsTo(f, "contractors.request_tax_forms").some((c) => {
       if (c.status === "done") return ((c.data as { requested?: unknown[] } | null)?.requested ?? []).length >= want;
+      return c.status === "pending_approval" && c.proposalId !== null && !["denied", "expired", "failed", "superseded", "dismissed"].includes(f.proposalStatus(c.proposalId) ?? "pending");
+    });
+  },
+  /** The due check-ins and nudges went out (or wait on a live approval). */
+  checkins_sent: ([send = "0", nudge = "0"], f) => {
+    const s = Number(send) || 0, n = Number(nudge) || 0;
+    if (s === 0 && n === 0) return true;
+    return callsTo(f, "onboarding.send_checkins").some((c) => {
+      if (c.status === "done") { const d = (c.data ?? {}) as { sent?: unknown[]; nudged?: unknown[] }; return (d.sent ?? []).length >= s && (d.nudged ?? []).length >= n; }
       return c.status === "pending_approval" && c.proposalId !== null && !["denied", "expired", "failed", "superseded", "dismissed"].includes(f.proposalStatus(c.proposalId) ?? "pending");
     });
   },

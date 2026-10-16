@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "onboarding__send_checkins", "arguments": "{{derived.onboarding.send_checkins}}" }] },
+      { "output": [{ "type": "text", "text": "Sent the first-month check-ins that were due and nudged the open ones." }] }
+    ]
+  }
+}

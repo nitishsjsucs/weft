@@ -5,21 +5,25 @@
 // Landed: onboarding.ready_check (R0), onboarding.flag_not_ready (R1, an Inbox suggestion per blocked hire),
 // reports.exec_figures (R0), comms.send_exec_report (R3 like comms.send_message; the text is built and grounded in
 // code), routines.set_autonomy (R1, only ever executed as an approved proposal), people.list_milestones (R0),
-// contractors.list_tax_forms (R0) and contractors.request_tax_forms (R3 email, autoAllow untainted).
-import { eq, inArray } from "drizzle-orm";
+// contractors.list_tax_forms (R0) and contractors.request_tax_forms (R3 email, autoAllow untainted), and the
+// thirty-day check-in: onboarding.list_checkins (R0), onboarding.send_checkins (R3 email, autoAllow untainted) and
+// onboarding.submit_checkin (human only, the hire's answers).
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { ChatChannel, MilestoneKind, Refused, RoutineAutonomy, W3_SETTINGS } from "@weft/contracts";
 import { check } from "@weft/grounding";
-import { contractorTaxForms, routines, settings, workers } from "@weft/db";
+import { checkins, contractorTaxForms, routines, settings, workers } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
+import { displayName } from "../people/names";
 import { blockedText, readyCheck } from "../parity/ready-check";
 import { execFigures, execReportText } from "../parity/exec-report";
 import { upsertSuggestion } from "../parity/suggestions";
 import { listMilestones } from "../parity/milestones";
 import { listTaxForms, requestEmail, requestedForm } from "../parity/contractor-forms";
+import { CheckinAnswers, checkinPlan, inviteEmail, managerSummary } from "../parity/checkins";
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const Month = z.string().regex(/^\d{4}-\d{2}$/);
@@ -219,4 +223,82 @@ const requestTaxForms = writeCommand<RequestFormsInput>({
   },
 });
 
-export const parityCommands: WeftCommand[] = [readyCheckCommand, flagNotReady, execFiguresCommand, sendExecReport, setAutonomy, listMilestonesCommand, listTaxFormsCommand, requestTaxForms];
+// ---------------------------------------------------------------- thirty-day check-in
+
+const CheckinsInput = z.object({ as_of: Day.optional(), ...responseFormatField });
+type CheckinsInput = z.infer<typeof CheckinsInput>;
+const listCheckins = readCommand({
+  name: "onboarding.list_checkins", domain: "people",
+  summary: "First-month check-ins to send, to nudge, open and submitted.",
+  description: "Employees whose day 30 (start date plus 30 days) has come within the last week and who have no check-in yet (to_send), check-ins sent three or more days ago and not nudged (to_nudge), open and submitted ones. Statuses only, never the answers. Example: {\"as_of\":null}",
+  input: CheckinsInput,
+  async run(i: CheckinsInput, ctx, deps) {
+    const p = await checkinPlan(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now));
+    return { data: p, summary: `${p.to_send.length} check-ins to send, ${p.to_nudge.length} to nudge, ${p.open.length} open` };
+  },
+});
+
+const SendCheckinsInput = z.object({ send: z.array(z.string().startsWith("wrk_")).max(20), nudge: z.array(z.string().startsWith("chk_")).max(20), as_of: Day.optional() });
+type SendCheckinsInput = z.infer<typeof SendCheckinsInput>;
+async function checkinWork(i: SendCheckinsInput, ctx: { companyId: string; now: string }, deps: Parameters<WeftCommand["run"]>[2]) {
+  const p = await checkinPlan(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now));
+  return { send: p.to_send.filter((r) => i.send.includes(r.worker_id)), nudge: p.to_nudge.filter((r) => r.checkin_id && i.nudge.includes(r.checkin_id)) };
+}
+const sendCheckins = writeCommand<SendCheckinsInput>({
+  name: "onboarding.send_checkins", summary: "Email first-month check-ins and one nudge three days later",
+  description: "Email each listed employee whose first-month check-in is due (send, worker ids) and nudge each listed check-in still open three days on (nudge, check-in ids), once. The list is rechecked here; anyone not due is skipped. R3 like comms.send_message. Example: {\"send\":[\"wrk_0049\"],\"nudge\":[],\"as_of\":null}",
+  input: SendCheckinsInput, domain: "people", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
+  afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
+  async preview(i, ctx, deps) {
+    const w = await checkinWork(i, ctx, deps);
+    return { title: `Send ${w.send.length} first-month check-ins and ${w.nudge.length} nudges`, diff: [],
+      content: [...w.send.map((r) => ({ label: "Check-in", text: `${r.name} (${r.worker_id}), day 30 was ${r.due_on}` })), ...w.nudge.map((r) => ({ label: "Nudge", text: `${r.name} (${r.worker_id}), sent ${r.sent_at}` }))], moneyCents: null,
+      subjectRef: [...w.send.map((r) => r.worker_id), ...w.nudge.map((r) => r.checkin_id!)].join(",") || "checkins",
+      subjectHash: sha256Hex(canonicalJson({ send: w.send.map((r) => [r.worker_id, r.due_on]), nudge: w.nudge.map((r) => r.checkin_id) })), evidence: w.send.map((r) => ({ label: "worker", ref: r.worker_id })) };
+  },
+  async run(i, ctx, deps) {
+    const w = await checkinWork(i, ctx, deps);
+    const ids = [...w.send, ...w.nudge].map((r) => r.worker_id);
+    const people = ids.length ? await deps.tx.select({ id: workers.id, email: workers.workEmail }).from(workers).where(inArray(workers.id, ids)) : [];
+    const to = (wid: string) => people.find((p) => p.id === wid)!.email;
+    const sent: { worker_id: string; checkin_id: string; email_id: string }[] = [];
+    for (const r of w.send) {
+      const id = await deps.newId("chk_");
+      await deps.tx.insert(checkins).values({ id, workerId: r.worker_id, dueOn: r.due_on, status: "sent", answersJson: null, sentAt: ctx.now, nudgedAt: null, submittedAt: null, createdAt: ctx.now });
+      const m = inviteEmail(r.name, false);
+      const mail = await deps.sims.email.send({ to: to(r.worker_id), from: "people@larkspur.example", subject: m.subject, body: m.body, kind: "portal_invite", relatedRef: id });
+      sent.push({ worker_id: r.worker_id, checkin_id: id, email_id: mail.id });
+    }
+    const nudged: { worker_id: string; checkin_id: string; email_id: string }[] = [];
+    for (const r of w.nudge) {
+      await deps.tx.update(checkins).set({ status: "nudged", nudgedAt: ctx.now }).where(eq(checkins.id, r.checkin_id!));
+      const m = inviteEmail(r.name, true);
+      const mail = await deps.sims.email.send({ to: to(r.worker_id), from: "people@larkspur.example", subject: m.subject, body: m.body, kind: "nudge", relatedRef: r.checkin_id });
+      nudged.push({ worker_id: r.worker_id, checkin_id: r.checkin_id!, email_id: mail.id });
+    }
+    return { data: { sent, nudged }, summary: `Sent ${sent.length} first-month check-ins and ${nudged.length} nudges` };
+  },
+});
+
+const SubmitCheckinInput = z.object({ checkin_id: z.string().startsWith("chk_"), answers: CheckinAnswers });
+type SubmitCheckinInput = z.infer<typeof SubmitCheckinInput>;
+const submitCheckin = writeCommand<SubmitCheckinInput>({
+  name: "onboarding.submit_checkin", summary: "Submit a first-month check-in (the hire, human only)",
+  description: "Human only: stores the hire's four answers on an open check-in and emails the manager a summary with the two multiple-choice answers; the written answers stay in Weft and never reach an agent.",
+  input: SubmitCheckinInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const [c] = await deps.tx.select().from(checkins).where(eq(checkins.id, i.checkin_id));
+    if (!c) throw new Refused("UNKNOWN_REFERENCE", `No check-in ${i.checkin_id}.`);
+    if (c.status !== "sent" && c.status !== "nudged") throw new DomainRefusal("DOMAIN_CHECKIN_CLOSED", `Check-in ${c.id} is ${c.status}`, "Only an open check-in takes answers", null);
+    const [w] = await deps.tx.select().from(workers).where(and(eq(workers.id, c.workerId), eq(workers.companyId, ctx.companyId)));
+    if (!w) throw new Refused("UNKNOWN_REFERENCE", `No check-in ${i.checkin_id}.`);
+    const [mgr] = w.managerId ? await deps.tx.select({ email: workers.workEmail }).from(workers).where(eq(workers.id, w.managerId)) : [];
+    await deps.tx.update(checkins).set({ status: "submitted", answersJson: JSON.stringify(i.answers), submittedAt: ctx.now }).where(eq(checkins.id, c.id));
+    const m = managerSummary(displayName(w.firstName, w.lastName), i.answers);
+    const mail = await deps.sims.email.send({ to: mgr?.email ?? "people@larkspur.example", from: "agent@larkspur.example", subject: m.subject, body: m.body, kind: "generic", relatedRef: c.id });
+    return { data: { checkin_id: c.id, worker_id: w.id, status: "submitted", summary_email_id: mail.id }, summary: `Recorded the first-month check-in ${c.id} and emailed the summary`,
+      events: [{ type: "checkin.submitted", subjectRef: c.id, payload: { checkin_id: c.id, worker_id: w.id } }] };
+  },
+});
+
+export const parityCommands: WeftCommand[] = [readyCheckCommand, flagNotReady, execFiguresCommand, sendExecReport, setAutonomy, listMilestonesCommand, listTaxFormsCommand, requestTaxForms, listCheckins, sendCheckins, submitCheckin];
