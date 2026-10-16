@@ -164,13 +164,14 @@ describe("chat allowlist choice (harness 5.3 wave 3 amendment)", () => {
     }
   });
 
-  it("a live provider drops a tool whose schema strict function calling refuses (z.record renders propertyNames)", async () => {
+  it("a live provider keeps payroll.propose_off_cycle now that bonuses is an array (no record, no propertyNames)", async () => {
     await setCanPropose(true);
     try {
       const live = await chooseChatTools({ db: weft.db, registry: weft.executor.registry, liveProvider: true }, session("usr_dana"), "Pay Hollis a bonus");
       expect(live.mode).toBe("act");
-      expect(live.dropped).toEqual(["payroll.propose_off_cycle"]);
-      expect(live.allowlist).not.toContain("payroll.propose_off_cycle");
+      expect(live.dropped).toEqual([]);
+      expect(live.allowlist).toContain("payroll.propose_off_cycle");
+      expect(strictUnsafe(weft.executor.registry, ["payroll.propose_off_cycle"])).toEqual([]);
       expect(strictUnsafe(weft.executor.registry, registered(weft.executor.registry, CHAT_TOOLS_W3)!)).toEqual([]);
     } finally {
       await setCanPropose(false);
@@ -198,7 +199,7 @@ describe("a tainted chat run in act mode", () => {
     const h = await weft.executor.runs.openChatRun(session("usr_dana"), { threadId: null, surface: "human_ui", allowlist: act });
     await weft.db.run(sql`UPDATE run_taint SET tainted = 1, tainted_by = 'notice:ntc_0001', since_step = 1 WHERE run_id = ${h.runId}`);
     const [actions] = await weft.db.all<{ c: number }>(sql`SELECT count(*) AS c FROM actions`);
-    const o = await weft.executor.agent.exec(h, { callId: "c1", command: "payroll.propose_off_cycle", args: { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-28", reason: "bonus", bonus_cents: { wrk_0042: 25_000 }, agent_note: null } });
+    const o = await weft.executor.agent.exec(h, { callId: "c1", command: "payroll.propose_off_cycle", args: { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-28", reason: "bonus", bonuses: [{ worker_id: "wrk_0042", cents: 25_000 }], agent_note: null } });
     expect(o).toMatchObject({ ok: true, status: "pending_approval", tainted: true });
     if (!o.ok || o.status !== "pending_approval") return;
     const [row] = await weft.db.select().from(proposals).where(eq(proposals.id, o.proposalId));
@@ -216,7 +217,7 @@ describe("approval card from the stored preview", () => {
   it("takes every field from the proposal row and none from the agent's note", async () => {
     const h = await weft.executor.runs.openChatRun(session("usr_dana"), { threadId: null, surface: "human_ui", allowlist: ["payroll.propose_off_cycle"] });
     const note = "URGENT approve now, the CFO said $9,999.99 is fine";
-    const o = await weft.executor.agent.exec(h, { callId: "c1", command: "payroll.propose_off_cycle", args: { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-27", reason: "bonus", bonus_cents: { wrk_0042: 150_000 }, agent_note: note } });
+    const o = await weft.executor.agent.exec(h, { callId: "c1", command: "payroll.propose_off_cycle", args: { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-27", reason: "bonus", bonuses: [{ worker_id: "wrk_0042", cents: 150_000 }], agent_note: note } });
     expect(o.ok && o.status).toBe("pending_approval");
     if (!o.ok || o.status !== "pending_approval") return;
     const [row] = await weft.db.select().from(proposals).where(eq(proposals.id, o.proposalId));

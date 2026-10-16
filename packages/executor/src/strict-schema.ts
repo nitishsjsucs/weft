@@ -90,6 +90,9 @@ export function strictSchemaProblems(schema: unknown, path = "$"): string[] {
   if (!schema || typeof schema !== "object") return out;
   const s = schema as Json;
   for (const k of Object.keys(s)) if (DROP.has(k)) out.push(`${path}: has ${k}`);
+  // A record (z.record) renders propertyNames; strict providers refuse the whole request over it, and the rewritten
+  // object has no properties, so the model could never fill it. Use an array of objects instead.
+  for (const k of ["propertyNames", "patternProperties"]) if (k in s) out.push(`${path}: has ${k} (a record; use an array of objects)`);
   const keys = Object.keys(s);
   if (keys.join(",") !== [...keys].sort().join(",")) out.push(`${path}: keys not sorted`);
   if (s.type === "object") {

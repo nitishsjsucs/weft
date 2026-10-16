@@ -7,7 +7,7 @@
           {
             "type": "function_call",
             "name": "payroll__propose_off_cycle",
-            "arguments": { "worker_ids": ["wrk_0042"], "period_start": "2026-10-01", "period_end": "2026-10-15", "payday": "2026-10-27", "reason": "bonus", "bonus_cents": { "wrk_0042": 150000 }, "agent_note": null }
+            "arguments": { "worker_ids": ["wrk_0042"], "period_start": "2026-10-01", "period_end": "2026-10-15", "payday": "2026-10-27", "reason": "bonus", "bonuses": [{ "worker_id": "wrk_0042", "cents": 150000 }], "agent_note": null }
           }
         ]
       },

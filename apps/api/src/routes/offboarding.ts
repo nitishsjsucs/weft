@@ -104,7 +104,7 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
   r.post("/v1/payrolls/off-cycle", async (c) => {
     const s = session(c);
     const body = OffCycleRequest.parse(await c.req.json().catch(() => ({})));
-    const args = { worker_ids: body.workerIds, period_start: body.periodStart, period_end: body.periodEnd, payday: body.payday, reason: body.reason, bonus_cents: body.bonusCents };
+    const args = { worker_ids: body.workerIds, period_start: body.periodStart, period_end: body.periodEnd, payday: body.payday, reason: body.reason, bonuses: Object.entries(body.bonusCents ?? {}).map(([worker_id, cents]) => ({ worker_id, cents })) };
     const propose = weft.executor.human.propose;
     const out = propose ? await propose.call(weft.executor.human, s, "payroll.propose_off_cycle", args) : await weft.executor.human.exec({ ...s, via: "api_key", keyScope: "mcp" }, "payroll.propose_off_cycle", args);
     await weft.scheduler.kick();

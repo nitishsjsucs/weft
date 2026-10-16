@@ -72,8 +72,8 @@ export function notProposalOnly(registry: RegistryLike | undefined, names: reado
 
 /**
  * Keywords a strict function-calling provider refuses in a tool schema. One refused schema fails the whole request,
- * so a live run drops that tool instead of failing every step (z.record inputs render `propertyNames`; see
- * docs/tracks/w3-parity-chat.md for the contract request on payroll.propose_off_cycle's bonus_cents).
+ * so a live run drops that tool instead of failing every step (z.record inputs render `propertyNames`). No registered
+ * command has one since payroll.propose_off_cycle took `bonuses` as an array; strictSchemaProblems now flags them too.
  */
 const STRICT_REFUSED = /"(propertyNames|patternProperties)"\s*:/;
 export function strictUnsafe(registry: RegistryLike | undefined, names: readonly string[]): string[] {

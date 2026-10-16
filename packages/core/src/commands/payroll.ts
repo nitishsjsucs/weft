@@ -297,12 +297,19 @@ const OFF_CYCLE_LABEL: Record<string, string> = { salary: "Salary", regular: "Re
 const OffCycleInput = z.object({
   worker_ids: z.array(z.string().startsWith("wrk_")).min(1).max(50), period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), period_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   payday: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), reason: z.enum(["missed_payroll", "bonus", "correction", "final_pay"]),
-  bonus_cents: z.record(z.string(), z.number().int().min(0)).optional(), agent_note: z.string().max(600).optional(),
-}).refine((i) => i.period_start <= i.period_end, { message: "period_start must be on or before period_end" });
+  // An array, not a record: a record's strict schema has no properties, so a strict-mode model could never send a bonus.
+  bonuses: z.array(z.object({ worker_id: z.string().startsWith("wrk_"), cents: z.number().int().min(0) })).max(50).optional(),
+  agent_note: z.string().max(600).optional(),
+}).refine((i) => i.period_start <= i.period_end, { message: "period_start must be on or before period_end" })
+  .refine((i) => (i.bonuses ?? []).every((b) => i.worker_ids.includes(b.worker_id)), { message: "every bonus worker_id must be in worker_ids" })
+  .refine((i) => new Set((i.bonuses ?? []).map((b) => b.worker_id)).size === (i.bonuses ?? []).length, { message: "one bonus per worker_id" });
 type OffCycleInput = z.infer<typeof OffCycleInput>;
 
+/** The planner's per-worker bonus map (the hash input stays the same shape as before the array change). */
+export const bonusRecord = (b: { worker_id: string; cents: number }[] | undefined): Record<string, number> => Object.fromEntries((b ?? []).map((x) => [x.worker_id, x.cents]));
+
 async function offCyclePlan(i: OffCycleInput, ctx: ExecContext, deps: CommandDeps) {
-  const req: OffCycleSpecInput = { companyId: ctx.companyId, workerIds: i.worker_ids, periodStart: i.period_start, periodEnd: i.period_end, payday: i.payday, reason: i.reason, bonusCents: i.bonus_cents ?? {} };
+  const req: OffCycleSpecInput = { companyId: ctx.companyId, workerIds: i.worker_ids, periodStart: i.period_start, periodEnd: i.period_end, payday: i.payday, reason: i.reason, bonusCents: bonusRecord(i.bonuses) };
   let lines;
   try { lines = await offCycleLines(deps.tx, req); } catch (e) { if (e instanceof OffCycleRefusal) throw new Refused(e.code, e.message); throw e; }
   const spec = { companyId: ctx.companyId, subtype: "off_cycle" as const, periodStart: i.period_start, periodEnd: i.period_end, payday: i.payday, lines, benefits: i.reason === "missed_payroll" };
@@ -316,7 +323,7 @@ async function offCyclePlan(i: OffCycleInput, ctx: ExecContext, deps: CommandDep
 
 export const proposeOffCycleCommand: WeftCommand<OffCycleInput> = {
   ...base, name: "payroll.propose_off_cycle", summary: "Propose an off-cycle pay run",
-  description: "Proposes an off_cycle run: salary for period_start to period_end prorated by calendar days on a mid-period raise, plus bonus_cents per worker as supplemental wages (federal 22%). A period a regular run already paid is refused for missed_payroll (DOMAIN_ALREADY_PAID); correction pays only the difference. Approval submits it to the bank; total cost counts against agent.off_cycle_cents.",
+  description: "Proposes an off_cycle run: salary for period_start to period_end prorated by calendar days on a mid-period raise, plus bonuses ([{worker_id, cents}]) as supplemental wages (federal 22%). A period a regular run already paid is refused for missed_payroll (DOMAIN_ALREADY_PAID); correction pays only the difference. Approval submits it to the bank; total cost counts against agent.off_cycle_cents.",
   compactDescription: "Propose an off-cycle pay run with a prorated raise and a bonus (needs approval).",
   input: OffCycleInput, needs: "edit", effect: "external", risk: () => "R4", approval: "always",
   amountCents: async (i, ctx, deps) => (await offCyclePlan(i, ctx, deps)).totals.totalCost,

@@ -62,10 +62,10 @@ try {
   usd = s.usd; steps = run.stepsUsed;
   const props = (await weft.db.select().from(db.proposals)).filter((p) => p.proposerRunId === runId);
   const off = props.filter((p) => p.command === "payroll.propose_off_cycle");
-  const args = off[0]?.argsJson ? (JSON.parse(off[0].argsJson) as { worker_ids?: string[]; reason?: string; bonus_cents?: Record<string, number>; period_start?: string; period_end?: string }) : null;
+  const args = off[0]?.argsJson ? (JSON.parse(off[0].argsJson) as { worker_ids?: string[]; reason?: string; bonuses?: { worker_id: string; cents: number }[]; period_start?: string; period_end?: string }) : null;
   if (off.length !== 1) reasons.push(`${off.length} off-cycle proposals`);
   if (props.length !== off.length) reasons.push(`other proposals: ${props.map((p) => p.command).join(", ")}`);
-  if (args && (JSON.stringify(args.worker_ids) !== JSON.stringify([WORKER]) || args.reason !== "missed_payroll" || args.bonus_cents?.[WORKER] !== 150_000 || args.period_start !== "2026-10-01" || args.period_end !== "2026-10-15")) reasons.push(`args ${JSON.stringify(args)}`);
+  if (args && (JSON.stringify(args.worker_ids) !== JSON.stringify([WORKER]) || args.reason !== "missed_payroll" || JSON.stringify(args.bonuses) !== JSON.stringify([{ worker_id: WORKER, cents: 150_000 }]) || args.period_start !== "2026-10-01" || args.period_end !== "2026-10-15")) reasons.push(`args ${JSON.stringify(args)}`);
   if ((await weft.db.select().from(db.actions)).length !== actionsBefore) reasons.push("an action executed from chat");
   if (run.status !== "done") reasons.push(`status ${run.status}`);
   if (run.stepsUsed > 4) reasons.push(`${run.stepsUsed} model steps`);

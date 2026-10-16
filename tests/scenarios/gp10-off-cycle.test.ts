@@ -38,7 +38,7 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     weft.app.request(path, { method, headers: { ...headers, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
 
   it("the agent proposes, the preview shows each line, approval submits the off_cycle run to the bank", async () => {
-    const args = { worker_ids: [WORKER], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-27", reason: "missed_payroll", bonus_cents: { [WORKER]: 150_000 } };
+    const args = { worker_ids: [WORKER], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-27", reason: "missed_payroll", bonuses: [{ worker_id: WORKER, cents: 150_000 }] };
     const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": mcpKey }, args);
     const out = (await res.json()) as { ok: boolean; status: string; proposalId: string };
     expect(res.status).toBe(200);
@@ -101,7 +101,7 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     expect(created.status).toBe(201);
     const key = ((await created.json()) as { plaintext: string }).plaintext;
     const before = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM payroll_runs WHERE subtype = 'off_cycle'`);
-    const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": key }, { worker_ids: [WORKER], period_start: "2026-11-01", period_end: "2026-11-15", payday: "2026-11-13", reason: "bonus", bonus_cents: { [WORKER]: 90_000 } });
+    const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": key }, { worker_ids: [WORKER], period_start: "2026-11-01", period_end: "2026-11-15", payday: "2026-11-13", reason: "bonus", bonuses: [{ worker_id: WORKER, cents: 90_000 }] });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, status: "pending_approval" });
     const after = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM payroll_runs WHERE subtype = 'off_cycle'`);
@@ -109,7 +109,7 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
   });
 
   it("an off-cycle over the $10,000.00 per-call ceiling is refused, not proposed", async () => {
-    const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": mcpKey }, { worker_ids: [WORKER], period_start: "2026-10-16", period_end: "2026-10-31", payday: "2026-10-30", reason: "bonus", bonus_cents: { [WORKER]: 2_000_000 } });
+    const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": mcpKey }, { worker_ids: [WORKER], period_start: "2026-10-16", period_end: "2026-10-31", payday: "2026-10-30", reason: "bonus", bonuses: [{ worker_id: WORKER, cents: 2_000_000 }] });
     expect(res.status).toBe(422);
     expect(((await res.json()) as { code: string }).code).toBe("OVER_CEILING");
   });

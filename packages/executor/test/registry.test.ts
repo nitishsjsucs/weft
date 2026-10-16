@@ -15,6 +15,12 @@ describe("strict schemas", () => {
     for (const d of all) expect(strictSchemaProblems(toStrictJsonSchema(d.input)), d.name).toEqual([]);
   });
 
+  it("a record input is flagged: strict providers refuse propertyNames, and the rewritten object takes no keys", () => {
+    const problems = strictSchemaProblems(toStrictJsonSchema(z.object({ bonus_cents: z.record(z.string(), z.number().int()).optional() })));
+    expect(problems.some((p) => p.includes("propertyNames"))).toBe(true);
+    expect(strictSchemaProblems(toStrictJsonSchema(z.object({ bonuses: z.array(z.object({ worker_id: z.string(), cents: z.number().int() })).optional() })))).toEqual([]);
+  });
+
   it("optional fields become [T, null] unions", () => {
     const s = toStrictJsonSchema(z.object({ a: z.string().min(2), b: z.number().int().max(3).optional(), c: z.enum(["x", "y"]).optional() })) as { properties: Record<string, unknown>; required: string[] };
     expect(s.required).toEqual(["a", "b", "c"]);

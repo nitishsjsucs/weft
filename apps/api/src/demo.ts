@@ -216,7 +216,7 @@ await weft.db.run(sql`DELETE FROM ytd_ledger WHERE worker_id = 'wrk_0042' AND so
 const [hollis] = await weft.db.all<{ id: string }>(sql`SELECT id FROM pay_rates WHERE worker_id = 'wrk_0042' AND effective_to IS NULL`);
 await weft.db.run(sql`UPDATE pay_rates SET effective_to = '2026-10-05' WHERE id = ${hollis!.id}`);
 await weft.db.insert(payRates).values({ id: "prt_9001", workerId: "wrk_0042", kind: "salary", amountCents: 8_200_000, currency: "USD", effectiveFrom: "2026-10-06", effectiveTo: null, createdActionSeq: null });
-const oc = (await viaKey("/v1/tools/payroll.propose_off_cycle", { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-27", reason: "missed_payroll", bonus_cents: { wrk_0042: 150_000 } })) as { proposalId: string };
+const oc = (await viaKey("/v1/tools/payroll.propose_off_cycle", { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-27", reason: "missed_payroll", bonuses: [{ worker_id: "wrk_0042", cents: 150_000 }] })) as { proposalId: string };
 const ocProposal = (await get(`/v1/proposals/${oc.proposalId}`)) as { headline: string; diff: { label: string; after: string }[] };
 say(`   proposal: ${ocProposal.headline}`);
 for (const d of ocProposal.diff.filter((x) => /Salary|Bonus/.test(x.label))) say(`   ${d.label}: ${d.after}`);
