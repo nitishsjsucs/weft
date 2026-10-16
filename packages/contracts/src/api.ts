@@ -49,6 +49,7 @@ export const ROUTES = [
   r("GET", "/v1/memory/tree", "memory", "t3-governance", "string[]", { query: ["prefix"] }),
   r("GET", "/v1/memory/file", "memory", "t3-governance", "MemoryFile", { query: ["path", "at"] }),
   r("GET", "/v1/memory/search", "memory", "t3-governance", "MemoryHit[]", { query: ["q", "folders", "at", "limit"] }),
+  r("GET", "/v1/memory/history", "memory", "w2-memory", "MemoryHistoryEntry[]", { query: ["path", "limit"] }),
   r("GET", "/v1/events", "events", "t3-governance", "Page<EventRow>", { query: ["afterId", "limit", "type"] }),
   r("GET", "/v1/settings/permissions", "settings", "t3-governance", "Permissions", { auth: "not_mcp" }),
   r("PUT", "/v1/settings/agent-grants", "settings", "t3-governance", "Permissions", { auth: "ui_only" }),

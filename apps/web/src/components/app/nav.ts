@@ -1,4 +1,4 @@
-import { Banknote, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
+import { Banknote, BookOpen, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
 
 export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox" | "simulated" | "soon" }
 export interface NavGroup { label: string | null; items: NavItem[] }
@@ -24,6 +24,7 @@ export const NAV: NavGroup[] = [
     { slug: "compliance", label: "Taxes & Compliance", href: "/app/compliance", icon: Landmark },
     { slug: "routines", label: "Routines", href: "/app/routines", icon: Repeat },
     { slug: "audit", label: "Audit log", href: "/app/audit", icon: ScrollText },
+    { slug: "memory", label: "Memory", href: "/app/memory", icon: BookOpen },
     { slug: "simulators", label: "Simulators", href: "/app/simulators", icon: FlaskConical, badge: "simulated" },
   ] },
 ];
