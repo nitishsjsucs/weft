@@ -81,6 +81,13 @@ describe("expense policy engine (hand-computed cases)", () => {
     expect(evaluateExpense({ ...e7, transactionDate: "2026-10-03" }, { worker: TX, others: [earlier] }).checks.some((c) => c.rule === "DUPLICATE")).toBe(false);
   });
 
+  it("two pending twins: only the later one is the duplicate, the original stays approvable", () => {
+    const a = item({ id: "exp_0910", workerId: TX.id, category: "software", merchant: "Fleetlog Cloud (demo)", amountCents: 4_000, transactionDate: "2026-10-10", submittedDate: "2026-10-12", status: "needs_review" });
+    const b = { ...a, id: "exp_0911" };
+    expect(evaluateExpense(a, { worker: TX, others: [b] }).checks.some((c) => c.rule === "DUPLICATE")).toBe(false);
+    expect(evaluateExpense(b, { worker: TX, others: [a] }).suggestion).toMatchObject({ decision: "decline", reasonCode: "duplicate" });
+  });
+
   it("E8 past 60 days (Jul 31 to Oct 20 is 81 days): only decline or approve as taxable", () => {
     const r = evaluateExpense(item({ workerId: "wrk_0019", category: "meals", amountCents: 5_420, transactionDate: "2026-07-31", submittedDate: "2026-10-20", attendees: "Wren, two customer engineers", extract: { totalCents: 5_420, date: "2026-07-31" } }), { worker: { ...CA, id: "wrk_0019" }, others: [] });
     expect(rules(r)).toEqual(["ACCOUNTABLE_WINDOW:review"]);

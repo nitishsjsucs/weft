@@ -40,6 +40,8 @@ export interface PolicyItem {
   businessPurpose: string; attendees: string | null; milesX10: number | null; tripRef: string | null; preApprovalRef: string | null;
   hasReceipt: boolean; extract: ReceiptExtract | null; status: string;
 }
+/** Statuses that are not yet decided; a pending twin is a duplicate only when it came first. */
+const PENDING: ReadonlySet<string> = new Set(["submitted", "needs_review", "returned"]);
 export interface PolicyWorker { id: string; workState: string | null; startDate: string; endDate: string | null }
 /** `others`: the worker's other expenses (any status; declined ones never count as duplicates). */
 export interface PolicyContext { worker: PolicyWorker; others: readonly PolicyItem[] }
@@ -96,8 +98,11 @@ export function evaluateExpense(item: PolicyItem, ctx: PolicyContext, policy: Ex
       checks.push(check("RECEIPT_MISMATCH", "review", `Receipt shows ${usd(item.extract.totalCents)} on ${item.extract.date}; the claim is ${usd(item.amountCents)} on ${item.transactionDate}`, [{ label: "Receipt", ref: item.id }]));
     }
   }
-  // DUPLICATE: same merchant (case folded), amount and date within a day of a non-declined item.
-  const dup = ctx.others.find((o) => o.id !== item.id && o.status !== "declined" && fold(o.merchant) === fold(item.merchant) && o.amountCents === item.amountCents
+  // DUPLICATE: same merchant (case folded), amount and date within a day of a non-declined item. Between two items
+  // still pending, only the later one (by submission date, then id) is the duplicate, so the original stays approvable.
+  const earlierPending = (o: PolicyItem) => o.submittedDate < item.submittedDate || (o.submittedDate === item.submittedDate && o.id < item.id);
+  const dup = ctx.others.find((o) => o.id !== item.id && o.status !== "declined" && (!PENDING.has(o.status) || earlierPending(o))
+    && fold(o.merchant) === fold(item.merchant) && o.amountCents === item.amountCents
     && Math.abs(daysBetween(o.transactionDate, item.transactionDate)) <= r.duplicateWindowDays);
   if (dup) checks.push(check("DUPLICATE", "block", `Same merchant, amount (${usd(item.amountCents)}) and date as ${dup.id} (${dup.status})`, [{ label: "Earlier expense", ref: dup.id }]));
   // ACCOUNTABLE_WINDOW: substantiated more than 60 days after the expense.
