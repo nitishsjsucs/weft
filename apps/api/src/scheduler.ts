@@ -2,11 +2,12 @@
 // (1) sims.tick(now), persisting SimEvents as events rows; (2) executor.expireProposals(now);
 // (3) core event handlers in event order as their svc_ principals; (4) routines.tick(now).
 // Wave 2: after (1), the payment rail simulator ticks and contractor payouts mirror its state (pending, sent,
-// delivered, returned), appending sim.rail_delivered events that step (3) then sees in the same tick.
+// delivered, returned), appending sim.rail_delivered events that step (3) then sees in the same tick. Sent or viewed
+// offers past their expiry date are expired by svc_scheduler (documents.expire_offers, R1), only when one is due.
 import { sql } from "drizzle-orm";
 import { isWeftError, type EventBody, type EventHandler, type ExecutorBundle, type RoutinesEngine, type Scheduler, type SimClock, type Simulators, type WeftEvent } from "@weft/contracts";
 import { settings, withWriteLock, type Db } from "@weft/db";
-import { emitEvent } from "@weft/core";
+import { emitEvent, ptDateOf } from "@weft/core";
 import { syncContractorRail } from "./routes/contractors";
 
 export const HANDLER_CURSOR_KEY = "scheduler.handlers_cursor";
@@ -65,6 +66,11 @@ export function createScheduler(o: CreateSchedulerOptions): Scheduler {
       }));
     });
     await step("rail.sync", () => syncContractorRail({ db: o.db, clock: o.clock }));
+    await step("offers.expire", async () => {
+      const due = await o.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM offers WHERE status IN ('sent', 'viewed') AND expires_on IS NOT NULL AND expires_on < ${ptDateOf(now)}`);
+      if (!due[0]?.n) return;
+      await o.executor.system.exec("svc_scheduler", "documents.expire_offers", {}, { eventId: null, attended: false, requestedBy: null });
+    });
     await step("executor.expireProposals", () => o.executor.expireProposals(now));
     await step("handlers", runHandlers);
     await step("routines.tick", () => o.routines.tick(now));

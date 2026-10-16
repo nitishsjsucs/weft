@@ -18,7 +18,7 @@ export const SYSTEM_PRINCIPALS: SystemPrincipal[] = ["svc_scheduler", "svc_event
 
 /** Exact allowlists. Additions are requested in docs/tracks/t3-governance.md; nothing at R2 or above is ever allowed. */
 export const SYSTEM_ALLOWLISTS: Record<SystemPrincipal, readonly string[]> = {
-  svc_scheduler: ["comms.post_update"],
+  svc_scheduler: ["comms.post_update", "documents.expire_offers"],   // expire_offers: wave 2, the offer expiry sweep (R1)
   svc_events: ["tax.record_registration", "payroll.mark_processed", "payroll.mark_failed", "onboarding.complete_task", "it.record_delivery", "comms.post_update"],
   svc_sim: ["tax.record_registration"],
   svc_digest: ["comms.post_update"],
