@@ -4,15 +4,32 @@ import { usePathname } from "next/navigation";
 import { ChevronDown, ChevronRight, Clock, PanelLeft, PanelRight, Search, Sparkles } from "lucide-react";
 import { Badge, Button, Kbd } from "@weft/ui/components";
 import { cn } from "@weft/ui";
-import { TID } from "@weft/contracts";
+import { TID, type W2OnboardingOfferDetail } from "@weft/contracts";
 import { crumbs } from "../nav";
 import { fmtClock, fmtShortClock } from "../format";
-import { PRINCIPALS, setPrincipal, useHealth, usePrincipal, useSimClock } from "@/lib/api/hooks";
+import { PRINCIPALS, setPrincipal, useGet, useHealth, usePrincipal, useSimClock } from "@/lib/api/hooks";
 import { useAgent } from "../agent-context";
+
+/** New-hire personas from sent, viewed or accepted offers. They sign in to the portal only (PORTAL_ONLY elsewhere). */
+function usePortalPersonas(): { id: string; name: string }[] {
+  const offers = useGet("/v1/offers", { query: { limit: 100 }, refreshMs: 15_000 });
+  const rows = (offers.data?.data ?? []) as unknown as W2OnboardingOfferDetail[];
+  return rows
+    .filter((o) => o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted"))
+    .map((o) => ({ id: o.personaPrincipalId!, name: `${o.candidateFirst} ${o.candidateLast}` }));
+}
+
+const PORTAL_PREFIX = "portal:";
 
 export function ViewingAs() {
   const who = usePrincipal();
+  const personas = usePortalPersonas();
   const current = PRINCIPALS.find((p) => p.id === who) ?? PRINCIPALS[0];
+  const choose = (v: string) => {
+    // A persona opens the new-hire portal in place of switching the admin shell's principal.
+    if (v.startsWith(PORTAL_PREFIX)) window.location.assign(`/portal?as=${encodeURIComponent(v.slice(PORTAL_PREFIX.length))}`);
+    else setPrincipal(v);
+  };
   return (
     <label className="relative flex min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg py-1 pr-1.5 pl-1 text-1 shadow-[var(--shadow-border)] hover:bg-gray-2" title={`Demo control: viewing as ${current.name}, ${current.title}. Switches the signed-in human (dev auth only) and defeats self-approval checks by design.`}>
       <Badge tone="amber" size="xs"><span className="@min-[560px]:hidden">Demo</span><span className="hidden @min-[560px]:inline">Demo control</span></Badge>
@@ -23,10 +40,15 @@ export function ViewingAs() {
         data-testid={TID.viewingAs}
         aria-label="Viewing as (demo control)"
         value={who}
-        onChange={(e) => setPrincipal(e.target.value)}
+        onChange={(e) => choose(e.target.value)}
         className="absolute inset-0 cursor-pointer opacity-0"
       >
         {PRINCIPALS.map((p) => <option key={p.id} value={p.id}>{p.name}, {p.title}</option>)}
+        {personas.length ? (
+          <optgroup label="New-hire portal">
+            {personas.map((p) => <option key={p.id} value={`${PORTAL_PREFIX}${p.id}`}>{p.name}, new hire (opens the portal)</option>)}
+          </optgroup>
+        ) : null}
       </select>
     </label>
   );

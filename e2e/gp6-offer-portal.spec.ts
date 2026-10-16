@@ -2,7 +2,7 @@
 // Hiring, saves the draft and sends it; the email simulator holds the invite; the portal link signs in as the new
 // hire persona (the offer reads Viewed); the new hire signs the offer and the confidentiality agreement by typing
 // their name; signature rows carry signer, sim time and the document sha256; both show under Signed in the library.
-import { WeftApi, eventually, expect, openApp, test, viewAs } from "./fixtures";
+import { TID, WeftApi, eventually, expect, openApp, test, viewAs } from "./fixtures";
 import { W2_ONBOARDING_TID as T } from "../packages/contracts/src/w2/testids-onboarding";
 
 const C = { first: "Rowan", last: "Ellery", email: "rowan.ellery@candidate.example", title: "Firmware Test Engineer" };
@@ -27,6 +27,9 @@ test("GP6: an offer goes from draft to signed through the new-hire portal", asyn
     await expect(row.getByTestId(T.offerStatus)).toHaveText("Draft");
     await row.getByTestId(T.offerSend).click();
     await expect(row.getByTestId(T.offerStatus)).toHaveText("Sent");
+    // The Viewing as switcher now lists the new-hire persona; choosing it opens the portal.
+    const sent = await eventually(() => weft.get<OfferDetail>(`/v1/offers/${offer.id}`), (o) => (o.personaPrincipalId ? o : null), "the persona exists");
+    await expect(page.getByTestId(TID.viewingAs).locator(`option[value="portal:${sent.personaPrincipalId}"]`)).toHaveCount(1);
   });
 
   await test.step("the invite with the portal link is in the email simulator", async () => {
