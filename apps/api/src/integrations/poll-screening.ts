@@ -6,7 +6,7 @@
 // integration_deliveries (ids and the body's sha256 only, never the body), then applied by the vendor's system command
 // after a re-read; (3) the poll fallback re-reads any open order not heard from in 30 minutes.
 import { createHash } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { formatId, VENDOR_APPLY_COMMAND, type IntegrationVendor, type ScreeningConnector, type ESignConnector } from "@weft/contracts";
 import { esignEnvelopes, integrationDeliveries, screeningOrders, withWriteLock, type Db, type DbTx } from "@weft/db";
 import { createSimulators } from "@weft/sim";
@@ -99,7 +99,7 @@ export async function pollOpenEnvelopes(d: PollDeps): Promise<string[]> {
 }
 
 export async function pollScreeningEsign(d: PollDeps): Promise<void> {
-  const any = await d.db.select({ id: screeningOrders.id }).from(screeningOrders).where(and(sql`1 = 1`)).limit(1);
+  const any = await d.db.select({ id: screeningOrders.id }).from(screeningOrders).limit(1);
   const envs = await d.db.select({ id: esignEnvelopes.id }).from(esignEnvelopes).limit(1);
   const pending = await d.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM sim_webhook_outbox WHERE status = 'pending' AND vendor IN ('checkr', 'hireright', 'docusign')`);
   if (!any.length && !envs.length && !pending[0]?.n) return;
