@@ -8,7 +8,7 @@ import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDateTime, notReversibleText } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 function actor(a: Action): string {
   if (a.actorKind === "agent") return "Weft agent";
@@ -20,6 +20,16 @@ const notReversible = (a: Action) => notReversibleText(a.notReversibleReason);
 
 export function AuditView() {
   const actions = useGet("/v1/actions", { query: { limit: 100 }, refreshMs: 5_000 });
+  // A link to /app/audit#audit-<seq> (the offboarding case view) scrolls to and marks that row once it has loaded.
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (jumped.current || !actions.data) return;
+    const m = /^#audit-(\d+)$/.exec(window.location.hash);
+    if (!m) return;
+    jumped.current = true;
+    const el = document.getElementById(`audit-${m[1]}`);
+    if (el) { el.scrollIntoView({ block: "center" }); el.classList.add("bg-blue-3"); }
+  }, [actions.data]);
   const chain = useGet("/v1/actions/verify", { refreshMs: 10_000 });
   const [result, setResult] = useState<ToolOutcome | null>(null);
   const undo = useMutation((seq: number) => client.post("/v1/actions/:seq/rollback", { params: { seq }, body: { reason: "Undo from the audit log" } }));

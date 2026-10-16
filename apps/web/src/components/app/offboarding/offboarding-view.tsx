@@ -127,7 +127,7 @@ export function OffboardingCaseView({ id }: { id: string }) {
                 <TD className="hidden text-gray-10 tabular-nums tablet:table-cell">{i + 1}</TD>
                 <TD className="font-medium">{STEP_LABEL[s.kind]}{PROPOSAL_STEPS.has(s.kind) ? <span className="ml-1.5 text-0 text-gray-10">approval</span> : null}<span className="mt-0.5 block text-1 font-normal text-gray-11 tablet:hidden">{s.detail}</span></TD>
                 <TD><Badge data-testid={w2OffboardingTid.stepStatus(s.kind)} data-status={s.status} tone={STEP_TONE[s.status]}>{STEP_STATUS_LABEL[s.status]}</Badge></TD>
-                <TD className="hidden max-w-[420px] text-[13px] break-words text-gray-11 tablet:table-cell">{s.detail}{s.actionSeq !== null ? <> · <Link href="/app/audit" className="hover:underline">action {s.actionSeq}</Link></> : null}</TD>
+                <TD className="hidden max-w-[420px] text-[13px] break-words text-gray-11 tablet:table-cell">{s.detail}{s.actionSeq !== null ? <> · <Link href={`/app/audit#audit-${s.actionSeq}`} className="hover:underline">action {s.actionSeq}</Link></> : null}</TD>
                 <TD>
                   <span className="flex flex-wrap items-center gap-2">
                     {s.proposalId ? <Link data-testid={w2OffboardingTid.stepProposal(s.kind)} href={`/app/inbox?proposal=${s.proposalId}`} className="font-mono text-0 text-accent-11 hover:underline">{s.proposalId}</Link> : <span className="text-gray-10">-</span>}
