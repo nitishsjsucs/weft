@@ -3,6 +3,8 @@ export const W2_OFFBOARDING_TID = {
   personTerminate: "person-terminate", personCaseLink: "person-offboarding-case",
   terminateKind: "terminate-kind", terminateLastDay: "terminate-last-day", terminateNote: "terminate-note", terminatePto: "terminate-pto",
   terminateSubmit: "terminate-submit", terminateError: "terminate-error",
+  personOffCycle: "person-off-cycle", offCyclePeriodStart: "off-cycle-period-start", offCyclePeriodEnd: "off-cycle-period-end",
+  offCyclePayday: "off-cycle-payday", offCycleReason: "off-cycle-reason", offCycleBonus: "off-cycle-bonus", offCycleSubmit: "off-cycle-submit",
   caseStatus: "offboarding-case-status", caseSteps: "offboarding-case-steps", runRemaining: "offboarding-run-remaining", caseList: "offboarding-case-list",
 } as const;
 

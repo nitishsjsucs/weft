@@ -15,14 +15,14 @@ Branch `track/w2-offboarding`, cut from main at 9b88e26. Golden paths GP9 (termi
 - **Audit.** Every step is finished by exactly one executor call, so each step has its own action row (`actionSeq` on the step) and its own `offboarding.step_done` event. When every step is done or skipped the case turns `complete` and the worker `inactive` with `end_date` set to the last day.
 - **Final period paid once.** Final pay leaves out wages that a submitted regular run already paid for the period (the PTO payout still goes, and if nothing is left it refuses with `DOMAIN_NOTHING_TO_PAY`). Once final pay is submitted, `writePaychecks` leaves the worker out of any regular draft whose period overlaps a live dismissal paycheck (`dismissedWorkerIds` in `payroll/lifecycle.ts`, a no-op when no dismissal run exists).
 - **Reads.** `GET /v1/offboarding` (`OffboardingCase[]`) and `GET /v1/offboarding/:id`. A step's `proposalId` is derived from the latest proposal whose subject is the step id, and a pending step with a pending proposal reads `proposed`. The agent has `offboarding.list_cases` and `offboarding.get_case`.
-- **UI.** The person header shows Terminate (kind, last day, note, PTO payout) for active and onboarding employees, and a link to the case once offboarding or inactive. `/app/offboarding` lists cases with finished-step counts. `/app/offboarding/[id]` shows the eight steps (status, detail, action seq, proposal link), renders each pending proposal as the inbox approval card, and has Run remaining steps once final pay is done. Test ids are in `packages/contracts/src/w2/testids-offboarding.ts`.
+- **UI.** The person header shows Terminate (kind, last day, note, PTO payout) for active and onboarding employees (never contractors), and a link to the case once offboarding or inactive. `/app/offboarding` lists cases with finished-step counts. `/app/offboarding/[id]` shows the eight steps (status, detail, action seq, proposal link), renders each pending proposal as the inbox approval card, and has Run remaining steps once final pay is done. Test ids are in `packages/contracts/src/w2/testids-offboarding.ts`.
 
 ### Off-cycle pay (GP10)
 
 - `payroll.propose_off_cycle` (defined in `commands/payroll.ts`, registered through `offboardingCommands` so the wave 1 payroll array and its registry test stay as they were): R4, approval always, `mcp: "propose"`, total cost from the plan against the off-cycle ceilings of harness 5.4 (`agent.off_cycle_cents` $10,000.00 per call, `agent.off_cycle_day_cents` $20,000.00 per day; over them the call is refused with `OVER_CEILING`, not proposed). The ceilings bind the gated path, so a person's proposal and its approval are held to them too. Input mirrors `OffCycleRequest` in snake case.
 - `packages/core/src/payroll/offcycle.ts`: salary for the period is split by calendar days between the rates in effect (`proratedSalaryLines`: annual / 24 x days / period days, decimal.js, one half-up rounding per line). The bonus is a `bonus` earning line passed to the engine as supplemental wages. Reason `bonus` pays only the bonus. Hourly workers are refused (`DOMAIN_UNSUPPORTED_HOURLY`). The preview lists every earning line, federal income tax and net per worker.
 - Approval creates an `off_cycle` run and submits it to the bank simulator like a regular run; `markProcessed` records the bonus as `supplemental` YTD wages for off-cycle runs.
-- `POST /v1/payrolls/off-cycle` (body `OffCycleRequest`) files it as the person's proposal. An MCP agent proposes it through `POST /v1/tools/payroll.propose_off_cycle` with the mcp key.
+- `POST /v1/payrolls/off-cycle` (body `OffCycleRequest`) files it as the person's proposal; the person header's Off-cycle pay drawer (period defaulting to the previous semi-monthly period, payday, reason, bonus in dollars) posts it and shows the proposal card in place. An MCP agent proposes it through `POST /v1/tools/payroll.propose_off_cycle` with the mcp key.
 - `packages/payroll-tax`: an additive `supplementalCents` input. Federal income tax withholds the regular method on the rest of the wages and the optional flat 22 percent on the supplemental part (pre-tax deductions reduce the regular part first); YTD gains `supplemental`. Without the field every output is unchanged, and the golden tests pass as before.
 
 ## How to run it
@@ -43,7 +43,7 @@ In the app: open a person (for example `/app/people/wrk_0004`), click Terminate,
 - `packages/core/test/offboarding/offcycle.test.ts`: proration, the 22 percent split and the PTO accrual, exact to the cent.
 - `apps/api/test/offboarding.test.ts`: route validation, the `not_mcp` refusal, skipped steps, untainted proposals on the person's behalf, final pay after a submitted regular run.
 - `e2e/gp9-offboarding.spec.ts`: the GP9 path in the browser.
-- `e2e/gp10-off-cycle.spec.ts`: an off-cycle request becomes a proposal whose inbox card lists the earning lines; approving it there submits the `off_cycle` run.
+- `e2e/gp10-off-cycle.spec.ts`: Off-cycle pay from Hollis's header becomes a proposal whose card lists the earning lines; approving it submits the `off_cycle` run.
 
 ## Stubbed or simplified
 
