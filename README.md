@@ -94,18 +94,47 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ### Final wave 3 gate
 
-Fresh clone of the merged tree on 2026-10-16, ports 4740, 4741 and 4744, scripted provider, no live spend:
+Fresh clone of the round 2 integration tree on 2026-10-16, ports 4740, 4741 and 4744, scripted provider (the live
+cases are in the next section):
 
 | Command | Outcome |
 |---|---|
-| `pnpm test` | 880 passed, 1 skipped (the opt-in public job board smoke), 158 files, 154 s |
-| `pnpm typecheck` | 16 of 16 tasks clean, 13 s |
-| `pnpm build` | ok in 9 s |
+| `pnpm test` | 883 passed, 1 skipped (the opt-in public job board smoke), 159 files, 132 s |
+| `pnpm typecheck` | 16 of 16 tasks clean, plus `tsc -p e2e` |
+| `pnpm build` | ok |
 | `pnpm e2e` | 44 passed, 1 skipped (the DocuSign envelope test, which runs on its own), 2.1 min |
 | `WEFT_ESIGN=docusign` Playwright run of `e2e/gp18-screening.spec.ts` | the envelope test passes (the built-in test skips under DocuSign) |
-| `pnpm demo` | exit 0 in 9 s; GP1 to GP18 on one world, GP9 still pays 90.00 h, audit chain verifies |
-| `pnpm demo:tests` | 147 passed (37 files), 75 s |
+| `pnpm demo` | exit 0 in 8 s; GP1 to GP18 on one world, GP9 still pays 90.00 h, GP10 still pays the $1,500.00 bonus, audit chain verifies |
+| `pnpm demo:tests` | 147 passed (37 files), 81 s |
 | `pnpm lint:prose --commits origin/main..HEAD`, `pnpm lint:brand`, `pnpm brand:overlap` | ok |
+
+### Live wave 3 agent golden paths
+
+One run each on `gpt-5.6-luna` through the repo live runner on 2026-10-16 (a fresh seed and a frozen clock per case,
+the spend ledger and the live cap on). Every case passes; the whole round cost about $0.016, including the reruns
+below. Run them yourself with the commands in [evals/live/README.md](evals/live/README.md).
+
+| Case | Golden path | What is checked | Result |
+|---|---|---|---|
+| L5 | GP15 chat proposal (GP10 asked in chat) | One `payroll.propose_off_cycle` proposal for Hollis with reason missed_payroll and a $1,500.00 bonus; nothing executes | passes, 4 model steps, $0.0018 |
+| L6 | GP13 expense review | One pending `expenses.decide` proposal for each of the 8 items in review, the duplicate declined, nothing executed | passes, 3 model steps, $0.0023 |
+| L7 | GP15 chart answer | `reports.query` for payroll cost by month, a grounded answer, no write | passes, 2 model steps, $0.0012 |
+| L8 | GP16 monthly exec report | One #leadership post for October 2026 from the derived arguments and the leadership email | passes, 2 model steps, $0.0006 |
+| L9 | GP18 follow-up routine | On acceptance, one R4 `screening.order` proposal at the catalog price; no order placed | passes, 2 model steps, $0.0007 |
+| L10 | GP14 time-off request routine | One pending `time_off.decide` proposal for Ruth with the balance note and the #people-ops post; nothing decided | passes on the zero-token template path: its precheck derives every call, so no model call is made, by design |
+
+The live runs found three harness problems, each fixed with a test:
+
+- The chat role prompt said chat is read-only, so the model refused to propose even with the proposal tool offered.
+  The role now follows the tool list that code chooses.
+- `people.search` matched one name field whole, so "Hollis Grey" found nobody. Every word of the query must now match
+  a name, title, employee number or worker id.
+- Asked for cost by month, the model added the months itself and grounding sent the sum back. `reports.query` now
+  returns `range_totals` for its money columns.
+
+`payroll.propose_off_cycle` now takes `bonuses: [{worker_id, cents}]` instead of the `bonus_cents` record, whose strict
+schema a live provider refused. MCP and API callers of the tool send the array; the person route
+`POST /v1/payrolls/off-cycle` keeps its `bonusCents` body.
 
 ### Final wave 2 gate
 
@@ -183,17 +212,18 @@ Screenshots were retaken with the new `pnpm screenshots` (`e2e/screens/capture.s
 
 ## What works
 
-Wave 3 golden paths (scripted provider; merged on 2026-10-16, results in "Final wave 3 gate" above):
+Wave 3 golden paths (scripted provider; merged on 2026-10-16, results in "Final wave 3 gate" above; the live column is
+one run each on `gpt-5.6-luna`, see "Live wave 3 agent golden paths"):
 
-| Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | In `pnpm demo` |
-|---|---|---|---|
-| GP13 expense review: four bands, a deterministic policy engine, one proposal per claim and no bulk decide, reimbursements on the next draft outside gross, paid on processing; portal claims with a receipt, return and resubmit | passes (plus the refused approve-all in chat) | passes (2 tests) | yes |
-| GP14 time off: minute ledger, coverage conflict and holiday checks, routing to the manager, PTO lines with gross unchanged, final pay from the ledger (GP9 still 90.00 h), Workday rows read-only | passes | passes (2 tests) | yes (decided by the HR manager, since Imani left in GP9) |
-| GP15 chart answer from `reports.query` with a table fallback; chat proposals behind Chat can propose, an approval card with Approve, Deny and Open that executes once; tainted cards offer no Approve | passes | passes (2 tests) | yes (the chart) |
-| GP16 routine parity: Ready Check, monthly exec report, milestones, three anomaly rules, autonomy (recommend, approve, auto), first-month check-in, contractor W-9 and W-8 forms, notice escalation | passes (6 files) | passes (2 tests) | yes (Ready Check and tax forms) |
-| GP17 Greenhouse hire to a linked draft offer, dedupe and conflicts; Workday sync of workers and approved time off | passes (2 files) | passes (2 tests) | yes |
-| GP18 background check after acceptance (R4 proposal, portal consent, signed webhook, clear), human-only adverse path with the dispute extension, the follow-up routine, DocuSign envelopes | passes (4 files) | passes; the envelope test runs with `WEFT_ESIGN=docusign` | yes (the check) |
-| GP19 coherent top bar at 1440, 1280, 1024 and 390: 32 px controls, 28 px segments, one focus ring, the persona menu, popovers, tiers | | passes (2 tests) | no (browser only) |
+| Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | In `pnpm demo` | Live Luna |
+|---|---|---|---|---|
+| GP13 expense review: four bands, a deterministic policy engine, one proposal per claim and no bulk decide, reimbursements on the next draft outside gross, paid on processing; portal claims with a receipt, return and resubmit | passes (plus the refused approve-all in chat) | passes (2 tests) | yes | L6 passes |
+| GP14 time off: minute ledger, coverage conflict and holiday checks, routing to the manager, PTO lines with gross unchanged, final pay from the ledger (GP9 still 90.00 h), Workday rows read-only | passes | passes (2 tests) | yes (decided by the HR manager, since Imani left in GP9) | L10 passes (template path, no model call) |
+| GP15 chart answer from `reports.query` with a table fallback; chat proposals behind Chat can propose, an approval card with Approve, Deny and Open that executes once; tainted cards offer no Approve | passes | passes (2 tests) | yes (the chart) | L7 (chart) and L5 (chat proposal) pass |
+| GP16 routine parity: Ready Check, monthly exec report, milestones, three anomaly rules, autonomy (recommend, approve, auto), first-month check-in, contractor W-9 and W-8 forms, notice escalation | passes (6 files) | passes (2 tests) | yes (Ready Check and tax forms) | L8 (exec report) passes |
+| GP17 Greenhouse hire to a linked draft offer, dedupe and conflicts; Workday sync of workers and approved time off | passes (2 files) | passes (2 tests) | yes | no agent step |
+| GP18 background check after acceptance (R4 proposal, portal consent, signed webhook, clear), human-only adverse path with the dispute extension, the follow-up routine, DocuSign envelopes | passes (4 files) | passes; the envelope test runs with `WEFT_ESIGN=docusign` | yes (the check) | L9 (follow-up routine) passes |
+| GP19 coherent top bar at 1440, 1280, 1024 and 390: 32 px controls, 28 px segments, one focus ring, the persona menu, popovers, tiers | | passes (2 tests) | no (browser only) | no agent step |
 
 Wave 2 golden paths (scripted provider; no live case covers GP6 to GP12):
 
@@ -240,9 +270,8 @@ time; the action chain verifies at the end of every scenario.
 - Not modeled in payroll: the stretch states WA, IL and FL, NY Method III, CA and NY supplemental rates (bonuses use
   the federal 22 percent flat rate and regular state withholding), bank holidays, state final-pay deadlines, retrying
   a failed run.
-- Off-cycle pay asked in chat files a proposal only with Chat can propose on (off by default); live Luna drops that
-  tool until `bonus_cents` becomes an array (its record schema fails the strict check). An offboarding case has no
-  cancel and no failed step state.
+- Off-cycle pay asked in chat files a proposal only with Chat can propose on (off by default). An offboarding case
+  has no cancel and no failed step state.
 - The new routines (`rt_onboarding_nudge`, `rt_open_enrollment`, `rt_memory_digest`) ship disabled; enable them in
   Routines. A scripted nudge run posts one hire's nudge per run (a live model posts all of them). `memory.forget` is
   still refused; task agents are not started.
@@ -292,8 +321,6 @@ A local Weft has no public URL, so polling on the scheduler tick is the baseline
 
 ## Wave 3: left
 
-- Live L5 (GP10 asked in chat on Luna) waits for `payroll.propose_off_cycle` to take bonuses as an array; until then a
-  live act-mode run drops that tool and answers read-only.
 - Auto autonomy end to end needs `expenses.decide` to declare `autoEligible` with a seeded limit; only the policy level
   is tested today.
 - Workday: the real adapter is a stub (the simulator stays), and `ats.mark_hired` and `hris.request_time_off` are not

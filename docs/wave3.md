@@ -409,7 +409,7 @@ in the registry rule test, the pinned id lists) and came in unchanged; none edit
 
 ### Open contract requests and left items
 
-- w3-parity-chat: `bonus_cents` as an array for strict schemas (blocks live L5); `proposals.ts` still uses `CHAT_TOOLS`;
+- w3-parity-chat: `proposals.ts` still uses `CHAT_TOOLS`;
   typed client responses for reports and artifacts; a taint field on `ApprovalCardW3`; a Reports screen; task agents.
 - w3-parity-routines: `autoEligible` on `expenses.decide` with a seeded limit for an end-to-end auto test; approval and
   override counts beside the autonomy control; check-in portal form and manager view; contractor form upload; more
@@ -424,7 +424,51 @@ in the registry rule test, the pinned id lists) and came in unchanged; none edit
   orphaned links; sync items in the Inbox; Workday-owned field locks on the person view; skipping unmapped time-off
   types on every poll; both imported routes in `api.ts`.
 - w3-integrations-screening-esign: `documents.resend_envelope`; the consent nudge; a Settings switch for the
-  screening company; the HireRight Simulated note on the Integrations card; Inbox cards for review orders; a
+  screening company; Inbox cards for review orders; a
   background_check label on People; the envelope e2e needs its own run with `WEFT_ESIGN=docusign`.
 - w3-topbar-shell: StatusBadge and PageBody in other owners' views; crumb titles for the remaining detail pages; a
   typed `GET /v1/agent/costs`; a base `:focus-visible` rule and reduced motion in PopoverContent; dark mode tokens.
+
+## 11. Integration, round 2 (2026-10-16)
+
+Round 2 worked on branch `integrate/w3` from main at 7b8259c, ran every check from a fresh clone on ports 4740 to 4759
+(runner 4744), then fast-forwarded main. It ran the new agent golden paths once live and fixed what they found.
+
+### Live agent golden paths on gpt-5.6-luna
+
+| Case | Golden path | Result |
+|---|---|---|
+| L5 | GP15 chat proposal (GP10 asked in chat), `evals/live/l5-chat-propose.ts` | passes: one `payroll.propose_off_cycle` proposal, missed_payroll, a 150000 cent bonus, nothing executed; 4 steps, $0.0018 |
+| L6 | GP13 `rt_expense_review` | passes: 8 pending single-item `expenses.decide` proposals, exp_0007 declined as a duplicate, none executed; 3 steps, $0.0023 |
+| L7 | GP15 chart answer | passes: `reports.query` payroll_cost_by_month, grounded on the first try after the fix below; 2 steps, $0.0012 |
+| L8 | GP16 monthly exec report | passes: one #leadership post for October 2026, the derived month and kind; 2 steps, $0.0006 |
+| L9 | GP18 `rt_screening_follow_up` | passes: one pending R4 `screening.order` at the catalog price, no order placed, untainted; 2 steps, $0.0007 |
+| L10 | GP14 `rt_time_off_requests` | passes: one pending `time_off.decide` for tor_0003 with the balance note and the post; it runs on the zero-token template path (the precheck derives every call), so it makes no model call |
+
+L6 to L10 are new cases in `evals/live/run.ts`. The round spent about $0.016 in total, including the failed first L5
+and two L7 reruns; no single run came near the per-run cap.
+
+### What the live runs found, and the fixes
+
+| Finding | Fix |
+|---|---|
+| `bonus_cents` was a `z.record`; its strict schema renders `propertyNames` and an object with no properties, so live chat dropped `payroll.propose_off_cycle` | The command takes `bonuses: [{worker_id, cents}]` (one per worker, only for workers in `worker_ids`); the planner hash input is unchanged and the person route converts its `bonusCents` body. `strictSchemaProblems` now flags `propertyNames` and `patternProperties`, so the registry tests catch a record input |
+| The chat role prompt said chat is read-only, so the first live L5 refused with the proposal tool on its list | The role says code decides through the tool list: with a proposal tool, file one proposal per item and say it waits for approval; without one, explain which screen does it. A generic propose example joins the role |
+| `people.search` matched one field whole, so "Hollis Grey" found nobody | Every word must match a first or last name, title, employee number or worker id; the "(demo)" suffix is ignored |
+| Asked for payroll cost by month, the model summed the months and grounding sent the total back | `reports.query` returns `range_totals` (every `*_cents` column summed with display strings); the style block asks the model to quote totals from results and to use no em dashes |
+
+### Other round 2 changes
+
+- The HireRight Integrations card reads "Simulated, API shape not published", like the Hiring row; GP17's e2e checks
+  it, and the card badges wrap on a narrow card.
+- The wave 3 track worktrees and the integration worktree were removed with `git worktree remove`; every
+  `track/w3-*` branch and `integrate/w3` are kept. Each track's gitignored `.scratch/<track>/left.md` and contract
+  request file were copied into the main checkout's `.scratch/` first.
+
+### Still open after round 2
+
+- Auto autonomy end to end: `expenses.decide` should declare `autoEligible` with a seeded `agent.expense_auto_cents`
+  limit, followed by the GP16 auto scenario.
+- No live case yet for GP16's Ready Check and milestones; GP14's routine runs live only on its template path.
+- Everything else in section 10's open list, apart from the two items closed above.
+

@@ -17,4 +17,17 @@ errors, tokens, cache-hit ratio, USD and wall time. Automated tests never run th
 Last run, 2026-10-15 on a trial merge of tracks t1 to t4: L1, L2 and L3 pass on gpt-5.6-luna for $0.0051 in total
 (2, 5 and 3 model steps). Numbers are in `docs/tracks/t4-agent.md`.
 
+Wave 3 cases (one per new agent golden path): L6 is GP13 (`rt_expense_review`), L7 is GP15's chart answer, L8 is
+GP16's monthly exec report, L9 is GP18's follow-up routine and L10 is GP14's time-off request routine (it runs on the
+zero-token template path, so it makes no model call). GP15's chat proposal is L5, in its own script:
+
+```sh
+WEFT_SECRETS_FILE=~/Developer/projects/.weft.secrets.env WEFT_LIVE_OPENAI=1 WEFT_LLM=openai pnpm eval:live L6 L7 L8 L9 L10
+WEFT_SECRETS_FILE=~/Developer/projects/.weft.secrets.env WEFT_LIVE_OPENAI=1 WEFT_LLM=openai node_modules/.bin/tsx evals/live/l5-chat-propose.ts
+```
+
+Last wave 3 run, 2026-10-16 on the round 2 integration branch: L5 to L10 all pass on gpt-5.6-luna (4, 3, 2, 2 and 2
+model steps; L10 needs none), about $0.016 for the round including reruns. The numbers and the harness fixes the runs led to are in
+README "Live wave 3 agent golden paths" and docs/wave3.md section 11.
+
 `smoke.ts` holds the 5 builder smoke calls of harness 11.2 (run once; results in `.scratch/t4-agent/smoke.md`).
