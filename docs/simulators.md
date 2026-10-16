@@ -10,10 +10,13 @@ Every outside party Weft talks to is a simulator in `packages/sim`. Nothing in t
 | TX TWC (sim) | Texas unemployment insurance | Registrations |
 | CO DOR (sim), CO CDLE (sim) | Colorado withholding and unemployment insurance | Registrations complete 2 simulated business days after submission with synthetic account numbers; a `needs_info` fault asks to "Confirm first wage date in Colorado" |
 | Sim Federal Credit Union (ACH) | The payroll bank | `submitBatch` settles at payday 06:00 PT on the first tick at or after `settleAt`; a `return` fault returns one entry |
-| Identity provider (sim) | Google Workspace, GitHub and team chat accounts | Accounts are active immediately; a `delay` fault keeps them provisioning for one tick |
-| Laptop vendor (sim) | Device orders | "Larkspur standard laptop (sim)" at $1,899.00, ETA 3 business days |
+| Identity provider (sim) | Google Workspace, GitHub, SSO and team chat accounts | Accounts are active immediately; a `delay` fault keeps them provisioning for one tick. Offboarding suspends accounts and clears groups (fault targets `idp.suspend`, `idp.clearGroups`) |
+| Laptop vendor (sim) | Device orders | "Larkspur standard laptop (sim)" at $1,899.00, ETA 3 business days; a remote lock for offboarding (fault target `devices.lock`) |
 | Team chat (sim) | Slack-style channels | Channels `#people-ops`, `#payroll`, `#new-hires`, `#general`; routines post through `comms.send_message` |
-| Juniper Mutual (sim), Tidewater Retirement (sim) | Benefits carriers | Plans and enrollments are real seed data; the invoice reconciliation is P1 |
+| Juniper Mutual (sim), Tidewater Retirement (sim) | Benefits carriers | Plans and enrollments are real seed data. `carrier.invoice(month)` bills medical, dental and vision enrollments per semi-monthly period at the enrolled tier, stored once per month; the October invoice carries three planted errors for reconciliation (fault target `carrier.invoice`) |
+| Email (sim) | Outbound mail | An outbox over `sim_email_messages`, `*.example` addresses only: offer invites with the portal link, COBRA notices, carrier disputes; `GET /v1/sim/email` (fault target `email.send`) |
+| Bank account verification (sim) | Direct deposit checks | Deterministic verify of a routing and account pair after the ABA checksum passes; only last 4 digits are stored (fault target `bankVerify.verify`) |
+| Payment rail (sim) | Contractor payouts abroad | `send` books a pending transfer; the scheduler tick moves it to sent, then delivered two PT business days after booking, emitting `sim.rail_delivered`; a `return` fault bounces it (fault target `rail.send`) |
 
 ## Notice scenarios
 

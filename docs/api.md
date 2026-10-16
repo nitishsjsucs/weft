@@ -23,13 +23,16 @@ The API is Hono on Node, bound to 127.0.0.1 (port 4070 by default). The route ta
 |---|---|
 | Health and stats | `GET /v1/health` (status, provider badge, clock, stubbed parts), `GET /v1/stats` (counts for the landing page and Home) |
 | Company and people | `GET /v1/company`, `GET /v1/workers`, `GET /v1/workers/:id`, `GET /v1/workers/:id/onboarding`, `GET /v1/offers`, `POST /v1/offers/:id/accept` |
-| Payroll | `GET /v1/payrolls`, `GET /v1/payrolls/:id`, `GET /v1/payrolls/:id/paychecks`, `GET /v1/paychecks/:id`, `POST /v1/payrolls/:id/preview`, `POST /v1/payrolls/:id/submit`, `POST /v1/payrolls/drafts` |
+| Hiring and documents (wave 2) | `POST /v1/offers`, `GET /v1/offers/:id`, `POST /v1/offers/:id/send`, `POST /v1/offers/:id/void`, `GET /v1/workers/:id/documents?status=`, `GET /v1/documents/:id` |
+| New-hire portal (wave 2, the hire's persona only) | `GET /v1/portal/me`, `POST /v1/portal/offer/view`, `POST /v1/portal/documents/:id/sign`, `POST /v1/portal/w4`, `POST /v1/portal/state-withholding`, `POST /v1/portal/direct-deposit`, `POST /v1/portal/i9` (multipart), `POST /v1/portal/benefits`. A persona gets 403 `PORTAL_ONLY` on every other path |
+| Offboarding (wave 2) | `POST /v1/workers/:id/terminate`, `GET /v1/offboarding`, `GET /v1/offboarding/:id` |
+| Payroll | `GET /v1/payrolls`, `GET /v1/payrolls/:id`, `GET /v1/payrolls/:id/paychecks`, `GET /v1/paychecks/:id`, `POST /v1/payrolls/:id/preview`, `POST /v1/payrolls/:id/submit`, `POST /v1/payrolls/drafts`, `POST /v1/payrolls/off-cycle` (wave 2, a proposal) |
 | Tax and notices | `GET /v1/tax/accounts`, `GET /v1/tax/rates`, `GET /v1/notices`, `GET /v1/notices/:id` |
-| Benefits and IT | `GET /v1/benefits/plans`, `GET /v1/benefits/enrollments`, `GET /v1/it/accounts`, `GET /v1/it/devices` |
+| Benefits, IT and contractors | `GET /v1/benefits/plans`, `GET /v1/benefits/enrollments`, `GET /v1/it/accounts`, `GET /v1/it/devices`; wave 2: `GET /v1/benefits/reconciliation?month=`, `POST /v1/benefits/reconciliation/run`, `GET /v1/benefits/open-enrollment`, `GET /v1/contractors/payouts`, `POST /v1/contractors/payouts`, `GET /v1/contractors/fx` |
 | Decisions | `GET /v1/proposals`, `GET /v1/proposals/:id`, `POST /v1/proposals/:id/{approve,deny,dismiss,start}` |
 | Audit | `GET /v1/actions`, `GET /v1/actions/:seq`, `POST /v1/actions/:seq/rollback`, `GET /v1/actions/verify` |
 | Tools | `GET /v1/tools?surface=mcp|main`, `POST /v1/tools/:name` (the surface comes from the key, never the request) |
-| Memory | `GET /v1/memory/tree`, `GET /v1/memory/file?path=`, `GET /v1/memory/search?q=` (read only) |
+| Memory | `GET /v1/memory/tree`, `GET /v1/memory/file?path=` (with `links`: outgoing and backlinks), `GET /v1/memory/search?q=` (alias and wiki-link expansion), `GET /v1/memory/history?path=&limit=` (read only) |
 | Activity and settings | `GET /v1/events?afterId=`, `GET /v1/settings/permissions`, `PUT /v1/settings/agent-grants`, `POST /v1/api-keys` (the key is shown once) |
 | Agent | `POST /v1/agent/runs`, `GET /v1/agent/runs`, `GET /v1/agent/runs/:id`, `GET /v1/agent/runs/:id/events` (SSE), `GET /v1/agent/runs/:id/trace`, `GET /v1/agent/runs/:id/artifacts/:ref`, `POST /v1/agent/runs/:id/cancel`, `GET /v1/agent/costs?day=` |
 | Routines | `GET /v1/routines`, `GET /v1/routines/:id`, `GET /v1/routines/:id/runs`, `GET /v1/routine-runs/:id`, `POST /v1/routines/:id/trigger`, `POST /v1/routines/draft`, `POST /v1/routines/:id/enable`, `POST /v1/routines/:id/disable` |
