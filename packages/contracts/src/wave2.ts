@@ -148,13 +148,14 @@ export interface BankVerifySim { verify(req: { workerId: string; routing: string
 
 // ---------- w2-memory: recall, dossiers, coarsening ----------
 
-export const RECALL_BUDGET = { maxItems: 6, maxChars: 2400 } as const;
+/** research/harness.md 18 item 4: at most 4 searches, hits within 1,200 tokens, once per run, always the one-pager. */
+export const RECALL_BUDGET = { maxSearches: 4, maxTokens: 1200, onePager: "knowledge/company/one-pager.md" } as const;
 export const RecallItem = z.object({ path: z.string(), title: z.string(), excerpt: z.string(), score: z.number(), asOf: iso });
 export type RecallItem = z.infer<typeof RecallItem>;
 export const DossierSubject = z.string().regex(/^(wrk|txa|bpl|ntc|cmp)_[A-Za-z0-9_]+$/);
 export const Dossier = z.object({ subjectRef: DossierSubject, path: z.string(), refreshedAt: iso, facts: z.array(z.object({ text: z.string(), sourceRef: z.string() })).max(40) });
 export type Dossier = z.infer<typeof Dossier>;
-export const CoarsenLevel = e("day", "week", "month"); export type CoarsenLevel = z.infer<typeof CoarsenLevel>;
+export const CoarsenLevel = e("hourly", "daily", "weekly", "monthly"); export type CoarsenLevel = z.infer<typeof CoarsenLevel>;
 
 // ---------- w2-providers-sandbox ----------
 
