@@ -96,6 +96,18 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     expect(salary[0]!.after).toBe(formatCents(due - paid));
   });
 
+  it("a cli API key's off-cycle call is a proposal, never a direct payment", async () => {
+    const created = await req("POST", "/v1/api-keys", weft.uiHeaders("usr_dana"), { label: "laptop cli", scope: "cli" });
+    expect(created.status).toBe(201);
+    const key = ((await created.json()) as { plaintext: string }).plaintext;
+    const before = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM payroll_runs WHERE subtype = 'off_cycle'`);
+    const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": key }, { worker_ids: [WORKER], period_start: "2026-11-01", period_end: "2026-11-15", payday: "2026-11-13", reason: "bonus", bonus_cents: { [WORKER]: 90_000 } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, status: "pending_approval" });
+    const after = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM payroll_runs WHERE subtype = 'off_cycle'`);
+    expect(after[0]!.n).toBe(before[0]!.n);
+  });
+
   it("an off-cycle over the $10,000.00 per-call ceiling is refused, not proposed", async () => {
     const res = await req("POST", "/v1/tools/payroll.propose_off_cycle", { "x-api-key": mcpKey }, { worker_ids: [WORKER], period_start: "2026-10-16", period_end: "2026-10-31", payday: "2026-10-30", reason: "bonus", bonus_cents: { [WORKER]: 2_000_000 } });
     expect(res.status).toBe(422);

@@ -9,6 +9,7 @@ import { appendAudit } from "./chain";
 import type { Engine } from "./engine";
 import { refusal, Rollback } from "./outcome";
 import { runInTx } from "./pipeline";
+import { riskOf } from "./policy";
 import { toProposal, type ProposalRow } from "./proposals";
 import { humanScope, runGrants, type CallScope } from "./scope";
 import { GRANT_RANK, intersect, loadPrincipal, readSetting, type PrincipalRow } from "./store";
@@ -68,6 +69,11 @@ async function decisionNote(e: Engine, row: ProposalRow, who: PrincipalRow, deci
 }
 
 export function createHumanExecutor(e: Engine): HumanExecutor {
+  const apiKeyGated = (command: string, args: unknown): boolean => {
+    const def = e.registry.def(command);
+    if (!def || def.approval !== "always" || def.effect !== "external" || def.mcp === "hidden") return false;
+    try { return riskOf(def, args) === "R4"; } catch { return false; }
+  };
   const fire = async (p: ProposalDecided) => {
     for (const cb of e.decided) {
       try { await cb(p); } catch (err) { e.log(e.redactor.redact(`onProposalDecided failed: ${err instanceof Error ? err.message : String(err)}`)); }
@@ -90,6 +96,9 @@ export function createHumanExecutor(e: Engine): HumanExecutor {
       const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
         const scope = await humanScope(e, tx, session);
         if (!scope) return refusal("NOT_PERMITTED", "The session principal is not a human of this company", false);
+        // A cli or admin API key moving money (R4, external, approval always) gets a proposal, never a direct run:
+        // a script holding a key is not a person looking at each earning line. UI sessions execute (SPEC 10).
+        if (session.via === "api_key" && apiKeyGated(command, args)) return (await runInTx(e, tx, { ...scope, caller: "mcp" }, command, args)).outcome;
         return (await runInTx(e, tx, scope, command, args)).outcome;
       }));
       await afterCommit(e, outcome);
