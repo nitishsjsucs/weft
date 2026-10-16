@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { CHAT_TOOLS, type AgentRunRow } from "@weft/contracts";
-import { agentRuns, proposals, routineRuns, routines } from "@weft/db";
+import { agentRuns, paychecks, proposals, routineRuns, routines } from "@weft/db";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 let weft: TestWeft;
@@ -76,5 +76,27 @@ describe("routine enable and disable", () => {
     expect(off.status, await off.clone().text()).toBe(200);
     const [d] = await weft.db.select().from(routines).where(eq(routines.id, "rt_people_digest"));
     expect(d?.enabled).toBe(false);
+  });
+});
+
+describe("rate change refreshes open drafts", () => {
+  it("an approved CA SUI change is applied to the open Oct 30 draft before anyone submits it", async () => {
+    const res = await post("/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" });
+    expect(res.status, await res.clone().text()).toBe(200);
+    let rate: typeof proposals.$inferSelect | undefined;
+    for (let i = 0; i < 20 && !rate; i++) {
+      await weft.scheduler.tick();
+      const [rr] = await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, "rt_agency_notice"));
+      if (rr?.agentRunId) await settled(rr.agentRunId);
+      rate = (await weft.db.select().from(proposals)).find((p) => p.command === "tax.update_rate" && p.status === "pending");
+    }
+    expect(rate).toBeTruthy();
+    const ok = await post(`/v1/proposals/${rate!.id}/approve`, { reasonCode: null, note: null });
+    expect(ok.status, await ok.clone().text()).toBe(200);
+    const rows = await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
+    const sui = rows.flatMap((r) => (JSON.parse(r.taxesJson) as { code: string; jurisdiction: string; payer: string; rate: string | null; amount_cents: number }[])
+      .filter((t) => t.code === "sui" && t.jurisdiction === "CA" && t.payer === "employer"));
+    expect(sui.length).toBeGreaterThan(0);
+    expect(new Set(sui.map((t) => t.rate))).toEqual(new Set(["0.015"]));
   });
 });

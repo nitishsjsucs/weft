@@ -63,6 +63,22 @@ export async function previewRun(tx: DbTx, deps: LifecycleDeps, runId: string): 
   return getRun(tx, runId);
 }
 
+/**
+ * Recomputes every open draft of the company whose payday is on or after `fromDate`. tax.update_rate and
+ * tax.revert_rate call it in the same transaction, so a draft never carries a superseded rate and a pending
+ * payroll.submit_run proposal sees a new subject hash (STALE_SUBJECT) instead of paying stale numbers.
+ */
+export async function refreshOpenDrafts(tx: DbTx, deps: LifecycleDeps, companyId: string, fromDate: string): Promise<string[]> {
+  const drafts = await tx.select().from(payrollRuns).where(and(eq(payrollRuns.companyId, companyId), eq(payrollRuns.status, "draft")));
+  const refreshed: string[] = [];
+  for (const run of drafts) {
+    if (run.payday < fromDate) continue;
+    await writePaychecks(tx, deps, run);
+    refreshed.push(run.id);
+  }
+  return refreshed;
+}
+
 function paycheckValues(cp: ComputedPaycheck, flags: Flag[]) {
   const status = isBlocked(flags) ? "blocked" : "draft";
   return {
