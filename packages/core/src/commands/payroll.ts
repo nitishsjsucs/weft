@@ -315,7 +315,7 @@ async function offCyclePlan(i: OffCycleInput, ctx: ExecContext, deps: CommandDep
 
 export const proposeOffCycleCommand: WeftCommand<OffCycleInput> = {
   ...base, name: "payroll.propose_off_cycle", summary: "Propose an off-cycle pay run",
-  description: "Proposes an off_cycle run: salary for period_start to period_end prorated by calendar days when the rate changed mid-period, plus bonus_cents per worker as supplemental wages (federal flat 22%). A period a submitted regular run already paid is refused for missed_payroll (DOMAIN_ALREADY_PAID); correction pays only the difference. Missed payroll takes the period's benefit deductions. Each line is in the preview; approval submits it to the bank like a regular run. Always needs approval; total cost counts against agent.off_cycle_cents.",
+  description: "Proposes an off_cycle run: salary for period_start to period_end prorated by calendar days on a mid-period raise, plus bonus_cents per worker as supplemental wages (federal 22%). A period a regular run already paid is refused for missed_payroll (DOMAIN_ALREADY_PAID); correction pays only the difference. Approval submits it to the bank; total cost counts against agent.off_cycle_cents.",
   compactDescription: "Propose an off-cycle pay run with a prorated raise and a bonus (needs approval).",
   input: OffCycleInput, needs: "edit", effect: "external", risk: () => "R4", approval: "always",
   amountCents: async (i, ctx, deps) => (await offCyclePlan(i, ctx, deps)).totals.totalCost,
