@@ -74,6 +74,9 @@ export function createRunStore(db: Db, opts: { wallNow?: () => string; onStep?: 
   return {
     async createRun(row, onBehalfOf = null) {
       await lockedWrite(() => db.insert(agentRuns).values(toInsert(row, onBehalfOf)));
+      // A new run has no steps. POST /v1/sim/reset rebuilds the world in this process and run ids restart at run_0001,
+      // so a counter cached for the old run with this id would number the fresh run's steps from where that one stopped.
+      nextN.delete(row.id);
     },
     async getRun(id) {
       const rows = await db.select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1);
