@@ -43,7 +43,7 @@ export function HomeView() {
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
       <h1 className="mb-8 text-7 font-semibold tracking-tight">{greeting(now)}, {first}</h1>
       <div className="grid items-start gap-6 tablet:grid-cols-2">
-        <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Funding via simulated ACH</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
+        <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Paid by simulated ACH debit</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
           {upcoming.length === 0 ? <div className="p-4 text-2 text-gray-10">{runs.error ? "Payroll is not available yet." : "No upcoming payrolls."}</div> : null}
           {upcoming.map((r) => (
             <Link key={r.id} href={`/app/payroll/${r.id}`} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-3 last:border-0 hover:bg-gray-2">
