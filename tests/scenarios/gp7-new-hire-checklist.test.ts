@@ -104,6 +104,18 @@ describe("GP7 new-hire checklist unblocks payroll", () => {
     expect(lib.map((d) => d.kind)).toEqual(["offer_letter", "confidentiality_agreement", "w4", "state_withholding", "direct_deposit_auth", "i9", "benefits_election"]);
   });
 
+  it("the agent finishing its own tasks later does not emit worker.onboarding_completed again", async () => {
+    const open = await weft.db.all<{ kind: string }>(sql`SELECT kind FROM onboarding_tasks WHERE worker_id = ${workerId} AND status != 'done' ORDER BY kind`);
+    expect(open.length).toBeGreaterThan(0);
+    const last = open.find((t) => t.kind !== "state_registration") ?? open[0]!;
+    await weft.db.run(sql`UPDATE onboarding_tasks SET status = 'done' WHERE worker_id = ${workerId} AND kind != ${last.kind}`);
+    const res = await call("usr_dana", "POST", "/v1/tools/onboarding.complete_task", { worker_id: workerId, kind: last.kind });
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(res.json.data).toMatchObject({ changed: true, open_count: 0 });
+    const done = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM events WHERE type = 'worker.onboarding_completed' AND subject_ref = ${workerId}`);
+    expect(done[0]!.n).toBe(1);
+  });
+
   it("the next payroll draft pays the hire: W-4 withholding, pre-tax deductions, no MISSING_BANK_ACCOUNT", async () => {
     const draft = await call("usr_dana", "POST", "/v1/payrolls/drafts", { payScheduleId: "ps_us_semimonthly", periodEnd: "2026-11-15" });
     expect(draft.status).toBe(200);

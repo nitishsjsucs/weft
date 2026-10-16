@@ -3,7 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { OnboardingTaskKind } from "@weft/contracts";
-import { onboardingTasks, taxAccounts } from "@weft/db";
+import { events as eventRows, onboardingTasks, taxAccounts } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, notFound, riskOf, writeCommand } from "../demo/define";
 import { nameRef } from "../people/names";
@@ -30,10 +30,13 @@ export const completeTask = writeCommand({
     await tx.update(onboardingTasks).set({ status: "done", doneAt: ctx.now, blockedReason: null }).where(eq(onboardingTasks.id, t.id));
     const all = await tx.select().from(onboardingTasks).where(eq(onboardingTasks.workerId, w.id));
     const allDone = all.every((x) => x.id === t.id || x.status === "done");
+    // The new-hire portal (wave 2) emits worker.onboarding_completed when the employee tasks finish; the agent's
+    // later tasks must not emit it a second time.
+    const already = allDone ? (await tx.select({ id: eventRows.id }).from(eventRows).where(and(eq(eventRows.type, "worker.onboarding_completed"), eq(eventRows.subjectRef, w.id))).limit(1)).length > 0 : false;
     return {
       data: { task_id: t.id, kind: t.kind, status: "done", changed: true, open_count: all.filter((x) => x.id !== t.id && x.status !== "done").length },
       summary: `Completed ${i.kind} for ${nameRef(w.firstName, w.lastName, w.id)}`,
-      events: allDone ? [{ type: "worker.onboarding_completed", subjectRef: w.id, payload: { worker_id: w.id } }] : [],
+      events: allDone && !already ? [{ type: "worker.onboarding_completed", subjectRef: w.id, payload: { worker_id: w.id } }] : [],
     };
   },
 });
