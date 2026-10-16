@@ -78,11 +78,17 @@ stopped afterwards (process group killed). The 27B model was never started. Live
 
 ## Tests added
 
-37 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
+38 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
 `packages/executor/test/sandbox/quickjs.test.ts` (11) and `code-run.test.ts` (9, including a vault value that an inner
-read leaks in every encoding and that never reaches the output), plus 2 in the existing files below.
+read leaks in every encoding and that never reaches the output), the s6 scenario, plus 2 in the existing files below.
 
 ## Edits outside the owned list, and why
+
+- `tests/scenarios/s6-code-run.test.ts` (new file; the brief asks for scenario tests on the scripted provider): a
+  routine run whose test-only routine row lists `code.run`, triggered through `POST /v1/routines/:id/trigger`; the
+  scripted model calls `code__run`, the script reads `people__search` and `payroll__get_run` through `weft.call`, its
+  send is refused `SANDBOX_NOT_ALLOWED`, the final text carries the CA headcount from the script, and no action row is
+  written.
 
 - `packages/agent/test/providers.test.ts`: the wave 1 test asserted `PROVIDER_CONFIG: not built in P0` for claude, mlx
   and llama, which the acceptance list replaces. It now asserts the message names the missing variable.
@@ -112,9 +118,8 @@ is in `.scratch/w2-providers-sandbox/left.md` (both in the main checkout; the le
 
 ## Left for later
 
-- Scenario S6 on the scripted provider (`code__run` summing CA SUI wages through `payroll__get_run` and
-  `people__search`): needs `code.run` on a scenario allowlist and a file under `tests/scenarios/`, which this track
-  does not own.
+- Scenario S6 as harness 3.6 words it (summing CA SUI wages, checked in cents against `tax.rate_change_impact`):
+  `tests/scenarios/s6-code-run.test.ts` covers the same path with a CA headcount and a draft-run read instead.
 - A return value over the 8,000 character observation cap is offloaded by the pipeline to a run artifact the model
   pages with `agent.read_artifact` (tested); over 64 KiB it is a `SANDBOX_ERROR` asking for a smaller summary,
   where harness 3.5 wants `runs/<id>/code/<n>.out.json` with an `artifact_ref` at any size.
