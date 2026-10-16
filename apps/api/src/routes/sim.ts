@@ -60,6 +60,9 @@ export async function resetWorld(weft: Weft): Promise<{ ms: number }> {
   });
   await seedWorld(weft);
   await weft.clock.set(SEED_TIME, rate);
+  // The engine lives across the reset; without this, a clock move before the next tick would start counting cron
+  // slots from the old (later) cursor and skip the seed morning's 09:00 digest.
+  (weft.routines as { resetCursor?: (at: string) => void }).resetCursor?.(SEED_TIME);
   return { ms: Date.now() - t0 };
 }
 

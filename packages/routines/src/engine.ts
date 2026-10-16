@@ -47,6 +47,8 @@ export interface WeftRoutinesEngine extends RoutinesEngine {
   runs(routineId: string, limit?: number): Promise<RoutineRun[]>;
   getRun(routineRunId: string): Promise<RoutineRun | null>;
   ensurePrebuilt(): Promise<void>;
+  /** After POST /v1/sim/reset: the world and the clock went back to the seed, so cron slots count from `at` again. */
+  resetCursor(at: string): void;
   /** Fire one trigger now (tests and the scheduler use tick; this is the shared path). */
   fire(routine: RoutineDef, input: { triggerRef: string; payload: Record<string, unknown>; attended: boolean; event: WeftEvent | null; at?: string }): Promise<RoutineRun>;
   settled(routineRunId: string): Promise<RoutineRun>;
@@ -90,7 +92,9 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
   const newId = () => `rtr_${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
 
   async function ensurePrebuilt() {
-    if (seeded) return;
+    // POST /v1/sim/reset drops and rebuilds every table under a live engine, so a cached "already seeded" flag is
+    // only trusted while the prebuilt rows are still there.
+    if (seeded && (await db.select({ id: routines.id }).from(routines).where(eq(routines.id, PREBUILT[0]!.id)).limit(1)).length) return;
     seeded = true;
     const existing = new Set((await db.select({ id: routines.id }).from(routines)).map((r) => r.id));
     for (const r of PREBUILT) {
@@ -211,6 +215,7 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     async runs(routineId, limit = 50) {
       return (await db.select().from(routineRuns).where(eq(routineRuns.routineId, routineId)).orderBy(desc(routineRuns.startedAt)).limit(limit)).map(toRun);
     },
+    resetCursor(at: string) { cursor = at; seeded = false; },
     async tick(now) {
       await ensurePrebuilt();
       if (cursor > now) cursor = now; // the sim clock was set back (reset): never backfill
