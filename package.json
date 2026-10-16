@@ -15,6 +15,7 @@
     "test": "vitest run",
     "typecheck": "turbo run typecheck",
     "e2e": "playwright test",
+    "screenshots": "playwright test -c playwright.screens.config.ts",
     "lint:prose": "tsx scripts/check-prose.ts",
     "lint:brand": "tsx scripts/check-brand.ts",
     "db:migrate": "tsx packages/db/src/cli.ts migrate",
