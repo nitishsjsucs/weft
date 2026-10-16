@@ -109,7 +109,7 @@ export function PeopleView() {
   );
 }
 
-const TASK_LABEL: Record<string, string> = { sign_offer: "Sign offer", federal_w4: "Federal W-4", state_withholding: "State withholding", direct_deposit: "Direct deposit", i9_sim: "I-9 (simulated)", benefits_selection: "Benefits selection", it_accounts: "IT accounts", device: "Laptop", state_registration: "State tax registration" };
+const TASK_LABEL: Record<string, string> = { sign_offer: "Sign offer", sign_confidentiality: "Sign confidentiality agreement", federal_w4: "Federal W-4", state_withholding: "State withholding", direct_deposit: "Direct deposit", i9_sim: "I-9 (simulated)", benefits_selection: "Benefits selection", it_accounts: "IT accounts", device: "Laptop", state_registration: "State tax registration" };
 
 /** GET /v1/workers/:id returns a WorkerDetail (route table); the scaffold client types it as Worker, so both are read. */
 interface PayRate { id: string; kind: string; amount: Money; effectiveFrom: string; effectiveTo: string | null; createdActionSeq: number | null }

@@ -4,6 +4,8 @@ import { DocumentStatus } from "@weft/contracts";
 import type { WeftCommand } from "../shared/deps";
 import { notFound, readCommand } from "../demo/define";
 import { getDocument, listWorkerDocuments, signatureOf, toDocumentDto } from "../documents/queries";
+import { createOffer, expireOffers, sendOffer, viewOffer, voidOffer } from "../portal/offers";
+import { portalCommands } from "../portal/forms";
 
 const ListInput = z.object({ worker_id: z.string(), status: DocumentStatus.optional() });
 const listDocuments = readCommand({
@@ -31,4 +33,6 @@ const getDoc = readCommand({
   },
 });
 
-export const documentsCommands: WeftCommand[] = [listDocuments, getDoc];
+// The offer lifecycle and the portal forms live in documents.* (offer letters, e-signature, W-4, state certificate,
+// direct deposit authorization, I-9, benefits election are all DocumentKinds). See docs/tracks/w2-onboarding.md.
+export const documentsCommands: WeftCommand[] = [listDocuments, getDoc, createOffer, sendOffer, voidOffer, expireOffers, viewOffer, ...portalCommands];

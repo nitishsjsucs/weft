@@ -37,7 +37,7 @@ export const isPastExpiry = (o: OfferRow, now: string) => !!o.expiresOn && ptDat
 
 const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T12:00:00.000Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-// onboarding.create_offer ------------------------------------------------------------------------------------
+// documents.create_offer ------------------------------------------------------------------------------------
 const CreateInput = z.object({
   candidate_first: z.string().min(1).max(60), candidate_last: z.string().min(1).max(60),
   candidate_email: z.string().max(120).regex(EXAMPLE_EMAIL, "use a *.example address (demo data)"),
@@ -46,8 +46,8 @@ const CreateInput = z.object({
   start_date: isoDate, expires_on: isoDate.optional(),
 });
 export const createOffer = writeCommand({
-  name: "onboarding.create_offer", summary: "Save a draft offer for a candidate (nothing is sent).",
-  description: "Create a draft offer: candidate name and *.example email, title, department_id, work_state (CA, NY, TX, CO), optional manager_id, base_cents (annual salary or hourly rate in cents), start_date and optional expires_on. A draft is not sent; onboarding.send_offer sends it. R1: no approval.",
+  name: "documents.create_offer", summary: "Save a draft offer for a candidate (nothing is sent).",
+  description: "Create a draft offer: candidate name and *.example email, title, department_id, work_state (CA, NY, TX, CO), optional manager_id, base_cents (annual salary or hourly rate in cents), start_date and optional expires_on. A draft is not sent; documents.send_offer sends it. R1: no approval.",
   input: CreateInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   async run(i, ctx, deps) {
     const tx = deps.tx;
@@ -72,7 +72,7 @@ export const createOffer = writeCommand({
   },
 });
 
-// onboarding.send_offer --------------------------------------------------------------------------------------
+// documents.send_offer --------------------------------------------------------------------------------------
 const OfferIdInput = z.object({ offer_id: z.string() });
 async function companyName(tx: DbTx, companyId: string) {
   const [c] = await tx.select().from(companies).where(eq(companies.id, companyId)).limit(1);
@@ -94,7 +94,7 @@ export async function offerLetterFor(tx: DbTx, o: OfferRow): Promise<string> {
 const subjectHash = (o: OfferRow) => sha256Hex(canonicalJson({ offer: o.id, status: o.status, base: o.baseCents, start: o.startDate }));
 
 export const sendOffer = writeCommand({
-  name: "onboarding.send_offer", summary: "Send a draft offer: offer letter, confidentiality agreement and a portal invite email.",
+  name: "documents.send_offer", summary: "Send a draft offer: offer letter, confidentiality agreement and a portal invite email.",
   description: "Send draft offer_id to the candidate: writes the offer letter and confidentiality agreement documents, creates the new hire portal sign-in, emails an offer_invite with the portal link through the email simulator and marks the offer sent. R2: always needs a human approval.",
   input: OfferIdInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R2"), approval: "always", reversible: false,
   lease: (i) => `offer:${i.offer_id}`,
@@ -134,7 +134,7 @@ export const sendOffer = writeCommand({
   },
 });
 
-// onboarding.void_offer --------------------------------------------------------------------------------------
+// documents.void_offer --------------------------------------------------------------------------------------
 async function closeOffer(tx: DbTx, o: OfferRow, status: "voided" | "expired", ctx: ExecContext) {
   await tx.update(offers).set(status === "voided" ? { status, voidedAt: ctx.now } : { status }).where(eq(offers.id, o.id));
   const docs = await tx.select().from(documents).where(eq(documents.offerId, o.id));
@@ -146,7 +146,7 @@ async function closeOffer(tx: DbTx, o: OfferRow, status: "voided" | "expired", c
 }
 
 export const voidOffer = writeCommand({
-  name: "onboarding.void_offer", summary: "Void an offer that is not accepted yet.",
+  name: "documents.void_offer", summary: "Void an offer that is not accepted yet.",
   description: "Void offer_id (draft, sent or viewed): the offer reads Void, its unsigned documents are voided and the new hire portal sign-in loses its access. An accepted, expired or void offer is refused. R2: always needs a human approval.",
   input: OfferIdInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R2"), approval: "always", reversible: false,
   lease: (i) => `offer:${i.offer_id}`,
@@ -163,9 +163,9 @@ export const voidOffer = writeCommand({
   },
 });
 
-// onboarding.expire_offers -----------------------------------------------------------------------------------
+// documents.expire_offers -----------------------------------------------------------------------------------
 export const expireOffers = writeCommand({
-  name: "onboarding.expire_offers", summary: "Expire sent or viewed offers whose expiry date has passed.",
+  name: "documents.expire_offers", summary: "Expire sent or viewed offers whose expiry date has passed.",
   description: "Mark every sent or viewed offer whose expires_on is before today's sim date (America/Los_Angeles) expired: its unsigned documents are voided and the portal sign-in loses access. Returns the expired offer ids. R1: no approval.",
   input: z.object({}), domain: "people", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   async run(_i, ctx, deps) {
@@ -176,9 +176,9 @@ export const expireOffers = writeCommand({
   },
 });
 
-// onboarding.view_offer (the new hire persona opens the portal) ----------------------------------------------
+// documents.view_offer (the new hire persona opens the portal) ----------------------------------------------
 export const viewOffer = writeCommand({
-  name: "onboarding.view_offer", summary: "The new hire opened their offer (portal only).",
+  name: "documents.view_offer", summary: "The new hire opened their offer (portal only).",
   description: "Human only, new hire persona: marks the caller's sent offer viewed. An offer past its expiry date is marked expired instead. Already viewed or accepted offers are left as they are.",
   input: z.object({}), domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
   async run(_i, ctx, deps) {

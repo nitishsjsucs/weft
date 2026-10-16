@@ -38,8 +38,8 @@ describe("GP6 offer to signed", () => {
     expect(mail).toHaveLength(1);
     expect(mail[0]).toMatchObject({ kind: "offer_invite", relatedRef: offerId });
     expect(mail[0]!.body).toContain(`/portal?as=${persona}`);
-    const acts = await weft.db.all<{ command: string; actor_id: string }>(sql`SELECT command, actor_id FROM actions WHERE command LIKE 'onboarding.%' ORDER BY seq`);
-    expect(acts).toEqual([{ command: "onboarding.create_offer", actor_id: "usr_dana" }, { command: "onboarding.send_offer", actor_id: "usr_dana" }]);
+    const acts = await weft.db.all<{ command: string; actor_id: string }>(sql`SELECT command, actor_id FROM actions WHERE command LIKE 'documents.%' ORDER BY seq`);
+    expect(acts).toEqual([{ command: "documents.create_offer", actor_id: "usr_dana" }, { command: "documents.send_offer", actor_id: "usr_dana" }]);
   });
 
   it("the persona sees only the portal; opening it marks the offer viewed", async () => {
@@ -74,7 +74,7 @@ describe("GP6 offer to signed", () => {
     expect(sigs.map((s) => [s.document_id, s.signer_principal_id, s.signed_at, s.document_sha256])).toEqual([[letter.id, persona, weft.clock.now(), letter.sha256], [nda.id, persona, weft.clock.now(), nda.sha256]]);
     for (const s of sigs) {
       const [a] = await weft.db.all<{ command: string; actor_id: string; ts: string; args_json: string; summary: string }>(sql`SELECT command, actor_id, ts, args_json, summary FROM actions WHERE seq = ${s.action_seq}`);
-      expect(a).toMatchObject({ command: "onboarding.sign_document", actor_id: persona, ts: s.signed_at });
+      expect(a).toMatchObject({ command: "documents.sign", actor_id: persona, ts: s.signed_at });
       expect(JSON.parse(a!.args_json)).toMatchObject({ document_id: s.document_id, document_sha256: s.document_sha256 });
       expect(a!.summary).toContain(s.document_sha256);
     }
@@ -101,11 +101,11 @@ describe("GP6 offer to signed", () => {
     await call("usr_dana", "POST", `/v1/offers/${x}/send`);
     await weft.clock.set("2026-10-30T16:00:00.000Z", 0);
     const dana = { principalId: "usr_dana", companyId: "cmp_larkspur", via: "ui" as const, keyScope: null };
-    const out = await weft.executor.human.exec(dana, "onboarding.expire_offers", {});
+    const out = await weft.executor.human.exec(dana, "documents.expire_offers", {});
     expect(out.ok && out.status === "done" ? out.data : out).toMatchObject({ expired_offer_ids: [x] });
     expect((await call("usr_dana", "GET", `/v1/offers/${x}`)).json).toMatchObject({ status: "expired", allowed: [] });
     expect((await call("usr_dana", "POST", `/v1/offers/${x}/void`)).json.code).toBe("DOMAIN_ILLEGAL_TRANSITION");
-    const acts = await weft.db.all<{ command: string }>(sql`SELECT command FROM actions WHERE command IN ('onboarding.void_offer', 'onboarding.expire_offers')`);
-    expect(acts.map((a) => a.command)).toEqual(["onboarding.void_offer", "onboarding.expire_offers"]);
+    const acts = await weft.db.all<{ command: string }>(sql`SELECT command FROM actions WHERE command IN ('documents.void_offer', 'documents.expire_offers')`);
+    expect(acts.map((a) => a.command)).toEqual(["documents.void_offer", "documents.expire_offers"]);
   });
 });

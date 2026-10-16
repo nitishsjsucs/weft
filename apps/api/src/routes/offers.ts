@@ -57,7 +57,7 @@ export function offersRoutes(weft: Weft): Hono<WeftEnv> {
       workplace_id: str(b.workplaceId), work_state: b.workState, manager_id: str(b.managerId) || undefined, base_cents: b.baseCents, pay_kind: str(b.payKind),
       start_date: b.startDate, expires_on: str(b.expiresOn),
     };
-    return outcomeJson(c, await weft.executor.human.exec(session, "onboarding.create_offer", args));
+    return outcomeJson(c, await weft.executor.human.exec(session, "documents.create_offer", args));
   });
   r.get("/v1/offers/:id", async (c) => {
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
@@ -65,7 +65,7 @@ export function offersRoutes(weft: Weft): Hono<WeftEnv> {
     if (!o) throw new NotFound(`No offer ${c.req.param("id")}`);
     return c.json(await offerDetail(weft, o));
   });
-  for (const [path, command] of [["/v1/offers/:id/send", "onboarding.send_offer"], ["/v1/offers/:id/void", "onboarding.void_offer"]] as const) {
+  for (const [path, command] of [["/v1/offers/:id/send", "documents.send_offer"], ["/v1/offers/:id/void", "documents.void_offer"]] as const) {
     r.post(path, async (c) => {
       const session = c.var.session;
       if (!session) throw new Unauthorized();

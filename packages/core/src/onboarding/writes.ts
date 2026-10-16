@@ -38,9 +38,3 @@ export const completeTask = writeCommand({
   },
 });
 
-// Wave 2 (w2-onboarding): the offer lifecycle and the new-hire portal commands live in ../portal.
-export { createOffer, sendOffer, voidOffer, expireOffers, viewOffer } from "../portal/offers";
-export { portalCommands } from "../portal/forms";
-import { createOffer, expireOffers, sendOffer, viewOffer, voidOffer } from "../portal/offers";
-import { portalCommands } from "../portal/forms";
-export const w2OnboardingCommands: WeftCommand[] = [createOffer, sendOffer, voidOffer, expireOffers, viewOffer, ...portalCommands];

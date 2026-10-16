@@ -79,7 +79,7 @@ async function submission(deps: CommandDeps, ctx: ExecContext, workerId: string,
 
 const sigLine = (p: Persona, now: string, sha: string) => `signed by ${p.principal.display} (${p.principal.id}) at ${now}, sha256 ${sha}`;
 
-// onboarding.sign_document -----------------------------------------------------------------------------------
+// documents.sign -----------------------------------------------------------------------------------
 const SignInput = z.object({ document_id: z.string(), typed_name: z.string().min(2).max(120), document_sha256: z.string().regex(/^[0-9a-f]{64}$/) });
 
 async function acceptOffer(deps: CommandDeps, ctx: ExecContext, p: Persona): Promise<Event[]> {
@@ -110,7 +110,7 @@ async function acceptOffer(deps: CommandDeps, ctx: ExecContext, p: Persona): Pro
 }
 
 export const signDocument = writeCommand({
-  name: "onboarding.sign_document", summary: "Sign a document by typing your name (new hire portal only).",
+  name: "documents.sign", summary: "Sign a document by typing your name (new hire portal only).",
   description: "Human only, new hire persona: signs document_id with typed_name (the legal name on the offer) and document_sha256, the hash of the text the signer saw. The server recomputes the hash and refuses STALE_SUBJECT on a mismatch. Signing the offer letter accepts the offer and creates the worker as onboarding.",
   input: SignInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R2"), approval: "always", access: "human_only", reversible: false,
   lease: (i) => `document:${i.document_id}`,
@@ -155,11 +155,11 @@ export const signDocument = writeCommand({
   },
 });
 
-// onboarding.submit_w4 ---------------------------------------------------------------------------------------
+// documents.submit_w4 ---------------------------------------------------------------------------------------
 const FILING_LABEL: Record<string, string> = { single: "Single or married filing separately", mfj: "Married filing jointly", hoh: "Head of household" };
 const dollars = (c: number) => `$${(c / 100).toFixed(2)}`;
 export const submitW4 = writeCommand({
-  name: "onboarding.submit_w4", summary: "Submit Form W-4 (new hire portal only).",
+  name: "documents.submit_w4", summary: "Submit Form W-4 (new hire portal only).",
   description: "Human only, new hire persona: submits the 2020 or later Form W-4 (filing status, step 2 checkbox, steps 3 and 4 in cents, exempt) signed with the typed legal name. Writes tax_profiles with source portal and completes federal_w4.",
   input: W4Submission, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
   async run(i, ctx, deps) {
@@ -183,9 +183,9 @@ export const submitW4 = writeCommand({
   },
 });
 
-// onboarding.submit_state_withholding ------------------------------------------------------------------------
+// documents.submit_state_withholding ------------------------------------------------------------------------
 export const submitStateWithholding = writeCommand({
-  name: "onboarding.submit_state_withholding", summary: "Submit the work state's withholding certificate (new hire portal only).",
+  name: "documents.submit_state_withholding", summary: "Submit the work state's withholding certificate (new hire portal only).",
   description: "Human only, new hire persona: submits the state certificate (DE 4 for CA, IT-2104 for NY, DR 0004 for CO; TX has none) with filing status, allowances, extra cents and the typed legal name. Writes the state fields of tax_profiles and completes state_withholding.",
   input: StateWithholdingSubmission, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
   async run(i, ctx, deps) {
@@ -209,7 +209,7 @@ export const submitStateWithholding = writeCommand({
   },
 });
 
-// onboarding.submit_direct_deposit ---------------------------------------------------------------------------
+// documents.submit_direct_deposit ---------------------------------------------------------------------------
 // The API route validates the full numbers (ABA checksum), stores them in the vault and passes only the last 4
 // digits and the vault reference here, so no action row, submission or bank row ever holds a full number.
 const DdInput = z.object({
@@ -217,7 +217,7 @@ const DdInput = z.object({
   account_type: z.enum(["checking", "savings"]), credential_ref: z.string().regex(/^vault:[a-z0-9][a-z0-9-]{1,62}$/), typed_name: z.string().min(2).max(120),
 });
 export const submitDirectDeposit = writeCommand({
-  name: "onboarding.submit_direct_deposit", summary: "Set up direct deposit (new hire portal only).",
+  name: "documents.submit_direct_deposit", summary: "Set up direct deposit (new hire portal only).",
   description: "Human only, new hire persona: verifies the vaulted routing and account numbers with the bank verification simulator, then writes an active bank account holding only the last 4 digits and the vault reference, and completes direct_deposit.",
   input: DdInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R2"), approval: "always", access: "human_only", reversible: false,
   async preview(i) {
@@ -246,7 +246,7 @@ export const submitDirectDeposit = writeCommand({
   },
 });
 
-// onboarding.submit_i9 ---------------------------------------------------------------------------------------
+// documents.submit_i9 ---------------------------------------------------------------------------------------
 // The executor maps null to undefined before parsing, so the contract's nullable fields are also optional here.
 const I9Input = I9Submission.extend({ expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), file_name: z.string().min(1).max(120), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/), storage_path: z.string().regex(/^uploads\/[0-9a-f]{64}\.bin$/) }).strict();
 export function maskedUpload(u: { id: string; fileName: string; bytes: number; sha256: string }) {
@@ -255,7 +255,7 @@ export function maskedUpload(u: { id: string; fileName: string; bytes: number; s
   return { id: u.id, fileName: `${u.fileName.slice(0, 2)}***${ext}`, bytes: u.bytes, sha256: `${u.sha256.slice(0, 8)}...`, masked: true as const, preview: `ID image on file (${kb} KB), hidden` };
 }
 export const submitI9 = writeCommand({
-  name: "onboarding.submit_i9", summary: "Complete the I-9 section 1 simulation with an ID image (new hire portal only).",
+  name: "documents.submit_i9", summary: "Complete the I-9 section 1 simulation with an ID image (new hire portal only).",
   description: "Human only, new hire persona: records the I-9 section 1 simulation (citizenship, document kind, last 4 of the document number, expiry) and the uploaded ID image stored under the data dir. Responses show the upload masked only. Completes i9_sim.",
   input: I9Input, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
   async run(i, ctx, deps) {
@@ -275,13 +275,13 @@ export const submitI9 = writeCommand({
   },
 });
 
-// onboarding.submit_benefits ---------------------------------------------------------------------------------
+// documents.submit_benefits ---------------------------------------------------------------------------------
 const Election = BenefitsSelection.shape.elections.element;
 const BenefitsInput = BenefitsSelection.extend({
   elections: z.array(Election.extend({ tier: Election.shape.tier.optional(), deferralBps: Election.shape.deferralBps.optional() })).max(8),
 });
 export const submitBenefits = writeCommand({
-  name: "onboarding.submit_benefits", summary: "Elect benefits from the company plans (new hire portal only).",
+  name: "documents.submit_benefits", summary: "Elect benefits from the company plans (new hire portal only).",
   description: "Human only, new hire persona: elects plans (one per type; medical, dental and vision with a coverage tier; 401(k) with a deferral in basis points) or waives types. Writes active benefit enrollments from the start date, which flow into paychecks as pre-tax deductions, and completes benefits_selection.",
   input: BenefitsInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
   async run(i, ctx, deps) {

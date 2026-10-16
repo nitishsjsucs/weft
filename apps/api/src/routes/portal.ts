@@ -35,18 +35,18 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json(view);
   });
 
-  r.post("/v1/portal/offer/view", async (c) => outcomeJson(c, await weft.executor.human.exec(need(c.var.session), "onboarding.view_offer", {})));
+  r.post("/v1/portal/offer/view", async (c) => outcomeJson(c, await weft.executor.human.exec(need(c.var.session), "documents.view_offer", {})));
 
   r.post("/v1/portal/documents/:id/sign", async (c) => {
     const s = need(c.var.session);
     const b = (await c.req.json().catch(() => ({}))) as { typedName?: unknown; documentSha256?: unknown };
-    await weft.executor.human.exec(s, "onboarding.view_offer", {});   // marks viewed, or expired past expires_on
-    const out = await weft.executor.human.exec(s, "onboarding.sign_document", { document_id: c.req.param("id"), typed_name: b.typedName, document_sha256: b.documentSha256 });
+    await weft.executor.human.exec(s, "documents.view_offer", {});   // marks viewed, or expired past expires_on
+    const out = await weft.executor.human.exec(s, "documents.sign", { document_id: c.req.param("id"), typed_name: b.typedName, document_sha256: b.documentSha256 });
     await weft.scheduler.kick();
     return outcomeJson(c, out);
   });
 
-  for (const [path, command] of [["/v1/portal/w4", "onboarding.submit_w4"], ["/v1/portal/state-withholding", "onboarding.submit_state_withholding"], ["/v1/portal/benefits", "onboarding.submit_benefits"]] as const) {
+  for (const [path, command] of [["/v1/portal/w4", "documents.submit_w4"], ["/v1/portal/state-withholding", "documents.submit_state_withholding"], ["/v1/portal/benefits", "documents.submit_benefits"]] as const) {
     r.post(path, async (c) => {
       const s = need(c.var.session);
       const out = await weft.executor.human.exec(s, command, await c.req.json().catch(() => ({})));
@@ -68,7 +68,7 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     const d = parsed.data;
     const name = `bank-${p.workerId.replace(/_/g, "-")}`;
     await weft.executor.vault.put({ name, kind: "bank_account", value: JSON.stringify({ routing: d.routing, account: d.account }), description: `Direct deposit for ${p.workerId} (demo)`, by: s.principalId });
-    const out = await weft.executor.human.exec(s, "onboarding.submit_direct_deposit", {
+    const out = await weft.executor.human.exec(s, "documents.submit_direct_deposit", {
       bank_name: d.bankName, routing_last4: d.routing.slice(-4), account_last4: d.account.slice(-4), account_type: d.accountType, credential_ref: `vault:${name}`, typed_name: d.typedName,
     });
     await weft.scheduler.kick();
@@ -93,7 +93,7 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
     if (fresh) writeFileSync(abs, bytes, { mode: 0o600 });
     const field = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : undefined);
-    const out = await weft.executor.human.exec(s, "onboarding.submit_i9", {
+    const out = await weft.executor.human.exec(s, "documents.submit_i9", {
       citizenship: field("citizenship"), documentKind: field("documentKind"), documentNumberLast4: field("documentNumberLast4"),
       expiresOn: field("expiresOn") || null, typedName: field("typedName"),
       file_name: (file.name || "id-image").slice(0, 120), bytes: bytes.length, sha256: sha, storage_path: rel,
