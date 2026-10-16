@@ -57,6 +57,19 @@ conflict), docs/wave3.md 2 and 5; design and hand-computed cases in research/wav
 - `time_off.adjust_balance` (R2, approval always, reverse: the inverse adjustment) posts a signed `adjustment` row and
   never takes the available balance below zero (`DOMAIN_NEGATIVE_BALANCE`). `time_off.reopen` (human only, an
   approver) returns a decided request that has not started to pending: the use rows come back and the hold returns.
+- Every decision that changes what a period pays refreshes the open drafts that pay those days: submit, approve, deny,
+  cancel and reopen. The leave lines and the pending flag follow the request at once.
+- A request imported from a connected HR system (`source` other than `weft`; w3-integrations-hr writes `workday`
+  rows when Workday owns time off) is read-only: decide, cancel, reopen, check and route refuse it with
+  `DOMAIN_MANAGED_EXTERNALLY`, and the Requests tab labels it "Managed in Workday" with no actions. Its approved days
+  still count for coverage and still become leave lines on the draft. `time_off.list_requests` returns `source` and
+  `extRef`.
+- A hire after the seed (Noor once her offer is accepted, or anyone added later) has no assignments until the first
+  time it matters: `ensureAssignments` (store.ts) runs in `time_off.submit` and `time_off.post_accruals` for an
+  employee with no assignment at all. `policyApplies` picks the policies by jurisdiction: `US` for every employee,
+  the work state's code, and `NY-NYC` for a New York worker unless the workplace is a known city outside New York
+  City. Each assignment starts on the later of the start date and the policy's, and a front-load policy posts its
+  on-hire bank (TX sick 2,400 minutes, NYC unpaid 1,920, NY prenatal 1,200). Seeded workers are never touched.
 - `usr_imani` (role `manager`, worker wrk_0004) is seeded with `people: view`; she decides on the Requests tab (her own
   call runs). Approving agent proposals in the Inbox needs `people: approve`, which she does not have, so the grant
   model is unchanged.
@@ -69,6 +82,21 @@ conflict), docs/wave3.md 2 and 5; design and hand-computed cases in research/wav
   lines are regular wages and `packages/payroll-tax` is untouched. The seeded TX day (Lucy Harrow, Oct 23) shows
   `salary` 431,154 and `pto` 43,846 on `pay_2026_10_30`, gross 475,000; GP2 totals are unchanged.
 
+### Pre-payroll flags
+
+`time-off/flags.ts`, called through the `w3Flags` seam on every draft compute and refresh:
+
+- `PTO_LINE` (info): the paycheck carries `pto` or `sick` lines from approved leave; the message gives the hours and
+  the request ids (Lucy's seeded TX day: "Paid leave on this paycheck: 8.00 h pto (tor_0006)"). A `paid_holiday` line
+  alone is routine and does not flag.
+- `PENDING_TIME_OFF_IN_PERIOD`: a pending request has working days inside the period. Research 6.4 calls it review;
+  Weft makes it review only when the decision would move this paycheck's gross (an hourly worker's paid leave that no
+  block check stops). For a salaried worker approval only moves hours out of the salary line, a blocked request
+  cannot be approved, and unpaid leave adds no line, so those are info. That keeps the seeded draft at four paychecks
+  in review (GP2 and S2): Kenji's NY sick half day and Ben's blocked CA sick day are info flags.
+- `NEGATIVE_BALANCE` is not a `FlagRule` in the contracts, so it is not built (contract request 6). Weft never posts
+  a negative balance anyway: approval re-checks the balance and `adjust_balance` refuses one.
+
 ### Routine, screens and seed
 
 - `rt_time_off_requests` (disabled by default, 7 tools, `scenarios/rt_time_off_requests.json`): on
@@ -76,7 +104,8 @@ conflict), docs/wave3.md 2 and 5; design and hand-computed cases in research/wav
   unless a check blocks) with a note naming the balance before and after, the review checks and the holidays, plus a
   #people-ops notice without digits. A manual run picks the oldest pending request.
 - `/app/time-off`: Requests (pending first with check chips, routing and the employee note as written; Approve and
-  Deny for the routed approver and the People admin), Calendar (department month grid with approved and pending marks,
+  Deny for the routed approver, the People admin and HR managers; "Managed in Workday" and no actions for imported
+  rows), Calendar (department month grid with approved and pending marks,
   holiday shading, the out percent per day and over-limit days outlined), Balances, Policies (rule lines and sources)
   and Holidays. The person page has a Time off tab (balances and requests); Home has a Time off tile (out today, waiting
   for a decision, approved in the next 30 days).
@@ -105,16 +134,38 @@ spelling it. See `.scratch/contract-requests/w3-timeoff.md`.
 pnpm exec vitest run --project @weft/core packages/core/test/time-off packages/core/test/offboarding
 pnpm exec vitest run --project @weft/api apps/api/test/time-off.test.ts
 pnpm exec vitest run --project @weft/tests tests/scenarios/gp14-time-off.test.ts tests/scenarios/gp9-offboarding.test.ts
-WEFT_E2E_WEB_PORT=4640 WEFT_E2E_API_PORT=4641 pnpm exec playwright test e2e/gp14-time-off.spec.ts
+WEFT_E2E_WEB_PORT=4676 WEFT_E2E_API_PORT=4677 pnpm exec playwright test e2e/gp14-time-off.spec.ts
 ```
+
+Round 1 ran the e2e on 4640/4641 (docs/wave3.md 7); round 2 was told to use only 4660 to 4679, and 4660 to 4671
+belong to the two integrations tracks, so round 2 used 4676/4677. Any free pair works.
+
+In the app: Time Off in the sidebar (`/app/time-off`), a person's Time off tab (`/app/people/<id>`), and the Time off
+tile on Home. "Viewing as" Sam (HR manager) or Dana (People admin) shows Approve and Deny on every pending request.
+
+## Real versus simulated
+
+Everything in this track is Weft's own system of record, running on the synthetic Larkspur world: the ledger,
+balances, accruals, year end, checks, routing, decisions, leave lines and flags are real code paths over real tables,
+driven by the simulated clock and the simulated pay runs. Nothing calls a vendor. The policies follow public agency
+pages (sources on each policy card) and are research, not legal advice. Requests with `source = workday` come from
+the w3-integrations-hr Workday simulator (or its real adapter once configured) and are read-only here.
 
 ## Tests
 
 - `packages/core/test/time-off/engine.test.ts`: T1 to T17 from research 9.1 on the pure rules (plus use cap and
   increment); T13 and T14 also in `packages/core/test/offboarding/offcycle.test.ts` (rewritten against the ledger).
+- `packages/core/test/time-off/flags.test.ts`: PTO_LINE and the severity rule of PENDING_TIME_OFF_IN_PERIOD
+  (salaried, hourly, blocked, unpaid, another worker).
+- `packages/core/test/time-off/assignments.test.ts`: `policyApplies` against the seed's assignment per state, remote
+  and out-of-city New York workers, and a state with no policy.
 - `apps/api/test/time-off.test.ts`: seeded checks and routing, balances, calendar, agent proposal and forged approval
-  (T19), manager scope, block refusal, submit and cancel, accrual idempotency (T18), year end (T16 in the database).
-- `tests/scenarios/gp14-time-off.test.ts` and `e2e/gp14-time-off.spec.ts`.
+  (T19), manager scope, block refusal, submit and cancel, the draft flags (four in review, the refresh on submit and
+  cancel), Workday rows read-only, a hire after the seed (assignments and the TX front load on the first request),
+  accrual idempotency (T18), year end (T16 in the database), adjust and reopen.
+- `tests/scenarios/gp14-time-off.test.ts`; `e2e/gp14-time-off.spec.ts` has GP14 (Ruth's conflict, Imani's scope, the
+  approval, the TX pto line) and GP14b (the Home tile, Kenji's info flag, Sam approves on the Requests tab, the sick
+  line and PTO_LINE on the draft, the Balances, Policies and Holidays tabs, the person Time off tab).
 
 ## Left for later
 
@@ -123,11 +174,15 @@ The same list is in `.scratch/w3-timeoff/left.md`.
 - The portal "Request time off" section: the new-hire persona may call only `/v1/portal/*` (auth.ts), so it needs a
   portal route owned by w2-onboarding or an auth allowance; the API and command are ready.
 - "Viewing as" Imani in the persona menu (w3-topbar-shell owns `PRINCIPALS`); the e2e decides as Imani through the API.
-- Pre-payroll flags `PENDING_TIME_OFF_IN_PERIOD` and `PTO_LINE` (`time-off/flags.ts` still flags nothing): they add
-  flags to the seeded draft (Ben and Kenji are pending inside Oct 16 to 31), which moves the GP2 and S2 counts.
-- The `peopleDigest` out-this-week line (prechecks.ts, GP4) was cut first as planned.
-- The pay statement "Time off" block per policy (NYC accrued, used and available each period).
-- Front loads and assignments for a worker hired after the seed (Noor on GP6 acceptance); unpaid salaried docking for
-  full days; Approve and Deny buttons for HR managers (the API already allows them).
-- A directly decided request leaves an agent proposal for it pending; approving that proposal later fails with
-  `DOMAIN_NOT_PENDING`. Superseding it needs an executor hook.
+- `NEGATIVE_BALANCE` needs a `FlagRule` entry and a web label (contract request 6).
+- The `peopleDigest` out-this-week line (prechecks.ts, GP4) was cut first as planned: the digest's numbers are
+  grounded against company facts, and the routine's allowlist would need `time_off.list_requests`.
+- The pay statement "Time off" block per policy (NYC accrued, used and available each period), and labels for the
+  `pto`, `sick` and `paid_holiday` earning types in the paycheck drawer and the employee statement (outside this
+  track's paths).
+- Balances for a hire after the seed show once the first request or processed run assigns the policies; a
+  `worker.created` handler would need a system command that is not in `W3_PLANNED_COMMANDS`. A New York worker at a
+  known workplace outside New York City gets no sick policy until Larkspur has a New York State one.
+- Unpaid salaried docking for full days of unpaid leave.
+- A directly decided request leaves an agent proposal for it pending in the Inbox; approving it later is refused
+  (the subject changed). Superseding it needs an executor hook.
