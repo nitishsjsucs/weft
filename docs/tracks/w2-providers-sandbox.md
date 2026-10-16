@@ -76,9 +76,9 @@ stopped afterwards (process group killed). The 27B model was never started. Live
 
 ## Tests added
 
-34 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
-`packages/executor/test/sandbox/quickjs.test.ts` (11) and `code-run.test.ts` (6), plus 2 in the existing files
-below. Full suite 437 of 437.
+36 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
+`packages/executor/test/sandbox/quickjs.test.ts` (11) and `code-run.test.ts` (8, including a vault value that an inner
+read leaks in every encoding and that never reaches the output), plus 2 in the existing files below.
 
 ## Edits outside the owned list, and why
 
@@ -113,8 +113,9 @@ is in `.scratch/w2-providers-sandbox/left.md` (both in the main checkout; the le
 - Scenario S6 on the scripted provider (`code__run` summing CA SUI wages through `payroll__get_run` and
   `people__search`): needs `code.run` on a scenario allowlist and a file under `tests/scenarios/`, which this track
   does not own.
-- A return value over 64 KiB is a `SANDBOX_ERROR` asking for a smaller summary; the harness wants it offloaded to
-  `runs/<id>/code/<n>.out.json` with an `artifact_ref`.
+- A return value over the 8,000 character observation cap is offloaded by the pipeline to a run artifact the model
+  pages with `agent.read_artifact` (tested); over 64 KiB it is a `SANDBOX_ERROR` asking for a smaller summary,
+  where harness 3.5 wants `runs/<id>/code/<n>.out.json` with an `artifact_ref` at any size.
 - Source and output are not written to the run workspace; inner calls are listed in the result, not as nested
   `run_steps` rows (the executor does not write `run_steps`).
 - `weft.memory.search` and `weft.memory.read` pinned to the HEAD sha: `memory_at` is reported, but inner memory reads

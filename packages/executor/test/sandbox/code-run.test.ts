@@ -3,14 +3,22 @@
 // tainted result is wrapped with the run nonce, limits come back as refusals, and WEFT_SANDBOX=off refuses.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { RunHandle, ToolOutcome } from "@weft/contracts";
+import { z } from "zod";
 import type { WeftCommand } from "@weft/core";
-import { createSandbox } from "../../src/index";
+import { createSandbox, encodings } from "../../src/index";
 import { nonceFromToken } from "../../src/untrusted";
 import { count, fixtureCommands, makeWorld, type World } from "../fixtures";
 
 // The fixture reads are sandbox "hidden"; the real read commands mark themselves "read". Two of them do here.
-const commands: WeftCommand[] = fixtureCommands.map((c) => (c.name === "people.search" || c.name === "notices.get" ? { ...c, sandbox: "read" as const } : c));
-const ALLOW = ["code.run", "people.search", "notices.get", "comms.send_message", "actions.list"];
+const SECRET = "sim-portal-Sandbox/Leak+7a1b?=&";
+/** A sandbox read that (wrongly) puts a vault value into its data in every encoding: redaction must still catch it. */
+const leakyRead: WeftCommand = {
+  ...fixtureCommands.find((c) => c.name === "people.search")!, name: "people.leaky_read", summary: "Test only", description: "Test only.", sandbox: "read",
+  input: z.object({}), untrustedFields: [],
+  async run() { return { data: { forms: encodings(SECRET) }, summary: "leaky read" }; },
+};
+const commands: WeftCommand[] = [...fixtureCommands.map((c) => (c.name === "people.search" || c.name === "notices.get" ? { ...c, sandbox: "read" as const } : c)), leakyRead];
+const ALLOW = ["code.run", "people.search", "notices.get", "comms.send_message", "actions.list", "people.leaky_read"];
 
 const prior = process.env.WEFT_SANDBOX;
 beforeAll(() => { process.env.WEFT_SANDBOX = "quickjs"; });
@@ -86,6 +94,21 @@ describe("code.run", () => {
     expect(await exec("for (let i = 0; i < 26; i++) await weft.call('actions__list', { limit: 1 }); return 1;")).toMatchObject({ ok: false, refusal: { code: "CALL_BUDGET" } });
     const err = await exec("throw new Error('bad math');");
     expect(dataOf(err)).toMatchObject({ ok: false, value: null, error: { code: "SANDBOX_ERROR", message: "Error: bad math" } });
+  });
+
+  it("a vault value returned by an inner read never reaches the output in any encoding", async () => {
+    await w.executor.vault.put({ name: "sandbox-leak", kind: "portal_password", value: SECRET, description: "test", by: "usr_dana" });
+    const o = await exec("const r = await weft.call('people__leaky_read', {}); console.log(JSON.stringify(r.data)); return r.data.forms;");
+    expect(o).toMatchObject({ ok: true, status: "done" });
+    const text = JSON.stringify(o);
+    for (const f of encodings(SECRET)) expect(text.includes(f), `${f} in the code.run outcome`).toBe(false);
+  });
+
+  it("a value over the 8,000 character observation cap is offloaded to a run artifact the model can page", async () => {
+    const o = await exec("return Array.from({ length: 400 }, (_, i) => ({ i, label: 'row ' + i + ' of the demo table' }));");
+    expect(o).toMatchObject({ ok: true, status: "done" });
+    expect(o.ok && o.status === "done" ? o.artifactRef : null).toMatch(/^art_/);
+    expect(await count(w.db, "run_artifacts")).toBe(1);
   });
 
   it("people and API keys cannot run it (no agent run); WEFT_SANDBOX=off refuses with the reason", async () => {
