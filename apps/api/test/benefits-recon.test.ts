@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { ReconFinding } from "@weft/contracts";
 import { benefitReconFindings, events, proposals, simCarrierInvoices, simEmailMessages } from "@weft/db";
+import { W2BenefitsOpenEnrollmentRow } from "../../../packages/contracts/src/ext/w2-benefits-contractors";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
 let weft: TestWeft;
@@ -82,7 +83,7 @@ describe("carrier reconciliation (GP11)", () => {
 
 describe("open enrollment", () => {
   it("lists one row per eligible employee for 2027 with deterministic statuses", async () => {
-    const rows = (await (await get("/v1/benefits/open-enrollment")).json()) as { workerId: string; status: string; planYear: number }[];
+    const rows = ((await (await get("/v1/benefits/open-enrollment")).json()) as unknown[]).map((r) => W2BenefitsOpenEnrollmentRow.parse(r));
     const eligible = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM workers WHERE type = 'employee' AND status IN ('active', 'onboarding') AND end_date IS NULL`);
     expect(rows).toHaveLength(eligible[0]!.n);   // on the wave 1 seed: 48 employees minus Owen Mercer (demo), who has an end date
     expect(rows.every((r) => r.planYear === 2027)).toBe(true);

@@ -47,7 +47,10 @@ expected and deducted $620.00.
 
 ## Contract changes
 
-None to frozen files. Requests for the integrator (also in `.scratch/contract-requests/w2-benefits-contractors.md`):
+None to frozen files. Additive: `packages/contracts/src/ext/w2-benefits-contractors.ts` defines
+`W2BenefitsOpenEnrollmentRow` and `W2BenefitsFxRate`, the response shapes the route table names as
+`OpenEnrollmentRow[]` and `FxRate[]` (tests parse responses with them; exporting them from the contracts index is
+optional). Requests for the integrator (also in `.scratch/contract-requests/w2-benefits-contractors.md`):
 
 1. `packages/routines/test/engine.test.ts` asserts exactly the four wave 1 routine ids. Once it accepts wave 2
    routines, change `routines` in `packages/routines/src/wave2/benefits.ts` to `[RT_OPEN_ENROLLMENT]`.

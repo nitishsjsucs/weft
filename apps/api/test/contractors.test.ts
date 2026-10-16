@@ -7,6 +7,7 @@ import { ContractorPayout, Page } from "@weft/contracts";
 import { convertToUsdCents } from "@weft/core";
 import { contractorPayments, events, proposals } from "@weft/db";
 import { toUsdCents } from "@weft/sim";
+import { W2BenefitsFxRate } from "../../../packages/contracts/src/ext/w2-benefits-contractors";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
 let weft: TestWeft;
@@ -19,7 +20,7 @@ const CONTRACTORS = ["wrk_0049", "wrk_0050", "wrk_0051"];
 
 describe("contractor payouts (GP11)", () => {
   it("serves the fixed FX table and converts half up with decimal.js, matching the simulator's integer math", async () => {
-    const fx = (await (await get("/v1/contractors/fx")).json()) as { currency: string; usdPerUnit: string; source: string }[];
+    const fx = ((await (await get("/v1/contractors/fx")).json()) as unknown[]).map((r) => W2BenefitsFxRate.parse(r));
     expect(fx.map((r) => [r.currency, r.usdPerUnit])).toEqual([["CAD", "0.73"], ["EUR", "1.08"], ["INR", "0.012"], ["USD", "1"]]);
     expect(fx.every((r) => r.source.startsWith("Synthetic FX table"))).toBe(true);
     for (const [m, c, r] of [[650_000, "EUR", "1.08"], [41_000_000, "INR", "0.012"], [980_000, "CAD", "0.73"], [125, "INR", "0.012"], [1_041, "CAD", "0.73"]] as const) {
