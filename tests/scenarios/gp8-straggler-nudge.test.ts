@@ -1,6 +1,6 @@
 // Scenario GP8 (docs/wave2.md): the straggler nudge. Owner: w2-onboarding. Scripted provider; the script for
-// rt_onboarding_nudge is written into a temp WEFT_SCRIPTS_DIR next to copies of the repo's scenarios (that folder is
-// not this track's). A hire signs the offer and stops; past the
+// rt_onboarding_nudge is scenarios/rt_onboarding_nudge.json, also written into a temp WEFT_SCRIPTS_DIR next to copies
+// of the repo's scenarios so this test pins the exact steps. A hire signs the offer and stops; past the
 // due date the routine posts one nudge in #new-hires naming the open tasks, a second run the same day is skipped by
 // the precheck, and once the checklist is complete the routine skips for good.
 import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -35,12 +35,8 @@ describe("GP8 straggler nudge", () => {
     writeFileSync(join(scripts, "rt_onboarding_nudge.json"), JSON.stringify(NUDGE));
     process.env.WEFT_SCRIPTS_DIR = scripts;
     weft = await createTestWeft();
-    // Until the integrator spreads it into PREBUILT (see the routine file), the scenario installs the definition.
-    await weft.db.insert(routines).values({
-      id: R.id, companyId: "cmp_larkspur", name: R.name, description: R.description, ownerPrincipalId: R.ownerPrincipalId, enabled: R.enabled, autonomy: R.autonomy,
-      triggerJson: JSON.stringify(R.trigger), filterJson: null, instructions: R.instructions, toolsJson: JSON.stringify(R.tools), precheck: R.precheck,
-      checklistJson: JSON.stringify(R.checklist), budgetJson: JSON.stringify(R.budget), surfaceJson: JSON.stringify(R.surface), source: R.source, taintedBy: null, createdAt: weft.clock.now(),
-    });
+    // rt_onboarding_nudge is in PREBUILT; reading it through the engine seeds its row.
+    await (weft.routines as unknown as { ensurePrebuilt(): Promise<void> }).ensurePrebuilt();
   });
   afterAll(async () => {
     // offer.accepted starts rt_new_hire in the background; run the pending events now and let every queued or

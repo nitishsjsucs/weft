@@ -39,8 +39,7 @@ const memoryDigest: Precheck = async (ctx, exec: ReadOnlyExecutor) => {
   return { action: "skip", reason: out.summary };
 };
 
-// RT_MEMORY_DIGEST ships disabled and joins this array once the integrator updates the two wave 1 assertions that
-// list the prebuilt routine ids (.scratch/contract-requests/w2-memory.md); until then apps/api fires it directly.
-export const routines: RoutineDef[] = [];
+// RT_MEMORY_DIGEST ships disabled and joined PREBUILT at the wave 2 merge; enable it in Routines to run it hourly.
+export const routines: RoutineDef[] = [RT_MEMORY_DIGEST];
 export const prechecks: Record<string, Precheck> = { memory_digest: memoryDigest };
 export const predicates: Record<string, Predicate> = {};

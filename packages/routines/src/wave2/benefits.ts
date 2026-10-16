@@ -45,9 +45,8 @@ export const openEnrollmentPrecheck: Precheck = async (ctx, exec) => {
   return { action: "run", severity: "digest", subjectRefs: [], findings: { pending: names.length, slot }, derivedArgs: { slot, "comms.send_message": { channel: "#general", text } } };
 };
 
-// RT_OPEN_ENROLLMENT is defined and its precheck registered, but it joins PREBUILT only once
-// packages/routines/test/engine.test.ts stops asserting the exact four wave 1 ids (integrator, see
-// .scratch/contract-requests/w2-benefits-contractors.md): then this line becomes [RT_OPEN_ENROLLMENT].
-export const routines: RoutineDef[] = [];
+// RT_OPEN_ENROLLMENT ships disabled and joined PREBUILT at the wave 2 merge; its scripted run is
+// scenarios/rt_open_enrollment.json.
+export const routines: RoutineDef[] = [RT_OPEN_ENROLLMENT];
 export const prechecks: Record<string, Precheck> = { open_enrollment: openEnrollmentPrecheck };
 export const predicates: Record<string, Predicate> = {};

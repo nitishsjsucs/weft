@@ -60,7 +60,7 @@ describe("GP11 benefits reconciliation and contractor payouts", () => {
     expect(waiting.length).toBeGreaterThan(0);
     expect(RT_OPEN_ENROLLMENT.enabled).toBe(false);
     expect(RT_OPEN_ENROLLMENT.tools.length).toBeLessThanOrEqual(8);
-    // The routine is not in PREBUILT yet (see docs/tracks/w2-benefits-contractors.md); install its row as the engine would.
+    // The routine is in PREBUILT; the insert is a no-op when the engine already seeded its row.
     const r = RT_OPEN_ENROLLMENT;
     await weft.db.insert(routines).values({
       id: r.id, companyId: "cmp_larkspur", name: r.name, description: r.description, ownerPrincipalId: r.ownerPrincipalId, enabled: r.enabled, autonomy: r.autonomy,

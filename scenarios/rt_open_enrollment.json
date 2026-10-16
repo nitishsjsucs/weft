@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      {"output": [{"type": "function_call", "name": "comms__send_message", "arguments": "{{derived.comms.send_message}}"}]},
+      {"output": [{"type": "text", "text": "Reminded everyone who has not chosen yet in #general."}]}
+    ]
+  }
+}
