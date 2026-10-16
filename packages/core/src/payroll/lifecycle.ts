@@ -83,7 +83,8 @@ function paycheckValues(cp: ComputedPaycheck, flags: Flag[]) {
   const status = isBlocked(flags) ? "blocked" : "draft";
   return {
     status, reviewGroup: reviewGroupOf(flags), hoursX100: cp.hoursX100, grossCents: cp.calc.gross_cents, netCents: cp.calc.net_cents,
-    reimbursementsCents: cp.reimbursementsCents, earningsJson: JSON.stringify(cp.earnings), deductionsJson: JSON.stringify(cp.deductions),
+    reimbursementsCents: cp.reimbursementsCents, reimbursementsJson: JSON.stringify(cp.reimbursementLines ?? []),   // wave 3 (w3-expenses)
+    earningsJson: JSON.stringify(cp.earnings), deductionsJson: JSON.stringify(cp.deductions),
     benefitsJson: JSON.stringify(cp.benefits), taxesJson: JSON.stringify(cp.calc.taxes), flagsJson: JSON.stringify(flags),
   };
 }
