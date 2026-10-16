@@ -127,7 +127,9 @@ export function CalendarTab() {
   const reqs = useGet("/v1/time-off/requests", { query: { status: "pending", limit: 100 } });
   const workers = useGet("/v1/workers", { query: { limit: 100 } });
   const depts = ((company.data as { departments?: { id: string; name: string }[] } | undefined)?.departments ?? []);
-  const firstPending = ((reqs.data as { data?: TimeOffRequestRow[] } | undefined)?.data ?? []).map((r) => r).sort((a, b) => (a.startAt < b.startAt ? -1 : 1))[0];
+  // Opens on the first pending request with a coverage conflict (else the first pending one): its department and month.
+  const pendingRows = ((reqs.data as { data?: TimeOffRequestRow[] } | undefined)?.data ?? []).slice().sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
+  const firstPending = pendingRows.find((r) => r.checks.some((c) => c.rule === "COVERAGE_CONFLICT")) ?? pendingRows[0];
   const [dept, setDept] = useState<string | null>(null);
   const [month, setMonth] = useState<string | null>(null);
   const deptId = dept ?? firstPending?.departmentId ?? depts[0]?.id ?? "dpt_hardware";
