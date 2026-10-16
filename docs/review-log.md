@@ -1,5 +1,65 @@
 # Review log
 
+## Wave 2: final review of main at 5e30a37 (2026-10-15, 20:30 to 21:45 PDT)
+
+Three lenses (correctness and security, harness, product and brand) reviewed main at 5e30a37. Every finding below was
+checked against the code before it was fixed or set aside; each fix landed on main with a test where one applies.
+
+### Fixed
+
+| Lens | Finding | Commit subject |
+|---|---|---|
+| Correctness (blocking) | Off-cycle missed_payroll or correction paid a period a processed regular run already paid; GP10 paid wrk_0042's Oct 1 to 15 twice; the run dropped benefit deductions | fix(payroll): off-cycle pay never pays a period a regular run already paid |
+| Harness (blocking) | Recall at run start tainted the prebuilt routines once a digest had run and any decision note existed, so the weekly digest became a proposal | fix(memory): recall never taints a routine run |
+| Product (blocking) | Offer builder fields lost focus after the first keystroke (label component declared inside the form) | fix(web): offer builder fields keep focus while typing; Void asks before it ends the offer |
+| Correctness | `onboarding.complete_task` let an agent mark the hire's own portal tasks done, locking the hire out of the form | fix(onboarding): complete_task refuses the new hire's own portal tasks |
+| Correctness | A skipped, refused or expired final pay stranded group, app, COBRA and benefits steps, so access was never revoked | fix(offboarding): a skipped final pay no longer strands access removal |
+| Security | `it.create_account` (autoAllow untainted) provisioned a leaver again after offboarding | fix(it): a leaver gets no new account or device |
+| Security | The redactor knew only the whole direct-deposit JSON blob, not the bare account number | fix(executor): the redactor learns a bare account number from the direct-deposit vault value |
+| Security | Signed documents and signatures could be edited and still verified | fix(executor): signed documents are append-only and verify checks them |
+| Correctness | The state certificate's extra withholding was signed but never withheld; the exempt flag likewise | fix(payroll): the state certificate's extra withholding reaches payroll; exempt is refused |
+| Correctness | A payout proposal for contractor B superseded a pending one for contractor A on the same date | fix(contractors): a payout proposal for one contractor no longer supersedes another's |
+| Harness | Untrusted `preferred_name` went into untainted dossier aliases | fix(memory): person dossiers take aliases from the legal name only |
+| Harness | No Claude run could pass admission (Luna-sized cap, reservation at 8,000 tokens while 16,000 are sent); cache writes priced at 1x | fix(agent): a Claude run fits its budget; spend reserves the real max_tokens and prices cache writes |
+| Harness | Runs still queued at shutdown stayed queued forever after a restart; close() left provider calls running | fix(agent): runs still queued at shutdown fail visibly at the next boot; drain aborts past its bound |
+| Harness | The loop's step timer read as a non-retryable cancel and cut the local 180 s step to 120 s | fix(agent): the loop's step timer reports a retryable timeout, and a local model gets its 180 s step |
+| Harness | A tool-call preamble at chat's answer-by step was returned as the answer; harness.md did not record the 4-step cap and 13 chat tools | fix(agent): a tool-call preamble at chat's answer-by step is never the answer |
+| Correctness, minor | Claude cache writes billed at the input rate | fix(agent): a Claude run fits its budget; spend reserves the real max_tokens and prices cache writes |
+| Product | Final pay and off-cycle runs looked like the regular run; "1 paychecks" | fix(web): final pay and off-cycle runs read as such in the Payroll list and on Home |
+| Product | Raw lowercase enum badges on offboarding, reconciliation, open enrollment and People offers | fix(web): wave 2 badges show words, not raw enum values |
+| Product | UTC timestamps and ISO dates on wave 2 screens | fix(web): wave 2 screens use the shared Pacific Time date formats |
+| Product | Wave 2 tables hid their key columns at 390 px | fix(web): reconciliation, offboarding steps and payouts fit a 390 px phone |
+| Product | Void fired on one click | fix(web): offer builder fields keep focus while typing; Void asks before it ends the offer |
+| Product | The direct deposit error read "routing: routing number fails the ABA checksum" | fix(web): the direct deposit error reads as a sentence, not a field path |
+| Product | Open enrollment reminder named every non-elector in #general | fix(benefits): open enrollment reminders never name people in #general |
+| Product | Offboarding copy used real product names without (sim) and showed internal ids | fix(offboarding): step details name the simulated systems with (sim) and drop internal ids |
+| Product, minor | Reconciliation copy used tier codes and ids; off-cycle notes showed unformatted money | fix(benefits): reconciliation copy uses words, not tier codes and ids; fix(payroll): off-cycle pay never pays a period a regular run already paid |
+| Product, minor | Hash prefix squeezed document titles at 390 px | fix(web): document titles get the room on a phone; the hash prefix shows from tablet width |
+| Product, minor | Disabled Run remaining steps explained only by a tooltip | fix(offboarding): a skipped final pay no longer strands access removal (visible hint line) |
+| Product, minor | README claims (screenshot caption, Viewing as list, offer builder gaps); stale saved note with an offer id; unstyled I-9 file input; People Offers badge | docs: README claims match the app; small portal and People polish |
+| Correctness | A cli or admin API key ran R4 money movers (off-cycle, final pay, contractor payouts) with no proposal | fix(executor): a cli or admin API key's money movers become proposals |
+| Harness | The template fallback skipped local providers, so a routine failed outright with the local server down | fix(agent): a routine on a local model whose server is down finishes on the templates |
+| Harness, minor | The Claude provider dispatched and replayed the declined partial's blocks after a mid-stream fallback | fix(agent): the Claude provider follows the bundled fallback echo rules |
+| Product, minor | Off-cycle diff labels lacked the (demo) suffix | fix(payroll): off-cycle proposal lines name the worker with the (demo) suffix |
+| Product, minor | The admin checklist listed the confidentiality agreement before the offer | fix(web): the admin onboarding checklist follows the portal's task order |
+| Product, minor | Hiring showed the offer status as blue text beside the buttons | fix(web): Hiring shows an offer's status as a badge, not blue text beside the buttons |
+| Product, minor | The Proposal and action links from the case view landed on the page, not the item | fix(web): case view links land on the proposal card and the audit row |
+
+### Set aside, with the reason
+
+| Lens | Finding | Why not now |
+|---|---|---|
+| Correctness | A person's UI session POST /v1/tools call executes R4 money movers directly | Rejected for UI sessions: SPEC 10 has a person's own call execute (the Submit button on a payroll run relies on it), and the UI's off-cycle and offboarding routes already propose. The API-key half is fixed above, and the descriptions now say an agent's call needs approval and a person's runs it |
+| Harness, minor | The 16,000-token incomplete retry is a no-op under the local 768-token cap and identical on Claude's 16,000 floor | Deferred: bounded by the two-incomplete rule (MODEL_INCOMPLETE); skipping the retry when `outputTokensFor` gives the same cap is the next step |
+| Harness, minor | The Claude provider caches only the system block and prices fallback turns at Opus 5.5 rates | Deferred: no Anthropic key here to confirm cache hits; the fallback echo rules are fixed above |
+| Harness, minor | `code.run` holds the write lock and a transaction for the whole script | Deferred: the sandbox is opt-in (`WEFT_SANDBOX=quickjs`) and on no prebuilt allowlist; the worker-thread move is in the README's left list |
+| Harness, minor | Recall lines lack the nonce-tagged untrusted wrapper, sit outside the pack budget, and every hit carries HEAD's date | Deferred: routine runs now recall trusted text only, so the wrapper matters only for read-only chat; budget accounting and per-file dates need a recall rewrite |
+| Harness, minor | rt_memory_digest writes from inside a precheck through a global hook | Deferred: needs a `memory.digest` executor command on a svc_digest allowlist; the routine ships disabled |
+| Product, minor | No way back to admin from the portal | Deferred: the portal persona is a separate principal, so a back link needs the Viewing as switch inside the portal |
+| Product, minor | Offer builder lacks Manager and Workplace; People Offers and Hiring render offers differently | Deferred and recorded in the README's left list; the People badge now says how many are to act on and Hiring uses a badge |
+| Product, minor | The direct deposit error is not attached to its input with aria-invalid | Deferred: the form needs to take the error state; the error copy itself is fixed |
+| Security | Document library shows verified from its own state, not the new signature pass | Deferred: verify now fails on a tampered signature and the database refuses edits; surfacing the pass per document is a UI follow-up |
+
 ## Wave 2: integration review (2026-10-15, 19:35 to 20:00 PDT)
 
 Found while merging the six wave 2 tracks and wiring their contract requests; each fixed on main with a test.
