@@ -1,6 +1,5 @@
-// w2-offboarding additive contract (docs/wave2.md rule 2). Additive only; the integrator folds it into sim.ts.
-// The simulators implement these today (packages/sim/src/idp.ts and devices.ts); core reads them through optional
-// methods (packages/core/src/offboarding/steps.ts), so nothing else changes until they are folded in.
+// w2-offboarding additive contract (docs/wave2.md rule 2). Folded into sim.ts at the wave 2 merge: IdpSim.clearGroups
+// and DeviceSim.lock are now part of the frozen simulator interfaces. These aliases stay for existing imports.
 import type { DeviceSim, IdpSim } from "../sim";
 
 /** IdpSim gains clearGroups (fault target idp.clearGroups); suspend now checks the fault target idp.suspend. */

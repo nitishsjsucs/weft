@@ -13,9 +13,10 @@ import { computeTotals } from "../payroll/totals";
 import type { CaseRow } from "./cases";
 import type { WorkerRow } from "../payroll/compute";
 
-/** Simulator methods added for offboarding (packages/sim idp.ts and devices.ts). Optional so older sim fakes still type. */
-export interface OffboardingIdp extends IdpSim { clearGroups?(ref: string): Promise<{ removed: string[] }> }
-export interface OffboardingDevices extends DeviceSim { lock?(req: { workerId: string; deviceId: string; reason: string }): Promise<{ lockRef: string; lockedAt: string }> }
+/** IdpSim.clearGroups and DeviceSim.lock are in the frozen sim contract since the wave 2 merge; the checks below
+ * stay so a partial sim fake still refuses cleanly. */
+export type OffboardingIdp = Omit<IdpSim, "clearGroups"> & Partial<Pick<IdpSim, "clearGroups">>;
+export type OffboardingDevices = Omit<DeviceSim, "lock"> & Partial<Pick<DeviceSim, "lock">>;
 
 export const COBRA_FROM = "benefits@larkspur.example";
 export const EARNING_LABEL: Record<string, string> = { salary: "Salary", regular: "Regular hours", overtime: "Overtime", pto_payout: "Unused PTO payout", bonus: "Bonus (supplemental)" };
