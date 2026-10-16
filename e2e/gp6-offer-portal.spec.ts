@@ -16,7 +16,9 @@ test("GP6: an offer goes from draft to signed through the new-hire portal", asyn
     await page.getByTestId(T.offerFirst).fill(C.first);
     await page.getByTestId(T.offerLast).fill(C.last);
     await page.getByTestId(T.offerEmail).fill(C.email);
-    await page.getByTestId(T.offerTitle).fill(C.title);
+    // Typed key by key: a remounting field would keep only the first character.
+    await page.getByTestId(T.offerTitle).pressSequentially(C.title);
+    await expect(page.getByTestId(T.offerTitle)).toHaveValue(C.title);
     await page.getByTestId(T.offerDepartment).selectOption("dpt_hardware");
     await page.getByTestId(T.offerState).selectOption("CO");
     await page.getByTestId(T.offerBase).fill("132000");

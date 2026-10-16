@@ -1,7 +1,7 @@
 "use client";
 // Hiring: the offer builder (draft, send, void) and the email simulator outbox. Owner: w2-onboarding (docs/wave2.md).
 // Every button runs an onboarding.* command through the executor, which writes the action row.
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { formatCents, W2_ONBOARDING_TID as T, type W2OnboardingOfferDetail } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
@@ -16,6 +16,11 @@ interface Email { id: string; to: string; subject: string; body: string; kind: s
 
 const field = "h-8 w-full rounded-lg border border-[var(--app-border)] bg-card px-2.5 text-2 outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]";
 
+/** Declared at module scope: a component declared inside OfferForm would remount its input on every keystroke. */
+function L({ label, children }: { label: string; children: ReactNode }) {
+  return <label className="flex flex-col gap-1 text-1 text-gray-11">{label}{children}</label>;
+}
+
 function OfferForm() {
   const [f, setF] = useState({ candidateFirst: "", candidateLast: "", candidateEmail: "", title: "", departmentId: "dpt_hardware", workState: "CO", base: "", startDate: "2026-11-16" });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
@@ -24,9 +29,8 @@ function OfferForm() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const out = (await save.run()) as { ok?: boolean; data?: { offer_id: string } } | undefined;
-    if (out?.data?.offer_id) { setSaved(out.data.offer_id); setF((x) => ({ ...x, candidateFirst: "", candidateLast: "", candidateEmail: "", title: "", base: "" })); }
+    if (out?.data?.offer_id) { setSaved(`${f.candidateFirst} ${f.candidateLast}`); setF((x) => ({ ...x, candidateFirst: "", candidateLast: "", candidateEmail: "", title: "", base: "" })); }
   };
-  const L = ({ label, children }: { label: string; children: React.ReactNode }) => <label className="flex flex-col gap-1 text-1 text-gray-11">{label}{children}</label>;
   return (
     <Card className="p-4">
       <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">New offer</h2>
@@ -41,7 +45,7 @@ function OfferForm() {
         <L label="Start date"><input required type="date" data-testid={T.offerStart} className={field} value={f.startDate} onChange={set("startDate")} /></L>
         <div className="flex items-center gap-3 tablet:col-span-2">
           <Button type="submit" variant="primary" disabled={save.pending} data-testid={T.offerSaveDraft}>Save draft</Button>
-          {save.error ? <span role="alert" className="text-1 text-red-11">{errorText(save.error)}</span> : saved ? <span className="text-1 text-gray-11">Saved {saved} as a draft. The manager defaults to the department lead.</span> : <span className="text-1 text-gray-10">Drafts are not sent until you press Send.</span>}
+          {save.error ? <span role="alert" className="text-1 text-red-11">{errorText(save.error)}</span> : saved ? <span className="text-1 text-gray-11">Draft saved for {saved} (demo). The manager defaults to the department lead.</span> : <span className="text-1 text-gray-10">Drafts are not sent until you press Send.</span>}
         </div>
       </form>
     </Card>
@@ -51,6 +55,7 @@ function OfferForm() {
 function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
   const send = useMutation(async () => client.post("/v1/offers/:id/send", { params: { id: o.id } }));
   const voidIt = useMutation(async () => client.post("/v1/offers/:id/void", { params: { id: o.id } }));
+  const [confirmVoid, setConfirmVoid] = useState(false);
   const err = send.error ?? voidIt.error;
   return (
     <li data-testid={T.offerRow} data-offer={o.id} data-status={o.status} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
@@ -60,7 +65,14 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
       </div>
       <span data-testid={T.offerStatus} className={`font-medium ${STATUS_CLASS[o.status] ?? ""}`}>{STATUS_LABEL[o.status] ?? o.status}</span>
       {o.allowed.includes("sent") ? <Button size="sm" variant="primary" data-testid={T.offerSend} disabled={send.pending} onClick={() => void send.run()}>Send</Button> : null}
-      {o.allowed.includes("voided") ? <Button size="sm" variant="danger" data-testid={T.offerVoid} disabled={voidIt.pending} onClick={() => void voidIt.run()}>Void</Button> : null}
+      {o.allowed.includes("voided") && !confirmVoid ? <Button size="sm" variant="secondary" data-testid={T.offerVoid} onClick={() => setConfirmVoid(true)}>Void</Button> : null}
+      {o.allowed.includes("voided") && confirmVoid ? (
+        <span className="flex items-center gap-2">
+          <span className="text-1 text-gray-11">The candidate's portal link stops working.</span>
+          <Button size="sm" variant="danger" data-testid="offer-void-confirm" disabled={voidIt.pending} onClick={() => void voidIt.run().then(() => setConfirmVoid(false))}>Void offer</Button>
+          <Button size="sm" variant="secondary" onClick={() => setConfirmVoid(false)}>Cancel</Button>
+        </span>
+      ) : null}
       {o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted") ? <a data-testid={T.offerPortalLink} className="text-1 text-blue-11 hover:underline" href={`/portal?as=${o.personaPrincipalId}`}>Open portal as new hire</a> : null}
       {err ? <span role="alert" className="w-full text-1 text-red-11">{errorText(err)}</span> : null}
     </li>
