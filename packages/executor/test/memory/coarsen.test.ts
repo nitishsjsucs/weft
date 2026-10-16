@@ -35,12 +35,17 @@ describe("coarsening", () => {
     const daily = plan.writes.find((w) => w.path === "timeline/daily/2026-10-12.md")!;
     expect(daily.frontmatter).toMatchObject({ type: "timeline_daily", links: ["entities/notices/ntc_0002", "entities/people/wrk_0002"], sources: ["timeline/raw/2026-10-12.md"] });
     expect(daily.body).toContain("- tax.update_rate: 1 (timeline/raw/2026-10-12.md#L13)");
-    expect(daily.body).toContain("- 2026-10-12T16:40:00.000Z [i2] tax.update_rate: Updated the CA SUI rate for [[entities/notices/ntc_0002]] (src: action:3) (ref: timeline/raw/2026-10-12.md#L13)");
+    // People read summaries: the period and the copied events are in company time; the raw line keeps its ISO.
+    expect(daily.body).toContain("Period Sun, Oct 11, 5:00 PM PT to Mon, Oct 12, 5:00 PM PT.");
+    expect(daily.body).toContain("- Mon, Oct 12, 9:40 AM PT [i2] tax.update_rate: Updated the CA SUI rate for [[entities/notices/ntc_0002]] (src: action:3) (ref: timeline/raw/2026-10-12.md#L13)");
+    expect(daily.body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    expect(daily.frontmatter.updated).toBe("2026-10-12");
     expect(daily.body).not.toContain("[i0] comms.post_update: Posted");   // importance 0 and 1 are counted, not copied
     expect(daily.body).toContain(`resolve at commit ${"a".repeat(40)}`);
     const weekly = plan.writes.find((w) => w.path === "timeline/weekly/2026-W42.md")!;
     expect(weekly.body).toContain("Events: 4.");
-    expect(weekly.body).toContain("[i3] payroll.submit");
+    expect(weekly.body).toContain("- Wed, Oct 14, 1:00 PM PT [i3] payroll.submit");
+    expect(weekly.body).toContain("Period Sun, Oct 11, 5:00 PM PT to Sun, Oct 18, 5:00 PM PT.");
     expect(weekly.body).toContain("- timeline/daily/2026-10-14.md");
     // The open day (2026-10-26) gets no daily; its closed hour does. The open month gets no monthly.
     expect(plan.writes.some((w) => w.path === "timeline/daily/2026-10-26.md")).toBe(false);
@@ -56,6 +61,16 @@ describe("coarsening", () => {
     const after = planCoarsen({ now: "2026-10-26T16:30:00.000Z", raw: [week[2]!], daily: dailies, rawCommit: "c".repeat(40) });
     expect(after.writes.find((w) => w.path === "timeline/weekly/2026-W42.md")).toEqual(a.writes.find((w) => w.path === "timeline/weekly/2026-W42.md"));
     expect(after.removes).toEqual([]);
+  });
+
+  it("weeklies show company time even for dailies written before times were formatted", () => {
+    const legacy = planCoarsen({ now: "2026-10-26T15:30:00.000Z", raw: week, daily: [] }).writes
+      .filter((w) => w.frontmatter.type === "timeline_daily")
+      .map((w) => ({ path: w.path, body: w.body.replace("Mon, Oct 12, 9:40 AM PT", "2026-10-12T16:40:00.000Z").replace("Wed, Oct 14, 1:00 PM PT", "2026-10-14T20:00:00.000Z") }));
+    expect(legacy.some((d) => d.body.includes("2026-10-12T16:40:00.000Z [i2]"))).toBe(true);
+    const weekly = planCoarsen({ now: "2026-10-26T15:30:00.000Z", raw: [], daily: legacy }).writes.find((w) => w.path === "timeline/weekly/2026-W42.md")!;
+    expect(weekly.body).toContain("- Mon, Oct 12, 9:40 AM PT [i2] tax.update_rate");
+    expect(weekly.body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
   });
 
   it("monthly summaries appear once the month closes", () => {

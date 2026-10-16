@@ -21,4 +21,11 @@ describe("approval preferences", () => {
       .toBe(approvalsDoc([row({}), row({ proposalId: "prp_0002", outcome: "denied", decidedAt: "2026-10-22T10:00:00.000Z" })], "x")!.body);
     expect(approvalsDoc([], "2026-10-26")).toBeNull();
   });
+
+  it("dates a decision by the company's calendar day, not the UTC one", () => {
+    // 2026-10-23T02:30Z is Thu Oct 22, 7:30 PM PT.
+    const d = approvalsDoc([row({ decidedAt: "2026-10-23T02:30:00.000Z" })], "2026-10-26")!;
+    expect(d.body).toContain("latest approved (2026-10-22, src: proposal:prp_0001)");
+    expect(d.frontmatter.updated).toBe("2026-10-22");
+  });
 });

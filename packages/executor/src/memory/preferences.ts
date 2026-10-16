@@ -1,9 +1,11 @@
 // Learned preferences (harness 18 item 5, Instinct's instinct/ folder): knowledge/preferences/approvals.md records,
 // deterministically from decisions, which proposal kinds each person approves, denies, edits or dismisses, with
 // counts and the latest reason code. It informs proposals only; it never changes permissions or grants. Human
-// decision notes are untrusted free text, so only the structured reason code is kept.
+// decision notes are untrusted free text, so only the structured reason code is kept. Decisions are dated by the
+// company's calendar day (memory/time.ts).
 import type { MemoryFrontmatter } from "@weft/contracts";
 import type { DossierDoc } from "./dossiers";
+import { companyDay } from "./time";
 
 export const APPROVALS_PATH = "knowledge/preferences/approvals.md";
 export type DecisionOutcome = "approved" | "denied" | "edited" | "dismissed";
@@ -30,12 +32,12 @@ export function approvalsDoc(rows: DecisionRow[], fallbackDate: string): Dossier
       const counts = OUTCOMES.map((o) => `${o} ${rs.filter((r) => r.outcome === o).length}`).join(", ");
       const last = rs.at(-1)!;
       const text = `${safe(k)}: ${counts}; latest ${last.outcome}${last.reasonCode ? ` (reason ${safe(last.reasonCode)})` : ""}`;
-      lines.push(`- ${text} (${last.decidedAt.slice(0, 10)}, src: proposal:${safe(last.proposalId)})`);
+      lines.push(`- ${text} (${companyDay(last.decidedAt)}, src: proposal:${safe(last.proposalId)})`);
       facts.push({ text, sourceRef: `proposal:${last.proposalId}` });
     }
     lines.push("");
   }
-  const updated = rows.map((r) => r.decidedAt.slice(0, 10)).sort().at(-1) ?? fallbackDate;
+  const updated = rows.map((r) => companyDay(r.decidedAt)).sort().at(-1) ?? fallbackDate;
   const frontmatter: MemoryFrontmatter = { id: "pref-approvals", type: "preference", aliases: ["approval preferences"], links: [], sources: [...new Set(rows.map((r) => `proposal:${r.proposalId}`))].sort().slice(0, 40), status: null, updated, taintedBy: null };
   return { subjectRef: null, path: APPROVALS_PATH, frontmatter, body: lines.join("\n"), facts: facts.slice(0, 40) };
 }

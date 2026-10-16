@@ -39,6 +39,7 @@ export type { BatchedAgentCall } from "./agent";
 export { adminChange, createApiKey, AdminRefused } from "./admin";
 export { MemoryError, MEMORY_FOLDERS } from "./memory/store";
 export { serialGit } from "./memory/git";
+export { COMPANY_TZ, companyDay, fmtDateTimePT, humanTimes } from "./memory/time";
 
 export interface CreateExecutorOptions {
   db: Db;

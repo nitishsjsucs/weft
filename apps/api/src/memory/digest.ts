@@ -4,6 +4,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { companies, departments, dossiers, notices, payrollRuns, principals, proposals, routines, taxAccounts, workers, type Db } from "@weft/db";
 import type { MemoryFrontmatter, MemoryHit, MemoryStore } from "@weft/contracts";
+import { companyDay, fmtDateTimePT } from "@weft/executor";
 
 // Structural mirror of the executor's LocalMemory additions (packages/executor/src/memory/store.ts); the executor
 // index exports only the frozen MemoryStore type, so apps/api names the shape it uses here.
@@ -31,14 +32,15 @@ export interface MemoryW2 extends MemoryStore {
   search(q: { query: string; folders: null | ("entities" | "comms" | "timeline" | "workstreams" | "knowledge")[]; at: string | null; limit: number }): Promise<MemoryHit[]>;
 }
 
-const day = (iso: string | null | undefined, fallback: string) => (iso ? iso.slice(0, 10) : fallback);
+/** A fact's stamp: the company calendar day (America/Los_Angeles) of the row's timestamp. */
+const day = (iso: string | null | undefined, fallback: string) => (iso ? companyDay(iso) : fallback);
 const maxDay = (days: string[], fallback: string) => days.sort().at(-1) ?? fallback;
 const mask = (s: string | null) => (s ? `${"*".repeat(Math.max(0, s.length - 4))}${s.slice(-4)}` : "not registered");
 const OPEN_NOTICE = ["new", "in_review", "proposed"];
 
 /** Dossier and one-pager inputs from structured rows only. Notice titles and bodies never enter (untrusted). */
 export async function digestSources(db: Db, companyId: string, now: string, workstreamFiles: { path: string; title: string; updated: string }[]): Promise<DigestSources> {
-  const today = now.slice(0, 10);
+  const today = companyDay(now);
   const [c] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
   const ws = await db.select().from(workers).where(eq(workers.companyId, companyId));
   const depts = new Map((await db.select().from(departments).where(eq(departments.companyId, companyId))).map((d) => [d.id, d.name]));
@@ -107,7 +109,7 @@ export async function digestSources(db: Db, companyId: string, now: string, work
     return { text: `${code} ${active} active${onboarding ? `, ${onboarding} onboarding` : ""}`, date: maxDay(inState.map((w) => day(w.updatedAt, fallback)), fallback), src: `workers:state=${code}` };
   }).filter((f) => !/^\w\w 0 active$/.test(f.text));
   const openItems: DigestFact[] = [
-    ...drafts.map((r) => ({ text: `Payroll draft ${r.id} payday ${r.payday}, approve by ${r.approvalDeadline}`, date: day(r.createdAt, fallback), src: `payroll_run:${r.id}` })),
+    ...drafts.map((r) => ({ text: `Payroll draft ${r.id} payday ${r.payday}, approve by ${fmtDateTimePT(r.approvalDeadline)}`, date: day(r.createdAt, fallback), src: `payroll_run:${r.id}` })),
     ...ns.filter((n) => OPEN_NOTICE.includes(n.status)).map((n) => ({ text: `Notice ${n.id} ${n.kind} from ${n.agency}${n.respondBy ? `, respond by ${n.respondBy}` : ""}`, date: day(n.receivedAt, fallback), src: `notice:${n.id}` })),
     // A proposal from a run that read untrusted content keeps its headline out of the one-pager.
     ...pending.map((p) => ({ text: `Pending approval ${p.id}: ${p.headline}`, date: day(p.createdAt, fallback), src: `proposal:${p.id}`, tainted: p.taintedBy !== null })),

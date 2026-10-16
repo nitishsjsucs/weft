@@ -4,13 +4,14 @@ import { eq } from "drizzle-orm";
 import { companies, taxAccounts, workers, type DbTx } from "@weft/db";
 import type { MemoryFrontmatter } from "@weft/contracts";
 import { renderDoc } from "./store";
+import { companyDay } from "./time";
 
 const fm = (id: string, type: MemoryFrontmatter["type"], day: string, extra: Partial<MemoryFrontmatter> = {}): MemoryFrontmatter =>
   ({ id, type, aliases: [], links: [], sources: ["seed"], status: null, updated: day, taintedBy: null, ...extra });
 const mask = (s: string | null) => (s ? `${"*".repeat(Math.max(0, s.length - 4))}${s.slice(-4)}` : "not registered");
 
 export async function seedMemoryFiles(db: DbTx, companyId: string, now: string): Promise<{ path: string; text: string }[]> {
-  const day = now.slice(0, 10);
+  const day = companyDay(now);
   const files: { path: string; text: string }[] = [];
   const [c] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
   if (c) {

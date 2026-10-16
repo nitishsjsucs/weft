@@ -2,9 +2,11 @@
 // summaries on the sim clock. Pure and deterministic: the same raw files and clock give the same summaries, so a
 // second digest for a period is a no-op. Only closed periods are summarised. Each summary lists event counts by
 // kind, the importance 2 and 3 events verbatim, and path#L<n> back-references. Weekly and monthly summaries are
-// built from the daily ones, so they survive the raw files leaving the working tree.
+// built from the daily ones, so they survive the raw files leaving the working tree. Period keys, paths and the
+// raw lines stay UTC and ISO; the period line and the copied events read in company time (memory/time.ts).
 import type { CoarsenLevel, MemoryFrontmatter } from "@weft/contracts";
 import { extractLinks } from "./links";
+import { fmtDateTimePT, humanTimes } from "./time";
 
 export const RAW_WINDOW_DAYS = 7;
 export const MAX_REFS_PER_KIND = 5;
@@ -91,9 +93,9 @@ function render(p: Period, r: Rollup, note: string | null): SummaryDoc {
   });
   const body = [
     `# ${TITLES[p.level]} ${p.key}`, "",
-    `Events: ${r.total}. Period ${p.start} to ${p.end}.${note ? ` ${note}` : ""}`, "",
+    `Events: ${r.total}. Period ${fmtDateTimePT(p.start)} to ${fmtDateTimePT(p.end)}.${note ? ` ${note}` : ""}`, "",
     "## Counts by kind", "", ...(counts.length ? counts : ["- none"]), "",
-    "## Importance 2 and 3 events", "", ...(r.important.length ? r.important.map((l) => `- ${l}`) : ["- none"]), "",
+    "## Importance 2 and 3 events", "", ...(r.important.length ? r.important.map((l) => `- ${humanTimes(l)}`) : ["- none"]), "",
     "## Back-references", "", ...[...r.sources].sort().map((s) => `- ${s}`), "",
   ].join("\n");
   return {

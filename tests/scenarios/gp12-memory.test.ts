@@ -69,6 +69,10 @@ describe("GP12 memory recall and coarsening (w2-memory)", () => {
     const pager = readFileSync(join(root, RECALL_BUDGET.onePager), "utf8");
     expect(pager).toContain("## Headcount by state");
     expect(pager).toContain("## Agent autonomy");
+    // People read these files: times are in company time like the payroll page, never raw UTC ISO.
+    expect(pager).toContain("approve by Wed, Oct 28, 5:00 PM PT");
+    for (const text of [pager, daily, person]) expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    expect(daily).toContain("Period Thu, Oct 8, 5:00 PM PT to Fri, Oct 9, 5:00 PM PT.");
     const rows = await weft.db.select().from(dossiers);
     expect(rows.map((r) => r.subjectRef)).toEqual(expect.arrayContaining(["wrk_0026", "cmp_larkspur"]));
   });
