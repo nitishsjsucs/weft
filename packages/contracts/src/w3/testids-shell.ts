@@ -8,3 +8,4 @@ export const W3_SHELL_TID = {
   newThread: "sidebar-new-thread",
   agentToggle: "agent-toggle",
 } as const;
+export * from "../ext/w3-topbar-shell";
