@@ -61,6 +61,9 @@ export function PayrollReview({ id }: { id: string }) {
   const data = pcs.data?.data ?? [];
   const blocked = data.filter((p) => p.status === "blocked").length;
   const nr = data.filter((p) => p.reviewGroup === "needs_review").length;
+  // GP2: when the agent has proposed submitting this run, say so here and make the human Submit secondary.
+  const pendingProps = useGet("/v1/proposals", { query: { status: "pending", limit: 100 }, refreshMs: 5_000 });
+  const pendingSubmit = (pendingProps.data?.data ?? []).find((p) => p.command === "payroll.submit_run" && (p.args as { run_id?: string } | null)?.run_id === id) ?? null;
   const now = clock.data?.now;
   const err = run.error ?? pcs.error ?? preview.error ?? submit.error ?? review.error ?? draft.error;
 
@@ -92,11 +95,17 @@ export function PayrollReview({ id }: { id: string }) {
               if (newId) router.push(`/app/payroll/${newId}`);
             }}><FilePlus2 /> New draft</Button>
             {r.status === "draft" ? (
-              <Button data-testid={TID.payrollSubmit} variant="primary" size="sm" disabled={submit.pending} onClick={() => { setExcludeBlocked(blocked > 0); setConfirm(true); }}><Send /> Submit</Button>
+              <Button data-testid={TID.payrollSubmit} variant={pendingSubmit ? "secondary" : "primary"} size="sm" disabled={submit.pending} onClick={() => { setExcludeBlocked(blocked > 0); setConfirm(true); }}><Send /> Submit</Button>
             ) : null}
           </>
         }
       />
+      {pendingSubmit && r.status === "draft" ? (
+        <div data-testid="payroll-pending-submit" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-blue-3 px-3 py-2 text-1 text-blue-11">
+          <span className="min-w-0 flex-1">{pendingSubmit.headline}. Waiting for approval in the Inbox.</span>
+          <Link href="/app/inbox" className="font-medium hover:underline">Open the Inbox ›</Link>
+        </div>
+      ) : null}
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       {outcome ? <div className="mb-4"><OutcomeLine o={outcome} /></div> : null}
       <TotalsStrip totals={r.totals} count={r.paycheckCount - r.excludedWorkerIds.length} />
