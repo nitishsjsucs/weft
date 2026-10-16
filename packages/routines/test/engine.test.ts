@@ -61,7 +61,7 @@ describe("routines engine", () => {
   it("seeds the 7 prebuilt routines (4 wave 1, 3 wave 2) with at most 8 tools each and rt_pre_payroll on 0 9 * * 1-5", async () => {
     const eng = createRoutines({ db, clock: mutableClock("2026-10-26T15:30:00.000Z"), agent: fakeAgent(), runs, readOnly: fakeRead() });
     const all = await eng.list();
-    expect(all.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_memory_digest", "rt_new_hire", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll"]);
+    expect(all.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_ats_hire", "rt_memory_digest", "rt_new_hire", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll"]);
     for (const r of PREBUILT) expect(r.tools.length).toBeLessThanOrEqual(8);
     expect(all.find((r) => r.id === "rt_pre_payroll")!.trigger).toEqual({ type: "cron", cron: "0 9 * * 1-5", tz: "America/Los_Angeles" });
   });
