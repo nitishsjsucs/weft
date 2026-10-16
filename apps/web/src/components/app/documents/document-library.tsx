@@ -34,10 +34,10 @@ export function DocumentLibrary({ workerId }: { workerId: string }) {
                 <ul className="flex flex-col divide-y divide-[var(--app-border)]">
                   {rows.map((d) => (
                     <li key={d.id} data-testid={T.docRow} data-kind={d.kind} data-status={d.status} className="flex flex-wrap items-center gap-2 py-2 text-[13px]">
-                      <button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => void show(d.id)}>{d.title}</button>
+                      <button type="button" className="min-w-0 flex-1 text-left font-medium break-words hover:underline tablet:truncate" onClick={() => void show(d.id)}>{d.title}</button>
                       {d.status === "voided" ? <Badge size="xs">Void</Badge> : null}
                       <span className="text-gray-10">{d.signedAt ? `Signed ${fmtDate(d.signedAt)}` : d.sentAt ? `Sent ${fmtDate(d.sentAt)}` : `Created ${fmtDate(d.createdAt)}`}</span>
-                      <code className="font-mono text-1 text-gray-10" title={d.sha256}>{d.sha256.slice(0, 10)}</code>
+                      <code className="hidden font-mono text-1 text-gray-10 tablet:inline" title={d.sha256}>{d.sha256.slice(0, 10)}</code>
                     </li>
                   ))}
                 </ul>
