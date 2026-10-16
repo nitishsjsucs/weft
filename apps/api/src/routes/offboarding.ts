@@ -64,6 +64,7 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
     });
     const bad = refused(c, out);
     if (bad) { await weft.scheduler.kick(); return bad; }
+    const filed: { kind: OffboardingStepKind; proposalId: string | null; refusal: string | null }[] = [];
     if (out.ok && out.status === "done") {
       const data = out.data as { case_id: string; steps: { kind: OffboardingStepKind; status: string }[] };
       const propose = weft.executor.human.propose;
@@ -72,11 +73,13 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
         const step = data.steps.find((x) => x.kind === kind);
         if (!step || step.status !== "pending") continue;
         const args = kind === "final_pay" ? { case_id: data.case_id, pay_unused_pto: input.payUnusedPto } : { case_id: data.case_id };
-        await propose.call(weft.executor.human, s, PROPOSAL_COMMAND[kind]!, args);
+        const o = await propose.call(weft.executor.human, s, PROPOSAL_COMMAND[kind]!, args);
+        // A step whose proposal is refused (for example final pay with no bank account) stays pending; say why.
+        filed.push({ kind, proposalId: o.ok && o.status === "pending_approval" ? o.proposalId : null, refusal: o.ok ? null : `${o.refusal.code}: ${o.refusal.message}` });
       }
     }
     await weft.scheduler.kick();
-    return c.json(out);
+    return c.json(out.ok && out.status === "done" ? { ...out, data: { ...(out.data as Record<string, unknown>), proposals: filed } } : out);
   });
 
   r.get("/v1/offboarding", async (c) => {

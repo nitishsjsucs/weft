@@ -39,13 +39,17 @@ function TerminateDrawer({ workerId, onClose }: { workerId: string; onClose: () 
   const [note, setNote] = useState("");
   const [pto, setPto] = useState(true);
   const m = useMutation(() => client.post("/v1/workers/:id/terminate", { params: { id: workerId }, body: { workerId, kind, lastDay: lastDay || today, reasonNote: note, payUnusedPto: pto } }));
+  const [refused, setRefused] = useState<{ caseId: string; lines: string[] } | null>(null);
   const submit = async () => {
-    const out = (await m.run()) as { ok?: boolean; data?: { case_id?: string } } | undefined;
-    if (out?.ok && out.data?.case_id) router.push(`/app/offboarding/${out.data.case_id}`);
+    const out = (await m.run()) as { ok?: boolean; data?: { case_id?: string; proposals?: { kind: string; refusal: string | null }[] } } | undefined;
+    if (!out?.ok || !out.data?.case_id) return;
+    const lines = (out.data.proposals ?? []).filter((p) => p.refusal).map((p) => `${p.kind.replaceAll("_", " ")}: ${p.refusal}`);
+    if (lines.length) setRefused({ caseId: out.data.case_id, lines });
+    else router.push(`/app/offboarding/${out.data.case_id}`);
   };
   return (
     <Drawer open onOpenChange={(o) => { if (!o) onClose(); }} title="Terminate employee" description="Opens an offboarding case. Final pay, directory suspend, SSO deactivation and device lock wait for approval."
-      footer={<div className="flex justify-end gap-2"><Button size="sm" onClick={onClose}>Cancel</Button><Button data-testid={W2_OFFBOARDING_TID.terminateSubmit} variant="primary" size="sm" disabled={m.pending || !(lastDay || today)} onClick={() => void submit()}>Terminate</Button></div>}>
+      footer={<div className="flex justify-end gap-2"><Button size="sm" onClick={onClose}>Cancel</Button><Button data-testid={W2_OFFBOARDING_TID.terminateSubmit} variant="primary" size="sm" disabled={m.pending || !!refused || !(lastDay || today)} onClick={() => void submit()}>Terminate</Button></div>}>
       <div className="flex flex-col gap-4 text-[13px]">
         <label className="flex flex-col gap-1"><span className="text-gray-11">Kind</span>
           <select data-testid={W2_OFFBOARDING_TID.terminateKind} value={kind} onChange={(e) => setKind(e.target.value as TerminationKind)} className={field}>
@@ -63,6 +67,13 @@ function TerminateDrawer({ workerId, onClose }: { workerId: string; onClose: () 
           <span>Pay unused PTO with final pay</span>
         </label>
         {m.error ? <div data-testid={W2_OFFBOARDING_TID.terminateError} role="alert" className="text-1 text-red-11">{errorText(m.error)}</div> : null}
+        {refused ? (
+          <div data-testid={W2_OFFBOARDING_TID.terminateError} role="alert" className="flex flex-col gap-1 text-1 text-amber-11">
+            <span>The case is open, but these steps could not be proposed:</span>
+            {refused.lines.map((l) => <span key={l} className="break-words">{l}</span>)}
+            <Link href={`/app/offboarding/${refused.caseId}`} className="text-accent-11 hover:underline">Open the case</Link>
+          </div>
+        ) : null}
       </div>
     </Drawer>
   );

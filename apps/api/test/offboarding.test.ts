@@ -57,6 +57,17 @@ describe("offboarding routes", () => {
     expect(p.diff.find((d) => d.label.startsWith("Unused PTO payout"))?.after).toBe("$10,038.46");
   });
 
+  it("terminate says which step proposals were refused (final pay with no bank account)", async () => {
+    const [w] = await weft.db.all<{ id: string }>(sql`SELECT w.id FROM workers w WHERE w.type = 'employee' AND w.status = 'active' AND NOT EXISTS (SELECT 1 FROM bank_accounts b WHERE b.worker_id = w.id AND b.status = 'active') ORDER BY w.id LIMIT 1`);
+    const res = await call("POST", `/v1/workers/${w!.id}/terminate`, { kind: "involuntary", lastDay: "2026-10-30" });
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { data: { case_id: string; proposals: { kind: string; proposalId: string | null; refusal: string | null }[] } };
+    const fp = out.data.proposals.find((p) => p.kind === "final_pay")!;
+    expect(fp).toMatchObject({ proposalId: null });
+    expect(fp.refusal).toMatch(/^DOMAIN_NO_BANK_ACCOUNT/);
+    expect(out.data.proposals.find((p) => p.kind === "directory_suspend")!.proposalId).toMatch(/^prp_/);
+  });
+
   it("off-cycle validates OffCycleRequest and answers a pending proposal", async () => {
     expect((await call("POST", "/v1/payrolls/off-cycle", { workerIds: [], periodStart: "2026-10-01", periodEnd: "2026-10-15", payday: "2026-10-27", reason: "bonus" })).status).toBe(400);
     const res = await call("POST", "/v1/payrolls/off-cycle", { workerIds: ["wrk_0006"], periodStart: "2026-10-01", periodEnd: "2026-10-15", payday: "2026-10-27", reason: "bonus", bonusCents: { wrk_0006: 120_000 } });
