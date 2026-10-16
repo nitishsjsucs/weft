@@ -28,6 +28,21 @@ describe("dossiers", () => {
     expect(p.body).toContain("## Active workstreams\n\n- none (2026-10-26, src: digest)");
   });
 
+  it("shows times in company time and dates stamps by the company's calendar day", () => {
+    const p = onePager({ companyName: "Larkspur Robotics, Inc. (demo)", asOf: "2026-10-26", headcount: [], workstreams: [], autonomy: [],
+      openItems: [{ text: "Payroll draft pay_2026_10_30 payday 2026-10-30, approve by 2026-10-29T00:00:00.000Z", date: "2026-10-17T01:00:00.000Z", src: "payroll_run:pay_2026_10_30" }] }, "cmp_larkspur");
+    expect(p.body).toContain("- Payroll draft pay_2026_10_30 payday 2026-10-30, approve by Wed, Oct 28, 5:00 PM PT (2026-10-16, src: payroll_run:pay_2026_10_30)");
+    expect(p.body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    expect(p.facts[0]!.text).toContain("approve by Wed, Oct 28, 5:00 PM PT");
+    expect(p.frontmatter.updated).toBe("2026-10-26");
+    const d = personDossier({ id: "wrk_0002", name: "Theo Marsh", aliases: [], facts: [{ text: "End date 2026-10-30", date: "2026-10-21T03:00:00.000Z", src: "worker:wrk_0002" }] }, "2026-10-26");
+    expect(d.body).toContain("- End date 2026-10-30 (2026-10-20, src: worker:wrk_0002)");
+    expect(d.frontmatter.updated).toBe("2026-10-20");
+    // Rendering the rendered text again changes nothing (the digest reruns a period without a diff).
+    expect(onePager({ companyName: "Larkspur Robotics, Inc. (demo)", asOf: "2026-10-26", headcount: [], workstreams: [], autonomy: [],
+      openItems: [{ text: p.facts[0]!.text, date: "2026-10-16", src: "payroll_run:pay_2026_10_30" }] }, "cmp_larkspur").body).toBe(p.body);
+  });
+
   it("renders in a stable order", () => {
     const s = { people: [{ id: "wrk_0003", name: "B", aliases: [], facts: [] }, { id: "wrk_0001", name: "A", aliases: [], facts: [] }], states: [], agencies: [], notices: [], onePager: null };
     expect(renderDossiers(s, "2026-10-26", "cmp_larkspur").map((d) => d.path)).toEqual(["entities/people/wrk_0001.md", "entities/people/wrk_0003.md"]);

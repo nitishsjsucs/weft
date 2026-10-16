@@ -9,6 +9,7 @@ import type { Redactor } from "../vault/redact";
 import { COMMITTER, git, serialGit } from "./git";
 import { digestKey, planCoarsen } from "./coarsen";
 import { renderDossiers, type DigestSources } from "./dossiers";
+import { companyDay } from "./time";
 import { BACKLINKS_HEADING, backlinkIndex, bodyWithoutBacklinks, extractLinks, linkify, linkPath, withBacklinks, type LinkContext } from "./links";
 import { excerptOf, pickSubjects, recallTerms, renderRecall, CAPS, type AliasEntry, type RecallCandidate } from "./recall";
 import { stripLinks } from "./links";
@@ -405,7 +406,7 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
     const raw = tracked.filter((p) => /^timeline\/raw\/\d{4}-\d{2}-\d{2}\.md$/.test(p)).map((p) => ({ path: p, text: readText(p) ?? "" }));
     const daily = tracked.filter((p) => p.startsWith("timeline/daily/")).map((p) => ({ path: p, body: parseDoc(readText(p) ?? "").body }));
     const plan = planCoarsen({ now: input.now, raw, daily, windowDays: input.windowDays, rawCommit: before });
-    const day = input.now.slice(0, 10);
+    const day = companyDay(input.now);
 
     // Dossiers: people mentioned in the raw events still in the tree (or without a dossier yet), every state,
     // agency and notice row passed in, and the one-pager. Links use every known person and state.

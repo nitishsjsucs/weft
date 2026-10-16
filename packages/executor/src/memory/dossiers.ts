@@ -4,6 +4,7 @@
 import type { MemoryFrontmatter } from "@weft/contracts";
 import { RECALL_BUDGET } from "@weft/contracts";
 import { approvalsDoc, type DecisionRow } from "./preferences";
+import { companyDay, humanTimes } from "./time";
 
 export const ONE_PAGER_PATH = RECALL_BUDGET.onePager;
 export const MAX_ONE_PAGER_ITEMS = 8;
@@ -21,11 +22,11 @@ export interface OnePagerInput {
 }
 export interface DigestSources { people: PersonInput[]; states: StateInput[]; agencies: AgencyInput[]; notices: NoticeInput[]; onePager: OnePagerInput | null; decisions?: DecisionRow[] }
 
-/** One line, no wiki-link brackets, and never a money amount (dossiers hold no pay data). */
-const clean = (s: string) => s.replace(/\s+/g, " ").replace(/[[\]]/g, "").replace(/\$\s?\d[\d,]*(\.\d+)?/g, "[amount]").trim();
-const bullet = (f: DossierFact) => `- ${clean(f.text)} (${f.date}, src: ${f.src})`;
+/** One line, no wiki-link brackets, never a money amount (dossiers hold no pay data), and times in company time. */
+const clean = (s: string) => humanTimes(s.replace(/\s+/g, " ").replace(/[[\]]/g, "").replace(/\$\s?\d[\d,]*(\.\d+)?/g, "[amount]").trim());
+const bullet = (f: DossierFact) => `- ${clean(f.text)} (${companyDay(f.date)}, src: ${f.src})`;
 const trusted = (facts: DossierFact[]) => facts.filter((f) => !f.tainted);
-const latest = (facts: DossierFact[], fallback: string) => facts.map((f) => f.date).sort().at(-1) ?? fallback;
+const latest = (facts: DossierFact[], fallback: string) => facts.map((f) => companyDay(f.date)).sort().at(-1) ?? fallback;
 
 function doc(subjectRef: string | null, path: string, type: MemoryFrontmatter["type"], id: string, aliases: string[], title: string, facts: DossierFact[], fallbackDate: string): DossierDoc {
   const kept = trusted(facts).slice(0, 40);
