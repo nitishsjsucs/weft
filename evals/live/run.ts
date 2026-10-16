@@ -150,7 +150,8 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
     return score(w, "L4", runId, t0, reasons, { readBody, tainted: run.tainted });
   },
   // Wave 3 agent golden paths, live (docs/wave3.md 5). L6 is GP13, L7 is GP15's chart answer, L8 is GP16's exec report,
-  // L9 is GP18's follow-up routine. GP15's chat proposal is L5 (evals/live/l5-chat-propose.ts).
+  // L9 is GP18's follow-up routine, L10 is GP14's time-off request routine. GP15's chat proposal is L5
+  // (evals/live/l5-chat-propose.ts).
   async L6(w) {
     const t0 = Date.now();
     const reasons: string[] = [];
@@ -250,13 +251,38 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
     if (run.stepsUsed > 4) reasons.push(`${run.stepsUsed} model steps`);
     return score(w, "L9", runId, t0, reasons, { offerId, summary: run.summary });
   },
+  // GP14: rt_time_off_requests on time_off.request.created proposes one time_off.decide (R2) with the balance note.
+  async L10(w) {
+    const t0 = Date.now();
+    const reasons: string[] = [];
+    const { emitEvent } = await import("../../packages/core/src/shared/events");
+    await w.scheduler.tick();   // the engine writes the prebuilt routine rows on its first tick
+    await (w.db as unknown as { $client: { execute(x: string): Promise<unknown> } }).$client.execute("UPDATE routines SET enabled = 1 WHERE id = 'rt_time_off_requests'");
+    await db.withWriteLock(() => w.db.transaction(async (tx) => {
+      await emitEvent(tx as never, w.clock as never, { body: { type: "time_off.request.created", payload: { request_id: "tor_0003", worker_id: "wrk_0010" } } as never, subjectRef: "tor_0003", attended: false, requestedBy: null });
+    }));
+    const runId = await waitForRun(w, () => routineAgentRun(w, "rt_time_off_requests"));
+    const run = await settled(w, runId);
+    if (run.status === "failed") reasons.push(`status ${run.status}`);
+    if (run.tainted) reasons.push("the run is tainted");
+    const props = (await w.db.select().from(db.proposals)).filter((p) => p.command === "time_off.decide");
+    if (props.length !== 1) reasons.push(`${props.length} time_off.decide proposals`);
+    const a = props[0] ? (asObj(props[0].argsJson) as { request_id?: string; decision?: string; note?: string }) : null;
+    if (a && a.request_id !== "tor_0003") reasons.push(`proposal for ${a.request_id}`);
+    if (a && !/available [\d.]+ h before this request/.test(a.note ?? "")) reasons.push("the note has no balance line");
+    if (props[0] && props[0].status !== "pending") reasons.push(`proposal ${props[0].status}`);
+    const decided = (await w.db.select().from(db.actions)).filter((x) => x.command === "time_off.decide");
+    if (decided.length) reasons.push(`${decided.length} time_off.decide actions executed without approval`);
+    if (run.stepsUsed > 4) reasons.push(`${run.stepsUsed} model steps`);
+    return score(w, "L10", runId, t0, reasons, { decision: a?.decision ?? null, note: a?.note ?? null, summary: run.summary });
+  },
 };
 
 const args = process.argv.slice(2);
 // "L3x6" runs L3 six times, each on a fresh world (gate report item 3).
-const bad = args.filter((a) => !/^L[1-9](x[1-9])?$/.test(a));
+const bad = args.filter((a) => !/^L([1-9]|10)(x[1-9])?$/.test(a));
 if (bad.length) {
-  console.error(`eval:live: unknown case ${bad.join(", ")}; use L1 to L9, optionally with a repeat such as L3x6`);
+  console.error(`eval:live: unknown case ${bad.join(", ")}; use L1 to L10, optionally with a repeat such as L3x6`);
   process.exit(2);
 }
 /**
