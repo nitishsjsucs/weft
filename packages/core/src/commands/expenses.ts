@@ -5,7 +5,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { ExpenseBand, ExpenseCategory, ExpenseDecision, ExpenseDeclineReason, ExpenseStatus, formatCents, W3_CEILINGS, type ExecContext, type W3Check } from "@weft/contracts";
-import { expenses, proposals, workers, type DbTx } from "@weft/db";
+import { expenses, proposals, settings, workers, type DbTx } from "@weft/db";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
@@ -143,12 +143,10 @@ const explainCmd = writeCommand({
 });
 
 async function readAttemptCounts(tx: DbTx): Promise<Record<string, number>> {
-  const { settings } = await import("@weft/db");
   const row = (await tx.select().from(settings).where(eq(settings.key, ATTEMPTS)))[0];
   return row ? (JSON.parse(row.valueJson) as Record<string, number>) : {};
 }
 async function writeAttemptCounts(tx: DbTx, a: Record<string, number>): Promise<void> {
-  const { settings } = await import("@weft/db");
   const valueJson = JSON.stringify(Object.fromEntries(Object.entries(a).sort(([x], [y]) => (x < y ? -1 : 1))));
   await tx.insert(settings).values({ key: ATTEMPTS, valueJson }).onConflictDoUpdate({ target: settings.key, set: { valueJson } });
 }

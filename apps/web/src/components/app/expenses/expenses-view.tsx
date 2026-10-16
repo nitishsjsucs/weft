@@ -30,7 +30,7 @@ export function ExpensesView() {
   const [category, setCategory] = useState<string>("");
   const [band, setBand] = useState<ExpenseBand | "">("");
   const [openId, setOpenId] = useState<string | null>(null);
-  const q = useGet("/v1/expenses", { query: { limit: 200, category: category || undefined }, refreshMs: 10_000 });
+  const q = useGet("/v1/expenses", { query: { limit: 100, category: category || undefined }, refreshMs: 10_000 });
   const page = q.data as W3ExpensesPage | undefined;
   const rows = useMemo(() => page?.data ?? [], [page]);
   const bands = ExpenseBand.options.filter((b) => !band || b === band);
