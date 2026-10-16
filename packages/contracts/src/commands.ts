@@ -113,11 +113,20 @@ export interface ReadOnlyExecutor { exec(companyId: string, command: string, arg
 
 /** apps/api routes (authenticated session) and the routine engine (routine id only). */
 export interface RunAuthority {
-  openChatRun(session: HumanSession, input: { threadId: string | null; surface: "human_ui" | "mcp" }): Promise<RunHandle>;
+  /** `allowlist` is frozen on the run; the executor refuses any other command from it (harness 5.3). Every route passes one. */
+  openChatRun(session: HumanSession, input: { threadId: string | null; surface: "human_ui" | "mcp"; allowlist?: readonly string[] }): Promise<RunHandle>;
   openRoutineRun(input: { routineId: string; routineRunId: string; triggerRef: string; attended: boolean }): Promise<RunHandle>;
   openChildRun(parent: RunHandle, kind: AgentKind): Promise<RunHandle>;   // P1; inherits taint
 }
 export type RoutineRunAuthority = Pick<RunAuthority, "openRoutineRun">;
+
+/** Harness 5.3: chat and MCP agent.ask, read-only in P0, exactly 14 tools. */
+export const CHAT_TOOLS = [
+  "people.search", "people.get", "payroll.list_runs", "payroll.get_run", "tax.get_rates", "tax.list_registrations", "notices.list", "notices.get",
+  "actions.list", "actions.get_run", "memory.search", "memory.read", "agent.read_artifact", "comms.post_update",
+] as const;
+/** The routine_draft recipe's run allowlist. */
+export const DRAFT_TOOLS = ["routines.draft", "routines.list"] as const;
 
 /** Imported only by apps/api routes. Banned in packages/agent and packages/routines by the import scan. */
 export interface HumanExecutor {

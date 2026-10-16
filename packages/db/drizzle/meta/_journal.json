@@ -15,6 +15,13 @@
       "when": 1792101166073,
       "tag": "0001_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792101200000,
+      "tag": "0002_run_allowlist",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { and, asc, eq, gt, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { NotFound, Unauthorized, ValidationError, type DecisionInput } from "@weft/contracts";
+import { CHAT_TOOLS, NotFound, Unauthorized, ValidationError, type DecisionInput } from "@weft/contracts";
 import { proposals } from "@weft/db";
 import { executorInternals, toProposal } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
@@ -69,7 +69,7 @@ export function proposalsRoutes(weft: Weft): Hono<WeftEnv> {
       if (decision === "start" && result.proposal.kind === "suggestion") {
         // A started suggestion opens a chat run carrying the suggestion's provenance (best-effort until T4 lands).
         try {
-          const run = await weft.executor.runs.openChatRun(s, { threadId: null, surface: "human_ui" });
+          const run = await weft.executor.runs.openChatRun(s, { threadId: null, surface: "human_ui", allowlist: CHAT_TOOLS });
           if (result.proposal.taintedBy) await executorInternals(weft.executor)?.taintRun(run.runId, `suggestion:${result.proposal.id}`);
           await weft.agent.startChat(run, { text: result.proposal.headline, recipe: "chat", pageContext: `proposal:${result.proposal.id}` });
           return c.json(redactJson(weft, { ...result, runId: run.runId }));

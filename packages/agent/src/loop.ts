@@ -131,6 +131,7 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
   const prompt = frozenPrompt(setup.promptKind);
   assertToolCap(setup.allowlist.length, `runLoop: run ${run.id} allowlist`);
   const tools: ToolSpec[] = executor.registry.toolSpecs({ agentKind: run.kind, allowlist: setup.allowlist });
+  const offered = new Set(tools.map((t) => t.name));
   assertToolCap(tools.length, `runLoop: run ${run.id} tool specs`);
   const settings = { model: run.model, effort: run.effort, parallelToolCalls: true, store: false, toolChoice: "auto" };
   const pHash = prefixHash(prompt, tools, settings);
@@ -280,7 +281,10 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
         let outcome: ToolOutcome;
         let args: unknown = null;
         const tCall = wall();
-        if (index > budget.toolCallsPerStep) {
+        if (!offered.has(call.name)) {
+          // Defense in depth for harness 5.3: never dispatch a tool the run was not given (the executor refuses it too).
+          outcome = refusal("UNAVAILABLE", `${call.name} is not one of this run's tools; it was not run.`, "Call only the tools listed for this run.");
+        } else if (index > budget.toolCallsPerStep) {
           outcome = refusal("CALL_BUDGET", `At most ${budget.toolCallsPerStep} tool calls per step; this call was not run.`, "Emit fewer calls per turn.");
         } else {
           try {

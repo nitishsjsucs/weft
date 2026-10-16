@@ -17,13 +17,8 @@ import { buildTrace } from "./trace";
 import { DEFAULT_SCRIPTS_DIR } from "./providers/factory";
 import { scriptedProvider } from "./providers/scripted";
 
-/** Harness 5.3: chat and MCP agent.ask, read-only in P0, exactly 14 tools. */
-export const CHAT_TOOLS = [
-  "people.search", "people.get", "payroll.list_runs", "payroll.get_run", "tax.get_rates", "tax.list_registrations", "notices.list", "notices.get",
-  "actions.list", "actions.get_run", "memory.search", "memory.read", "agent.read_artifact", "comms.post_update",
-] as const;
-
-export const DRAFT_TOOLS = ["routines.draft", "routines.list"] as const;
+export { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
+import { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
 export const DEFAULT_COMPANY_ID = "cmp_larkspur";
 
 /** Read access to routine definitions and their code-owned checklists. */

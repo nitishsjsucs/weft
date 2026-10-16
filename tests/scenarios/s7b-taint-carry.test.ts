@@ -10,7 +10,7 @@ beforeEach(async () => { weft = await fixtureWeft(await createTestWeft({ seed: f
 afterEach(async () => { await weft.close(); });
 
 const insertRoutine = (id: string, taintedBy: string | null) => weft.db.run(`INSERT INTO routines (id, company_id, name, description, owner_principal_id, enabled, trigger_json, instructions, tools_json, budget_json, surface_json, source, tainted_by, created_at)
-  VALUES ('${id}', 'cmp_larkspur', 'People digest (demo)', 'test', 'usr_dana', 1, '{"type":"cron","cron":"0 9 * * 1","tz":"America/Los_Angeles"}', '', '[]', '{}', '{}', 'prebuilt', ${taintedBy ? `'${taintedBy}'` : "NULL"}, '2026-10-26T15:30:00.000Z')` as never);
+  VALUES ('${id}', 'cmp_larkspur', 'People digest (demo)', 'test', 'usr_dana', 1, '{"type":"cron","cron":"0 9 * * 1","tz":"America/Los_Angeles"}', '', '["comms.send_message"]', '{}', '{}', 'prebuilt', ${taintedBy ? `'${taintedBy}'` : "NULL"}, '2026-10-26T15:30:00.000Z')` as never);
 
 describe("S7b taint carries into later runs and memory", () => {
   it("runs end to end: nothing derived from the notice is auto-sent and no memory note from the tainted run exists", async () => {

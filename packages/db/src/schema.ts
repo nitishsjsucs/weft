@@ -155,6 +155,7 @@ export const execRuns = sqliteTable("exec_runs", {
   id: text("id").primaryKey(), tokenHash: text("token_hash").notNull(), companyId: text("company_id").notNull(), principalId: text("principal_id").notNull(),
   onBehalfOf: text("on_behalf_of"), agentKind: text("agent_kind").notNull(), surface: text("surface").notNull(), routineId: text("routine_id"),
   routineRunId: text("routine_run_id"), parentRunId: text("parent_run_id"), attended: bool("attended").notNull(), createdAt: ts("created_at").notNull(),
+  allowlistJson: json("allowlist_json"),   // registry names the run may call; null only for test handles opened without one
 });
 export const runTaint = sqliteTable("run_taint", {
   runId: text("run_id").primaryKey(), tainted: bool("tainted").notNull().default(false), taintedBy: text("tainted_by"), sinceStep: integer("since_step"),

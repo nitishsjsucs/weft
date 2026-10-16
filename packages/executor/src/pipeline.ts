@@ -17,6 +17,7 @@ import { tierFor } from "./registry";
 import type { CallScope } from "./scope";
 import { GRANT_RANK, loadLimits } from "./store";
 import { nullToUndefined } from "./strict-schema";
+import { runAllowlist } from "./runs";
 import { markTainted } from "./taint";
 import { applyUntrusted } from "./untrusted";
 import { offloadIfLarge } from "./workspace";
@@ -78,6 +79,9 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
 
   // Tier and access.
   if (scope.caller === "agent") {
+    // Harness 5.3: the run's allowlist is frozen at open time; a name the model was never shown is refused.
+    const allow = scope.run ? runAllowlist(scope.run) : null;
+    if (allow && !allow.includes(def.name)) return refuse("UNAVAILABLE", `${def.name} is not on this run's allowlist`);
     const tier = tierFor(def, ctx.agentKind ?? "main");
     if (tier === "unavailable") return refuse("UNAVAILABLE", `${def.name} is not available to this agent`);
     if (tier === "delegated") return refuse("DELEGATED_ONLY", `${def.name} is only available to task agents`);

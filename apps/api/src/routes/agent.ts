@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { NotFound, Unauthorized, ValidationError, type Proposal, type RunStepRow } from "@weft/contracts";
+import { CHAT_TOOLS, NotFound, Unauthorized, ValidationError, type Proposal, type RunStepRow } from "@weft/contracts";
 import { execRuns, notices, payrollRuns, principals, proposals, workers, type Db } from "@weft/db";
 import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
 import type { Weft, WeftEnv } from "../http/context";
@@ -81,7 +81,7 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     const session = c.get("session");
     if (!session) throw new Unauthorized();
     const body = StartBody.parse(await c.req.json());
-    const handle = await weft.executor.runs.openChatRun(session, { threadId: body.threadId ?? null, surface: "human_ui" });
+    const handle = await weft.executor.runs.openChatRun(session, { threadId: body.threadId ?? null, surface: "human_ui", allowlist: CHAT_TOOLS });
     await weft.agent.startChat(handle, { text: body.text, recipe: "chat", pageContext: body.pageContext ?? null });
     return c.json({ runId: handle.runId }, 202);
   });
