@@ -25,6 +25,7 @@ on 2026-10-15 between 17:58 and 18:30 PDT. Each finding was checked against the 
 | Harness | routine run summaries were the model's prose | fix(agent): routine run summaries come from results and proposals, never the model's prose (no separate agent note yet) |
 | Design | all Deliver buttons disabled while polling; no word when no routine picks a notice up | fix(web): Deliver disables only the clicked notice row (the staged run feed reveal is still to do) |
 | Design | audit Summary squeezed; header search hidden at 1440 with the panel docked | fix(web): audit Summary column gets room; header search shows from a 720px header (routine names for run ids still to do) |
+| Design | the payroll page did not show the agent's pending submit proposal | fix(web): the payroll page shows a pending submit_run proposal and makes the human Submit secondary |
 | Correctness, harness | SPEC 12 L4 row did not match the relaxed live criterion | SPEC 12 L4 row now states the L4a criterion and names L4b as left (this commit) |
 
 Notes on the allowlist fix: a chat handle opened without an `allowlist` (only executor and scenario tests do this)
@@ -44,7 +45,7 @@ admin and cli keys on purpose, because their routes accept API keys.
 | Harness | spend ledger per-run cap keyed by reused run ids | Only bites after many live reruns on the same data dir; the loop already enforces the per-run budget. Key by a unique run key in the next live round |
 | Harness | sandbox gate missing | No code.run exists yet; add the SANDBOX_NOT_ALLOWED policy branch with code.run |
 | Harness | no cross-run prefix pin test | Worth adding with WEFT_PIN_PREFIX=1; not a defect today |
-| Design | paycheck table too wide with the agent panel docked; audit Actor shows a run id, not the routine name; payroll page does not show the pending submit proposal | Layout work that needs screenshots across breakpoints; the cn() fix already restores the 11px chips and 14px table text that caused much of the width |
+| Design | paycheck table too wide with the agent panel docked; audit Actor shows a run id, not the routine name; no row flash after a review | Layout work that needs screenshots across breakpoints; the cn() fix already restores the 11px chips and 14px table text that caused much of the width |
 | Design | simulators: no staged run feed reveal when a run finishes before first paint; approve gives no result strip | Interaction work across three components; next design round |
 | Design | landing: no mobile menu, missing agent showcase and run log sections, hero mock reflows at 390, dark island density, stat tile spacing | New sections and responsive work; next design round. The heading line height and the API path in the Numbers heading are fixed |
 | Design | Bank batches raw headers, empty states without a next step, humanized enums and run id crumbs everywhere | Small but spread over many files; next design round |
