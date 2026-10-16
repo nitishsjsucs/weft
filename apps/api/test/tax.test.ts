@@ -79,7 +79,7 @@ describe("hero rate change (GP1 domain)", () => {
     const def = findCommand("tax.update_rate");
     const args = { tax_account_id: "txa_0002", code: "sui", rate: "0.015", effective_from: "2026-01-01", source_notice_id: noticeId };
     const pv = await def.preview!(def.input.parse(args), directCtx(weft.clock), deps());
-    expect(pv.title).toBe("Update CA SUI rate 3.4% to 1.5% effective 2026-01-01 on account 000-4817-2 for 22 CA employees");
+    expect(pv.title).toBe("Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 on account 000-4817-2 for 22 CA employees");
     expect(pv.content).toEqual([]);
     expect(pv.diff[0]).toEqual({ label: "CA SUI rate", before: "3.4%", after: "1.5%" });
     expect(pv.evidence[0]).toEqual({ label: "Notice", ref: noticeId });

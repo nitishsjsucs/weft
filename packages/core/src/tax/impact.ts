@@ -42,7 +42,7 @@ export async function rateChangeImpact(tx: DbTx, i: ImpactInput) {
       before_cents: before, before_display: formatCents(before), after_cents: after, after_display: formatCents(after),
       credit_cents: before - after, credit_display: formatCents(before - after),
       under_wage_base: (ytd.get(w.id) ?? 0) < i.wageBaseCents,
-      next_run_taxable_cents: next, next_run_change_cents: na - nb, next_run_change_display: formatCents(na - nb),
+      next_run_taxable_cents: next, next_run_before_cents: nb, next_run_after_cents: na, next_run_change_cents: na - nb, next_run_change_display: formatCents(na - nb),
     };
   });
   const affected = perWorker.filter((p) => p.credit_cents !== 0);
@@ -56,7 +56,7 @@ export async function rateChangeImpact(tx: DbTx, i: ImpactInput) {
     ytd_after_cents: sum(perWorker.map((p) => p.after_cents)), ytd_after_display: formatCents(sum(perWorker.map((p) => p.after_cents))),
     credit_total_cents: sum(affected.map((p) => p.credit_cents)), credit_total_display: formatCents(sum(affected.map((p) => p.credit_cents))),
     under_wage_base_count: perWorker.filter((p) => p.under_wage_base).length,
-    next_run: draft ? { run_id: draft.id, affected_count: nextAffected.length, unaffected_count: emps.length - nextAffected.length, change_cents: sum(nextAffected.map((p) => p.next_run_change_cents)), change_display: formatCents(sum(nextAffected.map((p) => p.next_run_change_cents))) } : null,
+    next_run: draft ? { run_id: draft.id, payday: draft.payday, before_cents: sum(nextAffected.map((p) => p.next_run_before_cents)), before_display: formatCents(sum(nextAffected.map((p) => p.next_run_before_cents))), after_cents: sum(nextAffected.map((p) => p.next_run_after_cents)), after_display: formatCents(sum(nextAffected.map((p) => p.next_run_after_cents))), affected_count: nextAffected.length, unaffected_count: emps.length - nextAffected.length, change_cents: sum(nextAffected.map((p) => p.next_run_change_cents)), change_display: formatCents(sum(nextAffected.map((p) => p.next_run_change_cents))) } : null,
     workers: perWorker,
   };
 }

@@ -2,7 +2,6 @@
 // with the agency simulator (R3, always) and the system record of its completion (system_only, R1).
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { formatCents } from "@weft/contracts";
 import { employerTaxRates, notices, simRegistrations, taxAccounts, workers, type DbTx } from "@weft/db";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
@@ -83,9 +82,9 @@ export const updateRate = writeCommand({
       { label: `${acct.jurisdiction} ${code} rate`, before: rateDisplay(old), after: rateDisplay(i.rate) },
       { label: `YTD employer ${code} (${impact.employees_in_state} ${acct.jurisdiction} employees)`, before: impact.ytd_before_display, after: impact.ytd_after_display },
     ];
-    if (impact.next_run) diff.push({ label: `Next run ${impact.next_run.run_id} (${impact.next_run.affected_count} workers under the wage base)`, before: formatCents(0), after: impact.next_run.change_display });
+    if (impact.next_run) diff.push({ label: `Employer ${code} on the ${shortDate(impact.next_run.payday, false)} run (${impact.next_run.affected_count} workers under the wage base)`, before: impact.next_run.before_display, after: impact.next_run.after_display });
     return {
-      title: `Update ${acct.jurisdiction} ${code} rate ${rateDisplay(old)} to ${rateDisplay(i.rate)} effective ${i.effective_from} on account ${acct.accountNumber} for ${impact.employees_in_state} ${acct.jurisdiction} employees`,
+      title: `Update ${acct.jurisdiction} ${code} rate ${rateDisplay(old)} to ${rateDisplay(i.rate)} effective ${shortDate(i.effective_from, true)} on account ${acct.accountNumber} for ${impact.employees_in_state} ${acct.jurisdiction} employees`,
       diff, content: [], moneyCents: null, subjectRef: `${acct.id}:${i.code}`,
       subjectHash: sha256Hex(canonicalJson({ rate: cur?.id ?? null, value: old, notice: notice.id })),
       evidence: [{ label: "Notice", ref: notice.id }, ...(cur ? [{ label: "Current rate", ref: cur.id }] : [])],
@@ -109,6 +108,13 @@ export const updateRate = writeCommand({
     };
   },
 });
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-01-01" to "Jan 1, 2026" (or "Jan 1" without the year). */
+function shortDate(iso: string, year: boolean): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return `${MONTHS[(m ?? 1) - 1]} ${d}${year ? `, ${y}` : ""}`;
+}
 
 function dayBeforeIso(date: string): string { return new Date(Date.parse(`${date}T12:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10); }
 
