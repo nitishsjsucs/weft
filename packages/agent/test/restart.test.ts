@@ -1,13 +1,15 @@
-// Restart survival (owner: w2-reliability, gate report item 2). Two runtimes on one database stand for the API before
+// Restart survival (owner: w2-reliability, gate report item 2), and at the end the chat answer-by cap and the
+// read-only chat tool list (gate report item 3), which live here because this is the track's one agent test file. Two runtimes on one database stand for the API before
 // and after a restart. A waiting routine run keeps its handle (through the RunHandleStore) and its trigger (from the
 // context step), so the next decision evaluates the real checklist and the run ends done with no extra model step.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ModelProvider, PrecheckResult, RoutineDef, RoutineRun, RunHandle, SimClock, ToolOutcome } from "@weft/contracts";
+import type { ModelProvider, ModelStepRequest, ModelStepResult, PrecheckResult, RoutineDef, RoutineRun, RunHandle, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
-import { createAgentRuntime, createSpendLedger, scriptedProvider, type Script, type WeftAgentRuntime } from "../src/index";
+import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, scriptedProvider, type Script, type WeftAgentRuntime } from "../src/index";
+import { CHAT_ANSWER_BY } from "../src/loop";
 import type { RunHandleStore } from "../src/runtime";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
@@ -146,5 +148,86 @@ describe("a waiting routine run across a restart", () => {
     await after.boot();
     expect(await after.store.getRun(h.runId)).toMatchObject({ status: "failed", terminalReason: "PROCESS_RESTART" });
     expect(store.saved.has(h.runId)).toBe(false);
+  });
+});
+
+// ---- gate report item 3: chat stays read-only and answers by its fourth model step
+
+const ZERO = { input: 10, cached: 0, cacheWrite: 0, output: 5, reasoning: 0 };
+/** A fake model: each step returns the next scripted turn and records the request it saw. */
+function fakeModel(turns: ((req: ModelStepRequest) => Partial<ModelStepResult>)[]): ModelProvider & { seen: ModelStepRequest[] } {
+  const seen: ModelStepRequest[] = [];
+  return {
+    id: "scripted", model: "fake", label: "Fake model", live: false, seen,
+    async step(req) {
+      seen.push(req);
+      const turn = turns[Math.min(seen.length - 1, turns.length - 1)]!(req);
+      const calls = turn.toolCalls ?? [];
+      return { stop: calls.length ? "tool_calls" : "final", text: "", toolCalls: calls, native: { turn: seen.length }, usage: ZERO, servedBy: "fake", requestId: null, ...turn };
+    },
+  };
+}
+const call = (n: number, name: string, args: unknown) => ({ callId: `call_${n}`, name, argumentsJson: JSON.stringify(args) });
+
+function chatRuntime(fake: FakeExecutor, provider: ModelProvider): WeftAgentRuntime {
+  const ledger = createSpendLedger({ dir: join(dataDir, "spend"), caps: { runUsd: 0.1, dayUsd: 2, liveUsd: 0.5 } });
+  return createAgentRuntime({ db, clock, executor: fake, provider, ledger, routinesView: { get: async () => null } });
+}
+
+const chatExecutor = () => createFakeExecutor([
+  ...CHAT_TOOLS.filter((n) => n !== "payroll.get_run").map((name) => ({ name, effect: name === "comms.post_update" ? "draft" as const : "read" as const })),
+  { name: "payroll.get_run", effect: "read", handler: () => done({ flagged: [{ worker: "Lena Brooks (wrk_0026)", rule: "GROSS_CHANGE", before_cents: 491667, after_cents: 580167, result_id: "res_0001" }] }, "Read pay_2026_10_30 flagged rows") },
+]);
+
+describe("chat answer-by cap and read-only tools", () => {
+  it("chat is not offered comms__post_update, and a call to it is refused without reaching the executor", async () => {
+    const fake = chatExecutor();
+    const model = fakeModel([
+      () => ({ toolCalls: [call(1, "comms__post_update", { text: "Looking." }), call(2, "payroll__get_run", { run_id: "pay_2026_10_30" })] }),
+      () => ({ text: "Lena Brooks (wrk_0026) rose from $4,916.67 to $5,801.67 (res_0001)." }),
+    ]);
+    const rt = chatRuntime(fake, model);
+    const h = { runId: "run_0101", token: "tok" };
+    await rt.startChat(h, { text: "Why is the NY raise flagged?", recipe: "chat", pageContext: null });
+    const run = await rt.settled(h.runId);
+    expect(model.seen[0]!.tools.map((t) => t.name)).not.toContain("comms__post_update");
+    expect(model.seen[0]!.tools).toHaveLength(CHAT_TOOLS.length - 1);
+    expect(fake.calls.map((c) => c.command)).toEqual(["payroll.get_run"]);
+    expect(run).toMatchObject({ status: "done", stepsUsed: 2 });
+  });
+
+  it("a model that keeps calling tools is stopped at the answer-by step with a grounded answer", async () => {
+    const fake = chatExecutor();
+    let n = 0;
+    const model = fakeModel([() => ({ toolCalls: [call(++n, "payroll__get_run", { run_id: "pay_2026_10_30", extra: n })] })]);
+    const rt = chatRuntime(fake, model);
+    const h = { runId: "run_0102", token: "tok" };
+    await rt.startChat(h, { text: "Why is the NY raise flagged?", recipe: "chat", pageContext: null });
+    const run = await rt.settled(h.runId);
+    expect(run.status).toBe("done");
+    expect(run.stepsUsed).toBe(CHAT_ANSWER_BY);
+    // The calls of the last step never ran, and the step before it carried the answer-now notice.
+    expect(fake.calls).toHaveLength(CHAT_ANSWER_BY - 1);
+    const last = model.seen[CHAT_ANSWER_BY - 1]!.history.at(-1);
+    expect(last).toMatchObject({ kind: "notice", notice: "budget", attrs: { code: "ANSWER_NOW" } });
+    expect(run.summary).toContain("res_");
+  });
+
+  it("an ungrounded answer at the answer-by step gets the grounded template, not a repair round", async () => {
+    const fake = chatExecutor();
+    let n = 0;
+    const model = fakeModel([
+      () => ({ toolCalls: [call(++n, "payroll__get_run", { run_id: "pay_2026_10_30" })] }),
+      () => ({ toolCalls: [call(++n, "payroll__get_run", { run_id: "pay_2026_10_30" })] }),
+      () => ({ toolCalls: [call(++n, "payroll__get_run", { run_id: "pay_2026_10_30" })] }),
+      () => ({ text: "Gross pay rose by $9,999.99." }),
+    ]);
+    const rt = chatRuntime(fake, model);
+    const h = { runId: "run_0103", token: "tok" };
+    await rt.startChat(h, { text: "Why is the NY raise flagged?", recipe: "chat", pageContext: null });
+    const run = await rt.settled(h.runId);
+    expect(run).toMatchObject({ status: "done", stepsUsed: CHAT_ANSWER_BY });
+    expect(run.summary).not.toContain("9,999.99");
+    expect((await rt.store.steps(h.runId)).filter((s) => s.kind === "notice" && (s.result as { notice: string }).notice === "repair")).toHaveLength(0);
   });
 });
