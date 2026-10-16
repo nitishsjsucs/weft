@@ -12,7 +12,7 @@ import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import { CARRIER_BILLING_EMAIL, computeFindings, disputeMessage, getFinding, hasStoredInvoice, listFindings, storeFindings, toFindingDto, type ReconInvoice } from "../benefits/recon";
 import { listOpenEnrollment, OPEN_ENROLLMENT_DEADLINE, OPEN_ENROLLMENT_PLAN_YEAR, openEnrollmentStragglers, recordNudges } from "../benefits/enrollment";
-import { emitWave2Event } from "../contractors/events";
+import { emitBenefitsWave2Event } from "../contractors/events";
 
 const PlansInput = z.object({ ...responseFormatField });
 type PlansInput = z.infer<typeof PlansInput>;
@@ -84,7 +84,7 @@ const reconcileCmd = writeCommand({
     const invoice = (await deps.sims.carrier.invoice(i.month)) as ReconInvoice;
     const drafts = await computeFindings(deps.tx, ctx.companyId, invoice);
     const res = await storeFindings(deps.tx, ctx.companyId, i.month, invoice.carrier, drafts, ctx.now, (p) => deps.newId(p));
-    if (fresh) await emitWave2Event(deps.tx, ctx.now, { type: "benefits.invoice_received", payload: { month: i.month, carrier: invoice.carrier } }, invoice.id ?? `carrier:${i.month}`, { attended: ctx.principal.kind === "human", requestedBy: ctx.principal.id });
+    if (fresh) await emitBenefitsWave2Event(deps.tx, ctx.now, { type: "benefits.invoice_received", payload: { month: i.month, carrier: invoice.carrier } }, invoice.id ?? `carrier:${i.month}`, { attended: ctx.principal.kind === "human", requestedBy: ctx.principal.id });
     const { names, plans } = await lookups(deps, ctx.companyId);
     const findings = res.rows.map((r) => findingView(toFindingDto(r), names, plans));
     return {

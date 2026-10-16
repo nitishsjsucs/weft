@@ -7,9 +7,8 @@ import { and, asc, desc, eq, inArray, lte } from "drizzle-orm";
 import { dec, roundCents } from "@weft/payroll-tax";
 import type { ContractorPayout, RailStatus, Simulators } from "@weft/contracts";
 import { contractorPayments, fxRates, payRates, simRailTransfers, workers, type DbTx } from "@weft/db";
-import { emitWave2Event } from "./events";
+import { emitBenefitsWave2Event } from "./events";
 
-export { emitWave2Event } from "./events";
 
 export const PAYOUT_CREDENTIAL_REF = "vault:sim-bank-operating" as const;
 export type ContractorPaymentRow = typeof contractorPayments.$inferSelect;
@@ -92,7 +91,7 @@ export async function syncRail(tx: DbTx, sims: Pick<Simulators, "rail">, now: st
     }
   }
   for (const e of delivered) {
-    if (open.some((p) => p.id === e.payload.payment_id)) await emitWave2Event(tx, now, { type: "sim.rail_delivered", payload: { payment_id: e.payload.payment_id! } }, e.payload.payment_id!, stamp);
+    if (open.some((p) => p.id === e.payload.payment_id)) await emitBenefitsWave2Event(tx, now, { type: "sim.rail_delivered", payload: { payment_id: e.payload.payment_id! } }, e.payload.payment_id!, stamp);
   }
   return { sent, delivered: done };
 }
