@@ -57,7 +57,12 @@ function Line({ text, onOpen, resolved }: { text: string; onOpen: (path: string)
   if (last < text.length) parts.push(text.slice(last));
   if (text.startsWith("# ")) return <h2 className="mb-2 mt-1 text-4 font-semibold">{text.slice(2)}</h2>;
   if (text.startsWith("## ")) return <h3 className="mb-1 mt-4 text-2 font-semibold text-gray-12">{text.slice(3)}</h3>;
-  return <div className="min-h-[1.25rem] whitespace-pre-wrap break-words">{parts}</div>;
+  if (text.trim() === "") return <div className="h-2" aria-hidden />;
+  if (text.startsWith("- ")) {
+    if (typeof parts[0] === "string") parts[0] = parts[0].slice(2);
+    return <div className="relative whitespace-pre-wrap break-words pl-4 before:absolute before:left-1 before:top-[0.6em] before:size-1 before:rounded-full before:bg-gray-9">{parts}</div>;
+  }
+  return <div className="whitespace-pre-wrap break-words">{parts}</div>;
 }
 
 function Tree({ paths, current, onOpen }: { paths: string[]; current: string | null; onOpen: (p: string) => void }) {
@@ -72,7 +77,7 @@ function Tree({ paths, current, onOpen }: { paths: string[]; current: string | n
       </label>
       {FOLDERS.map((f) => {
         const files = shown.filter((p) => p.startsWith(`${f}/`));
-        const expanded = open[f] || (filter !== "" && files.length > 0);
+        const expanded = (open[f] ?? false) || (filter !== "" && files.length > 0) || (current?.startsWith(`${f}/`) ?? false);
         return (
           <div key={f} className="mb-1">
             <button type="button" onClick={() => setOpen((o) => ({ ...o, [f]: !o[f] }))} className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-1 font-medium hover:bg-gray-3" aria-expanded={expanded}>
@@ -130,6 +135,11 @@ export function MemoryView() {
     const fromHash = typeof window !== "undefined" ? decodeURIComponent(window.location.hash.slice(1)) : "";
     setCurrent(fromHash && tree.data.includes(fromHash) ? fromHash : tree.data.includes("knowledge/company/one-pager.md") ? "knowledge/company/one-pager.md" : (tree.data.find((p) => p.startsWith("knowledge/")) ?? tree.data[0] ?? null));
   }, [tree.data, current]);
+  useEffect(() => {
+    const onHash = () => { const p = decodeURIComponent(window.location.hash.slice(1)); if (p) setCurrent(p); };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   const open = (p: string) => { setCurrent(p); try { window.history.replaceState(null, "", `#${encodeURIComponent(p)}`); } catch { /* ignore */ } };
   const file = useJson<MemoryFile>(current ? `/v1/memory/file?path=${encodeURIComponent(current)}` : null);
   const known = useMemo(() => new Set(tree.data ?? []), [tree.data]);

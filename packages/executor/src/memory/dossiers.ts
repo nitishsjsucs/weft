@@ -63,7 +63,7 @@ export function onePager(o: OnePagerInput, companyRef: string): DossierDoc {
     return [`## ${title}`, "", ...(shown.length ? shown : [`- none (${o.asOf}, src: digest)`]), ""];
   };
   const body = [
-    `# ${clean(o.companyName)} one-pager (demo)`, "",
+    `# ${clean(o.companyName).replace(/\s*\(demo\)$/, "")} one-pager (demo)`, "",
     ...section("Headcount by state", o.headcount), ...section("Open items", o.openItems),
     ...section("Active workstreams", o.workstreams), ...section("Agent autonomy", o.autonomy),
   ].join("\n");
