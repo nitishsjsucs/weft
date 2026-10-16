@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { PayrollRun } from "@weft/contracts";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { events, expenses, paychecks, payrollRuns, simBankBatches, uploads } from "@weft/db";
+import { events, expenses, paychecks, payrollRuns, principals, simBankBatches, uploads } from "@weft/db";
 import { W3ExpensesDetail, W3ExpensesPage, W3ExpensesPortalPage } from "../../../packages/contracts/src/ext/w3-expenses";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
@@ -158,6 +158,15 @@ describe("expenses (GP13)", () => {
     expect((await get("/v1/expenses?workerId=wrk_0005", "usr_sam")).status).toBe(403);
     expect((await get("/v1/expenses/exp_0001", "usr_sam")).status).toBe(404);
     expect((await get("/v1/expenses/exp_0001/receipt", "usr_sam")).status).toBe(403);
+  });
+
+  it("separation of duties: an admin files their own claim but cannot decide it", async () => {
+    const [dana] = await weft.db.select().from(principals).where(eq(principals.id, "usr_dana"));
+    expect(dana!.workerId).toBeTruthy();
+    const filed = await post("/v1/expenses", { workerId: dana!.workerId, category: "office", merchant: "Paperworks Supply (demo)", amountCents: 1_200, transactionDate: "2026-10-27", businessPurpose: "Folders" });
+    const id = ((await filed.json()) as { data: { expense_id: string } }).data.expense_id;
+    const self = await post(`/v1/expenses/${id}/decide`, { decision: "approve" });
+    expect([self.status, ((await self.json()) as { code: string }).code]).toEqual([422, "DOMAIN_SELF_APPROVAL"]);
   });
 
   it("serves the policy with its sources and the receipt to admins only", async () => {

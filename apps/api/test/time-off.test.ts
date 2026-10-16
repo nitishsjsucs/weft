@@ -112,6 +112,16 @@ describe("time-off routes", () => {
     expect(typed.status).toBe(400);   // the employee never types an amount
   });
 
+  it("separation of duties: an HR manager files their own request but cannot decide it", async () => {
+    const [sam] = await weft.db.all<{ worker_id: string }>(sql`SELECT worker_id FROM principals WHERE id = 'usr_sam'`);
+    const res = await call("usr_sam", "POST", `/v1/time-off/requests?workerId=${sam!.worker_id}`, { policyId: "top_vac_us", startDate: "2026-12-14", endDate: "2026-12-14" });
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    const id = (res.json as { data: { request_id: string } }).data.request_id;
+    const self = await call("usr_sam", "POST", `/v1/time-off/requests/${id}/decide`, { decision: "approve", note: "" });
+    expect([self.status, (self.json as { code: string }).code]).toEqual([422, "DOMAIN_SELF_APPROVAL"]);
+    expect((await call("usr_sam", "POST", `/v1/time-off/requests/${id}/cancel`)).status).toBe(200);
+  });
+
   it("flags time off on the open draft: PTO_LINE for the approved TX day, pending requests as info, review counts unchanged", async () => {
     type Pc = { workerId: string; reviewGroup: string; flags: { rule: string; severity: string; message: string; evidence: Record<string, unknown> }[] };
     const checks = async () => (await weft.db.all<{ worker_id: string; review_group: string; flags_json: string }>(sql`SELECT worker_id, review_group, flags_json FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' ORDER BY worker_id`))

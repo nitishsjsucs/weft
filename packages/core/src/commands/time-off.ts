@@ -255,6 +255,7 @@ const decide = writeCommand({
     if (r.status !== "pending") throw new DomainRefusal("DOMAIN_NOT_PENDING", `${r.id} is ${r.status}; only pending requests are decided`, "List pending requests with time_off.list_requests", null);
     const who = await deciderOf(deps.tx, ctx);
     if (!who || who.kind !== "human") throw new DomainRefusal("DOMAIN_NOT_APPROVER", "Only a person decides time off", "Propose the decision for the routed approver", null);
+    if (who.workerId && who.workerId === w.id) throw new DomainRefusal("DOMAIN_SELF_APPROVAL", `${r.id} is ${who.display}'s own request; another approver decides it`, "Route it to the requester's manager, an HR manager or the People admin", null);
     if (who.role === "manager") {
       // A manager whose own worker record is no longer active (offboarding, inactive) has lost the approve right.
       const mine = who.workerId ? await workerOf(deps.tx, ctx.companyId, who.workerId) : null;
@@ -423,6 +424,12 @@ const reopen = writeCommand({
   async run(i: RequestIdInput, ctx, deps) {
     const r = weftOwned(await requestOf(deps.tx, ctx.companyId, i.request_id));
     if (!DECIDERS.has(ctx.principal.role ?? "") && ctx.principal.role !== "manager") throw new DomainRefusal("DOMAIN_NOT_APPROVER", "Only an approver reopens a decided request", null, null);
+    if (ctx.principal.role === "manager") {
+      // Same reach as time_off.decide: a manager reopens only a direct report's request.
+      const who = await deciderOf(deps.tx, ctx);
+      const subject = await workerOf(deps.tx, ctx.companyId, r.workerId);
+      if (!who?.workerId || subject?.managerId !== who.workerId) throw new DomainRefusal("DOMAIN_NOT_DIRECT_REPORT", "A manager reopens time off only for direct reports", "The worker's own manager or the People admin reopens it", null);
+    }
     const today = ptDateOf(ctx.now);
     if (!(r.status === "approved" || r.status === "denied") || r.startAt.slice(0, 10) <= today) throw new DomainRefusal("DOMAIN_NOT_REOPENABLE", `${r.id} is ${r.status}${r.startAt.slice(0, 10) <= today ? " and has started" : ""}`, null, null);
     const rows = (await ledgerOf(deps.tx, r.workerId, r.policyId)).filter((x) => x.sourceRef === r.id);
