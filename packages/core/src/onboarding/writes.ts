@@ -24,6 +24,8 @@ export const completeTask = writeCommand({
     // Employee-owned tasks (the portal's signatures, forms, uploads and elections) finish only when the new hire
     // submits them in the portal; marking one done here would skip the signature and lock the hire out of the form.
     if (t.owner === "employee") throw new DomainRefusal("DOMAIN_EMPLOYEE_TASK", `${i.kind} for ${w.id} is the new hire's task; they complete it in the portal`, "Nudge the new hire instead (comms.send_message)", null);
+    // Wave 3: the background check finishes only from the screening company's result or a person's engage step.
+    if (t.kind === "background_check") throw new DomainRefusal("DOMAIN_SYSTEM_TASK", `background_check for ${w.id} completes from the screening company's result, never by hand`, "Read screening.get_status", null);
     if (t.status === "done") return { data: { task_id: t.id, kind: t.kind, status: "done", changed: false }, summary: `${i.kind} already done for ${nameRef(w.firstName, w.lastName, w.id)}` };
     if (i.kind === "state_registration") {
       const accts = w.workState ? await tx.select().from(taxAccounts).where(and(eq(taxAccounts.companyId, ctx.companyId), eq(taxAccounts.jurisdiction, w.workState))) : [];
