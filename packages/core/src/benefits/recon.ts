@@ -86,7 +86,10 @@ export async function computeFindings(tx: DbTx, companyId: string, invoice: Reco
   for (const e of enr) {
     if (e.status !== "active" && e.status !== "terminated") continue;
     const end = personById.get(e.workerId)?.endDate ?? null;
-    const n = periods.filter((p) => e.effectiveFrom <= p.end && (e.effectiveTo === null || e.effectiveTo >= p.start) && !(e.status === "terminated" && e.effectiveTo === null) && (end === null || end >= p.end)).length;
+    // A leaver's coverage runs through the last full period worked, unless the enrollment was ended with an explicit
+    // effective_to (offboarding ends benefits at the end of the month, as the COBRA notice says); then that date rules.
+    const covered = (p: { start: string; end: string }) => end === null || end >= p.end || (e.effectiveTo !== null && e.effectiveTo >= p.end);
+    const n = periods.filter((p) => e.effectiveFrom <= p.end && (e.effectiveTo === null || e.effectiveTo >= p.start) && !(e.status === "terminated" && e.effectiveTo === null) && covered(p)).length;
     if (n === 0) continue;
     const tier = e.tier ?? "ee";
     const k = `${e.workerId}|${e.planId}`;

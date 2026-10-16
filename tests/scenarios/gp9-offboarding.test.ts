@@ -122,6 +122,16 @@ describe("GP9 termination with access revocation", () => {
     expect(new Set(done.map((e) => (JSON.parse(e.payload_json) as { step_id: string }).step_id))).toEqual(new Set(c.steps.map((s) => s.id)));
   });
 
+  it("October reconciliation after the case expects coverage through the end of the month, so the leaver is not a finding", async () => {
+    // GP9 ended Imani's enrollments effective 2026-10-31 (the COBRA notice says the same); the carrier bills October in
+    // full, which is right. Only the three planted errors remain.
+    const res = await call("POST", "/v1/benefits/reconciliation/run", { month: "2026-10" });
+    expect(res.status).toBe(200);
+    const findings = (await call("GET", "/v1/benefits/reconciliation?month=2026-10")).json as { kind: string; workerId: string | null }[];
+    expect(findings.filter((f) => f.workerId === WORKER)).toEqual([]);
+    expect(findings.map((f) => f.kind).sort()).toEqual(["missing_dependent", "terminated_but_billed", "wrong_tier"]);
+  });
+
   it("refuses a second termination and a contractor", async () => {
     const again = await call("POST", `/v1/workers/${WORKER}/terminate`, { kind: "voluntary", lastDay: "2026-10-30" });
     expect(again.status).toBe(422);
