@@ -167,6 +167,8 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     const out: unknown[] = [];
     for (const r of rows) {
       if (r.kind !== "tool_call") continue;
+      // Model-authored text (run feed updates) is not evidence: the answer cannot ground itself on it.
+      if (r.toolName === "comms__post_update") continue;
       const o = (r.result as { outcome?: ToolOutcome } | null)?.outcome;
       if (o && o.ok && o.status === "done") out.push({ resultId: o.resultId, data: o.data, summary: o.summary, actionSeq: o.actionSeq });
       else if (o && o.ok) out.push({ proposalId: o.proposalId, title: o.title });

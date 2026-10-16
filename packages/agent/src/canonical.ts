@@ -22,9 +22,9 @@ export function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-/** A run nonce: 12 lowercase hex characters, minted once per run and never placed in the frozen prompt. */
+/** A fallback run nonce: 16 lowercase hex characters, never placed in the frozen prompt. Runs use the handle nonce. */
 export function newNonce(): string {
-  return randomBytes(6).toString("hex");
+  return randomBytes(8).toString("hex");   // 16 hex (harness 6.3)
 }
 
 /** Escape text that goes inside a nonce-tagged element so it can never close the element from inside. */

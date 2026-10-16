@@ -24,7 +24,8 @@ export function builtinCommands(e: Engine): WeftCommand[] {
     tiers: { main: "executable", task: "executable" }, mcp: "hidden",
     errorHints: { INVALID_INPUT: { hint: "text is one line, at most 500 characters", example: { text: "Checked the draft payroll." } } },
     async run(i, ctx) {
-      return { data: { posted: true, run_id: ctx.run?.id ?? null, text: i.text }, summary: `Posted an update to the run feed${ctx.run ? ` of ${ctx.run.id}` : ""}` };
+      // The text is not echoed back: a model-authored string must never become a grounding source for its own answer.
+      return { data: { posted: true, run_id: ctx.run?.id ?? null }, summary: `Posted an update to the run feed${ctx.run ? ` of ${ctx.run.id}` : ""}` };
     },
   };
 

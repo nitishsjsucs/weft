@@ -145,7 +145,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       handles.set(handle.runId, handle);
       const kind: PromptKind = input.recipe === "routine_draft" ? "routine_draft" : "chat";
       await store.createRun(baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind }));
-      const nonce = newNonce();
+      const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
       let text: string;
       if (kind === "chat") {
         const c = (await opts.contextSource?.chat({ companyId, runId: handle.runId })) ?? { actingFor: "the person in this chat", grants: {}, companySummary: "No company summary is available.", openLoops: [] };
@@ -163,7 +163,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       const trigger: Record<string, unknown> = input.trigger ? { event: input.trigger.type, event_id: input.trigger.id, subject_ref: input.trigger.subjectRef, ...input.trigger.payload } : { trigger_ref: input.routineRun.triggerRef, attended: input.routineRun.attended };
       triggers.set(handle.runId, { routine: input.routine, trigger });
       await store.createRun(baseRow(handle, { trigger: `routine:${input.routineRun.id}`, attended: input.routineRun.attended, routineRunId: input.routineRun.id, routineId: input.routine.id, kind: "routine", budget: input.routine.budget }));
-      const nonce = newNonce();
+      const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
       const text = routinePack({
         nonce, now: opts.clock.now(), actingFor: input.routine.ownerPrincipalId, limits: { ...BUDGETS.routine, ...input.routine.budget, toolCallsPerStep: BUDGETS.routine.toolCallsPerStep },
         routine: { id: input.routine.id, name: input.routine.name, instructions: input.routine.instructions }, trigger,
