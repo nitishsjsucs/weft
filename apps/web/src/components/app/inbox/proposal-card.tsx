@@ -89,7 +89,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           <div data-testid={TID.proposalContent} className="flex flex-col gap-2">
             {p.content.map((c, i) => (
               <div key={i} className="rounded-lg border border-[var(--app-border)]">
-                <div className="border-b border-[var(--app-border)] bg-gray-2 px-3 py-1.5 text-1 font-medium text-gray-11">Content to be sent: {c.label}</div>
+                <div className="border-b border-[var(--app-border)] bg-gray-2 px-3 py-1.5 text-1 font-medium text-gray-11">{c.label === "Content to be sent" ? c.label : `Content to be sent: ${c.label}`}</div>
                 <pre className="max-w-full overflow-x-auto px-3 py-2 font-sans text-[13px] leading-5 break-words whitespace-pre-wrap">{c.text}</pre>
               </div>
             ))}
@@ -107,9 +107,9 @@ export function ProposalCard({ p }: { p: Proposal }) {
             {p.evidence.map((e, i) => {
               const href = refHref(e.ref);
               return href ? (
-                <Link key={i} href={href} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-blue-11 shadow-[var(--shadow-border)] hover:bg-blue-3">{e.label} <span className="font-mono text-0 text-gray-10">{e.ref}</span></Link>
+                <Link key={i} href={href} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-blue-11 shadow-[var(--shadow-border)] hover:bg-blue-3">{e.label} {e.ref && !e.label.includes(e.ref) ? <span className="font-mono text-0 text-gray-10">{e.ref}</span> : null}</Link>
               ) : (
-                <span key={i} className="rounded-md px-1.5 py-0.5 shadow-[var(--shadow-border)]">{e.label} <span className="font-mono text-0 text-gray-10">{e.ref}</span></span>
+                <span key={i} className="rounded-md px-1.5 py-0.5 shadow-[var(--shadow-border)]">{e.label}{e.ref && !e.label.includes(e.ref) && !/^not reversible/i.test(e.label) ? <> <span className="font-mono text-0 text-gray-10">{e.ref}</span></> : null}</span>
               );
             })}
           </div>

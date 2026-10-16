@@ -36,8 +36,8 @@ export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
       </PopoverTrigger>
       <PopoverContent onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2">
-          <span className={cn("rounded-md px-1.5 py-0.5 text-0 font-medium", TONE[flag.severity])}>{flag.rule}</span>
-          <span className="text-1 text-gray-10">{flag.severity}</span>
+          <span className={cn("rounded-md px-1.5 py-0.5 text-0 font-medium", TONE[flag.severity])}>{RULE_LABEL[flag.rule]}</span>
+          <span className="text-1 text-gray-10">{flag.severity === "block" ? "Blocks the run" : flag.severity === "review" ? "Needs review" : "Info"}</span>
         </div>
         <p className="mt-2 font-medium">{flag.message}</p>
         {pc.explanation ? (

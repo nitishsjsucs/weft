@@ -15,7 +15,7 @@ function Widget({ icon, title, href, children, footer, testid }: { icon: React.R
   return (
     <section data-testid={testid} className="flex min-w-0 flex-col">
       <CardHeading icon={icon} trailing={<Link href={href} aria-label={`Open ${title}`} className="text-gray-9 hover:text-foreground"><ChevronRight className="size-4" /></Link>}>{title}</CardHeading>
-      <Card className="min-h-[180px] flex-1 overflow-hidden">{children}</Card>
+      <Card className="overflow-hidden">{children}</Card>
       {footer ? <div className="mt-2 flex items-center justify-between px-1 text-1 text-gray-10">{footer}</div> : null}
     </section>
   );
@@ -38,7 +38,7 @@ export function HomeView() {
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
       <h1 className="mb-8 text-7 font-semibold tracking-tight">{greeting(now)}, {first}</h1>
-      <div className="grid gap-6 tablet:grid-cols-2">
+      <div className="grid items-start gap-6 tablet:grid-cols-2">
         <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Funding via simulated ACH</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
           {upcoming.length === 0 ? <div className="p-4 text-2 text-gray-10">{runs.error ? "Payroll is not available yet." : "No upcoming payrolls."}</div> : null}
           {upcoming.map((r) => (
@@ -60,7 +60,7 @@ export function HomeView() {
             {(accounts.data ?? []).filter((a) => a.jurisdiction !== "US").map((a) => (
               <li key={a.id} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-2 text-[13px] last:border-0">
                 <span className="w-8 font-medium">{a.jurisdiction}</span><span className="min-w-0 flex-1 truncate text-gray-11">{AGENCY[a.agency] ?? a.agency} <span className="text-gray-10">{a.accountType}{a.registeredAt ? ` · since ${fmtDate(a.registeredAt, { month: "short", year: "numeric" })}` : ""}</span></span>
-                <Badge tone={a.status === "active" ? "green" : a.status === "awaiting_state" ? "amber" : "gray"}>{a.status.replace("_", " ")}</Badge>
+                <Badge tone={a.status === "active" ? "green" : a.status === "awaiting_state" ? "amber" : "gray"}>{humanStatus(a.status)}</Badge>
               </li>
             ))}
           </ul>
@@ -72,4 +72,10 @@ export function HomeView() {
       </div>
     </div>
   );
+}
+
+/** "awaiting_state" to "Awaiting state". */
+function humanStatus(s: string): string {
+  const t = s.replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
 }
