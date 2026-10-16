@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "tsx scripts/dev.ts",
-    "demo": "vitest run --project @weft/tests --reporter verbose tests/scenarios",
+    "demo": "tsx apps/api/src/demo.ts",
+    "demo:tests": "vitest run --project @weft/tests --reporter verbose tests/scenarios",
     "build": "turbo run build",
     "test": "vitest run",
     "typecheck": "turbo run typecheck",
