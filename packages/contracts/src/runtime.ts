@@ -20,7 +20,8 @@ export interface WeftEvent { id: string; type: string; ts: string; subjectRef: s
 export interface EventHandler { event: string; principal: SystemPrincipal; handle(evt: WeftEvent, sys: SystemExecutor, read: ReadOnlyExecutor): Promise<void> }
 export interface AgentRuntime {
   boot(): Promise<void>;                                            // boot rule PROCESS_RESTART
-  startChat(run: RunHandle, input: { text: string; recipe: "chat" | "routine_draft"; pageContext: string | null }): Promise<void>;
+  /** `allowlist` (wave 3, additive): the chat tools the API chose for this run (CHAT_TOOLS_W3 or CHAT_ACT_TOOLS); omitted means CHAT_TOOLS. */
+  startChat(run: RunHandle, input: { text: string; recipe: "chat" | "routine_draft"; pageContext: string | null; allowlist?: readonly string[] }): Promise<void>;
   startRoutineRun(run: RunHandle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }): Promise<void>;
   requeue(runId: string, notice: { kind: NoticeKind; attrs: Record<string, string>; text: string }): Promise<void>;
   cancel(runId: string): Promise<void>;

@@ -236,7 +236,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         const channels = (await opts.contextSource?.channels?.(companyId)) ?? ["#people-ops", "#new-hires", "#payroll"];
         text = routineDraftPack({ nonce, now: opts.clock.now(), actingFor: "the person in this chat", request: input.text, channels, tools: [...CHAT_TOOLS, "comms.send_message"] });
       }
-      await writeContext(handle.runId, { promptKind: kind, allowlist: kind === "chat" ? [...CHAT_TOOLS] : [...DRAFT_TOOLS], nonce, routineId: null, text, pack: true });
+      await writeContext(handle.runId, { promptKind: kind, allowlist: kind === "chat" ? [...(input.allowlist ?? CHAT_TOOLS)] : [...DRAFT_TOOLS], nonce, routineId: null, text, pack: true });
       enqueue(handle.runId);
     },
     async startRoutineRun(handle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }) {
