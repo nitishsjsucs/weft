@@ -1,0 +1,5 @@
+# Allowlist for `pnpm brand:overlap` (scripts/brand-overlap.ts). Keep it empty.
+# Add an entry only when a shared run of 8 or more words is a generic phrase that any payroll or HR product would use
+# (a legal boilerplate line, a standard form name), never marketing copy. One entry per line, in the form
+#   <the shared phrase, at least 8 words>  # <why it is generic>
+# An entry covers every 8-word window inside its phrase. Entries that stop matching are reported so they can go.

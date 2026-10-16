@@ -46,20 +46,20 @@ Sources read in full or in the relevant parts:
 
 ---
 
-## 1. What Warp says about its agent (requirements to mirror, in original wording)
+## 1. What Warp says about its agent (requirements to mirror, restated in Weft's own words)
 
 Facts (marketing claims, not verified):
 
-- The agent handles onboarding, payroll, tax notices and benefits, checks with a person whenever the decision belongs to them, and logs each action it takes [W-HOME].
+- The agent takes on new-hire setup, pay runs, agency notices and benefit enrollment; it defers to a person on any call that is theirs to make and leaves a log entry for each step [W-HOME].
 - Home page mock: a CA EDD notice arrives; the agent reads the PDF, finds an outdated SUI rate and proposes updating it for a set of employees, then summarizes [W-HOME]. This is the shape of Weft's tax-notice flow (with a simulated agency and fictional people).
-- Routines are jobs the agent owns end to end; they start on an event (a signed offer, say) or on a schedule, wait for paperwork or permissions, check back and resume where they stopped, and bring in the right person when a decision is needed [W-AGENT].
+- Routines are jobs the agent owns end to end; they start on an event (a signed offer, say) or on a schedule, wait for paperwork or permissions, check back and resume where they stopped, and pull a human in whenever a choice needs one [W-AGENT].
 - Prebuilt routines on the page cover a weekly people report, time-off requests, a payroll anomaly check, a new-hire readiness check, an expense review against policy, a monthly executive report, open enrollment and milestone celebrations, plus a card to build your own [W-AGENT]. **Weft must not reuse the reference's routine names**; section 11 gives original ones.
 - Approval UX mock: a chat message mentions an approver, asks to approve a new hire's base salary that payroll depends on, lists Routine, Employee, Base salary, Payroll date, with Approve, Deny and Open-in-app buttons [W-AGENT].
-- Guardrails: the agent knows who is asking, holds fixed limits on money, logs every action and cannot lift its own limits [W-AGENT].
-- Permissions: admins pick what the agent may see and change, as finely as single actions; it never holds more access than the person it acts for; the settings mock shows a block for the person and a block for the agent, each with View (see people, payroll and company records), Edit (change them) and Approve (approve requests and run payroll) [W-AGENT].
-- Audit: every run can be opened to see its trigger, what it did and what it left for a person. Rollback: any action can be undone with one click, and the log keeps both the original and the reversal [W-AGENT].
+- Guardrails: the agent is aware of the requester's identity, works under money caps it has no way to raise, and writes each action to the log [W-AGENT].
+- Permissions: admins pick what the agent may see and change, as finely as single actions; its access is capped at that of the person it acts for; the settings mock shows a block for the person and a block for the agent, each with three levels: View (read access to records about people, pay and the company), Edit (may change those records) and Approve (may sign off requests and payroll runs) [W-AGENT].
+- Audit: opening a run shows its trigger, the actions taken and whatever still waits on a human. Rollback: a single click reverses an action, and the log retains the first entry next to its undo [W-AGENT].
 - Refusal example: asked to approve all open expenses, the agent declines and offers to walk through each one [W-AGENT]. Weft reproduces this as an executor rule (agents cannot approve), not as prompt politeness.
-- Slack: mention the app in a thread and it reads context and finishes the work; routines post to people [W-AGENT]. Weft: a simulated chat feed in-app (`comms` simulator).
+- Slack: tagging the app in a thread makes it pick up the context and complete the task; routines post to people [W-AGENT]. Weft: a simulated chat feed in-app (`comms` simulator).
 - MCP: the home page says the product can be driven from the agents a team already uses, such as Claude, ChatGPT or any MCP client [W-HOME]. Pricing lists a REST API, a CLI and MCP integration (named for Claude and ChatGPT), audit logs with 30-day retention (1-year on Enterprise) [W-PRICE]. No public MCP tool list was found; [W-DOCS] covers only the REST API.
 - Public API [W-DOCS]: REST plus typed SDKs generated from an OpenAPI 3.1 spec; company API key; Standard Webhooks signed events; cursor pagination. Resources: workers (create employee or contractor in draft, invite, update, delete before onboarding, reveal SSNs with one audit event per worker and `Cache-Control: private, no-store`), offers, pay rates (effective-dated, minor currency units, webhook payloads carry metadata only, never pay amounts), payrolls and paychecks, time off, benefits (health plans, retirement plans, benefit deductions), departments, workplaces, custom fields, I-9 verifications, bank accounts, levels. Webhook events include worker.created, worker.onboarding_completed, worker.offboarding_started, offer.accepted, time-off request created/reviewed, pay rate created/deleted.
   - **Decision:** Weft's internal event names reuse this generic vocabulary (`offer.accepted`, `worker.created`, `worker.onboarding_completed`, `worker.offboarding_started`, `time_off.requested`, `pay_rate.created`) plus Weft-specific `notice.received`, `payroll.draft_created`, `payroll.deadline_approaching`. Event payloads for comp changes carry ids, never amounts, following the same privacy idea.
@@ -517,7 +517,7 @@ Prebuilt ones live in `routines/*.yaml` in the repo, custom ones in SQLite. A cu
 - Run key = SHA-256 of canonical `{routine_id, trigger_ref}` (event id or cron slot); a second trigger with the same key is a no-op [SS src/shared/routines/definitions.ts].
 - `routine_runs`: id, routine_id, key, trigger_ref, status (`queued`, `running`, `waiting_approval`, `waiting_event`, `done`, `failed`, `cancelled`), agent_run_id, started_at, ended_at, summary, left_for_human (proposal ids), steps (precheck, agent, each proposal, each wake).
 - Waiting: when the main agent ends its turn with pending proposals, the run becomes `waiting_approval`. A decision, an expiry or a matching event re-checks the database, then wakes the run with a notice (StaySignal gate pattern [SS src/worker/workflows/gates.ts]).
-- Scheduler: a 30 s tick in live mode; in tests `clock.advanceTo(t)` fires due cron slots and consumes events in order. Every run, including no-op and failed ones, is listed with what triggered it, what it did and what it left for a person [W-AGENT].
+- Scheduler: a 30 s tick in live mode; in tests `clock.advanceTo(t)` fires due cron slots and consumes events in order. Every run, including no-op and failed ones, is listed with its trigger, its actions and anything still waiting on a human [W-AGENT].
 
 ---
 

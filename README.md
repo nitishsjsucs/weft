@@ -263,6 +263,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm screenshots` | Retakes `docs/screenshots/` (or `SHOTS_DIR`) through the e2e dev runner at 1440 by 900; same ports and world reset as `pnpm e2e`, never part of it |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |
+| `pnpm brand:overlap` | Fails on any run of 8 or more consecutive words shared between the visible text of the saved reference pages and the text in `apps/`, `packages/`, `docs/`, `research/`, `README.md` or `SPEC.md`, outside the (empty) allowlist `scripts/brand-overlap.allow.txt`; skips with a message when the gitignored reference folder is absent, as in CI |
 | `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world and print its digest (stable across runs) |
 | `pnpm eval:live` | Live Luna gate, opt-in (see docs/models.md); `L3x6` repeats a case |
 | `pnpm memory:bundle`, `pnpm memory:restore` | Write a verified git bundle of the memory repo under `companies/<id>/bundles/`, or restore one (the old repo is kept) |

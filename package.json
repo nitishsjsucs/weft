@@ -18,6 +18,7 @@
     "screenshots": "playwright test -c playwright.screens.config.ts",
     "lint:prose": "tsx scripts/check-prose.ts",
     "lint:brand": "tsx scripts/check-brand.ts",
+    "brand:overlap": "tsx scripts/brand-overlap.ts",
     "db:migrate": "tsx packages/db/src/cli.ts migrate",
     "db:seed": "tsx packages/seed/src/cli.ts seed",
     "db:reset": "tsx packages/seed/src/cli.ts reset",

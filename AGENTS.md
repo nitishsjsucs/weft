@@ -25,6 +25,7 @@ Weft is an open-source, self-hostable, AI-native payroll and HR platform that ru
 | `pnpm --filter @weft/web build` | Next production build |
 | `pnpm lint:prose` | No em or en dashes in tracked text |
 | `pnpm lint:brand` | No reference-site names, domains or denylisted phrases outside `research/`, `NOTICE` and `SPEC.md` |
+| `pnpm brand:overlap` | No run of 8+ consecutive words shared with the saved reference pages anywhere in `apps/`, `packages/`, `docs/`, `research/`, `README.md`, `SPEC.md` (skips without the reference folder) |
 | `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world in `.data/` and print its digest |
 | `pnpm dev` | API on 127.0.0.1:4070 and web on 127.0.0.1:3070 in separate process groups (check ports first) |
 | `pnpm e2e` | Playwright golden paths on ports 3170 and 4170 |

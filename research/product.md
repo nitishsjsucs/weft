@@ -63,7 +63,7 @@ Caveat: almost every number on warp.co is a vendor marketing claim (for example 
 
 ## 1. Company context (short)
 
-- Warp, operated by Poaster Technologies Inc., New York City, founded 2023, YC W23, CEO Ayush Sharma, team about 80, $85M raised including a $60M Series B led by Battery Ventures (June 2026). Formerly joinwarp.com; moved to warp.co in Feb 2026. [yc] [aiindex] [home]
+- Warp, operated by Poaster Technologies Inc., New York City, founded 2023, YC W23, CEO Ayush Sharma, team about 80, $85M raised in total, of which Battery Ventures led the $60M Series B (June 2026). Formerly joinwarp.com; moved to warp.co in Feb 2026. [yc] [aiindex] [home]
 - Started as payroll tax compliance for startups (state registrations, UI accounts, notices), then grew into payroll, HRIS, benefits brokerage, IT and global contractors. [yc] [blog-agent]
 - The agent release (the agent plus routines) launched 2026-09-25 through early access, switched on per company from an early access tab in settings. [fortune] [aiindex]
 - Stack hints: TypeScript, Next.js, Effect (Effect Platform HTTP API, Effect Schema validation of NoSQL data, RPC bridge from a legacy backend, test layers, tagged requests with Redis caching). Error payloads carry an Effect-style `_tag`. [effect] [eng] [docs-err]
@@ -85,12 +85,12 @@ Caveat: almost every number on warp.co is a vendor marketing claim (for example 
 
 ### 2.2 US payroll
 
-- W-2 employees in all 50 states and 1099 contractors in the same dashboard; unlimited runs; a claimed three clicks or about a minute to run; next-day payroll and AutoPay on Starter. [payroll] [pricing] [vs-gusto]
+- W-2 staff in any of the 50 states plus 1099 contractors, managed from one dashboard; unlimited runs; a claimed three clicks or about a minute to run; next-day payroll and AutoPay on Starter. [payroll] [pricing] [vs-gusto]
 - Calculates gross to net, applies deductions, remits and files federal (income tax, Social Security, Medicare, FUTA), state (income tax, SUI, SDI, PFL, workers' comp) and local taxes. [payroll] [compliance]
 - Multiple pay schedules; the dashboard lists a US semi-monthly run, a US quarterly bonus run and a global monthly run side by side, each with an autopay countdown. [pricing] [home]
 - Payroll object (public API): `type` us or global; `subtype` regular, off_cycle, bonus, invoice, contractor, dismissal, reimbursement, manual; `status` draft, pending, processing, partially_paid, processed, failed, voided; `payday`; `payPeriod` start and end (inclusive); `payFrequency` weekly, biweekly, monthly, semimonthly, quarterly, annually; `approvalDeadline`; `reopenDeadline`; `fundingMethod` ach or wire; `timeline.approvedAt`; `paycheckCount`; `totals` with cashRequirement, grossPay, netPay, reimbursements, workerTaxes, employerTaxes, preTaxDeductions, postTaxDeductions, workerBenefitContributions, employerBenefitContributions, transactionFees, totalCost, each as integer minor units plus a display string. [api-payroll]
 - Paycheck object: status draft, pending, processing, debited, credited, partially_paid, processed, failed, voided; paymentMethod direct_deposit or manual; worker type us_w2, us_1099, global_contractor, global_employee; line arrays `earnings` (types hourly, salaried, overtime, double_overtime, paid_holiday, pto, sick, commission, bonus, severance, and imputed types), `reimbursements`, `deductions` (pre_tax or post_tax), `benefits` (category health, retirement, health_savings, commuter, voluntary; types medical, dental, vision, 401k, roth_401k, hsa, fsa_medical, transit, parking and more; worker and employer contribution), `taxes` (payer worker or employer, amount, description), `exchangeRates`, `reportedHours`. [api-paycheck]
-- Payroll run review screen (mockup): a header naming the period and the schedule; columns Employee, Hours, Gross Pay, Reimbursements, Company Taxes, Employee Taxes, Company Benefits, Net Pay; rows grouped into a needs review band (2 rows) and a ready for approval band (6 rows); a Total row (8 or 9 employees, 669.35 hours, $41,150.67 gross, $530.90 reimbursements, $3,785.12 company taxes, $8,507.50 employee taxes, $1,534.00 company benefits, $31,640.07 net). Salaried semi-monthly rows show 86.67 hours. [agent] (agent.html text)
+- Payroll run review screen (mockup): a header naming the period and the schedule; columns for the employee and hours, then gross pay and reimbursements, the two tax columns (company first, then employee), company benefits, and net pay last; rows grouped into a needs review band (2 rows) and a ready for approval band (6 rows); a Total row (8 or 9 employees, 669.35 hours, $41,150.67 gross, $530.90 reimbursements, $3,785.12 company taxes, $8,507.50 employee taxes, $1,534.00 company benefits, $31,640.07 net). Salaried semi-monthly rows show 86.67 hours. [agent] (agent.html text)
 - Voids and reversals: void creates a negative offsetting payroll record (no money moves); reversal pulls net pay back by ACH within 5 business days, ACH only; taxes already deposited are generally not refundable; $100 fee each; requested via support with the payroll URL. Lifecycle stages named: processed (debit not settled), debit settled (funds in flight), net pay delivered, taxes deposited. [help-void]
 - Help center also lists articles on manual payrolls, offset paydays, next-day payroll and how earnings are prorated (titles only seen). [help] (WebSearch 2026-10-15)
 - Expense reimbursements are paid through payroll. [pricing]
@@ -123,10 +123,10 @@ Caveat: almost every number on warp.co is a vendor marketing claim (for example 
 
 - Identity: creates Okta account and SSO at hire, maps departments to Okta groups, SCIM lifecycle across Okta's app catalog; Google Workspace account, calendar, Drive and department groups at hire; on termination suspends Google, transfers Drive to the manager. [it]
 - Provisioning panel (mockup): employee with per-system rows and status: Google Workspace (address) Ready, Slack (#engineering) Ready, GitHub (org) Provisioning, Okta SSO (group) Provisioning. [it]
-- Trigger-based onboarding flow (mockup): a trigger for a new engineering hire (posted to a new hire chat channel) then steps: create Google Workspace email, create Slack account, create GitHub account, install the MDM agent. [it] [home]
+- Trigger-based onboarding flow (mockup): a trigger for a new engineering hire (posted to a new hire chat channel) then steps that set up a Google Workspace mailbox, a Slack account and a GitHub account and finally install the MDM agent. [it] [home]
 - In-house MDM (Rust agent, macOS and Windows): enrollment link during onboarding; policy checks firewall, disk encryption, screen lock, Gatekeeper, custom checks; device card shows a passed checks counter (for example 0 of 4); remote lock, password reset, wipe; scripts and patching. [it]
 - Offboarding: one termination action runs suspend Google, kill sessions, transfer Drive, deactivate Okta, remove groups, revoke SSO apps, lock or wipe devices, all timestamped in an audit log. [it]
-- Dashboard IT widget: three of three systems connected, 99% accounts linked, 96% devices compliant; MDM 768 of 800 compliant, Google Workspace 800 of 800 linked, Okta SSO 784 of 800 linked; counts of unlinked accounts (16) and non-compliant devices (32). [home]
+- Dashboard IT widget: all three systems connected; 99% of accounts linked and 96% of devices passing policy; per system, MDM passes on 768 of 800 devices, Google Workspace links all 800 people and Okta SSO links 784; 16 accounts are still unlinked and 32 devices fail policy. [home]
 
 ### 2.6 Global contractors
 
@@ -140,7 +140,7 @@ Caveat: almost every number on warp.co is a vendor marketing claim (for example 
 
 - Time off: policies, assignments, balances, requests (status pending, approved, denied; amounts in minutes; date or datetime ranges); agent checks balance and coverage and routes to the approver. [api-pto] [agent]
 - Time tracking add-on: clock in/out, geofencing, shifts, timesheet approvals, overtime, payroll sync. [pricing]
-- Expenses: list grouped Needs Review, Approved, Paid Out, Declined; columns Employee, Expense (merchant), Category, Amount, Transaction Date, Status, Submitted; categories Travel, Equipment, Meals, Office, Software, Supplies. [agent] (agent.html text)
+- Expenses: list grouped Needs Review, Approved, Paid Out, Declined; columns for the employee, the merchant, the category and amount, when the transaction happened, its status and when it was submitted; categories Travel, Equipment, Meals, Office, Software, Supplies. [agent] (agent.html text)
 - LMS for trainings and document acknowledgements; agent assigns state-required training by location. [pricing] [blog-10tasks]
 - Reports: custom HR reports (Pro), agent builds ad hoc reports and charts (for example payroll cost by month, split into contractor pay and gross pay). [pricing] [agent]
 
@@ -158,7 +158,7 @@ Caveat: almost every number on warp.co is a vendor marketing claim (for example 
 From [agent], [blog-agent], [fortune], [blog-10tasks]:
 
 1. Onboard new hires end to end: on offer signed, register the company in the new state, set up payroll, enroll benefits and 401(k), order a laptop, create Google and Slack accounts, send a first-day message. [blog-agent] [fortune]
-2. New-hire readiness check: confirm accounts, laptop, payroll and benefits before day one. [agent]
+2. New-hire readiness check: ahead of the start date, verify that the hire's accounts, laptop, payroll setup and benefits are all in place. [agent]
 3. Run payroll and check every run for anomalies by comparing it to the previous run and to employee data, flagging items with explanations before money moves. [agent] [blog-10tasks]
 4. Resolve tax notices: read the notice, check it against filings and payments, respond to the agency with documents; escalate to a human tax specialist when a phone call, POA or judgment is needed. [blog-agent] [blog-10tasks]
 5. Register in new states and file recurring payroll tax returns on schedule. [blog-10tasks]
@@ -172,7 +172,7 @@ From [agent], [blog-agent], [fortune], [blog-10tasks]:
 
 ### 3.2 How it asks for decisions
 
-- When a step needs a decision or access it lacks, it asks the right person, waits (days or weeks if needed), checks back, and resumes after approval. [agent] (agent.html text)
+- When a step calls for a decision or for access the agent does not hold, it hands the question to whoever owns it, waits (for days or weeks if it must), checks again later, and carries on once approved. [agent]
 - Approval surfaces: in-app, or a Slack message from the app bot with fields and buttons. Exact mockup: bot message mentions the approver, asks to approve a new hire's base salary because payroll depends on it, fields for the routine (new-hire onboarding), the employee (name, title), the base salary ($140,000) and the payroll date (Oct 31), and buttons to approve, deny or open the app. [agent]
 - Per-workflow autonomy: recommend only, act after approval, or act autonomously; most customers start with approval and widen after reviewing the log. [blog-agent] [fortune]
 - Escalation targets: a company employee or a Warp specialist (human-in-the-loop service). [blog-agent]
@@ -180,10 +180,10 @@ From [agent], [blog-agent], [fortune], [blog-10tasks]:
 
 ### 3.3 Permissions, limits, logging, rollback
 
-- The agent acts as the requesting user and never has more access than that user; admins scope it down to individual actions. [agent] [blog-agent]
-- Permissions screen (mockup): Settings > person > Permissions, one block for the person's own permissions and one for the agent's, each with View (see people, payroll, company records), Edit (change them), Approve (approve requests and run payroll). [agent]
+- The agent acts as the requesting user and its access is capped at that user's own; admins can narrow it further, down to single actions. [agent] [blog-agent]
+- Permissions screen (mockup): Settings > person > Permissions, one block for the person's own permissions and one for the agent's, each with three levels: View (read access to records about people, pay and the company), Edit (may change those records) and Approve (may sign off requests and payroll runs). [agent]
 - Hard limits on money movement that the agent cannot raise; irreversible actions like payroll runs get extra restrictions. [agent] [blog-agent] [aiweekly]
-- Every action records identity, scope, written rationale and a rollback path; run logs show what triggered the run, what it did, and what it left for a person; one-click reverse keeps both original and reversal in the log; the UI confirms with a toast that the message was logged. [blog-agent] [agent]
+- Every action records identity, scope, written rationale and a rollback path; each run's log records its trigger, the actions taken and anything handed back to a human; undoing an action is one click, and the log then holds both entries; a toast confirms when a message has been recorded. [blog-agent] [agent]
 - Audit log retention: 30 days Starter, 1 year Enterprise. [pricing]
 
 ### 3.4 Routines
@@ -193,7 +193,7 @@ From [agent], [blog-agent], [fortune], [blog-10tasks]:
 - Prebuilt gallery (a favorites section, each card with a button to try it): a weekly people report to chat, time-off request handling, a payroll anomaly check, a new-hire readiness check, an expense review against policy, a monthly executive report, open enrollment and milestone celebrations to chat, plus a card to build your own. [agent]
 - Routines list (mockup): each row has a routine name and either a live status line (for example that it is confirming a start date, or comparing this run with the previous one) or a trigger line (for example on a signed offer, or weekly on Monday); the rows cover new-hire onboarding, the payroll anomaly check, a laptop order and the people report. [agent]
 - Routine builder structure (mockup): a plain-language sentence (for example: for each new hire in one office, remind a named person to deliver the laptop by hand) compiled into Trigger chips (Routine: New Hire AND office = New York Office) then ordered steps: Slack: message @person; Agent: monitor newly connected devices; Agent: monitor until completion, loop in blockers. [agent] (agent.html text)
-- Homepage routine log example: create Google account, create Slack handle, intro in #general, ask HR to hand-deliver laptop, follow up in Slack until payroll-ready. [home]
+- Homepage routine log example: make a Google account and a Slack handle, introduce the hire in #general, ask HR to bring the laptop over in person, and keep nudging in Slack until the hire is ready for payroll. [home]
 - Custom examples: 30-day check-in summary to manager; Monday headcount and payroll cost by state to the CFO; preconfigured Monday exec briefing combining payroll, schedules, compliance risks and hiring trends. [blog-agent] [aiweekly]
 
 ### 3.5 MCP, CLI and API surface
@@ -219,8 +219,8 @@ From [agent], [blog-agent], [fortune], [blog-10tasks]:
 ### 4.1 Global shell
 
 - Left sidebar with a workspace switcher at top (avatar letter, company name, role label), then items. Two mockup variants exist:
-  - Homepage variant: Dashboard, Payroll, People, Calendar, Products, Benefits, IT, Expenses, Learning Management, Time Off, Time Tracking, Company, Taxes & Compliance, Reports, Contracts, Integrations, Settings. [home] (home.html text)
-  - Agent page variant: Dashboard, Payroll, People, Agent, Products, Benefits, IT, Expenses, Learning, Time Off, Time Tracking, Company, Taxes & Compliance, Workplaces, Reports, Accounting, Custom Agreements, Calendar. [agent] (agent.html text)
+  - Homepage variant (items listed alphabetically within each group here, not in screen order): four top items (Calendar, Dashboard, Payroll, People); a Products group of six (Benefits, Expenses, IT, Learning Management, Time Off, Time Tracking); a Company group of four (Contracts, Integrations, Reports, Taxes & Compliance); Settings at the bottom. [home]
+  - Agent page variant (also alphabetical within groups): four top items (Agent, Dashboard, Payroll, People); a Products group of six (Benefits, Expenses, IT, Learning, Time Off, Time Tracking); a Company group of six (Accounting, Calendar, Custom Agreements, Reports, Taxes & Compliance, Workplaces). [agent]
 - A global search box with a Cmd+K hint. A time-of-day greeting with the first name. Agent chat available as a right-side panel with a question input. [home] [agent]
 - Settings areas named in sources: Admins (Admins, Pending Invitations, Roles, Security), Developer (API keys, webhook endpoints, Send Test, Delivery Logs), Early Access tab (enables the agent), per-person Permissions (human and agent). [help-roles] [docs-hooks] [fortune] [agent]
 
@@ -236,11 +236,11 @@ From [agent], [blog-agent], [fortune], [blog-10tasks]:
 8. IT: 3/3 connected, accounts linked %, devices compliant %, per-system x/y counts, unlinked and non-compliant counts, Review.
 9. State Tax Registrations: state, age in days, status (Needs info, Awaiting state, Active).
 10. Compliance Status: 28 of 34 states registered, with a breakdown Active 28, Filing started 3, Awaiting state 2, Needs info 1.
-11. Agent panel: user asks the agent to look at the CA EDD notice in the inbox; agent acknowledges; step chips for reading the notice file and for checking the tax rates of 30 CA employees; agent states the notice flags an outdated SUI rate and it needs to update 3.4% to 1.5% for 33 employees; a working status. (30 verified vs 33 updated is an inconsistency in their mockup.)
+11. Agent panel: the user points the agent at a CA EDD notice waiting in the inbox; the agent replies, shows step chips (it opens the notice file, then verifies tax rates for 30 California employees), and concludes that the SUI rate on file is stale, so 33 employees should get 1.5% in place of 3.4%; a working status. (30 verified vs 33 updated is an inconsistency in their mockup.)
 
 ### 4.3 Other key screens seen in mockups
 
-- Background agent panel: a title naming it a background run, a finished-time status, a task list (reading the Q2 notice file, checking the tax rates of 30 CA employees), a summary (Q2 2026 UI rate change, SUI 3.4% to 1.5% across 3 pay groups, response filed with CA EDD, effective next cycle); a pending action to update the CA SUI rate for 44 employees, shown as approved. [payroll] [compliance]
+- Background agent panel: a title naming it a background run, a finished-time status, a task list (open the Q2 notice file, verify 30 California employees' tax rates), a summary (the Q2 2026 UI change lowers SUI to 1.5%, down from 3.4%, for three pay groups; the reply has gone to the EDD; the new rate applies from the next cycle), and an action, shown as approved, that moves 44 employees onto the new CA SUI rate. [payroll] [compliance]
 - Payroll run review (4.2 is the dashboard; see 2.2 for columns and grouping). [agent]
 - Expenses list (see 2.7). [agent]
 - Agent chat with inline chart rendering and step summaries. [agent]
