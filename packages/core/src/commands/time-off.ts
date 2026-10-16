@@ -61,37 +61,53 @@ const listPolicies = readCommand({
   },
 });
 
-const BalanceInput = z.object({ worker_id: z.string(), policy_id: z.string().optional(), as_of: date.optional(), include_ledger: z.boolean().optional() });
+const BalanceInput = z.object({ worker_id: z.string().optional(), policy_id: z.string().optional(), as_of: date.optional(), include_ledger: z.boolean().optional() });
 type BalanceInput = z.infer<typeof BalanceInput>;
-const getBalance = readCommand({
+const getBalance = readCommand<BalanceInput, Record<string, unknown>>({
   name: "time_off.get_balance", domain: "people",
-  summary: "Read a worker's time-off balances in minutes: unlocked, locked, used, holds and available, per policy.",
-  description: "Read one worker's time-off balances as of a date (default today) for every assigned policy, or one policy_id. Each balance is derived from the append-only ledger: accrued unlocked, accrued locked (inside a waiting period), used, holds (pending and approved but not yet taken) and available, in minutes. include_ledger adds the ledger rows.",
+  summary: "Read time-off balances in minutes: unlocked, locked, used, holds and available, per policy.",
+  description: "Read one worker's (or, without worker_id, every employee's) time-off balances as of a date (default today) for every assigned policy, or one policy_id. Each balance is derived from the append-only ledger: accrued unlocked, accrued locked (inside a waiting period), used, holds (pending and approved but not yet taken) and available, in minutes. include_ledger adds the ledger rows.",
   input: BalanceInput,
   async run(i: BalanceInput, ctx, deps) {
-    const w = await workerOf(deps.tx, ctx.companyId, i.worker_id);
-    if (!w) throw notFound("worker", i.worker_id);
     const asOf = i.as_of ?? ptDateOf(ctx.now);
     const pols = await loadPolicies(deps.tx, ctx.companyId);
-    const assigned = new Set((await assignmentsOf(deps.tx, [w.id])).map((a) => a.policyId));
-    const list = pols.filter((p) => assigned.has(p.id) && (!i.policy_id || p.id === i.policy_id));
-    const balances = [];
-    for (const p of list) {
-      const b = await balanceFor(deps.tx, w, p, asOf);
-      const rows = i.include_ledger ? (await ledgerOf(deps.tx, w.id, p.id)).map((r) => ({ id: r.id, kind: r.kind, minutes: r.minutes, effective_date: r.effectiveDate, source_ref: r.sourceRef, note: r.note })) : undefined;
-      balances.push({ ...b, policyName: p.name, typeName: p.typeName, available_display: h(b.availableMinutes), ...(rows ? { ledger: rows } : {}) });
+    let ws: Awaited<ReturnType<typeof workerOf>>[];
+    if (i.worker_id) {
+      const w = await workerOf(deps.tx, ctx.companyId, i.worker_id);
+      if (!w) throw notFound("worker", i.worker_id);
+      ws = [w];
+    } else {
+      ws = (await deps.tx.select().from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.type, "employee")))).filter((w) => w.status !== "inactive").sort((a, b) => (a.id < b.id ? -1 : 1));
     }
-    return { data: { worker_id: w.id, name: displayName(w), as_of: asOf, balances }, summary: `${displayName(w)}: ${balances.map((b) => `${b.policyName} ${b.available_display}`).join(", ") || "no time-off policies"}` };
+    const asns = await assignmentsOf(deps.tx, ws.map((w) => w!.id));
+    const people = [];
+    for (const w of ws) {
+      if (!w) continue;
+      const assigned = new Set(asns.filter((a) => a.workerId === w.id).map((a) => a.policyId));
+      const balances = [];
+      for (const p of pols.filter((x) => assigned.has(x.id) && (!i.policy_id || x.id === i.policy_id))) {
+        const b = await balanceFor(deps.tx, w, p, asOf);
+        const rows = i.include_ledger ? (await ledgerOf(deps.tx, w.id, p.id)).map((r) => ({ id: r.id, kind: r.kind, minutes: r.minutes, effective_date: r.effectiveDate, source_ref: r.sourceRef, note: r.note })) : undefined;
+        balances.push({ ...b, policyName: p.name, typeName: p.typeName, available_display: h(b.availableMinutes), ...(rows ? { ledger: rows } : {}) });
+      }
+      people.push({ worker_id: w.id, name: displayName(w), department_id: w.departmentId, work_state: w.workState, balances });
+    }
+    if (i.worker_id) {
+      const one = people[0]!;
+      return { data: { worker_id: one.worker_id, name: one.name, as_of: asOf, balances: one.balances }, summary: `${one.name}: ${one.balances.map((b) => `${b.policyName} ${b.available_display}`).join(", ") || "no time-off policies"}` };
+    }
+    return { data: { as_of: asOf, count: people.length, workers: people }, summary: `Balances for ${people.length} employees as of ${asOf}` };
   },
 });
 
 const ListRequestsInput = z.object({
-  status: z.enum(["pending", "approved", "denied", "cancelled", "taken"]).optional(), worker_id: z.string().optional(), department_id: z.string().optional(),
+  request_id: z.string().optional(), status: z.enum(["pending", "approved", "denied", "cancelled", "taken"]).optional(), worker_id: z.string().optional(), department_id: z.string().optional(),
   approver: z.string().optional(), from: date.optional(), to: date.optional(),
 });
 type ListRequestsInput = z.infer<typeof ListRequestsInput>;
 export async function listRequestRows(tx: DbTx, companyId: string, i: ListRequestsInput): Promise<RequestRow[]> {
   let rows = await tx.select().from(timeOffRequests).where(eq(timeOffRequests.companyId, companyId));
+  if (i.request_id) rows = rows.filter((r) => r.id === i.request_id);
   if (i.status) rows = rows.filter((r) => r.status === i.status);
   if (i.worker_id) rows = rows.filter((r) => r.workerId === i.worker_id);
   if (i.approver) rows = rows.filter((r) => r.approverPrincipalId === i.approver);

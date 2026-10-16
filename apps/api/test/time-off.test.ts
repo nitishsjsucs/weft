@@ -1,0 +1,131 @@
+// /v1/time-off routes (wave 3, w3-timeoff) over the seeded world: requests with checks and routing, balances from
+// the ledger, decisions by the manager (direct reports only), agents only propose, accruals idempotent per run.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
+import type { ToolOutcome } from "@weft/contracts";
+import { createTestWeft, type TestWeft } from "../src/testing";
+
+type Req = { id: string; workerId: string; status: string; requestedMinutes: number; approverPrincipalId: string | null; checks: { rule: string; severity: string; message: string; evidence: { label: string; ref: string }[] }[]; days: { date: string; minutes: number; holiday: boolean }[]; routing: { principalId: string | null; why: string }[] };
+
+describe("time-off routes", () => {
+  let weft: TestWeft;
+  let mcpKey = "";
+  beforeAll(async () => {
+    weft = await createTestWeft();
+    mcpKey = readFileSync(join(weft.dataDir, "demo-mcp-key.txt"), "utf8").trim();
+  });
+  afterAll(async () => { await weft.close(); });
+
+  const call = async (who: string, method: string, path: string, body?: unknown) => {
+    const headers = who.startsWith("key:") ? { "x-api-key": who.slice(4) } : weft.uiHeaders(who);
+    const res = await weft.app.request(path, { method, headers: { ...headers, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, json: (await res.json()) as unknown };
+  };
+  const request = async (id: string) => (await call("usr_dana", "GET", `/v1/time-off/requests/${id}`)).json as Req;
+
+  it("lists policies, holidays and the seeded requests with their checks and routing", async () => {
+    const pols = (await call("usr_dana", "GET", "/v1/time-off/policies")).json as { id: string; sources: unknown[] }[];
+    expect(pols.map((p) => p.id)).toEqual(["top_prenatal_ny", "top_sick_ca", "top_sick_co", "top_sick_ny", "top_sick_tx", "top_unpaid_nyc", "top_vac_us"]);
+    expect(pols.every((p) => p.sources.length > 0)).toBe(true);
+    const hol = (await call("usr_dana", "GET", "/v1/time-off/holidays?year=2026")).json as { date: string }[];
+    expect(hol.map((h) => h.date)).toContain("2026-11-27");
+
+    const page = (await call("usr_dana", "GET", "/v1/time-off/requests?status=pending")).json as { data: Req[] };
+    expect(page.data.map((r) => r.id)).toEqual(["tor_0003", "tor_0004", "tor_0005"]);
+
+    // R-B: Ruth, Nov 23 to 27: 3 of 9 out in Hardware on Nov 23 to 25 (33.3% over 30%), holidays Nov 26 and 27, routed to Imani.
+    const ruth = await request("tor_0003");
+    expect(ruth).toMatchObject({ workerId: "wrk_0010", status: "pending", requestedMinutes: 1_440, approverPrincipalId: "usr_imani" });
+    expect(ruth.days.filter((d) => d.holiday).map((d) => d.date)).toEqual(["2026-11-26", "2026-11-27"]);
+    const cov = ruth.checks.find((c) => c.rule === "COVERAGE_CONFLICT")!;
+    expect(cov).toMatchObject({ severity: "review", message: "3 of 9 out (33.3%) on 2026-11-23, 2026-11-24, 2026-11-25" });
+    expect(cov.evidence.filter((e) => e.label === "also out").map((e) => e.ref)).toEqual(["tor_0001", "tor_0002"]);
+    expect(ruth.checks.find((c) => c.rule === "INCLUDES_HOLIDAY")?.severity).toBe("info");
+
+    // R-D: Ben started Oct 1; CA sick has a 90-day wait.
+    const ben = await request("tor_0005");
+    expect(ben.checks.map((c) => [c.rule, c.severity])).toEqual([["WAITING_PERIOD", "block"]]);
+    // R-C: a NY sick half day, clean, routed past a manager with no login to Dana.
+    const kenji = await request("tor_0004");
+    expect(kenji).toMatchObject({ requestedMinutes: 240, approverPrincipalId: "usr_dana", checks: [] });
+    expect(kenji.routing.map((s) => s.principalId)).toEqual([null, "usr_dana"]);
+  });
+
+  it("derives balances from the ledger; Imani's imported vacation is 5,063 minutes", async () => {
+    const b = (await call("usr_dana", "GET", "/v1/time-off/balances?workerId=wrk_0004")).json as { policyId: string; availableMinutes: number; accruedUnlockedMinutes: number }[];
+    expect(b.find((x) => x.policyId === "top_vac_us")).toMatchObject({ accruedUnlockedMinutes: 5_063, availableMinutes: 5_063 });
+    const ben = (await call("usr_dana", "GET", "/v1/time-off/balances?workerId=wrk_0021")).json as { policyId: string; accruedLockedMinutes: number; accruedUnlockedMinutes: number }[];
+    expect(ben.find((x) => x.policyId === "top_sick_ca")).toMatchObject({ accruedUnlockedMinutes: 0 });
+    expect(ben.find((x) => x.policyId === "top_sick_ca")!.accruedLockedMinutes).toBeGreaterThan(0);
+    const all = (await call("usr_dana", "GET", "/v1/time-off/balances")).json as unknown[];
+    expect(all.length).toBeGreaterThan(48);
+    const cal = (await call("usr_dana", "GET", "/v1/time-off/calendar?departmentId=dpt_hardware&from=2026-11-23&to=2026-11-27")).json as { days: { date: string; outPct: number; overLimit: boolean; holiday: string | null }[] };
+    expect(cal.days.map((d) => [d.date, d.outPct, d.overLimit])).toEqual([["2026-11-23", 33.3, true], ["2026-11-24", 33.3, true], ["2026-11-25", 33.3, true], ["2026-11-26", 0, false], ["2026-11-27", 0, false]]);
+  });
+
+  it("an agent's decide is a proposal; a forged approval by the agent principal is refused", async () => {
+    const out = (await call(`key:${mcpKey}`, "POST", "/v1/tools/time_off.decide", { request_id: "tor_0004", decision: "approve", note: "Clean half day" })).json as ToolOutcome & { proposalId: string };
+    expect(out).toMatchObject({ ok: true, status: "pending_approval" });
+    expect((await request("tor_0004")).status).toBe("pending");
+    const forged = await call("agt_weft", "POST", `/v1/proposals/${out.proposalId}/approve`, {});
+    expect(JSON.stringify(forged.json)).toMatch(/AGENT_PRINCIPAL|WRONG_ROLE|Unauthorized|Forbidden/);
+    expect((await request("tor_0004")).status).toBe("pending");
+  });
+
+  it("the manager decides only for direct reports; block checks refuse approval", async () => {
+    const notMine = await call("usr_imani", "POST", "/v1/time-off/requests/tor_0004/decide", { decision: "approve", note: "" });
+    expect(notMine.status).toBe(422);
+    expect((notMine.json as { code: string }).code).toBe("DOMAIN_NOT_DIRECT_REPORT");
+    const theo = await call("usr_theo", "POST", "/v1/time-off/requests/tor_0003/decide", { decision: "approve", note: "" });
+    expect((theo.json as { code: string }).code).toBe("DOMAIN_NOT_APPROVER");
+    const blocked = await call("usr_imani", "POST", "/v1/time-off/requests/tor_0005/decide", { decision: "approve", note: "" });
+    expect((blocked.json as { code: string }).code).toBe("DOMAIN_REQUEST_BLOCKED");
+
+    const before = ((await call("usr_dana", "GET", "/v1/time-off/balances?workerId=wrk_0010")).json as { policyId: string; availableMinutes: number; holdsMinutes: number }[]).find((b) => b.policyId === "top_vac_us")!;
+    const ok = await call("usr_imani", "POST", "/v1/time-off/requests/tor_0003/decide", { decision: "approve", note: "Covered with the holiday week" });
+    expect(ok.status).toBe(200);
+    expect(ok.json).toMatchObject({ ok: true, status: "done" });
+    expect((await request("tor_0003")).status).toBe("approved");
+    const after = ((await call("usr_dana", "GET", "/v1/time-off/balances?workerId=wrk_0010")).json as { policyId: string; availableMinutes: number; holdsMinutes: number }[]).find((b) => b.policyId === "top_vac_us")!;
+    // The hold became future use rows: still held until taken, so available does not move twice.
+    expect(after.availableMinutes).toBe(before.availableMinutes);
+    const ledger = (await call("usr_dana", "GET", "/v1/time-off/ledger?workerId=wrk_0010&policyId=top_vac_us")).json as { kind: string; minutes: number; effective_date: string; source_ref: string | null }[];
+    expect(ledger.filter((l) => l.kind === "use" && l.source_ref === "tor_0003").map((l) => [l.effective_date, l.minutes])).toEqual([["2026-11-23", -480], ["2026-11-24", -480], ["2026-11-25", -480]]);
+    // A second decide on R-B is refused: by the same person it is no longer pending; anyone else meets the lease first.
+    const again = await call("usr_imani", "POST", "/v1/time-off/requests/tor_0003/decide", { decision: "deny", note: "" });
+    expect(["DOMAIN_NOT_PENDING", "LEASE_HELD"]).toContain((again.json as { code: string }).code);
+  });
+
+  it("submits a request from the dates, holds the balance and routes it; cancel releases the hold", async () => {
+    const res = await call("usr_dana", "POST", "/v1/time-off/requests?workerId=wrk_0011", { policyId: "top_vac_us", startDate: "2026-12-21", endDate: "2026-12-25", reason: "Year-end break" });
+    expect(res.status).toBe(200);
+    const out = res.json as { data: { request_id: string; requested_minutes: number; approver: string } };
+    expect(out.data).toMatchObject({ requested_minutes: 1_920, approver: "usr_imani" });   // Dec 25 is a holiday
+    const cancel = await call("usr_dana", "POST", `/v1/time-off/requests/${out.data.request_id}/cancel`);
+    expect(cancel.status).toBe(200);
+    const ledger = (await call("usr_dana", "GET", "/v1/time-off/ledger?workerId=wrk_0011&policyId=top_vac_us")).json as { minutes: number; source_ref: string | null }[];
+    expect(ledger.filter((l) => l.source_ref === out.data.request_id).reduce((s, l) => s + l.minutes, 0)).toBe(0);
+    const typed = await call("usr_dana", "POST", "/v1/time-off/requests?workerId=wrk_0011", { policyId: "top_vac_us", startDate: "2026-12-21", endDate: "2026-12-21", requestedMinutes: 9_999 });
+    expect(typed.status).toBe(400);   // the employee never types an amount
+  });
+
+  it("posts accruals once per processed regular run and assignment; re-running changes nothing", async () => {
+    await weft.db.run(sql`UPDATE payroll_runs SET status = 'processed' WHERE id = 'pay_2026_10_30'`);
+    const count = async () => (await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_ledger`))[0]!.n;
+    const n0 = await count();
+    const src = { eventId: null, attended: false, requestedBy: null };
+    const first = await weft.executor.system.exec("svc_events", "time_off.post_accruals", { run_id: "pay_2026_10_30" }, src);
+    expect(first).toMatchObject({ ok: true });
+    const n1 = await count();
+    expect(n1).toBeGreaterThan(n0);
+    const second = await weft.executor.system.exec("svc_events", "time_off.post_accruals", { run_id: "pay_2026_10_30" }, src);
+    expect(second).toMatchObject({ ok: true });
+    expect(await count()).toBe(n1);
+    // Imani (42 months) gets the 360-minute tier; Mira (hired Oct 19, no import) accrues from her first run.
+    const rows = await weft.db.all<{ worker_id: string; minutes: number; run_key: string }>(sql`SELECT worker_id, minutes, run_key FROM time_off_ledger WHERE kind = 'accrual' AND policy_id = 'top_vac_us' AND worker_id IN ('wrk_0004', 'wrk_0022') ORDER BY worker_id`);
+    expect(rows.map((r) => [r.worker_id, r.minutes])).toEqual([["wrk_0004", 360], ["wrk_0022", 300]]);
+    expect(rows.every((r) => r.run_key.startsWith("pay_2026_10_30:tasn_"))).toBe(true);
+  });
+});
