@@ -924,3 +924,12 @@ Track ids: `t1-payroll`, `t2-world`, `t3-governance`, `t4-agent`, `t5-app`, `t6-
 | Sandbox and Cloudflare free tier (user request) | Minor | 9.9: open-source QuickJS-WASM locally (P1), srt and microsandbox opt-in, Workers Free hosted twin design-only; Cloudflare's sandbox products need Paid; today only the contract, the stub and `WEFT_SANDBOX=off` |
 
 Not adopted: critique option (a) for the 5th Needs Review row (skip GROSS_CHANGE after PRORATED and compare annual rates); option (b) is simpler and keeps the rule table unchanged. Added beyond the critique: the stale-lock timeout for the spend ledger (harness risk list), `access` on `CommandDef` for human-only and system-only commands, and the system-record rule so simulator confirmations reach domain tables without an R2 path for `svc_` principals.
+
+### 16.3 Wave 2 integration (2026-10-15 20:05)
+
+Wave 2 (`docs/wave2.md`) merged six tracks onto this spec: GP6 to GP12 extend section 12 as scenario tests and, except
+GP8, Playwright specs. Spec-level changes made at the merge, all additive: the three wave 2 routines join PREBUILT
+disabled (P0-8's four prebuilt routines become seven); `svc_scheduler` may run `documents.expire_offers` (R1);
+the scheduler tick also syncs the contractor payment rail; `IdpSim.clearGroups` and `DeviceSim.lock` join the
+simulator contract; the runtime prices each provider from its own table. The full list, with what is left, is in
+`docs/wave2.md` under "What landed".
