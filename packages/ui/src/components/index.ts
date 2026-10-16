@@ -8,4 +8,8 @@ export { Tabs, TabsList, TabsTrigger, TabsContent } from "./tabs";
 export { ShimmerText } from "./shimmer-text";
 export { DiffTable, type DiffRow } from "./diff-table";
 export { Popover, PopoverTrigger, PopoverContent } from "./popover";
-export { Kbd } from "./kbd";
+export { Kbd, shortcutLabel } from "./kbd";
+export {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuRadioGroup,
+  DropdownMenuRadioItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from "./dropdown-menu";

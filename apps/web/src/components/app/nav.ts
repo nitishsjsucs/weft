@@ -37,12 +37,22 @@ export function activeNav(pathname: string): NavItem | undefined {
   return ALL_NAV.filter((n) => pathname === n.href || (n.href !== "/app" && pathname.startsWith(`${n.href}/`))).sort((a, b) => b.href.length - a.href.length)[0];
 }
 
-/** Breadcrumb trail for a pathname: section label, then a record label when deeper. */
-export function crumbs(pathname: string): { label: string; href?: string }[] {
+export interface Crumb { label: string; href?: string; /** a raw record id shown while its title loads */ id?: boolean }
+
+/**
+ * Breadcrumb trail for a pathname: section label, then a record crumb when deeper. A detail view registers its title
+ * (shell/crumbs.tsx) and the record crumb reads it; until then the crumb is the raw id, marked so the bar can set it
+ * in a small mono face.
+ */
+export function crumbs(pathname: string, recordTitle?: string | null): Crumb[] {
   const item = activeNav(pathname);
-  if (!item) return [{ label: pathname.startsWith("/app/runs/") ? "Runs" : "Home", href: "/app" }];
+  if (!item) {
+    const run = pathname.match(/^\/app\/runs\/([^/]+)/);
+    if (run) return recordTitle ? [{ label: "Runs", href: "/app" }, { label: recordTitle }] : [{ label: "Runs", href: "/app" }];
+    return [{ label: "Home", href: "/app" }];
+  }
   const rest = pathname.slice(item.href.length).split("/").filter(Boolean);
-  const out: { label: string; href?: string }[] = [{ label: item.label, href: item.href }];
-  if (rest[0]) out.push({ label: decodeURIComponent(rest[0]) });
+  const out: Crumb[] = [{ label: item.label, href: item.href }];
+  if (rest[0]) out.push(recordTitle ? { label: recordTitle } : { label: decodeURIComponent(rest[0]), id: true });
   return out;
 }

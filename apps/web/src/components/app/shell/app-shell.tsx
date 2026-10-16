@@ -5,7 +5,8 @@ import { cn } from "@weft/ui";
 import { AgentProvider, useAgent } from "../agent-context";
 import { AgentPanel } from "../agent/agent-panel";
 import { CommandMenu } from "./command-menu";
-import { Header } from "./header";
+import { BreadcrumbProvider } from "./crumbs";
+import { AGENT_PANEL_ID, Header, SIDEBAR_ID } from "./header";
 import { Sidebar } from "./sidebar";
 import { mocksEnabled } from "@/lib/api/mocks";
 
@@ -42,21 +43,21 @@ function Frame({ children }: { children: ReactNode }) {
       className="grid h-dvh overflow-hidden"
       style={{ gridTemplateColumns: `${showSidebar ? "var(--app-sidebar-w) " : ""}minmax(0,1fr)${dockAgent ? " var(--app-agent-w)" : ""}` }}
     >
-      {showSidebar ? <aside className="min-h-0 bg-[var(--app-sidebar-bg)]"><Sidebar /></aside> : null}
+      {showSidebar ? <aside className="min-h-0 bg-[var(--app-sidebar-bg)]"><Sidebar id={SIDEBAR_ID} onOpenSearch={() => setSearch(true)} /></aside> : null}
       <div className={cn("flex min-h-0 min-w-0 flex-col bg-background", showSidebar && "border-l border-[var(--app-border)]")}>
-        <Header onToggleSidebar={() => (laptop ? setSidebarHidden((h) => !h) : setMobileNav((v) => !v))} onOpenSearch={() => setSearch(true)} />
+        <Header sidebarVisible={showSidebar} sidebarExpanded={laptop ? showSidebar : mobileNav} onToggleSidebar={() => (laptop ? setSidebarHidden((h) => !h) : setMobileNav((v) => !v))} onOpenSearch={() => setSearch(true)} />
         {mocksEnabled ? <div className="border-b border-[var(--app-border)] bg-amber-3 px-4 py-1 text-1 text-amber-11">Mock data (NEXT_PUBLIC_WEFT_MOCKS=1). Nothing here talks to the API.</div> : null}
         <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">{children}</main>
       </div>
-      {dockAgent ? <AgentPanel className="min-h-0" /> : null}
+      {dockAgent ? <AgentPanel id={AGENT_PANEL_ID} className="min-h-0" /> : null}
       {!desktop && agent.open ? (
         <div className="fixed inset-0 z-40 flex justify-end bg-black/20" onClick={(e) => { if (e.target === e.currentTarget) agent.setOpen(false); }}>
-          <AgentPanel className="w-full max-w-[var(--app-agent-w)] shadow-[var(--shadow-modal)]" />
+          <AgentPanel id={AGENT_PANEL_ID} overlay className="w-full max-w-[var(--app-agent-w)] shadow-[var(--shadow-modal)]" />
         </div>
       ) : null}
       {!laptop && mobileNav ? (
         <div className="fixed inset-0 z-40 bg-black/20" onClick={(e) => { if (e.target === e.currentTarget) setMobileNav(false); }}>
-          <aside className="h-full w-[min(var(--app-sidebar-w),85vw)] bg-[var(--app-sidebar-bg)] shadow-[var(--shadow-modal)]"><Sidebar onNavigate={() => setMobileNav(false)} /></aside>
+          <aside className="h-full w-[min(var(--app-sidebar-w),85vw)] bg-[var(--app-sidebar-bg)] shadow-[var(--shadow-modal)]"><Sidebar id={SIDEBAR_ID} onNavigate={() => setMobileNav(false)} onOpenSearch={() => { setMobileNav(false); setSearch(true); }} /></aside>
         </div>
       ) : null}
       <CommandMenu open={search} onOpenChange={setSearch} />
@@ -69,5 +70,5 @@ function readPref(): boolean {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  return <AgentProvider><Frame>{children}</Frame></AgentProvider>;
+  return <AgentProvider><BreadcrumbProvider><Frame>{children}</Frame></BreadcrumbProvider></AgentProvider>;
 }

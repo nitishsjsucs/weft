@@ -10,7 +10,8 @@ import { useAgent } from "../agent-context";
 import { RunFeed } from "./run-feed";
 
 /** The agent panel (every app page): thread, live step chips, composer, and "Ask about this page". */
-export function AgentPanel({ className }: { className?: string }) {
+/** `overlay` is true when the panel covers the page (below 1280 px); only then does its header carry a close X. */
+export function AgentPanel({ id, className, overlay = false }: { id?: string; className?: string; overlay?: boolean }) {
   const agent = useAgent();
   const pathname = usePathname();
   const [text, setText] = useState("");
@@ -34,11 +35,12 @@ export function AgentPanel({ className }: { className?: string }) {
   }
 
   return (
-    <aside aria-label="Agent" className={cn("flex h-full min-h-0 flex-col border-l border-[var(--app-border)] bg-[var(--app-sidebar-bg)]", className)}>
+    <aside id={id} aria-label="Agent" className={cn("flex h-full min-h-0 flex-col border-l border-[var(--app-border)] bg-[var(--app-sidebar-bg)]", className)}>
       <div className="flex h-[var(--app-header-h)] shrink-0 items-center gap-2 border-b border-[var(--app-border)] px-4">
         <span className="flex-1 text-2 font-semibold">Weft agent</span>
-        <Button variant="ghost" size="icon-sm" onClick={agent.clear} aria-label="New thread"><Plus strokeWidth={1.5} /></Button>
-        <Button variant="ghost" size="icon-sm" onClick={() => agent.setOpen(false)} aria-label="Close agent panel"><X strokeWidth={1.5} /></Button>
+        <Button variant="ghost" size="icon" onClick={agent.clear} aria-label="New thread"><Plus strokeWidth={1.5} /></Button>
+        {/* Docked, the top bar's agent toggle closes the panel; the X shows only when the panel overlays the page. */}
+        {overlay ? <Button variant="ghost" size="icon" onClick={() => agent.setOpen(false)} aria-label="Close agent panel"><X strokeWidth={1.5} /></Button> : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {agent.thread.length === 0 ? (

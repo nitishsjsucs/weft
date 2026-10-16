@@ -31,7 +31,9 @@ test("GP6: an offer goes from draft to signed through the new-hire portal", asyn
     await expect(row.getByTestId(T.offerStatus)).toHaveText("Sent");
     // The Viewing as switcher now lists the new-hire persona; choosing it opens the portal.
     const sent = await eventually(() => weft.get<OfferDetail>(`/v1/offers/${offer.id}`), (o) => (o.personaPrincipalId ? o : null), "the persona exists");
-    await expect(page.getByTestId(TID.viewingAs).locator(`option[value="portal:${sent.personaPrincipalId}"]`)).toHaveCount(1);
+    await page.getByTestId(TID.viewingAs).click();
+    await expect(page.getByRole("menuitem", { name: new RegExp(`${C.first} ${C.last}`) })).toHaveAttribute("data-persona", `portal:${sent.personaPrincipalId}`);
+    await page.keyboard.press("Escape");
   });
 
   await test.step("the invite with the portal link is in the email simulator", async () => {
