@@ -242,10 +242,12 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
 
       // ---- assemble
       const tAsm = wall();
+      const stepTimer = AbortSignal.timeout(deps.modelTimeoutMs);
+      const cancel = deps.signalFor(run.id);
       const req: ModelStepRequest = {
         runId: run.id, agentKind: run.kind, model: run.model, frozenPrompt: prompt, tools, toolChoice: { mode: "auto" }, history,
         effort: run.effort, maxOutputTokens: maxOut, cacheKey: run.cacheKey,
-        signal: deps.signalFor(run.id) ? AbortSignal.any([deps.signalFor(run.id)!, AbortSignal.timeout(deps.modelTimeoutMs)]) : AbortSignal.timeout(deps.modelTimeoutMs),
+        signal: cancel ? AbortSignal.any([cancel, stepTimer]) : stepTimer,
       };
       const assembleMs = wall() - tAsm;
       await append({ stage: "assemble", kind: "context", attempt, prefixHash: pHash, result: { items: history.length, estInputTokens: estInput }, timings: { ...emptyTimings(), assembleMs } });
@@ -259,6 +261,10 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
       } catch (e) {
         await ledger.settle(rsv.reservationId, 0);
         throw e; // scripted expectation failures and programming errors surface to the caller
+      }
+      // The loop's own step timer fired (not a cancel): that is a retryable timeout, whatever the provider called it.
+      if (res.stop === "error" && stepTimer.aborted && !cancel?.aborted) {
+        res = { ...res, error: { code: "PROVIDER_TIMEOUT", message: `no answer within the ${deps.modelTimeoutMs} ms step budget`, retryable: true } };
       }
       const modelMs = wall() - tModel;
       const usd = stepCostUsd(res.usage, deps.prices);

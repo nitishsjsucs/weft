@@ -151,7 +151,8 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     store, executor: opts.executor, provider: opts.provider, ledger: opts.ledger, clock: opts.clock, prices, checklist,
     isCancelled: (id: string) => cancelled.has(id),
     signalFor: (id: string) => aborts.get(id)?.signal,
-    modelTimeoutMs: opts.modelTimeoutMs ?? Number(env.WEFT_T_MODEL_MS ?? 120_000),
+    // A local model gets its 180 s step budget (harness 11.4) plus a margin, so the provider's own timer reports first.
+    modelTimeoutMs: opts.modelTimeoutMs ?? Number(env.WEFT_T_MODEL_MS ?? (opts.provider.id === "openai_compat" ? 190_000 : 120_000)),
   };
 
   const notifySettled = (row: AgentRunRow) => {

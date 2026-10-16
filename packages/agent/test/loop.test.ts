@@ -333,6 +333,22 @@ describe("runtime rules", () => {
     expect(await rt.store.getRun(h.runId)).toMatchObject({ status: "failed", terminalReason: "PROCESS_RESTART" });
   });
 
+  it("the loop's step timer is a retryable PROVIDER_TIMEOUT, not a cancellation", async () => {
+    const fake = noticeExecutor();
+    let calls = 0;
+    const slow: ModelProvider = {
+      id: "openai_compat", model: "local", label: "local", live: false,
+      step: (r) => new Promise((resolve) => { calls++; r.signal?.addEventListener("abort", () => resolve({ stop: "error", text: "", toolCalls: [], native: [], usage: { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 }, servedBy: "local", requestId: null, error: { code: "PROVIDER_TIMEOUT", message: "the step was cancelled", retryable: false } })); }),
+    };
+    const ledger = createSpendLedger({ dir: join(dataDir, "spend"), caps: { runUsd: 0.1, dayUsd: 2, liveUsd: 0.5 } });
+    const rt = createAgentRuntime({ db, clock, executor: fake, provider: slow, ledger, modelTimeoutMs: 50, routinesView: { get: async () => routine, checklist: checklistFor(fake) } });
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
+    const run = await rt.settled(h.runId);
+    expect(calls).toBeGreaterThan(1);
+    expect(run).toMatchObject({ status: "failed", terminalReason: "PROVIDER_DOWN" });
+  });
+
   it("boot rule: a run still queued from the previous process fails with PROCESS_RESTART instead of sitting queued", async () => {
     const fake = noticeExecutor();
     const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: {} }));
