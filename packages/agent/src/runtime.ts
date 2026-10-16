@@ -206,8 +206,10 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     store,
     queue,
     async boot() {
-      for (const r of await store.runsWithStatus(["running"])) {
-        await store.updateRun(r.id, { status: "failed", terminalReason: "PROCESS_RESTART", endedAt: opts.clock.now(), summary: "The process restarted while this run was active. Run it again." });
+      // Running and queued runs both belonged to the previous process: nothing would ever pick a queued run up again
+      // (its handle and queue slot are gone), so it fails visibly with PROCESS_RESTART instead of sitting queued.
+      for (const r of await store.runsWithStatus(["running", "queued"])) {
+        await store.updateRun(r.id, { status: "failed", terminalReason: "PROCESS_RESTART", endedAt: opts.clock.now(), summary: r.status === "queued" ? "The process restarted before this run started. Run it again." : "The process restarted while this run was active. Run it again." });
         if (r.routineRunId) await store.failRoutineRun(r.routineRunId, "The process restarted while this run was active. Run again.", opts.clock.now());
         await handleStore?.drop(r.id).catch(() => undefined);
       }
@@ -319,6 +321,9 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       let timer: ReturnType<typeof setTimeout> | undefined;
       const idle = await Promise.race([queue.idle().then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timeoutMs); })]);
       clearTimeout(timer);
+      // Past the bound, abort what is still running so no provider call outlives the database; the boot rule fails
+      // those runs with PROCESS_RESTART on the next start.
+      if (!idle) for (const c of aborts.values()) c.abort();
       return idle;
     },
   };

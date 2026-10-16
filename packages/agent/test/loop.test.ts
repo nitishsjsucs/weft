@@ -333,6 +333,20 @@ describe("runtime rules", () => {
     expect(await rt.store.getRun(h.runId)).toMatchObject({ status: "failed", terminalReason: "PROCESS_RESTART" });
   });
 
+  it("boot rule: a run still queued from the previous process fails with PROCESS_RESTART instead of sitting queued", async () => {
+    const fake = noticeExecutor();
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: {} }));
+    const h = handle();
+    await rt.store.createRun({
+      id: h.runId, companyId: "cmp_larkspur", kind: "main", parentRunId: null, threadId: null, routineRunId: null, trigger: "chat", attended: true, provider: "scripted",
+      model: "scripted", effort: "low", cacheKey: "weft:main:chat:cmp_larkspur", status: "queued", terminalReason: null, tainted: false, taintedBy: null, checklist: null,
+      budget: { steps: 12, usd: 0.1, minutes: 10 }, stepsUsed: 0, requeues: 0, consecutiveErrors: 0, costUsdMicros: 0, tokens: { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 },
+      createdAt: clock.now(), endedAt: null, summary: null,
+    });
+    await rt.boot();
+    expect(await rt.store.getRun(h.runId)).toMatchObject({ status: "failed", terminalReason: "PROCESS_RESTART", summary: "The process restarted before this run started. Run it again." });
+  });
+
   it("requeues are capped at 2; a third wake escalates", async () => {
     const fake = noticeExecutor();
     const script: Script = { agents: { main: [
