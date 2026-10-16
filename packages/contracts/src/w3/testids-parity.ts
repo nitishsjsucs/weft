@@ -15,4 +15,5 @@ export const W3_ROUTINES_TID = {
   settingsAgent: "settings-agent",
   settingChatCanPropose: "setting-chat-can-propose",
   settingAllowAutoAutonomy: "setting-allow-auto-autonomy",
+  noticeEscalation: "notice-escalation",
 } as const;

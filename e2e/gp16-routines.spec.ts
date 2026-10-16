@@ -1,6 +1,7 @@
 // GP16. Routine parity: the autonomy control and the agent settings (docs/wave3.md). Owner: w3-parity-routines.
 // Settings > Agent shows both switches off; turning on auto autonomy is saved. On a routine, picking Recommend files a
-// proposal (nothing changes yet); approving it in the Inbox moves the control to Recommend.
+// proposal (nothing changes yet); approving it in the Inbox moves the control to Recommend. An escalated notice shows
+// the specialist hand-off in the Compliance drawer.
 import { approveCard, eventually, expect, openApp, test, type Proposal } from "./fixtures";
 import { W3_ROUTINES_TID as T } from "../packages/contracts/src/w3/testids-parity";
 
@@ -45,5 +46,27 @@ test("GP16: agent settings and a routine autonomy change through the Inbox", asy
     expect((await weft.routines()).find((r) => r.id === ROUTINE)?.autonomy).toBe("recommend");
     await openApp(page, `/app/routines/${ROUTINE}`);
     await expect(page.getByTestId(T.autonomy(ROUTINE))).toHaveAttribute("data-level", "recommend");
+  });
+});
+
+test("GP16: an escalated notice shows the specialist hand-off and its evidence pack", async ({ page, weft }) => {
+  let noticeId = "";
+  await test.step("deliver a missing-filing notice and escalate it", async () => {
+    await weft.post("/v1/sim/notices/deliver", { scenario: "ny_missing_filing" });
+    const notice = await eventually(() => weft.notices(), (ns) => ns.find((n) => n.kind === "missing_filing"), "the missing-filing notice");
+    noticeId = notice.id;
+    const r = await weft.post<{ ok: boolean }>("/v1/tools/notices.escalate", { notice_id: noticeId, reason_code: "missing_filing" });
+    expect(r.ok).toBe(true);
+    expect((await weft.notice(noticeId)).status).toBe("escalated");
+  });
+
+  await test.step("the Compliance notice drawer names the specialist, the reason and the evidence", async () => {
+    await openApp(page, `/app/compliance?notice=${noticeId}`);
+    const box = page.getByTestId(T.noticeEscalation);
+    await expect(box).toBeVisible();
+    await expect(box).toContainText(/tax specialist \(simulated\)/i);
+    await expect(box).toContainText(/a filing is missing/i);
+    await expect(box).toContainText(noticeId);
+    await expect(box).toContainText("parser extract");
   });
 });

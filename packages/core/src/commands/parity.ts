@@ -7,12 +7,13 @@
 // code), routines.set_autonomy (R1, only ever executed as an approved proposal), people.list_milestones (R0),
 // contractors.list_tax_forms (R0) and contractors.request_tax_forms (R3 email, autoAllow untainted), and the
 // thirty-day check-in: onboarding.list_checkins (R0), onboarding.send_checkins (R3 email, autoAllow untainted) and
-// onboarding.submit_checkin (human only, the hire's answers).
+// onboarding.submit_checkin (human only, the hire's answers), and notices.escalate (R1, hands a notice to a
+// simulated tax specialist with an evidence pack).
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { ChatChannel, MilestoneKind, Refused, RoutineAutonomy, W3_SETTINGS } from "@weft/contracts";
 import { check } from "@weft/grounding";
-import { checkins, contractorTaxForms, routines, settings, workers } from "@weft/db";
+import { checkins, contractorTaxForms, notices, routines, settings, workers } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { canonicalJson } from "../shared/canonical-json";
@@ -24,6 +25,7 @@ import { upsertSuggestion } from "../parity/suggestions";
 import { listMilestones } from "../parity/milestones";
 import { listTaxForms, requestEmail, requestedForm } from "../parity/contractor-forms";
 import { CheckinAnswers, checkinPlan, inviteEmail, managerSummary } from "../parity/checkins";
+import { EscalationReason, REASON_LABEL, SPECIALIST, evidencePack, specialistEmail, type Escalation } from "../parity/escalation";
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const Month = z.string().regex(/^\d{4}-\d{2}$/);
@@ -301,4 +303,29 @@ const submitCheckin = writeCommand<SubmitCheckinInput>({
   },
 });
 
-export const parityCommands: WeftCommand[] = [readyCheckCommand, flagNotReady, execFiguresCommand, sendExecReport, setAutonomy, listMilestonesCommand, listTaxFormsCommand, requestTaxForms, listCheckins, sendCheckins, submitCheckin];
+// ---------------------------------------------------------------- notice escalation
+
+const EscalateInput = z.object({ notice_id: z.string().startsWith("ntc_"), reason_code: EscalationReason });
+type EscalateInput = z.infer<typeof EscalateInput>;
+const escalateNotice = writeCommand<EscalateInput>({
+  name: "notices.escalate", summary: "Hand an agency notice to a tax specialist with an evidence pack",
+  description: "Escalate a notice that needs a person with judgment or power of attorney: sets it to escalated and sends a simulated tax specialist the notice, its tax account, the account's filings and the parser's extract. reason_code: agency_call_needed, penalty_dispute, unrecognized_notice, missing_filing or amount_mismatch. Example: {\"notice_id\":\"ntc_0001\",\"reason_code\":\"agency_call_needed\"}",
+  input: EscalateInput, domain: "tax", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
+  tiers: { main: "executable", task: "delegated" },
+  async run(i, ctx, deps) {
+    const [n] = await deps.tx.select().from(notices).where(eq(notices.id, i.notice_id));
+    if (!n || n.companyId !== ctx.companyId) throw new Refused("UNKNOWN_REFERENCE", `No notice ${i.notice_id}.`);
+    if (n.status === "resolved" || n.status === "escalated") throw new DomainRefusal("DOMAIN_NOTICE_CLOSED", `Notice ${n.id} is already ${n.status}`, "Only an open notice can be escalated", null);
+    const e: Escalation = {
+      outcome: "escalated", reason_code: i.reason_code, reason: REASON_LABEL[i.reason_code], specialist: SPECIALIST.name, specialist_principal: SPECIALIST.principal,
+      escalated_at: ctx.now, escalated_by: ctx.principal.kind === "human" ? ctx.principal.id : ctx.onBehalfOf ?? ctx.principal.id, previous_status: n.status, evidence: await evidencePack(deps.tx, n),
+    };
+    await deps.tx.update(notices).set({ status: "escalated", resolutionJson: JSON.stringify(e) }).where(eq(notices.id, n.id));
+    const m = specialistEmail(n, e);
+    const mail = await deps.sims.email.send({ to: SPECIALIST.email, from: "agent@larkspur.example", subject: m.subject, body: m.body, kind: "generic", relatedRef: n.id });
+    return { data: { notice_id: n.id, status: "escalated", reason_code: i.reason_code, specialist: SPECIALIST.name, evidence: e.evidence, email_id: mail.id },
+      summary: `Escalated ${n.id} to the ${SPECIALIST.name.toLowerCase()} with ${e.evidence.length} evidence items` };
+  },
+});
+
+export const parityCommands: WeftCommand[] = [escalateNotice, readyCheckCommand, flagNotReady, execFiguresCommand, sendExecReport, setAutonomy, listMilestonesCommand, listTaxFormsCommand, requestTaxForms, listCheckins, sendCheckins, submitCheckin];
