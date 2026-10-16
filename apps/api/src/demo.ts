@@ -305,7 +305,7 @@ const vac0 = await vac();
 await post("/v1/time-off/requests/tor_0003/decide", { decision: "approve", note: "Covered with the holiday week" }, "usr_sam");
 const vac1 = await vac();
 say(`   Sam approved it: vacation used ${vac0?.usedMinutes} to ${vac1?.usedMinutes} minutes, available ${vac1?.availableMinutes} minutes`);
-const imaniPay = await weft.db.all<{ gross_cents: number; earnings_json: string }>(sql`SELECT gross_cents, earnings_json FROM paychecks WHERE worker_id = 'wrk_0004' AND payroll_run_id IN (SELECT id FROM payroll_runs WHERE subtype = 'off_cycle')`);
+const imaniPay = await weft.db.all<{ gross_cents: number; earnings_json: string }>(sql`SELECT gross_cents, earnings_json FROM paychecks WHERE worker_id = 'wrk_0004' AND payroll_run_id IN (SELECT id FROM payroll_runs WHERE subtype != 'regular')`);
 const ptoLine = imaniPay.flatMap((p) => JSON.parse(p.earnings_json) as { type: string; hoursX100?: number; amountCents?: number }[]).find((l) => l.type === "pto_payout");
 say(`   GP9 final pay comes from the ledger: ${ptoLine ? `${((ptoLine.hoursX100 ?? 0) / 100).toFixed(2)} h, ${ptoLine.amountCents} cents` : "(no PTO payout line)"}`);
 
