@@ -10,7 +10,9 @@ afterEach(async () => { await w.close(); });
 describe("business days", () => {
   it("Mon plus 2 is Wed; Fri plus 1 is Mon", () => {
     expect(addBusinessDays("2026-10-26T16:00:00.000Z", 2)).toBe("2026-10-28T16:00:00.000Z");
-    expect(addBusinessDays("2026-10-30T16:00:00.000Z", 1)).toBe("2026-11-02T16:00:00.000Z");
+    // Fri Oct 30 09:00 PDT plus 1 business day is Mon Nov 2 09:00 PST: the wall time survives the DST change.
+    expect(addBusinessDays("2026-10-30T16:00:00.000Z", 1)).toBe("2026-11-02T17:00:00.000Z");
+    expect(addBusinessDays("2026-10-30T16:00:00.000Z", 2)).toBe("2026-11-03T17:00:00.000Z");
   });
 });
 
