@@ -4,12 +4,13 @@
 //
 // Landed: onboarding.ready_check (R0), onboarding.flag_not_ready (R1, an Inbox suggestion per blocked hire),
 // reports.exec_figures (R0), comms.send_exec_report (R3 like comms.send_message; the text is built and grounded in
-// code), routines.set_autonomy (R1, only ever executed as an approved proposal), people.list_milestones (R0).
-import { eq } from "drizzle-orm";
+// code), routines.set_autonomy (R1, only ever executed as an approved proposal), people.list_milestones (R0),
+// contractors.list_tax_forms (R0) and contractors.request_tax_forms (R3 email, autoAllow untainted).
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { ChatChannel, MilestoneKind, Refused, RoutineAutonomy, W3_SETTINGS } from "@weft/contracts";
 import { check } from "@weft/grounding";
-import { routines, settings } from "@weft/db";
+import { contractorTaxForms, routines, settings, workers } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { canonicalJson } from "../shared/canonical-json";
@@ -18,6 +19,7 @@ import { blockedText, readyCheck } from "../parity/ready-check";
 import { execFigures, execReportText } from "../parity/exec-report";
 import { upsertSuggestion } from "../parity/suggestions";
 import { listMilestones } from "../parity/milestones";
+import { listTaxForms, requestEmail, requestedForm } from "../parity/contractor-forms";
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const Month = z.string().regex(/^\d{4}-\d{2}$/);
@@ -166,4 +168,55 @@ const listMilestonesCommand = readCommand({
   },
 });
 
-export const parityCommands: WeftCommand[] = [readyCheckCommand, flagNotReady, execFiguresCommand, sendExecReport, setAutonomy, listMilestonesCommand];
+// ---------------------------------------------------------------- contractor tax forms
+
+const TaxFormsInput = z.object({ as_of: Day.optional(), within_days: z.number().int().min(0).max(180).optional(), ...responseFormatField });
+type TaxFormsInput = z.infer<typeof TaxFormsInput>;
+const listTaxFormsCommand = readCommand({
+  name: "contractors.list_tax_forms", domain: "payroll",
+  summary: "Each contractor's W-9 or W-8 on file, its expiry, and who needs a new one.",
+  description: "For every active contractor: the form needed (W-9 in the US, W-8BEN or W-8BEN-E abroad), the form on file, when it was signed and when it lapses (W-8: December 31 of the third year after signing), and whether it is missing, expired or expiring within within_days (default 60). Example: {\"as_of\":null,\"within_days\":null}",
+  input: TaxFormsInput,
+  async run(i: TaxFormsInput, ctx, deps) {
+    const r = await listTaxForms(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now), { withinDays: i.within_days });
+    return { data: r, summary: `${r.contractors.length} contractors; ${r.needs_request.length} need a new tax form` };
+  },
+});
+
+const RequestFormsInput = z.object({ worker_ids: z.array(z.string().startsWith("wrk_")).min(1).max(20), as_of: Day.optional() });
+type RequestFormsInput = z.infer<typeof RequestFormsInput>;
+async function formRequests(i: RequestFormsInput, ctx: { companyId: string; now: string }, deps: Parameters<WeftCommand["run"]>[2]) {
+  const ids = [...new Set(i.worker_ids)].sort();
+  const r = await listTaxForms(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now), { workerIds: ids });
+  const unknown = ids.filter((id) => !r.contractors.some((c) => c.worker_id === id));
+  if (unknown.length) throw new DomainRefusal("DOMAIN_NOT_FOUND", `Not an active contractor: ${unknown.join(", ")}`, "Use worker ids from contractors.list_tax_forms", null);
+  return r.contractors.filter((c) => r.needs_request.includes(c.worker_id));
+}
+const requestTaxForms = writeCommand<RequestFormsInput>({
+  name: "contractors.request_tax_forms", summary: "Email contractors whose W-9 or W-8 is missing or lapsing",
+  description: "Email each listed contractor whose tax form is missing, expired or expiring soon, asking for a new one in the contractor portal, and mark the form on file as renewal requested. Contractors whose form is current are skipped. R3 like comms.send_message. Example: {\"worker_ids\":[\"wrk_0051\"],\"as_of\":null}",
+  input: RequestFormsInput, domain: "payroll", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
+  afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
+  async preview(i, ctx, deps) {
+    const due = await formRequests(i, ctx, deps);
+    return { title: due.length ? `Ask ${due.length} contractors for a new tax form` : "No contractor needs a new tax form", diff: [],
+      content: due.map((c) => ({ label: `${c.name} (${c.worker_id})`, text: `${requestedForm(c)}: ${c.state}${c.expires_on ? `, lapses ${c.expires_on}` : ""}` })), moneyCents: null,
+      subjectRef: due.map((c) => c.worker_id).join(",") || "contractors", subjectHash: sha256Hex(canonicalJson(due.map((c) => [c.worker_id, c.form_id, c.state]))), evidence: due.map((c) => ({ label: "worker", ref: c.worker_id })) };
+  },
+  async run(i, ctx, deps) {
+    const due = await formRequests(i, ctx, deps);
+    const people = due.length ? await deps.tx.select({ id: workers.id, personal: workers.personalEmail, work: workers.workEmail }).from(workers).where(inArray(workers.id, due.map((c) => c.worker_id))) : [];
+    const sent: { worker_id: string; email_id: string; form: string; state: string }[] = [];
+    for (const c of due) {
+      const p = people.find((x) => x.id === c.worker_id)!;
+      const { subject, body } = requestEmail(c);
+      const mail = await deps.sims.email.send({ to: p.personal ?? p.work, from: "people@larkspur.example", subject, body, kind: "generic", relatedRef: c.worker_id });
+      if (c.form_id && c.state !== "requested") await deps.tx.update(contractorTaxForms).set({ status: "renewal_requested" }).where(eq(contractorTaxForms.id, c.form_id));
+      sent.push({ worker_id: c.worker_id, email_id: mail.id, form: requestedForm(c), state: c.state });
+    }
+    const skipped = [...new Set(i.worker_ids)].filter((id) => !due.some((c) => c.worker_id === id)).sort();
+    return { data: { requested: sent, skipped }, summary: sent.length ? `Asked ${sent.length} contractors for a new tax form` : "Every listed contractor has a current tax form" };
+  },
+});
+
+export const parityCommands: WeftCommand[] = [readyCheckCommand, flagNotReady, execFiguresCommand, sendExecReport, setAutonomy, listMilestonesCommand, listTaxFormsCommand, requestTaxForms];

@@ -9,6 +9,8 @@
 //   leadership list; the text and its numbers are built in code from reports.exec_figures. Disabled.
 // - rt_exec_briefing: Mondays 08:00 PT, the weekly variant. Disabled.
 // - rt_milestones: weekday 09:00 PT, anniversaries and opted-in birthdays (month and day only) to #general. Disabled.
+// - rt_contractor_forms: Mondays 09:00 PT. Contractors whose W-9 or W-8 is missing, expired or lapses within 60 days
+//   get an email asking for a new one (contractors.request_tax_forms). Disabled.
 import type { Precheck, ReadOnlyExecutor, RoutineDef } from "@weft/contracts";
 import type { Predicate } from "../checks";
 
@@ -61,6 +63,17 @@ export const RT_MILESTONES: RoutineDef = {
   precheck: "milestones",
   checklist: [{ id: "posted", label: "celebrate in #general", check: "posted:#general" }],
   budget, surface: { worthSurfacing: false, channel: "#general" }, source: "prebuilt", taintedBy: null,
+};
+
+export const RT_CONTRACTOR_FORMS: RoutineDef = {
+  id: "rt_contractor_forms", name: "Contractor tax forms",
+  description: "Monday mornings, check every contractor's W-9 or W-8 on file. Ask anyone whose form is missing, expired or lapses within 60 days to sign a new one.",
+  ownerPrincipalId: OWNER, enabled: false, autonomy: "approve", trigger: { type: "cron", cron: "0 9 * * 1", tz: TZ }, filter: null,
+  instructions: "Call contractors.request_tax_forms with the derived arguments; it writes each email from the form on file. Then write a one-line final message.",
+  tools: ["contractors.list_tax_forms", "contractors.request_tax_forms"],
+  precheck: "contractor_forms",
+  checklist: [{ id: "requested", label: "ask for each missing or lapsing form", check: "tax_forms_requested:{request_count}" }],
+  budget, surface: { worthSurfacing: false, channel: null }, source: "prebuilt", taintedBy: null,
 };
 
 type Obj = Record<string, unknown>;
@@ -134,11 +147,25 @@ export const milestones: Precheck = async (ctx, exec) => {
   };
 };
 
+export const contractorForms: Precheck = async (ctx, exec) => {
+  const asOf = ptDate(ctx.now);
+  const r = await read(exec, ctx.companyId, "contractors.list_tax_forms", { as_of: asOf, within_days: 60 });
+  if (!r) return { action: "skip", reason: "The contractor tax forms could not be read." };
+  const rows = (Array.isArray(r.contractors) ? r.contractors : []) as { worker_id: string; state: string; form: string | null; expires_on: string | null }[];
+  const due = (Array.isArray(r.needs_request) ? r.needs_request : []) as string[];
+  if (!due.length) return { action: "skip", reason: `Every contractor's tax form is current through ${asOf} plus 60 days.` };
+  return {
+    action: "run", severity: "digest", subjectRefs: due,
+    findings: { as_of: asOf, forms: rows.filter((x) => due.includes(x.worker_id)).map((x) => ({ worker_id: x.worker_id, state: x.state, form: x.form, expires_on: x.expires_on })) },
+    derivedArgs: { as_of: asOf, request_count: due.length, "contractors.request_tax_forms": { worker_ids: due, as_of: asOf } },
+  };
+};
+
 const callsTo = (facts: Parameters<Predicate>[1], command: string) => facts.calls.filter((c) => c.command.replace("__", ".") === command);
 
-export const routines: RoutineDef[] = [RT_NEW_HIRE_READY, RT_MONTHLY_EXEC_REPORT, RT_EXEC_BRIEFING, RT_MILESTONES];
+export const routines: RoutineDef[] = [RT_NEW_HIRE_READY, RT_MONTHLY_EXEC_REPORT, RT_EXEC_BRIEFING, RT_MILESTONES, RT_CONTRACTOR_FORMS];
 export const prechecks: Record<string, Precheck> = {
-  new_hire_ready: newHireReady, monthly_exec_report: reportPrecheck("monthly"), exec_briefing: reportPrecheck("weekly"), milestones,
+  new_hire_ready: newHireReady, monthly_exec_report: reportPrecheck("monthly"), exec_briefing: reportPrecheck("weekly"), milestones, contractor_forms: contractorForms,
 };
 export const predicates: Record<string, Predicate> = {
   /** Every blocked hire got a suggestion (a count of 0 passes without a call). */
@@ -146,6 +173,15 @@ export const predicates: Record<string, Predicate> = {
     const want = Number(count) || 0;
     if (want === 0) return true;
     return callsTo(f, "onboarding.flag_not_ready").some((c) => c.status === "done" && ((c.data as { flagged?: { suggestion_id: string | null }[] } | null)?.flagged ?? []).filter((x) => x.suggestion_id).length >= want);
+  },
+  /** Every contractor due a request got one (a count of 0 passes without a call). */
+  tax_forms_requested: ([count = "0"], f) => {
+    const want = Number(count) || 0;
+    if (want === 0) return true;
+    return callsTo(f, "contractors.request_tax_forms").some((c) => {
+      if (c.status === "done") return ((c.data as { requested?: unknown[] } | null)?.requested ?? []).length >= want;
+      return c.status === "pending_approval" && c.proposalId !== null && !["denied", "expired", "failed", "superseded", "dismissed"].includes(f.proposalStatus(c.proposalId) ?? "pending");
+    });
   },
   exec_report_sent: ([kind = "", month = ""], f) => callsTo(f, "comms.send_exec_report").some((c) => {
     const a = (c.args ?? {}) as { kind?: string; month?: string };

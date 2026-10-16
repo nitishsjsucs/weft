@@ -2,13 +2,25 @@
 // Never change wave 1 or wave 2 seed counts (SPEC 5.2 numbers are asserted by tests) and never touch processed runs.
 //
 // The default step adds only data that no wave 1 or wave 2 number reads: synthetic birthdays (MM-DD, never a year)
-// for about half the people. The three anomaly cases are a separate helper, plantParityAnomalyCases(), because each
+// for about half the people, and the contractors' tax forms on file. The three anomaly cases are a separate helper, plantParityAnomalyCases(), because each
 // case changes pay data and the open draft pay_2026_10_30 must keep its GP2 flags: the helper dates every case inside
 // the Nov 1 to 15 period, so only a new draft for that period shows them (tests/scenarios/gp16-anomalies.test.ts).
 import { and, asc, eq } from "drizzle-orm";
 import { idMinter } from "@weft/core";
-import { onboardingSubmissions, paychecks, payrollRuns, payRates, workers, type Db } from "@weft/db";
+import { contractorTaxForms, onboardingSubmissions, paychecks, payrollRuns, payRates, workers, type Db } from "@weft/db";
 import type { SeedContext } from "./context";
+import { seedWorkerId } from "./people";
+
+/**
+ * Tax forms on file for the three contractors abroad (wave 3 rank 15). Ines and Arjun signed a W-8BEN before they
+ * started (in effect through 2028-12-31). Claire has none: she moved her work to her own company, so the W-8BEN she
+ * signed as a person was superseded and the W-8BEN-E for the company is still to come.
+ */
+export const CONTRACTOR_FORMS = [
+  { key: "ines", form: "w8ben", signedOn: "2025-05-26", status: "active" },
+  { key: "arjun", form: "w8ben", signedOn: "2025-07-28", status: "active" },
+  { key: "claire", form: "w8ben", signedOn: "2025-09-08", status: "superseded" },
+] as const;
 
 /** Every other active person, by employee id order, gets a synthetic month and day (opt-in for milestones). */
 export async function seedW3Parity(ctx: SeedContext): Promise<void> {
@@ -22,6 +34,13 @@ export async function seedW3Parity(ctx: SeedContext): Promise<void> {
     const month = ((n * 7) % 12) + 1;
     const day = ((n * 11) % 28) + 1;
     await ctx.db.update(workers).set({ birthMonthDay: `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` }).where(eq(workers.id, w.id));
+  }
+  const newId = idMinter(ctx.db);
+  for (const f of CONTRACTOR_FORMS) {
+    await ctx.db.insert(contractorTaxForms).values({
+      id: await newId("ctf_"), workerId: seedWorkerId(f.key), form: f.form, signedOn: f.signedOn, expiresOn: `${Number(f.signedOn.slice(0, 4)) + 3}-12-31`,
+      documentId: null, status: f.status, createdAt: `${f.signedOn}T17:00:00.000Z`,
+    });
   }
 }
 

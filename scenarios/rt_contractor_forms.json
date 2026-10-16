@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "contractors__request_tax_forms", "arguments": "{{derived.contractors.request_tax_forms}}" }] },
+      { "output": [{ "type": "text", "text": "Asked the contractors with a missing or lapsing tax form to sign a new one." }] }
+    ]
+  }
+}
