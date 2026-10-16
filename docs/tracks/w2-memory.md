@@ -23,6 +23,10 @@ Wave 2 completes the company memory (research/harness.md section 18, in its prio
 - Browse: `pnpm dev`, then open `/app/memory` (no nav entry yet, see contract requests).
 - Snapshots: `pnpm memory:bundle`, `pnpm memory:restore .data/companies/cmp_larkspur/bundles/<iso>.bundle`.
 
+## Live check
+
+One chat on gpt-5.6-luna after a digest (2026-10-15, about $0.0012 on a fresh ledger, scripted otherwise): "Who is Lena Brooks's manager and what changed for her recently?" started with a 1,606-character recall block (one-pager, `entities/people/wrk_0026.md`, `timeline/daily/2026-10-09.md#L21`, one keyword hit), logged in `memory_recalls`, untainted. The model still verified with `people.get` and `actions.list` and answered in 2 steps, done. Automated tests never call a live model.
+
 ## Wave 1 compatibility
 
 - Recall returns `""` until a digest has written the one-pager, so every wave 1 pack, scripted transcript and token count is byte-identical (no wave 1 test runs the digest). `MemoryBinding.recallEnabled = false` switches recall off for one world if a later test needs that.
