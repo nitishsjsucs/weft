@@ -1,6 +1,6 @@
 // Scenario s1 (SPEC 12, 13). Owner: t4-agent. GP1 tax notice to rate change (hero), scripted provider
 // (scenarios/rt_agency_notice.json). Needs the merged world (T2 seed and simulators, T3 executor and decide, the
-// events source for the routines engine): until those land each test skips itself, naming the missing parts.
+// events source for the routines engine). A stubbed part fails each test by name; it never skips.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { AgentRunRow } from "@weft/contracts";
@@ -35,8 +35,8 @@ async function deliverAndPropose() {
 }
 
 describe("GP1 tax notice to rate change (hero)", () => {
-  it("runs end to end with the scripted provider (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("runs end to end with the scripted provider (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const { runId, run, proposals: open } = await deliverAndPropose();
     expect(open.map((p) => p.command).sort()).toEqual(["notices.send_response", "tax.update_rate"]);
     expect(run).toMatchObject({ status: "waiting", tainted: false, stepsUsed: 2 });
@@ -54,8 +54,8 @@ describe("GP1 tax notice to rate change (hero)", () => {
     expect(n?.status).toBe("resolved");
   });
 
-  it("verifies the action chain and memory SHAs (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("verifies the action chain and memory SHAs (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     expect((await weft.executor.verifyChain()).ok).toBe(true);
   });
 });

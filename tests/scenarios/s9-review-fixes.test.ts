@@ -72,7 +72,7 @@ describe("routine enable and disable", () => {
     expect(card).toBeTruthy();
     const ok = await post(`/v1/proposals/${card!.id}/approve`, { reasonCode: null, note: null });
     expect(ok.status, await ok.clone().text()).toBe(200);
-    const [r] = await weft.db.select().from(routines).where(eq(routines.id, card!.subjectRef));
+    const [r] = await weft.db.select().from(routines).where(eq(routines.id, card!.subjectRef!));
     expect(r?.enabled).toBe(true);
     const off = await post("/v1/routines/rt_people_digest/disable", {});
     expect(off.status, await off.clone().text()).toBe(200);

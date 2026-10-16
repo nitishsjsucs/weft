@@ -24,8 +24,8 @@ async function ask(text: string): Promise<AgentRunRow> {
 }
 
 describe("GP5 grounded chat answer and the cannot-approve guardrail", () => {
-  it("runs end to end with the scripted provider (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("runs end to end with the scripted provider (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const raise = (await weft.db.select().from(actions)).find((a) => a.command === "people.set_pay_rate");
     expect(raise?.resultId).toBeTruthy();
     const before = (await weft.db.select().from(actions)).length;
@@ -44,8 +44,8 @@ describe("GP5 grounded chat answer and the cannot-approve guardrail", () => {
     expect((await weft.db.select().from(proposals)).filter((p) => p.status === "pending").length).toBe(pendingBefore);
   });
 
-  it("a forged decide with an agent principal returns AGENT_PRINCIPAL (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("a forged decide with an agent principal returns AGENT_PRINCIPAL (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     // The seed has no pending proposal, so let the agency notice routine make two (GP1), then forge a decision.
     const res = await post("/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" });
     expect(res.status, await res.clone().text()).toBe(200);
@@ -67,8 +67,8 @@ describe("GP5 grounded chat answer and the cannot-approve guardrail", () => {
     expect(still?.status).toBe("pending");
   });
 
-  it("verifies the action chain and memory SHAs (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("verifies the action chain and memory SHAs (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     expect((await weft.executor.verifyChain()).ok).toBe(true);
   });
 });

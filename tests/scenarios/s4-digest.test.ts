@@ -21,8 +21,8 @@ const get = (path: string, who = "usr_dana") => weft.app.request(path, { headers
 const post = (path: string, body: unknown, who = "usr_dana") => weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders(who), "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("GP4 a routine runs on schedule and logs its run", () => {
-  it("runs end to end with the scripted provider (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("runs end to end with the scripted provider (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     await weft.clock.advance("2026-10-26T16:00:00.000Z");   // +30 min from Mon 08:30 PT
     await weft.scheduler.tick();
     const page = (await (await get("/v1/routines/rt_people_digest/runs")).json()) as { data: RoutineRun[] };
@@ -40,8 +40,8 @@ describe("GP4 a routine runs on schedule and logs its run", () => {
     expect(row?.tainted).toBe(false);
   });
 
-  it("the draft parser gives a disabled routine on 0 9 * * 5 and a routine_enable proposal (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("the draft parser gives a disabled routine on 0 9 * * 5 and a routine_enable proposal (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const res = await post("/v1/routines/draft", { prompt: "Every Friday, post open approvals to #payroll" });
     expect(res.status, await res.clone().text()).toBe(200);
     const custom = (await weft.db.select().from(routines)).filter((r) => r.source === "custom");
@@ -53,8 +53,8 @@ describe("GP4 a routine runs on schedule and logs its run", () => {
     expect(enable).toHaveLength(1);
   });
 
-  it("POST /v1/sim/reset and clock moves never touch the spend ledger (t4-agent)", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("POST /v1/sim/reset and clock moves never touch the spend ledger (t4-agent)", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const r = await weft.ledger.reserve({ runId: null, usdMicros: 7, model: "gpt-5.6-luna", live: true });
     if (!r.ok) throw new Error(`reserve refused: ${r.cap}`);
     await weft.ledger.settle(r.reservationId, 5);

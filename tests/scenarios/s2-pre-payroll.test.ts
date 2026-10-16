@@ -86,14 +86,14 @@ async function waitForWake(routineRunId: string): Promise<void> {
 }
 
 describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant", () => {
-  it("the seeded draft has 48 paychecks, 4 Needs Review and 44 Ready", async (ctx) => {
-    if (missing.some((m) => m.startsWith("seeded"))) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("the seeded draft has 48 paychecks, 4 Needs Review and 44 Ready", async () => {
+    expect(missing.filter((m) => m.startsWith("seeded")), "stubbed parts").toEqual([]);
     const run = PayrollRun.parse(await (await get(`/v1/payrolls/${RUN}`)).json());
     expect(run).toMatchObject({ status: "draft", paycheckCount: 48, anomalySummary: { needsReview: 4, ready: 44 } });
   });
 
-  it("STALE_SUBJECT: a direct-deposit change between proposal and approval refuses the approval", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("STALE_SUBJECT: a direct-deposit change between proposal and approval refuses the approval", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const { proposalId, routineRunId } = await reviewAndPropose();
     const rows = await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN));
     const ready = rows.find((p) => p.reviewGroup === "ready")!;
@@ -109,8 +109,8 @@ describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant
     await waitForWake(routineRunId);
   });
 
-  it("runs end to end with the scripted provider: explained, proposed, approved, processing, processed", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("runs end to end with the scripted provider: explained, proposed, approved, processing, processed", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const { proposalId, routineRunId } = await reviewAndPropose();
     const flagged = (await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN))).filter((p) => p.reviewGroup === "needs_review");
     expect(flagged).toHaveLength(4);
@@ -139,8 +139,8 @@ describe("GP2 pre-payroll review and payroll run, plus the STALE_SUBJECT variant
     expect((await weft.db.select().from(events).where(eq(events.type, "payroll.processed"))).map((e) => e.subjectRef)).toContain(RUN);
   });
 
-  it("verifies the action chain", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("verifies the action chain", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const chain = await weft.executor.verifyChain();
     expect(chain.ok).toBe(true);
   });
@@ -153,8 +153,8 @@ describe("S2 fault variant: the bank returns the batch", () => {
     weft = await createTestWeft();
   });
 
-  it("arms bank.submitBatch return; after payday 06:00 PT the run is failed, nothing is paid and no YTD is written", async (ctx) => {
-    if (missing.length) return ctx.skip(`waiting for: ${missing.join(", ")}`);
+  it("arms bank.submitBatch return; after payday 06:00 PT the run is failed, nothing is paid and no YTD is written", async () => {
+    expect(missing, "stubbed parts").toEqual([]);
     const armed = await post("/v1/sim/faults", { target: "bank.submitBatch", kind: "return", mode: "once" });
     expect(armed.status).toBe(200);
     const { proposalId, routineRunId } = await reviewAndPropose();
