@@ -382,3 +382,49 @@ steps, state-required training, life-event benefit windows and carrier election 
 thread, a CLI and outbound webhooks, Greenhouse write-back (`ats.mark_hired`) beyond a proposal stub, Workday payroll
 results write-back, Greenhouse Onboarding API, an off-cycle reimbursement run, dark mode for the app, and any live
 Checkr or HireRight call.
+
+## 10. Integration, round 1 (2026-10-16)
+
+The seven tracks merged into main in the planned order with `--no-ff`: w3-topbar-shell, w3-parity-chat,
+w3-parity-routines, w3-timeoff, w3-expenses, w3-integrations-hr, w3-integrations-screening-esign. Every merge was
+clean except the two pinned prebuilt routine id lists (`packages/routines/test/engine.test.ts`,
+`apps/api/test/routines.test.ts`), which take the sorted union of every track's ids. The tracks' `contract:` commits
+are all additive (route rows in `api.ts`, the `ext/` and `w3/testids-*` files, the policy autonomy fact, sample values
+in the registry rule test, the pinned id lists) and came in unchanged; none edits a frozen row.
+
+### What the integrator changed
+
+| Change | Why |
+|---|---|
+| GP15 denies its card before the approval test | Once GP10's $1,500.00 bonus is paid, `DUPLICATE_SUPPLEMENTAL` (w3-parity-routines) blocks a second identical bonus for Hollis, as it should |
+| The `reports.query` tests check what their inserts add | The expense and time-off seeds now hold rows in the same months |
+| The chat guard test expects `expenses.decide` and `time_off.decide` | Both are registered act-mode writes, each approval always with no auto-allow, so the guard keeps them |
+| `usr_imani` joins the persona list | Viewing as Imani (manager) works; the menu groups her under Managers |
+| Expenses and Time Off drop the Coming soon badge, and the soon badge kind is gone | Both are real products now |
+| `rt_screening_follow_up` joins PREBUILT (disabled) with `scenarios/rt_screening_follow_up.json` | Merge request from w3-integrations-screening-esign |
+| The portal I-9 card reads only `i9_id_image` uploads | A receipt uploaded from the portal showed on the I-9 card |
+| The e2e runner (`WEFT_E2E=1`) gets a 6,000 a minute UI limit; real use keeps 1,200 | With every wave 3 spec the suite sat at the limit and failed with 429 (w3-timeoff request 8) |
+| `deliverSimWebhooks` reads the screening outbox under the write lock | A libsql transaction runs on its own connection; one opened outside the lock raced `POST /v1/sim/reset`, the reset failed with SQLITE_BUSY and every later e2e spec timed out |
+| `pnpm demo` walks GP13 to GP18 after GP12 | Workday runs last, since its first sync takes ownership of People, Compensation and Time off |
+
+### Open contract requests and left items
+
+- w3-parity-chat: `bonus_cents` as an array for strict schemas (blocks live L5); `proposals.ts` still uses `CHAT_TOOLS`;
+  typed client responses for reports and artifacts; a taint field on `ApprovalCardW3`; a Reports screen; task agents.
+- w3-parity-routines: `autoEligible` on `expenses.decide` with a seeded limit for an end-to-end auto test; approval and
+  override counts beside the autonomy control; check-in portal form and manager view; contractor form upload; more
+  notice precheck branches; the Ready Check reading the holiday calendar; the exec report on `reports.query`.
+- w3-timeoff: a portal time-off route; `NEGATIVE_BALANCE` as a FlagRule with a label; a statement block per policy and
+  labels for the leave earning types; balances for a hire after the seed before their first request; unpaid salaried
+  docking; superseding a pending agent proposal when a request is decided directly.
+- w3-expenses: the `expense.submitted` trigger (RoutineDef takes one trigger); the returned-item notification; second
+  approver and manager routing; extraction for uploaded receipts; the paycheck drawer listing reimbursement lines;
+  exporting `ext/w3-expenses.ts` from the contracts index; narrowing the approve-all chat script match.
+- w3-integrations-hr: the real Workday adapter; `ats.mark_hired` and `hris.request_time_off` proposal stubs; unhire and
+  orphaned links; sync items in the Inbox; Workday-owned field locks on the person view; skipping unmapped time-off
+  types on every poll; both imported routes in `api.ts`.
+- w3-integrations-screening-esign: `documents.resend_envelope`; the consent nudge; a Settings switch for the
+  screening company; the HireRight Simulated note on the Integrations card; Inbox cards for review orders; a
+  background_check label on People; the envelope e2e needs its own run with `WEFT_ESIGN=docusign`.
+- w3-topbar-shell: StatusBadge and PageBody in other owners' views; crumb titles for the remaining detail pages; a
+  typed `GET /v1/agent/costs`; a base `:focus-visible` rule and reduced motion in PopoverContent; dark mode tokens.

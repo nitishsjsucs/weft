@@ -32,13 +32,25 @@ Things to try in the demo:
 8. **Benefits**: run the October carrier reconciliation (three planted errors), dispute a finding, and look at who
    has not elected in open enrollment. **Contractors**: pay the three contractors and advance the clock two days.
 9. **Memory**: browse the agent's git-backed memory with wiki-links, backlinks and per-file history.
+10. **Expenses**: eight claims wait in Needs review. Run the expense review routine; it explains each one and proposes
+    one decision per claim in the Inbox. Approve two and open the next draft: the reimbursements sit outside gross and
+    inside net. New hires file and fix their own claims, with a receipt, from the portal.
+11. **Time Off**: Ruth's vacation shows a coverage conflict (3 of 9 in Hardware out on Nov 23 to 25) and the
+    Thanksgiving holiday. Approve it on the Requests tab, then check the balance, the calendar and the PTO line on the
+    open draft. Switch Viewing as to Imani Ferreira (demo) to decide as her manager.
+12. **Agent panel**: ask "Show payroll cost by month" for a chart with a table fallback. With Settings > Agent > Chat
+    can propose turned on, asking for an off-cycle payment files a proposal whose card has Approve, Deny and Open.
+13. **Integrations**: every card says Simulated until you connect it. Simulate a Greenhouse hire (a signed delivery
+    becomes a linked draft offer), sync Workday (people, pay and approved time off), and on Hiring order a background
+    check after an offer is accepted; the hire authorizes it in the portal and it completes on the simulated clock.
 
-The "Viewing as" switcher in the header is a demo control for acting as Dana, Theo or Sam; new hires whose offer
+The "Viewing as" segment of the header's environment pill is a demo control for acting as Dana, Theo, Sam or Imani
+(a manager who decides time off for her direct reports only); new hires whose offer
 was sent from Hiring are listed there too and open the portal (the seeded offer for Noor Castellanos (demo) is
 accepted from People > Offers instead).
 
-To see the golden paths run without a browser, `pnpm demo` seeds one world in `.data-demo/` and walks GP1 to GP12 in
-about 5 seconds through the same HTTP routes the UI, the portal and MCP clients use, with the scripted provider (it
+To see the golden paths run without a browser, `pnpm demo` seeds one world in `.data-demo/` and walks GP1 to GP18 in
+about 10 seconds through the same HTTP routes the UI, the portal and MCP clients use, with the scripted provider (it
 never spends money, whatever `WEFT_LLM` says): the DE 2088 notice to an approved 1.5% rate, the grounded NY raise
 answer and the refused approve-all, the pre-payroll review to an approved and then processed payroll, the 09:00
 digest, the new hire's Colorado registrations activating two business days later, and an injected notice that
@@ -46,7 +58,11 @@ leaves only tainted proposals. Wave 2 continues on the same world: the October c
 findings and a dispute, the open enrollment reminder, contractor payouts on the payment rail, an offer signed in the
 portal, the 7 of 7 checklist that puts the hire on the next draft, the straggler nudge, an off-cycle run with a
 mid-period raise and a supplemental bonus, a termination whose case revokes access and completes, and the memory
-digest followed by a chat run that starts with a recall block. It ends by verifying the audit chain. Then browse that same world with
+digest followed by a chat run that starts with a recall block. Wave 3 follows: the expense review with one proposal per
+claim and two approvals onto the next draft, Ruth's coverage conflict approved by the HR manager, a chart answer, the
+Ready Check and contractor tax forms, a background check ordered as a proposal and completed clear, a Greenhouse hire
+to a linked draft offer with a no-op redelivery, and a Workday sync (last, since Workday then owns People,
+Compensation and Time off). It ends by verifying the audit chain. Then browse that same world with
 `WEFT_DATA_DIR=.data-demo pnpm dev`. `pnpm demo:tests` runs the golden path scenario tests instead, each on a fresh
 world.
 
@@ -152,6 +168,18 @@ Screenshots were retaken with the new `pnpm screenshots` (`e2e/screens/capture.s
 
 ## What works
 
+Wave 3 golden paths (scripted provider; merged on 2026-10-16, results in "Final wave 3 gate" above):
+
+| Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | In `pnpm demo` |
+|---|---|---|---|
+| GP13 expense review: four bands, a deterministic policy engine, one proposal per claim and no bulk decide, reimbursements on the next draft outside gross, paid on processing; portal claims with a receipt, return and resubmit | passes (plus the refused approve-all in chat) | passes (2 tests) | yes |
+| GP14 time off: minute ledger, coverage conflict and holiday checks, routing to the manager, PTO lines with gross unchanged, final pay from the ledger (GP9 still 90.00 h), Workday rows read-only | passes | passes (2 tests) | yes (decided by the HR manager, since Imani left in GP9) |
+| GP15 chart answer from `reports.query` with a table fallback; chat proposals behind Chat can propose, an approval card with Approve, Deny and Open that executes once; tainted cards offer no Approve | passes | passes (2 tests) | yes (the chart) |
+| GP16 routine parity: Ready Check, monthly exec report, milestones, three anomaly rules, autonomy (recommend, approve, auto), first-month check-in, contractor W-9 and W-8 forms, notice escalation | passes (6 files) | passes (2 tests) | yes (Ready Check and tax forms) |
+| GP17 Greenhouse hire to a linked draft offer, dedupe and conflicts; Workday sync of workers and approved time off | passes (2 files) | passes (2 tests) | yes |
+| GP18 background check after acceptance (R4 proposal, portal consent, signed webhook, clear), human-only adverse path with the dispute extension, the follow-up routine, DocuSign envelopes | passes (4 files) | passes; the envelope test runs with `WEFT_ESIGN=docusign` | yes (the check) |
+| GP19 coherent top bar at 1440, 1280, 1024 and 390: 32 px controls, 28 px segments, one focus ring, the persona menu, popovers, tiers | | passes (2 tests) | no (browser only) |
+
 Wave 2 golden paths (scripted provider; no live case covers GP6 to GP12):
 
 | Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | In `pnpm demo` |
@@ -187,8 +215,8 @@ time; the action chain verifies at the end of every scenario.
 
 ## What is stubbed or left
 
-- `GET /v1/agent/runs/:id/artifacts/:ref` answers 501. Expenses, Time Off and Settings are labeled stubs; Benefits,
-  IT and Contractors stay labeled Simulated; charts and the landing page's routine showcase are P1.
+- Benefits, IT and Contractors stay labeled Simulated; the landing page's routine showcase is P1. Wave 3's open items
+  are listed under "Wave 3: left" below and in `docs/wave3.md`.
 - `code.run` ships in QuickJS but is opt-in (`WEFT_SANDBOX=quickjs`) and on no prebuilt allowlist. Return values
   over 64 KiB are an error rather than an artifact, inner calls are listed in the result rather than as nested steps,
   and scripts run on the API thread.
@@ -196,9 +224,10 @@ time; the action chain verifies at the end of every scenario.
   was smoke-tested on llama-server with a 1.7B model, not on `mlx_lm.server`. Local providers are `live: false`.
 - Not modeled in payroll: the stretch states WA, IL and FL, NY Method III, CA and NY supplemental rates (bonuses use
   the federal 22 percent flat rate and regular state withholding), bank holidays, state final-pay deadlines, retrying
-  a failed run. PTO for final pay is a simulated accrual until Time Off lands.
-- Off-cycle pay is proposed by people and MCP agents; the chat agent's tool list is the frozen read-only set, so
-  "asked in chat" is not wired. An offboarding case has no cancel and no failed step state.
+  a failed run.
+- Off-cycle pay asked in chat files a proposal only with Chat can propose on (off by default); live Luna drops that
+  tool until `bonus_cents` becomes an array (its record schema fails the strict check). An offboarding case has no
+  cancel and no failed step state.
 - The new routines (`rt_onboarding_nudge`, `rt_open_enrollment`, `rt_memory_digest`) ship disabled; enable them in
   Routines. A scripted nudge run posts one hire's nudge per run (a live model posts all of them). `memory.forget` is
   still refused; task agents are not started.
@@ -224,6 +253,42 @@ time; the action chain verifies at the end of every scenario.
   document library does not show the per-signature verify result.
 - A run still queued when the API stops is failed with `PROCESS_RESTART` at the next boot, not resumed.
 - Track notes with the full lists live in `docs/tracks/` and `docs/wave2.md`.
+
+## Integrations
+
+`/app/integrations` has one card per vendor. With no credentials every card runs its simulator and says Simulated.
+Each simulator follows the vendor's published API shapes (paging, references, signed webhooks, state machines) and
+writes only to its own simulator tables. Real adapters live only in `@weft/integrations`, run only when
+`WEFT_INTEGRATIONS_REAL=1` and every required secret is present in the file named by `WEFT_SECRETS_FILE`, and can
+never run inside tests. Weft never creates an account or accepts terms for you, and the screen reports each secret as
+present or missing, never its value.
+
+| Vendor | What runs today | Real or simulated | Free path | How to connect it yourself |
+|---|---|---|---|---|
+| Greenhouse | Simulated hire: a signed `hire_candidate` delivery is verified, deduped, re-read and becomes one linked draft offer; an unmapped office becomes a sync item; a changed start date becomes a conflict for a person | Simulated by default. A read-only real adapter (OAuth client credentials, Link cursor paging, Retry-After, webhook verify) exists and is tested on a fake transport only | No free sandbox for individuals; the public job board needs no key | Through an employer's Greenhouse account or a Pro sandbox, a Site Admin creates Harvest v3 OAuth credentials with read-only scopes. Put `WEFT_GREENHOUSE_CLIENT_ID` and `WEFT_GREENHOUSE_CLIENT_SECRET` in the secrets file (optional: `WEFT_GREENHOUSE_WEBHOOK_SECRET`, `WEFT_GREENHOUSE_BOARD_TOKEN`), then start with `WEFT_INTEGRATIONS_REAL=1` |
+| Workday | Sync now and a 15 minute poll: workers linked by work email, a changed title applied, a pay change held as a conflict for a person, approved time off imported read-only into Time Off; Workday then owns People, Compensation and Time off | Simulated. The real adapter is still a stub, so the simulator stays in place even with secrets | Developer program personal tenant (beta, expires after 7 days without use) | Sign up at the Workday developer site yourself and read its terms, request a development tenant, register an API client and an integration system user, then put the six `WEFT_WORKDAY_*` values (host, tenant, client id, client secret, refresh token, token URL) in the secrets file |
+| Checkr | `screening.order` is an R4 proposal, allowed only after the offer is accepted and priced from the package row; the hire authorizes on a labeled simulated apply page; signed webhooks complete the check; review and every adverse step are human only, with the dispute extension | Simulated. A real adapter written to the published API (staging by default) is tested on a fake fetch only; production also needs `WEFT_LIVE_CHECKR=1` | None for individuals; staging needs a credentialed business | Credential a real business with Checkr (or apply as a partner) and get its written view on automated access, then `CHECKR_API_KEY` in the secrets file |
+| HireRight | The same screening flow on a HireRight-shaped simulator, labeled "Simulated, API shape not published"; choose it with `WEFT_SCREENING=hireright` | Simulated only; the real adapter always refuses with `INTEGRATION_NOT_AVAILABLE` | None | A HireRight customer contract and an assigned technical consultant; nothing is possible for free |
+| DocuSign | With `WEFT_ESIGN=docusign` an offer goes out as one envelope with both documents; the portal's sign button redirects to a simulated signing page and the signed Connect message accepts the offer (a declined envelope sets declined). Built-in click to sign stays the default | Simulated. The real adapter (JWT grant, embedded signing, Connect HMAC, polling at most every 20 minutes) is tested on a fake fetch only and also needs `WEFT_LIVE_DOCUSIGN=1` | Free developer account with the full eSignature API in the demo environment | Create the developer account, an app with an integration key and an RSA key pair (keep the PEM outside every repo), grant consent once, then put `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`, `DOCUSIGN_ACCOUNT_ID` and `DOCUSIGN_PRIVATE_KEY_FILE` (a path) in the secrets file; optional `DOCUSIGN_CONNECT_HMAC_KEY` |
+
+A local Weft has no public URL, so polling on the scheduler tick is the baseline; the one public webhook route is
+`POST /v1/integrations/:vendor/webhook` (HMAC over the raw bytes, constant time, ids only stored). More in
+[docs/wave3.md](docs/wave3.md) section 3 and the track notes `docs/tracks/w3-integrations-*.md`.
+
+## Wave 3: left
+
+- Live L5 (GP10 asked in chat on Luna) waits for `payroll.propose_off_cycle` to take bonuses as an array; until then a
+  live act-mode run drops that tool and answers read-only.
+- Auto autonomy end to end needs `expenses.decide` to declare `autoEligible` with a seeded limit; only the policy level
+  is tested today.
+- Workday: the real adapter is a stub (the simulator stays), and `ats.mark_hired` and `hris.request_time_off` are not
+  built. `documents.resend_envelope` is not built, so a voided or expired envelope means a new offer.
+- The portal has no Request time off section yet (the portal persona reaches only `/v1/portal/*`), no check-in form and
+  no contractor tax form upload. Sync items show on the Integrations screen, not yet in the Inbox.
+- The `expense.submitted` trigger for the expense review routine (it runs on its weekday schedule and on demand), a
+  second approver for `SECOND_APPROVER`, manager routing inside `expenses.decide`, and extraction for uploaded receipts.
+- StatusBadge and PageBody are adopted in the shell only; other views keep their own badges and widths.
+- Full lists: `docs/wave3.md` section 10 and each `docs/tracks/w3-*.md`.
 
 ## Sandboxes and a free hosted option
 
@@ -259,11 +324,11 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | Command | What it does |
 |---|---|
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
-| `pnpm demo` | Narrated GP1 to GP12 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
-| `pnpm demo:tests` | The golden path scenario tests (GP1 to GP12, S6 to S9) in process on fresh seeded worlds |
+| `pnpm demo` | Narrated GP1 to GP18 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
+| `pnpm demo:tests` | The golden path scenario tests (GP1 to GP18, S6 to S9) in process on fresh seeded worlds |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
-| `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP12 and the site specs against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
+| `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP19 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm screenshots` | Retakes `docs/screenshots/` (or `SHOTS_DIR`) through the e2e dev runner at 1440 by 900; same ports and world reset as `pnpm e2e`, never part of it |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |

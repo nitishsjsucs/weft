@@ -70,7 +70,8 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await page.getByTestId(TID.viewingAs).click();
     const menu = page.getByRole("menu");
     await expect(menu).toContainText("Viewing as (demo control)");
-    await expect(menu.getByRole("menuitemradio")).toHaveCount(3);
+    await expect(menu.getByRole("menuitemradio")).toHaveCount(4);   // Dana, Theo and Sam, then Imani under Managers
+    await expect(menu).toContainText("Managers");
     await expect(menu.getByRole("menuitemradio", { name: /Dana/ })).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
