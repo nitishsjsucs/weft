@@ -41,14 +41,15 @@ export function memoryCommands(e: Engine): WeftCommand[] {
   };
   const read: WeftCommand<{ path: string; at?: string }> = {
     ...base, name: "memory.read", namespace: "memory", summary: "Read one memory file",
-    description: "Read one memory file by path (from memory.search). Returns frontmatter and body. Example: { \"path\": \"knowledge/procedures/state-sui-rate-notice.md\" }",
+    description: "Read one memory file by path (from memory.search). Returns frontmatter, body and links (outgoing wiki-links with whether each resolves, and the files that link here). Example: { \"path\": \"knowledge/procedures/state-sui-rate-notice.md\" }",
     compactDescription: "Read a memory file.",
     input: z.object({ path: z.string().min(1).max(200), at: z.string().optional() }), domain: "company", needs: "view", effect: "read", risk: () => "R0", mcp: "read", sandbox: "read",
     errorHints: { INVALID_INPUT: { hint: "use a path from memory.search", example: { path: "knowledge/procedures/state-sui-rate-notice.md" } } },
     async run(i) {
       const doc = await e.memory.read(i.path, i.at);
       if (!doc) throw new MemoryError("INVALID_INPUT", `No memory file ${i.path}`);
-      const out = { data: { path: i.path, frontmatter: doc.frontmatter, body: doc.body }, summary: `Read ${i.path}` };
+      const links = (e.memory as { links?: (p: string) => Promise<unknown> }).links && !i.at ? await (e.memory as unknown as { links(p: string): Promise<unknown> }).links(i.path).catch(() => null) : null;
+      const out = { data: { path: i.path, frontmatter: doc.frontmatter, body: doc.body, ...(links ? { links } : {}) }, summary: `Read ${i.path}` };
       const untrusted = doc.frontmatter.taintedBy ?? (i.path.startsWith("knowledge/decisions/") ? `memory:${i.path}` : null);
       return untrusted ? Object.assign(out, { taintedBy: untrusted, untrusted: ["body"] }) : out;
     },
