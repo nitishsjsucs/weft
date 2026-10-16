@@ -4,16 +4,18 @@
 // employee's own text: React renders them as plain text, never markup.
 import { useMemo, useState } from "react";
 import { CircleCheck, CircleDashed, CircleX, Receipt } from "lucide-react";
-import { Badge, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
+import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { ExpenseBand, ExpenseCategory, W3_EXPENSES_TID as TID } from "@weft/contracts";
 import type { W3ExpensesPage, W3ExpensesRow } from "../../../../../../packages/contracts/src/ext/w3-expenses";
-import { errorText, useGet } from "@/lib/api/hooks";
+import { client, errorText, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 import { fmtDate } from "../format";
+import { AddExpense } from "./add-expense";
 import { ExpenseDrawer } from "./expense-drawer";
 import { BAND_LABEL, CATEGORY_LABEL, STATUS_LABEL, STATUS_TONE, usd } from "./labels";
 
 const BAND_ICON = { needs_review: <CircleDashed />, approved: <CircleCheck />, paid_out: <Receipt />, declined: <CircleX /> } as const;
+const ptDate = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 const SEVERITY_DOT = { block: "bg-red-9", review: "bg-amber-9", info: "bg-gray-8" } as const;
 
 function CheckDots({ row }: { row: W3ExpensesRow }) {
@@ -34,13 +36,24 @@ export function ExpensesView() {
   const page = q.data as W3ExpensesPage | undefined;
   const rows = useMemo(() => page?.data ?? [], [page]);
   const bands = ExpenseBand.options.filter((b) => !band || b === band);
+  const clock = useSimClock();
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const review = useMutation(async () => (await client.post("/v1/routines/:id/trigger", { params: { id: "rt_expense_review" }, body: {} })) as { routineRunId: string });
+  const onReview = async () => { const r = await review.run(); if (r) setNotice(`Review started (${r.routineRunId}): the agent explains each item and files one proposal per item in the Inbox.`); };
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
         title="Expenses"
         subtitle="Every claim is checked against the company policy as it arrives. Approvers decide one item at a time; approved items ride the next payroll, outside gross pay."
         meta={<Badge tone="outline" size="md">Synthetic data</Badge>}
+        actions={<>
+          <Button size="sm" variant="secondary" disabled={review.pending || !(page?.bands.needs_review)} onClick={() => void onReview()}>Review with agent</Button>
+          <Button size="sm" variant="primary" onClick={() => setAdding(true)}>Add expense</Button>
+        </>}
       />
+      {notice ? <div role="status" className="mb-4 rounded-lg bg-gray-3 px-3 py-2 text-1 text-gray-12">{notice}</div> : null}
+      {review.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(review.error)}</div> : null}
       {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(q.error)}</div> : null}
       <div className="mb-4 grid grid-cols-2 gap-2 tablet:grid-cols-4">
         {ExpenseBand.options.map((b) => (
@@ -96,6 +109,7 @@ export function ExpensesView() {
       </Card>
       <p className="mt-2 text-1 text-gray-10">Dots mark policy checks: red blocks approval, amber needs a person&apos;s judgment. Receipts are simulated images with a simulated extraction.</p>
       <ExpenseDrawer id={openId} onClose={() => setOpenId(null)} />
+      <AddExpense open={adding} onClose={() => setAdding(false)} today={clock.data ? ptDate(clock.data.now) : "2026-10-26"} />
     </div>
   );
 }

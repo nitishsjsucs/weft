@@ -132,6 +132,19 @@ describe("expenses (GP13)", () => {
     expect(PayrollRun.parse(await (await get(`/v1/payrolls/${next}`)).json()).totals!.reimbursements.amount).toBe(4_800 + 9_600 + 6_450 + 3_275 + 9_120);
   });
 
+  it("a submitted claim runs the engine at once and lands in needs review; people without payroll edit cannot submit", async () => {
+    const res = await post("/v1/expenses", { workerId: "wrk_0005", category: "mileage", merchant: "Personal car (demo)", amountCents: 6_000, transactionDate: "2026-10-27", businessPurpose: "Supplier visit", milesX10: 840 });
+    const out = (await res.json()) as { ok: boolean; data: { expense_id: string; status: string; checks: { rule: string; severity: string }[] } };
+    expect(out).toMatchObject({ ok: true, data: { status: "needs_review" } });
+    expect(out.data.checks).toEqual([expect.objectContaining({ rule: "MILEAGE_RATE", severity: "block" })]);
+    expect((await detail(out.data.expense_id)).allowedDecisions).toEqual(["return", "decline"]);
+    expect((await weft.db.select().from(events).where(eq(events.type, "expense.submitted"))).map((e) => e.subjectRef)).toContain(out.data.expense_id);
+    const sam = await post("/v1/expenses", { workerId: "wrk_0025", category: "office", merchant: "Paperworks Supply (demo)", amountCents: 1_200, transactionDate: "2026-10-27", businessPurpose: "Folders" }, "usr_sam");
+    expect(sam.status).toBe(422);
+    expect(await sam.json()).toMatchObject({ code: "NOT_PERMITTED" });
+    expect((await post("/v1/expenses", { workerId: "wrk_0005", category: "travel", merchant: "x", amountCents: 0, transactionDate: "2026-10-27", businessPurpose: "y" })).status).toBe(400);
+  });
+
   it("people who are not admins see only their own expenses", async () => {
     expect((await page("")).count).toBeGreaterThan(0);
     const sam = W3ExpensesPage.parse(await (await get("/v1/expenses", "usr_sam")).json());
