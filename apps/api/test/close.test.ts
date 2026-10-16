@@ -172,3 +172,32 @@ describe("restart survival", () => {
     }
   });
 });
+
+// The routines engine watches each (routine run, agent run) pair. POST /v1/sim/reset rebuilds the world and agent run
+// ids start over, so a watch keyed by the agent run id alone skipped the new run and its routine run never finalized
+// (caught by e2e GP4, which resets before each test).
+describe("routine finalization after a world reset", () => {
+  it("finalizes a routine run whose agent run reuses an id from before the reset", async () => {
+    const weft = await createTestWeft();
+    try {
+      const headers = { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" };
+      const fire = async () => {
+        const res = await weft.app.request("/v1/routines/rt_people_digest/trigger", { method: "POST", headers, body: "{}" });
+        expect(res.status, await res.clone().text()).toBe(200);
+        const { routineRunId } = (await res.json()) as { routineRunId: string };
+        const rr = await (weft.routines as unknown as { settled(id: string): Promise<{ status: string; agentRunId: string | null }> }).settled(routineRunId);
+        return { routineRunId, ...rr };
+      };
+      const first = await fire();
+      expect(first.status).toBe("done");
+      const reset = await weft.app.request("/v1/sim/reset", { method: "POST", headers, body: "{}" });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      const second = await fire();
+      expect(second.agentRunId).toBe(first.agentRunId);
+      expect(second.routineRunId).not.toBe(first.routineRunId);
+      expect(second.status).toBe("done");
+    } finally {
+      await weft.close();
+    }
+  });
+});

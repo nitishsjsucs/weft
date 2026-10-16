@@ -111,10 +111,15 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     pending.add(p);
     return p;
   };
-  /** Finalizes the routine run when its agent run writes a terminal step. Idempotent per agent run, so a rehydrated run is watched once. */
+  /**
+   * Finalizes the routine run when its agent run writes a terminal step. Idempotent per pair, so a rehydrated run is
+   * watched once. The key holds the routine run id too, because POST /v1/sim/reset rebuilds the world and agent run
+   * ids start over at run_0001 while routine run ids never repeat.
+   */
   const watch = (routineRunId: string, agentRunId: string) => {
-    if (watched.has(agentRunId)) return;
-    watched.add(agentRunId);
+    const key = `${routineRunId}:${agentRunId}`;
+    if (watched.has(key)) return;
+    watched.add(key);
     agent.subscribe(agentRunId, (step) => {
       if (step.stage === "terminal") void track(() => finalizeFromAgent(routineRunId, agentRunId));
     });
