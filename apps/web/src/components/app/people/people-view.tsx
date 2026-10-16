@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
 import { CircleCheck, CircleDashed, CircleSlash } from "lucide-react";
 import { Badge, Button, Card, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
-import { tid, type BenefitPlan, type Enrollment, type ItAccount, type Money, type Offer, type ToolOutcome, type Worker } from "@weft/contracts";
+import { tid, W3_TIMEOFF_TID, type BenefitPlan, type Enrollment, type ItAccount, type Money, type Offer, type ToolOutcome, type Worker } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, initials } from "../format";
 import { PageHeader } from "../page";
@@ -267,7 +267,7 @@ export function PersonView({ id }: { id: string }) {
           <TabsTrigger value="it">IT accounts</TabsTrigger>
           <TabsTrigger value="onboarding">Onboarding {list.length ? <Badge size="xs">{list.filter((t) => t.status !== "done").length}</Badge> : null}</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
-          {p.type === "employee" ? <TabsTrigger value="time-off">Time off</TabsTrigger> : null}
+          {p.type === "employee" ? <TabsTrigger value="time-off" data-testid={W3_TIMEOFF_TID.personTab}>Time off</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="profile">
           <div className="grid gap-6 laptop:grid-cols-[1fr_1fr] [&>*]:min-w-0">

@@ -6,9 +6,10 @@
 // gross unchanged. ("Viewing as" Imani joins the persona menu with w3-topbar-shell; until then her call goes through
 // the API here.)
 import { W3_TIMEOFF_TID as T } from "../packages/contracts/src/index";
-import { eventually, expect, openApp, SEED, test, WeftApi } from "./fixtures";
+import { eventually, expect, openApp, SEED, test, viewAs, WeftApi } from "./fixtures";
 
-type Req = { id: string; status: string; approverPrincipalId: string | null; checks: { rule: string }[] };
+type Req = { id: string; status: string; approverPrincipalId: string | null; decidedBy?: string | null; checks: { rule: string }[] };
+type DraftPage = { data: { workerId: string; gross: { amount: number }; earnings: { type: string; amountCents: number; hoursX100: number | null }[]; flags: { rule: string; severity: string }[] }[] };
 
 test("GP14: coverage conflict routed to the manager, approved on the Requests tab, pto line on the draft", async ({ page, weft, request }) => {
   await test.step("Requests: Ruth's vacation carries its checks and routing; Ben's sick day is blocked", async () => {
@@ -56,5 +57,55 @@ test("GP14: coverage conflict routed to the manager, approved on the Requests ta
     const lucy = page1.data.find((p) => p.workerId === "wrk_0038")!;
     expect(lucy.earnings.map((e) => [e.type, e.amountCents])).toEqual([["salary", 431_154], ["pto", 43_846]]);
     expect(lucy.gross.amount).toBe(475_000);
+  });
+});
+
+test("GP14b: an HR manager decides on the Requests tab; balances, policies, holidays, the person tab and the Home tile", async ({ page, weft }) => {
+  await test.step("Home: the Time off tile counts the three requests waiting for a decision", async () => {
+    await openApp(page, "/app");
+    await expect(page.getByTestId("home-time-off-pending")).toHaveText("3");
+  });
+
+  await test.step("the open draft flags Kenji's pending sick half day as info (salaried: gross does not move)", async () => {
+    const draft = await weft.get<DraftPage>(`/v1/payrolls/${SEED.draftRun}/paychecks`, { limit: 100 });
+    const kenji = draft.data.find((p) => p.workerId === "wrk_0034")!;
+    expect(kenji.flags.filter((f) => f.rule.includes("TIME_OFF") || f.rule === "PTO_LINE")).toEqual([expect.objectContaining({ rule: "PENDING_TIME_OFF_IN_PERIOD", severity: "info" })]);
+  });
+
+  await test.step("Sam (HR manager) approves Kenji's request, routed to the People admin, on the Requests tab", async () => {
+    await openApp(page, "/app/time-off");
+    await viewAs(page, "sam");
+    const kenji = page.getByTestId(T.requestRow("tor_0004"));
+    await expect(kenji).toContainText("Routed to Dana Whitfield (demo)");
+    await kenji.getByTestId(T.decide("approve")).click();
+    await expect(page.getByRole("status")).toContainText("Approved Kenji Watanabe (demo)'s sick leave");
+    const r = await eventually(() => weft.get<Req>("/v1/time-off/requests/tor_0004"), (x) => x.status === "approved" && x, "Kenji's request is approved");
+    expect(r.decidedBy).toBe("usr_sam");
+  });
+
+  await test.step("the draft now pays 4.00 h of sick leave out of the salary line, gross unchanged, flagged PTO_LINE", async () => {
+    const draft = await weft.get<DraftPage>(`/v1/payrolls/${SEED.draftRun}/paychecks`, { limit: 100 });
+    const kenji = draft.data.find((p) => p.workerId === "wrk_0034")!;
+    expect(kenji.earnings.map((e) => [e.type, e.amountCents, e.hoursX100])).toEqual([["salary", 620_000, null], ["sick", 30_000, 400]]);
+    expect(kenji.gross.amount).toBe(650_000);
+    expect(kenji.flags.map((f) => [f.rule, f.severity])).toContainEqual(["PTO_LINE", "info"]);
+    expect(kenji.flags.map((f) => f.rule)).not.toContain("PENDING_TIME_OFF_IN_PERIOD");
+  });
+
+  await test.step("Balances, Policies and Holidays tabs show the ledger, the sourced rules and the calendar", async () => {
+    await page.getByTestId(T.tab("balances")).click();
+    await expect(page.getByTestId(T.balance("wrk_0004", "top_vac_us"))).toContainText("84.38 h");
+    await page.getByTestId(T.tab("policies")).click();
+    await expect(page.getByTestId(T.policy("top_sick_ca"))).toContainText("Usable after 90 days of employment");
+    await expect(page.getByTestId(T.policy("top_sick_ca")).getByRole("link", { name: "CA DLSE paid sick leave FAQ" })).toBeVisible();
+    await page.getByTestId(T.tab("holidays")).click();
+    await expect(page.getByTestId(T.holiday("2026-11-27"))).toContainText("Day after Thanksgiving");
+  });
+
+  await test.step("the person page has a Time off tab with Ruth's balances and her pending request", async () => {
+    await openApp(page, "/app/people/wrk_0010");
+    await page.getByTestId(T.personTab).click();
+    await expect(page.getByTestId(T.balance("wrk_0010", "top_vac_us"))).toBeVisible();
+    await expect(page.getByTestId(T.requestRow("tor_0003"))).toHaveAttribute("data-status", "pending");
   });
 });

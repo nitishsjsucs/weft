@@ -16,6 +16,7 @@ export interface TimeOffRequestRow {
   reason: string; approverPrincipalId: string | null; routing: { principalId: string | null; why: string }[];
   checks: { rule: string; severity: "info" | "review" | "block"; message: string; evidence: { label: string; ref: string }[] }[];
   decidedBy: string | null; decidedAt: string | null; decisionNote: string | null;
+  source?: string; extRef?: string | null;
 }
 export interface TimeOffBalanceRow {
   workerId: string; policyId: string; policyName: string; typeName: string; typeKind: string;
@@ -38,6 +39,10 @@ const RULE_LABEL: Record<string, string> = {
   COVERAGE_CONFLICT: "Coverage", OVERLAPS_PAYROLL_DEADLINE: "Payroll deadline", INCLUDES_HOLIDAY: "Includes holidays", SHORT_NOTICE: "Short notice",
 };
 const PRINCIPAL_NAMES: Record<string, string> = { ...Object.fromEntries(PRINCIPALS.map((p) => [p.id, p.name])), usr_imani: "Imani Ferreira (demo)" };
+/** The People admin and HR managers decide anyone's request; the routed approver decides their own (the server re-checks both). */
+const DECIDER_ROLES = new Set(["admin", "hr_manager"]);
+const SOURCE_NAMES: Record<string, string> = { workday: "Workday" };
+const roleOf = (id: string) => (PRINCIPALS as readonly { id: string; role: string }[]).find((p) => p.id === id)?.role ?? null;
 export const principalName = (id: string | null) => (id ? PRINCIPAL_NAMES[id] ?? id : "nobody");
 const range = (r: Pick<TimeOffRequestRow, "startAt" | "endAt">) => (r.startAt === r.endAt ? fmtDate(r.startAt, { weekday: "short", month: "short", day: "numeric" }) : `${fmtDate(r.startAt)} to ${fmtDate(r.endAt)}`);
 const today = (iso: string | undefined) => (iso ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(iso)) : "2026-10-26");
@@ -56,7 +61,8 @@ export function CheckChips({ checks }: { checks: TimeOffRequestRow["checks"] }) 
 function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: string; onDone: (text: string) => void }) {
   const [note, setNote] = useState("");
   const decide = useMutation(async (decision: "approve" | "deny") => (await client.post("/v1/time-off/requests/:id/decide", { params: { id: r.id }, body: { decision, note } })) as ToolOutcome);
-  const canDecide = r.status === "pending" && (viewer === r.approverPrincipalId || viewer === "usr_dana");
+  const external = r.source && r.source !== "weft" ? SOURCE_NAMES[r.source] ?? r.source : null;
+  const canDecide = !external && r.status === "pending" && (viewer === r.approverPrincipalId || DECIDER_ROLES.has(roleOf(viewer) ?? ""));
   const blocked = r.checks.some((c) => c.severity === "block");
   const go = async (d: "approve" | "deny") => { const o = await decide.run(d); if (o && o.ok) onDone(o.status === "done" ? o.summary : `Proposal ${o.proposalId} is waiting in the Inbox`); };
   return (
@@ -66,7 +72,10 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
         <span className="text-[13px] text-gray-11">{r.policyName}</span>
         <span className="text-[13px] tabular-nums">{range(r)}</span>
         <span className="font-mono text-1 text-gray-11">{hrs(r.requestedMinutes)}</span>
-        <Badge tone={STATUS_TONE[r.status] ?? "gray"} className="ml-auto">{r.status}</Badge>
+        <span className="ml-auto flex items-center gap-1.5">
+          {external ? <Badge tone="outline" data-testid={TID.source(r.id)} title="Read-only in Weft: change it where it lives and the next sync updates it">Managed in {external}</Badge> : null}
+          <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{r.status}</Badge>
+        </span>
       </div>
       <CheckChips checks={r.checks} />
       {r.checks.filter((c) => c.severity !== "info").map((c) => <p key={c.rule} className="text-1 text-gray-11">{c.message}</p>)}
@@ -83,7 +92,7 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
           <Button size="sm" variant="primary" data-testid={TID.decide("approve")} disabled={decide.pending || blocked} title={blocked ? "A block check stands" : undefined} onClick={() => void go("approve")}><Check /> Approve</Button>
           <Button size="sm" data-testid={TID.decide("deny")} disabled={decide.pending} onClick={() => void go("deny")}><X /> Deny</Button>
         </div>
-      ) : r.status === "pending" ? <p className="text-1 text-gray-10">Waiting on {principalName(r.approverPrincipalId)}.</p> : null}
+      ) : r.status === "pending" && !external ? <p className="text-1 text-gray-10">Waiting on {principalName(r.approverPrincipalId)}.</p> : null}
     </li>
   );
 }
@@ -251,7 +260,7 @@ export function PoliciesTab() {
       {list.length === 0 ? <Card><Empty text={q.data ? "No policies." : "Loading..."} /></Card> : (
         <div className="grid gap-3 tablet:grid-cols-2">
           {list.map((p) => (
-            <Card key={p.id} className="flex flex-col gap-2 p-4" data-testid={`time-off-policy-${p.id}`}>
+            <Card key={p.id} className="flex flex-col gap-2 p-4" data-testid={TID.policy(p.id)}>
               <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{p.name}</span><Badge tone="outline">{p.jurisdiction}</Badge>{p.paid ? null : <Badge>Unpaid</Badge>}</div>
               <ul className="list-disc pl-5 text-[13px] text-gray-11">{ruleLines(p).map((l) => <li key={l}>{l}</li>)}</ul>
               {p.sources.length ? <p className="text-1 text-gray-10">Sources: {p.sources.map((s, i) => <span key={s.url}>{i ? ", " : ""}<a className="underline decoration-gray-7 underline-offset-2 hover:text-gray-12" href={s.url} target="_blank" rel="noreferrer">{s.label}</a></span>)}</p> : null}
@@ -274,7 +283,7 @@ export function HolidaysTab() {
         {list.length === 0 ? <Empty text={q.data ? "No holidays." : "Loading..."} /> : (
           <Table className="text-[13px]">
             <THead><TR><TH>Date</TH><TH>Holiday</TH></TR></THead>
-            <TBody>{list.map((h) => <TR key={h.date}><TD className="h-9 whitespace-nowrap tabular-nums">{fmtDate(h.date, { weekday: "short", month: "short", day: "numeric" })}</TD><TD className="h-9">{h.name}</TD></TR>)}</TBody>
+            <TBody>{list.map((h) => <TR key={h.date} data-testid={TID.holiday(h.date)}><TD className="h-9 whitespace-nowrap tabular-nums">{fmtDate(h.date, { weekday: "short", month: "short", day: "numeric" })}</TD><TD className="h-9">{h.name}</TD></TR>)}</TBody>
           </Table>
         )}
       </Card>
