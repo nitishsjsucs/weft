@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "integrations__list_sync_items", "arguments": "{{derived.integrations.list_sync_items}}" },
+          { "type": "function_call", "name": "documents__send_offer", "arguments": "{{derived.documents.send_offer}}" }
+        ]
+      },
+      {
+        "output": [{ "type": "text", "text": "The Greenhouse hire is a draft offer now. The Boulder office is not mapped to a Weft workplace yet, so the offer uses Remote US with the state from the office location. Sending the offer waits for approval in the Inbox." }]
+      }
+    ]
+  }
+}
