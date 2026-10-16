@@ -111,6 +111,9 @@ report, digest, milestones) whose Try it fires an attended run; every card shows
 - PREBUILT id lists in `packages/routines/test/engine.test.ts` and `apps/api/test/routines.test.ts` gained
   `rt_contractor_forms`, `rt_exec_briefing`, `rt_milestones`, `rt_monthly_exec_report`, `rt_new_hire_ready` and
   `rt_thirty_day_checkin`. Other tracks touch the same two lines; merge by taking the sorted union.
+- `apps/api/test/offers.test.ts` (the t2 registry rules), own commit "contract: t2 registry rule samples ...":
+  required-field samples for `notices.escalate`, `onboarding.send_checkins` and `onboarding.submit_checkin`, and
+  `onboarding.send_checkins` joins the autoAllow untainted list. No rule changed.
 - `W3_ROUTINES_TID` (this track's block) gained `autonomyLevel`, `autonomyStatus`, `settingsAgent`,
   `settingChatCanPropose`, `settingAllowAutoAutonomy` and `noticeEscalation`.
 - `GET /v1/routines` rows also carry `lastRun` and `nextRunAt` (a superset of `RoutineDef`).
