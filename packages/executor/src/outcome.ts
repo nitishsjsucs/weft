@@ -2,9 +2,25 @@
 import type { RefusalCode, ToolOutcome } from "@weft/contracts";
 import type { WeftCommand } from "@weft/core";
 
-export function refusal(code: RefusalCode, message: string, tainted: boolean, def?: WeftCommand | null): ToolOutcome {
+/**
+ * A refusal's hint and example: a Refused error's own extra.hint and extra.example win (they carry values derived for
+ * this call, such as the tax.update_rate arguments from the notice), then the command's static errorHints.
+ */
+export function refusal(code: RefusalCode, message: string, tainted: boolean, def?: WeftCommand | null, derived?: { hint?: string | null; example?: unknown } | null): ToolOutcome {
   const h = def?.errorHints?.[code];
-  return { ok: false, refusal: { code, message, hint: h?.hint ?? null, example: h?.example ?? null }, tainted };
+  const hint = derived?.hint ?? h?.hint ?? null;
+  const example = derived?.example ?? h?.example ?? null;
+  return { ok: false, refusal: { code, message, hint, example }, tainted };
+}
+
+/** extra.hint and extra.example from a thrown Refused error, if any. */
+export function hintsOfError(err: unknown): { hint?: string | null; example?: unknown } | null {
+  if (!err || typeof err !== "object") return null;
+  const e = err as { _tag?: string; extra?: { hint?: unknown; example?: unknown } };
+  if (e._tag !== "Refused" || !e.extra) return null;
+  const hint = typeof e.extra.hint === "string" ? e.extra.hint : null;
+  const example = e.extra.example ?? null;
+  return hint || example ? { hint, example } : null;
 }
 
 const KNOWN = new Set<string>(["UNKNOWN_COMMAND", "UNAVAILABLE", "DELEGATED_ONLY", "INVALID_INPUT", "UNKNOWN_REFERENCE", "NOT_PERMITTED", "OVER_CEILING",

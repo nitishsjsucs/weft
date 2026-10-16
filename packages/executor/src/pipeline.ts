@@ -9,7 +9,7 @@ import { execCalls, leases, proposals, type DbTx } from "@weft/db";
 import { appendAction } from "./chain";
 import { digestOf } from "./digest";
 import type { Engine } from "./engine";
-import { codeOfError, refusal } from "./outcome";
+import { codeOfError, hintsOfError, refusal } from "./outcome";
 import { policy, RISK_RANK, riskOf } from "./policy";
 import { genericPreview, insertProposal, proposeCall, type ProposalRow } from "./proposals";
 import { findUnknownReference } from "./references";
@@ -71,7 +71,10 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
   const def = e.registry.def(command) ?? null;
   if (!def) return { def, outcome: refusal("UNKNOWN_COMMAND", `No command named ${command}`, t()) };
   const done = (outcome: ToolOutcome) => ({ outcome, def });
-  const refuse = (code: Parameters<typeof refusal>[0], message: string) => done(refusal(code, message, t(), def));
+  const refuse = (code: Parameters<typeof refusal>[0], message: string, err?: unknown) => {
+    const d = hintsOfError(err);
+    return done(refusal(code, message, t(), def, d ? { hint: d.hint ? e.redactor.redact(d.hint) : null, example: d.example == null ? null : e.redactor.value(d.example) } : null));
+  };
 
   // Tier and access.
   if (scope.caller === "agent") {
@@ -119,7 +122,7 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
   const readDeps = makeDeps(e, tx);
   let amount: number | null = null;
   try { amount = def.amountCents ? await def.amountCents(input, ctx, readDeps) : null; } catch (err) {
-    return refuse(codeOfError(err) ?? "INTERNAL", e.redactor.redact(err instanceof Error ? err.message : String(err)));
+    return refuse(codeOfError(err) ?? "INTERNAL", e.redactor.redact(err instanceof Error ? err.message : String(err)), err);
   }
   const gated = scope.caller === "agent" || scope.caller === "mcp" || scope.caller === "approved";
   let ceiling = null as null | { key: string; perCall: number | null; day: number | null; daySpent: number };
@@ -134,7 +137,7 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
   const wantsPreview = def.effect !== "read" && (scope.caller === "agent" || scope.caller === "mcp" || scope.caller === "approved");
   if (wantsPreview) {
     try { preview = def.preview ? await def.preview(input, ctx, readDeps) : genericPreview(def, input, amount); } catch (err) {
-      return refuse(codeOfError(err) ?? "INTERNAL", e.redactor.redact(err instanceof Error ? err.message : String(err)));
+      return refuse(codeOfError(err) ?? "INTERNAL", e.redactor.redact(err instanceof Error ? err.message : String(err)), err);
     }
     if (preview.moneyCents === null && amount !== null) preview = { ...preview, moneyCents: amount };
   }
@@ -180,7 +183,7 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
       return done({ ok: true, status: "done", resultId: "res_readonly", data: e.redactor.value(out.data), summary: e.redactor.redact(out.summary),
         actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" });
     } catch (err) {
-      return refuse(codeOfError(err) ?? "INTERNAL", e.redactor.redact(err instanceof Error ? err.message : String(err)));
+      return refuse(codeOfError(err) ?? "INTERNAL", e.redactor.redact(err instanceof Error ? err.message : String(err)), err);
     }
   }
 
@@ -243,7 +246,7 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
     const code = codeOfError(err) ?? "INTERNAL";
     const msg = e.redactor.redact(err instanceof Error ? err.message : String(err));
     if (code === "INTERNAL") e.log(e.redactor.redact(err instanceof Error ? (err.stack ?? err.message) : String(err)));
-    return refuse(code, code === "INTERNAL" ? `Internal error in ${def.name}: ${msg}` : msg);
+    return refuse(code, code === "INTERNAL" ? `Internal error in ${def.name}: ${msg}` : msg, err);
   }
 }
 
