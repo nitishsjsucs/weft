@@ -30,11 +30,15 @@ export function HomeView() {
   const runs = useGet("/v1/payrolls", { query: { limit: 10 } });
   const props = useGet("/v1/proposals", { query: { status: "pending", limit: 100 }, refreshMs: 5_000 });
   const accounts = useGet("/v1/tax/accounts");
-  const workers = useGet("/v1/workers", { query: { limit: 100 } });
+  const workers = useGet("/v1/workers", { query: { type: "employee", limit: 100 } });
   const upcoming = (runs.data?.data ?? []).filter((r) => r.status !== "processed").slice(0, 3);
   const approvals = (props.data?.data ?? []).filter((p) => p.kind !== "suggestion");
-  const ws = workers.data?.data ?? [];
-  const in30 = now ? ws.filter((w) => new Date(`${w.startDate}T12:00:00Z`).getTime() >= new Date(now).getTime() - 30 * 86_400_000).length : 0;
+  // Headcount (gate report item 5): active employees, with onboarding counted apart; together with offboarding they
+  // make GET /v1/stats `employees`. Contractors are not headcount.
+  const ws = (workers.data?.data ?? []).filter((w) => w.type === "employee");
+  const active = ws.filter((w) => w.status === "active");
+  const onboarding = ws.filter((w) => w.status === "onboarding").length;
+  const in30 = now ? active.filter((w) => new Date(`${w.startDate}T12:00:00Z`).getTime() >= new Date(now).getTime() - 30 * 86_400_000).length : 0;
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
       <h1 className="mb-8 text-7 font-semibold tracking-tight">{greeting(now)}, {first}</h1>
@@ -66,8 +70,11 @@ export function HomeView() {
           </ul>
         </Widget>
         <Widget testid="home-widget-headcount" icon={<Users />} title="Headcount" href="/app/people">
-          <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{workers.data ? workers.data.count : "-"}</span>{in30 ? <span className="text-2 font-medium text-green-11">+{in30}</span> : null}<span className="text-1 text-gray-10">30d</span></div>
-          <div className="px-4 pt-1 pb-4 text-1 text-gray-10">People on payroll, including onboarding</div>
+          <div className="flex items-baseline gap-2 px-4 pt-4"><span data-testid="home-headcount-active" className="text-7 font-semibold tabular">{workers.data ? active.length : "-"}</span>{in30 ? <span className="text-2 font-medium text-green-11">+{in30}</span> : null}<span className="text-1 text-gray-10">30d</span></div>
+          <div className="flex flex-wrap items-baseline gap-x-3 px-4 pt-1 pb-4 text-1 text-gray-10">
+            <span>Active employees</span>
+            {workers.data ? <span data-testid="home-headcount-onboarding"><span className="font-medium text-gray-11 tabular">{onboarding}</span> onboarding</span> : null}
+          </div>
         </Widget>
       </div>
     </div>
