@@ -5,6 +5,10 @@
 Three lenses (correctness and security, harness, product and brand) reviewed main at 5e30a37. Every finding below was
 checked against the code before it was fixed or set aside; each fix landed on main with a test where one applies.
 
+Gate after the fixes, on a fresh clone of main at c716c93 (21:04 to 21:07 PDT): install ok, `pnpm test` 596 of 596,
+typecheck 15 of 15, build ok, `pnpm demo` exit 0 (GP1 to GP12, audit chain verifies), `pnpm e2e` 30 of 30,
+`lint:prose --commits` and `lint:brand` ok. No live model calls were made in this round.
+
 ### Fixed
 
 | Lens | Finding | Commit subject |
