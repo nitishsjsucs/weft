@@ -33,8 +33,9 @@ Things to try in the demo:
    has not elected in open enrollment. **Contractors**: pay the three contractors and advance the clock two days.
 9. **Memory**: browse the agent's git-backed memory with wiki-links, backlinks and per-file history.
 
-The "Viewing as" switcher in the header is a demo control for acting as Dana, Theo or Sam; new hires with a sent
-offer are listed there too and open the portal.
+The "Viewing as" switcher in the header is a demo control for acting as Dana, Theo or Sam; new hires whose offer
+was sent from Hiring are listed there too and open the portal (the seeded offer for Noor Castellanos (demo) is
+accepted from People > Offers instead).
 
 To see the golden paths run without a browser, `pnpm demo` seeds one world in `.data-demo/` and walks GP1 to GP12 in
 about 5 seconds through the same HTTP routes the UI, the portal and MCP clients use, with the scripted provider (it
@@ -150,7 +151,7 @@ OpenAI provider calls `/v1/responses` only. Time and memory were not the reason.
 
 Wave 2 screenshots, taken at 1440 by 900 from `pnpm dev --fresh` on the gate clone at `adbf752` with the agent panel
 docked: `13-hiring` (an offer sent, the invite in the email simulator outbox), `14-portal` (the new-hire portal at 0
-of 7), `15-offboarding-case` (Imani's eight steps with four proposals), `16-benefits-reconciliation` (the three
+of 7), `15-offboarding-case` (Imani's eight steps with three proposals; SSO is skipped because the seed has no SSO account), `16-benefits-reconciliation` (the three
 October findings) and `17-memory` (the company one-pager after a digest).
 
 Wave 1 screenshots of Weft's own UI from that dev server, 1440 by 900 unless noted, are in
@@ -211,7 +212,11 @@ time; the action chain verifies at the end of every scenario.
 - The new routines (`rt_onboarding_nudge`, `rt_open_enrollment`, `rt_memory_digest`) ship disabled; enable them in
   Routines. A scripted nudge run posts one hire's nudge per run (a live model posts all of them). `memory.forget` is
   still refused; task agents are not started.
-- The portal refuses HSA elections; a state certificate's extra withholding is recorded but not used in payroll.
+- The portal refuses HSA elections and an exempt state certificate; a state certificate's extra withholding is used
+  in payroll.
+- The offer builder has no Manager or Workplace field: the manager defaults to the department lead and the hire lands
+  as Remote US (the API accepts `manager_id` and `workplace_id`).
+- Open enrollment reminders go to each person by email; #general gets only an anonymous count.
 - Track notes with the full lists live in `docs/tracks/` and `docs/wave2.md`.
 
 ## Sandboxes and a free hosted option

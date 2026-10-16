@@ -241,7 +241,7 @@ function I9Form({ busy, nameField, errorLine, onSubmit }: FormProps<FormData>) {
       <Field label="Document"><select data-testid={T.i9DocKind} className={field} value={f.documentKind} onChange={(e) => setF({ ...f, documentKind: e.target.value })}><option value="us_passport">US passport</option><option value="permanent_resident_card">Permanent resident card</option><option value="drivers_license_and_ssn_card">Driver's license and SSN card</option></select></Field>
       <Field label="Last 4 of the document number"><input required data-testid={T.i9Last4} maxLength={4} className={field} value={f.last4} onChange={(e) => setF({ ...f, last4: e.target.value })} /></Field>
       <Field label="Expires"><input type="date" className={field} value={f.expiresOn} onChange={(e) => setF({ ...f, expiresOn: e.target.value })} /></Field>
-      <Field label="ID image (PNG, JPEG, WebP or PDF, up to 5 MB)"><input required type="file" data-testid={T.i9File} accept="image/png,image/jpeg,image/webp,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
+      <Field label="ID image (PNG, JPEG, WebP or PDF, up to 5 MB)"><input required type="file" data-testid={T.i9File} className="text-1 text-gray-11 file:mr-3 file:h-8 file:cursor-pointer file:rounded-lg file:border file:border-[var(--app-border)] file:bg-card file:px-3 file:text-2 file:text-foreground" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
       <div className="tablet:col-span-2">{nameField}</div>
       <div className="tablet:col-span-2">{errorLine}</div>
       <div><Submit busy={busy} testId={T.i9Submit}>Sign and submit I-9</Submit></div>

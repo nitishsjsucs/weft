@@ -92,7 +92,7 @@ export function PeopleView() {
       <Tabs defaultValue="people">
         <TabsList>
           <TabsTrigger value="people">People {workers.data ? <Badge size="xs">{workers.data.count}</Badge> : null}</TabsTrigger>
-          <TabsTrigger value="offers">Offers {offers.data ? <Badge size="xs">{offers.data.data.filter((o) => o.status === "sent").length}</Badge> : null}</TabsTrigger>
+          <TabsTrigger value="offers">Offers {offers.data ? <Badge size="xs" title="Sent offers waiting on the candidate">{offers.data.data.filter((o) => o.status === "sent").length} to act on</Badge> : null}</TabsTrigger>
         </TabsList>
         <TabsContent value="people">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name, title or state" aria-label="Filter people" className="mb-3 h-8 w-full max-w-[320px] rounded-lg border border-[var(--app-border)] bg-card px-3 text-[13px]" />
