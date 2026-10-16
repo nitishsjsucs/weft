@@ -130,7 +130,38 @@ export async function openAdverse(tx: DbTx, r: OrderRow) {
   const rows = await tx.select().from(extLinks).where(and(eq(extLinks.weftType, "screening_order"), eq(extLinks.weftId, r.id), eq(extLinks.extType, "adverse_action"), inArray(extLinks.status, ["linked"])));
   return rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null;
 }
+/** Business days added to the waiting period for each dispute (California's 5 business days, applied everywhere). */
+export const DISPUTE_EXTENSION_BUSINESS_DAYS = 5;
+const PT_WEEKDAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short" });
+/** Adds n business days (Monday to Friday by the PT calendar) in whole 24 hour steps. */
+export function addBusinessDaysPt(iso: string, n: number): string {
+  let t = Date.parse(iso);
+  for (let left = n; left > 0;) {
+    t += 86_400_000;
+    const day = PT_WEEKDAY.format(new Date(t));
+    if (day !== "Sat" && day !== "Sun") left -= 1;
+  }
+  return new Date(t).toISOString();
+}
 /** The earliest instant the final step may run: the pre-adverse time plus the waiting period, plus 5 business days per dispute. */
-export function finalNotAllowedBefore(preAdverseAt: string): string {
-  return new Date(Date.parse(preAdverseAt) + W3_SCREENING_WAITING_DAYS * 86_400_000).toISOString();
+export function finalNotAllowedBefore(preAdverseAt: string, disputes = 0): string {
+  let t = new Date(Date.parse(preAdverseAt) + W3_SCREENING_WAITING_DAYS * 86_400_000).toISOString();
+  for (let k = 0; k < disputes; k++) t = addBusinessDaysPt(t, DISPUTE_EXTENSION_BUSINESS_DAYS);
+  return t;
+}
+/**
+ * How many times the order entered the disputed state since `since` (the pre-adverse time), read from the order's
+ * screening.status_changed events. Repeated disputed events without a status in between count once.
+ */
+export async function disputesSince(tx: DbTx, orderId: string, since: string): Promise<number> {
+  const rows = await tx.select({ ts: eventRows.ts, payloadJson: eventRows.payloadJson }).from(eventRows)
+    .where(and(eq(eventRows.type, "screening.status_changed"), eq(eventRows.subjectRef, orderId)));
+  let n = 0;
+  let prev: string | null = null;
+  for (const r of rows.filter((x) => x.ts >= since).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))) {
+    const status = (JSON.parse(r.payloadJson) as { status?: string }).status ?? null;
+    if (status === "disputed" && prev !== "disputed") n += 1;
+    prev = status;
+  }
+  return n;
 }

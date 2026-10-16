@@ -44,12 +44,13 @@ export const screeningFollowUp: Precheck = async (ctx, exec) => {
   const open = ((obj(st.data).orders ?? []) as OrderLine[]).filter((o) => !CLOSED.has(o.status));
   if (open.length) return { action: "skip", reason: `Offer ${offerId} already has background check ${open.map((o) => `${o.order_id} (${o.status})`).join(", ")}.` };
   const pk = await exec.exec(ctx.companyId, "screening.list_packages", {});
-  const packages = pk.ok && pk.status === "done" ? ((obj(pk.data).packages ?? []) as PackageLine[]) : [];
+  const pkData = pk.ok && pk.status === "done" ? obj(pk.data) : {};
+  const packages = (pkData.packages ?? []) as PackageLine[];
   if (!packages.length) return { action: "skip", reason: "No background check package is configured." };
   const workerId = str(obj(ctx.payload).worker_id);
   return {
     action: "run", severity: "digest", subjectRefs: workerId ? [offerId, workerId] : [offerId],
-    findings: { offer_id: offerId, worker_id: workerId, vendor: str(obj(pk.data).vendor), packages: packages.map((p) => ({ slug: p.slug, name: p.name, price: p.price_display, phase: p.phase })) },
+    findings: { offer_id: offerId, worker_id: workerId, vendor: str(pkData.vendor), packages: packages.map((p) => ({ slug: p.slug, name: p.name, price: p.price_display, phase: p.phase })) },
     derivedArgs: { offer_id: offerId, "screening.order": { offer_id: offerId } },
   };
 };

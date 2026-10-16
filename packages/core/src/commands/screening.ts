@@ -20,7 +20,7 @@ import type { CommandDeps, WeftCommand } from "../shared/deps";
 import { DomainRefusal, ptDateOf, readCommand, riskOf, writeCommand } from "../demo/define";
 import { displayName, nameRef } from "../people/names";
 import {
-  acceptedOffer, connectorOf, defaultPackage, ensureBackgroundTask, finalNotAllowedBefore, linkAdverse, loadOrder, openAdverse, openOrders, orderByVendorRef,
+  acceptedOffer, connectorOf, defaultPackage, disputesSince, ensureBackgroundTask, finalNotAllowedBefore, linkAdverse, loadOrder, openAdverse, openOrders, orderByVendorRef,
   orderViews, packageRow, screeningVendor, syncBackgroundTask, workLocationOf, type OrderRow,
 } from "../screening/orders";
 import type { ExecContext } from "@weft/contracts";
@@ -222,7 +222,8 @@ export const sendFinalAdverse = writeCommand({
     r = (await applyVendorSnapshot(deps, r, ctx.now)).next;
     if (r.timerPaused || r.status === "disputed") throw new DomainRefusal("DOMAIN_SCREENING_TIMER_PAUSED", `${r.id} is disputed; the waiting period is paused`, "Wait for the dispute to finish", null);
     const link = await openAdverse(deps.tx, r);
-    const notBefore = link ? finalNotAllowedBefore(link.createdAt) : ctx.now;
+    // California: a dispute adds 5 business days to the candidate's response window; the rule applies everywhere.
+    const notBefore = link ? finalNotAllowedBefore(link.createdAt, await disputesSince(deps.tx, r.id, link.createdAt)) : ctx.now;
     if (ctx.now < notBefore) throw new DomainRefusal("DOMAIN_SCREENING_WAITING_PERIOD", `The waiting period for ${r.id} ends ${notBefore}`, `Wait until ${ptDateOf(notBefore)}`, null);
     await deps.tx.update(screeningOrders).set({ adjudication: "post_adverse" }).where(eq(screeningOrders.id, r.id));
     const next = { ...r, adjudication: "post_adverse" };
