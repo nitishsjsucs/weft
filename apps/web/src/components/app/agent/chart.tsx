@@ -12,7 +12,8 @@ import { fmtDate } from "../format";
 import type { ReportRef } from "./run-steps";
 
 /** Fixed categorical order (never cycled): blue-11, accent-9, violet-9, green-9, amber-11, then gray for a sixth. */
-export const SERIES_COLORS = ["var(--blue-11)", "var(--accent-9)", "var(--violet-9)", "var(--green-9)", "var(--amber-11)", "var(--gray-9)"] as const;
+// No brand accent here: the accent is for primary actions and the Inbox count, and a red series reads as an error.
+export const SERIES_COLORS = ["var(--blue-11)", "var(--violet-9)", "var(--green-9)", "var(--amber-11)", "var(--gray-9)", "var(--blue-9)"] as const;
 type Unit = ChartSpec["series"][number]["unit"];
 type Row = Record<string, string | number>;
 

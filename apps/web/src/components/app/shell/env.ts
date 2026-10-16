@@ -13,8 +13,10 @@ export interface ProviderInfo { id: string; model: string; label: string; live: 
  */
 export function modelState(provider: ProviderInfo | undefined, failed: boolean): ModelState {
   if (!provider) return failed ? "offline" : "loading";
+  // Local providers report live: false (they are not metered), so they are recognised before the scripted check.
+  if (/^local\b/i.test(provider.label) || provider.id === "local" || provider.id === "openai_compat") return "local";
   if (!provider.live) return "scripted";
-  return /^local\b/i.test(provider.label) || provider.id === "local" ? "local" : "live";
+  return "live";
 }
 
 export const MODE_LABEL: Record<ModelState, string> = {

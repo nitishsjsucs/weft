@@ -15,7 +15,7 @@ import { ExpenseStatus, NoticeStatus, OfferStatus, PaycheckStatus, PayrollRunSta
 
 const plain = (s: string) => s.replace(/[  ]/g, " ");
 const OPENAI = { id: "openai", model: "gpt-5.6-luna", label: "OpenAI gpt-5.6-luna", live: true };
-const LOCAL = { id: "openai_compat", model: "mlx-community/Qwen3.6-27B", label: "Local Qwen3.6-27B", live: true };
+const LOCAL = { id: "openai_compat", model: "mlx-community/Qwen3.6-27B", label: "Local Qwen3.6-27B", live: false };   // as the real provider reports
 const SCRIPTED = { id: "scripted", model: "scripted", label: "Scripted, no model", live: false };
 const SEED_NOW = "2026-10-26T15:30:00.000Z"; // Monday 8:30 AM PT
 
