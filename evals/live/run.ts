@@ -145,6 +145,20 @@ if (bad.length) {
   console.error(`eval:live: unknown case ${bad.join(", ")}; use L1 to L4`);
   process.exit(2);
 }
+/**
+ * A routine run finalizes (status, summary, left for human) after its agent run settles. Wait for every routine
+ * run to leave queued or running before the world closes, or that last write lands on a closed client and the
+ * unhandled rejection ends the process before any result is written.
+ */
+async function drainRoutines(w: W): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    const open = (await w.db.select().from(db.routineRuns)).filter((r) => r.status === "queued" || r.status === "running");
+    if (!open.length) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  await new Promise((r) => setTimeout(r, 250));
+}
+
 const ids = args.length ? args : ["L1", "L2", "L3"];
 const results: CaseResult[] = [];
 for (const id of ids) {
@@ -156,6 +170,7 @@ for (const id of ids) {
   } catch (e) {
     results.push({ id, pass: false, reasons: [e instanceof Error ? e.message : String(e)], runId: null, modelSteps: 0, toolCalls: 0, invalidArgs: 0, tokens: null, cacheHitRatio: null, usd: 0, wallMs: 0, notes: {} });
   } finally {
+    if (w) await drainRoutines(w).catch(() => undefined);
     await w?.close();
   }
 }
