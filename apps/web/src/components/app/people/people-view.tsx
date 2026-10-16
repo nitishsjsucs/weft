@@ -10,6 +10,7 @@ import { fmtDate, initials } from "../format";
 import { PageHeader } from "../page";
 import { DocumentLibrary } from "../documents/document-library";
 import { PersonActions } from "../offboarding/person-actions";
+import { BalancesTab, RequestsTab } from "../time-off/time-off-view";
 
 const DEPT: Record<string, string> = { dpt_engineering: "Engineering", dpt_hardware: "Hardware", dpt_operations: "Operations", dpt_people: "People", dpt_finance: "Finance", dpt_gtm: "Go-to-market" };
 const deptName = (id: string | null) => (id ? (DEPT[id] ?? id) : "-");
@@ -266,6 +267,7 @@ export function PersonView({ id }: { id: string }) {
           <TabsTrigger value="it">IT accounts</TabsTrigger>
           <TabsTrigger value="onboarding">Onboarding {list.length ? <Badge size="xs">{list.filter((t) => t.status !== "done").length}</Badge> : null}</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
+          {p.type === "employee" ? <TabsTrigger value="time-off">Time off</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="profile">
           <div className="grid gap-6 laptop:grid-cols-[1fr_1fr] [&>*]:min-w-0">
@@ -281,6 +283,7 @@ export function PersonView({ id }: { id: string }) {
         <TabsContent value="it">{tab === "it" ? <ItTab id={id} /> : null}</TabsContent>
         <TabsContent value="onboarding">{onboarding}</TabsContent>
         <TabsContent value="documents">{tab === "documents" ? <DocumentLibrary workerId={id} /> : null}</TabsContent>
+        <TabsContent value="time-off">{tab === "time-off" ? <div className="flex flex-col gap-6"><BalancesTab workerId={id} /><RequestsTab workerId={id} /></div> : null}</TabsContent>
       </Tabs>
     </div>
   );
