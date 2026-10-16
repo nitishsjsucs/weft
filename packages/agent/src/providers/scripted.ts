@@ -20,6 +20,12 @@ export interface ScriptedProviderOptions {
   scripts?: Record<string, Script>;
   /** Force a script for every run (tests); otherwise routines use <routineId>.json and chat uses `match`. */
   scenario?: string;
+  /**
+   * Optional variant chooser for routine runs. The scripted provider stands in for a model, so it may look at the
+   * world to decide how that model behaves (for example, a model that reads the notice body when the body carries an
+   * injected line). A returned name is used only when that script exists. Live providers never see this hook.
+   */
+  variant?: (info: { routineId: string; trigger: Record<string, unknown> }) => Promise<string | null> | string | null;
 }
 
 export const SCRIPTED_LABEL = "Scripted, no model";
@@ -158,9 +164,13 @@ export function scriptedProvider(opts: ScriptedProviderOptions): ModelProvider {
     return [...names].sort();
   };
 
-  function pick(req: ModelStepRequest, parsed: Parsed): string | null {
+  async function pick(req: ModelStepRequest, parsed: Parsed): Promise<string | null> {
     if (opts.scenario) return opts.scenario;
     const routine = req.cacheKey.split(":")[2] ?? "chat";
+    if (routine !== "chat" && opts.variant) {
+      const v = await opts.variant({ routineId: routine, trigger: parsed.trigger });
+      if (v && load(v)) return v;
+    }
     if (routine !== "chat" && load(routine)) return routine;
     for (const name of allNames()) {
       const s = load(name);
@@ -179,7 +189,7 @@ export function scriptedProvider(opts: ScriptedProviderOptions): ModelProvider {
       // Only this provider's own items count, so a run that fell back from a live model to templates starts at step 0.
       const own = req.history.filter((h) => h.kind === "model" && h.provider === "scripted");
       const stepIndex = own.length;
-      const name = pick(req, parsed);
+      const name = await pick(req, parsed);
       const agent = req.agentKind === "main" ? "main" : req.agentKind.slice(5);
       const steps = name ? load(name)?.agents[agent] : undefined;
       const step = steps?.[stepIndex];

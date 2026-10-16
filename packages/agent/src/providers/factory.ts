@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { ModelProvider, SpendLedger } from "@weft/contracts";
 import { loadSecret, type Env } from "../secrets";
 import { openaiProvider } from "./openai";
-import { scriptedProvider } from "./scripted";
+import { scriptedProvider, type ScriptedProviderOptions } from "./scripted";
 
 export class ProviderError extends Error {
   constructor(readonly code: "LIVE_PROVIDER_IN_TEST" | "PROVIDER_CONFIG", message: string) {
@@ -19,7 +19,11 @@ export const DEFAULT_MODEL = "gpt-5.6-luna";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 export const DEFAULT_SCRIPTS_DIR = join(REPO_ROOT, "scenarios");
 
-export interface CreateProviderOptions { env: Env; ledger: SpendLedger; testMode: boolean }
+export interface CreateProviderOptions {
+  env: Env; ledger: SpendLedger; testMode: boolean;
+  /** Scripted provider only: picks a routine script variant (see ScriptedProviderOptions.variant). */
+  scriptVariant?: ScriptedProviderOptions["variant"];
+}
 
 export function isTestEnv(env: Env, testMode: boolean): boolean {
   return testMode || Boolean(env.VITEST) || env.NODE_ENV === "test";
@@ -28,7 +32,7 @@ export function isTestEnv(env: Env, testMode: boolean): boolean {
 export function createProvider(opts: CreateProviderOptions): ModelProvider {
   const { env } = opts;
   const which = (env.WEFT_LLM ?? "").trim() || "scripted";
-  if (which === "scripted") return scriptedProvider({ scriptsDir: env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR });
+  if (which === "scripted") return scriptedProvider({ scriptsDir: env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR, variant: opts.scriptVariant });
   if (isTestEnv(env, opts.testMode) && env.WEFT_LIVE_OPENAI !== "1") {
     throw new ProviderError("LIVE_PROVIDER_IN_TEST", `WEFT_LLM=${which} is a live provider; tests use the scripted provider unless WEFT_LIVE_OPENAI=1`);
   }

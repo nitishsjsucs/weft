@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "notices__get", "arguments": { "notice_id": "{{trigger.notice_id}}", "response_format": "detailed" } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "notices__get", "status": "done" }] },
+        "output": [
+          { "type": "function_call", "name": "notices__draft_response", "arguments": { "notice_id": "{{trigger.notice_id}}", "note": "We will apply the new rate from the effective date." } },
+          { "type": "function_call", "name": "tax__update_rate", "arguments": "{{derived.tax.update_rate}}" },
+          { "type": "function_call", "name": "notices__send_response", "arguments": { "notice_id": "{{trigger.notice_id}}" } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "notices__draft_response" }, { "tool": "tax__update_rate", "status": "pending_approval" }, { "tool": "notices__send_response", "status": "pending_approval" }] },
+        "output": [{ "type": "text", "text": "I read the full notice, drafted the reply and proposed the rate change and the filing. Both wait for approval in the inbox." }]
+      }
+    ]
+  }
+}

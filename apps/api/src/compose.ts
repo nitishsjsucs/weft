@@ -6,7 +6,8 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isWeftError, NotImplemented, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
-import { closeDb, migrate, openDb } from "@weft/db";
+import { eq } from "drizzle-orm";
+import { closeDb, migrate, notices, openDb, type Db } from "@weft/db";
 import { commands, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createExecutor } from "@weft/executor";
@@ -60,6 +61,18 @@ const placeholderProvider: ModelProvider = {
   step: async () => { throw new NotImplemented("provider.step (t4-agent)"); },
 };
 
+// Scripted provider only (SPEC 12 GP5): the scripted stand-in plays a model that reads the notice body when that body
+// carries an injected line, so the browser GP5 exercises taint with the same delivery click as GP1. A live model
+// decides for itself (eval L4) and never sees this hook.
+const INJECTED_LINE = /ignore (all )?prior instructions/i;
+function scriptVariant(db: Db) {
+  return async ({ routineId, trigger }: { routineId: string; trigger: Record<string, unknown> }): Promise<string | null> => {
+    if (routineId !== "rt_agency_notice" || typeof trigger.notice_id !== "string") return null;
+    const rows = await db.select({ body: notices.bodyText }).from(notices).where(eq(notices.id, trigger.notice_id)).limit(1);
+    return rows[0] && INJECTED_LINE.test(rows[0].body) ? "rt_agency_notice.injection" : null;
+  };
+}
+
 export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   const testMode = opts.testMode ?? false;
   const dataDir = resolve(opts.dataDir);
@@ -78,7 +91,7 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   const sims = await tolerate<Simulators>("sim", () => createSimulators({ db, clock }), () => stubOf("sims"));
   const executor = await tolerate<ExecutorBundle>("executor", () => createExecutor({ db, clock, dataDir, commands, simulators: createSimulators, testMode }), () => stubOf("executor"));
   const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
-  const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({ env: process.env, ledger, testMode }), () => placeholderProvider));
+  const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({ env: process.env, ledger, testMode, scriptVariant: scriptVariant(db) }), () => placeholderProvider));
   const routinesRef: { current: RoutinesEngine | null } = { current: null };
   const agent = await tolerate<AgentRuntime>("agent", () => createAgentRuntime({
     db, clock, executor: executor.agent, provider, ledger,
