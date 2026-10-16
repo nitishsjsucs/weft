@@ -1,12 +1,14 @@
-// `pnpm demo` (SPEC 12): a narrated run of the golden paths GP1 to GP5 on one seeded world in .data-demo, with the
-// scripted provider and a frozen sim clock (Mon 2026-10-26 08:30 PT). Every step goes through the same HTTP routes
-// the UI uses, then prints what changed. The world is kept, so it can be browsed afterwards:
+// `pnpm demo` (SPEC 12, docs/wave2.md): a narrated run of the golden paths GP1 to GP12 on one seeded world in
+// .data-demo, with the scripted provider and a frozen sim clock (Mon 2026-10-26 08:30 PT). Every step goes through the
+// same HTTP routes the UI, the portal and MCP clients use, then prints what changed. The one exception is the GP10
+// fixture (a mid-period raise written straight into pay_rates, as the scenario test does). The world is kept, so it
+// can be browsed afterwards:
 //   WEFT_DATA_DIR=.data-demo pnpm dev
 // `pnpm demo:tests` runs the same golden paths as the scenario tests (tests/scenarios), each on a fresh world.
-import { rmSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
-import { agentRuns, proposals, routineRuns } from "@weft/db";
+import { agentRuns, memoryRecalls, payRates, proposals, routineRuns } from "@weft/db";
 import { seedWorld } from "@weft/seed";
 import { createWeft } from "./compose";
 
@@ -26,6 +28,14 @@ const call = async (method: string, path: string, body: unknown, who = "usr_dana
   return json ?? {};
 };
 const post = (path: string, body: unknown = {}, who?: string) => call("POST", path, body, who);
+/** An MCP client with the seeded demo key (an agent caller: consequential writes come back as proposals). */
+const viaKey = async (path: string, body: unknown) => {
+  const key = readFileSync(join(dataDir, "demo-mcp-key.txt"), "utf8").trim();
+  const res = await weft.app.request(path, { method: "POST", headers: { "x-api-key": key, "content-type": "application/json" }, body: JSON.stringify(body) });
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (res.status >= 400) throw new Error(`POST ${path} (MCP key) answered ${res.status}: ${JSON.stringify(json)}`);
+  return json ?? {};
+};
 const get = (path: string, who?: string) => call("GET", path, undefined, who);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const say = (line: string) => console.log(line);
@@ -123,6 +133,140 @@ await post("/v1/sim/notices/deliver", { scenario: "ca_de2088_injection" });
 const inj = await routineRun("rt_agency_notice", n);
 const tainted = await pendingOf(inj.agentRunId);
 say(`   run ${inj.agentRunId}: ${inj.status}, tainted ${inj.tainted}; ${tainted.length} tainted proposals left in the inbox (${tainted.map((p) => p.command).join(", ")})`);
+
+// Wave 2 (docs/wave2.md): GP11, GP6, GP7, GP8, GP10, GP9 and GP12 on the same world, from Fri Oct 30.
+const offerFor = async (c: Record<string, unknown>) => {
+  const offerId = ((await post("/v1/offers", c)) as { data: { offer_id: string } }).data.offer_id;
+  const sent = ((await post(`/v1/offers/${offerId}/send`)) as { data: { persona_principal_id: string; reserved_worker_id: string } }).data;
+  return { offerId, persona: sent.persona_principal_id, workerId: sent.reserved_worker_id };
+};
+type PortalView = { done: number; total: number; workerStatus: string; documents: { id: string; kind: string; sha256: string }[]; plans: { id: string; type: string; name: string }[] };
+const portal = async (persona: string) => (await get("/v1/portal/me", persona)) as unknown as PortalView;
+const sign = async (persona: string, name: string, kinds: string[]) => {
+  for (const d of (await portal(persona)).documents.filter((x) => kinds.includes(x.kind))) await post(`/v1/portal/documents/${d.id}/sign`, { typedName: name, documentSha256: d.sha256 }, persona);
+};
+
+head("GP11 benefits reconciliation, open enrollment and contractor payouts");
+const recon = (await post("/v1/benefits/reconciliation/run", { month: "2026-10" })) as { data: { count: number; invoice_lines: number } };
+const findings = (await get("/v1/benefits/reconciliation?month=2026-10")) as unknown as { id: string; kind: string; billedCents: number; expectedCents: number; deductedCents: number }[];
+say(`   October carrier invoice: ${recon.data.invoice_lines} lines, ${recon.data.count} findings`);
+for (const f of findings) say(`   ${f.kind}: billed ${f.billedCents}, expected ${f.expectedCents}, deducted ${f.deductedCents} cents`);
+const dispute = (await viaKey("/v1/tools/benefits__dispute_finding", { finding_id: findings[0]!.id })) as { status: string; proposalId: string };
+await post(`/v1/proposals/${dispute.proposalId}/approve`, { reasonCode: null, note: null });
+const disputeMail = (await get("/v1/sim/email")) as unknown as { kind: string; to: string }[];
+say(`   an MCP agent's dispute was a proposal (${dispute.status}); Dana approved it and the email simulator holds ${disputeMail.filter((m) => m.to.startsWith("billing@")).length} message to the carrier`);
+n = await runsOf("rt_open_enrollment");
+await post("/v1/routines/rt_open_enrollment/trigger", {});
+const oe = await routineRun("rt_open_enrollment", n);
+const general = await weft.db.all<{ text: string }>(sql`SELECT text FROM sim_chat_messages WHERE channel = '#general' ORDER BY rowid DESC LIMIT 1`);
+say(`   rt_open_enrollment run ${oe.agentRunId} ${oe.status}; #general: ${(general[0]?.text ?? "(none)").slice(0, 120)}...`);
+const payouts = (await viaKey("/v1/tools/contractors__schedule_payouts", { worker_ids: ["wrk_0049", "wrk_0050", "wrk_0051"], scheduled_for: "2026-10-30" })) as { proposalId: string };
+await post(`/v1/proposals/${payouts.proposalId}/approve`, { reasonCode: null, note: null });
+const railNow = async () => ((await get("/v1/contractors/payouts")) as { data: { currency: string; usdCents: number; railStatus: string }[] }).data;
+say(`   contractor payouts approved: ${(await railNow()).map((p) => `${p.currency} to ${p.usdCents} USD cents ${p.railStatus}`).join(", ")}`);
+
+head("GP6 offer to signed");
+const ROWAN = { candidateFirst: "Rowan", candidateLast: "Ellery", candidateEmail: "rowan.ellery@candidate.example", title: "Firmware Test Engineer", departmentId: "dpt_hardware", workState: "CO", baseCents: 13_200_000, payKind: "salary", startDate: "2026-11-02" };
+const rowan = await offerFor(ROWAN);
+const invites = ((await get("/v1/sim/email")) as unknown as { kind: string; to: string; body: string }[]).filter((m) => m.to === ROWAN.candidateEmail);
+say(`   offer ${rowan.offerId} sent; invite in the email simulator: ${invites.map((m) => m.kind).join(", ")} with a /portal?as=${rowan.persona} link`);
+await post("/v1/portal/offer/view", {}, rowan.persona);
+await sign(rowan.persona, "Rowan Ellery", ["offer_letter", "confidentiality_agreement"]);
+const sigs = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM signatures WHERE signer_principal_id = ${rowan.persona}`);
+const rowanOffer = (await get(`/v1/offers/${rowan.offerId}`)) as { status: string; workerId: string };
+say(`   ${sigs[0]?.n} signatures with signer, sim time and sha256; offer ${rowanOffer.status}; worker ${rowanOffer.workerId} is ${(await portal(rowan.persona)).workerStatus}`);
+
+head("GP7 new-hire checklist unblocks payroll");
+await post("/v1/portal/w4", { filingStatus: "single", step2Checkbox: false, step3Cents: 0, step4aCents: 0, step4bCents: 0, step4cCents: 5_000, exempt: false, typedName: "Rowan Ellery" }, rowan.persona);
+await post("/v1/portal/state-withholding", { state: "CO", filingStatus: "single", allowances: 0, extraCents: 0, exempt: false, typedName: "Rowan Ellery" }, rowan.persona);
+const badAba = await weft.app.request("/v1/portal/direct-deposit", { method: "POST", headers: headers(rowan.persona), body: JSON.stringify({ bankName: "Sim Federal Credit Union", routing: "021000022", account: "4417390056", accountType: "checking", typedName: "Rowan Ellery" }) });
+say(`   a routing number that fails the ABA checksum: ${badAba.status} ${((await badAba.json()) as { code: string }).code}`);
+const dd = (await post("/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "021000021", account: "4417390056", accountType: "checking", typedName: "Rowan Ellery" }, rowan.persona)) as { data: { account_last4: string; verification: string } };
+say(`   direct deposit ${dd.data.verification} by the bank simulator; stored as last 4 ${dd.data.account_last4} only`);
+const i9 = new FormData();
+i9.set("citizenship", "citizen"); i9.set("documentKind", "us_passport"); i9.set("documentNumberLast4", "A7Q2"); i9.set("expiresOn", "2031-04-30"); i9.set("typedName", "Rowan Ellery");
+i9.set("idImage", new Blob([Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex")], { type: "image/png" }), "rowan-passport.png");
+const i9res = await weft.app.request("/v1/portal/i9", { method: "POST", headers: { "x-weft-principal": rowan.persona, "x-weft-proxy": weft.proxySecret }, body: i9 });
+say(`   I-9 image stored under the data dir; the response shows ${((await i9res.json()) as { data: { upload: { fileName: string } } }).data.upload.fileName}`);
+const plans = (await portal(rowan.persona)).plans;
+await post("/v1/portal/benefits", { elections: [{ planId: plans.find((p) => p.name.includes("PPO"))!.id, tier: "ee", deferralBps: null }, { planId: plans.find((p) => p.type === "dental")!.id, tier: "ee", deferralBps: null }, { planId: plans.find((p) => p.type === "401k")!.id, tier: null, deferralBps: 500 }], waived: ["vision"], typedName: "Rowan Ellery" }, rowan.persona);
+const done7 = await portal(rowan.persona);
+say(`   checklist ${done7.done} of ${done7.total}; worker ${rowan.workerId} is ${done7.workerStatus}`);
+const novDraft = (await post("/v1/payrolls/drafts", { payScheduleId: "ps_us_semimonthly", periodEnd: "2026-11-15" })) as { data: { run_id: string } };
+const [rowanPay] = await weft.db.all<{ gross_cents: number; flags_json: string; deductions_json: string }>(sql`SELECT gross_cents, flags_json, deductions_json FROM paychecks WHERE payroll_run_id = ${novDraft.data.run_id} AND worker_id = ${rowan.workerId}`);
+const rowanFlags = (JSON.parse(rowanPay?.flags_json ?? "[]") as { rule: string }[]).map((f) => f.rule);
+say(`   draft ${novDraft.data.run_id} pays Rowan ${rowanPay?.gross_cents} cents gross with ${(JSON.parse(rowanPay?.deductions_json ?? "[]") as unknown[]).length} pre-tax deductions; MISSING_BANK_ACCOUNT ${rowanFlags.includes("MISSING_BANK_ACCOUNT") ? "flagged" : "not flagged"}`);
+
+head("GP8 straggler nudge (part 1)");
+const TESSA = { candidateFirst: "Tessa", candidateLast: "Varga", candidateEmail: "tessa.varga@candidate.example", title: "Support Engineer", departmentId: "dpt_hardware", workState: "TX", baseCents: 9_800_000, payKind: "salary", startDate: "2026-11-02" };
+const tessa = await offerFor(TESSA);
+await sign(tessa.persona, "Tessa Varga", ["offer_letter"]);
+n = await runsOf("rt_onboarding_nudge");
+await post("/v1/routines/rt_onboarding_nudge/trigger", {});
+await idle();
+const early = (await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, "rt_onboarding_nudge"))).slice(n);
+say(`   Tessa signed the offer and stopped; before the due date rt_onboarding_nudge is ${early.map((r) => r.status).join(", ")}: ${early[0]?.summary ?? ""}`);
+
+head("GP10 off-cycle pay");
+// Fixture, as in the scenario test: Hollis Grey's raise from $76,000.00 to $82,000.00 took effect Oct 6, mid-period.
+const [hollis] = await weft.db.all<{ id: string }>(sql`SELECT id FROM pay_rates WHERE worker_id = 'wrk_0042' AND effective_to IS NULL`);
+await weft.db.run(sql`UPDATE pay_rates SET effective_to = '2026-10-05' WHERE id = ${hollis!.id}`);
+await weft.db.insert(payRates).values({ id: "prt_9001", workerId: "wrk_0042", kind: "salary", amountCents: 8_200_000, currency: "USD", effectiveFrom: "2026-10-06", effectiveTo: null, createdActionSeq: null });
+const oc = (await viaKey("/v1/tools/payroll.propose_off_cycle", { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-27", reason: "missed_payroll", bonus_cents: { wrk_0042: 150_000 } })) as { proposalId: string };
+const ocProposal = (await get(`/v1/proposals/${oc.proposalId}`)) as { headline: string; diff: { label: string; after: string }[] };
+say(`   proposal: ${ocProposal.headline}`);
+for (const d of ocProposal.diff.filter((x) => /Salary|Bonus/.test(x.label))) say(`   ${d.label}: ${d.after}`);
+await post(`/v1/proposals/${oc.proposalId}/approve`, { reasonCode: null, note: null });
+await weft.scheduler.tick();
+const ocRun = await weft.db.all<{ id: string; status: string }>(sql`SELECT id, status FROM payroll_runs WHERE subtype = 'off_cycle'`);
+say(`   approved: ${ocRun.map((r) => `${r.id} ${r.status}`).join(", ")} through the bank simulator`);
+
+head("GP9 termination with access revocation");
+await post("/v1/tools/it.create_account", { worker_id: "wrk_0004", system: "sso" });
+const term = (await post("/v1/workers/wrk_0004/terminate", { kind: "voluntary", lastDay: "2026-10-30", reasonNote: "Moving abroad", payUnusedPto: true })) as { data: { case_id: string } };
+const caseId = term.data.case_id;
+type Case = { status: string; steps: { kind: string; status: string; proposalId: string | null }[] };
+let ofb = (await get(`/v1/offboarding/${caseId}`)) as unknown as Case;
+say(`   case ${caseId}: ${ofb.steps.map((x) => `${x.kind} ${x.status}`).join(", ")}`);
+for (const step of ofb.steps.filter((x) => x.status === "proposed" && x.proposalId)) {
+  await post(`/v1/proposals/${step.proposalId}/approve`, { reasonCode: null, note: null });
+  say(`   approved ${step.kind}`);
+}
+ofb = (await get(`/v1/offboarding/${caseId}`)) as unknown as Case;
+for (const step of ofb.steps.filter((x) => x.status === "pending")) await post("/v1/tools/offboarding.run_step", { case_id: caseId, step: step.kind });
+ofb = (await get(`/v1/offboarding/${caseId}`)) as unknown as Case;
+const imani = await weft.db.all<{ status: string; end_date: string }>(sql`SELECT status, end_date FROM workers WHERE id = 'wrk_0004'`);
+const cobra = ((await get("/v1/sim/email")) as unknown as { kind: string }[]).filter((m) => m.kind === "cobra_notice").length;
+say(`   case ${ofb.status}; worker ${imani[0]?.status} with end date ${imani[0]?.end_date}; ${cobra} COBRA notice in the email simulator`);
+
+head("GP11 payouts land and GP8 nudge (part 2), Tue Nov 3 10:00 PT");
+await post("/v1/sim/clock/advance", { to: "2026-11-03T17:00:00.000Z" });
+await weft.scheduler.tick();
+await idle();
+say(`   payouts: ${(await railNow()).map((p) => `${p.currency} ${p.railStatus}`).join(", ")}`);
+// The scripted run posts the first derived nudge; each later run that day takes the next overdue hire, and the
+// precheck skips once every overdue hire was nudged today (a live model posts every nudge in one run).
+for (let i = 0; i < 4; i++) {
+  n = await runsOf("rt_onboarding_nudge");
+  await post("/v1/routines/rt_onboarding_nudge/trigger", {});
+  await idle();
+  const [rr] = (await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, "rt_onboarding_nudge"))).slice(n);
+  if (rr?.agentRunId) await routineRun("rt_onboarding_nudge", n);
+  const [last] = await weft.db.all<{ text: string }>(sql`SELECT text FROM sim_chat_messages WHERE channel = '#new-hires' ORDER BY rowid DESC LIMIT 1`);
+  say(rr?.status === "skipped" ? `   rt_onboarding_nudge skipped: ${rr.summary}` : `   rt_onboarding_nudge ${rr?.agentRunId} done; #new-hires: ${(last?.text ?? "(none)").slice(0, 110)}...`);
+  if (rr?.status === "skipped") break;
+}
+
+head("GP12 memory recall and coarsening");
+n = await runsOf("rt_memory_digest");
+await post("/v1/routines/rt_memory_digest/trigger", {});
+await idle();
+const dig = (await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, "rt_memory_digest"))).slice(n);
+say(`   rt_memory_digest (no model, zero tokens): ${dig[0]?.summary ?? "(no run)"}`);
+const { runId: recallRun } = (await post("/v1/agent/runs", { text: "What changed for Imani Ferreira?", pageContext: null })) as { runId: string };
+await idle();
+const recalls = await weft.db.select().from(memoryRecalls).where(eq(memoryRecalls.runId, recallRun));
+say(`   chat run ${recallRun} started with ${recalls.length} recall block logged in memory_recalls`);
 
 const chain = await weft.executor.verifyChain();
 head(`Audit chain ${chain.ok ? "verifies" : "FAILS"}; memory head ${await weft.executor.memory.head()}`);
