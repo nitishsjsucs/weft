@@ -21,7 +21,9 @@
     "db:seed": "tsx packages/seed/src/cli.ts seed",
     "db:reset": "tsx packages/seed/src/cli.ts reset",
     "db:digest": "tsx packages/seed/src/cli.ts digest",
-    "eval:live": "tsx evals/live/run.ts"
+    "eval:live": "tsx evals/live/run.ts",
+    "memory:bundle": "tsx scripts/memory-bundle.ts",
+    "memory:restore": "tsx scripts/memory-restore.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.0",
