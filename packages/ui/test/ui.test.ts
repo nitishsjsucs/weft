@@ -8,6 +8,11 @@ describe("@weft/ui", () => {
   it("cn merges Tailwind classes, last wins", () => {
     expect(cn("px-2 text-sm", false && "hidden", "px-4")).toBe("text-sm px-4");
   });
+  it("cn keeps a type scale size next to a text color", () => {
+    expect(cn("text-2 text-gray-12")).toBe("text-2 text-gray-12");
+    expect(cn("bg-gray-12 text-white", "text-2")).toBe("bg-gray-12 text-white text-2");
+    expect(cn("text-2", "text-0")).toBe("text-0");
+  });
   it("tokens use the madder accent and the renamed effects", () => {
     expect(tokens).toContain(`--accent-9: ${ACCENT_9}`);
     for (const c of [".weft-hatch", ".weft-hatch-strong", ".weft-rule"]) expect(tokens).toContain(c);
