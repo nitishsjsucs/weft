@@ -7,6 +7,7 @@ Three layers, from fastest to slowest. None of them calls a live model: the prov
 | `pnpm test` | Vitest projects under `packages/*`, `apps/*` and `tests/` (unit, contract and scenario tests on in-memory SQLite) | seconds |
 | `pnpm typecheck` | `tsc --noEmit` in every workspace package through turbo | seconds |
 | `pnpm lint:prose`, `pnpm lint:brand` | No em or en dashes; no reference-site name, domains, denylisted phrases, copied files or font names | about a second each |
+| `pnpm brand:overlap` | No run of 8 or more consecutive words shared with the saved reference pages' visible text (`scripts/brand-overlap.ts`; allowlist `scripts/brand-overlap.allow.txt`, kept empty); skipped when the reference folder is absent. `pnpm brand:overlap -- --words 6` lowers the run length for a one-off look at near-verbatim fragments | about a second |
 | `pnpm e2e` | Playwright: the golden paths GP1 to GP5 plus the site specs, against `scripts/dev.ts --e2e` | a few minutes |
 
 `e2e/` is not a workspace package, so `pnpm typecheck` does not cover it. Check it with `pnpm exec tsc -p e2e/tsconfig.json`, which also covers `playwright.config.ts` and the root scripts.
