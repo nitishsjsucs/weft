@@ -52,11 +52,13 @@ export async function ingestVendorDelivery(d: Pick<PollDeps, "db" | "executor" |
 export async function deliverSimWebhooks(d: PollDeps): Promise<DeliveryResult[]> {
   const results: DeliveryResult[] = [];
   for (const vendor of ["checkr", "hireright", "docusign"] as const) {
-    const due = await d.db.transaction(async (tx) => {
+    // Under the write lock like every other transaction: a libsql transaction runs on its own connection, so one
+    // opened outside the lock raced the reset's DROP TABLE and the scheduler's writes into SQLITE_BUSY.
+    const due = await withWriteLock(() => d.db.transaction(async (tx) => {
       const conn = createSimulators({ db: tx, clock: d.clock }).vendors[vendor];
       const ctl = vendor === "docusign" ? w3EsignSimControls(conn) : w3ScreeningSimControls(conn);
       return ctl ? await ctl.outbox(d.now) : [];
-    });
+    }));
     for (const item of due) {
       const conn = createSimulators({ db: d.db, clock: d.clock }).vendors[vendor];
       const r = await ingestVendorDelivery(d, vendor, conn, new TextEncoder().encode(item.raw), item.headers);
