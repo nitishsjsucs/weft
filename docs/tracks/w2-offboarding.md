@@ -42,7 +42,7 @@ In the app: open a person (for example `/app/people/wrk_0004`), click Terminate,
 - `tests/scenarios/gp9-offboarding.test.ts`: the whole GP9 path over HTTP, including the dismissal run in the bank simulator, the suspended IdP accounts, the cleared groups, terminated enrollments, the COBRA email, one action row and one `offboarding.step_done` per step, the regular draft no longer paying the worker, and refusals for a second termination and a contractor.
 - `tests/scenarios/gp10-off-cycle.test.ts`: the MCP agent proposes for Hollis (raise from $76,000.00 to $82,000.00 on Oct 6), the preview shows $1,055.56 and $2,277.78 for the 5 and 10 days on either side of the raise and the $1,500.00 bonus, Dana approves, the batch total equals net pay, the run settles on payday and the ledger records the bonus as supplemental; an off-cycle over $10,000.00 is refused with `OVER_CEILING`.
 - `packages/core/test/offboarding/offcycle.test.ts`: salary and hourly proration (half-cent cases), the 22 percent split and the PTO accrual, exact to the cent.
-- `apps/api/test/offboarding.test.ts`: route validation, the `not_mcp` refusal, skipped steps, untainted proposals on the person's behalf, final pay after a submitted regular run.
+- `apps/api/test/offboarding.test.ts`: route validation, the `not_mcp` refusal, skipped steps, untainted proposals on the person's behalf, a denied proposal then a direct run, skip_step, refused proposals reported by terminate, final pay after a submitted regular run, the off-cycle route.
 - `e2e/gp9-offboarding.spec.ts`: the GP9 path in the browser.
 - `e2e/gp10-off-cycle.spec.ts`: Off-cycle pay from Hollis's header becomes a proposal whose card lists the earning lines; approving it submits the `off_cycle` run.
 
@@ -65,3 +65,4 @@ In the app: open a person (for example `/app/people/wrk_0004`), click Terminate,
 3. Additive, in owned files: `packages/contracts/src/ext/w2-offboarding.ts` describes the new simulator methods (`IdpSim.clearGroups`, `DeviceSim.lock`) for the integrator to fold into `sim.ts`; `PaycheckInput.supplementalCents` in payroll-tax.
 
 Integrator requests are in `.scratch/contract-requests/w2-offboarding.md`.
+4. Outside the listed owned paths: `e2e/gp10-off-cycle.spec.ts`, a new spec for this track's GP10 golden path.
