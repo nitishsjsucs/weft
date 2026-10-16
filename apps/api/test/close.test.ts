@@ -3,10 +3,10 @@
 // the database closed is caught, so no CLIENT_CLOSED rejection goes unhandled.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { closeDb, openDb, routineRuns } from "@weft/db";
+import { agentRuns, closeDb, openDb, proposals, routineRuns, runSteps } from "@weft/db";
 import { seedWorld } from "@weft/seed";
 import { createWeft } from "../src/compose";
 import { createTestWeft, type TestWeft } from "../src/testing";
@@ -109,5 +109,66 @@ describe("weft.close()", () => {
     const weft = await createTestWeft({ seed: false });
     await weft.close();
     await expect(weft.close()).resolves.toBeUndefined();
+  });
+});
+
+// Gate report item 2: a waiting routine run keeps its trigger and handle across an API restart (two createWeft
+// instances on one data dir) and completes after approval in the second process.
+describe("restart survival", () => {
+  it("a waiting routine run survives a restart and completes after approval", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "weft-restart-"));
+    const ui = (w: { proxySecret: string }) => (p: string) => ({ "x-weft-principal": p, "x-weft-proxy": w.proxySecret });
+    try {
+      const first = await createWeft({ dataDir, testMode: true });
+      await seedWorld(first);
+      await first.clock.set("2026-10-26T15:30:00.000Z", 0);
+      const routineRunId = await startNoticeRun(Object.assign(first, { uiHeaders: ui(first) }));
+      await (first.agent as unknown as { idle(): Promise<void> }).idle();
+      await (first.routines as unknown as { drain(ms: number): Promise<boolean> }).drain(2_000);
+      const [before] = await first.db.select().from(routineRuns).where(eq(routineRuns.id, routineRunId));
+      expect(before?.status).toBe("waiting_approval");
+      const agentRunId = before!.agentRunId!;
+      const [waiting] = await first.db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId));
+      expect(waiting?.status).toBe("waiting");
+      // The handle is a bearer credential: it sits in a 0600 file under the data dir, never in run_steps.
+      const handleFile = join(dataDir, "run", "handles", `${agentRunId}.json`);
+      expect(statSync(handleFile).mode & 0o777).toBe(0o600);
+      const token = (JSON.parse(readFileSync(handleFile, "utf8")) as { token: string }).token;
+      const stepsJson = JSON.stringify(await first.db.select().from(runSteps).where(eq(runSteps.runId, agentRunId)));
+      expect(stepsJson.includes(token)).toBe(false);
+      await first.close();
+
+      const second = await createWeft({ dataDir, testMode: true });
+      try {
+        const [booted] = await second.db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId));
+        expect(booted?.status, "the boot rule fails only running runs").toBe("waiting");
+        const open = (await second.db.select().from(proposals)).filter((p) => p.status === "pending" && p.proposerRunId === agentRunId);
+        expect(open.map((p) => p.command).sort()).toEqual(["notices.send_response", "tax.update_rate"]);
+        const approve = async (id: string) => {
+          const res = await second.app.request(`/v1/proposals/${id}/approve`, {
+            method: "POST", headers: { ...ui(second)("usr_dana"), "content-type": "application/json" }, body: JSON.stringify({ reasonCode: null, note: null }),
+          });
+          expect(res.status, await res.clone().text()).toBe(200);
+        };
+        // One approval is not enough: the rehydrated handle still sees the other pending proposal, so the run waits.
+        await approve(open[0]!.id);
+        await (second.agent as unknown as { idle(): Promise<void> }).idle();
+        const [half] = await second.db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId));
+        expect(half?.status, "the run must keep waiting for the second proposal").toBe("waiting");
+        await approve(open[1]!.id);
+        await (second.agent as unknown as { idle(): Promise<void> }).idle();
+        await (second.routines as unknown as { drain(ms: number): Promise<boolean> }).drain(2_000);
+        const [after] = await second.db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId));
+        expect(after).toMatchObject({ status: "done", terminalReason: "DONE" });
+        const [rr] = await second.db.select().from(routineRuns).where(eq(routineRuns.id, routineRunId));
+        expect(rr?.status).toBe("done");
+        expect(existsSync(handleFile), "a finished run's handle file is removed").toBe(false);
+        expect(unhandled.map(String)).toEqual([]);
+      } finally {
+        await second.close();
+      }
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

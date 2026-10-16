@@ -30,7 +30,11 @@ export function assertToolCap(count: number, what: string): void {
 export const MAX_REQUEUES = 2;
 
 /** Stored on the context step so a requeued run rebuilds the same request. */
-export interface RunSetup { promptKind: PromptKind; allowlist: string[]; nonce: string; routineId: string | null; text: string; pack: true }
+export interface RunSetup {
+  promptKind: PromptKind; allowlist: string[]; nonce: string; routineId: string | null; text: string; pack: true;
+  /** Routine runs: the trigger the checklist is evaluated against, so a waiting run keeps it across a restart. */
+  trigger?: Record<string, unknown>;
+}
 
 export interface ChecklistState { id: string; label: string; passed: boolean }
 

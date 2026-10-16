@@ -43,12 +43,26 @@ function withRecall(text: string, block: string | undefined): string {
   return end < 0 ? text : `${text.slice(0, end)}\n${block}${text.slice(end)}`;
 }
 
+/**
+ * Where the runtime keeps run handles between processes (gate report item 2). A handle is a bearer credential for the
+ * executor, so it never goes into run_steps (the trace and the SSE feed read those); apps/api compose.ts keeps one
+ * 0600 file per open run under <dataDir>/run/handles. Without a store, handles live only in memory and a waiting run fails
+ * with PROCESS_RESTART when it is woken after a restart.
+ */
+export interface RunHandleStore {
+  save(handle: RunHandle): Promise<void>;
+  load(runId: string): Promise<RunHandle | null>;
+  drop(runId: string): Promise<void>;
+}
+
 export interface CreateAgentRuntimeOptions {
   db: Db; clock: SimClock; executor: AgentExecutor; provider: ModelProvider; ledger: SpendLedger; routinesView: RoutinesView;
   companyId?: string;
   contextSource?: ChatContextSource;
   env?: Record<string, string | undefined>;
   modelTimeoutMs?: number;
+  /** Persists run handles so waiting runs survive a restart (compose.ts passes fileRunHandleStore). */
+  handleStore?: RunHandleStore;
 }
 
 export interface WeftAgentRuntime extends AgentRuntime {
@@ -78,8 +92,49 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
   const companyId = opts.companyId ?? DEFAULT_COMPANY_ID;
   const settledWaiters = new Map<string, ((r: AgentRunRow) => void)[]>();
 
-  async function checklist(run: AgentRunRow): Promise<ChecklistState[] | null> {
+  const handleStore = opts.handleStore;
+  const terminal = (status: string) => !["queued", "running", "waiting", "held"].includes(status);
+
+  /** The run's setup from its context step (the prompt kind, allowlist, nonce, routine id and, for routines, the trigger). */
+  async function setupOf(runId: string): Promise<RunSetup | undefined> {
+    const steps = await store.steps(runId);
+    return steps.find((s) => s.kind === "context" && (s.result as RunSetup | null)?.pack)?.result as RunSetup | undefined;
+  }
+
+  /** The in-memory handle, or the persisted one after a restart. */
+  async function handleOf(runId: string): Promise<RunHandle | undefined> {
+    const h = handles.get(runId);
+    if (h || !handleStore) return h;
+    const loaded = await handleStore.load(runId).catch(() => null);
+    if (loaded) handles.set(runId, loaded);
+    return loaded ?? undefined;
+  }
+
+  /** The in-memory trigger, or the one written into the context step, with the routine read again by id. */
+  async function triggerOf(run: AgentRunRow): Promise<{ routine: RoutineDef; trigger: Record<string, unknown> } | undefined> {
     const t = triggers.get(run.id);
+    if (t || !run.routineRunId) return t;
+    const setup = await setupOf(run.id);
+    if (!setup?.routineId || !setup.trigger) return undefined;
+    const routine = await opts.routinesView.get(setup.routineId);
+    if (!routine) return undefined;
+    const back = { routine, trigger: setup.trigger };
+    triggers.set(run.id, back);
+    return back;
+  }
+
+  const remember = async (handle: RunHandle) => {
+    handles.set(handle.runId, handle);
+    await handleStore?.save(handle);
+  };
+  const forget = (runId: string) => {
+    handles.delete(runId);
+    triggers.delete(runId);
+    void handleStore?.drop(runId).catch(() => undefined);
+  };
+
+  async function checklist(run: AgentRunRow): Promise<ChecklistState[] | null> {
+    const t = await triggerOf(run);
     if (!t || !opts.routinesView.checklist) return null;
     return opts.routinesView.checklist({ routine: t.routine, agentRunId: run.id, routineRunId: run.routineRunId, companyId: run.companyId, trigger: t.trigger });
   }
@@ -97,13 +152,14 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
   };
 
   const notifySettled = (row: AgentRunRow) => {
+    if (terminal(row.status)) forget(row.id);
     const ws = settledWaiters.get(row.id) ?? [];
     settledWaiters.delete(row.id);
     for (const w of ws) w(row);
   };
 
-  function enqueue(runId: string) {
-    const handle = handles.get(runId);
+  function enqueue(runId: string, restored?: RunHandle) {
+    const handle = restored ?? handles.get(runId);
     if (!handle) throw new Error(`no run handle for ${runId}`);
     aborts.set(runId, new AbortController());
     void queue.push(runId, async () => {
@@ -150,10 +206,17 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       for (const r of await store.runsWithStatus(["running"])) {
         await store.updateRun(r.id, { status: "failed", terminalReason: "PROCESS_RESTART", endedAt: opts.clock.now(), summary: "The process restarted while this run was active. Run it again." });
         if (r.routineRunId) await store.failRoutineRun(r.routineRunId, "The process restarted while this run was active. Run again.", opts.clock.now());
+        await handleStore?.drop(r.id).catch(() => undefined);
+      }
+      // Waiting and held runs are not active, so they survive: their handle and trigger come back from the handle
+      // store and the context step, and the next decision wakes them as if the process had never stopped.
+      for (const r of await store.runsWithStatus(["waiting", "held"])) {
+        await handleOf(r.id);
+        await triggerOf(r).catch(() => undefined);
       }
     },
     async startChat(handle, input) {
-      handles.set(handle.runId, handle);
+      await remember(handle);
       const kind: PromptKind = input.recipe === "routine_draft" ? "routine_draft" : "chat";
       await store.createRun(baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind }));
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
@@ -170,7 +233,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       enqueue(handle.runId);
     },
     async startRoutineRun(handle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }) {
-      handles.set(handle.runId, handle);
+      await remember(handle);
       if (input.precheck.action !== "run") throw new Error("startRoutineRun needs a precheck with action run");
       const trigger: Record<string, unknown> = input.trigger ? { event: input.trigger.type, event_id: input.trigger.id, subject_ref: input.trigger.subjectRef, ...input.trigger.payload } : { trigger_ref: input.routineRun.triggerRef, attended: input.routineRun.attended };
       triggers.set(handle.runId, { routine: input.routine, trigger });
@@ -182,7 +245,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         precheck: { severity: input.precheck.severity, findings: input.precheck.findings, derivedArgs: input.precheck.derivedArgs }, checklist: input.routine.checklist,
       });
       const text = withRecall(packed, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "routine", query: input.routine.name, subjectRefs: input.precheck.subjectRefs ?? [] }));
-      await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true });
+      await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true, trigger });
       enqueue(handle.runId);
     },
     async requeue(runId, notice) {
@@ -194,20 +257,22 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         notifySettled((await store.getRun(runId))!);
         return;
       }
-      const steps = await store.steps(runId);
-      const setup = steps.find((s) => s.kind === "context" && (s.result as RunSetup | null)?.pack)?.result as RunSetup | undefined;
+      const setup = await setupOf(runId);
+      const handle = await handleOf(runId);
+      if (run.routineRunId) await triggerOf(run);
       await store.updateRun(runId, { status: "queued", requeues });
       await store.appendStep(runId, { stage: "post", kind: "notice", parentN: null, callId: null, toolName: null, toolArgs: null, outcome: "ok", result: { notice: notice.kind, attrs: { ...notice.attrs, n: setup?.nonce ?? "" }, text: notice.text }, native: null, usage: null, costUsdMicros: 0, attempt: 1, requestId: null, prefixHash: null, timings: null });
-      if (!handles.has(runId)) {
+      if (!handle) {
         await store.updateRun(runId, { status: "failed", terminalReason: "PROCESS_RESTART", endedAt: opts.clock.now(), summary: "The run handle was lost in a restart. Run it again." });
+        notifySettled((await store.getRun(runId))!);
         return;
       }
-      enqueue(runId);
+      enqueue(runId, handle);
     },
     async wake(runId, notice) {
       const run = await store.getRun(runId);
       if (!run || run.status !== "waiting") return "ignored";
-      const handle = handles.get(runId);
+      const handle = await handleOf(runId);
       const items = await checklist(run);
       const pending = handle ? (await opts.executor.runState(handle)).pendingProposalIds : [];
       if (!items || items.every((i) => i.passed)) {

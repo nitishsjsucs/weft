@@ -54,9 +54,10 @@ export interface WeftRoutinesEngine extends RoutinesEngine {
   settled(routineRunId: string): Promise<RoutineRun>;
   /**
    * Waits for routine finalizations already in flight (each started when an agent run wrote its terminal step), up to
-   * `timeoutMs`. weft.close() calls it before closing the database. Resolves true when nothing was left pending.
+   * `timeoutMs`. weft.close() calls it with `closing` before closing the database, after which a late finalization
+   * failure is dropped quietly. Resolves true when nothing was left pending.
    */
-  drain(timeoutMs?: number): Promise<boolean>;
+  drain(timeoutMs?: number, closing?: boolean): Promise<boolean>;
   /** Number of finalizations in flight (tests and the close drain). */
   pendingFinalizations(): number;
 }
@@ -302,8 +303,8 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
       if (rr) await track(() => finalizeFromAgent(rr.id, runId));
     },
     pendingFinalizations: () => pending.size,
-    async drain(timeoutMs = 5_000) {
-      closing = true;
+    async drain(timeoutMs = 5_000, isClosing = false) {
+      if (isClosing) closing = true;
       const deadline = Date.now() + timeoutMs;
       while (pending.size > 0) {
         const left = deadline - Date.now();
