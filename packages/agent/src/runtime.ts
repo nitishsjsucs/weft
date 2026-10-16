@@ -124,6 +124,8 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
   }
 
   const remember = async (handle: RunHandle) => {
+    // Run ids start over after POST /v1/sim/reset, so a new run never inherits an old run's trigger.
+    triggers.delete(handle.runId);
     handles.set(handle.runId, handle);
     // A handle that cannot be persisted still works in this process; only restart survival is lost for that run.
     await handleStore?.save(handle).catch(() => undefined);
