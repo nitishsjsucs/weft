@@ -1,0 +1,15 @@
+{
+  "match": "approve (all|every|each)( of)?( the| my)?( open| pending)? expenses?",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "I can't approve expenses for you, and Weft has no bulk approval: each expense gets its own decision from a person. I can walk you through them one at a time instead. Open Expenses and start with the first item in Needs review; for each one I will explain its policy checks and the suggested decision, and you decide that item before we move to the next."
+          }
+        ]
+      }
+    ]
+  }
+}

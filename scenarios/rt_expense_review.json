@@ -1,0 +1,95 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__explain",
+            "arguments": "{{derived.expenses.explain}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.0}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.1}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.2}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.3}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.4}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.5}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.6}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "expenses__decide",
+            "arguments": "{{derived.decisions.7}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Explained each expense awaiting review from its policy checks and proposed one decision per item. Each proposal waits for a person in the Inbox."
+          }
+        ]
+      }
+    ]
+  }
+}
