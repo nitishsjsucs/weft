@@ -1,6 +1,6 @@
 // The new hire persona (w2-onboarding): a human principal with role "employee", created when an offer is sent.
 // Its worker_id is reserved at send time and becomes the worker row's id when the offer letter is signed.
-// Grants are people:view only; every portal command also checks that the subject is the persona's own record,
+// Grants are people:view and benefits:view (to name the seeded plans) only; every portal command also checks that the subject is the persona's own record,
 // and the API restricts the persona to /v1/portal/* (apps/api/src/http/auth.ts).
 import { and, eq } from "drizzle-orm";
 import type { ExecContext } from "@weft/contracts";
@@ -8,7 +8,7 @@ import { documents, offers, principals, type DbTx } from "@weft/db";
 import { DomainRefusal } from "../demo/define";
 
 export const PERSONA_ROLE = "employee";
-export const PERSONA_GRANTS = JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "none", it: "none", comms: "none", company: "none" });
+export const PERSONA_GRANTS = JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" });
 export const REVOKED_GRANTS = JSON.stringify({ people: "none", payroll: "none", tax: "none", benefits: "none", it: "none", comms: "none", company: "none" });
 
 export type PrincipalRow = typeof principals.$inferSelect;

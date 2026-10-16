@@ -247,7 +247,8 @@ export const submitDirectDeposit = writeCommand({
 });
 
 // onboarding.submit_i9 ---------------------------------------------------------------------------------------
-const I9Input = I9Submission.extend({ file_name: z.string().min(1).max(120), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/), storage_path: z.string().regex(/^uploads\/[0-9a-f]{64}\.bin$/) }).strict();
+// The executor maps null to undefined before parsing, so the contract's nullable fields are also optional here.
+const I9Input = I9Submission.extend({ expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), file_name: z.string().min(1).max(120), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/), storage_path: z.string().regex(/^uploads\/[0-9a-f]{64}\.bin$/) }).strict();
 export function maskedUpload(u: { id: string; fileName: string; bytes: number; sha256: string }) {
   const kb = Math.max(1, Math.round(u.bytes / 1024));
   const ext = /\.[A-Za-z0-9]{1,5}$/.exec(u.fileName)?.[0] ?? "";
@@ -268,17 +269,21 @@ export const submitI9 = writeCommand({
     const rec = await signedRecord(deps, ctx, p, "i9", "Form I-9 section 1 (simulation)", [
       ["Citizenship", i.citizenship.replace(/_/g, " ")], ["Document", i.documentKind.replace(/_/g, " ")], ["Document number", `ending ${i.documentNumberLast4}`], ["Expires", i.expiresOn ?? "n/a"], ["ID image", `upload ${id}, masked`],
     ]);
-    await submission(deps, ctx, w.id, "i9_sim", { citizenship: i.citizenship, documentKind: i.documentKind, documentNumberLast4: i.documentNumberLast4, expiresOn: i.expiresOn, uploadId: id }, rec.documentId);
+    await submission(deps, ctx, w.id, "i9_sim", { citizenship: i.citizenship, documentKind: i.documentKind, documentNumberLast4: i.documentNumberLast4, expiresOn: i.expiresOn ?? null, uploadId: id }, rec.documentId);
     const done = await completePortalTask(tx, w.id, "i9_sim", ctx.now);
     return { data: { worker_id: w.id, upload: maskedUpload({ id, fileName: i.file_name, bytes: i.bytes, sha256: i.sha256 }), document_id: rec.documentId, activated: done.activated }, summary: `I-9 section 1 for ${displayName(w.firstName, w.lastName)} with upload ${id}, ${sigLine(p, ctx.now, rec.sha)}`, events: done.events };
   },
 });
 
 // onboarding.submit_benefits ---------------------------------------------------------------------------------
+const Election = BenefitsSelection.shape.elections.element;
+const BenefitsInput = BenefitsSelection.extend({
+  elections: z.array(Election.extend({ tier: Election.shape.tier.optional(), deferralBps: Election.shape.deferralBps.optional() })).max(8),
+});
 export const submitBenefits = writeCommand({
   name: "onboarding.submit_benefits", summary: "Elect benefits from the company plans (new hire portal only).",
   description: "Human only, new hire persona: elects plans (one per type; medical, dental and vision with a coverage tier; 401(k) with a deferral in basis points) or waives types. Writes active benefit enrollments from the start date, which flow into paychecks as pre-tax deductions, and completes benefits_selection.",
-  input: BenefitsSelection, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
+  input: BenefitsInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
   async run(i, ctx, deps) {
     const tx = deps.tx;
     const p = await requirePersona(tx, ctx);
