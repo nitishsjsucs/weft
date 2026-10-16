@@ -10,8 +10,8 @@ import { eq } from "drizzle-orm";
 import { closeDb, migrate, notices, openDb, type Db } from "@weft/db";
 import { commands, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
-import { createExecutor } from "@weft/executor";
-import { createAgentRuntime, createProvider, createSpendLedger } from "@weft/agent";
+import { createExecutor, executorInternals } from "@weft/executor";
+import { createAgentRuntime, createProvider, createSpendLedger, loadSecret } from "@weft/agent";
 import { createRoutines, type WeftRoutinesEngine } from "@weft/routines";
 import { createChatContextSource } from "./routes/agent";
 import { createRoutinesEventSource } from "./routes/routines";
@@ -90,6 +90,11 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   const clock = opts.clock ?? (await createSimClock({ db, initial: testMode ? { at: "2026-10-26T15:30:00.000Z", rate: 0 } : undefined }));
   const sims = await tolerate<Simulators>("sim", () => createSimulators({ db, clock }), () => stubOf("sims"));
   const executor = await tolerate<ExecutorBundle>("executor", () => createExecutor({ db, clock, dataDir, commands, simulators: createSimulators, testMode }), () => stubOf("executor"));
+  // Harness 6.4: provider keys may come from WEFT_SECRETS_FILE and never reach process.env; teach the redactor them too.
+  for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) {
+    const v = (() => { try { return loadSecret(k, process.env); } catch { return null; } })();
+    if (v) executorInternals(executor)?.addSecret(v);
+  }
   const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
   const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({ env: process.env, ledger, testMode, scriptVariant: scriptVariant(db) }), () => placeholderProvider));
   const routinesRef: { current: RoutinesEngine | null } = { current: null };
