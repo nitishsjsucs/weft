@@ -109,6 +109,7 @@ export function PeopleView() {
   );
 }
 
+const TASK_ORDER = ["sign_offer", "sign_confidentiality", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts", "device", "state_registration"];
 const TASK_LABEL: Record<string, string> = { sign_offer: "Sign offer", sign_confidentiality: "Sign confidentiality agreement", federal_w4: "Federal W-4", state_withholding: "State withholding", direct_deposit: "Direct deposit", i9_sim: "I-9 (simulated)", benefits_selection: "Benefits selection", it_accounts: "IT accounts", device: "Laptop", state_registration: "State tax registration" };
 
 /** GET /v1/workers/:id returns a WorkerDetail (route table); the scaffold client types it as Worker, so both are read. */
@@ -231,7 +232,9 @@ export function PersonView({ id }: { id: string }) {
   const d = toDetail(w.data);
   const p = d?.worker;
   const [tab, setTab] = useState("profile");
-  const list = (tasks.data ?? []) as { id: string; kind: string; status: "pending" | "done" | "blocked"; owner: string; dueOn: string | null; blockedReason: string | null }[];
+  // The portal's order first (sign the offer before the confidentiality agreement), then the agent's own tasks.
+  const list = ((tasks.data ?? []) as { id: string; kind: string; status: "pending" | "done" | "blocked"; owner: string; dueOn: string | null; blockedReason: string | null }[])
+    .slice().sort((a, b) => TASK_ORDER.indexOf(a.kind) - TASK_ORDER.indexOf(b.kind));
   if (w.error && !p) return <div role="alert" className="p-8 text-2 text-red-11">{errorText(w.error)}</div>;
   if (!d || !p) return <div className="p-8 text-2 text-gray-10">Loading...</div>;
   const onboarding = (
