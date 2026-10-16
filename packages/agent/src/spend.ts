@@ -146,7 +146,7 @@ export function createSpendLedger(opts: SpendLedgerOptions): WeftSpendLedger {
       return withLock(() => {
         const usd = (t: LedgerTotals) => t.settledMicros + t.openMicros;
         const checks: { cap: "run" | "day" | "live"; capMicros: number; committed: number }[] = [];
-        if (input.runId !== null) checks.push({ cap: "run", capMicros: caps.runUsd * 1e6, committed: usd(totals({ runId: input.runId })) });
+        if (input.runId !== null) checks.push({ cap: "run", capMicros: caps.runUsd * Math.max(1, input.runCapScale ?? 1) * 1e6, committed: usd(totals({ runId: input.runId })) });
         checks.push({ cap: "day", capMicros: caps.dayUsd * 1e6, committed: usd(totals({ day: today() })) });
         if (input.live) checks.push({ cap: "live", capMicros: caps.liveUsd * 1e6, committed: usd(totals({ live: true })) });
         for (const c of checks) {

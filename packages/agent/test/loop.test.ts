@@ -193,6 +193,21 @@ describe("runLoop on a routine (GP1 shape)", () => {
     const adm = (await rt.store.steps(h.runId)).find((s) => s.stage === "admission");
     expect(adm?.result).toMatchObject({ cap: "live" });
   });
+
+  it("a live Claude provider gets model calls through admission, reserving its real 16,000-token max_tokens", async () => {
+    const fake = noticeExecutor();
+    const inner = scriptedProvider({ scriptsDir: dataDir, scripts: { rt_agency_notice: S1 } });
+    let calls = 0;
+    const claude: ModelProvider = { ...inner, id: "claude", model: "claude-opus-5-5", live: true, outputTokensFor: (n) => Math.max(n, 16_000), step: async (r) => { calls++; return inner.step(r); } };
+    const rt = runtimeWith(fake, claude, { liveUsd: 5 });
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
+    await rt.settled(h.runId);
+    expect(calls).toBeGreaterThan(0);
+    const adm = (await rt.store.steps(h.runId)).find((s) => s.stage === "admission" && s.outcome === "ok");
+    // 16,000 output tokens at $20 per million is 320,000 micro dollars before any input.
+    expect((adm?.result as { reserveMicros: number }).reserveMicros).toBeGreaterThan(320_000);
+  });
 });
 
 describe("runLoop on chat", () => {

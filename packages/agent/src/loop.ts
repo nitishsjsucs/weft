@@ -8,7 +8,7 @@ import type {
 } from "@weft/contracts";
 import { check } from "@weft/grounding";
 import { canonicalJson } from "./canonical";
-import { addUsage, reserveUsd, stepCostUsd, usdToMicros, type Prices } from "./cost";
+import { addUsage, reserveUsd, RUN_CAP_SCALE, stepCostUsd, usdToMicros, type Prices } from "./cost";
 import { approxTokens } from "./context";
 import { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
 import type { NewStep, RunStore } from "./store";
@@ -145,7 +145,9 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
   if (!setup) throw new Error(`runLoop: run ${run.id} has no context step`);
   const budget = BUDGETS[setup.promptKind];
   const stepBudget = run.budget.steps || budget.steps;
-  const usdBudget = run.budget.usd || budget.usd;
+  // A provider priced far above Luna (Claude) gets a scaled run cap, here and in the ledger, or no step fits.
+  const runCapScale = RUN_CAP_SCALE[provider.id] ?? 1;
+  const usdBudget = (run.budget.usd || budget.usd) * runCapScale;
   const prompt = frozenPrompt(setup.promptKind);
   assertToolCap(setup.allowlist.length, `runLoop: run ${run.id} allowlist`);
   const chat = setup.promptKind === "chat";
@@ -223,12 +225,14 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     while (result === null) {
       const estInput = approxTokens(prompt) + approxTokens(JSON.stringify(tools)) + approxTokens(JSON.stringify(history));
       // A provider that is not live (scripted, templates) spends nothing: it still reserves and settles, at zero.
-      const reserveMicros = provider.live ? usdToMicros(reserveUsd(estInput, maxOut, deps.prices)) : 0;
+      // Reserve against the max_tokens the request will really carry (Claude raises it to its thinking floor).
+      const sentOut = provider.outputTokensFor?.(maxOut) ?? maxOut;
+      const reserveMicros = provider.live ? usdToMicros(reserveUsd(estInput, sentOut, deps.prices)) : 0;
       if (provider.live && run.costUsdMicros + reserveMicros > usdBudget * 1e6) {
         await append({ stage: "admission", kind: "verify", outcome: "refused:BUDGET_EXCEEDED", result: { cap: "run", reserveMicros }, timings: { ...emptyTimings(), admissionMs: wall() - tAdm } });
         return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: "Stopped before the per-run spend cap." });
       }
-      const rsv = await ledger.reserve({ runId: run.id, usdMicros: reserveMicros, model: run.model, live: provider.live });
+      const rsv = await ledger.reserve({ runId: run.id, usdMicros: reserveMicros, model: run.model, live: provider.live, runCapScale });
       const admissionMs = wall() - tAdm;
       if (!rsv.ok) {
         await append({ stage: "admission", kind: "verify", outcome: "refused:BUDGET_EXCEEDED", result: { cap: rsv.cap, spentMicros: rsv.spentMicros, reserveMicros }, timings: { ...emptyTimings(), admissionMs } });

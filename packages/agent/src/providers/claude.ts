@@ -165,6 +165,7 @@ export function claudeProvider(opts: ClaudeProviderOptions): ModelProvider {
   const model = opts.model ?? CLAUDE_MODEL;
   return {
     id: "claude",
+    outputTokensFor: (requested: number) => Math.max(requested, CLAUDE_FIXED.minMaxTokens),
     model,
     label: model === CLAUDE_MODEL ? CLAUDE_LABEL : `Claude ${model}`,
     live: true,

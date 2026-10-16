@@ -97,10 +97,12 @@ describe("prices per provider (wave 2)", () => {
   it("prices Claude Opus 5.5 at $4, $0.20 and $20 per million, local models at zero, and WEFT_PRICES_JSON still overrides", async () => {
     const { pricesFor, CLAUDE_OPUS_5_5 } = await import("../src/index");
     expect(pricesFor("openai", {})).toEqual(LUNA);
-    expect(pricesFor("claude", {})).toEqual({ inPerM: 4, cachedPerM: 0.2, outPerM: 20 });
+    expect(pricesFor("claude", {})).toEqual({ inPerM: 4, cachedPerM: 0.2, outPerM: 20, cacheWritePerM: 5 });
     expect(pricesFor("openai_compat", {})).toEqual({ inPerM: 0, cachedPerM: 0, outPerM: 0 });
     // 3,000 input (2,000 cached) and 200 output tokens on Claude: 1,000 * 4 + 2,000 * 0.2 + 200 * 20 = 8,400 micro dollars.
     expect(usdToMicros(stepCostUsd({ input: 3000, cached: 2000, cacheWrite: 0, output: 200, reasoning: 0 }, CLAUDE_OPUS_5_5))).toBe(8400);
-    expect(pricesFor("claude", { WEFT_PRICES_JSON: JSON.stringify({ outPerM: 15 }) })).toEqual({ inPerM: 4, cachedPerM: 0.2, outPerM: 15 });
+    expect(pricesFor("claude", { WEFT_PRICES_JSON: JSON.stringify({ outPerM: 15 }) })).toEqual({ inPerM: 4, cachedPerM: 0.2, outPerM: 15, cacheWritePerM: 5 });
+    // 1,000 cache-write tokens inside 3,000 input (2,000 cached): writes at $5, not the $4 input rate.
+    expect(usdToMicros(stepCostUsd({ input: 3000, cached: 2000, cacheWrite: 1000, output: 200, reasoning: 0 }, CLAUDE_OPUS_5_5))).toBe(9400);
   });
 });

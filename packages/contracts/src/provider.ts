@@ -54,4 +54,7 @@ export interface ModelProvider {
   label: string;                       // UI badge
   live: boolean;                       // false only for scripted; the factory guard refuses live providers in tests
   step(req: ModelStepRequest): Promise<ModelStepResult>;   // one attempt, no internal retries
+  /** The max_tokens this provider actually sends for a requested output budget (a floor or a cap); the loop reserves
+   * spend against it. Absent means the request is sent as asked. */
+  outputTokensFor?(requested: number): number;
 }

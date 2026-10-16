@@ -1,10 +1,12 @@
 // Cost accounting (harness 10). Prices per provider (USD per million tokens); WEFT_PRICES_JSON overrides them.
 import type { ProviderId, Usage } from "@weft/contracts";
 
-export interface Prices { inPerM: number; cachedPerM: number; outPerM: number }
+/** cacheWritePerM is optional: absent means cache writes cost the input rate (OpenAI has no write surcharge). */
+export interface Prices { inPerM: number; cachedPerM: number; outPerM: number; cacheWritePerM?: number }
 export const LUNA: Prices = { inPerM: 0.2, cachedPerM: 0.02, outPerM: 1.2 } as const;
-/** Claude Opus 5.5 from the bundled claude-api docs (shared/models.md): $4 input, $0.20 cache reads, $20 output. */
-export const CLAUDE_OPUS_5_5: Prices = { inPerM: 4, cachedPerM: 0.2, outPerM: 20 } as const;
+/** Claude Opus 5.5 from the bundled claude-api docs (shared/models.md, shared/prompt-caching.md): $4 input, $0.20
+ * cache reads, $5 five-minute cache writes (1.25x input), $20 output. */
+export const CLAUDE_OPUS_5_5: Prices = { inPerM: 4, cachedPerM: 0.2, outPerM: 20, cacheWritePerM: 5 } as const;
 export const ZERO_PRICES: Prices = { inPerM: 0, cachedPerM: 0, outPerM: 0 } as const;
 export const PRICES_BY_PROVIDER: Record<ProviderId, Prices> = { openai: LUNA, claude: CLAUDE_OPUS_5_5, openai_compat: ZERO_PRICES, scripted: LUNA };
 
@@ -13,7 +15,8 @@ export function pricesFromEnv(env: Record<string, string | undefined>, base: Pri
   if (!raw) return base;
   try {
     const p = JSON.parse(raw) as Partial<Prices>;
-    return { inPerM: Number(p.inPerM ?? base.inPerM), cachedPerM: Number(p.cachedPerM ?? base.cachedPerM), outPerM: Number(p.outPerM ?? base.outPerM) };
+    const write = p.cacheWritePerM ?? base.cacheWritePerM;
+    return { inPerM: Number(p.inPerM ?? base.inPerM), cachedPerM: Number(p.cachedPerM ?? base.cachedPerM), outPerM: Number(p.outPerM ?? base.outPerM), ...(write === undefined ? {} : { cacheWritePerM: Number(write) }) };
   } catch {
     return base;
   }
@@ -24,10 +27,14 @@ export function pricesFor(provider: ProviderId, env: Record<string, string | und
   return pricesFromEnv(env, PRICES_BY_PROVIDER[provider] ?? LUNA);
 }
 
-/** USD for one model attempt. cacheWrite is recorded but priced at 0 (smoke call 4 decides). */
+/** USD for one model attempt. Cache writes (inside u.input) cost cacheWritePerM when the provider sets it. */
 export function stepCostUsd(u: Usage, p: Prices = LUNA): number {
-  return ((u.input - u.cached) * p.inPerM + u.cached * p.cachedPerM + u.output * p.outPerM) / 1e6;
+  const writes = p.cacheWritePerM === undefined ? 0 : Math.min(u.cacheWrite, Math.max(0, u.input - u.cached));
+  return ((u.input - u.cached - writes) * p.inPerM + writes * (p.cacheWritePerM ?? p.inPerM) + u.cached * p.cachedPerM + u.output * p.outPerM) / 1e6;
 }
+
+/** Run cap factor per provider: Claude Opus 5.5 output costs about 17x Luna, so its runs get 6x the Luna cap. */
+export const RUN_CAP_SCALE: Partial<Record<ProviderId, number>> = { claude: 6 };
 
 export function usdToMicros(usd: number): number {
   return Math.ceil(usd * 1e6);
@@ -35,7 +42,7 @@ export function usdToMicros(usd: number): number {
 
 /** Worst case for one attempt: every input token uncached and the full output budget spent. */
 export function reserveUsd(estimatedInputTokens: number, maxOutputTokens: number, p: Prices = LUNA): number {
-  return (estimatedInputTokens * p.inPerM + maxOutputTokens * p.outPerM) / 1e6;
+  return (estimatedInputTokens * Math.max(p.inPerM, p.cacheWritePerM ?? 0) + maxOutputTokens * p.outPerM) / 1e6;
 }
 
 export const ZERO_USAGE: Usage = { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 };
