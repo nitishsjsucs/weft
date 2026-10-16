@@ -307,6 +307,17 @@ describe("template fallback (SPEC 9.6)", () => {
     expect(fake.proposals.map((p) => p.command)).toEqual(["tax.update_rate", "notices.send_response"]);
   });
 
+  it("a routine on a local model whose server is down also finishes on the templates", async () => {
+    const fake = noticeExecutor();
+    const local: ModelProvider = { ...down, id: "openai_compat", model: "local", label: "local", live: false,
+      step: async () => ({ ...(await down.step({} as never)), error: { code: "PROVIDER_UNAVAILABLE", message: "connection refused", retryable: true } }) };
+    const rt = runtimeWith(fake, local);
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
+    expect(await rt.settled(h.runId)).toMatchObject({ status: "waiting", model: "template" });
+    expect(fake.proposals.map((p) => p.command)).toEqual(["tax.update_rate", "notices.send_response"]);
+  });
+
   it("an unattended routine under a live provider runs on templates from the start", async () => {
     const fake = noticeExecutor();
     let liveCalls = 0;
@@ -345,8 +356,9 @@ describe("runtime rules", () => {
     const h = handle();
     await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
     const run = await rt.settled(h.runId);
+    // Retried as a timeout (more than one call), then PROVIDER_DOWN hands the routine to the templates.
     expect(calls).toBeGreaterThan(1);
-    expect(run).toMatchObject({ status: "failed", terminalReason: "PROVIDER_DOWN" });
+    expect(run).toMatchObject({ status: "waiting", model: "template" });
   });
 
   it("boot rule: a run still queued from the previous process fails with PROCESS_RESTART instead of sitting queued", async () => {
