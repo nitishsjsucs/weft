@@ -7,7 +7,8 @@
 //   that list is R2 or R4 with approval always, so chat files proposals and never executes.
 // A bulk decision ("approve everything") is never an action request: there is no bulk decide command, and the run
 // stays read-only so the existing refusal answers it. MCP sessions (tainted from the start) never get the act list.
-// Names a track has not registered yet are dropped, so the list can only shrink, never exceed the cap of 16.
+// Names a track has not registered yet are dropped, so the list can only shrink, never exceed the cap of 16, and an
+// act-mode write that is not proposal-only (approval always, no auto-allow) is dropped too.
 import { eq } from "drizzle-orm";
 import { CHAT_ACT_TOOLS, CHAT_TOOLS_W3, W3_SETTINGS, type HumanSession } from "@weft/contracts";
 import { settings, type Db } from "@weft/db";
@@ -43,8 +44,30 @@ export async function chatCanPropose(db: Db): Promise<boolean> {
 }
 
 interface RegistryLike {
-  get(name: string): { tiers: { main: string } } | undefined;
+  get(name: string): { tiers: { main: string }; effect?: string } | undefined;
+  /** The full definition (the executor's registry has it at runtime); keeps act-mode writes proposal-only. */
+  def?(name: string): { effect: string; approval: unknown; autoAllow: string } | undefined;
   toolSpecs?(input: { agentKind: "main"; allowlist: string[] }): readonly { name: string; parameters: unknown }[];
+}
+
+/**
+ * Harness 5.3 wave 3 amendment: every write chat can propose has `approval: "always"` and no auto-allow, so the
+ * policy can only answer propose (or refuse) for it. A write a track registers with a looser rule (an amount
+ * threshold, or auto-allow for untainted runs) could execute from chat, so the act list drops it instead. Writes
+ * already on the read list (comms.post_update, hidden from chat by the loop) are not act-mode additions.
+ */
+export function notProposalOnly(registry: RegistryLike | undefined, names: readonly string[]): string[] {
+  if (!registry) return [];
+  const reads = new Set<string>(CHAT_TOOLS_W3);
+  return names.filter((n) => {
+    const known = registry.get(n);
+    if (!known || reads.has(n) || known.effect === "read") return false;   // unregistered names are dropped by registered()
+    // Fail closed: a write whose approval rule cannot be read is not offered.
+    const d = typeof registry.def === "function" ? registry.def(n) : undefined;
+    if (!d) return true;
+    if (d.effect === "read") return false;
+    return d.approval !== "always" || d.autoAllow !== "never";
+  });
 }
 
 /**
@@ -72,6 +95,7 @@ export async function chooseChatTools(deps: { db: Db; registry?: RegistryLike; l
   const canPropose = intent ? await chatCanPropose(deps.db) : false;
   const mode: ChatMode = intent && canPropose && session.keyScope !== "mcp" ? "act" : "read";
   const names = registered(deps.registry, mode === "act" ? CHAT_ACT_TOOLS : CHAT_TOOLS_W3);
-  const dropped = names && deps.liveProvider ? strictUnsafe(deps.registry, names) : [];
+  const loose = names && mode === "act" ? notProposalOnly(deps.registry, names) : [];
+  const dropped = [...loose, ...(names && deps.liveProvider ? strictUnsafe(deps.registry, names.filter((n) => !loose.includes(n))) : [])];
   return { mode, intent, canPropose, allowlist: names ? names.filter((n) => !dropped.includes(n)) : null, dropped };
 }

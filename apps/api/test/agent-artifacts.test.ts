@@ -1,12 +1,14 @@
 // Wave 3 (w3-parity-chat): GET /v1/agent/runs/:id/artifacts/:ref, the chat allowlist choice and the approval card
 // built from the stored preview. Scripted provider only; nothing here calls a live model.
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { CHAT_ACT_TOOLS, CHAT_TOOLS_W3, ReportResult, W3_SETTINGS, type AgentRunRow, type ApprovalCardW3, type Proposal } from "@weft/contracts";
-import { proposals, runSteps, settings } from "@weft/db";
-import { approvalCardOf } from "@weft/executor";
+import { proposals, runArtifacts, runSteps, settings } from "@weft/db";
+import { approvalCardOf, TAINTED_WRITE_COMMANDS } from "@weft/executor";
 import { createTestWeft, type TestWeft } from "../src/testing";
-import { chooseChatTools, readsActionIntent, registered, strictUnsafe } from "../src/agent/chat-allowlist";
+import { chooseChatTools, notProposalOnly, readsActionIntent, registered, strictUnsafe } from "../src/agent/chat-allowlist";
 
 let weft: TestWeft;
 beforeAll(async () => { weft = await createTestWeft(); });
@@ -40,6 +42,34 @@ describe("GET /v1/agent/runs/:id/artifacts/:ref", () => {
     expect(ReportResult.safeParse(body.data).success).toBe(true);
     expect(body.data.rows).toHaveLength(118);
     expect(body.data.chart.series.map((s) => s.key)).toEqual(["hires", "departures"]);
+  });
+
+  it("a routine run's artifact follows the domain grant rule, and a stored path outside the data dir is never read", async () => {
+    await weft.scheduler.tick();   // seeds the prebuilt routines
+    const h = await weft.executor.runs.openRoutineRun({ routineId: "rt_pre_payroll", routineRunId: "rtr_9151", triggerRef: "manual", attended: false });
+    const dir = join(weft.dataDir, "runs", h.runId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "benefits.json"), JSON.stringify({ rows: [{ plan: "Medical (demo)", enrolled: 41 }] }));
+    writeFileSync(join(weft.dataDir, "..", `outside-${h.runId}.json`), JSON.stringify({ secret: "outside the data dir" }));
+    const row = { runId: h.runId, stepN: 1, bytes: 10, sha256: "0".repeat(64), summary: "Benefit enrollment (demo)", domain: "benefits", needs: "view", taintedBy: null };
+    await weft.db.insert(runArtifacts).values([
+      { ...row, id: "art_9151", path: join("runs", h.runId, "benefits.json") },
+      { ...row, id: "art_9152", path: join("..", `outside-${h.runId}.json`) },
+    ]);
+    const dana = await get(`/v1/agent/runs/${h.runId}/artifacts/art_9151`);
+    expect(dana.status).toBe(200);
+    expect(await dana.json()).toMatchObject({ kind: "rows", domain: "benefits", data: { rows: [{ plan: "Medical (demo)" }] } });
+    expect((await get(`/v1/agent/runs/${h.runId}/artifacts/art_9151`, "usr_sam")).status).toBe(200);    // benefits: edit
+    const theo = await get(`/v1/agent/runs/${h.runId}/artifacts/art_9151`, "usr_theo");                  // benefits: none
+    expect(theo.status).toBe(403);
+    expect(await theo.text()).not.toContain("Medical");
+    try {
+      const outside = await get(`/v1/agent/runs/${h.runId}/artifacts/art_9152`);
+      expect(outside.status).toBe(404);
+      expect(await outside.text()).not.toContain("outside the data dir");
+    } finally {
+      rmSync(join(weft.dataDir, "..", `outside-${h.runId}.json`), { force: true });
+    }
   });
 
   it("refuses another principal's run and unknown refs", async () => {
@@ -93,6 +123,45 @@ describe("chat allowlist choice (harness 5.3 wave 3 amendment)", () => {
     }
   });
 
+  it("act mode offers a write only when every call of it is a proposal (approval always, no auto-allow)", async () => {
+    // The executor's registry carries def() at runtime (RegistryView types only get()); the guard reads it.
+    type Def = { effect: string; approval: unknown; autoAllow: string };
+    const real = weft.executor.registry as typeof weft.executor.registry & { def(n: string): Def | undefined };
+    expect(typeof real.def).toBe("function");
+    expect(real.def("payroll.propose_off_cycle")).toMatchObject({ approval: "always", autoAllow: "never" });
+    expect(notProposalOnly(real, registered(real, CHAT_ACT_TOOLS)!)).toEqual([]);
+    // Without def() the guard fails closed: no act-mode write is offered.
+    expect(notProposalOnly({ get: (n) => real.get(n) }, registered(real, CHAT_ACT_TOOLS)!)).toEqual(["payroll.propose_off_cycle"]);
+    // A track that registers a decide command with an amount threshold or auto-allow would let chat execute it.
+    const loose: Record<string, Def> = {
+      "expenses.decide": { effect: "write", approval: { overCents: 50_000 }, autoAllow: "never" },
+      "time_off.decide": { effect: "write", approval: "always", autoAllow: "untainted" },
+      "expenses.get": { effect: "read", approval: "never", autoAllow: "never" },
+    };
+    const fake = {
+      get: (n: string) => (loose[n] ? { tiers: { main: "executable" }, effect: loose[n].effect } : real.get(n)),
+      def: (n: string) => loose[n] ?? real.def(n),
+    };
+    expect(notProposalOnly(fake, [...CHAT_ACT_TOOLS])).toEqual(["expenses.decide", "time_off.decide"]);
+    await setCanPropose(true);
+    try {
+      const choice = await chooseChatTools({ db: weft.db, registry: fake }, session("usr_dana"), "Approve Ruth's vacation request");
+      expect(choice.mode).toBe("act");
+      expect(choice.dropped).toEqual(["expenses.decide", "time_off.decide"]);
+      expect(choice.allowlist).toContain("expenses.get");
+      expect(choice.allowlist).toContain("payroll.propose_off_cycle");
+      expect(choice.allowlist).not.toContain("expenses.decide");
+      expect(choice.allowlist).not.toContain("time_off.decide");
+    } finally {
+      await setCanPropose(false);
+    }
+    // The laundering writes a tainted run refuses (harness 6.2) are on neither chat list.
+    for (const n of TAINTED_WRITE_COMMANDS) {
+      expect(CHAT_ACT_TOOLS as readonly string[]).not.toContain(n);
+      expect(CHAT_TOOLS_W3 as readonly string[]).not.toContain(n);
+    }
+  });
+
   it("a live provider drops a tool whose schema strict function calling refuses (z.record renders propertyNames)", async () => {
     await setCanPropose(true);
     try {
@@ -118,6 +187,26 @@ describe("chat allowlist choice (harness 5.3 wave 3 amendment)", () => {
     expect(allowlist).not.toContain("actions.get_run");
     const [row] = await weft.db.all<{ allowlist_json: string }>(sql`SELECT allowlist_json FROM exec_runs WHERE id = ${runId}`);
     expect(JSON.parse(row!.allowlist_json)).toEqual([...allowlist].sort());
+  });
+});
+
+describe("a tainted chat run in act mode", () => {
+  it("still files a proposal (never executes) and the proposal carries the taint source", async () => {
+    const act = registered(weft.executor.registry, CHAT_ACT_TOOLS)!;
+    const h = await weft.executor.runs.openChatRun(session("usr_dana"), { threadId: null, surface: "human_ui", allowlist: act });
+    await weft.db.run(sql`UPDATE run_taint SET tainted = 1, tainted_by = 'notice:ntc_0001', since_step = 1 WHERE run_id = ${h.runId}`);
+    const [actions] = await weft.db.all<{ c: number }>(sql`SELECT count(*) AS c FROM actions`);
+    const o = await weft.executor.agent.exec(h, { callId: "c1", command: "payroll.propose_off_cycle", args: { worker_ids: ["wrk_0042"], period_start: "2026-10-01", period_end: "2026-10-15", payday: "2026-10-28", reason: "bonus", bonus_cents: { wrk_0042: 25_000 }, agent_note: null } });
+    expect(o).toMatchObject({ ok: true, status: "pending_approval", tainted: true });
+    if (!o.ok || o.status !== "pending_approval") return;
+    const [row] = await weft.db.select().from(proposals).where(eq(proposals.id, o.proposalId));
+    expect(row!.taintedBy).toBe("notice:ntc_0001");
+    expect((await weft.executor.agent.exec(h, { callId: "c2", command: "memory.write_note", args: { title: "x", body: "y" } }))).toMatchObject({ ok: false });
+    const [after] = await weft.db.all<{ c: number }>(sql`SELECT count(*) AS c FROM actions`);
+    expect(after!.c).toBe(actions!.c);
+    // The card stays preview-only; the panel and the simulator read taintedBy from the proposal and show the warning.
+    expect(Object.keys(await approvalCardOf(weft.db, row!))).not.toContain("agentNote");
+    await weft.app.request(`/v1/proposals/${row!.id}/deny`, { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: JSON.stringify({ reasonCode: "not_needed", note: null }) });
   });
 });
 
