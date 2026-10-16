@@ -36,8 +36,11 @@ const priceOf = (plan: Plan, tier: string): number => {
   const v = prices[tier];
   return typeof v === "number" ? v : 0;
 };
-const inForce = (e: Pick<Enr, "status" | "effectiveFrom" | "effectiveTo">, p: { start: string; end: string }) =>
-  e.status !== "pending" && e.effectiveFrom <= p.end && (e.effectiveTo === null || e.effectiveTo >= p.start) && !(e.status === "terminated" && e.effectiveTo === null);
+/** Active enrollments, and terminated ones up to their end date, overlapping the period. */
+const inForce = (e: Pick<Enr, "status" | "effectiveFrom" | "effectiveTo">, p: { start: string; end: string }) => {
+  const onFile = e.status === "active" || (e.status === "terminated" && e.effectiveTo !== null);
+  return onFile && e.effectiveFrom <= p.end && (e.effectiveTo === null || e.effectiveTo >= p.start);
+};
 
 /** Builds the lines deterministically from the carrier's enrollment records (no storage). */
 export async function buildCarrierLines(db: DbTx, month: string, carrier = CARRIER_NAME): Promise<CarrierLine[]> {

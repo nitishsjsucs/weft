@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { AgentRunRow, ContractorPayout, ReconFinding, RoutineRun } from "@weft/contracts";
 import { contractorPayments, events, proposals, routines, simChatMessages } from "@weft/db";
 import { DEFAULT_SCRIPTS_DIR, scriptedProvider } from "../../packages/agent/src/index";
@@ -36,7 +36,8 @@ describe("GP11 benefits reconciliation and contractor payouts", () => {
   it("reconciliation lists exactly the three planted errors, idempotently, and a dispute is a proposal", async () => {
     const run = await (await post("/v1/benefits/reconciliation/run", { month: "2026-10" })).json() as { ok: boolean; data: { count: number; invoice_lines: number } };
     expect(run).toMatchObject({ ok: true, data: { count: 3 } });
-    expect(run.data.invoice_lines).toBe(38 + 34 + 30);   // every medical, dental and vision enrollment is on the bill
+    const billable = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM benefit_enrollments e JOIN benefit_plans p ON p.id = e.plan_id WHERE e.status = 'active' AND p.type IN ('medical', 'dental', 'vision')`);
+    expect(run.data.invoice_lines).toBe(billable[0]!.n);   // every medical, dental and vision enrollment is on the bill (38 + 34 + 30 on the wave 1 seed)
     const findings = (await (await get("/v1/benefits/reconciliation?month=2026-10")).json()) as ReconFinding[];
     expect(findings.map((f) => [f.kind, f.billedCents, f.expectedCents, f.deductedCents])).toEqual([
       ["terminated_but_billed", 21_200, 10_600, 21_200],
