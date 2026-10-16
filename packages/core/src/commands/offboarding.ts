@@ -4,7 +4,7 @@
 // step, so each step has its own action row and offboarding.step_done event.
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { formatCents, OFFBOARDING_STEP_ORDER, Refused, TerminationKind, type OffboardingStepKind } from "@weft/contracts";
+import { formatCents, Refused, TerminationKind, type OffboardingStepKind } from "@weft/contracts";
 import { proposals, workers } from "@weft/db";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import { canonicalJson } from "../shared/canonical-json";
@@ -13,15 +13,15 @@ import { DomainRefusal, nextActionSeq, notFound, readCommand, writeCommand } fro
 import { nameRef } from "../people/names";
 import { getWorker } from "../people/queries";
 import { PayrollRefusal, refreshOpenDrafts, submitRun } from "../payroll/lifecycle";
-import { createSpecialRun, periodEndContaining } from "../payroll/offcycle";
+import { createSpecialRun, periodEndContaining, specialSettleAt } from "../payroll/offcycle";
 import { semimonthlyPeriod } from "../payroll/calendar";
 import { BANK_CREDENTIAL_REF, PAYROLL_RUN_CEILING, proposeOffCycleCommand } from "./payroll";
 import {
-  caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL, stepsOf,
+  caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL,
   type CaseRow, type StepRow,
 } from "../offboarding/cases";
 import {
-  accountsHash, accountsOf, clearAllGroups, cobraNotice, COBRA_FROM, endOfMonth, finalPayDiff, finalPayPlan, finalPaySettleAt, liveEnrollments,
+  accountsHash, accountsOf, clearAllGroups, cobraNotice, COBRA_FROM, endOfMonth, finalPayDiff, finalPayPlan,
   lockableDevices, lockDevices, suspendAccounts, terminateEnrollments,
 } from "../offboarding/steps";
 
@@ -157,7 +157,7 @@ export const finalPayCommand = writeCommand({
     const credential = await deps.resolveCredential(BANK_CREDENTIAL_REF);
     let res;
     try {
-      res = await submitRun(deps.tx, { newId: deps.newId, now: ctx.now }, { runId: run.id, excludeBlocked: false, approvedBy, actionSeq: seq, bank: deps.sims.bank, credential, settleAt: finalPaySettleAt(plan.payday, ctx.now) });
+      res = await submitRun(deps.tx, { newId: deps.newId, now: ctx.now }, { runId: run.id, excludeBlocked: false, approvedBy, actionSeq: seq, bank: deps.sims.bank, credential, settleAt: specialSettleAt(plan.payday, ctx.now) });
     } catch (e) {
       if (e instanceof PayrollRefusal) throw new Refused(e.code, e.message, e.details);
       throw e;
@@ -294,13 +294,6 @@ export const runStepCommand = writeCommand({
   },
 });
 
-/** The direct steps still pending on a case, in step order (the UI's "Run remaining steps"). */
-export async function pendingDirectSteps(deps: Pick<CommandDeps, "tx">, caseId: string): Promise<OffboardingStepKind[]> {
-  const steps = await stepsOf(deps.tx, caseId);
-  return OFFBOARDING_STEP_ORDER.filter((k) => DirectStep.options.includes(k as z.infer<typeof DirectStep>) && steps.find((s) => s.kind === k)?.status === "pending");
-}
-
-export { liveEnrollments };
 
 export const offboardingCommands: WeftCommand[] = [
   listCases, getCase, terminateCommand, finalPayCommand, suspendDirectoryCommand, deactivateSsoCommand, lockDeviceCommand, runStepCommand,

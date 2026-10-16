@@ -2,14 +2,13 @@
 // so an approval re-renders the same subject; each effect goes through a simulator and mirrors the result locally.
 import { and, eq, inArray } from "drizzle-orm";
 import { formatCents, type IdpSim, type DeviceSim } from "@weft/contracts";
-import { benefitEnrollments, benefitPlans, devices, itAccounts, paychecks, payrollRuns, timeEntries, type DbTx } from "@weft/db";
+import { benefitEnrollments, benefitPlans, devices, itAccounts, paychecks, payRates, payrollRuns, timeEntries, type DbTx } from "@weft/db";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import type { CommandDeps } from "../shared/deps";
 import { DomainRefusal } from "../demo/define";
-import { lastDayOfMonth, ptToUtc, semimonthlyRunDates, ymd } from "../payroll/calendar";
+import { lastDayOfMonth, ymd } from "../payroll/calendar";
 import { businessDayOnOrAfter, finalPayEarnings, planSpecialRun, type SpecialEarning } from "../payroll/offcycle";
-import { payRates } from "@weft/db";
 import { computeTotals } from "../payroll/totals";
 import type { CaseRow } from "./cases";
 import type { WorkerRow } from "../payroll/compute";
@@ -83,13 +82,6 @@ export function finalPayDiff(plan: FinalPayPlan): { label: string; before: strin
   ];
 }
 
-/** Settles at 06:00 PT on payday, or at the next tick when payday 06:00 has already passed. */
-export function finalPaySettleAt(payday: string, now: string): string {
-  const at = ptToUtc(payday, 6);
-  return at > now ? at : now;
-}
-
-export { semimonthlyRunDates };
 
 // ------------------------------------------------------------------ IdP steps
 
