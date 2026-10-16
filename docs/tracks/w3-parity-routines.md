@@ -22,6 +22,7 @@ Branch `track/w3-parity-routines`. Specs: `research/wave3/agent-parity.md` secti
 | `routines.set_autonomy` (R1) | `commands/parity.ts`, `apps/api/src/routes/routines.ts` | `POST /v1/routines/:id/autonomy` files it with `human.propose` (MCP propose path), so it is always a proposal; `run()` refuses unless it executes an approved proposal, and auto is refused at proposal and at execution while the setting is off. Tier unavailable to agents. |
 | Agent settings | `apps/api/src/routes/settings.ts` | `GET /v1/settings/agent` and `PUT` (ui_only, admin only through `adminChange`, audited). Both default off. |
 | Engine | `packages/routines/src/engine.ts` | A recommend run's pending writes are listed as "Review the suggestion ..." in the run log. |
+| Gallery and run times (rank 11) | `packages/routines/src/engine.ts` (`overview`, `nextRunAt`), `apps/api/src/routes/routines.ts`, `apps/web/src/components/app/routines/gallery.tsx` | `GET /v1/routines` rows also carry `lastRun` (id, status, start, summary) and `nextRunAt` (the next croner slot from the sim clock, enabled cron routines only). The routines page opens with a Favorites row (ready check, pre-payroll, exec report, digest, milestones) whose Try it fires an attended run and opens it in the agent panel; every card shows last and next run. |
 | UI | `apps/web/src/components/app/routines/{autonomy-control,agent-settings}.tsx`, routines view, Settings page | Three-way segmented control on the routine page (auto disabled until Settings allows it; a pending change is shown with a link to the Inbox); an autonomy badge on routine cards; Settings > Agent with both switches. |
 
 ## Tests
@@ -30,7 +31,11 @@ Branch `track/w3-parity-routines`. Specs: `research/wave3/agent-parity.md` secti
 - `tests/scenarios/gp16-anomalies.test.ts`: pure rule cases; the open draft's flags unchanged after planting and a recompute; a new Nov 1 to 15 draft flags exactly the raise and the W-4 workers; an off-cycle repeating the planted bonus is blocked and another worker's is not.
 - `tests/scenarios/gp16-routines.test.ts`: ready check with one ready and one blocked hire (exact post, one suggestion, refreshed not duplicated), the exec report on Nov 1 (numbers equal the figures, email sent, derived args), milestones (anniversaries, opted-in birthdays only, no year).
 - `tests/scenarios/gp16-autonomy.test.ts`: settings defaults and admin-only PUT; the autonomy change is a proposal applied on approval; direct execution refused; auto gate; a recommend run posts nothing and files a suggestion.
-- `e2e/gp16-routines.spec.ts` (ports 4630 and 4631): Settings switches and the autonomy change through the Inbox.
+- `e2e/gp16-routines.spec.ts` (ports 4630 and 4631): Settings switches, the gallery with Try it and run times, and the autonomy change through the Inbox.
+
+Gate on this branch (2026-10-16, before the gallery commit): `pnpm typecheck`, `pnpm test` (660 passed), `pnpm demo`
+(GP1 to GP12), `pnpm build`, `pnpm e2e` on 4630 and 4631 (32 passed: the 31 existing specs plus GP16). After the
+gallery commit: the affected unit and scenario tests, web build, lints, and the GP16 and GP4 e2e specs.
 - PREBUILT id assertions updated in `packages/routines/test/engine.test.ts` and `apps/api/test/routines.test.ts` (outside the owned paths, required by the acceptance list).
 
 ## Decisions and deviations
@@ -52,8 +57,8 @@ Branch `track/w3-parity-routines`. Specs: `research/wave3/agent-parity.md` secti
   `autoEligible: "agent.expense_auto_cents"` and seed that limits row; then a GP16 scenario where a routine at auto
   approves a clean expense under the cap, proposes one above it, and a tainted run falls back to approve.
 - The approval and override counts from `knowledge/preferences/approvals.md` next to the autonomy control (G8).
-- Stretch items not started: notice escalation (rank 10), routine gallery with last and next run (rank 11), 30-day
-  check-in (rank 12), contractor W-9 and W-8 expiry (rank 15). `contractors.list_tax_forms` and `notices.escalate`
+- Stretch items not started: notice escalation (rank 10), 30-day check-in (rank 12), contractor W-9 and W-8 expiry
+  (rank 15). Rank 11 (gallery with last and next run) landed. `contractors.list_tax_forms` and `notices.escalate`
   from the planned table are not implemented.
 - `rt_new_hire_ready` does not yet read the holiday calendar or Workday-owned start dates.
 - The exec report uses processed runs by payday month; it does not split contractor payouts.

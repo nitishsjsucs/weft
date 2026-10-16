@@ -10,6 +10,7 @@ import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
 import { AUTONOMY_COPY, AutonomyControl } from "./autonomy-control";
+import { RoutineGallery, RunTimes, type RoutineRow } from "./gallery";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /** Readable trigger: "Mondays 9:00 PT", "Weekdays 9:00 PT", "On notice.received". Falls back to the raw cron. */
@@ -59,10 +60,11 @@ function DraftBox() {
 }
 
 export function RoutinesView() {
-  const list = useGet("/v1/routines", { refreshMs: 5_000 });
+  const list = useGet("/v1/routines", { refreshMs: 5_000 }) as { data: RoutineRow[] | undefined; error: Error | null };
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="Routines" subtitle="Standing jobs the agent runs on a schedule or an event. Deterministic prechecks decide whether a model is needed at all." />
+      <RoutineGallery rows={list.data ?? []} />
       <DraftBox />
       {list.error ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(list.error)}</div> : null}
       <div className="grid gap-4 tablet:grid-cols-2">
@@ -74,6 +76,7 @@ export function RoutinesView() {
                 <Badge tone={r.enabled ? "green" : "gray"}>{r.enabled ? "Enabled" : "Disabled"}</Badge>
               </div>
               <p className="text-[13px] text-gray-11">{r.description}</p>
+              <RunTimes r={r} />
               <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-2">
                 <TriggerChip t={r.trigger} />
                 {r.autonomy !== "approve" ? <Badge tone="outline">{AUTONOMY_COPY[r.autonomy].label}</Badge> : null}

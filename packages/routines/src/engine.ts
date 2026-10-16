@@ -44,6 +44,8 @@ export interface WeftRoutinesEngine extends RoutinesEngine {
     checklist(input: { routine: RoutineDef; agentRunId: string; routineRunId: string | null; companyId: string; trigger: Record<string, unknown> }): Promise<{ id: string; label: string; passed: boolean }[]>;
   };
   list(): Promise<RoutineDef[]>;
+  /** Wave 3: last run and next cron slot per routine (the sim clock is the "from"). */
+  overview(): Promise<RoutineOverview[]>;
   runs(routineId: string, limit?: number): Promise<RoutineRun[]>;
   getRun(routineRunId: string): Promise<RoutineRun | null>;
   ensurePrebuilt(): Promise<void>;
@@ -61,6 +63,16 @@ export interface WeftRoutinesEngine extends RoutinesEngine {
   /** Number of finalizations in flight (tests and the close drain). */
   pendingFinalizations(): number;
 }
+
+/** The next cron slot after `from` for an enabled cron routine (croner, in its time zone); null otherwise. */
+export function nextRunAt(r: Pick<RoutineDef, "enabled" | "trigger">, from: string): string | null {
+  if (!r.enabled || r.trigger.type !== "cron") return null;
+  const c = new Cron(r.trigger.cron, { timezone: r.trigger.tz, paused: true });
+  try { return c.nextRun(new Date(from))?.toISOString() ?? null; } catch { return null; } finally { c.stop(); }
+}
+
+/** One routine's last run and next run, for the routines list and gallery (wave 3 rank 11). */
+export interface RoutineOverview { routineId: string; lastRun: { id: string; status: RoutineRunStatus; startedAt: string | null; summary: string | null } | null; nextRunAt: string | null }
 
 export function runKey(routineId: string, triggerRef: string): string {
   return createHash("sha256").update(JSON.stringify({ routine_id: routineId, trigger_ref: triggerRef })).digest("hex");
@@ -256,6 +268,15 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
   const engine: WeftRoutinesEngine = {
     view: { get, checklist },
     list,
+    async overview() {
+      const now = clock.now();
+      const out: RoutineOverview[] = [];
+      for (const r of await list()) {
+        const last = (await db.select().from(routineRuns).where(eq(routineRuns.routineId, r.id)).orderBy(desc(routineRuns.startedAt)).limit(1))[0];
+        out.push({ routineId: r.id, lastRun: last ? { id: last.id, status: last.status as RoutineRunStatus, startedAt: last.startedAt, summary: last.summary } : null, nextRunAt: nextRunAt(r, now) });
+      }
+      return out;
+    },
     getRun,
     ensurePrebuilt,
     fire,

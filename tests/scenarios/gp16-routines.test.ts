@@ -64,6 +64,12 @@ describe("GP16 routine parity", () => {
     }
   });
 
+  it("GET /v1/routines carries the next cron slot for enabled routines and no last run before any run", async () => {
+    const rows = (await call("GET", "/v1/routines")).json as { id: string; enabled: boolean; nextRunAt: string | null; lastRun: unknown }[];
+    expect(rows.find((r) => r.id === "rt_people_digest")).toMatchObject({ enabled: true, nextRunAt: "2026-10-26T16:00:00.000Z", lastRun: null });
+    expect(rows.find((r) => r.id === "rt_new_hire_ready")).toMatchObject({ enabled: false, nextRunAt: null, lastRun: null });
+  });
+
   it("the brain's ready line matches core's", () => {
     const h = { worker_id: "wrk_x", name: "A B (demo)", start_date: "2026-10-28", work_state: "CA", first_day: false, ready: false, items: [], blocked: [{ item: "bank_verified" as const, label: "direct deposit account", owner: "the hire" as const }] };
     for (const v of [h, { ...h, ready: true, blocked: [] }, { ...h, first_day: true }, { ...h, first_day: true, ready: true, blocked: [] }]) expect(brainReadyLine(v)).toBe(coreReadyLine(v));
@@ -84,6 +90,8 @@ describe("GP16 routine parity", () => {
     expect(sug[0]!.headline).toContain("Kai Tester (demo)");
     const inbox = (await call("GET", "/v1/proposals?status=pending")).json;
     expect(JSON.stringify(inbox)).toContain(sug[0]!.id);
+    const rows = (await call("GET", "/v1/routines")).json as { id: string; lastRun: { id: string; status: string } | null }[];
+    expect(rows.find((r) => r.id === "rt_new_hire_ready")?.lastRun).toMatchObject({ id: run.id, status: "done" });
   });
 
   it("a second run the same day refreshes the suggestion instead of adding one", async () => {

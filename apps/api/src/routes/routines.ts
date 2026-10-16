@@ -56,7 +56,12 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
   };
   const dto = (run: RoutineRun) => ({ ...run, durationMs: run.startedAt && run.endedAt ? new Date(run.endedAt).getTime() - new Date(run.startedAt).getTime() : null });
 
-  r.get("/v1/routines", async (c) => c.json(await engine.list()));
+  // Wave 3 (w3-parity-routines): each row also carries lastRun and nextRunAt for the gallery and the list.
+  r.get("/v1/routines", async (c) => {
+    const defs = await engine.list();
+    const ov = typeof engine.overview === "function" ? new Map((await engine.overview()).map((o) => [o.routineId, o])) : new Map();
+    return c.json(defs.map((d) => ({ ...d, lastRun: ov.get(d.id)?.lastRun ?? null, nextRunAt: ov.get(d.id)?.nextRunAt ?? null })));
+  });
 
   r.get("/v1/routines/:id", async (c) => c.json(await getRoutine(c.req.param("id"))));
 

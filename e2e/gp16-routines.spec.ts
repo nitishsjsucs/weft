@@ -31,6 +31,14 @@ test("GP16: agent settings and a routine autonomy change through the Inbox", asy
     expect((await weft.routines()).find((r) => r.id === ROUTINE)?.autonomy).toBe("approve");
   });
 
+  await test.step("the routines page shows the favorites gallery with Try it and run times", async () => {
+    await openApp(page, "/app/routines");
+    const gallery = page.getByTestId(T.gallery);
+    await expect(gallery).toBeVisible();
+    await expect(gallery.getByTestId(T.tryIt("rt_new_hire_ready"))).toBeVisible();
+    await expect(gallery).toContainText(/Next run/);
+  });
+
   await test.step("approving it in the Inbox moves the routine to Recommend", async () => {
     await openApp(page, "/app/inbox");
     await approveCard(page, weft, proposal.id);
