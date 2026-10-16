@@ -131,7 +131,9 @@ describe("chat allowlist choice (harness 5.3 wave 3 amendment)", () => {
     expect(real.def("payroll.propose_off_cycle")).toMatchObject({ approval: "always", autoAllow: "never" });
     expect(notProposalOnly(real, registered(real, CHAT_ACT_TOOLS)!)).toEqual([]);
     // Without def() the guard fails closed: no act-mode write is offered.
-    expect(notProposalOnly({ get: (n) => real.get(n) }, registered(real, CHAT_ACT_TOOLS)!)).toEqual(["payroll.propose_off_cycle"]);
+    // With w3-expenses and w3-timeoff merged, their decide commands are registered act-mode writes too.
+    expect(notProposalOnly({ get: (n) => real.get(n) }, registered(real, CHAT_ACT_TOOLS)!)).toEqual(["payroll.propose_off_cycle", "expenses.decide", "time_off.decide"]);
+    for (const n of ["expenses.decide", "time_off.decide"]) expect(real.def(n)).toMatchObject({ approval: "always", autoAllow: "never" });
     // A track that registers a decide command with an amount threshold or auto-allow would let chat execute it.
     const loose: Record<string, Def> = {
       "expenses.decide": { effect: "write", approval: { overCents: 50_000 }, autoAllow: "never" },

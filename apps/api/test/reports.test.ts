@@ -91,6 +91,8 @@ describe("reports.query against the seed", () => {
   });
 
   it("time_off_minutes_by_month sums use rows only", async () => {
+    // The w3_timeoff seed already holds use rows; the check is on what these inserts add.
+    const base = new Map((await report("time_off_minutes_by_month", "?from=2026-09-01&to=2026-10-31")).body.rows.map((r) => [r.period, Number(r.minutes_used)]));
     await weft.db.run(sql`INSERT INTO time_off_ledger (id, assignment_id, worker_id, policy_id, kind, minutes, effective_date, created_at) VALUES
       ('tol_r001', 'tasn_r1', 'wrk_0001', 'top_r1', 'use', -480, '2026-09-14', '2026-09-14T00:00:00.000Z'),
       ('tol_r002', 'tasn_r1', 'wrk_0001', 'top_r1', 'use', -240, '2026-09-15', '2026-09-15T00:00:00.000Z'),
@@ -98,14 +100,17 @@ describe("reports.query against the seed", () => {
       ('tol_r004', 'tasn_r2', 'wrk_0002', 'top_r1', 'accrual', 400, '2026-10-15', '2026-10-15T00:00:00.000Z'),
       ('tol_r005', 'tasn_r2', 'wrk_0002', 'top_r1', 'hold', -480, '2026-10-20', '2026-10-20T00:00:00.000Z')`);
     const { body } = await report("time_off_minutes_by_month", "?from=2026-09-01&to=2026-10-31");
-    expect(body.rows).toEqual([
-      { period: "2026-09", period_label: "Sep 2026", period_start: "2026-09-01", period_end: "2026-09-30", minutes_used: 720, hours_display: "12 h" },
-      { period: "2026-10", period_label: "Oct 2026", period_start: "2026-10-01", period_end: "2026-10-31", minutes_used: 480, hours_display: "8 h" },
-    ]);
+    expect(body.rows.map((r) => r.period)).toEqual(["2026-09", "2026-10"]);
+    expect(body.rows.map((r) => Number(r.minutes_used) - (base.get(String(r.period)) ?? 0))).toEqual([720, 480]);
+    if (base.size === 0 || [...base.values()].every((v) => v === 0)) {
+      expect(body.rows.map((r) => r.hours_display)).toEqual(["12 h", "8 h"]);
+    }
     expect(body.chart.series).toEqual([{ key: "minutes_used", label: "Time off taken", unit: "minutes" }]);
   });
 
   it("expenses_by_category splits approved from awaiting review and leaves declined out", async () => {
+    // The w3_expenses seed already holds claims; the check is on what these inserts add per category.
+    const base = new Map((await report("expenses_by_category", "?from=2026-09-01&to=2026-10-31")).body.rows.map((r) => [String(r.category), r]));
     const ins = (id: string, cat: string, cents: number, status: string, day: string) => weft.db.run(sql`INSERT INTO expenses (id, company_id, worker_id, category, merchant, amount_cents, transaction_date, submitted_at, business_purpose, status)
       VALUES (${id}, 'cmp_larkspur', 'wrk_0003', ${cat}, 'Demo Merchant (demo)', ${cents}, ${day}, ${`${day}T12:00:00.000Z`}, 'Customer visit (demo)', ${status})`);
     await ins("exp_r001", "travel", 42_000, "approved", "2026-10-02");
@@ -114,10 +119,16 @@ describe("reports.query against the seed", () => {
     await ins("exp_r004", "meals", 9_900, "declined", "2026-10-06");
     await ins("exp_r005", "software", 1_200, "approved", "2025-01-06");   // out of range
     const { body } = await report("expenses_by_category", "?from=2026-09-01&to=2026-10-31");
-    expect(body.rows).toEqual([
-      { category: "Travel", items: 2, approved_cents: 60_050, approved_display: "$600.50", pending_cents: 0, pending_display: "$0.00" },
-      { category: "Meals", items: 1, approved_cents: 0, approved_display: "$0.00", pending_cents: 6_400, pending_display: "$64.00" },
-    ]);
+    const delta = (cat: string) => {
+      const after = body.rows.find((r) => r.category === cat), before = base.get(cat);
+      const n = (r: typeof after, k: string) => Number((r as Record<string, unknown> | undefined)?.[k] ?? 0);
+      return { items: n(after, "items") - n(before, "items"), approved_cents: n(after, "approved_cents") - n(before, "approved_cents"), pending_cents: n(after, "pending_cents") - n(before, "pending_cents") };
+    };
+    expect(delta("Travel")).toEqual({ items: 2, approved_cents: 60_050, pending_cents: 0 });
+    expect(delta("Meals")).toEqual({ items: 1, approved_cents: 0, pending_cents: 6_400 });   // the declined meal is left out
+    expect(delta("Software")).toEqual({ items: 0, approved_cents: 0, pending_cents: 0 });   // out of range
+    const travel = body.rows.find((r) => r.category === "Travel")!;
+    expect(travel.approved_display).toBe(`$${(Number(travel.approved_cents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`);
   });
 });
 

@@ -70,6 +70,29 @@ describe("GP15 chart answer and approval card", () => {
       expect(trace.cards).toEqual([]);
     });
 
+    // Deny runs before the approval below: once that $1,500.00 bonus is paid, DUPLICATE_SUPPLEMENTAL (w3-parity-routines)
+    // blocks a second identical bonus line for Hollis, as it should.
+    it("Deny from the card (the Inbox deny route) executes nothing and the card reads denied", async () => {
+      await setCanPropose(true);
+      const actions = await count("actions");
+      const offCycleRuns = async () => Number((await weft.db.all<{ c: number }>(sql`SELECT count(*) AS c FROM payroll_runs WHERE subtype = 'off_cycle'`))[0]!.c);
+      const runsBefore = await offCycleRuns();
+      const { trace, chatMode } = await ask("Pay Hollis Grey (demo) an off-cycle bonus of $1,500.00 with payday Oct 27");
+      expect(chatMode).toBe("act");
+      const p = trace.proposals[0]!;
+      expect(p).toMatchObject({ command: "payroll.propose_off_cycle", status: "pending" });
+      expect(trace.cards[0]).toMatchObject({ proposalId: p.id, status: "pending" });
+      const res = await weft.app.request(`/v1/proposals/${p.id}/deny`, { method: "POST", headers: headers(), body: JSON.stringify({ reasonCode: "not_needed", note: null }) });
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(((await res.json()) as { proposal: Proposal }).proposal.status).toBe("denied");
+      expect((await weft.app.request(`/v1/proposals/${p.id}/approve`, { method: "POST", headers: headers(), body: "{}" })).status).toBe(422);
+      expect(await offCycleRuns()).toBe(runsBefore);
+      expect(await count("actions")).toBe(actions);
+      const after = (await (await weft.app.request(`/v1/agent/runs/${trace.run.id}/trace`, { headers: headers() })).json()) as Trace;
+      expect(after.cards[0]!.status).toBe("denied");
+      await setCanPropose(false);
+    });
+
     it("with it on, chat files one R4 proposal and executes nothing; the card comes from the stored preview", async () => {
       await setCanPropose(true);
       const actions = await count("actions");
@@ -101,27 +124,6 @@ describe("GP15 chart answer and approval card", () => {
       expect(await count("actions")).toBe(actions + 1);
       const after = (await (await weft.app.request(`/v1/agent/runs/${run.id}/trace`, { headers: headers() })).json()) as Trace;
       expect(after.cards[0]!.status).toBe("approved");
-    });
-
-    it("Deny from the card (the Inbox deny route) executes nothing and the card reads denied", async () => {
-      await setCanPropose(true);
-      const actions = await count("actions");
-      const offCycleRuns = async () => Number((await weft.db.all<{ c: number }>(sql`SELECT count(*) AS c FROM payroll_runs WHERE subtype = 'off_cycle'`))[0]!.c);
-      const runsBefore = await offCycleRuns();
-      const { trace, chatMode } = await ask("Pay Hollis Grey (demo) an off-cycle bonus of $1,500.00 with payday Oct 27");
-      expect(chatMode).toBe("act");
-      const p = trace.proposals[0]!;
-      expect(p).toMatchObject({ command: "payroll.propose_off_cycle", status: "pending" });
-      expect(trace.cards[0]).toMatchObject({ proposalId: p.id, status: "pending" });
-      const res = await weft.app.request(`/v1/proposals/${p.id}/deny`, { method: "POST", headers: headers(), body: JSON.stringify({ reasonCode: "not_needed", note: null }) });
-      expect(res.status, await res.clone().text()).toBe(200);
-      expect(((await res.json()) as { proposal: Proposal }).proposal.status).toBe("denied");
-      expect((await weft.app.request(`/v1/proposals/${p.id}/approve`, { method: "POST", headers: headers(), body: "{}" })).status).toBe(422);
-      expect(await offCycleRuns()).toBe(runsBefore);
-      expect(await count("actions")).toBe(actions);
-      const after = (await (await weft.app.request(`/v1/agent/runs/${trace.run.id}/trace`, { headers: headers() })).json()) as Trace;
-      expect(after.cards[0]!.status).toBe("denied");
-      await setCanPropose(false);
     });
 
     it("bulk approval is still refused with the setting on, and files nothing", async () => {
