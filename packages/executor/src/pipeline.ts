@@ -65,6 +65,9 @@ async function daySpent(tx: DbTx, e: Engine, companyId: string, key: string, now
   return rows.filter((r) => r.id !== excludeId).reduce((s, r) => s + (r.cents ?? 0), 0);
 }
 
+/** Human-only commands whose routes are ui_only (routine toggles, rollbacks): never from an API key. */
+const UI_ONLY_COMMANDS = new Set(["routines.enable", "routines.disable", "tax.revert_rate", "people.revert_pay_rate"]);
+
 /** Runs one call inside the caller's transaction. Never opens a transaction or takes the write lock itself. */
 export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: string, rawArgs: unknown, opts: CallOptions = {}): Promise<{ outcome: ToolOutcome; def: WeftCommand | null }> {
   const ctx = scope.ctx;
@@ -91,6 +94,9 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
     return refuse("UNAVAILABLE", `${def.name} is recorded by the system only`);
   } else if (scope.caller === "mcp" && def.access === "human_only") {
     return refuse("UNAVAILABLE", `${def.name} is not exposed over MCP`);
+  } else if (UI_ONLY_COMMANDS.has(def.name) && ctx.surface !== "human_ui") {
+    // The dedicated routes for these are ui_only; POST /v1/tools/:name must not be a way around that.
+    return refuse("NOT_PERMITTED", `${def.name} needs the UI session (an API key cannot run it)`);
   }
 
   // Null mapping and Zod.

@@ -52,6 +52,10 @@ export function auth(): MiddlewareHandler<WeftEnv> {
     const host = c.req.header("host") ?? url.host;
     const hosts = allowedHosts(weft.ports, weft.testMode);
     if (!hosts.has(host)) throw new Forbidden("Host not allowed");
+    // The web proxy rewrites Host to the API's own address; the browser's Host arrives as x-forwarded-host and must
+    // pass the same allowlist, or a DNS-rebound page could read the API through the proxy (SPEC 10).
+    const forwarded = c.req.header("x-forwarded-host")?.split(",")[0]?.trim();
+    if (forwarded && !hosts.has(forwarded)) throw new Forbidden("Forwarded host not allowed");
     const method = c.req.method;
     const mutating = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
     const origin = c.req.header("origin");

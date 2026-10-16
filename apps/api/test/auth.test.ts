@@ -17,6 +17,12 @@ describe("auth", () => {
     const ok = await weft.app.request("/v1/proposals/prp_0001/deny", { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), origin: "http://localhost:3070" }, body: "{}" });
     expect(ok.status).toBe(422);
   });
+  it("rejects a foreign x-forwarded-host even with a valid proxy secret (DNS rebinding through the web proxy)", async () => {
+    const res = await weft.app.request("/v1/proposals", { headers: { ...weft.uiHeaders("usr_dana"), "x-forwarded-host": "evil.example:3070" } });
+    expect(res.status).toBe(403);
+    const ok = await weft.app.request("/v1/proposals", { headers: { ...weft.uiHeaders("usr_dana"), "x-forwarded-host": "127.0.0.1:3070" } });
+    expect(ok.status).toBe(200);
+  });
   it("requires a session, a valid key, and the proxy secret for x-weft-principal", async () => {
     expect((await weft.app.request("/v1/proposals")).status).toBe(401);
     expect((await weft.app.request("/v1/proposals", { headers: { "x-api-key": "weft_sk_nope" } })).status).toBe(401);
@@ -27,7 +33,8 @@ describe("auth", () => {
     const mcp = readFileSync(join(weft.dataDir, "demo-mcp-key.txt"), "utf8").trim();
     const h = { "x-api-key": mcp, "content-type": "application/json" };
     for (const [m, p] of [["POST", "/v1/proposals/prp_0001/approve"], ["POST", "/v1/proposals/prp_0001/deny"], ["POST", "/v1/proposals/prp_0001/dismiss"], ["POST", "/v1/proposals/prp_0001/start"],
-      ["POST", "/v1/actions/1/rollback"], ["GET", "/v1/settings/permissions"], ["PUT", "/v1/settings/agent-grants"], ["POST", "/v1/api-keys"], ["GET", "/v1/sim/state"], ["POST", "/v1/sim/reset"]] as const) {
+      ["POST", "/v1/actions/1/rollback"], ["GET", "/v1/settings/permissions"], ["PUT", "/v1/settings/agent-grants"], ["POST", "/v1/api-keys"], ["GET", "/v1/sim/state"], ["POST", "/v1/sim/reset"],
+      ["POST", "/v1/routines/rt_people_digest/trigger"], ["POST", "/v1/agent/runs/run_0001/cancel"]] as const) {
       expect((await weft.app.request(p, { method: m, headers: h, body: m === "GET" ? undefined : "{}" })).status, `${m} ${p}`).toBe(403);
     }
     expect((await weft.app.request("/v1/proposals", { headers: h })).status).toBe(200);

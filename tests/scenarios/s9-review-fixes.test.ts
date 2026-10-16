@@ -1,5 +1,7 @@
 // Regression tests for the round 2 review: the frozen run allowlist (harness 5.3), proposal expiry finalizing the
 // proposing runs, and routines.enable and routines.disable emitting known events.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { CHAT_TOOLS, type AgentRunRow } from "@weft/contracts";
@@ -98,5 +100,16 @@ describe("rate change refreshes open drafts", () => {
       .filter((t) => t.code === "sui" && t.jurisdiction === "CA" && t.payer === "employer"));
     expect(sui.length).toBeGreaterThan(0);
     expect(new Set(sui.map((t) => t.rate))).toEqual(new Set(["0.015"]));
+  });
+});
+
+describe("ui-only commands through /v1/tools", () => {
+  it("an admin API key cannot toggle a routine through the generic tool route", async () => {
+    await weft.scheduler.tick();
+    const admin = readFileSync(join(weft.dataDir, "demo-api-key.txt"), "utf8").trim();
+    const res = await weft.app.request("/v1/tools/routines__disable", { method: "POST", headers: { "x-api-key": admin, "content-type": "application/json" }, body: JSON.stringify({ routine_id: "rt_people_digest" }) });
+    expect(await res.json()).toMatchObject({ ok: false, refusal: { code: "NOT_PERMITTED" } });
+    const [d] = await weft.db.select().from(routines).where(eq(routines.id, "rt_people_digest"));
+    expect(d?.enabled).toBe(true);
   });
 });
