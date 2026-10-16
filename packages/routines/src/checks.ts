@@ -30,7 +30,11 @@ export const PREDICATES: Record<string, Predicate> = {
   }),
   accounts_created: ([workerId = ""], f) => callsTo(f, "it.create_account").filter((c) => (c.status === "done" || live(f, c)) && mentions(c.args, workerId)).length >= 3,
   posted: ([channel = ""], f) => callsTo(f, "comms.send_message").some((c) => live(f, c) && mentions(c.args, channel)),
-  registrations_proposed: ([workerId = ""], f) => callsTo(f, "tax.register_state_account").filter((c) => c.status === "pending_approval" && live(f, c) && mentions(c.args, workerId)).length >= 2,
+  // Registration args name the tax account, not the worker, so the count comes from the precheck (register_count).
+  registrations_proposed: ([, count = ""], f) => {
+    const want = count === "" || !Number.isFinite(Number(count)) ? 1 : Number(count);
+    return callsTo(f, "tax.register_state_account").filter((c) => c.status === "pending_approval" && live(f, c)).length >= want;
+  },
   device_proposed: ([workerId = ""], f) => callsTo(f, "it.order_device").some((c) => c.status === "pending_approval" && live(f, c) && mentions(c.args, workerId)),
 };
 

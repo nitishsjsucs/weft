@@ -1,9 +1,7 @@
 // Scenario s3 (SPEC 12, 13). Owner: t2-world. GP3 new hire in a new state (asserts tainted === false).
 // Part 1 runs the domain flow through direct stand-ins for the executor (no approvals or action rows) and the real
-// scheduler with the real handlers. Part 2 is the end-to-end run through the real executor and skips while the
-// executor is a stub (checked against track/t3-governance in a scratch merge on 2026-10-15).
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+// scheduler with the real handlers. Part 2 is the end-to-end run: offer.accepted fires rt_new_hire through the
+// routines engine, the scripted provider and the real executor.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { commands, directExecutors, findCommand, handlers, nonEmptyUntrusted } from "@weft/core";
@@ -124,22 +122,16 @@ describe("GP3 new hire in a new state (asserts tainted === false)", () => {
 
 });
 
-// Part 2 runs only when the real executor is wired (it is a stub on the track branch). It drives the calls of
-// scripts/s3-new-hire.json through executor.agent in a routine run, as the agent loop will once T4 lands, with
-// "Mark accepted" through the HumanExecutor route, Dana's decisions, the sim clock route, the chain and memory checks.
-interface ScriptCall { type: string; name?: string; arguments?: Record<string, unknown> }
-interface ScriptStep { expect?: { lastResults: { tool: string; ok?: boolean; status?: string }[] }; output: ScriptCall[]; stop: boolean }
-const script = JSON.parse(readFileSync(join(import.meta.dirname, "scripts", "s3-new-hire.json"), "utf8")) as { routine: string; agents: { main: ScriptStep[] } };
-const fill = (v: unknown, workerId: string): unknown => JSON.parse(JSON.stringify(v).replaceAll("{{trigger.worker_id}}", workerId));
-const toCommand = (tool: string) => tool.replace("__", ".");
-
-describe("GP3 end to end through the executor (asserts tainted === false)", () => {
+// Part 2 is the real path: "Mark accepted" through the HumanExecutor route emits offer.accepted, a scheduler tick
+// fires rt_new_hire from that event, and the agent loop runs scenarios/rt_new_hire.json through the scripted
+// provider and the real executor. Then Dana's decisions, the sim clock route, the chain and memory checks.
+describe("GP3 end to end through the routine and the executor (asserts tainted === false)", () => {
   let weft: TestWeft;
   beforeAll(async () => { weft = await createTestWeft(); });
   afterAll(async () => { await weft.close(); });
-  const live = () => !weft.stubs.includes("executor");
+  const live = () => !["executor", "agent", "routines"].some((s) => weft.stubs.includes(s));
 
-  it("Mark accepted, rt_new_hire calls, Dana approves, 2 business days activate CO and complete state_registration", async (ctx) => {
+  it("Mark accepted fires rt_new_hire, Dana approves, 2 business days activate CO and complete state_registration", async (ctx) => {
     if (!live()) return ctx.skip();
     const post = async (path: string, body?: unknown) => {
       const res = await weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -149,34 +141,20 @@ describe("GP3 end to end through the executor (asserts tainted === false)", () =
     const accepted = await post(`/v1/offers/${NOOR_OFFER}/accept`);
     if (!accepted.ok || accepted.status !== "done") throw new Error(JSON.stringify(accepted));
     const noor = (accepted.data as { worker_id: string }).worker_id;
-    const [evt] = await weft.db.all<{ id: string }>(sql`SELECT id FROM events WHERE type = 'offer.accepted'`);
 
-    const routineRunId = "rtr_s3_0001";
-    const open = () => weft.executor.runs.openRoutineRun({ routineId: script.routine, routineRunId, triggerRef: evt!.id, attended: true });
-    const run = await open().catch(async () => {
-      await weft.db.run(sql`INSERT INTO routines (id, company_id, name, description, owner_principal_id, enabled, trigger_json, instructions, tools_json, budget_json, surface_json, source, created_at)
-        VALUES (${script.routine}, 'cmp_larkspur', 'New hire (demo)', 's3', 'usr_dana', 1, '{"type":"event","event":"offer.accepted"}', '', ${JSON.stringify(RT_NEW_HIRE)}, '{}', '{}', 'prebuilt', ${weft.clock.now()})`);
-      return open();
-    });
-
-    let tainted = false;
-    let last: { tool: string; outcome: ToolOutcome }[] = [];
-    let n = 0;
-    for (const [i, step] of script.agents.main.entries()) {
-      for (const [j, want] of (step.expect?.lastResults ?? []).entries()) {
-        const got = last[j]!;
-        expect(got.tool, `step ${i} result ${j}`).toBe(want.tool);
-        if (want.ok !== undefined) expect(got.outcome.ok, `${want.tool} ${JSON.stringify(got.outcome)}`).toBe(want.ok);
-        if (want.status) expect(got.outcome.ok && got.outcome.status, `${want.tool} ${JSON.stringify(got.outcome)}`).toBe(want.status);
-      }
-      last = [];
-      for (const c of step.output.filter((o) => o.type === "function_call")) {
-        const outcome = await weft.executor.agent.exec(run, { callId: `call_s3_${++n}`, command: toCommand(c.name!), args: fill(c.arguments, noor), batch: i + 1 } as never);
-        tainted ||= outcome.tainted;
-        last.push({ tool: c.name!, outcome });
-      }
-      if (step.stop) break;
+    const settled = (id: string) => (weft.agent as unknown as { settled(id: string): Promise<{ status: string; tainted: boolean }> }).settled(id);
+    let agentRunId: string | null = null;
+    for (let i = 0; i < 20 && !agentRunId; i++) {
+      await weft.scheduler.tick();
+      const rows = await weft.db.all<{ agent_run_id: string | null }>(sql`SELECT agent_run_id FROM routine_runs WHERE routine_id = 'rt_new_hire' ORDER BY rowid`);
+      agentRunId = rows.at(-1)?.agent_run_id ?? null;
     }
+    if (!agentRunId) throw new Error("GP3: offer.accepted did not fire rt_new_hire");
+    const run = await settled(agentRunId);
+    expect(run).toMatchObject({ status: "waiting", tainted: false });
+    const runs = await weft.db.all<{ n: number }>(sql`SELECT count(*) AS n FROM routine_runs WHERE routine_id = 'rt_new_hire'`);
+    expect(runs[0]!.n, "the routine fires once for one offer.accepted").toBe(1);
+    const tainted = run.tainted;
 
     const pending = await weft.db.all<{ id: string; command: string; tainted_by: string | null }>(sql`SELECT id, command, tainted_by FROM proposals WHERE status = 'pending' ORDER BY id`);
     expect(pending.map((p) => p.command)).toEqual(["tax.register_state_account", "tax.register_state_account", "it.order_device"]);
@@ -187,6 +165,16 @@ describe("GP3 end to end through the executor (asserts tainted === false)", () =
       if (!d.ok) throw new Error(`${p.command}: ${d.code} ${d.message}`);
       expect(d.outcome?.ok && d.outcome.status, p.command).toBe("done");
     }
+
+    // The approvals wake the routine run; with every checklist item passed it finishes without another model step.
+    for (let i = 0; i < 20; i++) {
+      const [r] = await weft.db.all<{ status: string }>(sql`SELECT status FROM agent_runs WHERE id = ${agentRunId}`);
+      if (r?.status === "done") break;
+      await weft.scheduler.tick();
+      await settled(agentRunId);
+    }
+    const [doneRun] = await weft.db.all<{ status: string; steps_used: number }>(sql`SELECT status, steps_used FROM agent_runs WHERE id = ${agentRunId}`);
+    expect(doneRun).toMatchObject({ status: "done" });
 
     await post("/v1/sim/clock/advance", { by: "P2D" });   // Mon 08:30 PT plus 2 business days
     const co = await weft.db.all<{ status: string }>(sql`SELECT status FROM tax_accounts WHERE id IN ('txa_0006', 'txa_0007') ORDER BY id`);

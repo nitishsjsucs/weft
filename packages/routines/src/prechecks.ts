@@ -108,6 +108,7 @@ export const newHire: Precheck = async (ctx, exec) => {
     findings: { worker_id: workerId, state, to_register: toRegister.map((a) => ({ id: a.id, agency: a.agency, status: a.status })) },
     derivedArgs: {
       worker_id: workerId,
+      register_count: toRegister.length,
       "it.create_account": ["chat", "google_ws", "github"].map((system) => ({ worker_id: workerId, system })),
       "comms.send_message": { channel: "#new-hires", text: `Please welcome ${name} to the team.` },
       "tax.register_state_account": toRegister.map((a) => ({ tax_account_id: a.id })),

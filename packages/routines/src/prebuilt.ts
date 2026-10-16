@@ -45,7 +45,7 @@ export const RT_NEW_HIRE: RoutineDef = {
   checklist: [
     { id: "accounts", label: "create accounts", check: "accounts_created:{worker_id}" },
     { id: "welcome", label: "post in #new-hires", check: "posted:#new-hires:{worker_id}" },
-    { id: "registrations", label: "propose state registrations", check: "registrations_proposed:{worker_id}" },
+    { id: "registrations", label: "propose state registrations", check: "registrations_proposed:{worker_id}:{register_count}" },
     { id: "device", label: "propose the laptop", check: "device_proposed:{worker_id}" },
   ],
   budget, surface: { worthSurfacing: true, channel: "#new-hires" }, source: "prebuilt", taintedBy: null,
