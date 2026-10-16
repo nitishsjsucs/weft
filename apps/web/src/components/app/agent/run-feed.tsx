@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { Check, CircleAlert, Clock, ExternalLink, ShieldAlert } from "lucide-react";
 import { ShimmerText } from "@weft/ui/components";
 import { cn } from "@weft/ui";
-import { TID } from "@weft/contracts";
+import { TID, W3_CHAT_TID, type ApprovalCardW3, type Proposal } from "@weft/contracts";
 import { watchRun, type RunWatch } from "@/lib/api/sse";
 import { invalidate } from "@/lib/api/hooks";
-import { isChipStep, outcomeTone, stepSummary, toolLabel } from "./run-steps";
+import { isChipStep, outcomeTone, ranToolsLine, reportOf, stepSummary, toolLabel, type ReportRef } from "./run-steps";
+import { StepReport } from "./chart";
+import { ApprovalCard } from "./approval-card";
 import { humanTimes } from "../format";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
@@ -23,6 +25,12 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
   const status = w.run?.status;
   const working = !status || status === "queued" || status === "running";
   const chips = w.steps.filter(isChipStep);
+  const reports = w.steps.map(reportOf).filter((r): r is ReportRef => r !== null);
+  // Wave 3: one card per proposal this run filed, built by the API from the stored preview (trace.cards).
+  const trace = w.trace as (typeof w.trace & { cards?: ApprovalCardW3[]; proposals?: Proposal[] }) | null;
+  const cards = trace?.cards ?? [];
+  const statusOf = (id: string) => trace?.proposals?.find((p) => p.id === id)?.status;
+  const ran = working ? null : ranToolsLine(w.steps);
   return (
     <div className="flex flex-col gap-1.5" data-run-id={runId} data-stream-mode={w.mode}>
       {label ? <div className="text-1 text-gray-10">{label}</div> : null}
@@ -40,6 +48,9 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
           );
         })}
       </ul>
+      {reports.map((r) => <StepReport key={r.stepN} runId={runId} item={r} />)}
+      {cards.map((c) => <ApprovalCard key={c.proposalId} card={c} status={statusOf(c.proposalId)} onDecided={() => invalidate()} />)}
+      {ran ? <div data-testid={W3_CHAT_TID.ranTools} className="text-1 text-gray-10">{ran}</div> : null}
       <div data-testid={latest ? TID.agentStatus : undefined} data-status={status ?? "starting"} className="text-[13px]">
         {working ? <ShimmerText>Working...</ShimmerText>
           : status === "waiting" ? <span className="text-amber-11">Waiting for approval in the Inbox</span>

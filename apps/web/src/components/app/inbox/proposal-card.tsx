@@ -5,11 +5,12 @@ import { Check, Clock, ExternalLink, ShieldAlert, X } from "lucide-react";
 import { Badge, Button, Card, DiffTable } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TID, tid, type DecisionResult, type Proposal } from "@weft/contracts";
-import { client, errorText, useMutation, useSimClock } from "@/lib/api/hooks";
+import { errorText, useMutation, useSimClock } from "@/lib/api/hooks";
 import { cents, fmtDateTime, humanTimes, relative } from "../format";
 import { principalName, refHref } from "../refs";
 import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
+import { decideProposal, type Decision } from "./decide";
 
 export const DENY_REASONS = [
   { code: "incorrect", label: "Incorrect or not grounded" },
@@ -18,8 +19,6 @@ export const DENY_REASONS = [
   { code: "wrong_timing", label: "Wrong timing" },
   { code: "other", label: "Other" },
 ] as const;
-
-type Decision = "approve" | "deny" | "dismiss" | "start";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -49,8 +48,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
   const [reason, setReason] = useState<string>("");
   const [note, setNote] = useState("");
   const [result, setResult] = useState<DecisionResult | null>(null);
-  const m = useMutation((decision: Decision, body?: { reasonCode: string | null; note: string | null }) =>
-    client.post(`/v1/proposals/:id/${decision}` as "/v1/proposals/:id/approve", { params: { id: p.id }, body: body ?? {} }));
+  const m = useMutation((decision: Decision, body?: { reasonCode: string | null; note: string | null }) => decideProposal(p.id, decision, body));
 
   async function decide(decision: Decision, body?: { reasonCode: string | null; note: string | null }) {
     const r = await m.run(decision, body);
