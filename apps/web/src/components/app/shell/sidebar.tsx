@@ -14,7 +14,7 @@ import { usePendingCount } from "@/lib/api/hooks";
 import { useAgent } from "../agent-context";
 import { WeftMark } from "../weft-mark";
 
-const TRAILING: Record<"simulated" | "soon", string> = { simulated: "Simulated", soon: "Coming soon" };
+const TRAILING: Record<"simulated", string> = { simulated: "Simulated" };
 
 function Item({ item, active, pending, onNavigate }: { item: NavItem; active: boolean; pending: number | null; onNavigate?: () => void }) {
   const Icon = item.icon;
@@ -34,7 +34,7 @@ function Item({ item, active, pending, onNavigate }: { item: NavItem; active: bo
       {item.badge === "inbox" && pending ? (
         <span aria-label={`${pending} pending`} className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-accent-9 px-1.5 text-[11px] leading-none font-semibold tabular text-white">{pending}</span>
       ) : null}
-      {item.badge === "simulated" || item.badge === "soon" ? <span className="shrink-0 text-1 font-normal text-gray-9">{TRAILING[item.badge]}</span> : null}
+      {item.badge === "simulated" ? <span className="shrink-0 text-1 font-normal text-gray-9">{TRAILING[item.badge]}</span> : null}
     </Link>
   );
 }

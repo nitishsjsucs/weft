@@ -1,6 +1,6 @@
 import { Banknote, BookOpen, Cable, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
 
-export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox" | "simulated" | "soon" }
+export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox" | "simulated" }
 export interface NavGroup { label: string | null; items: NavItem[] }
 
 // Sidebar per SPEC 11.3. Slugs feed the `nav-<slug>` test ids.
