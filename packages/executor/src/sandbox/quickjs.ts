@@ -37,8 +37,10 @@ const PRELUDE = `"use strict";
   const call = globalThis.__weft_call, log = globalThis.__weft_log, raw = globalThis.__weft_inputs;
   delete globalThis.__weft_call; delete globalThis.__weft_log; delete globalThis.__weft_inputs;
   const show = (a) => a.map((x) => (typeof x === "string" ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })())).join(" ");
+  const rpc = (name, args) => call(String(name), JSON.stringify(args === undefined ? {} : args)).then((s) => JSON.parse(s));
   const weft = Object.freeze({
-    call: (name, args) => call(String(name), JSON.stringify(args === undefined ? {} : args)).then((s) => JSON.parse(s)),
+    call: rpc,
+    memory: Object.freeze({ search: (query, opts) => rpc("memory__search", { ...(opts || {}), query }), read: (path) => rpc("memory__read", { path }) }),
   });
   Object.defineProperty(globalThis, "weft", { value: weft, enumerable: false, writable: false, configurable: false });
   const console = Object.freeze({ log: (...a) => log(show(a)), info: (...a) => log(show(a)), warn: (...a) => log(show(a)), error: (...a) => log(show(a)) });

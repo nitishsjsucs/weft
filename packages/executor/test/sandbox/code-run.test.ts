@@ -96,6 +96,15 @@ describe("code.run", () => {
     expect(dataOf(err)).toMatchObject({ ok: false, value: null, error: { code: "SANDBOX_ERROR", message: "Error: bad math" } });
   });
 
+  it("weft.memory.search and read map to the memory commands, pinned to the commit captured at start", async () => {
+    const allow = await w.executor.runs.openChatRun(w.ui("usr_dana"), { threadId: null, surface: "human_ui", allowlist: ["code.run", "memory.search", "memory.read"] });
+    const o = await w.executor.agent.exec(allow, { callId: "m", command: "code.run", args: { purpose: "p", source: "const s = await weft.memory.search('SUI'); const r = await weft.memory.read('knowledge/does-not-exist.md'); return [s.ok, r.ok === false ? r.refusal.code : 'read'];" } });
+    const d = dataOf(o)!;
+    expect(d.calls.map((c) => c.command)).toEqual(["memory__search", "memory__read"]);
+    expect(d.memory_at).toMatch(/^[0-9a-f]{40}$/);
+    expect((d.value as unknown[])[0]).toBe(true);
+  });
+
   it("a vault value returned by an inner read never reaches the output in any encoding", async () => {
     await w.executor.vault.put({ name: "sandbox-leak", kind: "portal_password", value: SECRET, description: "test", by: "usr_dana" });
     const o = await exec("const r = await weft.call('people__leaky_read', {}); console.log(JSON.stringify(r.data)); return r.data.forms;");

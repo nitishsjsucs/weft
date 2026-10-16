@@ -36,14 +36,16 @@ wiring (the cut line), and `code.run` on QuickJS.
 - **code.run on QuickJS** (`packages/executor/src/sandbox/`):
   - `quickjs.ts`: `createQuickJsEngine()` implements `SandboxEngine` on `quickjs-emscripten` 0.32.0. A fresh WASM
     module, runtime and context per run, disposed in `finally` with every handle. The script is an async function
-    body; `weft.call(name, args)` returns a promise that the host serves one call at a time; `inputs` and `console`
+    body; `weft.call(name, args)` returns a promise that the host serves one call at a time;
+    `weft.memory.search(query, opts)` and `weft.memory.read(path)` map to the memory commands; `inputs` and `console`
     are the only other globals added. `DEFAULT_CODE_LIMITS` are enforced: heap and stack on the runtime, guest CPU
     (host time excluded) and wall through the interrupt handler plus a host timer, 25 calls and 256 KiB of inner
     results (over budget is refused as data, then the run ends `CALL_BUDGET`), 64 KiB value, 8 KiB of logs.
   - `host.ts`: `sandboxCall(engine, tx, ctx)` runs each inner call through `runInTx` on the code.run's own run and
     transaction with surface `sandbox` and a scope rebuilt from `exec_runs` (allowlist, tier, grants, references,
     policy, untrusted wrapping with a fresh nonce, taint, redaction). Commands without `sandbox: "read"` are
-    `SANDBOX_NOT_ALLOWED` data before the pipeline. No batch state is touched.
+    `SANDBOX_NOT_ALLOWED` data before the pipeline. No batch state is touched. `memory.search` and `memory.read`
+    get `at: <HEAD captured at start>` unless the script names a commit, so one script sees one memory commit.
   - `select.ts`: `WEFT_SANDBOX` (`off` default, `quickjs` or `on`, anything else is not built).
   - `code.run` in `builtins.ts`: R0 read, `mcp: "hidden"`, `sandbox: "hidden"` (cannot nest), tiers executable,
     refused outside an agent run, `UNAVAILABLE` with the reason when the sandbox is off. Input `{ source, purpose,
@@ -76,8 +78,8 @@ stopped afterwards (process group killed). The 27B model was never started. Live
 
 ## Tests added
 
-36 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
-`packages/executor/test/sandbox/quickjs.test.ts` (11) and `code-run.test.ts` (8, including a vault value that an inner
+37 tests: `packages/agent/test/providers/chat-completions.test.ts` (9), `claude.test.ts` (6),
+`packages/executor/test/sandbox/quickjs.test.ts` (11) and `code-run.test.ts` (9, including a vault value that an inner
 read leaks in every encoding and that never reaches the output), plus 2 in the existing files below.
 
 ## Edits outside the owned list, and why
@@ -118,8 +120,6 @@ is in `.scratch/w2-providers-sandbox/left.md` (both in the main checkout; the le
   where harness 3.5 wants `runs/<id>/code/<n>.out.json` with an `artifact_ref` at any size.
 - Source and output are not written to the run workspace; inner calls are listed in the result, not as nested
   `run_steps` rows (the executor does not write `run_steps`).
-- `weft.memory.search` and `weft.memory.read` pinned to the HEAD sha: `memory_at` is reported, but inner memory reads
-  are not pinned.
 - QuickJS runs on the API thread, so a long script can hold the event loop for up to the 2 s CPU deadline; a worker
   thread is the fix.
 - Per-provider pricing in the loop (Claude at $4 and $20 per million, local at zero) and the compose wiring of

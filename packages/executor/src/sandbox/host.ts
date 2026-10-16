@@ -54,12 +54,19 @@ async function sandboxScope(tx: DbTx, outer: ExecContext, callId: string): Promi
   };
 }
 
+/** Memory reads inside one code.run see one commit: the HEAD captured at start, unless the script names another. */
+const PINNED = new Set(["memory.search", "memory.read"]);
+
 /** weft.call for one code.run: (name, args) to a GuestOutcome, inside the caller's transaction. */
-export function sandboxCall(e: Engine, tx: DbTx, outer: ExecContext): (name: string, args: unknown) => Promise<GuestOutcome> {
+export function sandboxCall(e: Engine, tx: DbTx, outer: ExecContext, opts: { memoryAt?: string } = {}): (name: string, args: unknown) => Promise<GuestOutcome> {
   let n = 0;
-  return async (name, args) => {
+  return async (name, rawArgs) => {
     n++;
     const def = e.registry.def(name) ?? null;
+    let args = rawArgs;
+    if (def && PINNED.has(def.name) && opts.memoryAt && args && typeof args === "object" && !Array.isArray(args) && (args as { at?: unknown }).at === undefined) {
+      args = { ...(args as Record<string, unknown>), at: opts.memoryAt };
+    }
     const tainted = async () => (outer.run ? (await readTaint(tx, outer.run.id)).tainted : false);
     if (!def) return toGuest(refusal("UNKNOWN_COMMAND", `No command named ${name}`, await tainted()));
     if (def.sandbox !== "read") {

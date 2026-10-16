@@ -124,9 +124,10 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       if (i.inputs_json !== undefined && i.inputs_json.trim()) {
         try { inputs = JSON.parse(i.inputs_json) as unknown; } catch { throw Object.assign(new Error("inputs_json is not valid JSON"), { code: "INVALID_INPUT" }); }
       }
-      const res = await s.engine.run({ language: "js", source: i.source, purpose: i.purpose, inputs }, DEFAULT_CODE_LIMITS, sandboxCall(e, deps.tx, ctx));
+      // Memory reads in the box are pinned to the commit at start (harness 3.3).
       let memoryAt = "";
       try { memoryAt = await e.memory.head(); } catch { /* no memory repo in this world */ }
+      const res = await s.engine.run({ language: "js", source: i.source, purpose: i.purpose, inputs }, DEFAULT_CODE_LIMITS, sandboxCall(e, deps.tx, ctx, { memoryAt }));
       // Resource failures are refusals the model can act on; a script error comes back as data so it can be fixed.
       if (res.error && res.error.code !== "SANDBOX_ERROR") throw Object.assign(new Error(res.error.message), { code: res.error.code });
       const data = { ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, memory_at: memoryAt };
