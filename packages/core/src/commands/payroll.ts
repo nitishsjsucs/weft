@@ -289,6 +289,9 @@ export const markFailedCommand: WeftCommand<MarkFailedInput> = {
 
 // ---------------------------------------------------------------- off-cycle (wave 2, w2-offboarding)
 
+/** Harness 5.4 ceilings: $10,000.00 per call and $20,000.00 per day of off-cycle total cost (agent.off_cycle_day_cents). */
+export const OFF_CYCLE_CEILING = "agent.off_cycle_cents";
+
 const OffCycleInput = z.object({
   worker_ids: z.array(z.string().startsWith("wrk_")).min(1).max(50), period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), period_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   payday: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), reason: z.enum(["missed_payroll", "bonus", "correction", "final_pay"]),
@@ -311,11 +314,11 @@ async function offCyclePlan(i: OffCycleInput, ctx: ExecContext, deps: CommandDep
 
 export const proposeOffCycleCommand: WeftCommand<OffCycleInput> = {
   ...base, name: "payroll.propose_off_cycle", summary: "Propose an off-cycle pay run",
-  description: "Proposes an off_cycle run: salary for period_start to period_end prorated by calendar days when the rate changed mid-period, plus bonus_cents per worker as supplemental wages (federal flat 22%). Each earning line is in the preview; approval submits it to the bank like a regular run. Always needs approval.",
+  description: "Proposes an off_cycle run: salary for period_start to period_end prorated by calendar days when the rate changed mid-period, plus bonus_cents per worker as supplemental wages (federal flat 22%). Each line is in the preview; approval submits it to the bank like a regular run. Always needs approval; total cost counts against agent.off_cycle_cents.",
   compactDescription: "Propose an off-cycle pay run with a prorated raise and a bonus (needs approval).",
   input: OffCycleInput, needs: "edit", effect: "external", risk: () => "R4", approval: "always",
   amountCents: async (i, ctx, deps) => (await offCyclePlan(i, ctx, deps)).totals.totalCost,
-  ceilingKey: PAYROLL_RUN_CEILING, lease: (i) => `payroll:off_cycle:${[...i.worker_ids].sort().join(",")}:${i.period_end}`,
+  ceilingKey: OFF_CYCLE_CEILING, lease: (i) => `payroll:off_cycle:${[...i.worker_ids].sort().join(",")}:${i.period_end}`,
   tiers: { main: "executable", task: "unavailable" }, mcp: "propose", untrustedFields: [],
   async preview(i, ctx, deps): Promise<Preview> {
     const { plan, totals, hash } = await offCyclePlan(i, ctx, deps);

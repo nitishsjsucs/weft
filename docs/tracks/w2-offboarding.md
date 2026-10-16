@@ -19,7 +19,7 @@ Branch `track/w2-offboarding`, cut from main at 9b88e26. Golden paths GP9 (termi
 
 ### Off-cycle pay (GP10)
 
-- `payroll.propose_off_cycle` (defined in `commands/payroll.ts`, registered through `offboardingCommands` so the wave 1 payroll array and its registry test stay as they were): R4, approval always, `mcp: "propose"`, amount from the plan against the payroll run ceiling. Input mirrors `OffCycleRequest` in snake case.
+- `payroll.propose_off_cycle` (defined in `commands/payroll.ts`, registered through `offboardingCommands` so the wave 1 payroll array and its registry test stay as they were): R4, approval always, `mcp: "propose"`, total cost from the plan against the off-cycle ceilings of harness 5.4 (`agent.off_cycle_cents` $10,000.00 per call, `agent.off_cycle_day_cents` $20,000.00 per day; over them the call is refused with `OVER_CEILING`, not proposed). The ceilings bind the gated path, so a person's proposal and its approval are held to them too. Input mirrors `OffCycleRequest` in snake case.
 - `packages/core/src/payroll/offcycle.ts`: salary for the period is split by calendar days between the rates in effect (`proratedSalaryLines`: annual / 24 x days / period days, decimal.js, one half-up rounding per line). The bonus is a `bonus` earning line passed to the engine as supplemental wages. Reason `bonus` pays only the bonus. Hourly workers are refused (`DOMAIN_UNSUPPORTED_HOURLY`). The preview lists every earning line, federal income tax and net per worker.
 - Approval creates an `off_cycle` run and submits it to the bank simulator like a regular run; `markProcessed` records the bonus as `supplemental` YTD wages for off-cycle runs.
 - `POST /v1/payrolls/off-cycle` (body `OffCycleRequest`) files it as the person's proposal. An MCP agent proposes it through `POST /v1/tools/payroll.propose_off_cycle` with the mcp key.
@@ -39,7 +39,7 @@ In the app: open a person (for example `/app/people/wrk_0004`), click Terminate,
 ## Tests
 
 - `tests/scenarios/gp9-offboarding.test.ts`: the whole GP9 path over HTTP, including the dismissal run in the bank simulator, the suspended IdP accounts, the cleared groups, terminated enrollments, the COBRA email, one action row and one `offboarding.step_done` per step, the regular draft no longer paying the worker, and refusals for a second termination and a contractor.
-- `tests/scenarios/gp10-off-cycle.test.ts`: the MCP agent proposes, the preview shows $3,222.22 and $6,944.44 for the 5 and 10 days on either side of the raise and the $5,000.00 bonus, Dana approves, the batch total equals net pay, the run settles on payday and the ledger records the bonus as supplemental.
+- `tests/scenarios/gp10-off-cycle.test.ts`: the MCP agent proposes for Hollis (raise from $76,000.00 to $82,000.00 on Oct 6), the preview shows $1,055.56 and $2,277.78 for the 5 and 10 days on either side of the raise and the $1,500.00 bonus, Dana approves, the batch total equals net pay, the run settles on payday and the ledger records the bonus as supplemental; an off-cycle over $10,000.00 is refused with `OVER_CEILING`.
 - `packages/core/test/offboarding/offcycle.test.ts`: proration, the 22 percent split and the PTO accrual, exact to the cent.
 - `apps/api/test/offboarding.test.ts`: route validation, the `not_mcp` refusal, skipped steps, untainted proposals on the person's behalf, final pay after a submitted regular run.
 - `e2e/gp9-offboarding.spec.ts`: the GP9 path in the browser.
