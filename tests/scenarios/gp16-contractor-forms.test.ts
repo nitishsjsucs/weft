@@ -96,7 +96,7 @@ describe("GP16 contractor tax forms", () => {
     expect(mail.find((m) => m.relatedRef === "wrk_0952")).toMatchObject({ toAddr: "mara@contractor.example" });
     expect(mail.find((m) => m.relatedRef === "wrk_0952")!.body).toContain("stays in effect through 2026-12-31");
     expect(mail.find((m) => m.relatedRef === "wrk_0953")!.body).toContain("lapsed on 2025-12-31");
-    for (const m of mail) expect(m.body).not.toMatch(/—/);
+    for (const m of mail) expect(m.body).not.toMatch(/\u2014/);
     const [mara] = await weft.db.select().from(contractorTaxForms).where(eq(contractorTaxForms.workerId, "wrk_0952"));
     expect(mara!.status).toBe("renewal_requested");
 

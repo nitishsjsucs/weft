@@ -59,7 +59,7 @@ describe("GP16 notice escalation", () => {
     expect(mail.map((m) => [m.toAddr, m.relatedRef])).toEqual([[SPECIALIST.email, noticeId]]);
     expect(mail[0]!.subject).toBe(`Escalated notice ${noticeId}: NYS-45`);
     expect(mail[0]!.body).toContain("the agency says a filing is missing and none is on record");
-    expect(mail[0]!.body).not.toMatch(/—/);
+    expect(mail[0]!.body).not.toMatch(/\u2014/);
   });
 
   it("an escalated or resolved notice cannot be escalated again", async () => {
