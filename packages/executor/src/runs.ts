@@ -27,6 +27,10 @@ interface OpenInput {
 async function open(e: Engine, i: OpenInput): Promise<WeftRunHandle> {
   return writeLocked(() => e.db.transaction(async (tx) => {
     const id = await newId(tx, "run_");
+    // POST /v1/sim/reset restarts run ids and step numbers in this process, so a new run must not inherit the batch
+    // state (keyed by run id and step:<n>) that an earlier run with the same id left behind.
+    e.batches.delete(id);
+    e.lastBatch.delete(id);
     const token = randomBytes(24).toString("hex");
     const principalId = await agentPrincipalId(tx, i.companyId);
     await tx.insert(execRuns).values({

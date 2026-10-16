@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentExecutor, RunHandle, ToolOutcome } from "@weft/contracts";
 import { count, INJECTION, makeWorld, type World } from "./fixtures";
@@ -118,6 +119,17 @@ describe("batch rules", () => {
     expect(code(await w.executor.agent.exec(h, { callId: "2", command: "payroll.preview_run", args: { run_id: "pay_2026_10_30" }, batch: 9 } as never))).toBe("SKIPPED_AFTER_PENDING");
     const s = await w.executor.agent.exec(h, { callId: "3", command: "comms.send_message", args: { channel: "#payroll", text: "rate updated" }, batch: 9 } as never);
     expect(s.ok && s.status).toBe("pending_approval");
+  });
+
+  it("a run minted with a reused id after a world reset starts with a fresh batch", async () => {
+    // POST /v1/sim/reset rebuilds the tables in this process, so run ids and step numbers start over. GP3's run_0001
+    // left a pending batch at step 2; GP4's digest, minted as run_0001 again, had its post turned into a proposal.
+    expect((await w.executor.agent.exec(h, { callId: "1", command: "tax.update_rate", args: { rate_id: "etr_0001", rate: "0.015" }, batch: "step:2" } as never)).ok).toBe(true);
+    for (const t of ["exec_calls", "run_taint", "exec_runs"]) await w.db.run(sql.raw(`DELETE FROM ${t}`));
+    await w.db.run(sql`DELETE FROM id_counters WHERE prefix = 'run_'`);
+    const again = await w.executor.runs.openChatRun(w.ui("usr_dana"), { threadId: null, surface: "human_ui" });
+    expect(again.runId).toBe(h.runId);
+    ok(await w.executor.agent.exec(again, { callId: "1", command: "comms.send_message", args: { channel: "#people-ops", text: "digest" }, batch: "step:2" } as never));
   });
 });
 
