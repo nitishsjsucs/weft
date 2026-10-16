@@ -61,6 +61,10 @@ describe("proposal expiry", () => {
     expect(rr?.endedAt).not.toBeNull();
     const [ar] = await weft.db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId!));
     expect(ar?.endedAt).not.toBeNull();
+    expect(JSON.parse(rr?.leftForHumanJson ?? "[]")).toEqual([]);
+    // The routines engine reads decisions this way (not from memory), so a restart keeps them.
+    const view = await weft.executor.readOnly.exec("cmp_larkspur", "actions.get_run", { run_id: agentRunId });
+    expect(view.ok && view.status === "done" && (view.data as { proposals: { status: string }[] }).proposals.map((p) => p.status)).toEqual(open.map(() => "expired"));
   });
 });
 

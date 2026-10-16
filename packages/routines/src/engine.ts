@@ -3,9 +3,9 @@
 // precheck runs in code first: skip is recorded with zero tokens, run starts an agent run with derived arguments.
 // Decisions wake the run through the checklist first, so a run whose checklist holds ends with zero tokens.
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { Cron } from "croner";
-import { agentRuns, proposals, routineRuns, routines, runSteps, type Db } from "@weft/db";
+import { agentRuns, routineRuns, routines, runSteps, type Db } from "@weft/db";
 import { lockedWrite } from "./busy";
 import type { AgentRuntime, PrecheckResult, ProposalDecided, ReadOnlyExecutor, RoutineDef, RoutineRun, RoutineRunAuthority, RoutineRunStatus, RoutinesEngine, SimClock, ToolOutcome, WeftEvent } from "@weft/contracts";
 import { evaluateChecklist, type RunCall, type RunFacts } from "./checks";
@@ -145,11 +145,15 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
         data: o.ok && o.status === "done" ? o.data : null,
       });
     }
-    // Decisions come from the proposals table, so a restart does not forget a denial or an expiry; the in-memory
-    // map only covers the moment between a decision callback and this read.
-    const ids = calls.map((c) => c.proposalId).filter((x): x is string => !!x);
+    // Decisions are read through the ReadOnlyExecutor (actions.get_run lists the run's proposals with their status),
+    // so a restart does not forget a denial or an expiry; the in-memory map only covers the moment between a
+    // decision callback and this read.
     const stored = new Map<string, string>();
-    if (ids.length) for (const p of await db.select({ id: proposals.id, status: proposals.status }).from(proposals).where(inArray(proposals.id, ids))) if (p.status !== "pending") stored.set(p.id, p.status);
+    if (readOnly && calls.some((c) => c.proposalId)) {
+      const out = await readOnly.exec(companyId, "actions.get_run", { run_id: agentRunId }).catch(() => null);
+      const listed = out && out.ok && out.status === "done" ? ((out.data as { proposals?: { id: string; status: string }[] } | null)?.proposals ?? []) : [];
+      for (const p of listed) if (p.status !== "pending") stored.set(p.id, p.status);
+    }
     return { calls, proposalStatus: (id) => stored.get(id) ?? decisions.get(id) ?? null };
   }
 
