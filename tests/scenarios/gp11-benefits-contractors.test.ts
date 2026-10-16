@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import type { AgentRunRow, ContractorPayout, ReconFinding, RoutineRun } from "@weft/contracts";
-import { contractorPayments, events, proposals, routines, simChatMessages } from "@weft/db";
+import { contractorPayments, events, proposals, routines, simChatMessages, simRailTransfers } from "@weft/db";
 import { DEFAULT_SCRIPTS_DIR, scriptedProvider } from "../../packages/agent/src/index";
 import { OPEN_ENROLLMENT_CLOSES, RT_OPEN_ENROLLMENT } from "../../packages/routines/src/wave2/benefits";
 import { createTestWeft, type TestWeft } from "./helpers";
@@ -85,8 +85,10 @@ describe("GP11 benefits reconciliation and contractor payouts", () => {
     const proposal = await (await viaKey("/v1/tools/contractors__schedule_payouts", { worker_ids: ["wrk_0049", "wrk_0050", "wrk_0051"], scheduled_for: "2026-10-30" })).json() as { status: string; proposalId: string };
     expect(proposal.status).toBe("pending_approval");
     expect((await post(`/v1/proposals/${proposal.proposalId}/approve`, {})).status).toBe(200);
+    // The approval books each transfer pending; the scheduler kick after it ticks the rail, which sends them.
     const booked = await weft.db.select().from(contractorPayments);
-    expect(booked.map((b) => [b.currency, b.fxRate, b.usdCents, b.railStatus])).toEqual([["EUR", "1.08", 702_000, "pending"], ["INR", "0.012", 492_000, "pending"], ["CAD", "0.73", 715_400, "pending"]]);
+    expect(booked.map((b) => [b.currency, b.fxRate, b.usdCents, b.railStatus])).toEqual([["EUR", "1.08", 702_000, "sent"], ["INR", "0.012", 492_000, "sent"], ["CAD", "0.73", 715_400, "sent"]]);
+    expect(await weft.db.select().from(simRailTransfers)).toHaveLength(3);
     const list = async () => ((await (await get("/v1/contractors/payouts")).json()) as { data: ContractorPayout[] }).data.map((p) => p.railStatus);
     expect(await list()).toEqual(["sent", "sent", "sent"]);
     await weft.clock.advance("2026-10-28T15:29:00.000Z");
@@ -94,5 +96,16 @@ describe("GP11 benefits reconciliation and contractor payouts", () => {
     await weft.clock.advance("2026-10-28T15:31:00.000Z");
     expect(await list()).toEqual(["delivered", "delivered", "delivered"]);
     expect(await weft.db.select().from(events).where(eq(events.type, "sim.rail_delivered"))).toHaveLength(3);
+  });
+
+  it("the scheduler tick moves payouts along the rail with no read in between", async () => {
+    const proposal = await (await viaKey("/v1/tools/contractors__schedule_payouts", { worker_ids: ["wrk_0049"], scheduled_for: "2026-11-13" })).json() as { status: string; proposalId: string };
+    expect((await post(`/v1/proposals/${proposal.proposalId}/approve`, {})).status).toBe(200);
+    const rail = async () => (await weft.db.select().from(contractorPayments)).filter((p) => p.scheduledFor === "2026-11-13").map((p) => [p.railStatus, p.status]);
+    expect((await rail())[0]![0]).toBe("sent");
+    await weft.clock.advance("2026-10-30T15:35:00.000Z");
+    await weft.scheduler.tick();
+    expect(await rail()).toEqual([["delivered", "paid"]]);
+    expect(await weft.db.select().from(events).where(eq(events.type, "sim.rail_delivered"))).toHaveLength(4);
   });
 });

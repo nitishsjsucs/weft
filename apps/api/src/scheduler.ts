@@ -1,10 +1,13 @@
 // Scaffold (frozen): scheduler tick order (SPEC 9.0). 5 s live, synchronous in tests via tick() and kick().
 // (1) sims.tick(now), persisting SimEvents as events rows; (2) executor.expireProposals(now);
 // (3) core event handlers in event order as their svc_ principals; (4) routines.tick(now).
+// Wave 2: after (1), the payment rail simulator ticks and contractor payouts mirror its state (pending, sent,
+// delivered, returned), appending sim.rail_delivered events that step (3) then sees in the same tick.
 import { sql } from "drizzle-orm";
 import { isWeftError, type EventBody, type EventHandler, type ExecutorBundle, type RoutinesEngine, type Scheduler, type SimClock, type Simulators, type WeftEvent } from "@weft/contracts";
 import { settings, withWriteLock, type Db } from "@weft/db";
 import { emitEvent } from "@weft/core";
+import { syncContractorRail } from "./routes/contractors";
 
 export const HANDLER_CURSOR_KEY = "scheduler.handlers_cursor";
 const MAX_HANDLER_PASSES = 5;
@@ -61,6 +64,7 @@ export function createScheduler(o: CreateSchedulerOptions): Scheduler {
         }
       }));
     });
+    await step("rail.sync", () => syncContractorRail({ db: o.db, clock: o.clock }));
     await step("executor.expireProposals", () => o.executor.expireProposals(now));
     await step("handlers", runHandlers);
     await step("routines.tick", () => o.routines.tick(now));

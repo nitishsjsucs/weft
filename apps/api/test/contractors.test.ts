@@ -29,7 +29,7 @@ describe("contractor payouts (GP11)", () => {
     expect(convertToUsdCents(125, "0.012")).toBe(2);   // 1.5 rounds half up
   });
 
-  it("an API proposal books nothing until approved, then each payout goes to the rail as pending", async () => {
+  it("an API proposal books nothing until approved, then each payout goes to the rail and the scheduler kick sends it", async () => {
     const key = readFileSync(join(weft.dataDir, "demo-mcp-key.txt"), "utf8").trim();
     const res = await weft.app.request("/v1/tools/contractors__schedule_payouts", { method: "POST", headers: { "x-api-key": key, "content-type": "application/json" }, body: JSON.stringify({ worker_ids: CONTRACTORS, scheduled_for: "2026-10-30" }) });
     const out = await res.json() as { ok: boolean; status: string; proposalId: string };
@@ -41,9 +41,9 @@ describe("contractor payouts (GP11)", () => {
     expect(dec.status, await dec.clone().text()).toBe(200);
     const rows = await weft.db.select().from(contractorPayments);
     expect(rows.map((r) => [r.workerId, r.currency, r.amountMinor, r.fxRate, r.usdCents, r.railStatus])).toEqual([
-      ["wrk_0049", "EUR", 650_000, "1.08", 702_000, "pending"],
-      ["wrk_0050", "INR", 41_000_000, "0.012", 492_000, "pending"],
-      ["wrk_0051", "CAD", 980_000, "0.73", 715_400, "pending"],
+      ["wrk_0049", "EUR", 650_000, "1.08", 702_000, "sent"],
+      ["wrk_0050", "INR", 41_000_000, "0.012", 492_000, "sent"],
+      ["wrk_0051", "CAD", 980_000, "0.73", 715_400, "sent"],
     ]);
     expect(rows.every((r) => r.railRef?.startsWith("simr_"))).toBe(true);
   });
