@@ -1,7 +1,7 @@
 # Track w3-integrations-screening-esign: Checkr, HireRight and DocuSign
 
-Branch `track/w3-integrations-screening-esign`, cut from main at `35b385f` (wave 3 plan and scaffold). Round 1 of 2.
-Everything runs on the simulators; no vendor was called, no account was created and no credential was entered.
+Branch `track/w3-integrations-screening-esign`, cut from main at `35b385f` (wave 3 plan and scaffold). Rounds 1 and 2
+are done. Everything runs on the simulators; no vendor was called, no account was created and no credential was entered.
 
 ## What exists
 
@@ -20,7 +20,10 @@ Everything runs on the simulators; no vendor was called, no account was created 
 | Envelope on send and void | `packages/core/src/portal/offers.ts`, `packages/core/src/portal/forms.ts` | Only with `WEFT_ESIGN=docusign`: `documents.send_offer` also sends one envelope (the built-in path is the fallback when the send fails), void and expiry void it. `documents.sign` refuses an enveloped offer with `DOMAIN_ESIGN_ENVELOPE`. A completed envelope accepts the offer once through `acceptFromEnvelope` (the same acceptance as the built-in signature, then one signature per document with `signature_evidence`); delivered marks the offer viewed; declined sets the new `declined` state, voids the open documents and revokes the persona |
 | Routes | `apps/api/src/routes/screening.ts` | `GET /v1/screening/packages`, `GET /v1/screening/orders`, `GET /v1/screening/orders/:id` (`?detail=items` runs `screening.review` for a signed-in person), `POST /v1/offers/:id/screening`, `POST /v1/screening/orders/:id/adjudicate`, `GET /v1/offers/:id/envelope`, `POST /v1/portal/esign/url`, plus the two new rows `GET /v1/portal/screening` and `POST /v1/portal/screening/consent` |
 | Seed | `packages/seed/src/w3-screening-esign.ts` | The package catalog cached from the simulators (Checkr four packages, HireRight one, synthetic prices) and `agent.screening_cents` 10,000 and `agent.screening_day_cents` 30,000 |
-| Web | `apps/web/src/components/app/screening/offer-screening.tsx`, `hiring-view.tsx`, `apps/web/src/components/portal/screening/section.tsx` | Hiring: each accepted offer shows its check (status badge, Simulated badge, package, price, ETA) with Order and the person-only steps. Portal: the order status and, while simulated, the labeled "Screening company apply page (simulated)" (disclosure, summary of rights, typed authorization) |
+| Web | `apps/web/src/components/app/screening/offer-screening.tsx`, `hiring-view.tsx`, `apps/web/src/components/portal/screening/section.tsx` | Hiring: each accepted offer shows its check (status badge, the screening company by name, a Simulated badge that reads "Simulated, API shape not published" for HireRight, package, price, ETA) with Order and the person-only steps. Portal: the order status and, while simulated, the labeled "Screening company apply page (simulated)" (disclosure, summary of rights, typed authorization) |
+| Embedded signing | `apps/web/src/components/portal/screening/esign.tsx`, `portal-view.tsx`, `POST /v1/portal/esign/finish` | Only with `WEFT_ESIGN=docusign`. The portal's sign button posts the built-in signature exactly as before; when it is refused with `DOMAIN_ESIGN_ENVELOPE` it asks `POST /v1/portal/esign/url` for a fresh one-time link and sends the whole page there (never a frame). With the simulator that link is the "E-signature provider signing page (simulated)" (`/portal?esign=...&return=...`) with Sign both documents and Decline. Finish is checked against the signer's own envelope, the simulator records it, and its signed Connect message is verified, deduped and applied before the response, so the redirect back (`esign_return=1`, same-site portal paths only) already shows the offer accepted or declined |
+| Routine | `packages/routines/src/wave3/screening.ts` | `rt_screening_follow_up` (disabled, event `offer.accepted`, 4 tools, approve autonomy): the `screening_follow_up` precheck reads `screening.get_status` and `screening.list_packages`, skips when the offer already has an open check, when the event has no offer, or when no package exists, and derives one `screening.order` call; the model proposes it as R4 at the catalog price. Checklist `proposal_exists:screening.order:{offer_id}`. The precheck is registered; the routine joins `PREBUILT` at the wave 3 merge (the engine test that pins the routine ids is owned elsewhere), and its script ships as `scenarios/rt_screening_follow_up.json` then (the test pins it today) |
+| Dispute extension | `finalNotAllowedBefore`, `disputesSince`, `addBusinessDaysPt` in `screening/orders.ts` | The final adverse step waits 7 days from pre-adverse plus 5 business days for each time the order entered `disputed` since then (California's extension, applied everywhere like the other strictest-rule choices), counted from the order's `screening.status_changed` events. While disputed it is refused with `DOMAIN_SCREENING_TIMER_PAUSED` |
 
 ## Tests
 
@@ -32,21 +35,52 @@ Everything runs on the simulators; no vendor was called, no account was created 
 | `apps/api/test/screening.test.ts` | Real adapters on a fake fetch: Checkr signature, request shapes and production refusal; HireRight refusal; DocuSign JWT verified with the public key, envelope body, token reuse and the 15 minute guard; routes for the catalog, ceilings, the pre-acceptance refusal, step validation and the built-in path's missing envelope |
 | `tests/scenarios/gp18-screening.test.ts` | GP18 screening half: refused before acceptance; agent call is an R4 proposal at the DB price (changed in the test to prove the source); approval places the order; consent on the simulated apply page; clear through the signed webhook completes `background_check`; redelivery is a duplicate and a re-serialized body is rejected; consider opens the human-only review, blocked task, no record text in any agent result or run step, every human-only command refused for the agent and absent from tool specs; pre-adverse, waiting period, final step; registry check |
 | `e2e/gp18-screening.spec.ts` | Browser: the accepted offer's Order button in Hiring (Invited, Simulated, 3,500 cents), the labeled apply page in the portal (disclosure, rights, typed authorization), clock advanced one business day, Hiring reads Clear. Passed with GP6 and GP7 on ports 4670 and 4671 |
-| `tests/scenarios/gp18-envelope.test.ts` | GP18 envelope half with `WEFT_ESIGN=docusign`: one envelope with both documents, built-in signing refused, fresh link, completion accepts once with evidence (idempotent re-apply), decline sets `declined`, polls never under 20 minutes apart, void voids the envelope |
+| `tests/scenarios/gp18-envelope.test.ts` | GP18 envelope half with `WEFT_ESIGN=docusign`: one envelope with both documents, built-in signing refused, fresh link, completion accepts once with evidence (idempotent re-apply), decline sets `declined`, polls never under 20 minutes apart, void voids the envelope; the simulated signing page's finish route (only the envelope's signer, known outcomes only, accepted before the response, a second finish refused, decline) |
+| `tests/scenarios/gp18-follow-up.test.ts` | `rt_screening_follow_up`: ships disabled with no human-only tool; on `offer.accepted` the scripted model proposes `screening.order` as R4 at the catalog price and nothing is ordered until Dana approves; the run waits for approval and finishes once approved; the precheck skips an offer with an open order and an event without an offer |
+| `tests/scenarios/gp18-dispute.test.ts` | Business-day math; a CA hire's consider result, pre-adverse, the candidate's dispute pauses the final step, the dispute finishes after 5 business days, the final step stays refused until 7 days plus 5 business days, then succeeds; the offer is never ended automatically |
+| `e2e/gp18-screening.spec.ts`, second test | Under `WEFT_ESIGN=docusign` only: the portal's sign button redirects the full page to the simulated signing page, Sign completes the envelope, and the portal comes back with both signing tasks done and the offer accepted. It skips under built-in signing, and the first test skips under `WEFT_ESIGN=docusign` |
 
 ```
 pnpm --filter @weft/sim exec vitest run test/vendors
 pnpm --filter @weft/api exec vitest run test/screening.test.ts
-pnpm --filter @weft/tests exec vitest run scenarios/gp18-screening.test.ts scenarios/gp18-envelope.test.ts
-WEFT_E2E_WEB_PORT=4670 WEFT_E2E_API_PORT=4671 npx playwright test e2e/gp6-offer-portal.spec.ts e2e/gp7-new-hire-checklist.spec.ts e2e/gp18-screening.spec.ts
+pnpm --filter @weft/tests exec vitest run scenarios/gp18
+# e2e: built-in signing (GP6, GP7 unchanged; GP18 screening), then the envelope path
+WEFT_E2E_DATA_DIR=.data-e2e-w3se WEFT_E2E_WEB_PORT=4720 WEFT_E2E_API_PORT=4721 npx playwright test e2e/gp6-offer-portal.spec.ts e2e/gp7-new-hire-checklist.spec.ts e2e/gp18-screening.spec.ts
+WEFT_ESIGN=docusign WEFT_E2E_DATA_DIR=.data-e2e-w3se WEFT_E2E_WEB_PORT=4720 WEFT_E2E_API_PORT=4721 npx playwright test e2e/gp18-screening.spec.ts
 ```
 
-Round 1 results on this branch: `pnpm test` 658 passed (126 files), `pnpm typecheck` clean, `lint:prose`, `lint:brand` and
-`brand:overlap` ok, e2e GP6, GP7 and GP18 passed. `pnpm build` and `pnpm demo` were not run in round 1.
+To try it by hand: `WEFT_ESIGN=docusign` (optional) and `WEFT_SCREENING=hireright` (optional) in the API's environment,
+then Hiring, an accepted offer, Order background check; the new hire's portal shows the simulated apply page; advance the
+sim clock one business day. Faults `checkr.consider`, `checkr.suspended`, `checkr.dispute`, `checkr.expire` and
+`esign.send` arm through the `sim_faults` table, as the GP18 scenarios do.
+
+Round 2 results on this branch: `pnpm test` 665 passed (128 files), `pnpm typecheck` 16 of 16, `lint:prose`, `lint:brand`
+and `brand:overlap` ok, `pnpm build` ok, `pnpm demo` GP1 to GP12 ok with the audit chain verified. e2e on 4720 and 4721:
+GP6, GP7 and GP18 (screening) passed under built-in signing; GP18 (envelope) passed under `WEFT_ESIGN=docusign`.
+
+## Real versus simulated
+
+| Vendor | Simulated (default) | Real adapter | What turns the real one on |
+|---|---|---|---|
+| Checkr | Full simulator in Checkr's field names, enums, webhook signature and retry schedule; labeled Simulated in Hiring and the portal | Written to the published API; staging by default; tested only against a fake fetch; never run live | `CHECKR_API_KEY` and the webhook key in `~/Developer/projects/.weft.secrets.env` (read through `WEFT_SECRETS_FILE`), and for production also `CHECKR_ENV=production` with `WEFT_LIVE_CHECKR=1`. Staging requests are free, but a staging account needs a credentialed production account or partner approval first (research/wave3/integrations-screening-esign.md), so there is no practical free path today |
+| HireRight | The same engine with Weft's own event shape, labeled "Simulated, API shape not published" | Always refuses `INTEGRATION_NOT_AVAILABLE`: the API is partner-only and its shapes are not public | Nothing today; a partner agreement would come first |
+| DocuSign | Envelopes, embedded signer, recipient view, void, download, Connect JSON SIM messages with the base64 HMAC; the signing page is the portal's simulated page | RS256 JWT grant, one envelope per offer, recipient view, void, download, Connect HMAC, a 15 minute per-envelope status guard; never run live | `WEFT_ESIGN=docusign` selects envelopes at all; the real adapter also needs `WEFT_LIVE_DOCUSIGN=1` and the integration key, user id, account and RSA key in the secrets file. DocuSign's free developer account (demo environment, not legally binding) is the one free path; Nitish opens it himself |
+
+Without `WEFT_ESIGN=docusign` the built-in click-to-sign path is untouched, which is what GP6 and GP7 run.
+
+## Observations
+
+- A scheduler tick that runs while the app's own background routine and agent runs are writing can fail its
+  `integrations.poll` step with `SQLITE_BUSY` (seen in a scenario that jumped the sim clock a week with routines on).
+  The step is idempotent and the next tick retries it, so nothing is lost, but the dispute scenario turns routines off
+  and runs its ticks on the app's tick chain to stay deterministic. This is the same family as the known w2-reliability
+  item about draining background runs on close.
 
 ## Contract changes and requests
 
 - Commit `contract: two portal screening route rows` adds `GET /v1/portal/screening` and `POST /v1/portal/screening/consent` (ui_only) to the screening route file in `packages/contracts/src/api.ts`. Additive; no row changed.
+- Commit `contract: portal route row for the simulated signing page's finish step` (round 2) adds `POST /v1/portal/esign/finish` (ui_only, `{ envelopeId, outcome: 'signed' | 'declined' }`, simulated signing page only). Additive; no row changed.
+- Merge request (routines owner): spread `RT_SCREENING_FOLLOW_UP` into `routines` in `packages/routines/src/wave3/screening.ts` and add `rt_screening_follow_up` to the ids pinned in `packages/routines/test/engine.test.ts`; add `scenarios/rt_screening_follow_up.json` with the script pinned in `tests/scenarios/gp18-follow-up.test.ts`.
 - New ext file `packages/contracts/src/ext/w3-integrations-screening-esign.ts` (DTOs, apply inputs, refusal codes, poll constants, simulator controls). Request: re-export it from the w3 testids barrel so callers stop importing it by relative path.
 - Request (w3-integrations-hr): the generic `POST /v1/integrations/:vendor/webhook` should call the same steps as `ingestVendorDelivery` (or `ingestVendorDelivery` itself) for checkr, hireright and docusign; the apply inputs are `W3ScreeningApplyInput` and `W3EsignApplyInput`.
 - Request (t3-governance): `svc_scheduler` is not on the allowlist for `screening.apply_vendor_event` or `documents.apply_esign_event`, so the poll fallback runs them as `svc_events`. Either add them to `svc_scheduler` or confirm `svc_events` for polls.
@@ -55,11 +89,15 @@ Round 1 results on this branch: `pnpm test` 658 passed (126 files), `pnpm typech
 
 ## Left
 
-See `.scratch/w3-integrations-screening-esign/left.md` (copied below).
+Also in `.scratch/w3-integrations-screening-esign/left.md`.
 
-- Portal embedded signing redirect in `portal-view.tsx`: when `POST /v1/portal/esign/url` answers, the sign button should redirect the full page there; plus the simulated signing page (`?esign=`) in the portal section with Sign and Decline, which needs one more route row for the simulator's finish step.
-- `documents.resend_envelope` (R3, planned) is not built.
-- `rt_screening_follow_up` routine (propose `screening.order` on `offer.accepted`, nudge consent) with a scripted scenario; GP18 drives the agent call through a routine run handle directly.
-- HireRight in the Hiring UI: `WEFT_SCREENING=hireright` selects it, but there is no UI switch.
-- CA dispute extension is modeled in the simulator (5 business days) but Weft's final-step gate uses 7 days from pre-adverse without adding the extension.
-- The Integrations screen cards for checkr, hireright and docusign come from w3-integrations-hr; the "Simulated, API shape not published" label should show on the HireRight card.
+- `documents.resend_envelope` (R3, planned) is not built; today a voided or expired envelope means a new offer.
+- `rt_screening_follow_up` joins `PREBUILT` and gets its repo script at the wave 3 merge (see the merge request above).
+  Its consent nudge (remind a hire whose invitation is still pending after a few days) is not built.
+- No UI switch for the screening company: `WEFT_SCREENING=hireright` selects HireRight and Hiring now names it, but the
+  choice lives in the environment, not in Settings.
+- The Integrations screen cards for checkr, hireright and docusign come from w3-integrations-hr; the "Simulated, API
+  shape not published" label should show on the HireRight card there too.
+- Inbox card for `complete_review` orders (inbox owner) and a `background_check` label in `people-view.tsx` (people
+  owner), both requested above.
+- The envelope e2e needs its own Playwright run with `WEFT_ESIGN=docusign`; `pnpm e2e` runs only the built-in path.
