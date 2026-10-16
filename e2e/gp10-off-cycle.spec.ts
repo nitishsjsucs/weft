@@ -3,7 +3,7 @@
 // is refused and nothing is paid twice. She then proposes a $1,500.00 bonus only. It arrives as a proposal whose card
 // lists every earning line in cents; Dana approves it and the off_cycle run goes to the bank simulator like a
 // regular run. The missed-period proration is covered by the GP10 scenario test and pnpm demo.
-import { approveCard, eventually, expect, openApp, test, tid, type PayrollRun } from "./fixtures";
+import { approveCard, eventually, expect, openApp, PEOPLE, test, tid, type PayrollRun } from "./fixtures";
 import { W2_OFFBOARDING_TID as OT } from "../packages/contracts/src/index";
 
 const HOLLIS = "wrk_0042";   // Hollis Grey (demo), TX, $76,000.00 a year
@@ -33,6 +33,18 @@ test("GP10: off-cycle pay with a bonus is proposed with its earning lines and ap
     await expect(card).toContainText("Bonus (supplemental wages");
     await expect(card).toContainText("$1,500.00");
     await expect(card).not.toContainText("Salary (");
+  });
+
+  await test.step("the card names Dana as the proposer and labels her reason as her note, not the agent's", async () => {
+    const card = page.getByTestId(tid.inboxCard(proposalId));
+    const p = await weft.proposal(proposalId);
+    expect(p.proposerRunId, "Dana proposed it in the app, not through an agent run").toBeNull();
+    expect(p.onBehalfOf).toBe(PEOPLE.dana.id);
+    await expect(card.getByTestId("proposal-note-label")).toHaveText(`Note from ${PEOPLE.dana.name}`);
+    await expect(card.getByTestId("proposal-note-label")).toHaveAttribute("data-proposer", "person");
+    await expect(card.locator("dt", { hasText: "Proposed by" }).locator("xpath=following-sibling::dd")).toHaveText(PEOPLE.dana.name);
+    await expect(card).not.toContainText("Agent's note");
+    await expect(card).not.toContainText("Note from the agent");
   });
 
   await test.step("approval submits the off_cycle run to the bank simulator", async () => {

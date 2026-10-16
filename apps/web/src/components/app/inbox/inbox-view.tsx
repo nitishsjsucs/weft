@@ -41,7 +41,7 @@ export function InboxView() {
   }, [target, rows]);
   return (
     <div className="mx-auto w-full max-w-[880px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title="Inbox" subtitle="Everything the agent wants to change waits here for a person. Approving re-runs every check on the stored arguments." />
+      <PageHeader title="Inbox" subtitle="Every change the agent, a routine or a person proposes waits here for a decision. Approving re-runs every check on the stored arguments." />
       {all.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(all.error)}</div> : null}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>

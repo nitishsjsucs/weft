@@ -59,6 +59,11 @@ test("GP1: CA EDD DE 2088 notice becomes an approved SUI rate change, a filed re
     await expect(filingCard.getByTestId(TID.proposalContent)).not.toBeEmpty();
     for (const c of filing.content) await expect(filingCard.getByTestId(TID.proposalContent)).toContainText(c.text.slice(0, 60));
     await expect(page.getByTestId(TID.inboxTaintedBanner)).toHaveCount(0);
+    // The notice routine's run proposed both, so each card names the routine run and links the agent run.
+    for (const [card, p] of [[rateCard, rate], [filingCard, filing]] as const) {
+      await expect(card).toContainText(`Routine ${p.routineRunId}`);
+      await expect(card.locator(`a[href="/app/runs/${p.proposerRunId}"]`)).toBeVisible();
+    }
   });
 
   await test.step("Dana approves both; the run ends done with no further model steps", async () => {

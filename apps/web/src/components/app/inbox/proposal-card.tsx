@@ -8,6 +8,7 @@ import { TID, tid, type DecisionResult, type Proposal } from "@weft/contracts";
 import { client, errorText, useMutation, useSimClock } from "@/lib/api/hooks";
 import { cents, fmtDateTime, humanTimes, relative } from "../format";
 import { principalName, refHref } from "../refs";
+import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
 
 export const DENY_REASONS = [
@@ -29,6 +30,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** Who proposed the change, with the routine run and a link to the agent run when there is one. */
+function ProposedBy({ who }: { who: Proposer }) {
+  const run = (id: string | null) => id ? <Link className="inline-flex items-center gap-0.5 text-blue-11 hover:underline" href={`/app/runs/${id}`}>Open run <ExternalLink className="size-3" /></Link> : null;
+  switch (who.kind) {
+    case "routine": return <span className="flex flex-wrap gap-x-2">Routine <span className="font-mono text-1">{who.routineRunId}</span>{run(who.runId)}</span>;
+    case "agent": return <span className="flex flex-wrap gap-x-2">Weft agent{run(who.runId)}</span>;
+    case "person": return <>{principalName(who.principalId)}</>;
+    case "unknown": return <span className="text-gray-10">Not recorded</span>;
+  }
+}
+
 /** One decision card (SPEC 11.3 /app/inbox). Free text renders only as text: React escapes it and nothing is truncated. */
 export function ProposalCard({ p }: { p: Proposal }) {
   const clock = useSimClock();
@@ -47,6 +59,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
   const pending = p.status === "pending";
   const isSuggestion = p.kind === "suggestion";
   const expired = new Date(p.expiresAt).getTime() <= new Date(now).getTime();
+  const who = proposerOf(p);
 
   return (
     <Card data-testid={tid.inboxCard(p.id)} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
@@ -75,14 +88,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           <Field label="On behalf of">{principalName(p.onBehalfOf)}</Field>
           <Field label="Money">{p.moneyCents === null ? "None" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
-          <Field label="Source">
-            {p.routineRunId || p.proposerRunId ? (
-              <span className="flex flex-wrap gap-x-2">
-                {p.routineRunId ? <span className="font-mono text-1">{p.routineRunId}</span> : null}
-                {p.proposerRunId ? <Link className="inline-flex items-center gap-0.5 text-blue-11 hover:underline" href={`/app/runs/${p.proposerRunId}`}>Open run <ExternalLink className="size-3" /></Link> : null}
-              </span>
-            ) : p.kind === "routine_enable" ? "Routine draft" : p.kind === "suggestion" ? "Agent suggestion" : "No run recorded"}
-          </Field>
+          <Field label="Proposed by"><ProposedBy who={who} /></Field>
         </dl>
         {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} rows={p.diff.map((r) => ({ ...r, before: humanTimes(r.before), after: humanTimes(r.after) }))} /> : null}
         {p.content.length ? (
@@ -97,7 +103,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
         ) : null}
         {p.agentNote ? (
           <div className="rounded-lg bg-gray-2 px-3 py-2">
-            <div className="text-1 font-medium text-gray-11">Agent&apos;s note</div>
+            <div data-testid="proposal-note-label" data-proposer={who.kind} className="text-1 font-medium text-gray-11">{noteLabel(who, principalName)}</div>
             <p className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12">{humanTimes(p.agentNote)}</p>
           </div>
         ) : null}
