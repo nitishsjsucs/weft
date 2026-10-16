@@ -106,7 +106,7 @@ async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[
     }
     if (count === 0 && contractor === 0) continue;   // no paid runs: a zero here would read as "payroll cost nothing"
     rows.push({
-      period: p.key, period_label: p.label, runs: count,
+      period: p.key, period_label: p.label, period_start: p.start, period_end: p.end, runs: count,
       gross_cents: gross, gross_display: formatCents(gross), employer_taxes_cents: erTax, employer_taxes_display: formatCents(erTax),
       benefits_cents: benefits, benefits_display: formatCents(benefits), reimbursements_cents: reimb, reimbursements_display: formatCents(reimb),
       contractor_cents: contractor, contractor_display: formatCents(contractor), total_cents: total + contractor, total_display: formatCents(total + contractor),
@@ -160,9 +160,9 @@ async function hiresDepartures(tx: DbTx, q: ReportQuery, turnover: boolean) {
     if (turnover) {
       const avg = (headStart + headEnd) / 2;
       const pct = avg > 0 ? Math.round((d / avg) * 10000) / 100 : 0;
-      rows.push({ period: p.key, period_label: p.label, departures: d, average_headcount: avg, turnover_pct: pct, turnover_display: pctDisplay(pct) });
+      rows.push({ period: p.key, period_label: p.label, period_start: p.start, period_end: p.end, departures: d, average_headcount: avg, turnover_pct: pct, turnover_display: pctDisplay(pct) });
     } else {
-      rows.push({ period: p.key, period_label: p.label, hires: h, departures: d, net: h - d, headcount_end: headEnd });
+      rows.push({ period: p.key, period_label: p.label, period_start: p.start, period_end: p.end, hires: h, departures: d, net: h - d, headcount_end: headEnd });
     }
   }
   if (turnover) {
@@ -184,7 +184,7 @@ async function timeOffMinutes(tx: DbTx, q: ReportQuery) {
   const rows: ReportRow[] = periodsOf(q.from, q.to, q.groupBy).map((p) => {
     const minutes = p.months.reduce((a, m) => a + n(U.get(m)?.minutes), 0);
     total += minutes;
-    return { period: p.key, period_label: p.label, minutes_used: minutes, hours_display: hours(minutes) };
+    return { period: p.key, period_label: p.label, period_start: p.start, period_end: p.end, minutes_used: minutes, hours_display: hours(minutes) };
   });
   const chart = seriesChart(q.metric, "bar", q.groupBy, [{ key: "minutes_used", label: "Time off taken", unit: "minutes" }]);
   return { rows, chart, summary: `Time off taken by ${q.groupBy}, ${q.from} to ${q.to}: ${total} minutes (${hours(total)})` };

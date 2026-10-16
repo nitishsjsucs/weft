@@ -99,8 +99,8 @@ describe("reports.query against the seed", () => {
       ('tol_r005', 'tasn_r2', 'wrk_0002', 'top_r1', 'hold', -480, '2026-10-20', '2026-10-20T00:00:00.000Z')`);
     const { body } = await report("time_off_minutes_by_month", "?from=2026-09-01&to=2026-10-31");
     expect(body.rows).toEqual([
-      { period: "2026-09", period_label: "Sep 2026", minutes_used: 720, hours_display: "12 h" },
-      { period: "2026-10", period_label: "Oct 2026", minutes_used: 480, hours_display: "8 h" },
+      { period: "2026-09", period_label: "Sep 2026", period_start: "2026-09-01", period_end: "2026-09-30", minutes_used: 720, hours_display: "12 h" },
+      { period: "2026-10", period_label: "Oct 2026", period_start: "2026-10-01", period_end: "2026-10-31", minutes_used: 480, hours_display: "8 h" },
     ]);
     expect(body.chart.series).toEqual([{ key: "minutes_used", label: "Time off taken", unit: "minutes" }]);
   });

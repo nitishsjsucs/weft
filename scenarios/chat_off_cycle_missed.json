@@ -1,0 +1,21 @@
+{
+  "match": "missed the Oct 1 to 15 payroll",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "payroll__propose_off_cycle",
+            "arguments": { "worker_ids": ["wrk_0042"], "period_start": "2026-10-01", "period_end": "2026-10-15", "payday": "2026-10-27", "reason": "missed_payroll", "bonus_cents": { "wrk_0042": 150000 }, "agent_note": null }
+          }
+        ]
+      },
+      {
+        "output": [
+          { "type": "text", "text": "Off-cycle pay always needs a person's approval, so nothing has been paid from this chat. When chat proposals are on, the proposal card is below with each earning line; when they are off, use Off-cycle pay on Hollis's page." }
+        ]
+      }
+    ]
+  }
+}
