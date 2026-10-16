@@ -16,10 +16,15 @@ export function createMemoryRecall(db: Db): (input: RecallInput) => Promise<stri
     if (!b || !b.recallEnabled || typeof b.memory.recall !== "function") return "";
     // Once per run: a run that already recalled (for example after a requeue) gets nothing new.
     if ((await db.select({ id: memoryRecalls.id }).from(memoryRecalls).where(eq(memoryRecalls.runId, input.runId)).limit(1)).length) return "";
-    const out = await b.memory.recall({ request: input.query, subjectRefs: input.subjectRefs }).catch(() => null);
+    // A routine run never recalls tainted text: its autoAllow writes (the weekly digest post, the new hire welcome)
+    // depend on the run staying untainted, so it gets trusted candidates only. Chat runs are read-only and may be
+    // tainted by what they recall.
+    const trustedOnly = input.kind === "routine";
+    const out = await b.memory.recall({ request: input.query, subjectRefs: input.subjectRefs, trustedOnly }).catch(() => null);
     if (!out || !out.block) return "";
     // Taint first: if the run cannot be marked, the untrusted text never reaches the pack.
     const tainted = out.items.find((i) => i.taintedBy);
+    if (tainted && trustedOnly) return "";
     if (tainted) {
       try { await b.taintRun(input.runId, `memory:${tainted.path.split("#")[0]}`); } catch { return ""; }
     }

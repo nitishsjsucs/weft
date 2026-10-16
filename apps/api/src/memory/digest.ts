@@ -26,7 +26,7 @@ export interface MemoryW2 extends MemoryStore {
   links(path: string): Promise<{ outgoing: { target: string; path: string; resolved: boolean }[]; backlinks: string[] }>;
   aliasIndex(): Promise<{ path: string; id: string; aliases: string[] }[]>;
   history(path: string, limit?: number): Promise<{ commit: string; date: string; author: string; subject: string; diff: string }[]>;
-  recall(input: { request: string; subjectRefs: string[] }): Promise<{ block: string; items: { path: string; kind: string; taintedBy: string | null }[]; searches: string[] }>;
+  recall(input: { request: string; subjectRefs: string[]; trustedOnly?: boolean }): Promise<{ block: string; items: { path: string; kind: string; taintedBy: string | null }[]; searches: string[] }>;
   read(path: string, at?: string): Promise<{ frontmatter: MemoryFrontmatter; body: string } | null>;
   search(q: { query: string; folders: null | ("entities" | "comms" | "timeline" | "workstreams" | "knowledge")[]; at: string | null; limit: number }): Promise<MemoryHit[]>;
 }

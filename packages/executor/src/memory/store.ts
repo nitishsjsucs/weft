@@ -86,7 +86,9 @@ export interface LocalMemory extends MemoryStore {
    * Recall at run start (harness 9.5): "" when the one-pager does not exist yet (no digest has run), else a
    * <recall> block within RECALL_BUDGET that leads with the one-pager. `searches` is at most maxSearches.
    */
-  recall(input: { request: string; subjectRefs: string[] }): Promise<RecallOutcome>;
+  /** `trustedOnly` (routine runs) leaves out every tainted candidate and the decision notes, so recall never taints
+   * a routine run whose autoAllow writes depend on staying untainted (harness 5.3, section 8). */
+  recall(input: { request: string; subjectRefs: string[]; trustedOnly?: boolean }): Promise<RecallOutcome>;
   /** Git log of one file, newest first, with each commit's diff for that file (clipped, redacted). */
   history(path: string, limit?: number): Promise<MemoryHistoryEntry[]>;
 }
@@ -357,7 +359,7 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
           cands.push({ kind: "hit", path: h.cite, title: h.path, excerpt: excerpt.length > CAPS.hit * 4 ? `${excerpt.slice(0, CAPS.hit * 4 - 12)} [clipped]` : excerpt, score: (RECALL_BUDGET.maxSearches - ti) * 10 - hi, asOf: h.date, taintedBy: untrusted(h.path, h.taintedBy) });
         });
       }
-      const { block, kept } = renderRecall(cands, RECALL_BUDGET.maxTokens);
+      const { block, kept } = renderRecall(input.trustedOnly ? cands.filter((c) => !c.taintedBy) : cands, RECALL_BUDGET.maxTokens);
       return { block, items: kept.map((c) => ({ path: c.path, kind: c.kind, taintedBy: c.taintedBy })), searches: terms };
     },
     async history(path, limit = 20) {
