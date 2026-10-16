@@ -8,25 +8,34 @@ import { FlagChip } from "./flag-chip";
 
 const features = tableFeatures({});
 const h = createColumnHelper<typeof features, Paycheck>();
-const money = (label: string, get: (p: Paycheck) => string, optional = false) => h.display({ id: label, header: label, cell: (c) => get(c.row.original), meta: { numeric: true, optional } });
+/**
+ * Which card width a column needs before it shows. Gate report item 4: with the agent panel docked at 1440 px the card
+ * is about 790 px wide, so the two columns the drawer repeats least often (reimbursements, company benefits) step
+ * aside below a 960 px card. On a tablet-width card Hours and both tax columns go as well, and on a phone (a card under
+ * 480 px) Gross pay too, so Employee and Net pay always stay in view. Every hidden figure is in the paycheck drawer one
+ * click away. Narrower than any of that, the table scrolls inside its card.
+ */
+const SHOW_FROM = {
+  wide: "hidden @min-[960px]:table-cell",
+  tablet: "hidden @min-[720px]:table-cell",
+  phone: "hidden @min-[480px]:table-cell",
+} as const;
+type ShowFrom = keyof typeof SHOW_FROM;
+
+const money = (label: string, get: (p: Paycheck) => string, showFrom?: ShowFrom) => h.display({ id: label, header: label, cell: (c) => get(c.row.original), meta: { numeric: true, showFrom } });
 const columns = h.columns([
   h.accessor("workerName", { header: "Employee", cell: (c) => c.getValue() }),
-  h.display({ id: "Hours", header: "Hours", cell: (c) => hours(c.row.original.hoursX100), meta: { numeric: true } }),
-  money("Gross pay", (p) => p.gross.display),
-  money("Reimbursements", (p) => p.reimbursements.display, true),
-  money("Company taxes", (p) => p.companyTaxes.display),
-  money("Employee taxes", (p) => p.employeeTaxes.display),
-  money("Company benefits", (p) => p.companyBenefits.display, true),
+  h.display({ id: "Hours", header: "Hours", cell: (c) => hours(c.row.original.hoursX100), meta: { numeric: true, showFrom: "tablet" } }),
+  money("Gross pay", (p) => p.gross.display, "phone"),
+  money("Reimbursements", (p) => p.reimbursements.display, "wide"),
+  money("Company taxes", (p) => p.companyTaxes.display, "tablet"),
+  money("Employee taxes", (p) => p.employeeTaxes.display, "tablet"),
+  money("Company benefits", (p) => p.companyBenefits.display, "wide"),
   money("Net pay", (p) => p.net.display),
 ]);
 
-type ColMeta = { numeric?: boolean; optional?: boolean } | undefined;
-/**
- * Gate report item 4: with the agent panel docked at 1440 px the card is about 790 px wide, so the two columns the
- * drawer repeats (reimbursements, company benefits) step aside below a 960 px card and Net pay stays in view. Narrower
- * still, the table scrolls inside its card.
- */
-const OPTIONAL_COL = "hidden @min-[960px]:table-cell";
+type ColMeta = { numeric?: boolean; showFrom?: ShowFrom } | undefined;
+const showFrom = (meta: ColMeta) => (meta?.showFrom ? SHOW_FROM[meta.showFrom] : undefined);
 
 const GROUPS = [
   { key: "needs_review", label: "Needs Review", testid: TID.payrollGroupNeedsReview, wash: "bg-amber-9/20", dot: "bg-amber-9" },
@@ -41,12 +50,12 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
   const ncol = columns.length;
   return (
     <div data-testid="paycheck-table-card" className="@container min-w-0 overflow-hidden rounded-xl border border-[var(--app-border)] bg-card shadow-xs">
-      <Table className="min-w-[640px]">
+      <Table>
         <THead>
           {headers.map((g) => (
             <TR key={g.id}>
               {g.headers.map((hd) => (
-                <TH key={hd.id} numeric={(hd.column.columnDef.meta as ColMeta)?.numeric} className={cn(hd.column.id === "workerName" && "sticky left-0 z-10 bg-card", (hd.column.columnDef.meta as ColMeta)?.optional && OPTIONAL_COL)}>
+                <TH key={hd.id} numeric={(hd.column.columnDef.meta as ColMeta)?.numeric} className={cn(hd.column.id === "workerName" && "sticky left-0 z-10 bg-card", showFrom(hd.column.columnDef.meta as ColMeta))}>
                   {hd.isPlaceholder ? null : <table.FlexRender header={hd} />}
                 </TH>
               ))}
@@ -83,7 +92,7 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
                             <div className="flex items-start gap-2.5">
                               <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-gray-4 text-0 font-medium text-gray-11">{initials(pc.workerName)}</span>
                               <div className="min-w-0">
-                                <div className="truncate font-medium">{pc.workerName}</div>
+                                <div className="font-medium break-words">{pc.workerName}</div>
                                 {pc.flags.length ? <div className="mt-1 flex flex-wrap gap-1">{pc.flags.map((f) => <FlagChip key={f.rule} pc={pc} flag={f} />)}</div> : null}
                                 {pc.status === "excluded" ? <div className="mt-0.5 text-1 text-gray-10">Excluded from this run</div> : null}
                               </div>
@@ -91,7 +100,7 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
                           </TD>
                         );
                       }
-                      return <TD key={cell.id} numeric={numeric} className={cn("whitespace-nowrap", meta?.optional && OPTIONAL_COL)}><table.FlexRender cell={cell} /></TD>;
+                      return <TD key={cell.id} numeric={numeric} className={cn("whitespace-nowrap", showFrom(meta))}><table.FlexRender cell={cell} /></TD>;
                     })}
                   </TR>
                 );

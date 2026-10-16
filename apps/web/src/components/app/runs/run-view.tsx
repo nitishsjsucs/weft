@@ -41,9 +41,26 @@ export function providerLabel(run: { provider: string; model: string }): string 
   return `${run.provider} ${run.model} (live)`;
 }
 
+/**
+ * Gate report item 4 and the GP1 run at 1440 px: the Steps card is about 790 px wide with the agent panel docked, so
+ * step titles wrap instead of widening the table, and the columns the metrics above already total step aside as the
+ * card narrows. Below a 900 px card Cache hit and Model time go; below 560 px (a phone) Stage moves under the title and
+ * Tokens and USD go too, so #, Step and Outcome stay in view without scrolling.
+ */
 const STEP_OPTIONAL = "hidden @min-[900px]:table-cell";
+const STEP_WIDE = "hidden @min-[560px]:table-cell";
 
 const STEP_KIND: Partial<Record<RunStepRow["kind"], string>> = { context: "Context assembled", model_call: "Model call", verify: "Checks", recite: "Plan recited", notice: "Notice", error: "Error" };
+
+/** The mono line under a step title: its stage on a narrow card (where the Stage column steps aside), then kind, tool and attempt. */
+function StepDetail({ s }: { s: RunStepRow }) {
+  const extra = [s.toolName || s.attempt > 1 ? s.kind : null, s.toolName ? toolLabel(s.toolName) : null, s.attempt > 1 ? `attempt ${s.attempt}` : null].filter(Boolean).join(" · ");
+  return (
+    <div className="font-mono text-0 text-gray-10 [overflow-wrap:anywhere]">
+      <span className="@min-[560px]:hidden">{s.stage}{extra ? " · " : ""}</span>{extra}
+    </div>
+  );
+}
 
 /** Run view (SPEC 11.3): stages, tool calls, outcomes, tokens, cache-hit ratio, USD and model time, checklist, proposals. */
 export function RunView({ id }: { id: string }) {
@@ -101,26 +118,22 @@ export function RunView({ id }: { id: string }) {
       ) : null}
       <section className="mb-6">
         <h2 className="mb-2 text-2 font-medium">Steps</h2>
-        {/* Gate report item 4: with the agent panel docked at 1440 px this card is about 790 px wide; Cache hit and Model
-            time (both in the metrics above) step aside below a 900 px card, and narrower still the table scrolls inside it. */}
         <div data-testid="run-steps-card" className="@container min-w-0 overflow-hidden rounded-xl border border-[var(--app-border)] bg-card shadow-xs">
-          <Table className="min-w-[640px] text-[13px]">
-            <THead><TR><TH>#</TH><TH>Stage</TH><TH>Step</TH><TH>Outcome</TH><TH numeric className="whitespace-nowrap">Tokens in / cached / out</TH><TH numeric className={STEP_OPTIONAL}>Cache hit</TH><TH numeric>USD</TH><TH numeric className={STEP_OPTIONAL}>Model time</TH></TR></THead>
+          <Table className="text-[13px]">
+            <THead><TR><TH>#</TH><TH className={STEP_WIDE}>Stage</TH><TH className="w-full">Step</TH><TH>Outcome</TH><TH numeric className={cn("whitespace-nowrap", STEP_WIDE)}>Tokens in / cached / out</TH><TH numeric className={STEP_OPTIONAL}>Cache hit</TH><TH numeric className={STEP_WIDE}>USD</TH><TH numeric className={STEP_OPTIONAL}>Model time</TH></TR></THead>
             <TBody>
               {w.steps.map((s) => (
                 <TR key={s.n} data-testid={TID.runStep} data-stage={s.stage} data-kind={s.kind}>
                   <TD className="h-10 tabular text-gray-10">{s.n}</TD>
-                  <TD className="h-10"><code className="font-mono text-0">{s.stage}</code></TD>
-                  <TD className="h-10">
-                    <div className="min-w-0">
-                      <div className="truncate">{s.toolName ? stepSummary(s) : STEP_KIND[s.kind] ?? stepSummary(s)}</div>
-                      {s.toolName || s.attempt > 1 ? <div className="font-mono text-0 text-gray-10">{s.kind}{s.toolName ? ` · ${toolLabel(s.toolName)}` : ""}{s.attempt > 1 ? ` · attempt ${s.attempt}` : ""}</div> : null}
-                    </div>
+                  <TD className={cn("h-10", STEP_WIDE)}><code className="font-mono text-0">{s.stage}</code></TD>
+                  <TD className="h-10 py-1.5">
+                    <div className="min-w-0 break-words">{s.toolName ? stepSummary(s) : STEP_KIND[s.kind] ?? stepSummary(s)}</div>
+                    <StepDetail s={s} />
                   </TD>
                   <TD className="h-10"><OutcomeBadge o={s.outcome} /></TD>
-                  <TD numeric className="h-10 whitespace-nowrap">{s.usage ? `${int(s.usage.input)} / ${int(s.usage.cached)} / ${int(s.usage.output)}` : "-"}</TD>
+                  <TD numeric className={cn("h-10 whitespace-nowrap", STEP_WIDE)}>{s.usage ? `${int(s.usage.input)} / ${int(s.usage.cached)} / ${int(s.usage.output)}` : "-"}</TD>
                   <TD numeric className={cn("h-10", STEP_OPTIONAL)}>{s.usage ? pct(s.usage.cached, s.usage.input) : "-"}</TD>
-                  <TD numeric className="h-10">{s.costUsdMicros ? usd(s.costUsdMicros) : "-"}</TD>
+                  <TD numeric className={cn("h-10", STEP_WIDE)}>{s.costUsdMicros ? usd(s.costUsdMicros) : "-"}</TD>
                   <TD numeric className={cn("h-10 whitespace-nowrap", STEP_OPTIONAL)}>{s.timings ? `${(s.timings.modelMs / 1000).toFixed(2)} s` : "-"}</TD>
                 </TR>
               ))}
