@@ -15,10 +15,10 @@ import { expensePolicies, expenses, limits, uploads } from "@weft/db";
 import { expenses as exp, newId } from "@weft/core";
 import type { SeedContext } from "./context";
 
-/** Agent ceilings: per call, the daily aggregate, and the auto-approval cap (used only at routine autonomy "auto"). */
+/** Agent ceilings: per call, the daily aggregate (the governance step's _day_cents naming), and the auto-approval cap (routine autonomy "auto" only). */
 export const EXPENSE_LIMITS: Record<string, number> = {
-  [W3_CEILINGS.expense]: 250_000, [`${W3_CEILINGS.expense}_day`]: 1_000_000,
-  [W3_CEILINGS.expenseAuto]: 50_000, [`${W3_CEILINGS.expenseAuto}_day`]: 200_000,
+  [W3_CEILINGS.expense]: 250_000, "agent.expense_day_cents": 1_000_000,
+  [W3_CEILINGS.expenseAuto]: 50_000, "agent.expense_auto_day_cents": 200_000,
 };
 
 interface SeedExpense {

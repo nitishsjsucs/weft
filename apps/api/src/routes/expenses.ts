@@ -16,6 +16,15 @@ import { parsePage } from "../http/paging";
 
 const ADMIN_ROLES = new Set(["admin", "payroll_admin"]);
 
+/** Admins see every expense; anyone else (an employee persona, a manager until routing lands) sees only their own. */
+async function viewerScope(weft: Weft, c: Context<WeftEnv>): Promise<{ admin: boolean; workerId: string | null }> {
+  const s = c.var.session;
+  if (!s) throw new Unauthorized();
+  const [p] = await weft.db.select({ role: principals.role, workerId: principals.workerId }).from(principals).where(eq(principals.id, s.principalId));
+  if (s.via === "api_key") return { admin: true, workerId: null };
+  return { admin: ADMIN_ROLES.has(p?.role ?? ""), workerId: p?.workerId ?? null };
+}
+
 async function outcome(c: Context<WeftEnv>, weft: Weft, command: string, args: unknown): Promise<Response> {
   const s = c.var.session;
   if (!s) throw new Unauthorized();
@@ -50,7 +59,10 @@ export function expensesRoutes(weft: Weft): Hono<WeftEnv> {
     const q = z.object({ band: ExpenseBand.optional(), status: ExpenseStatus.optional(), category: ExpenseCategory.optional(), workerId: z.string().startsWith("wrk_").optional() })
       .safeParse({ band: c.req.query("band") || undefined, status: c.req.query("status") || undefined, category: c.req.query("category") || undefined, workerId: c.req.query("workerId") || undefined });
     if (!q.success) throw bad("band, status, category or workerId is not valid", q.error.issues);
-    const all = await exp.listExpenseRows(weft.db, companyOf(c), { status: q.data.status, category: q.data.category, workerId: q.data.workerId });
+    const scope = await viewerScope(weft, c);
+    if (!scope.admin && q.data.workerId && q.data.workerId !== scope.workerId) throw new Forbidden("You can see only your own expenses");
+    const workerId = scope.admin ? q.data.workerId : scope.workerId ?? "wrk_none";
+    const all = await exp.listExpenseRows(weft.db, companyOf(c), { status: q.data.status, category: q.data.category, workerId });
     const bands = Object.fromEntries(ExpenseBand.options.map((b) => [b, all.filter((x) => exp.bandOf(x.status) === b).length])) as W3ExpensesPage["bands"];
     let rows = q.data.band ? all.filter((x) => exp.bandOf(x.status) === q.data.band) : all;
     if (page.afterId) rows = rows.filter((x) => x.id > page.afterId!);
@@ -67,7 +79,8 @@ export function expensesRoutes(weft: Weft): Hono<WeftEnv> {
 
   r.get("/v1/expenses/:id", async (c) => {
     const row = await exp.getExpenseRow(weft.db, companyOf(c), c.req.param("id"));
-    if (!row) throw new NotFound(`No expense ${c.req.param("id")}`);
+    const scope = await viewerScope(weft, c);
+    if (!row || (!scope.admin && row.workerId !== scope.workerId)) throw new NotFound(`No expense ${c.req.param("id")}`);
     const [base] = await rowsOut(weft, [row]);
     const decidable = exp.DECIDABLE.includes(row.status as never);
     const res = decidable ? await exp.evaluateRow(weft.db, row) : null;

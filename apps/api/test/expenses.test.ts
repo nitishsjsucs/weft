@@ -132,6 +132,15 @@ describe("expenses (GP13)", () => {
     expect(PayrollRun.parse(await (await get(`/v1/payrolls/${next}`)).json()).totals!.reimbursements.amount).toBe(4_800 + 9_600 + 6_450 + 3_275 + 9_120);
   });
 
+  it("people who are not admins see only their own expenses", async () => {
+    expect((await page("")).count).toBeGreaterThan(0);
+    const sam = W3ExpensesPage.parse(await (await get("/v1/expenses", "usr_sam")).json());
+    expect(sam.data.every((e) => e.workerId === "wrk_0025")).toBe(true);
+    expect((await get("/v1/expenses?workerId=wrk_0005", "usr_sam")).status).toBe(403);
+    expect((await get("/v1/expenses/exp_0001", "usr_sam")).status).toBe(404);
+    expect((await get("/v1/expenses/exp_0001/receipt", "usr_sam")).status).toBe(403);
+  });
+
   it("serves the policy with its sources and the receipt to admins only", async () => {
     const p = (await (await get("/v1/expense-policy")).json()) as { version: number; rules: Record<string, number>; sources: unknown[] };
     expect(p.version).toBe(1);
