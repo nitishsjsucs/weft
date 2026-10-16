@@ -199,7 +199,9 @@ export function disputeMessage(f: ReconFindingRow, workerName: string | null, pl
     `Employee: ${workerName ?? "not applicable"}${f.workerId ? ` (${f.workerId})` : ""}`,
     `Plan: ${planName ?? "all plans on the line"}`,
     `Billed: ${formatCents(f.billedCents)}. Expected from our enrollment records: ${formatCents(f.expectedCents)}. Deducted from paychecks: ${formatCents(f.deductedCents)}.`,
-    `Please correct the invoice and send a credit for ${formatCents(Math.max(0, f.billedCents - f.expectedCents))}.`,
+    f.billedCents > f.expectedCents
+      ? `Please correct the invoice and send a credit for ${formatCents(f.billedCents - f.expectedCents)}.`
+      : `Please reissue the line at the enrolled coverage (${formatCents(f.expectedCents)}) so our records match.`,
     ``,
     `Reference: ${f.id}`,
   ].join("\n");
