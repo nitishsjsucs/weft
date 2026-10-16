@@ -79,6 +79,24 @@ describe("recorded responses", () => {
     expect(res).toMatchObject({ servedBy: "claude-opus-5-5", requestId: "req_fixture" });
   });
 
+  it("a mid-stream fallback: declined tool_use and thinking before the boundary are neither run nor echoed", () => {
+    const msg = {
+      model: "claude-opus-4-8", stop_reason: "tool_use", usage: { input_tokens: 100, output_tokens: 20 },
+      content: [
+        { type: "thinking", thinking: "declined partial", signature: "sig_a" },
+        { type: "text", text: "Reading the notice" },
+        { type: "tool_use", id: "toolu_DECLINED", name: "tax__update_rate", input: { rate: "9.9" } },
+        { type: "fallback", from: { model: "claude-opus-5-5" }, to: { model: "claude-opus-4-8" } },
+        { type: "text", text: " and the rates." },
+        { type: "tool_use", id: "toolu_SERVED", name: "notices__get", input: { notice_id: "ntc_0001" } },
+      ],
+    };
+    const res = handleClaudeMessage(msg as never, CLAUDE_MODEL);
+    expect(res.toolCalls.map((c) => c.callId)).toEqual(["toolu_SERVED"]);
+    expect((res.native as { type: string }[]).map((b) => b.type)).toEqual(["text", "text", "tool_use"]);
+    expect(res.servedBy).toBe("claude-opus-4-8");
+  });
+
   it("final text, a refusal with its category and a max_tokens cut-off", () => {
     expect(handleClaudeMessage(fixture("claude-final") as never, CLAUDE_MODEL)).toMatchObject({
       stop: "final", text: "Proposed the CA SUI rate change from 3.4% to 1.5%; it waits for approval.", toolCalls: [], usage: { input: 1590, cached: 0, cacheWrite: 1500, output: 44 },

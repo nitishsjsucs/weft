@@ -112,9 +112,24 @@ export function mapClaudeUsage(u: RawUsage | null | undefined): Usage {
   return { input: (u?.input_tokens ?? 0) + cached + cacheWrite, cached, cacheWrite, output: u?.output_tokens ?? 0, reasoning: 0 };
 }
 
+/**
+ * Server-side fallback (bundled shared/model-migration.md, "Echoing fallback turns back"): after a mid-output decline,
+ * a `fallback` block marks the boundary. Before the last one, only text blocks are kept (thinking, redacted_thinking,
+ * tool_use and other model-internal blocks of the declined partial are never echoed or run); everything after it
+ * stays. Weft sends no server tools, so there are no paired server-tool blocks to keep.
+ */
+export function echoSafeContent(content: Block[]): { kept: Block[]; afterBoundary: Block[] } {
+  const last = content.map((b) => b.type).lastIndexOf("fallback");
+  if (last < 0) return { kept: content, afterBoundary: content };
+  const before = content.slice(0, last).filter((b) => b.type === "text");
+  const after = content.slice(last + 1);
+  return { kept: [...before, ...after], afterBoundary: after };
+}
+
 /** Response handling: refusal before content, a cut-off turn runs nothing, then tool_use blocks or final text. */
 export function handleClaudeMessage(msg: RawMessage, model: string, requestId: string | null = null): ModelStepResult {
-  const content = Array.isArray(msg.content) ? msg.content : [];
+  const { kept, afterBoundary } = echoSafeContent(Array.isArray(msg.content) ? msg.content : []);
+  const content = kept;
   const base = { usage: mapClaudeUsage(msg.usage), servedBy: msg.model ?? model, requestId: requestId ?? msg._request_id ?? null, native: content };
   const text = content.filter((b) => b.type === "text").map((b) => String(b.text ?? "")).join("");
   if (msg.stop_reason === "refusal") {
@@ -128,7 +143,8 @@ export function handleClaudeMessage(msg: RawMessage, model: string, requestId: s
     // Only server tools pause a turn and Weft sends none, so this is unexpected: fail the step, run nothing.
     return { ...base, stop: "error", text: "", toolCalls: [], error: { code: "PROVIDER_UNAVAILABLE", message: "unexpected pause_turn", retryable: false } };
   }
-  const toolCalls = content
+  // Only tool_use blocks after the last fallback boundary come from the model that served the turn.
+  const toolCalls = afterBoundary
     .filter((b) => b.type === "tool_use")
     .map((b) => ({ callId: String(b.id), name: String(b.name), argumentsJson: JSON.stringify(b.input ?? {}) }));
   return { ...base, stop: toolCalls.length ? "tool_calls" : "final", text, toolCalls };
