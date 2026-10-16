@@ -8,7 +8,7 @@ import { sha256Hex } from "../shared/hash";
 import type { CommandDeps } from "../shared/deps";
 import { DomainRefusal } from "../demo/define";
 import { lastDayOfMonth, ymd } from "../payroll/calendar";
-import { businessDayOnOrAfter, finalPayEarnings, planSpecialRun, submittedRegularRunFor, type SpecialEarning } from "../payroll/offcycle";
+import { businessDayOnOrAfter, finalPayEarnings, finalVacationFor, planSpecialRun, submittedRegularRunFor, type SpecialEarning } from "../payroll/offcycle";
 export { submittedRegularRunFor };
 import { computeTotals } from "../payroll/totals";
 import type { CaseRow } from "./cases";
@@ -34,13 +34,14 @@ export interface FinalPayPlan {
 /** Final pay: the worker's period wages through the last day plus unused PTO, paid on the last day or the next business day. */
 export async function finalPayPlan(tx: DbTx, c: CaseRow, w: WorkerRow, payUnusedPto: boolean, now: string): Promise<FinalPayPlan> {
   const rates = await tx.select().from(payRates).where(eq(payRates.workerId, w.id));
-  const pre = finalPayEarnings(w, rates, c.lastDay, payUnusedPto, null);
+  const vacation = payUnusedPto ? await finalVacationFor(tx, w, c.lastDay) : null;   // wave 3: the time-off ledger balance
+  const pre = finalPayEarnings(w, rates, c.lastDay, payUnusedPto, null, vacation);
   let hours: number | null = null;
   if (rates.some((r) => r.kind === "hourly")) {
     const [t] = await tx.select().from(timeEntries).where(and(eq(timeEntries.workerId, w.id), eq(timeEntries.periodStart, pre.period.periodStart)));
     hours = t ? t.regularHoursX100 + t.overtimeHoursX100 : 0;
   }
-  const fp = finalPayEarnings(w, rates, c.lastDay, payUnusedPto, hours);
+  const fp = finalPayEarnings(w, rates, c.lastDay, payUnusedPto, hours, vacation);
   const { period, ptoHoursX100 } = fp;
   if (!fp.earnings.length) throw new DomainRefusal("DOMAIN_NO_PAY_RATE", `${w.id} has no pay rate on ${c.lastDay}`, null, null);
   // Wages a submitted regular run already paid for this period are not paid again; the PTO payout still is.
