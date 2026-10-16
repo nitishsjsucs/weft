@@ -91,6 +91,25 @@ After that:
 multi_select as an array. It is tested on a hand-written fictional Larkspur fixture. One live smoke read runs only
 with `WEFT_LIVE_PUBLIC=1`.
 
+**Tests.**
+
+- `packages/sim/test/vendors/greenhouse.test.ts` (6 tests)
+- `apps/api/test/integrations.test.ts` (6 tests: cards and secret values, webhook refusals and the 1 MB cap, retry
+  and poll, registry rules)
+- `packages/integrations/test/{board,overlay}.test.ts`
+- `tests/scenarios/gp17-greenhouse-hire.test.ts` (4 tests)
+- `e2e/gp17-greenhouse-hire.spec.ts` (ports 4660 and 4661)
+
+## Left for round 2
+
+These are in `.scratch/w3-integrations-hr/left.md`, matching the cut line:
+
+- the Workday simulator, `integrations.apply_hris_change` and the Workday scenario (workers and approved time off
+  read-only with `source = workday`)
+- the real Harvest v3 adapter (OAuth client credentials, read-only) and the Workday real adapter skeleton
+- `ats.mark_hired` and `hris.request_time_off` proposal stubs, and `unhire_candidate`
+- Inbox rendering of sync items
+
 ## Shared files touched outside the owned paths
 
 - `packages/routines/test/engine.test.ts` and `apps/api/test/routines.test.ts` pin the prebuilt routine list. Both
