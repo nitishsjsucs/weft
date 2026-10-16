@@ -24,15 +24,28 @@ Things to try in the demo:
 3. **People**: mark Noor Castellanos (demo)'s offer accepted. New hire readiness creates accounts, posts a welcome, and proposes the Colorado registrations and a laptop.
 4. **Routines**: advance the simulated clock 30 minutes and watch the weekly people digest run on schedule.
 5. **Audit log**: every action is in a hash-chained log; reversible ones have Undo.
+6. **Hiring**: build an offer for a fictional candidate and send it. The email simulator outbox holds the invite;
+   its link opens the new-hire portal, where the hire signs the offer and the confidentiality agreement by typing
+   their name and works through the checklist (W-4, state form, direct deposit, I-9 upload, benefits).
+7. **People**: on Imani Ferreira (demo), Terminate opens an offboarding case. Approve final pay and the access
+   revocations from the case view, then run the remaining steps; Off-cycle pay proposes a one-off run.
+8. **Benefits**: run the October carrier reconciliation (three planted errors), dispute a finding, and look at who
+   has not elected in open enrollment. **Contractors**: pay the three contractors and advance the clock two days.
+9. **Memory**: browse the agent's git-backed memory with wiki-links, backlinks and per-file history.
 
-The "Viewing as" switcher in the header is a demo control for acting as Dana, Theo or Sam.
+The "Viewing as" switcher in the header is a demo control for acting as Dana, Theo or Sam; new hires with a sent
+offer are listed there too and open the portal.
 
-To see the golden paths run without a browser, `pnpm demo` seeds one world in `.data-demo/` and walks GP1 to GP5 in
-about 3 seconds through the same HTTP routes the UI uses, with the scripted provider (it never spends money, whatever
-`WEFT_LLM` says): the DE 2088 notice to an approved 1.5% rate, the grounded NY raise answer and the refused
-approve-all, the pre-payroll review to an approved and then processed payroll, the 09:00 digest, the new hire's
-Colorado registrations activating two business days later, and an injected notice that leaves only tainted
-proposals. It ends by verifying the audit chain. Then browse that same world with
+To see the golden paths run without a browser, `pnpm demo` seeds one world in `.data-demo/` and walks GP1 to GP12 in
+about 5 seconds through the same HTTP routes the UI, the portal and MCP clients use, with the scripted provider (it
+never spends money, whatever `WEFT_LLM` says): the DE 2088 notice to an approved 1.5% rate, the grounded NY raise
+answer and the refused approve-all, the pre-payroll review to an approved and then processed payroll, the 09:00
+digest, the new hire's Colorado registrations activating two business days later, and an injected notice that
+leaves only tainted proposals. Wave 2 continues on the same world: the October carrier reconciliation with its three
+findings and a dispute, the open enrollment reminder, contractor payouts on the payment rail, an offer signed in the
+portal, the 7 of 7 checklist that puts the hire on the next draft, the straggler nudge, an off-cycle run with a
+mid-period raise and a supplemental bonus, a termination whose case revokes access and completes, and the memory
+digest followed by a chat run that starts with a recall block. It ends by verifying the audit chain. Then browse that same world with
 `WEFT_DATA_DIR=.data-demo pnpm dev`. `pnpm demo:tests` runs the golden path scenario tests instead, each on a fresh
 world.
 
@@ -43,15 +56,18 @@ runs and every simulator. `apps/api/src/compose.ts` (`createWeft()`) is the only
 web app (`apps/web`, Next 16) reaches it through an `/api` rewrite that adds the proxy secret, and the MCP server
 (`apps/mcp`, stdio) is a thin client of `/v1/tools`.
 
-- **Brain** (`packages/agent`, `packages/routines`): the model loop, providers (scripted, OpenAI Responses), budgets,
-  the spend ledger and the routines engine. It holds only an opaque run handle and never imports domain code.
+- **Brain** (`packages/agent`, `packages/routines`): the model loop, providers (scripted, OpenAI Responses, Claude
+  Messages, and OpenAI-compatible chat completions for local MLX or llama.cpp servers), budgets, the spend ledger and
+  the routines engine. It holds only an opaque run handle and never imports domain code.
 - **Hands** (`packages/executor`): every state change, from the agent, a person or a system principal, goes through
   one pipeline: strict schemas, risk tiers, taint, approvals as proposals, the hash-chained action log, rollback, the
-  vault and redaction, and the git-backed memory repo.
+  vault and redaction, the git-backed memory repo (coarsening, wiki-links, dossiers, recall) and the QuickJS
+  `code.run` sandbox.
 - **Domain** (`packages/core`, `packages/payroll-tax`): commands, services and event handlers; the pure tax engine
   with versioned 2026 rate data.
-- **World** (`packages/sim`, `packages/seed`): agencies, bank ACH, identity provider, devices and chat simulators, and
-  the deterministic seed for Larkspur Robotics (demo).
+- **World** (`packages/sim`, `packages/seed`): agencies, bank ACH, identity provider, devices, chat, email, benefits
+  carrier, bank account verification and contractor payment rail simulators, and the deterministic seed for Larkspur
+  Robotics (demo).
 - **Storage**: SQLite through libsql in `.data/weft.db`. Every write, autocommit or transaction, serializes through
   one in-process write mutex (`withWriteLock` in `packages/db`).
 
@@ -113,7 +129,20 @@ and Taxes and Compliance.
 
 ## What works
 
-Checked in the final gate above (scripted provider unless noted):
+Wave 2 golden paths (scripted provider; live Luna cases are wave 1 only):
+
+| Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | In `pnpm demo` |
+|---|---|---|---|
+| GP6 offer to signed: lifecycle, invite in the email simulator, portal persona, click-to-sign with sha256 | passes (plus expiry on the sim clock) | passes | yes |
+| GP7 new-hire checklist: W-4, state form, ABA refusal and bank verification, I-9 upload, benefits, next draft pays the hire | passes | passes | yes |
+| GP8 straggler nudge routine, once a day, stops when the checklist is complete | passes | | yes |
+| GP9 termination: eight ordered steps, four proposals through the bank, IdP and device simulators, COBRA notice | passes | passes | yes |
+| GP10 off-cycle pay: mid-period raise prorated by days, bonus at the 22 percent supplemental rate | passes (MCP agent and the person route) | passes | yes (MCP agent) |
+| GP11 carrier reconciliation (three findings with billed, expected and deducted cents), open enrollment chase, contractor payouts pending, sent, delivered | passes | passes | yes |
+| GP12 memory digest (hourly, daily, weekly summaries with back-references), dossiers, one-pager, recall within budget, learned preferences | passes | passes (memory browser) | yes |
+| S6 `code.run` in QuickJS: read-only `weft.call`, refused writes, limits | passes | | |
+
+Wave 1 golden paths, checked in the wave 1 final gate below and again after the wave 2 merge:
 
 | Golden path | Scenario test (`pnpm demo:tests`) | Browser test (`pnpm e2e`) | Live Luna (`pnpm eval:live`) |
 |---|---|---|---|
@@ -135,19 +164,23 @@ time; the action chain verifies at the end of every scenario.
 
 ## What is stubbed or left
 
-- `GET /v1/agent/runs/:id/artifacts/:ref` answers 501. Expenses, Time Off and Settings are labeled stubs; contractor
-  payouts, charts and the landing page's routine showcase are P1.
-- `code.run` is not on any allowlist and `WEFT_SANDBOX=off`: only the sandbox contract and the `createSandbox()` stub
-  ship today.
-- Not modeled in payroll: the stretch states WA, IL and FL, NY Method III, CA supplemental rates, bank holidays, more
-  than one pay rate inside a period, retrying a failed run.
-- Memory search is a plain fixed-string search (no alias expansion); recall at run start is P1.
-- Only the scripted and OpenAI providers are built. Claude, local MLX and llama.cpp providers throw
-  `PROVIDER_CONFIG`.
-- A waiting routine run loses its in-memory trigger and handle across an API restart.
-- With the agent panel docked at 1440 px, the run view's Steps table and the payroll paycheck table are cut off on
-  the right (see `04-agent-run` and `07-payroll-draft`).
-- Track notes with the full lists live in `docs/tracks/`.
+- `GET /v1/agent/runs/:id/artifacts/:ref` answers 501. Expenses, Time Off and Settings are labeled stubs; Benefits,
+  IT and Contractors stay labeled Simulated; charts and the landing page's routine showcase are P1.
+- `code.run` ships in QuickJS but is opt-in (`WEFT_SANDBOX=quickjs`) and on no prebuilt allowlist. Return values
+  over 64 KiB are an error rather than an artifact, inner calls are listed in the result rather than as nested steps,
+  and scripts run on the API thread.
+- The Claude provider is tested against recorded request snapshots only (no Anthropic key here); the local provider
+  was smoke-tested on llama-server with a 1.7B model, not on `mlx_lm.server`. Local providers are `live: false`.
+- Not modeled in payroll: the stretch states WA, IL and FL, NY Method III, CA and NY supplemental rates (bonuses use
+  the federal 22 percent flat rate and regular state withholding), bank holidays, state final-pay deadlines, retrying
+  a failed run. PTO for final pay is a simulated accrual until Time Off lands.
+- Off-cycle pay is proposed by people and MCP agents; the chat agent's tool list is the frozen read-only set, so
+  "asked in chat" is not wired. An offboarding case has no cancel and no failed step state.
+- The new routines (`rt_onboarding_nudge`, `rt_open_enrollment`, `rt_memory_digest`) ship disabled; enable them in
+  Routines. A scripted nudge run posts one hire's nudge per run (a live model posts all of them). `memory.forget` is
+  still refused; task agents are not started.
+- The portal refuses HSA elections; a state certificate's extra withholding is recorded but not used in payroll.
+- Track notes with the full lists live in `docs/tracks/` and `docs/wave2.md`.
 
 ## Sandboxes and a free hosted option
 
@@ -169,6 +202,13 @@ OPENAI_API_KEY=...
 WEFT_LLM=openai WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev
 ```
 
+Other providers (see [docs/models.md](docs/models.md)):
+
+- `WEFT_LLM=claude` uses Claude Opus 5.5 through the Messages API (adaptive thinking, an explicit effort, server-side
+  fallbacks) with `ANTHROPIC_API_KEY` from the same secrets file, priced at $4, $0.20 and $20 per million tokens.
+- `WEFT_LLM=mlx` or `WEFT_LLM=llama` with `WEFT_LOCAL_BASE_URL` (and optionally `WEFT_LOCAL_MODEL`) uses a local
+  OpenAI-compatible chat-completions server, with reasoning off and strict JSON tool arguments, at zero cost.
+
 Spend is capped per run, per day and in total. See [docs/models.md](docs/models.md) for the provider matrix, the caps, the live gate and the sandbox and Cloudflare free-tier decision.
 
 ## Commands
@@ -176,15 +216,16 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | Command | What it does |
 |---|---|
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
-| `pnpm demo` | Narrated GP1 to GP5 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
-| `pnpm demo:tests` | The golden path scenario tests (GP1 to GP5, S7, S8) in process on fresh seeded worlds |
+| `pnpm demo` | Narrated GP1 to GP12 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
+| `pnpm demo:tests` | The golden path scenario tests (GP1 to GP12, S6 to S9) in process on fresh seeded worlds |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
-| `pnpm e2e` | Playwright golden paths GP1 to GP5 and the site specs against a fresh seed on ports 3170 and 4170, one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
+| `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP12 and the site specs against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |
 | `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world and print its digest (stable across runs) |
-| `pnpm eval:live` | Live Luna gate, opt-in (see docs/models.md) |
+| `pnpm eval:live` | Live Luna gate, opt-in (see docs/models.md); `L3x6` repeats a case |
+| `pnpm memory:bundle`, `pnpm memory:restore` | Write a verified git bundle of the memory repo under `companies/<id>/bundles/`, or restore one (the old repo is kept) |
 
 ## Synthetic data only
 

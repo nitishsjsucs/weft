@@ -35,15 +35,15 @@ Notes:
 
 Response handling: `stop_reason: "refusal"` ends the step as a refusal with `stop_details.category`; `max_tokens` is incomplete and runs no tool; `tool_use` blocks become tool calls. Usage maps `input = input_tokens + cache reads + cache writes`, `cached = cache_read_input_tokens`, `cacheWrite = cache_creation_input_tokens`. The SDK client has `maxRetries: 0` and a 120 s timeout; errors map to the same provider codes as OpenAI.
 
-Pricing: the loop still prices every live provider with the Luna table. Until the runtime picks prices per provider (a contract request), run Claude with `WEFT_PRICES_JSON='{"inPerM":4,"cachedPerM":0.2,"outPerM":20}'` (Opus 5.5 from the bundled docs: $4 and $20 per million, cache reads $0.20).
+Pricing: since the wave 2 merge the runtime prices each live provider from its own table (`PRICES_BY_PROVIDER` in `packages/agent/src/cost.ts`): Luna for `openai`, Opus 5.5 for `claude` from the bundled docs ($4 input, $0.20 cache reads, $20 output per million) and zero for the local chat-completions provider. `WEFT_PRICES_JSON` still overrides any field.
 
 ```sh
-WEFT_LLM=claude WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env WEFT_PRICES_JSON='{"inPerM":4,"cachedPerM":0.2,"outPerM":20}' pnpm dev
+WEFT_LLM=claude WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev
 ```
 
 ### Local chat-completions (`WEFT_LLM=mlx` or `llama`)
 
-`packages/agent/src/providers/chat-completions.ts`: one system message (the frozen prompt), the context pack and notices as user messages (Qwen chat templates refuse a request without a user message), assistant messages replayed as normalized `tool_calls`, and `role: "tool"` outputs. Each step sends `chat_template_kwargs: { enable_thinking: false }`, `temperature: 0`, `max_tokens: 768` and tools sorted by name with compact descriptions (the registry's `compactDescription` when the caller passes it, otherwise the first sentence of the description, at most 200 characters). Tool-call arguments are parsed as strict JSON with no repair; an invalid one reaches the loop as an `INVALID_INPUT` tool error and the run continues. Any `<think>` text is dropped. A step times out after 180 s.
+`packages/agent/src/providers/chat-completions.ts`: one system message (the frozen prompt), the context pack and notices as user messages (Qwen chat templates refuse a request without a user message), assistant messages replayed as normalized `tool_calls`, and `role: "tool"` outputs. Each step sends `chat_template_kwargs: { enable_thinking: false }`, `temperature: 0`, `max_tokens: 768` and tools sorted by name with compact descriptions (the registry's `compactDescription`, which `createWeft()` passes since the wave 2 merge; otherwise the first sentence of the description, at most 200 characters). Tool-call arguments are parsed as strict JSON with no repair; an invalid one reaches the loop as an `INVALID_INPUT` tool error and the run continues. Any `<think>` text is dropped. A step times out after 180 s.
 
 The provider is not live: the server is local and free, so the loop reserves and settles each local step at zero and the live cap never moves. Token counts are still recorded.
 

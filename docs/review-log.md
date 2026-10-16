@@ -1,5 +1,19 @@
 # Review log
 
+## Wave 2: integration review (2026-10-15, 19:35 to 20:00 PDT)
+
+Found while merging the six wave 2 tracks and wiring their contract requests; each fixed on main with a test.
+
+| Finding | Fix | Commit subject |
+|---|---|---|
+| After the portal turned a hire active, the agent finishing its own tasks emitted `worker.onboarding_completed` a second time | `onboarding.complete_task` emits it only when no earlier one exists for the worker | fix(onboarding): the agent's later tasks do not emit worker.onboarding_completed a second time after the portal did |
+| `payroll.get_run` with `response_format: "detailed"` offloaded to an artifact whose first page read "rows 1 to 0 of 0" (live L2 hit it) | An offloaded result pages its longest array field, not its first (`excluded_worker_ids` is often empty) | fix(executor): an offloaded result pages its longest array, so payroll.get_run detailed no longer reads as 0 rows |
+| Contractor payouts only moved along the rail when someone read `GET /v1/contractors/payouts` | The scheduler tick syncs the rail after `sims.tick` | integrate: the scheduler tick drives the payment rail, so payouts move sent to delivered without a read |
+| Sent offers never expired unless the hire opened the portal or someone ran the sweep | `svc_scheduler` runs `documents.expire_offers` when one is due | integrate: offers expire on the sim clock (svc_scheduler runs documents.expire_offers only when one is due) |
+| Claude runs were priced with the Luna table, about 20 times too low | Prices per provider | integrate: prices per provider (Claude Opus 5.5 at $4, $0.20 and $20 per million) and compact tool descriptions for the local providers |
+| `POST /v1/sim/reset` left stored run handles behind while run ids restart | The reset clears `<dataDir>/run/handles` | integrate: POST /v1/sim/reset clears stored run handles, since run ids restart |
+| Checked and fine: the new-hire persona's `PORTAL_ONLY` confinement holds against `..`, `%2e%2e` and mixed-case encodings of a path outside `/v1/portal/` | No change | |
+
 ## Wave 2: gate report fixes (track w2-reliability, 2026-10-15, 18:50 to 19:15 PDT)
 
 Each item of the wave 1 gate report, fixed on `track/w2-reliability` with a test. Notes in `docs/tracks/w2-reliability.md`.

@@ -4,6 +4,53 @@ Wave 1 passed its gate on 2026-10-15 (fresh clone at 56d0054: 403 tests, typeche
 
 Hard deadline: everything merged, reviewed, fixed and gated by 22:00 PDT on 2026-10-15. Finishing beats starting. Every track lands working, tested slices and records what is left in `.scratch/<track-id>/left.md`. Every existing test, e2e spec and the demo stays green after every merge.
 
+## What landed (integration, 2026-10-15 evening)
+
+All six tracks merged into main with no conflicts, in the planned order (`22ae51a` reliability, `4e17a78` providers and
+sandbox, `a82824a` memory, `184c6d7` benefits and contractors, `4be5065` onboarding, `46b1c21` offboarding). The two
+identical `contract:` commits for `parseEventBody` (onboarding `98c91b7`, cherry-picked by offboarding) collapsed into
+one change in `packages/contracts/src/events.ts`; the offboarding `contract:` commit for `HumanExecutor.propose` and the
+providers `contract:` commit for the sandbox refusal codes landed as they were. The track branches are kept; their
+worktrees are removed.
+
+Integrator changes on top of the merges, from the tracks' contract requests and left lists:
+
+| Change | Where |
+|---|---|
+| `rt_onboarding_nudge`, `rt_open_enrollment` and `rt_memory_digest` join PREBUILT (disabled), with scripted scenarios for the first two; the two wave 1 prebuilt id assertions now list 7 routines | `packages/routines/src/wave2/*.ts`, `scenarios/rt_onboarding_nudge.json`, `scenarios/rt_open_enrollment.json` |
+| The scheduler tick drives the payment rail (`syncContractorRail` after `sims.tick`), so payouts move sent to delivered with no read; the approval's scheduler kick sends them, so a booked payout reads `sent` right after approval | `apps/api/src/scheduler.ts` |
+| Offers expire on the sim clock: `svc_scheduler` may run `documents.expire_offers` (R1), and the tick calls it only when a sent or viewed offer is past its expiry date | `packages/executor/src/system.ts`, `apps/api/src/scheduler.ts`, `tests/scenarios/gp6-offer-expiry.test.ts` |
+| Prices per provider: Luna for `openai`, Opus 5.5 for `claude` ($4, $0.20, $20 per million), zero for local; `WEFT_PRICES_JSON` still overrides | `packages/agent/src/cost.ts`, `packages/agent/src/runtime.ts` |
+| `createWeft()` passes the registry's compact tool descriptions to the local provider | `apps/api/src/compose.ts` |
+| `IdpSim.clearGroups` and `DeviceSim.lock` folded into the frozen sim contract; `@weft/core` exports the offboarding read model as `offboarding` | `packages/contracts/src/sim.ts`, `packages/core/src/index.ts` |
+| Route table row for `GET /v1/memory/history`; a Memory nav entry | `packages/contracts/src/api.ts`, `apps/web/src/components/app/nav.ts` |
+| Viewing as lists new-hire personas (sent, viewed or accepted offers); choosing one opens `/portal?as=<id>` | `apps/web/src/components/app/shell/header.tsx` |
+| `POST /v1/sim/reset` clears stored run handles, since run ids restart | `apps/api/src/routes/sim.ts` |
+| Fix: the agent's later onboarding tasks no longer emit `worker.onboarding_completed` a second time after the portal did | `packages/core/src/onboarding/writes.ts` |
+| Fix: an offloaded result pages its longest array, so `payroll.get_run` with `response_format: "detailed"` no longer reads "rows 1 to 0 of 0" (its empty `excluded_worker_ids` came first) | `packages/executor/src/workspace.ts` |
+| `pnpm demo` walks GP6 to GP12 on the same world after GP1 to GP5 | `apps/api/src/demo.ts` |
+| New e2e specs: GP12 memory browser, and the 1440 px layout checks with the agent panel docked; GP6 also checks the persona in Viewing as | `e2e/gp12-memory-browser.spec.ts`, `e2e/site-layout-1440.spec.ts` |
+
+Golden paths after the merge, all on the scripted provider: GP1 to GP12 pass as scenario tests; GP1 to GP7 and GP9
+to GP12 pass as Playwright specs (GP8 is scenario only, as planned); `pnpm demo` narrates GP1 to GP12 and the audit
+chain verifies. Live on `gpt-5.6-luna` after the merge: L1, L2, L4 and L3 three times all pass ($0.0073).
+
+Left after wave 2 (details in each track's `docs/tracks/w2-*.md` and the gitignored `.scratch/w2-*/left.md`):
+
+- Onboarding: commands stay in the `documents.*` namespace; the seeded offer for Noor has no persona or documents; the
+  portal refuses HSA elections; a state form's extra withholding is recorded but not used in payroll.
+- Offboarding: no case cancel and no failed step state; no "propose again" for a stranded step; CA and NY supplemental
+  rates and state final-pay deadlines are not modeled; PTO is a simulated accrual; `DeviceStatus` has no `locked`.
+- GP10 "asked in chat" needs `payroll.propose_off_cycle` on the chat allowlist, which is frozen read-only (harness 5.3);
+  people and MCP agents propose it today.
+- Benefits and contractors: routine reminders do not count toward the screen's nudge counter; no dependents table; no
+  retry for returned payouts; nothing consumes `benefits.invoice_received` yet.
+- Memory: task agents (`openChildRun`), `memory.forget`, state dossier index rows, alias expansion for `at=<commit>`
+  searches, bundle upload to object storage.
+- Providers and sandbox: `code.run` values over 64 KiB, nested inner-call steps, a worker thread for QuickJS; no live
+  Claude call (no key) and no `mlx_lm.server` smoke test.
+- A scripted nudge run posts the first derived nudge only; each later run that day takes the next overdue hire.
+
 ## Schedule (PDT)
 
 | Time | What |
