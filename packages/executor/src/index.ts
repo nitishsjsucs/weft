@@ -32,7 +32,7 @@ export { Redactor, encodings } from "./vault/redact";
 export { writeLocked, isBusy } from "./write";
 export { escapeUntrusted, wrapUntrusted, nonceFromToken, LT_ESCAPE } from "./untrusted";
 export { actionHash, GENESIS_HASH } from "./chain";
-export { toProposal } from "./proposals";
+export { toProposal, approvalCardOf } from "./proposals";
 export { toCsv } from "./workspace";
 export type { WeftRunHandle } from "./runs";
 export type { BatchedAgentCall } from "./agent";
