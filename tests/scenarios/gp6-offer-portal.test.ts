@@ -108,4 +108,19 @@ describe("GP6 offer to signed", () => {
     const acts = await weft.db.all<{ command: string }>(sql`SELECT command FROM actions WHERE command IN ('documents.void_offer', 'documents.expire_offers')`);
     expect(acts.map((a) => a.command)).toEqual(["documents.void_offer", "documents.expire_offers"]);
   });
+  it("signed records are tamper-evident: the database refuses edits and verify catches a bypass", async () => {
+    const [sig] = await weft.db.all<{ id: string; document_id: string }>(sql`SELECT id, document_id FROM signatures ORDER BY id LIMIT 1`);
+    expect(sig, "a signature from the signing test").toBeTruthy();
+    const ok = (await call("usr_dana", "GET", "/v1/actions/verify")).json as { ok: boolean; signatureProblems?: string[] };
+    expect(ok).toMatchObject({ ok: true, signatureProblems: [] });
+    await expect(weft.db.run(sql`UPDATE documents SET body_text = body_text || ' (edited)' WHERE id = ${sig!.document_id}`)).rejects.toThrow();
+    await expect(weft.db.run(sql`UPDATE signatures SET typed_name = 'Someone Else' WHERE id = ${sig!.id}`)).rejects.toThrow();
+    await expect(weft.db.run(sql`DELETE FROM signatures WHERE id = ${sig!.id}`)).rejects.toThrow();
+    // A tamperer who drops the trigger is still caught by the signature pass of verify.
+    await weft.db.run(sql`DROP TRIGGER documents_signed_no_edit`);
+    await weft.db.run(sql`UPDATE documents SET body_text = body_text || ' (edited: base salary $999,999.00)' WHERE id = ${sig!.document_id}`);
+    const bad = (await call("usr_dana", "GET", "/v1/actions/verify")).json as { ok: boolean; signatureProblems: string[] };
+    expect(bad.ok).toBe(false);
+    expect(bad.signatureProblems.join(" ")).toContain(sig!.document_id);
+  });
 });

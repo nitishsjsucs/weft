@@ -1,9 +1,9 @@
 // Action log integrity (harness 6.5). Every state change appends one hash-chained actions row in the same SQLite
 // transaction. Preimage: canonical JSON of { seq, prev_hash, ts, actor, command, args_hash, proposal_id, result_digest }.
-import { asc, desc, isNotNull, sql } from "drizzle-orm";
+import { asc, desc, inArray, isNotNull, sql } from "drizzle-orm";
 import type { ChainStatus } from "@weft/contracts";
 import { canonicalJson, newId, sha256Hex } from "@weft/core";
-import { actions, approvalAudit, proposals, type DbTx } from "@weft/db";
+import { actions, approvalAudit, documents, proposals, signatures, type DbTx } from "@weft/db";
 
 export const GENESIS_HASH = "0".repeat(64);
 
@@ -58,8 +58,29 @@ export async function appendAudit(tx: DbTx, a: { proposalId: string; principalId
   await tx.insert(approvalAudit).values({ ...a, seq, prevHash, hash });
 }
 
+/**
+ * The signature pass: every signature's document still hashes to the sha256 it was signed at, the document row and
+ * the signature agree, and the action row at the signature's seq carries that sha256 (so the hash chain covers it).
+ */
+export async function verifySignatures(tx: DbTx): Promise<string[]> {
+  const problems: string[] = [];
+  const sigs = await tx.select().from(signatures);
+  if (!sigs.length) return problems;
+  const docs = new Map((await tx.select({ id: documents.id, bodyText: documents.bodyText, sha256: documents.sha256 }).from(documents).where(inArray(documents.id, sigs.map((s) => s.documentId)))).map((d) => [d.id, d]));
+  const seqs = sigs.map((s) => s.actionSeq).filter((n): n is number => n !== null);
+  const acts = new Map((seqs.length ? await tx.select({ seq: actions.seq, summary: actions.summary, argsJson: actions.argsJson }).from(actions).where(inArray(actions.seq, seqs)) : []).map((a) => [a.seq, a]));
+  for (const s of sigs) {
+    const d = docs.get(s.documentId);
+    if (!d) { problems.push(`${s.id}: document ${s.documentId} missing`); continue; }
+    if (sha256Hex(d.bodyText) !== d.sha256 || d.sha256 !== s.documentSha256) { problems.push(`${s.id}: ${d.id} text does not match its signed sha256`); continue; }
+    const a = s.actionSeq === null ? undefined : acts.get(s.actionSeq);
+    if (!a || !`${a.summary} ${typeof a.argsJson === "string" ? a.argsJson : JSON.stringify(a.argsJson)}`.includes(s.documentSha256)) problems.push(`${s.id}: action ${s.actionSeq ?? "none"} does not carry the signed sha256`);
+  }
+  return problems;
+}
+
 /** Recomputes the chain, checks seq has no gaps, checks every executed proposal has exactly one action row. */
-export async function verifyActions(tx: DbTx, gitHeadSeq: number | null): Promise<ChainStatus & { proposalProblems: string[] }> {
+export async function verifyActions(tx: DbTx, gitHeadSeq: number | null): Promise<ChainStatus & { proposalProblems: string[]; signatureProblems: string[] }> {
   const rows = await tx.select().from(actions).orderBy(asc(actions.seq));
   const gaps: number[] = [];
   let badSeq: number | null = null;
@@ -84,7 +105,8 @@ export async function verifyActions(tx: DbTx, gitHeadSeq: number | null): Promis
   const last = rows.at(-1);
   const head = last ? { seq: last.seq, hash: last.hash } : null;
   const gitLag = head && gitHeadSeq !== null ? Math.max(0, head.seq - gitHeadSeq) : 0;
-  return { ok: gaps.length === 0 && badSeq === null && proposalProblems.length === 0 && gitLag <= 1, head, gaps, badSeq, gitLag, proposalProblems };
+  const signatureProblems = await verifySignatures(tx);
+  return { ok: gaps.length === 0 && badSeq === null && proposalProblems.length === 0 && signatureProblems.length === 0 && gitLag <= 1, head, gaps, badSeq, gitLag, proposalProblems, signatureProblems };
 }
 
 /** Count of rows, for tests. */

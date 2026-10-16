@@ -10,7 +10,7 @@ export interface SimClock { now(): string; rate(): number; advance(to: string): 
 export type SystemPrincipal = "svc_scheduler" | "svc_events" | "svc_sim" | "svc_digest";
 export interface SystemExecutor { exec(principal: SystemPrincipal, command: string, args: unknown, source: { eventId: string | null; attended: boolean; requestedBy: string | null }): Promise<ToolOutcome> }
 export interface VaultAdmin { put(input: { name: string; kind: string; value: string; description: string; by: string }): Promise<void>; list(): Promise<{ name: string; kind: string; fingerprint: string }[]> }
-export interface ChainStatus { ok: boolean; head: { seq: number; hash: string } | null; gaps: number[]; badSeq: number | null; gitLag: number }
+export interface ChainStatus { ok: boolean; head: { seq: number; hash: string } | null; gaps: number[]; badSeq: number | null; gitLag: number; /** Wave 2 review: signed documents whose text, hash or action row disagree. */ signatureProblems?: string[] }
 export interface ExecutorBundle {
   agent: AgentExecutor; readOnly: ReadOnlyExecutor; runs: RunAuthority; human: HumanExecutor; system: SystemExecutor;
   vault: VaultAdmin; memory: MemoryStore; registry: RegistryView;

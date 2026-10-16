@@ -102,7 +102,7 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
     async verifyChain() {
       const gitSeq = memory.root() ? (memory.chainHeadSeq() ?? 0) : null;
       const s = await verifyActions(opts.db, gitSeq);
-      return { ok: s.ok, head: s.head, gaps: s.gaps, badSeq: s.badSeq, gitLag: s.gitLag };
+      return { ok: s.ok, head: s.head, gaps: s.gaps, badSeq: s.badSeq, gitLag: s.gitLag, signatureProblems: s.signatureProblems };
     },
     redact: (text) => redactor.redact(text),
     async close() { /* the db belongs to createWeft; nothing else is held open */ },
