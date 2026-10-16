@@ -23,3 +23,9 @@ export async function listEnrollments(tx: DbTx, companyId: string, workerId?: st
   if (ids.length === 0) return [];
   return tx.select().from(benefitEnrollments).where(inArray(benefitEnrollments.workerId, ids)).orderBy(asc(benefitEnrollments.id));
 }
+
+// Wave 2 (w2-benefits-contractors): reconciliation, open enrollment and contractor payouts, re-exported through the
+// demo surface so the seed and the API routes reach them from @weft/core.
+export * from "./recon";
+export * from "./enrollment";
+export * from "../contractors/index";
