@@ -332,6 +332,13 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
         const d = await this.read(sub.path);
         if (d) cands.push({ kind: "dossier", path: sub.path, title: /^# (.+)$/m.exec(d.body)?.[1] ?? sub.path, excerpt: excerptOf(d.body, CAPS.dossier), score: 50 - i, asOf: d.frontmatter.updated || "", taintedBy: untrusted(sub.path, d.frontmatter.taintedBy) });
       }
+      // Learned preferences: the approvals lines whose proposal kind shares a word with the request.
+      const prefs = await this.read("knowledge/preferences/approvals.md");
+      if (prefs) {
+        const words = new Set(input.request.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+        const relevant = prefs.body.split("\n").filter((l) => /^- [A-Za-z0-9_.:-]+: approved/.test(l) && l.slice(2, l.indexOf(":")).toLowerCase().split(/[._]/).some((w) => w.length >= 3 && words.has(w)));
+        if (relevant.length) cands.push({ kind: "dossier", path: "knowledge/preferences/approvals.md", title: "Approval preferences", excerpt: relevant.join(" / "), score: 10, asOf: prefs.frontmatter.updated || "", taintedBy: untrusted("knowledge/preferences/approvals.md", prefs.frontmatter.taintedBy) });
+      }
       const included = new Set(cands.map((c) => c.path));
       const seenText = new Set<string>();
       for (const [ti, term] of terms.entries()) {

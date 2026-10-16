@@ -3,6 +3,7 @@
 // pay amounts, no inferred traits, and never a fact marked tainted (untrusted text never enters a dossier).
 import type { MemoryFrontmatter } from "@weft/contracts";
 import { RECALL_BUDGET } from "@weft/contracts";
+import { approvalsDoc, type DecisionRow } from "./preferences";
 
 export const ONE_PAGER_PATH = RECALL_BUDGET.onePager;
 export const MAX_ONE_PAGER_ITEMS = 8;
@@ -18,7 +19,7 @@ export interface OnePagerInput {
   companyName: string; asOf: string;
   headcount: DossierFact[]; openItems: DossierFact[]; workstreams: DossierFact[]; autonomy: DossierFact[];
 }
-export interface DigestSources { people: PersonInput[]; states: StateInput[]; agencies: AgencyInput[]; notices: NoticeInput[]; onePager: OnePagerInput | null }
+export interface DigestSources { people: PersonInput[]; states: StateInput[]; agencies: AgencyInput[]; notices: NoticeInput[]; onePager: OnePagerInput | null; decisions?: DecisionRow[] }
 
 /** One line, no wiki-link brackets, and never a money amount (dossiers hold no pay data). */
 const clean = (s: string) => s.replace(/\s+/g, " ").replace(/[[\]]/g, "").replace(/\$\s?\d[\d,]*(\.\d+)?/g, "[amount]").trim();
@@ -82,5 +83,7 @@ export function renderDossiers(s: DigestSources, fallbackDate: string, companyRe
     ...[...s.notices].sort((a, b) => a.id.localeCompare(b.id)).map((n) => noticeDossier(n, fallbackDate)),
   ];
   if (s.onePager) out.push(onePager(s.onePager, companyRef));
+  const prefs = approvalsDoc(s.decisions ?? [], fallbackDate);
+  if (prefs) out.push(prefs);
   return out;
 }

@@ -2,7 +2,7 @@
 // dated and sourced, no pay amounts, no free text from untrusted sources), the executor's memory store coarsens the
 // timeline and writes everything in one commit as Weft Agent, and the dossiers table indexes what was written.
 import { and, eq, inArray } from "drizzle-orm";
-import { companies, departments, dossiers, notices, payrollRuns, proposals, routines, taxAccounts, workers, type Db } from "@weft/db";
+import { companies, departments, dossiers, notices, payrollRuns, principals, proposals, routines, taxAccounts, workers, type Db } from "@weft/db";
 import type { MemoryFrontmatter, MemoryHit, MemoryStore } from "@weft/contracts";
 
 // Structural mirror of the executor's LocalMemory additions (packages/executor/src/memory/store.ts); the executor
@@ -14,6 +14,7 @@ export interface DigestSources {
   agencies: { id: string; path: string; name: string; aliases: string[]; facts: DigestFact[] }[];
   notices: { id: string; facts: DigestFact[] }[];
   onePager: { companyName: string; asOf: string; headcount: DigestFact[]; openItems: DigestFact[]; workstreams: DigestFact[]; autonomy: DigestFact[] } | null;
+  decisions?: { deciderId: string; deciderName: string; kind: string; outcome: "approved" | "denied" | "edited" | "dismissed"; reasonCode: string | null; decidedAt: string; proposalId: string }[];
 }
 export interface DigestOutcome {
   commit: string | null; key: string; periods: string[]; removed: string[]; written: string[];
@@ -113,8 +114,15 @@ export async function digestSources(db: Db, companyId: string, now: string, work
     .map((r) => ({ text: `Routine ${r.id} ${r.enabled ? "enabled" : "disabled"}, autonomy ${r.autonomy}`, date: day(r.createdAt, fallback), src: `routine:${r.id}` }));
   autonomy.push({ text: "Every change to pay, tax and benefits data is a proposal a person approves (knowledge/preferences/agent/autonomy.md)", date: fallback, src: "knowledge/preferences/agent/autonomy.md" });
   const all = [...headcount, ...openItems, ...workstreams, ...autonomy].filter((f) => !f.tainted);
+  // Learned preferences: decided proposals by decider and kind, with the structured reason code only.
+  const names = new Map((await db.select({ id: principals.id, display: principals.display }).from(principals).where(eq(principals.companyId, companyId))).map((p) => [p.id, p.display]));
+  type Outcome = "approved" | "denied" | "edited" | "dismissed";
+  const outcome = (status: string): Outcome | null => (["approved", "executed", "failed"].includes(status) ? "approved" : status === "denied" ? "denied" : status === "superseded" ? "edited" : status === "dismissed" ? "dismissed" : null);
+  const decided = (await db.select().from(proposals).where(eq(proposals.companyId, companyId)))
+    .filter((p) => p.decidedBy && p.decidedAt && outcome(p.status))
+    .map((p) => ({ deciderId: p.decidedBy!, deciderName: names.get(p.decidedBy!) ?? p.decidedBy!, kind: p.command ?? p.kind, outcome: outcome(p.status)!, reasonCode: p.decisionCode, decidedAt: p.decidedAt!, proposalId: p.id }));
   return {
-    people, states, agencies, notices: noticeDocs,
+    people, states, agencies, notices: noticeDocs, decisions: decided,
     onePager: { companyName: c?.legalName ?? companyId, asOf: maxDay(all.map((f) => f.date), fallback), headcount, openItems, workstreams, autonomy },
   };
 }
