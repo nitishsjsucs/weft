@@ -84,6 +84,8 @@ export function auth(): MiddlewareHandler<WeftEnv> {
         if (!p || p.kind !== "human") throw new Unauthorized("Unknown human principal");
         if (!uiLimit.take(p.id)) throw new RateLimitExceeded();
         session = { principalId: p.id, companyId: p.companyId, via: "ui", keyScope: null };
+        // w2-onboarding: the new hire persona (role employee) signs in only to its own portal.
+        if (p.role === "employee" && !url.pathname.startsWith("/v1/portal/")) throw new Forbidden("The new hire persona can use only the portal", { code: "PORTAL_ONLY" });
       }
     }
 

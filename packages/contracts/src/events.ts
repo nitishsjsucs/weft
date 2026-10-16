@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Wave2EventBody } from "./wave2";
 // Domain events (SPEC 6.5, 15 item 4): a discriminated union on `type` with id-only payloads, never free text.
 // The executor stamps `attended` and `requestedBy` (SPEC 9.0 amendment 3); stored in the events table.
 const ref = (p: string) => z.string().startsWith(p);
@@ -41,4 +42,9 @@ export const EventRow = z.object({ id: ref("evt_"), type: z.string(), ts: z.stri
 export type EventRow = z.infer<typeof EventRow>;
 
 /** Validates an event body; payload values must be strings (ids), which keeps payloads free of untrusted text. */
-export function parseEventBody(body: unknown): EventBody { return EventBody.parse(body); }
+/** Wave 2 event bodies (wave2.ts Wave2EventBody) are accepted too; the frozen EventBody union is unchanged. */
+export function parseEventBody(body: unknown): EventBody {
+  const t = (body as { type?: unknown } | null)?.type;
+  if (typeof t === "string" && !EVENT_TYPES.includes(t as EventType) && Wave2EventBody.options.some((o) => o.shape.type.value === t)) return Wave2EventBody.parse(body) as unknown as EventBody;
+  return EventBody.parse(body);
+}
