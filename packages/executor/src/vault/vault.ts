@@ -38,6 +38,25 @@ export interface Vault extends VaultAdmin {
   primeRedactor(): Promise<void>;
 }
 
+/**
+ * Teaches the redactor a vault value. A JSON object value (the direct-deposit blob) also registers every digit-string
+ * leaf of at least 8 characters, so a bare account number is redacted on its own, not only the whole blob. Routing
+ * numbers are public bank identifiers and names are not secret, so neither is registered.
+ */
+export function learnSecret(redactor: Redactor, value: string): void {
+  redactor.add(value);
+  if (!value.startsWith("{")) return;
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { return; }
+  const walk = (v: unknown, key: string): void => {
+    if (/routing/i.test(key)) return;
+    if (typeof v === "string" || typeof v === "number") { const t = String(v); if (/^[0-9][0-9 -]{6,}[0-9]$/.test(t)) redactor.add(t); }
+    else if (Array.isArray(v)) v.forEach((x) => walk(x, key));
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+  };
+  walk(parsed, "");
+}
+
 export function createVault(opts: { db: Db; clock: SimClock; key: Buffer; redactor: Redactor }): Vault {
   const { db, key, redactor, clock } = opts;
   const decrypt = (row: { ciphertext: string; iv: string; tag: string; name: string }) => {
@@ -57,7 +76,7 @@ export function createVault(opts: { db: Db; clock: SimClock; key: Buffer; redact
         name: input.name, kind: input.kind, description: input.description, ciphertext: ct.toString("base64"), iv: iv.toString("base64"),
         tag: c.getAuthTag().toString("base64"), fingerprint: fingerprint(input.value), createdBy: input.by, createdAt: clock.now(), lastUsedAt: null,
       };
-      redactor.add(input.value);
+      learnSecret(redactor, input.value);
       await writeLocked(() => db.insert(vaultSecrets).values(row).onConflictDoUpdate({ target: vaultSecrets.name, set: { kind: row.kind, description: row.description, ciphertext: row.ciphertext, iv: row.iv, tag: row.tag, fingerprint: row.fingerprint } }));
     },
     async list() {
@@ -73,12 +92,12 @@ export function createVault(opts: { db: Db; clock: SimClock; key: Buffer; redact
       const [row] = await tx.select().from(vaultSecrets).where(eq(vaultSecrets.name, name)).limit(1);
       if (!row) throw new Error(`vault: no secret named ${name}`);
       const v = decrypt(row);
-      redactor.add(v);
+      learnSecret(redactor, v);
       return v;
     },
     async primeRedactor() {
       for (const row of await db.select().from(vaultSecrets)) {
-        try { redactor.add(decrypt(row)); } catch { /* wrong key: the value stays unreadable */ }
+        try { learnSecret(redactor, decrypt(row)); } catch { /* wrong key: the value stays unreadable */ }
       }
     },
   };

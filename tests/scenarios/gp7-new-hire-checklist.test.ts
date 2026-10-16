@@ -63,6 +63,12 @@ describe("GP7 new-hire checklist unblocks payroll", () => {
     }
   });
 
+  it("after direct deposit a bare account number is redacted on its own", async () => {
+    const red = (weft.executor as unknown as { redact(t: string): string }).redact(`pay her at ${ACCOUNT} please`);
+    expect(red).not.toContain(ACCOUNT);
+    expect(red).toContain("pay her at");
+  });
+
   it("the new hire's own tasks cannot be marked done for them through onboarding.complete_task", async () => {
     for (const kind of ["i9_sim", "federal_w4"]) {
       const res = await call("usr_dana", "POST", "/v1/tools/onboarding.complete_task", { worker_id: workerId, kind });
