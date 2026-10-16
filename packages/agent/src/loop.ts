@@ -361,8 +361,9 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     const state = await executor.runState(handle);
     const allPass = !items || items.every((i) => i.passed);
     if (allPass) {
-      if (state.pendingProposalIds.length > 0) return finish({ status: "waiting", reason: "WAITING_APPROVAL", summary: text || null });
-      return finish({ status: "done", reason: "DONE", summary: text || null });
+      // Harness 4.3: what a person reads about a routine run comes from its results and proposals, never the prose.
+      if (state.pendingProposalIds.length > 0) return finish({ status: "waiting", reason: "WAITING_APPROVAL", summary: await routineSummary(allToolResults) });
+      return finish({ status: "done", reason: "DONE", summary: await routineSummary(allToolResults) });
     }
     if (!corrected) {
       corrected = true;
@@ -372,8 +373,19 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
       history = [...history, { kind: "notice", ...notice }];
       continue;
     }
-    return finish({ status: "escalated", reason: "NOT_DONE", summary: text || "The routine ended with open checklist items." });
+    const failing = (items ?? []).filter((i) => !i.passed).map((i) => i.label);
+    return finish({ status: "escalated", reason: "NOT_DONE", summary: `The routine ended with open checklist items: ${failing.join("; ") || "unknown"}. ${await routineSummary(allToolResults)}` });
   }
+}
+
+/** A routine run's summary from its effects and proposals (harness 4.3), e.g. "Proposed Update CA SUI ... (prp_0001)". */
+async function routineSummary(results: () => Promise<unknown[]>): Promise<string> {
+  const rs = (await results()) as { resultId?: string; summary?: string; proposalId?: string; title?: string; actionSeq?: number | null }[];
+  const parts = [
+    ...rs.filter((r) => r.resultId && r.actionSeq !== null && r.actionSeq !== undefined).map((r) => `${r.summary ?? "Done"} (#${r.actionSeq})`),
+    ...rs.filter((r) => r.proposalId).map((r) => `Proposed ${r.title ?? "a change"} (${r.proposalId})`),
+  ];
+  return parts.length ? parts.slice(0, 8).join("; ") : "Checked; nothing needed a change.";
 }
 
 async function groundedTemplate(results: () => Promise<unknown[]>): Promise<string> {
