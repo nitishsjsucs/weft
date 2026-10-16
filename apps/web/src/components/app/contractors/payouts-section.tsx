@@ -12,7 +12,7 @@ import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 const TONE: Record<string, "amber" | "blue" | "green" | "red"> = { pending: "amber", sent: "blue", delivered: "green", returned: "red" };
 const usd = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const minor = (m: number, cur: string) => `${(m / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
-const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace("T", " ") + " UTC" : "-");
+const when = (iso: string | null) => (iso ? iso.slice(5, 16).replace("T", " ") + " UTC" : "-");
 
 /** The last business day of the sim month (the global monthly payday). */
 function monthEnd(nowIso: string | undefined): string {
@@ -51,7 +51,7 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
           {rows.length === 0 ? <p className="px-4 py-4 text-[13px] text-gray-10">{q.data ? "No payouts yet." : "Loading..."}</p> : (
             <div className="overflow-x-auto">
               <Table data-testid={TID.payoutsTable} className="text-[13px]">
-                <THead><TR><TH>Contractor</TH><TH>Payday</TH><TH numeric>Amount</TH><TH numeric>FX</TH><TH numeric>USD</TH><TH>Rail</TH><TH>Sent</TH><TH>Delivered</TH></TR></THead>
+                <THead><TR><TH>Contractor</TH><TH>Payday</TH><TH numeric>Amount</TH><TH numeric>FX</TH><TH numeric>USD</TH><TH>Rail</TH></TR></THead>
                 <TBody>
                   {rows.map((p) => (
                     <TR key={p.id} data-testid={TID.payoutRow(p.id)} data-rail={p.railStatus}>
@@ -60,9 +60,10 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
                       <TD numeric className="h-10 whitespace-nowrap">{minor(p.amountMinor, p.currency)}</TD>
                       <TD numeric className="h-10 font-mono text-1">{p.fxRate}</TD>
                       <TD numeric className="h-10 whitespace-nowrap">{usd(p.usdCents)}</TD>
-                      <TD className="h-10"><Badge tone={TONE[p.railStatus] ?? "gray"}>{p.railStatus}</Badge></TD>
-                      <TD className="h-10 whitespace-nowrap text-gray-10">{when(p.sentAt)}</TD>
-                      <TD className="h-10 whitespace-nowrap text-gray-10">{when(p.deliveredAt)}</TD>
+                      <TD className="h-10 whitespace-nowrap">
+                        <Badge tone={TONE[p.railStatus] ?? "gray"}>{p.railStatus}</Badge>
+                        <span className="ml-2 text-1 text-gray-10" title={`Sent ${when(p.sentAt)}, delivered ${when(p.deliveredAt)}`}>{p.deliveredAt ? when(p.deliveredAt) : p.sentAt ? when(p.sentAt) : ""}</span>
+                      </TD>
                     </TR>
                   ))}
                 </TBody>

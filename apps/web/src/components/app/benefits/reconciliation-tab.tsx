@@ -4,7 +4,7 @@
 // the email simulator; from this screen the click is the person's own decision, while an agent or API caller gets a
 // proposal in the Inbox.
 import Link from "next/link";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Scale } from "lucide-react";
 import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { W2_BENEFITS_TID as TID, type ReconFinding, type ToolOutcome } from "@weft/contracts";
@@ -62,30 +62,37 @@ export function ReconciliationTab({ names, plans }: { names: Map<string, string>
               <THead><TR><TH>Finding</TH><TH>Person</TH><TH>Plan</TH><TH numeric>Billed</TH><TH numeric>Expected</TH><TH numeric>Deducted</TH><TH>Status</TH><TH /></TR></THead>
               <TBody>
                 {rows.map((f) => (
-                  <TR key={f.id} data-testid={TID.reconRow(f.id)} data-kind={f.kind}>
-                    <TD className="py-2 align-top"><div className="font-medium">{KIND_LABEL[f.kind] ?? f.kind}</div><div className="max-w-[360px] text-1 text-gray-10">{f.detail}</div></TD>
-                    <TD className="whitespace-nowrap py-2 align-top">{f.workerId ? <Link href={`/app/people/${f.workerId}`} className="hover:underline">{names.get(f.workerId) ?? f.workerId}</Link> : "-"}</TD>
-                    <TD className="py-2 align-top">{f.planId ? plans.get(f.planId) ?? f.planId : "All billed plans"}</TD>
-                    <TD numeric className="py-2 align-top">{dollars(f.billedCents)}</TD>
-                    <TD numeric className="py-2 align-top">{dollars(f.expectedCents)}</TD>
-                    <TD numeric className="py-2 align-top">{dollars(f.deductedCents)}</TD>
-                    <TD className="py-2 align-top"><Badge tone={STATUS_TONE[f.status] ?? "gray"}>{f.status}</Badge></TD>
-                    <TD className="whitespace-nowrap py-2 align-top">
-                      {f.status !== "open" ? null : confirm === f.id ? (
-                        <span className="flex items-center gap-1">
-                          <Button data-testid={TID.reconDisputeConfirm} size="xs" variant="primary" disabled={dispute.pending} onClick={() => void onDispute(f.id)}>Send dispute</Button>
-                          <Button size="xs" variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
-                        </span>
-                      ) : <Button data-testid={TID.reconDispute(f.id)} size="xs" onClick={() => setConfirm(f.id)}>Dispute</Button>}
-                    </TD>
-                  </TR>
+                  <Fragment key={f.id}>
+                    <TR data-testid={TID.reconRow(f.id)} data-kind={f.kind} className="border-b-0">
+                      <TD className="h-10 font-medium">{KIND_LABEL[f.kind] ?? f.kind}</TD>
+                      <TD className="h-10">{f.workerId ? <Link href={`/app/people/${f.workerId}`} className="hover:underline">{names.get(f.workerId) ?? f.workerId}</Link> : "-"}</TD>
+                      <TD className="h-10">{f.planId ? plans.get(f.planId) ?? f.planId : "All billed plans"}</TD>
+                      <TD numeric className="h-10">{dollars(f.billedCents)}</TD>
+                      <TD numeric className="h-10">{dollars(f.expectedCents)}</TD>
+                      <TD numeric className="h-10">{dollars(f.deductedCents)}</TD>
+                      <TD className="h-10"><Badge tone={STATUS_TONE[f.status] ?? "gray"}>{f.status}</Badge></TD>
+                      <TD className="h-10 whitespace-nowrap text-right">
+                        {f.status !== "open" ? null : confirm === f.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Button data-testid={TID.reconDisputeConfirm} size="xs" variant="primary" disabled={dispute.pending} onClick={() => void onDispute(f.id)}>Send dispute</Button>
+                            <Button size="xs" variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
+                          </span>
+                        ) : <Button data-testid={TID.reconDispute(f.id)} size="xs" onClick={() => setConfirm(f.id)}>Dispute</Button>}
+                      </TD>
+                    </TR>
+                    <TR>
+                      <TD colSpan={8} className="pb-3 pt-0 text-1 text-gray-10">
+                        {f.detail}
+                        {confirm === f.id ? <span className="mt-1 block text-gray-11">Sends a templated dispute to billing@juniper-mutual.example in the email simulator and marks this finding disputed.</span> : null}
+                      </TD>
+                    </TR>
+                  </Fragment>
                 ))}
               </TBody>
             </Table>
           </div>
         )}
       </Card>
-      {confirm ? <p className="mt-2 text-1 text-gray-10">Sends a templated dispute for {confirm} to billing@juniper-mutual.example in the email simulator and marks the finding disputed.</p> : null}
     </section>
   );
 }
