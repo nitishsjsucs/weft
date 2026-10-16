@@ -31,6 +31,7 @@ Integrator changes on top of the merges, from the tracks' contract requests and 
 | `pnpm demo` walks GP6 to GP12 on the same world after GP1 to GP5 | `apps/api/src/demo.ts` |
 | New e2e specs: GP12 memory browser, and the 1440 px layout checks with the agent panel docked; GP6 also checks the persona in Viewing as | `e2e/gp12-memory-browser.spec.ts`, `e2e/site-layout-1440.spec.ts` |
 | Fix: reconciliation honors an enrollment ended by offboarding (effective end of month, as the COBRA notice says), so a GP9 leaver billed through October is not a `terminated_but_billed` finding; the three planted errors are unchanged | `packages/core/src/benefits/recon.ts`, `tests/scenarios/gp9-offboarding.test.ts` |
+| Fix: a worker terminated after open enrollment was seeded drops out of the open enrollment list, so `rt_open_enrollment` never reminds a leaver | `packages/core/src/benefits/enrollment.ts` |
 | Fix: the dev runner spec waited for the processes to stop but read the runner's output before it drained; it now waits for the pipes to close (a fresh-clone gate run caught it once) | `e2e/site-dev-runner.spec.ts` |
 
 Golden paths after the merge, all on the scripted provider: GP1 to GP12 pass as scenario tests; GP1 to GP7 and GP9
