@@ -70,9 +70,12 @@ function ChatFeed({ channel }: { channel: (typeof CHANNELS)[number] }) {
   );
 }
 
-async function findNewRun(before: Set<string>, hinted: string | undefined): Promise<string | null> {
+/** Notices the prebuilt agency routine picks up; the others usually start no run, so the wait is short. */
+const ROUTED = new Set<string>(["ca_de2088_rate_change", "ca_de2088_injection"]);
+
+async function findNewRun(before: Set<string>, hinted: string | undefined, tries: number): Promise<string | null> {
   if (hinted) return hinted;
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < tries; i++) {
     try {
       const page = await client.get("/v1/agent/runs", { query: { limit: 10 } });
       const fresh = (page as { data: { id: string }[] }).data.find((r) => !before.has(r.id));
@@ -90,13 +93,15 @@ export function SimulatorsView() {
   const s = (state.data ?? {}) as SimState;
   const [last, setLast] = useState<string | null>(null);
   const advance = useMutation((body: Record<string, string>) => client.post("/v1/sim/clock/advance", { body }));
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const deliver = useMutation(async (scenario: string) => {
     let before = new Set<string>();
     try { before = new Set(((await client.get("/v1/agent/runs", { query: { limit: 10 } })) as { data: { id: string }[] }).data.map((r) => r.id)); } catch { /* list may be unavailable */ }
     const o = (await client.post("/v1/sim/notices/deliver", { body: { scenario } })) as ToolOutcome;
     setLast(o.ok && o.status === "done" ? o.summary : !o.ok ? `${o.refusal.code}: ${o.refusal.message}` : null);
     const hinted = o.ok && o.status === "done" ? (o.data as { agentRunId?: string } | null)?.agentRunId : undefined;
-    const runId = await findNewRun(before, hinted);
+    const runId = o.ok ? await findNewRun(before, hinted, ROUTED.has(scenario) ? 12 : 3) : null;
+    if (!runId && o.ok && o.status === "done") setLast(`${o.summary}. No routine started a run for this notice, so it waits on the Notices tab of Compliance.`);
     if (runId) agent.watch(runId, SCENARIOS[scenario as keyof typeof SCENARIOS]?.label.replace("Deliver ", "Agency notice: ") ?? scenario);
     return o;
   });
@@ -146,7 +151,7 @@ export function SimulatorsView() {
             {Object.entries(SCENARIOS).map(([k, v]) => (
               <div key={k} className="flex items-center gap-3 px-4 py-2.5">
                 <div className="min-w-0 flex-1"><div className="text-[13px] font-medium">{v.label}</div><div className="truncate text-1 text-gray-10">{v.note} · <code className="font-mono">{k}</code></div></div>
-                <Button data-testid={tid.simDeliver(k)} size="sm" disabled={deliver.pending} onClick={() => void deliver.run(k)}>Deliver</Button>
+                <Button data-testid={tid.simDeliver(k)} size="sm" disabled={deliver.pending && busyKey === k} onClick={() => { setBusyKey(k); void deliver.run(k); }}>{deliver.pending && busyKey === k ? "Delivering..." : "Deliver"}</Button>
               </div>
             ))}
           </Card>
