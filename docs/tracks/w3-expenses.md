@@ -18,7 +18,7 @@ GP13 in `docs/wave3.md`.
 | Routes: `GET/POST /v1/expenses`, `GET /v1/expenses/:id`, `/receipt` (admins only), `/decide`, `/reopen`, `GET /v1/expense-policy`; non-admins see only their own expenses | `apps/api/src/routes/expenses.ts` |
 | Routine `rt_expense_review` (weekday 09:00 PT and manual, ships disabled, 8 tools) with checklist predicates `expenses_explained` and `expense_decisions_proposed` | `packages/routines/src/wave3/expenses.ts`, `scenarios/rt_expense_review.json` |
 | Chat script that refuses bulk approval and offers a walk-through | `scenarios/chat_expenses_approve_all.json` |
-| Screens: `/app/expenses` (four bands with counts, filters, check dots), the drawer (receipt, claim against extraction, checks, explanation, suggestion, decision bar, payment, audit trail), portal My expenses | `apps/web/src/components/app/expenses/**`, `apps/web/src/components/portal/expenses/section.tsx` |
+| Screens: `/app/expenses` (four bands with counts, filters, check dots, Review with agent, Add expense with the mileage amount from the IRS rate), the drawer (receipt, claim against extraction, checks, explanation, suggestion, decision bar, payment, audit trail), portal My expenses | `apps/web/src/components/app/expenses/**`, `apps/web/src/components/portal/expenses/section.tsx` |
 | Display shapes the API serves | `packages/contracts/src/ext/w3-expenses.ts` |
 
 Tests: `packages/core/test/expenses/policy.test.ts` (E1 to E9, E10 and E11 at the seam, E13 registry),
@@ -73,7 +73,20 @@ nothing executes, Dana approves two, paid on processing), `tests/scenarios/gp13-
   against `pay_2026_11_13`.
 - Sidebar "soon" badge for Expenses is the w3-topbar-shell track's to drop at merge.
 
+## Verification (round 1)
+
+- `pnpm test` (662 tests), `pnpm typecheck`, `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` and
+  `pnpm demo` (GP1 to GP12, audit chain verifies) pass in the worktree.
+- `pnpm e2e` on web 4680 and api 4681: 30 of 32 passed on the first full run, including GP13 and GP2; the two
+  `site-dev-runner` failures were a shutdown slower than its 12 s window under load (the second is the first one's
+  leftovers). Rerun alone with `WEFT_E2E_RUNNER_PORT=4682`, all four dev runner specs pass. Note: the first full run
+  left `WEFT_E2E_RUNNER_PORT` unset, so that spec used its default 4216 and 4217 for about a minute (its own
+  processes, cleaned up); set it to a port in your range next time. After the last UI change GP13, GP2 and GP5 passed
+  again.
+- `tests/boundaries.test.ts` rule 3 now strips quoted `<namespace>.decide` command names before looking for the word
+  `decide` in the brain (contract commit); a call such as `executor.decide(...)` still fails it.
+
 ## Ports
 
-E2E ran on 4680 (web) and 4681 (api), the pair assigned for this round; `docs/wave3.md` lists 4650 and 4651 for this
-track.
+E2E ran on 4680 (web), 4681 (api) and 4682 (dev runner spec), the range assigned for this round; `docs/wave3.md`
+lists 4650 and 4651 for this track.
