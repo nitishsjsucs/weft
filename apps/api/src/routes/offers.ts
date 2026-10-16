@@ -5,6 +5,7 @@ import { Unauthorized } from "@weft/contracts";
 import { offers } from "@weft/db";
 import { pageById, toOfferDto } from "@weft/core";
 import type { Weft, WeftEnv } from "../http/context";
+import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
 
 export function offersRoutes(weft: Weft): Hono<WeftEnv> {
@@ -23,5 +24,6 @@ export function offersRoutes(weft: Weft): Hono<WeftEnv> {
     await weft.scheduler.kick();
     return c.json(out);
   });
+  stubRoutes(r, "offers", ["GET /v1/offers", "POST /v1/offers/:id/accept"]);   // wave 2 routes answer 501 until the owning track lands them
   return r;
 }

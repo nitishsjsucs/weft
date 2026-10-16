@@ -1,4 +1,4 @@
-import { Banknote, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, Users, type LucideIcon } from "lucide-react";
+import { Banknote, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
 
 export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox" | "simulated" | "soon" }
 export interface NavGroup { label: string | null; items: NavItem[] }
@@ -10,6 +10,8 @@ export const NAV: NavGroup[] = [
     { slug: "inbox", label: "Inbox", href: "/app/inbox", icon: Inbox, badge: "inbox" },
     { slug: "payroll", label: "Payroll", href: "/app/payroll", icon: Banknote },
     { slug: "people", label: "People", href: "/app/people", icon: Users },
+    { slug: "hiring", label: "Hiring", href: "/app/hiring", icon: UserPlus },   // wave 2: offers and onboarding (w2-onboarding)
+    { slug: "offboarding", label: "Offboarding", href: "/app/offboarding", icon: UserMinus },   // wave 2 (w2-offboarding)
   ] },
   { label: "Products", items: [
     { slug: "benefits", label: "Benefits", href: "/app/benefits", icon: HeartPulse, badge: "simulated" },

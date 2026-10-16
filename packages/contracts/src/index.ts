@@ -16,3 +16,7 @@ export * from "./sim";
 export * from "./errors";
 export * from "./testids";
 export * from "./api";
+export * from "./wave2";
+export * from "./w2/testids-onboarding";
+export * from "./w2/testids-offboarding";
+export * from "./w2/testids-benefits";

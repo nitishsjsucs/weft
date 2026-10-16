@@ -8,6 +8,8 @@ export const ID_PREFIXES = [
   "bpl_", "ben_", "ita_", "dev_", "cpy_",
   "run_", "art_", "act_", "prp_", "rt_", "rtr_", "evt_", "res_", "thr_", "rsv_", "dec_",
   "sima_", "simm_", "simb_", "simi_", "simd_", "simc_", "simv_", "simf_",
+  // wave 2 (packages/contracts/src/wave2.ts WAVE2_ID_PREFIXES)
+  "doc_", "sig_", "upl_", "obs_", "ofb_", "ofs_", "rcf_", "oen_", "eml_", "simr_", "simk_",
 ] as const;
 export type IdPrefix = (typeof ID_PREFIXES)[number];
 

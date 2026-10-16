@@ -11,6 +11,7 @@ import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntim
 import type { Weft, WeftEnv } from "../http/context";
 import { sse } from "../http/sse";
 import { stubRoutes } from "../http/stub";
+import { createMemoryRecall } from "../memory/recall";
 
 // Steps carry raw model call args, so the trace and the SSE stream go through the executor's redactor (harness 9).
 // Route tests that pass a fake executor without a redactor get the value unchanged.
@@ -64,6 +65,7 @@ export function createChatContextSource(db: Db): ChatContextSource {
       };
     },
     async channels() { return ["#general", "#new-hires", "#payroll", "#people-ops"]; },
+    recall: createMemoryRecall(db),   // wave 2 (w2-memory); "" until that track lands recall
   };
 }
 

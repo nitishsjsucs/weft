@@ -12,6 +12,9 @@ import { seedIt } from "./it";
 import { seedGovernance } from "./governance";
 import { seedActions } from "./actions";
 import { seedPayroll } from "./payroll";
+import { seedW2Onboarding } from "./w2-onboarding";
+import { seedW2Offboarding } from "./w2-offboarding";
+import { seedW2BenefitsContractors } from "./w2-benefits-contractors";
 
 export type { SeedContext, SeedStep } from "./context";
 export { DIGEST_EXCLUDE, digestDb, dumpDb } from "./digest";
@@ -26,6 +29,8 @@ export const SEED_STEPS: readonly (readonly [string, SeedStep])[] = [
   ["governance", seedGovernance],
   ["actions", seedActions],
   ["payroll", seedPayroll],
+  // wave 2 (docs/wave2.md)
+  ["w2_onboarding", seedW2Onboarding], ["w2_offboarding", seedW2Offboarding], ["w2_benefits_contractors", seedW2BenefitsContractors],
 ];
 
 export async function seedWorld(weft: SeedTarget, opts: { log?: (line: string) => void } = {}): Promise<void> {

@@ -27,7 +27,7 @@ async function seededDigest(): Promise<string> {
 
 describe("seed", () => {
   it("runs the SPEC 5 step order", () => {
-    expect(SEED_STEPS.map(([n]) => n)).toEqual(["company", "people", "benefits", "tax", "it", "governance", "actions", "payroll"]);
+    expect(SEED_STEPS.map(([n]) => n)).toEqual(["company", "people", "benefits", "tax", "it", "governance", "actions", "payroll", "w2_onboarding", "w2_offboarding", "w2_benefits_contractors"]);
   });
   it("is deterministic: two seeds give the same digest", async () => {
     expect(await seededDigest()).toBe(await seededDigest());

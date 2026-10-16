@@ -2,8 +2,10 @@
 // Owners are track ids. apps/api mounts one Hono sub-app per `file`; apps/web's typed client is keyed by `${method} ${path}`.
 export type Method = "GET" | "POST" | "PUT" | "DELETE";
 export interface RouteDef { method: Method; path: string; file: RouteFile; owner: TrackId; query?: string[]; body?: string; res: string; auth: "public" | "any" | "ui_only" | "not_mcp"; mutates: boolean }
-export type TrackId = "t1-payroll" | "t2-world" | "t3-governance" | "t4-agent" | "t5-app" | "t6-site";
-export type RouteFile = "health" | "company" | "stats" | "workers" | "offers" | "payrolls" | "tax" | "notices" | "benefits" | "it" | "proposals" | "actions" | "tools" | "memory" | "events" | "settings" | "api-keys" | "agent" | "routines" | "sim";
+export type TrackId = "t1-payroll" | "t2-world" | "t3-governance" | "t4-agent" | "t5-app" | "t6-site"
+  | "w2-onboarding" | "w2-offboarding" | "w2-benefits-contractors" | "w2-memory" | "w2-providers-sandbox" | "w2-reliability";
+export type RouteFile = "health" | "company" | "stats" | "workers" | "offers" | "payrolls" | "tax" | "notices" | "benefits" | "it" | "proposals" | "actions" | "tools" | "memory" | "events" | "settings" | "api-keys" | "agent" | "routines" | "sim"
+  | "portal" | "documents" | "offboarding" | "contractors";
 
 const r = <M extends Method, P extends string, F extends RouteFile>(method: M, path: P, file: F, owner: TrackId, res: string, x: Partial<RouteDef> = {}) =>
   ({ owner, res, auth: "any", mutates: method !== "GET", ...x, method, path, file }) as RouteDef & { method: M; path: P; file: F };
@@ -74,6 +76,32 @@ export const ROUTES = [
   r("POST", "/v1/sim/faults", "sim", "t2-world", "ArmedFault[]", { auth: "not_mcp", body: "{ target, kind, mode } | { target, disarm: true }" }),
   r("GET", "/v1/sim/chat", "sim", "t2-world", "ChatMessageDto[]", { auth: "not_mcp", query: ["channel", "afterId"] }),
   r("POST", "/v1/sim/reset", "sim", "t2-world", "{ ok }", { auth: "not_mcp" }),
+  // Wave 2 (docs/wave2.md). Stubs answer 501 until the owning track lands them.
+  r("POST", "/v1/offers", "offers", "w2-onboarding", "ToolOutcome", { auth: "not_mcp", body: "{ candidateFirst, candidateLast, candidateEmail, title, departmentId, workplaceId, workState, managerId, baseCents, payKind, startDate }" }),
+  r("GET", "/v1/offers/:id", "offers", "w2-onboarding", "Offer"),
+  r("POST", "/v1/offers/:id/send", "offers", "w2-onboarding", "ToolOutcome", { auth: "not_mcp" }),
+  r("POST", "/v1/offers/:id/void", "offers", "w2-onboarding", "ToolOutcome", { auth: "not_mcp" }),
+  r("GET", "/v1/portal/me", "portal", "w2-onboarding", "PortalView", { auth: "ui_only" }),
+  r("POST", "/v1/portal/offer/view", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only" }),
+  r("POST", "/v1/portal/documents/:id/sign", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "{ typedName, documentSha256 }" }),
+  r("POST", "/v1/portal/w4", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "W4Submission" }),
+  r("POST", "/v1/portal/state-withholding", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "StateWithholdingSubmission" }),
+  r("POST", "/v1/portal/direct-deposit", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "DirectDepositSubmission" }),
+  r("POST", "/v1/portal/i9", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "I9Submission plus multipart idImage" }),
+  r("POST", "/v1/portal/benefits", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "BenefitsSelection" }),
+  r("GET", "/v1/workers/:id/documents", "documents", "w2-onboarding", "WorkerDocument[]", { query: ["status"] }),
+  r("GET", "/v1/documents/:id", "documents", "w2-onboarding", "WorkerDocument"),
+  r("GET", "/v1/sim/email", "documents", "w2-onboarding", "EmailMessage[]", { auth: "not_mcp", query: ["to"] }),
+  r("POST", "/v1/workers/:id/terminate", "offboarding", "w2-offboarding", "ToolOutcome", { auth: "not_mcp", body: "TerminationInput" }),
+  r("GET", "/v1/offboarding", "offboarding", "w2-offboarding", "OffboardingCase[]"),
+  r("GET", "/v1/offboarding/:id", "offboarding", "w2-offboarding", "OffboardingCase"),
+  r("POST", "/v1/payrolls/off-cycle", "offboarding", "w2-offboarding", "ToolOutcome", { body: "OffCycleRequest" }),
+  r("GET", "/v1/benefits/reconciliation", "benefits", "w2-benefits-contractors", "ReconFinding[]", { query: ["month", "status"] }),
+  r("POST", "/v1/benefits/reconciliation/run", "benefits", "w2-benefits-contractors", "ToolOutcome", { body: "{ month }" }),
+  r("GET", "/v1/benefits/open-enrollment", "benefits", "w2-benefits-contractors", "OpenEnrollmentRow[]"),
+  r("GET", "/v1/contractors/payouts", "contractors", "w2-benefits-contractors", "Page<ContractorPayout>", { query: ["workerId", "status", "limit", "afterId"] }),
+  r("POST", "/v1/contractors/payouts", "contractors", "w2-benefits-contractors", "ToolOutcome", { body: "{ workerIds, scheduledFor }" }),
+  r("GET", "/v1/contractors/fx", "contractors", "w2-benefits-contractors", "FxRate[]"),
 ] as const satisfies readonly RouteDef[];
 
 export type RouteKey = `${(typeof ROUTES)[number]["method"]} ${(typeof ROUTES)[number]["path"]}`;

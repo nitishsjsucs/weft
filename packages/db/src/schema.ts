@@ -62,6 +62,8 @@ export const offers = sqliteTable("offers", {
   departmentId: text("department_id").notNull(), workplaceId: text("workplace_id").notNull(), workState: text("work_state").notNull(),
   managerId: text("manager_id"), baseCents: integer("base_cents").notNull(), payKind: text("pay_kind").notNull(), startDate: text("start_date").notNull(),
   status: text("status").notNull(), acceptedAt: ts("accepted_at"), workerId: text("worker_id"),
+  // wave 2 offer lifecycle
+  createdAt: ts("created_at"), sentAt: ts("sent_at"), viewedAt: ts("viewed_at"), voidedAt: ts("voided_at"), expiresOn: text("expires_on"), documentId: text("document_id"),
 });
 export const onboardingTasks = sqliteTable("onboarding_tasks", {
   id: text("id").primaryKey(), workerId: text("worker_id").notNull().references(() => workers.id), kind: text("kind").notNull(),
@@ -148,6 +150,8 @@ export const devices = sqliteTable("devices", {
 export const contractorPayments = sqliteTable("contractor_payments", {
   id: text("id").primaryKey(), workerId: text("worker_id").notNull(), amountMinor: integer("amount_minor").notNull(), currency: text("currency").notNull(),
   fxRate: text("fx_rate").notNull(), usdCents: integer("usd_cents").notNull(), status: text("status").notNull(), scheduledFor: text("scheduled_for").notNull(),
+  // wave 2 payment rail
+  railStatus: text("rail_status"), railRef: text("rail_ref"), sentAt: ts("sent_at"), deliveredAt: ts("delivered_at"),
 });
 
 // 6.5 Agent, governance, routines
@@ -259,4 +263,66 @@ export const simCarrierInvoices = sqliteTable("sim_carrier_invoices", {
 });
 export const simFaults = sqliteTable("sim_faults", {
   target: text("target").primaryKey(), kind: text("kind").notNull(), mode: text("mode").notNull(), armed: bool("armed").notNull().default(true), firedCount: integer("fired_count").notNull().default(0),
+});
+
+// 6.7 Wave 2 (docs/wave2.md, migration 0003_wave2.sql). Additive only; owners in docs/wave2.md.
+// w2-onboarding: offer lifecycle columns live on offers (see the migration); documents, signatures, form submissions, uploads.
+export const documents = sqliteTable("documents", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), workerId: text("worker_id"), offerId: text("offer_id"), kind: text("kind").notNull(),
+  title: text("title").notNull(), status: text("status").notNull(), bodyText: text("body_text").notNull(), sha256: text("sha256").notNull(),
+  createdAt: ts("created_at").notNull(), sentAt: ts("sent_at"), signedAt: ts("signed_at"),
+}, (t) => [index("documents_worker").on(t.workerId, t.status)]);
+export const signatures = sqliteTable("signatures", {
+  id: text("id").primaryKey(), documentId: text("document_id").notNull(), signerPrincipalId: text("signer_principal_id").notNull(), signerName: text("signer_name").notNull(),
+  typedName: text("typed_name").notNull(), signedAt: ts("signed_at").notNull(), documentSha256: text("document_sha256").notNull(), actionSeq: integer("action_seq"),
+}, (t) => [uniqueIndex("signatures_document").on(t.documentId)]);
+export const onboardingSubmissions = sqliteTable("onboarding_submissions", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), kind: text("kind").notNull(), maskedJson: json("masked_json").notNull(),   // never full account or id numbers
+  documentId: text("document_id"), submittedAt: ts("submitted_at").notNull(), actionSeq: integer("action_seq"),
+}, (t) => [index("onboarding_submissions_worker").on(t.workerId, t.kind)]);
+export const uploads = sqliteTable("uploads", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), purpose: text("purpose").notNull(), fileName: text("file_name").notNull(),
+  storagePath: text("storage_path").notNull(), bytes: integer("bytes").notNull(), sha256: text("sha256").notNull(), createdAt: ts("created_at").notNull(),
+});
+// w2-offboarding
+export const offboardingCases = sqliteTable("offboarding_cases", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), workerId: text("worker_id").notNull(), kind: text("kind").notNull(), lastDay: text("last_day").notNull(),
+  reasonNote: text("reason_note").notNull().default(""), status: text("status").notNull(), createdAt: ts("created_at").notNull(), closedAt: ts("closed_at"),
+}, (t) => [index("offboarding_cases_worker").on(t.workerId)]);
+export const offboardingSteps = sqliteTable("offboarding_steps", {
+  id: text("id").primaryKey(), caseId: text("case_id").notNull(), kind: text("kind").notNull(), status: text("status").notNull(), proposalId: text("proposal_id"),
+  actionSeq: integer("action_seq"), detail: text("detail").notNull().default(""), doneAt: ts("done_at"),
+}, (t) => [uniqueIndex("offboarding_steps_case_kind").on(t.caseId, t.kind)]);
+// w2-benefits-contractors
+export const benefitReconFindings = sqliteTable("benefit_recon_findings", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), month: text("month").notNull(), carrier: text("carrier").notNull(), kind: text("kind").notNull(),
+  workerId: text("worker_id"), planId: text("plan_id"), billedCents: integer("billed_cents").notNull(), expectedCents: integer("expected_cents").notNull(),
+  deductedCents: integer("deducted_cents").notNull(), status: text("status").notNull(), detail: text("detail").notNull(), createdAt: ts("created_at").notNull(),
+}, (t) => [index("benefit_recon_month").on(t.companyId, t.month)]);
+export const openEnrollment = sqliteTable("open_enrollment", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), planYear: integer("plan_year").notNull(), status: text("status").notNull(),
+  lastNudgedAt: ts("last_nudged_at"), nudges: integer("nudges").notNull().default(0), electedAt: ts("elected_at"),
+}, (t) => [uniqueIndex("open_enrollment_worker_year").on(t.workerId, t.planYear)]);
+export const fxRates = sqliteTable("fx_rates", {
+  currency: text("currency").notNull(), asOf: text("as_of").notNull(), usdPerUnit: text("usd_per_unit").notNull(), source: text("source").notNull(),
+}, (t) => [primaryKey({ columns: [t.currency, t.asOf] })]);
+// Wave 2 simulators: email, payment rail, bank account verification. Same rule: no resolved credential.
+export const simEmailMessages = sqliteTable("sim_email_messages", {
+  id: text("id").primaryKey(), toAddr: text("to_addr").notNull(), fromAddr: text("from_addr").notNull(), subject: text("subject").notNull(), body: text("body").notNull(),
+  kind: text("kind").notNull(), relatedRef: text("related_ref"), ts: ts("ts").notNull(),
+}, (t) => [index("sim_email_to").on(t.toAddr, t.id)]);
+export const simRailTransfers = sqliteTable("sim_rail_transfers", {
+  id: text("id").primaryKey(), paymentId: text("payment_id").notNull(), amountMinor: integer("amount_minor").notNull(), currency: text("currency").notNull(),
+  status: text("status").notNull(), sentAt: ts("sent_at").notNull(), deliverAt: ts("deliver_at").notNull(), deliveredAt: ts("delivered_at"),
+}, (t) => [uniqueIndex("sim_rail_payment").on(t.paymentId)]);
+export const simBankVerifications = sqliteTable("sim_bank_verifications", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), routingLast4: text("routing_last4").notNull(), accountLast4: text("account_last4").notNull(),
+  status: text("status").notNull(), reason: text("reason"), ts: ts("ts").notNull(),
+});
+// w2-memory: recall log (what a run was shown at start) and dossier index; memory file bodies stay where harness memory keeps them.
+export const memoryRecalls = sqliteTable("memory_recalls", {
+  id: integer("id").primaryKey({ autoIncrement: true }), runId: text("run_id").notNull(), pathsJson: json("paths_json").notNull(), chars: integer("chars").notNull(), ts: ts("ts").notNull(),
+}, (t) => [index("memory_recalls_run").on(t.runId)]);
+export const dossiers = sqliteTable("dossiers", {
+  subjectRef: text("subject_ref").primaryKey(), path: text("path").notNull(), refreshedAt: ts("refreshed_at").notNull(), sourceDigest: text("source_digest").notNull(),
 });

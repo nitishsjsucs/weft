@@ -4,6 +4,9 @@
 // tolerantly (several spellings) until the integrator pins them.
 import type { Precheck, PrecheckResult, ReadOnlyExecutor, ToolOutcome } from "@weft/contracts";
 import { TZ } from "./prebuilt";
+import { prechecks as w2Onboarding } from "./wave2/onboarding";
+import { prechecks as w2Benefits } from "./wave2/benefits";
+import { prechecks as w2Memory } from "./wave2/memory";
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
@@ -142,6 +145,7 @@ export const openApprovals: Precheck = async (ctx, exec) => {
 
 export const PRECHECKS: Record<string, Precheck> = {
   agency_notice: agencyNotice, pre_payroll: prePayroll, new_hire: newHire, people_digest: peopleDigest, open_approvals: openApprovals,
+  ...w2Onboarding, ...w2Benefits, ...w2Memory,   // wave 2
 };
 
 export async function runPrecheck(name: string | null, ctx: Parameters<Precheck>[0], exec: ReadOnlyExecutor): Promise<PrecheckResult> {

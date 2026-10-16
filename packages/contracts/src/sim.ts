@@ -1,6 +1,7 @@
 // Simulator interfaces (SPEC 8). Simulators write only sim_* tables and store only vault names, never credentials.
 import type { AgencyCode, AgencyNoticeKind as NoticeKind, ChatChannel, FaultKind, FaultMode, ItSystem, NoticeScenario, TaxAccountType as AccountType } from "./enums";
 import type { NoticeExtract } from "./domain";
+import type { BankVerifySim, EmailSim, PaymentRailSim } from "./wave2";
 
 export type { AgencyCode, AccountType, NoticeScenario, ChatChannel, ItSystem };
 
@@ -30,4 +31,8 @@ export interface DeviceSim { catalog(): DeviceCatalogItem[]; order(req: { worker
 export interface ChatSim { post(msg: { channel: ChatChannel; author: string; text: string; card?: ApprovalCard }): Promise<{ id: string }>; list(channel: ChatChannel, afterId?: string): Promise<ChatMessage[]> }
 export interface CarrierSim { invoice(month: string): Promise<CarrierInvoice> }   // P1
 export interface FaultInjector { arm(f: { target: FaultTarget; kind: FaultKind; mode: FaultMode }): Promise<void>; disarm(target: FaultTarget): Promise<void>; check(target: FaultTarget): Promise<FaultDecision>; list(): Promise<ArmedFault[]> }
-export interface Simulators { agency: AgencySim; bank: BankSim; idp: IdpSim; devices: DeviceSim; chat: ChatSim; carrier: CarrierSim; faults: FaultInjector; tick(now: string): Promise<SimEvent[]> }
+export interface Simulators {
+  agency: AgencySim; bank: BankSim; idp: IdpSim; devices: DeviceSim; chat: ChatSim; carrier: CarrierSim; faults: FaultInjector;
+  email: EmailSim; rail: PaymentRailSim; bankVerify: BankVerifySim;   // wave 2
+  tick(now: string): Promise<SimEvent[]>;
+}

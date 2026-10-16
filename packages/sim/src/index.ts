@@ -1,6 +1,6 @@
 // Simulators (SPEC 8). Owner: t2-world. Stateless objects over a db handle, so the executor binds one to its
 // transaction: createSimulators({ db: tx, clock }). They write only sim_* tables and store only vault names.
-import { NotImplemented, type CarrierSim, type SimClock, type SimEvent, type Simulators } from "@weft/contracts";
+import type { SimClock, SimEvent, Simulators } from "@weft/contracts";
 import type { DbTx } from "@weft/db";
 import { createAgencySim } from "./agency";
 import { createBankSim } from "./bank";
@@ -8,12 +8,15 @@ import { createChatSim, type ChatSimInternal } from "./chat";
 import { createDeviceSim } from "./devices";
 import { createFaults } from "./faults";
 import { createIdpSim } from "./idp";
+import { createEmailSim } from "./email";
+import { createRailSim } from "./rail";
+import { createBankVerifySim } from "./bank-verify";
+import { createCarrierSim } from "./carrier";
 
 export interface CreateSimulatorsOptions { db: DbTx; clock: SimClock }
 export type SimulatorsFactory = (opts: CreateSimulatorsOptions) => Simulators;
 export interface WeftSimulators extends Simulators { chat: ChatSimInternal }
 
-const carrier: CarrierSim = { invoice: async () => { throw new NotImplemented("carrier invoice simulator (P1)"); } };
 
 export const createSimulators = ((opts: CreateSimulatorsOptions): WeftSimulators => {
   const { db, clock } = opts;
@@ -23,8 +26,12 @@ export const createSimulators = ((opts: CreateSimulatorsOptions): WeftSimulators
   const idp = createIdpSim(db, clock, faults);
   const devices = createDeviceSim(db, clock, faults);
   const chat = createChatSim(db, clock, faults);
+  const carrier = createCarrierSim(db, clock, faults);
+  const email = createEmailSim(db, clock, faults);
+  const rail = createRailSim(db, clock, faults);
+  const bankVerify = createBankVerifySim(db, clock, faults);
   return {
-    agency, bank, idp, devices, chat, carrier, faults,
+    agency, bank, idp, devices, chat, carrier, faults, email, rail, bankVerify,
     async tick(now: string): Promise<SimEvent[]> {
       await idp.tick(now);
       return [...(await agency.tick(now)), ...(await bank.tick(now)), ...(await devices.tick(now))];

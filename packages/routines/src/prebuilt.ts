@@ -1,6 +1,9 @@
 // The four prebuilt routines (SPEC 9.7, harness 5.3 allowlists, harness 8). Checklists name code predicates in
 // checks.ts; `{field}` templates read the trigger payload, then the precheck's derived values.
 import type { RoutineDef } from "@weft/contracts";
+import { routines as w2Onboarding } from "./wave2/onboarding";
+import { routines as w2Benefits } from "./wave2/benefits";
+import { routines as w2Memory } from "./wave2/memory";
 
 export const TZ = "America/Los_Angeles";
 export const OWNER = "usr_dana";
@@ -62,4 +65,4 @@ export const RT_PEOPLE_DIGEST: RoutineDef = {
   budget, surface: { worthSurfacing: false, channel: "#people-ops" }, source: "prebuilt", taintedBy: null,
 };
 
-export const PREBUILT: RoutineDef[] = [RT_AGENCY_NOTICE, RT_PRE_PAYROLL, RT_NEW_HIRE, RT_PEOPLE_DIGEST];
+export const PREBUILT: RoutineDef[] = [RT_AGENCY_NOTICE, RT_PRE_PAYROLL, RT_NEW_HIRE, RT_PEOPLE_DIGEST, ...w2Onboarding, ...w2Benefits, ...w2Memory];

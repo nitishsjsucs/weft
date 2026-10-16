@@ -3,6 +3,9 @@
 // Predicates read the run's observed facts: its own tool outcomes (run_steps) and the proposal decisions the engine
 // has seen. When the executor's actions.get_run exposes proposal status, `facts` can be built from it instead.
 import type { ChecklistItem, ReadOnlyExecutor, RoutineDef } from "@weft/contracts";
+import { predicates as w2Onboarding } from "./wave2/onboarding";
+import { predicates as w2Benefits } from "./wave2/benefits";
+import { predicates as w2Memory } from "./wave2/memory";
 
 export interface RunCall { command: string; args: unknown; status: "done" | "pending_approval" | "refused"; proposalId: string | null; data: unknown }
 export interface RunFacts { calls: RunCall[]; proposalStatus: (proposalId: string) => string | null }
@@ -36,6 +39,7 @@ export const PREDICATES: Record<string, Predicate> = {
     return callsTo(f, "tax.register_state_account").filter((c) => c.status === "pending_approval" && live(f, c)).length >= want;
   },
   device_proposed: ([workerId = ""], f) => callsTo(f, "it.order_device").some((c) => c.status === "pending_approval" && live(f, c) && mentions(c.args, workerId)),
+  ...w2Onboarding, ...w2Benefits, ...w2Memory,   // wave 2
 };
 
 /** Expand `{field}` from the scope (trigger payload first, then derived values). Unknown fields expand to "". */

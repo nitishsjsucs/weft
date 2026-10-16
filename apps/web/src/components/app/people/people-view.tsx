@@ -8,6 +8,8 @@ import { tid, type BenefitPlan, type Enrollment, type ItAccount, type Money, typ
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, initials } from "../format";
 import { PageHeader } from "../page";
+import { DocumentLibrary } from "../documents/document-library";
+import { PersonActions } from "../offboarding/person-actions";
 
 const DEPT: Record<string, string> = { dpt_engineering: "Engineering", dpt_hardware: "Hardware", dpt_operations: "Operations", dpt_people: "People", dpt_finance: "Finance", dpt_gtm: "Go-to-market" };
 const deptName = (id: string | null) => (id ? (DEPT[id] ?? id) : "-");
@@ -252,7 +254,7 @@ export function PersonView({ id }: { id: string }) {
   );
   return (
     <div className="mx-auto w-full max-w-[1000px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title={p.displayName} subtitle={`${p.title} · ${d.department ?? deptName(p.departmentId)}${d.workplace ? ` · ${d.workplace}` : ""}`} meta={<span className={`text-2 font-medium capitalize ${STATUS_CLASS[p.status]}`}>{p.status}</span>} />
+      <PageHeader title={p.displayName} subtitle={`${p.title} · ${d.department ?? deptName(p.departmentId)}${d.workplace ? ` · ${d.workplace}` : ""}`} meta={<span className="flex items-center gap-3"><span className={`text-2 font-medium capitalize ${STATUS_CLASS[p.status]}`}>{p.status}</span><PersonActions workerId={p.id} status={p.status} /></span>} />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="mb-4 overflow-x-auto">
           <TabsTrigger value="profile">Profile</TabsTrigger>
@@ -260,6 +262,7 @@ export function PersonView({ id }: { id: string }) {
           <TabsTrigger value="benefits">Benefits</TabsTrigger>
           <TabsTrigger value="it">IT accounts</TabsTrigger>
           <TabsTrigger value="onboarding">Onboarding {list.length ? <Badge size="xs">{list.filter((t) => t.status !== "done").length}</Badge> : null}</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
         <TabsContent value="profile">
           <div className="grid gap-6 laptop:grid-cols-[1fr_1fr] [&>*]:min-w-0">
@@ -274,6 +277,7 @@ export function PersonView({ id }: { id: string }) {
         <TabsContent value="benefits">{tab === "benefits" ? <BenefitsTab id={id} /> : null}</TabsContent>
         <TabsContent value="it">{tab === "it" ? <ItTab id={id} /> : null}</TabsContent>
         <TabsContent value="onboarding">{onboarding}</TabsContent>
+        <TabsContent value="documents">{tab === "documents" ? <DocumentLibrary workerId={id} /> : null}</TabsContent>
       </Tabs>
     </div>
   );

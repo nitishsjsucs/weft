@@ -4,7 +4,8 @@ import type { AgentKind, ToolSpec } from "./provider";
 import type { DecisionInput, DecisionResult, ProposalDecided } from "./approvals";
 
 export type Namespace = "people" | "payroll" | "tax" | "notices" | "benefits" | "it" | "comms" | "onboarding"
-  | "memory" | "vault" | "actions" | "routines" | "agent" | "code";
+  | "memory" | "vault" | "actions" | "routines" | "agent" | "code"
+  | "documents" | "offboarding" | "contractors";   // wave 2
 export type Domain = "people" | "payroll" | "tax" | "benefits" | "it" | "comms" | "company";
 export type Grant = "none" | "view" | "edit" | "approve";
 export type Effect = "read" | "draft" | "write" | "external";

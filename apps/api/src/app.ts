@@ -23,6 +23,10 @@ import { apiKeysRoutes } from "./routes/api-keys";
 import { agentRoutes } from "./routes/agent";
 import { routinesRoutes } from "./routes/routines";
 import { simRoutes } from "./routes/sim";
+import { portalRoutes } from "./routes/portal";
+import { documentsRoutes } from "./routes/documents";
+import { offboardingRoutes } from "./routes/offboarding";
+import { contractorsRoutes } from "./routes/contractors";
 
 export const ROUTE_MODULES = [
     healthRoutes,
@@ -45,6 +49,10 @@ export const ROUTE_MODULES = [
     agentRoutes,
     routinesRoutes,
     simRoutes,
+    portalRoutes,
+    documentsRoutes,
+    offboardingRoutes,
+    contractorsRoutes,
 ] as const;
 
 export function buildApp(weft: Weft): Hono<WeftEnv> {

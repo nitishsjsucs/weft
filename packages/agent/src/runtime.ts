@@ -32,6 +32,15 @@ export interface RoutinesView {
 export interface ChatContextSource {
   chat(input: { companyId: string; runId: string }): Promise<{ actingFor: string; grants: Record<string, string>; companySummary: string; openLoops: OpenLoop[] }>;
   channels?(companyId: string): Promise<string[]>;
+  /** Wave 2 (w2-memory): a <recall> block for the run start, or "" for none. */
+  recall?(input: { companyId: string; runId: string; kind: "chat" | "routine"; query: string; subjectRefs: string[] }): Promise<string>;
+}
+
+/** Appends a non-empty recall block inside the context pack (wave 2, w2-memory); "" or undefined leaves it unchanged. */
+function withRecall(text: string, block: string | undefined): string {
+  if (!block) return text;
+  const end = text.lastIndexOf("\n</context>");
+  return end < 0 ? text : `${text.slice(0, end)}\n${block}${text.slice(end)}`;
 }
 
 export interface CreateAgentRuntimeOptions {
@@ -150,6 +159,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       if (kind === "chat") {
         const c = (await opts.contextSource?.chat({ companyId, runId: handle.runId })) ?? { actingFor: "the person in this chat", grants: {}, companySummary: "No company summary is available.", openLoops: [] };
         text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext });
+        text = withRecall(text, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "chat", query: input.text, subjectRefs: [] }));
       } else {
         const channels = (await opts.contextSource?.channels?.(companyId)) ?? ["#people-ops", "#new-hires", "#payroll"];
         text = routineDraftPack({ nonce, now: opts.clock.now(), actingFor: "the person in this chat", request: input.text, channels, tools: [...CHAT_TOOLS, "comms.send_message"] });
@@ -164,11 +174,12 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       triggers.set(handle.runId, { routine: input.routine, trigger });
       await store.createRun(baseRow(handle, { trigger: `routine:${input.routineRun.id}`, attended: input.routineRun.attended, routineRunId: input.routineRun.id, routineId: input.routine.id, kind: "routine", budget: input.routine.budget }));
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
-      const text = routinePack({
+      const packed = routinePack({
         nonce, now: opts.clock.now(), actingFor: input.routine.ownerPrincipalId, limits: { ...BUDGETS.routine, ...input.routine.budget, toolCallsPerStep: BUDGETS.routine.toolCallsPerStep },
         routine: { id: input.routine.id, name: input.routine.name, instructions: input.routine.instructions }, trigger,
         precheck: { severity: input.precheck.severity, findings: input.precheck.findings, derivedArgs: input.precheck.derivedArgs }, checklist: input.routine.checklist,
       });
+      const text = withRecall(packed, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "routine", query: input.routine.name, subjectRefs: input.precheck.subjectRefs ?? [] }));
       await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true });
       enqueue(handle.runId);
     },
