@@ -108,4 +108,11 @@ describe("GP11 benefits reconciliation and contractor payouts", () => {
     expect(await rail()).toEqual([["delivered", "paid"]]);
     expect(await weft.db.select().from(events).where(eq(events.type, "sim.rail_delivered"))).toHaveLength(4);
   });
+  it("payout proposals for different contractors on the same date both stay pending", async () => {
+    const a = await (await viaKey("/v1/tools/contractors__schedule_payouts", { worker_ids: ["wrk_0049"], scheduled_for: "2026-11-27" })).json() as { status: string; proposalId: string };
+    const b = await (await viaKey("/v1/tools/contractors__schedule_payouts", { worker_ids: ["wrk_0050"], scheduled_for: "2026-11-27" })).json() as { status: string; proposalId: string };
+    expect([a.status, b.status]).toEqual(["pending_approval", "pending_approval"]);
+    const rows = (await weft.db.select().from(proposals)).filter((p) => p.id === a.proposalId || p.id === b.proposalId).map((p) => p.status);
+    expect(rows).toEqual(["pending", "pending"]);
+  });
 });
