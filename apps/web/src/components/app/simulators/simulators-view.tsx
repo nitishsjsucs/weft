@@ -13,7 +13,7 @@ import { ApprovalCard } from "../agent/approval-card";
 /** A posted approval card with its live status (wave 3): the card JSON was built by the executor from the stored preview. */
 function SimChatCard({ card }: { card: ApprovalCardW3 }) {
   const p = useGet("/v1/proposals/:id", { params: { id: card.proposalId }, refreshMs: 3_000 });
-  return <div className="mt-1.5"><ApprovalCard card={card} status={p.data?.status} taintedBy={p.data?.taintedBy ?? null} compact /></div>;
+  return <div className="mt-1.5"><ApprovalCard card={card} status={p.data?.status} taintedBy={p.data?.taintedBy ?? null} known={p.data !== undefined} compact /></div>;
 }
 
 const SCENARIOS: Record<(typeof NoticeScenario.options)[number], { label: string; note: string }> = {
