@@ -60,7 +60,10 @@ export function createDocusignClient(o: DocusignClientOptions): ESignConnector {
     if (token && nowMs() < token.renewAt) return token;
     const assertion = docusignAssertion({
       integrationKey: readSecret("DOCUSIGN_INTEGRATION_KEY", env), userId: readSecret("DOCUSIGN_USER_ID", env), aud: oauthHost,
-      privateKeyPem: readFileSync(readSecret("DOCUSIGN_PRIVATE_KEY_FILE", env), "utf8"), nowSec: Math.floor(nowMs() / 1000),
+      privateKeyPem: (() => {
+        // The refusal never carries the path.
+        try { return readFileSync(readSecret("DOCUSIGN_PRIVATE_KEY_FILE", env), "utf8"); } catch { throw new IntegrationRefused("INTEGRATION_LIVE_DISABLED", "DOCUSIGN_PRIVATE_KEY_FILE could not be read"); }
+      })(), nowSec: Math.floor(nowMs() / 1000),
     });
     const res = await f(`https://${oauthHost}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }).toString() });
     if (!res.ok) throw new IntegrationRefused("INTEGRATION_HTTP", `DocuSign token request answered ${res.status} (consent granted for this integration key?)`);

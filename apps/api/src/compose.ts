@@ -5,12 +5,12 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isWeftError, NotImplemented, type RunHandle, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
+import { INTEGRATION_OPTIONAL_SECRETS, INTEGRATION_SECRETS, IntegrationVendor, isWeftError, NotImplemented, type RunHandle, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
 import { eq } from "drizzle-orm";
 import { closeDb, migrate, notices, openDb, type Db } from "@weft/db";
 import { commands, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
-import { createVendorOverlay } from "@weft/integrations";
+import { createVendorOverlay, readSecret } from "@weft/integrations";
 import { createExecutor, executorInternals } from "@weft/executor";
 import { createAgentRuntime, createProvider, createSpendLedger, loadSecret } from "@weft/agent";
 import { createRoutines, type WeftRoutinesEngine } from "@weft/routines";
@@ -131,6 +131,18 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) {
     const v = (() => { try { return loadSecret(k, process.env); } catch { return null; } })();
     if (v) executorInternals(executor)?.addSecret(v);
+  }
+  // Wave 3: the vendor credentials too (and the DocuSign private key's contents), as a backstop if one ever reached
+  // an action row, a refusal, the model or MCP output. Names only come from the contracts; values stay in memory.
+  const vendorSecretNames = [...new Set(IntegrationVendor.options.flatMap((v) => [...INTEGRATION_SECRETS[v], ...INTEGRATION_OPTIONAL_SECRETS[v]]))];
+  for (const k of vendorSecretNames) {
+    const v = (() => { try { return readSecret(k, process.env); } catch { return null; } })();
+    if (!v) continue;
+    executorInternals(executor)?.addSecret(v);
+    if (k === "DOCUSIGN_PRIVATE_KEY_FILE") {
+      const pem = (() => { try { return readFileSync(v, "utf8").trim(); } catch { return null; } })();
+      if (pem) executorInternals(executor)?.addSecret(pem);
+    }
   }
   const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
   const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({
