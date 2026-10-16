@@ -98,9 +98,17 @@ After committing the results, the gate reran the suite on a second fresh clone a
 screenshot capture and its `package.json` script changed) while another project's build held the load average between
 14 and 38. `pnpm test` passed 596 of 596 (181 s), `pnpm typecheck` 15 of 15, `pnpm demo` exited 0 and `pnpm lint:brand`
 passed, but the first `pnpm e2e` passed 27 of 30: the fixture's `POST /v1/sim/reset` answered 500 before GP7, GP9 and
-the 1440 px spec. A second `pnpm e2e` on that clone, still under load, passed 30 of 30 (175 s). The cause is not known:
-in test mode the API does not log a 500's stack (`apps/api/src/http/errors.ts`), so nothing was recorded. A third run
-with that logging patched in locally (not committed) passed 30 of 30 and logged no 500.
+the 1440 px spec. A second `pnpm e2e` on that clone, still under load, passed 30 of 30 (175 s).
+
+The cause, found on `polish/reset` with 500 stacks written to `<dataDir>/run/errors.log` under tests: the reset dropped
+every table, then `rmSync` of `<dataDir>/companies` failed with ENOTEMPTY because a `git` process of an in-flight
+memory write was still adding objects, which left the world without tables. A reset could also interleave its seed
+with a second reset, or with agent runs, routine finalizations and scheduler ticks started before it. The reset now
+runs one at a time on the scheduler's tick chain after that work settles, removes the repos on the git queue before
+any table is dropped, and seeds under the write lock (`apps/api/src/routes/sim.ts`, `apps/api/test/sim-reset.test.ts`).
+With 12 busy-loop processes on top of other projects' load (load average 22 to 35), 25 looped resets with agent,
+routine and clock work in flight all answered 200 where the old code failed 40 of 40, and `pnpm e2e` passed 30 of 30
+(2.1 min); without the extra load it passed 30 of 30 too.
 
 Live on `gpt-5.6-luna` (Responses API), on the same clone. Wave 2 added no live case, so L1 to L4 are the whole live
 suite:
@@ -211,8 +219,6 @@ time; the action chain verifies at the end of every scenario.
   portal has no way back to the admin view; the direct deposit error is not tied to its input with `aria-invalid`; the
   document library does not show the per-signature verify result.
 - A run still queued when the API stops is failed with `PROCESS_RESTART` at the next boot, not resumed.
-- `POST /v1/sim/reset` can answer 500 under heavy machine load (3 of 30 e2e resets once in the final gate), and in test
-  mode the API drops the stack, so the cause is not yet known.
 - Track notes with the full lists live in `docs/tracks/` and `docs/wave2.md`.
 
 ## Sandboxes and a free hosted option

@@ -20,7 +20,10 @@ export interface CreateSchedulerOptions {
 
 const isStub = (e: unknown) => isWeftError(e) && e._tag === "NotImplemented";
 
-export function createScheduler(o: CreateSchedulerOptions): Scheduler {
+/** The scheduler plus exclusive(), which the sim reset uses to keep ticks out while it rebuilds the world. */
+export interface WeftScheduler extends Scheduler { exclusive<T>(fn: () => Promise<T>): Promise<T> }
+
+export function createScheduler(o: CreateSchedulerOptions): WeftScheduler {
   const log = o.log ?? ((l: string) => console.error(l));
   const stubbed = new Set<string>();
   const redact = (t: string) => { try { return o.executor.redact(t); } catch { return t.slice(0, 300); } };
@@ -79,9 +82,20 @@ export function createScheduler(o: CreateSchedulerOptions): Scheduler {
   let inflight: Promise<void> = Promise.resolve();
   let timer: ReturnType<typeof setInterval> | null = null;
   const tick = () => { inflight = inflight.then(tickOnce, tickOnce); return inflight; };
+  /**
+   * Runs `fn` on the tick chain: it starts once the tick in flight has finished, and every tick or kick asked for
+   * meanwhile waits until it is done. POST /v1/sim/reset rebuilds the world inside this, so no tick reads or writes
+   * a half-dropped database.
+   */
+  const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = inflight.then(fn, fn);
+    inflight = run.then(() => undefined, () => undefined);
+    return run;
+  };
   return {
     tick,
     kick: tick,
+    exclusive,
     start() {
       if (timer) return;
       timer = setInterval(() => { void tick(); }, o.intervalMs ?? 5_000);

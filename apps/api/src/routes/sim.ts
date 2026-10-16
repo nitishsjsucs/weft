@@ -9,6 +9,7 @@ import { sql } from "drizzle-orm";
 import { ChatChannel, FaultKind, FaultMode, NoticeScenario, NotImplemented, ValidationError, type ChatMessageDto, type HumanSession } from "@weft/contracts";
 import { migrate, withWriteLock } from "@weft/db";
 import { emitEvent, SEED_TIME } from "@weft/core";
+import { serialGit } from "@weft/executor";
 import { seedWorld } from "@weft/seed";
 import type { Weft, WeftEnv } from "../http/context";
 
@@ -46,24 +47,67 @@ function session(c: { var: { session: HumanSession | null } }): HumanSession {
   return s;
 }
 
-export async function resetWorld(weft: Weft): Promise<{ ms: number }> {
+/** Removes a directory tree, retrying while something still writes into it (ENOTEMPTY, EBUSY, EPERM). */
+const removeTree = (dir: string) => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
+
+/**
+ * Lets background work started before the reset settle, so none of it writes into the world while it is rebuilt:
+ * queued and running agent runs (past the bound they are aborted and given a moment to stop), then the routine
+ * finalizations their terminal steps started.
+ */
+async function settleBackgroundWork(weft: Weft): Promise<void> {
+  const bound = Number(process.env.WEFT_RESET_DRAIN_MS ?? 5_000);
+  const agent = weft.agent as { drain?: (ms: number) => Promise<boolean> };
+  const routines = weft.routines as { drain?: (ms: number, closing?: boolean) => Promise<boolean> };
+  const quiet = async (fn: () => Promise<unknown> | undefined) => { try { await fn(); } catch { /* a stubbed part has nothing to drain */ } };
+  await quiet(async () => { if (agent.drain && !(await agent.drain(bound))) await agent.drain(1_000); });
+  await quiet(() => routines.drain?.(bound, false));
+  await quiet(() => agent.drain?.(bound));   // a finalization can wake a waiting run
+}
+
+/** One reset at a time per world: a second POST /v1/sim/reset waits for the first instead of interleaving with it. */
+const resetChains = new WeakMap<Weft, Promise<unknown>>();
+
+/**
+ * Rebuilds the world from the seed. Under heavy load the old reset failed with 500 (ENOTEMPTY from rmSync while a
+ * `git` child process of an in-flight memory write was still adding objects to the repo) and left every table
+ * dropped, so even the next reset failed its auth lookup. Now resets are serialized, no scheduler tick runs during
+ * one, in-flight agent runs and routine finalizations settle first, the memory repos are removed on the git queue
+ * (no git process is running then) before any table is dropped, and drop, migrate and seed hold the write lock
+ * together, so no other request writes into a half-built world.
+ */
+export function resetWorld(weft: Weft): Promise<{ ms: number }> {
+  const prev = resetChains.get(weft) ?? Promise.resolve();
+  const run = prev.then(() => rebuild(weft), () => rebuild(weft));
+  resetChains.set(weft, run.catch(() => undefined));
+  return run;
+}
+
+async function rebuild(weft: Weft): Promise<{ ms: number }> {
   const t0 = Date.now();
   const rate = weft.clock.rate();
-  await withWriteLock(async () => {
-    await weft.db.run(sql`PRAGMA foreign_keys=OFF`);
-    try {
-      const tables = await weft.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`);
-      for (const { name } of tables) await weft.db.run(sql.raw(`DROP TABLE IF EXISTS "${name.replace(/"/g, "")}"`));
-    } finally { await weft.db.run(sql`PRAGMA foreign_keys=ON`); }
-    rmSync(join(weft.dataDir, "companies"), { recursive: true, force: true });   // memory repos and run workspaces; never spend/
-    rmSync(join(weft.dataDir, "run", "handles"), { recursive: true, force: true });   // run ids restart after a reset
-    await migrate(weft.db);
+  const scheduler = weft.scheduler as { exclusive?: <T>(fn: () => Promise<T>) => Promise<T> };
+  const exclusive = <T>(fn: () => Promise<T>) => (scheduler.exclusive ? scheduler.exclusive(fn) : fn());
+  await exclusive(async () => {
+    await settleBackgroundWork(weft);
+    await serialGit(async () => {
+      removeTree(join(weft.dataDir, "companies"));   // memory repos and run workspaces; never spend/
+      removeTree(join(weft.dataDir, "run", "handles"));   // run ids restart after a reset
+    });
+    await withWriteLock(async () => {
+      await weft.db.run(sql`PRAGMA foreign_keys=OFF`);
+      try {
+        const tables = await weft.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`);
+        for (const { name } of tables) await weft.db.run(sql.raw(`DROP TABLE IF EXISTS "${name.replace(/"/g, "")}"`));
+      } finally { await weft.db.run(sql`PRAGMA foreign_keys=ON`); }
+      await migrate(weft.db);
+      await seedWorld(weft);
+    });
+    await weft.clock.set(SEED_TIME, rate);
+    // The engine lives across the reset; without this, a clock move before the next tick would start counting cron
+    // slots from the old (later) cursor and skip the seed morning's 09:00 digest.
+    (weft.routines as { resetCursor?: (at: string) => void }).resetCursor?.(SEED_TIME);
   });
-  await seedWorld(weft);
-  await weft.clock.set(SEED_TIME, rate);
-  // The engine lives across the reset; without this, a clock move before the next tick would start counting cron
-  // slots from the old (later) cursor and skip the seed morning's 09:00 digest.
-  (weft.routines as { resetCursor?: (at: string) => void }).resetCursor?.(SEED_TIME);
   return { ms: Date.now() - t0 };
 }
 
