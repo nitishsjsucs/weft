@@ -1,6 +1,7 @@
 // The hand-computed expense cases of research/wave3/expenses-timeoff.md 9.2 that the pure engine decides (E1 to E9),
 // plus the registry rule of E13. E10 to E12 and E14 run against the seeded world in apps/api/test/expenses.test.ts.
 import { describe, expect, it } from "vitest";
+import { W3_PLANNED_COMMANDS } from "@weft/contracts";
 import { evaluateExpense, mileageCents, mileageRateX10, perDiemAllowanceCents, type PolicyItem, type PolicyWorker } from "../../src/expenses/policy";
 import { expensesCommands } from "../../src/commands/expenses";
 import { commands } from "../../src/commands/index";
@@ -131,8 +132,17 @@ describe("E13 no bulk decide (registry)", () => {
       const shape = (c.input as unknown as { shape?: Record<string, unknown> }).shape ?? {};
       if (c.effect === "write" && c.access === "all") expect(Object.keys(shape), c.name).not.toContain("expense_ids");
     }
-    // Planned risk, access and approval match the contract.
+    // Planned risk, access and approval match the contract, and every planned expenses command is registered.
     for (const c of all) if (c.access !== "all") expect(c.tiers.main, c.name).toBe("unavailable");
+    const planned = W3_PLANNED_COMMANDS.filter((c) => c.name.startsWith("expenses."));
+    expect(all.map((c) => c.name).sort()).toEqual(planned.map((c) => c.name).sort());
+    for (const p of planned) {
+      const c = all.find((x) => x.name === p.name)!;
+      expect([c.risk({} as never), c.access ?? "all", c.approval], p.name).toEqual([p.risk, p.access, p.approval]);
+    }
+    // Submit and resubmit are people only, one claim each: resubmit takes one expense_id, never an array.
+    const resubmit = all.find((c) => c.name === "expenses.resubmit")!;
+    expect(resubmit.input.safeParse({ expense_ids: ["exp_0001"], category: "office", merchant: "m", amount_cents: 100, transaction_date: "2026-10-20", business_purpose: "p" }).success).toBe(false);
   });
 });
 
