@@ -60,17 +60,17 @@ export function ReconciliationTab({ names, plans }: { names: Map<string, string>
         {rows.length === 0 ? <p className="px-4 py-4 text-[13px] text-gray-10">{q.data ? `No findings for ${month}. Run reconciliation to compare the carrier invoice.` : "Loading..."}</p> : (
           <div className="overflow-x-auto">
             <Table data-testid={TID.reconTable} className="text-[13px]">
-              <THead><TR><TH>Finding</TH><TH>Person</TH><TH>Plan</TH><TH numeric>Billed</TH><TH numeric>Expected</TH><TH numeric>Deducted</TH><TH>Status</TH><TH /></TR></THead>
+              <THead><TR><TH>Finding</TH><TH>Person</TH><TH className="hidden tablet:table-cell">Plan</TH><TH numeric className="hidden tablet:table-cell">Billed</TH><TH numeric className="hidden tablet:table-cell">Expected</TH><TH numeric className="hidden tablet:table-cell">Deducted</TH><TH>Status</TH><TH /></TR></THead>
               <TBody>
                 {rows.map((f) => (
                   <Fragment key={f.id}>
                     <TR data-testid={TID.reconRow(f.id)} data-kind={f.kind} className="border-b-0">
                       <TD className="h-10 font-medium">{KIND_LABEL[f.kind] ?? f.kind}</TD>
                       <TD className="h-10">{f.workerId ? <Link href={`/app/people/${f.workerId}`} className="hover:underline">{names.get(f.workerId) ?? f.workerId}</Link> : "-"}</TD>
-                      <TD className="h-10">{f.planId ? plans.get(f.planId) ?? f.planId : "All billed plans"}</TD>
-                      <TD numeric className="h-10">{dollars(f.billedCents)}</TD>
-                      <TD numeric className="h-10">{dollars(f.expectedCents)}</TD>
-                      <TD numeric className="h-10">{dollars(f.deductedCents)}</TD>
+                      <TD className="hidden h-10 tablet:table-cell">{f.planId ? plans.get(f.planId) ?? f.planId : "All billed plans"}</TD>
+                      <TD numeric className="hidden h-10 tablet:table-cell">{dollars(f.billedCents)}</TD>
+                      <TD numeric className="hidden h-10 tablet:table-cell">{dollars(f.expectedCents)}</TD>
+                      <TD numeric className="hidden h-10 tablet:table-cell">{dollars(f.deductedCents)}</TD>
                       <TD className="h-10"><Badge tone={STATUS_TONE[f.status] ?? "gray"} data-status={f.status}>{FINDING_LABEL[f.status] ?? f.status}</Badge></TD>
                       <TD className="h-10 whitespace-nowrap text-right">
                         {f.status !== "open" ? null : confirm === f.id ? (
@@ -82,7 +82,7 @@ export function ReconciliationTab({ names, plans }: { names: Map<string, string>
                       </TD>
                     </TR>
                     <TR>
-                      <TD colSpan={8} className="pb-3 pt-0 text-1 text-gray-10">
+                      <TD colSpan={8} className="max-w-[calc(100vw-2rem)] whitespace-normal pb-3 pt-0 text-1 text-gray-10 tablet:max-w-none">
                         {f.detail}
                         {confirm === f.id ? <span className="mt-1 block text-gray-11">Sends a templated dispute to billing@juniper-mutual.example in the email simulator and marks this finding disputed.</span> : null}
                       </TD>

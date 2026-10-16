@@ -52,18 +52,18 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
           {rows.length === 0 ? <p className="px-4 py-4 text-[13px] text-gray-10">{q.data ? "No payouts yet." : "Loading..."}</p> : (
             <div className="overflow-x-auto">
               <Table data-testid={TID.payoutsTable} className="text-[13px]">
-                <THead><TR><TH>Contractor</TH><TH>Payday</TH><TH numeric>Amount</TH><TH numeric>FX</TH><TH numeric>USD</TH><TH>Rail</TH></TR></THead>
+                <THead><TR><TH>Contractor</TH><TH className="hidden tablet:table-cell">Payday</TH><TH numeric className="hidden tablet:table-cell">Amount</TH><TH numeric className="hidden tablet:table-cell">FX</TH><TH numeric>USD</TH><TH>Rail</TH></TR></THead>
                 <TBody>
                   {rows.map((p) => (
                     <TR key={p.id} data-testid={TID.payoutRow(p.id)} data-rail={p.railStatus}>
                       <TD className="h-10 whitespace-nowrap">{names.get(p.workerId) ?? p.workerId}</TD>
-                      <TD className="h-10 whitespace-nowrap">{fmtDate(p.scheduledFor)}</TD>
-                      <TD numeric className="h-10 whitespace-nowrap">{minor(p.amountMinor, p.currency)}</TD>
-                      <TD numeric className="h-10 font-mono text-1">{p.fxRate}</TD>
+                      <TD className="hidden h-10 whitespace-nowrap tablet:table-cell">{fmtDate(p.scheduledFor)}</TD>
+                      <TD numeric className="hidden h-10 whitespace-nowrap tablet:table-cell">{minor(p.amountMinor, p.currency)}</TD>
+                      <TD numeric className="hidden h-10 font-mono text-1 tablet:table-cell">{p.fxRate}</TD>
                       <TD numeric className="h-10 whitespace-nowrap">{usd(p.usdCents)}</TD>
                       <TD className="h-10 whitespace-nowrap">
                         <Badge tone={TONE[p.railStatus] ?? "gray"}>{p.railStatus}</Badge>
-                        <span className="ml-2 text-1 text-gray-10" title={`Sent ${when(p.sentAt)}, delivered ${when(p.deliveredAt)}`}>{p.deliveredAt ? when(p.deliveredAt) : p.sentAt ? when(p.sentAt) : ""}</span>
+                        <span className="ml-2 hidden text-1 text-gray-10 tablet:inline" title={`Sent ${when(p.sentAt)}, delivered ${when(p.deliveredAt)}`}>{p.deliveredAt ? when(p.deliveredAt) : p.sentAt ? when(p.sentAt) : ""}</span>
                       </TD>
                     </TR>
                   ))}
