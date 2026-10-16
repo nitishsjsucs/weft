@@ -132,6 +132,9 @@ const setAutonomy = writeCommand<AutonomyInput>({
   async preview(i, _ctx, deps) {
     const [r] = await deps.tx.select({ id: routines.id, name: routines.name, autonomy: routines.autonomy }).from(routines).where(eq(routines.id, i.routine_id));
     if (!r) throw new Refused("UNKNOWN_REFERENCE", `No routine ${i.routine_id}.`);
+    if (i.autonomy === "auto" && !(await allowAutoAutonomy(deps.tx))) {
+      throw new DomainRefusal("DOMAIN_AUTO_AUTONOMY_OFF", "Auto autonomy is off for this company", `Turn on ${AUTONOMY_SETTING} in Settings first`, null);
+    }
     return { title: `Set autonomy of ${r.name} (${r.id}) to ${i.autonomy}`, diff: [{ label: "autonomy", before: r.autonomy, after: i.autonomy }], content: [], moneyCents: null,
       subjectRef: r.id, subjectHash: sha256Hex(canonicalJson({ routine: r.id, from: r.autonomy, to: i.autonomy })), evidence: [{ label: "routine", ref: r.id }] };
   },

@@ -205,7 +205,12 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     const a = (await db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId)).limit(1))[0];
     if (!a || !TERMINAL_AGENT.has(a.status)) return;
     const facts = await factsFor(agentRunId);
-    const left = facts.calls.filter((c) => c.status === "pending_approval" && c.proposalId && facts.proposalStatus(c.proposalId) === null).map((c) => `Approve ${c.command.replace("__", ".")} (${c.proposalId})`);
+    // Wave 3 autonomy: at recommend every pending write is an Inbox suggestion (policy() and the pipeline enforce the
+    // level per call); the run log says so instead of asking for an approval.
+    const rr = (await db.select({ routineId: routineRuns.routineId }).from(routineRuns).where(eq(routineRuns.id, routineRunId)).limit(1))[0];
+    const level = rr ? (await db.select({ autonomy: routines.autonomy }).from(routines).where(eq(routines.id, rr.routineId)).limit(1))[0]?.autonomy : null;
+    const verb = level === "recommend" ? "Review the suggestion" : "Approve";
+    const left = facts.calls.filter((c) => c.status === "pending_approval" && c.proposalId && facts.proposalStatus(c.proposalId) === null).map((c) => `${verb} ${c.command.replace("__", ".")} (${c.proposalId})`);
     const status: RoutineRunStatus = a.status === "waiting" ? "waiting_approval" : a.status === "done" ? "done" : a.status === "cancelled" ? "cancelled" : "failed";
     await updateRun(routineRunId, { status, summary: a.summary ?? null, leftForHumanJson: JSON.stringify(left), costUsdMicros: a.costUsdMicros, endedAt: status === "waiting_approval" ? null : clock.now() });
   }
