@@ -10,7 +10,10 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { formatCents, type ScreeningStatus } from "@weft/contracts";
 import { screeningOrders, screeningPackages } from "@weft/db";
-import { W3ScreeningApplyInput } from "../../../contracts/src/ext/w3-integrations-screening-esign";
+import { W3EsignApplyInput, W3ScreeningApplyInput } from "../../../contracts/src/ext/w3-integrations-screening-esign";
+import { esignEnvelopes } from "@weft/db";
+import { applyEnvelope, envelopeOfOffer } from "../esign/envelopes";
+import { acceptFromEnvelope } from "../portal/forms";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
@@ -268,7 +271,33 @@ export const proceedToCriminal = writeCommand({
   },
 });
 
+// ---- e-signature envelopes (WEFT_ESIGN=docusign only; the built-in click to sign has no envelope) ----------------
+export const getEnvelope = readCommand({
+  name: "documents.get_envelope", summary: "E-signature envelope status for an offer.",
+  description: "The e-signature envelope for offer_id when the offer went out through the e-signature connector: provider, status (sent, delivered, completed, declined, voided) and timestamps. Offers signed in the portal's built-in flow have none.",
+  input: z.object({ offer_id: z.string() }), domain: "people",
+  async run(i, ctx, deps) {
+    const e = await envelopeOfOffer(deps.tx, i.offer_id);
+    if (!e || e.companyId !== ctx.companyId) return { data: { offer_id: i.offer_id, envelope: null as Record<string, string | null> | null }, summary: `Offer ${i.offer_id} uses built-in signing` };
+    return { data: { offer_id: i.offer_id, envelope: { id: e.id, provider: e.provider, mode: e.mode, status: e.status, sent_at: e.sentAt, delivered_at: e.deliveredAt, completed_at: e.completedAt, voided_at: e.voidedAt } }, summary: `Envelope ${e.id} is ${e.status}` };
+  },
+});
+
+export const applyEsignEvent = writeCommand({
+  name: "documents.apply_esign_event", summary: "System: apply an e-signature envelope update.",
+  description: "System command (svc_events, svc_scheduler): re-reads envelope_id from the e-signature connector and applies it: delivered marks the offer viewed, completed accepts it once with provider evidence, declined ends it declined. Never reads a webhook body.",
+  input: W3EsignApplyInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", access: "system_only", reversible: false, preview: null,
+  lease: (i) => `envelope:${i.envelope_id}`,
+  async run(i, ctx, deps) {
+    const [e] = await deps.tx.select().from(esignEnvelopes).where(and(eq(esignEnvelopes.provider, "docusign"), eq(esignEnvelopes.envelopeId, i.envelope_id))).limit(1);
+    if (!e || e.companyId !== ctx.companyId) return { data: { matched: false }, summary: `No envelope ${i.envelope_id}` };
+    const r = await applyEnvelope(deps, ctx, e, { accept: acceptFromEnvelope });
+    return { data: { matched: true, envelope_id: e.id, status: r.status, previous_status: r.previous, offer_status: r.offerStatus }, summary: `Envelope ${e.id}: ${r.previous} to ${r.status} (offer ${r.offerStatus})`, events: r.events };
+  },
+});
+
 export const screeningCommands: WeftCommand[] = [
+  getEnvelope, applyEsignEvent,
   listPackages, getStatus, orderScreening, cancelScreening, applyVendorEvent,
   reviewScreening, engageScreening, startPreAdverse, sendFinalAdverse, cancelAdverse, proceedToCriminal,
 ];

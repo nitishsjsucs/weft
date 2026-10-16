@@ -99,8 +99,22 @@ export function screeningRoutes(weft: Weft): Hono<WeftEnv> {
     await weft.scheduler.kick();
     return c.json({ ok: true, orderId: row.id });
   });
+  // Embedded signing: a fresh one-time link per click (DocuSign's expire after five minutes); the portal redirects the full page.
+  r.post("/v1/portal/esign/url", async (c) => {
+    const session = c.var.session;
+    if (!session) throw new Unauthorized();
+    const p = await loadPersona(weft.db, session.companyId, session.principalId);
+    if (!p) throw new NotFound("No offer for this sign-in");
+    const [e] = (await weft.db.select().from(esignEnvelopes).where(eq(esignEnvelopes.offerId, p.offer.id))).sort((a, b) => (a.id < b.id ? 1 : -1));
+    if (!e || (e.status !== "sent" && e.status !== "delivered")) throw new NotFound("This offer has no open e-signature envelope (built-in signing)");
+    const returnUrl = `/portal?as=${encodeURIComponent(session.principalId)}&esign_return=1`;
+    const signer = { name: `${p.offer.candidateFirst} ${p.offer.candidateLast} (demo)`, email: p.offer.candidateEmail, clientUserId: session.principalId };
+    const link = await withWriteLock(() => weft.sims.vendors.docusign.signingUrl(e.envelopeId, signer, returnUrl));
+    await weft.scheduler.kick();
+    return c.json(link);
+  });
   return stubRoutes(r, "screening", [
     "GET /v1/screening/packages", "GET /v1/screening/orders", "GET /v1/screening/orders/:id", "POST /v1/offers/:id/screening", "POST /v1/screening/orders/:id/adjudicate",
-    "GET /v1/offers/:id/envelope", "GET /v1/portal/screening", "POST /v1/portal/screening/consent",
+    "GET /v1/offers/:id/envelope", "GET /v1/portal/screening", "POST /v1/portal/screening/consent", "POST /v1/portal/esign/url",
   ]);
 }

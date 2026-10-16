@@ -8,9 +8,9 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { formatId, VENDOR_APPLY_COMMAND, type IntegrationVendor, type ScreeningConnector, type ESignConnector } from "@weft/contracts";
-import { integrationDeliveries, screeningOrders, withWriteLock, type Db, type DbTx } from "@weft/db";
+import { esignEnvelopes, integrationDeliveries, screeningOrders, withWriteLock, type Db, type DbTx } from "@weft/db";
 import { createSimulators } from "@weft/sim";
-import { W3_SCREENING_POLL_MINUTES, w3EsignSimControls, w3ScreeningSimControls } from "../../../../packages/contracts/src/ext/w3-integrations-screening-esign";
+import { W3_ESIGN_POLL_MINUTES, W3_SCREENING_POLL_MINUTES, w3EsignSimControls, w3ScreeningSimControls } from "../../../../packages/contracts/src/ext/w3-integrations-screening-esign";
 import type { PollDeps } from "./poll";
 
 type Connector = ScreeningConnector | ESignConnector;
@@ -86,17 +86,27 @@ export async function pollOpenOrders(d: PollDeps): Promise<string[]> {
   const cutoff = new Date(Date.parse(d.now) - W3_SCREENING_POLL_MINUTES * 60_000).toISOString();
   const rows = (await d.db.select().from(screeningOrders).where(inArray(screeningOrders.status, POLLED)))
     .filter((r) => r.vendorOrderId && (r.status !== "complete_review" || r.adjudication === "pre_adverse") && (!r.lastPolledAt || r.lastPolledAt <= cutoff));
-  for (const r of rows) await d.executor.system.exec("svc_scheduler", "screening.apply_vendor_event", { vendor: r.vendor, vendor_order_id: r.vendorOrderId }, { eventId: null, attended: false, requestedBy: null });
+  for (const r of rows) await d.executor.system.exec("svc_events", "screening.apply_vendor_event", { vendor: r.vendor, vendor_order_id: r.vendorOrderId }, { eventId: null, attended: false, requestedBy: null });
   return rows.map((r) => r.id);
+}
+
+/** DocuSign allows one status read per envelope every 15 minutes; Weft polls an open envelope no more than every 20. */
+export async function pollOpenEnvelopes(d: PollDeps): Promise<string[]> {
+  const cutoff = new Date(Date.parse(d.now) - W3_ESIGN_POLL_MINUTES * 60_000).toISOString();
+  const rows = (await d.db.select().from(esignEnvelopes).where(inArray(esignEnvelopes.status, ["sent", "delivered"]))).filter((e) => !e.lastPolledAt || e.lastPolledAt <= cutoff);
+  for (const e of rows) await d.executor.system.exec("svc_events", "documents.apply_esign_event", { envelope_id: e.envelopeId }, { eventId: null, attended: false, requestedBy: null });
+  return rows.map((e) => e.id);
 }
 
 export async function pollScreeningEsign(d: PollDeps): Promise<void> {
   const any = await d.db.select({ id: screeningOrders.id }).from(screeningOrders).where(and(sql`1 = 1`)).limit(1);
+  const envs = await d.db.select({ id: esignEnvelopes.id }).from(esignEnvelopes).limit(1);
   const pending = await d.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM sim_webhook_outbox WHERE status = 'pending' AND vendor IN ('checkr', 'hireright', 'docusign')`);
-  if (!any.length && !pending[0]?.n) return;
+  if (!any.length && !envs.length && !pending[0]?.n) return;
   await advanceScreeningSims(d);
   await deliverSimWebhooks(d);
   await pollOpenOrders(d);
+  await pollOpenEnvelopes(d);
 }
 
 export type { Db };
