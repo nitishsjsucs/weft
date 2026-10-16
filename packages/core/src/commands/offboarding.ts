@@ -13,7 +13,8 @@ import { DomainRefusal, nextActionSeq, notFound, readCommand, writeCommand } fro
 import { nameRef } from "../people/names";
 import { getWorker } from "../people/queries";
 import { PayrollRefusal, refreshOpenDrafts, submitRun } from "../payroll/lifecycle";
-import { createSpecialRun } from "../payroll/offcycle";
+import { createSpecialRun, periodEndContaining } from "../payroll/offcycle";
+import { semimonthlyPeriod } from "../payroll/calendar";
 import { BANK_CREDENTIAL_REF, PAYROLL_RUN_CEILING, proposeOffCycleCommand } from "./payroll";
 import {
   caseDto, finishStep, insertCase, listCaseRows, openCaseFor, openStep, requireCase, requireFinalPayDone, STEP_LABEL, stepsOf,
@@ -89,21 +90,23 @@ async function terminatePlan(i: TerminateInput, companyId: string, deps: Command
 
 export const terminateCommand = writeCommand({
   name: "offboarding.terminate", summary: "Terminate an employee and open an offboarding case.",
-  description: "Terminate employee worker_id (kind voluntary, involuntary, layoff or end_of_contract; last_day YYYY-MM-DD). Sets the worker to offboarding and opens a case with eight ordered steps; final pay, directory suspend, SSO deactivation and device lock follow as proposals. R2, always needs approval.",
+  description: "Terminate employee worker_id (kind voluntary, involuntary, layoff or end_of_contract; last_day YYYY-MM-DD). Sets the worker to offboarding with end_date last_day and opens a case with eight ordered steps; final pay, directory suspend, SSO deactivation and device lock follow as proposals. R2, always needs approval.",
   input: TerminateInput, domain: "people", needs: "edit", effect: "write", risk: () => "R2", approval: "always", reversible: false,
   untrustedFields: [], mcp: "hidden", lease: (i) => `offboarding:${i.worker_id}`,
   async preview(i, ctx, deps) {
     const w = await terminatePlan(i, ctx.companyId, deps);
     return {
       title: `Terminate ${nameRef(w.firstName, w.lastName, w.id)} (${i.kind.replaceAll("_", " ")}), last day ${i.last_day}`,
-      diff: [{ label: "Status", before: w.status, after: "offboarding" }, { label: "Offboarding case", before: "none", after: `8 steps from final pay to benefits termination${i.pay_unused_pto === false ? ", no PTO payout" : ", unused PTO paid"}` }],
+      diff: [{ label: "Status", before: w.status, after: "offboarding" }, { label: "End date", before: w.endDate ?? "none", after: i.last_day }, { label: "Offboarding case", before: "none", after: `8 steps from final pay to benefits termination${i.pay_unused_pto === false ? ", no PTO payout" : ", unused PTO paid"}` }],
       content: i.reason_note ? [{ label: "Reason note", text: i.reason_note }] : [], moneyCents: null, subjectRef: w.id,
       subjectHash: sha256Hex(canonicalJson({ worker: w.id, status: w.status, kind: i.kind, lastDay: i.last_day })), evidence: [{ label: "Worker", ref: w.id }],
     };
   },
   async run(i, ctx, deps) {
     const w = await terminatePlan(i, ctx.companyId, deps);
-    await deps.tx.update(workers).set({ status: "offboarding" }).where(eq(workers.id, w.id));
+    // end_date is the last day from now on, so no regular draft pays past it (and the final period's draft prorates).
+    await deps.tx.update(workers).set({ status: "offboarding", endDate: i.last_day }).where(eq(workers.id, w.id));
+    await refreshOpenDrafts(deps.tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, semimonthlyPeriod(periodEndContaining(i.last_day)).periodStart);
     const { caseId, steps } = await insertCase(deps.tx, { newId: (p) => deps.newId(p), now: ctx.now }, {
       companyId: ctx.companyId, workerId: w.id, kind: i.kind, lastDay: i.last_day, reasonNote: i.reason_note ?? "", payUnusedPto: i.pay_unused_pto ?? true,
     });

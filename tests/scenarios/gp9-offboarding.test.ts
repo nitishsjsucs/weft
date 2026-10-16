@@ -34,7 +34,7 @@ describe("GP9 termination with access revocation", () => {
     const caseId = out.data.case_id;
 
     const worker = (await weft.db.all<{ status: string; end_date: string | null }>(sql`SELECT status, end_date FROM workers WHERE id = ${WORKER}`))[0]!;
-    expect(worker).toEqual({ status: "offboarding", end_date: null });
+    expect(worker).toEqual({ status: "offboarding", end_date: "2026-10-30" });
     const evt = await weft.db.all<{ payload_json: string }>(sql`SELECT payload_json FROM events WHERE type = 'worker.terminated'`);
     expect(evt.map((e) => JSON.parse(e.payload_json))).toEqual([{ worker_id: WORKER, case_id: caseId }]);
 
