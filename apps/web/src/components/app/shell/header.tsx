@@ -50,14 +50,14 @@ export function Header({ onToggleSidebar, onOpenSearch }: { onToggleSidebar: () 
           </span>
         ))}
       </nav>
-      <div className="hidden min-w-0 flex-1 justify-center @min-[1040px]:flex">
-        <button type="button" onClick={onOpenSearch} className="flex h-8 w-full max-w-[420px] items-center gap-2 rounded-lg border border-[var(--app-border)] bg-card px-2.5 text-2 text-gray-9 shadow-xs hover:bg-gray-2">
+      <div className="hidden min-w-0 flex-1 justify-center @min-[720px]:flex">
+        <button type="button" onClick={onOpenSearch} className="flex h-8 w-full max-w-[320px] items-center gap-2 @min-[1040px]:max-w-[420px] rounded-lg border border-[var(--app-border)] bg-card px-2.5 text-2 text-gray-9 shadow-xs hover:bg-gray-2">
           <Search className="size-4" strokeWidth={1.5} />
           <span className="flex-1 truncate text-left">Search or jump to...</span>
           <Kbd>⌘</Kbd><Kbd>K</Kbd>
         </button>
       </div>
-      <Button variant="ghost" size="icon-sm" className="@min-[1040px]:hidden" onClick={onOpenSearch} aria-label="Search"><Search strokeWidth={1.5} /></Button>
+      <Button variant="ghost" size="icon-sm" className="@min-[720px]:hidden" onClick={onOpenSearch} aria-label="Search"><Search strokeWidth={1.5} /></Button>
       <Badge data-testid={TID.providerBadge} tone={health.data?.provider.live ? "green" : "outline"} size="md" className="hidden @min-[600px]:inline-flex" title="Active model provider">
         {health.data?.provider.label ?? "Provider"}
       </Badge>

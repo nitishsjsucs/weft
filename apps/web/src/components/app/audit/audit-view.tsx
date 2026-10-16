@@ -41,17 +41,19 @@ export function AuditView() {
       {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{result.summary}</div> : null}
       <Card className="overflow-hidden">
         <Table className="min-w-[980px] text-[13px]">
-          <THead><TR><TH>Seq</TH><TH>Time</TH><TH>Actor</TH><TH>On behalf of</TH><TH>Command</TH><TH>Summary</TH><TH>Run</TH><TH /></TR></THead>
+          <THead><TR><TH>Seq</TH><TH>Time</TH><TH>Actor</TH><TH>Command</TH><TH className="min-w-[320px]">Summary</TH><TH>Run</TH><TH /></TR></THead>
           <TBody>
             {(actions.data?.data ?? []).map((a) => (
               <TR key={a.seq} id={`audit-${a.seq}`} data-testid={tid.auditRow(a.seq)} data-reversible={a.reversible} className={cn(a.reversedBySeq !== null && "bg-gray-2")}>
                 <TD className="h-11 tabular text-gray-10">#{a.seq}</TD>
                 <TD className="h-11 whitespace-nowrap">{fmtDateTime(a.ts)}</TD>
-                <TD className="h-11 whitespace-nowrap">{actor(a)}</TD>
-                <TD className="h-11 whitespace-nowrap">{a.onBehalfOf ? principalName(a.onBehalfOf) : "-"}</TD>
-                <TD className="h-11"><code className="font-mono text-0">{a.command}</code></TD>
-                <TD className="h-11">
-                  <div className="min-w-[220px]">{a.summary}</div>
+                <TD className="h-11 whitespace-nowrap">
+                  <div>{actor(a)}</div>
+                  {a.onBehalfOf ? <div className="text-1 text-gray-10">for {principalName(a.onBehalfOf)}</div> : null}
+                </TD>
+                <TD className="h-11 whitespace-nowrap"><code className="font-mono text-[12px]">{a.command}</code></TD>
+                <TD className="h-11 min-w-[320px] whitespace-normal">
+                  <div>{a.summary}</div>
                   <div className="text-1 text-gray-10">
                     {a.reversesSeq !== null ? <>Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></> : null}
                     {a.reversedBySeq !== null ? <>Reversed by <a href={`#audit-${a.reversedBySeq}`} className="text-blue-11 hover:underline">#{a.reversedBySeq}</a></> : null}
