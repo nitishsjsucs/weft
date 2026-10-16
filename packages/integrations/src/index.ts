@@ -37,3 +37,4 @@ export function createVendorOverlay(env: Env, opts: { testMode?: boolean } = {})
     docusign: (modes.docusign === "real" ? createRealDocusign(env, sim.docusign) : null) ?? sim.docusign,
   });
 }
+export { fetchBoardJobs, parseBoardJobs, boardUrl, type BoardJob, type BoardMetadata } from "./board";
