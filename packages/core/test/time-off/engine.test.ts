@@ -3,7 +3,7 @@
 // T18 and T19 end to end in apps/api/test/time-off.test.ts; here they run on the pure rules.
 import { describe, expect, it } from "vitest";
 import {
-  applyCaps, balanceOf, coverageDays, deemedWorkedMinutes, finalVacationMinutes, forfeitureProblem, perHourWorked, perPeriodMinutes, requestChecks,
+  applyCaps, availableOn, balanceOf, coverageDays, deemedWorkedMinutes, finalVacationMinutes, forfeitureProblem, perHourWorked, perPeriodMinutes, requestChecks,
   requestDays, serviceMonths, yearEndCarry, type CheckInput,
 } from "../../src/time-off/engine";
 import { leaveMinutes, timeOffEarnings, type TimeOffPayrollInputs } from "../../src/time-off/payroll";
@@ -86,6 +86,14 @@ describe("requests and checks", () => {
     expect(b).toMatchObject({ accruedUnlockedMinutes: 0, accruedLockedMinutes: 176, availableMinutes: 0 });
     const checks = requestChecks({ ...baseCheck, typeKind: "sick", startDate: "2026-10-28", requestedMinutes: 480, locked: { until: "2026-12-30" } });
     expect(checks.map((c) => [c.rule, c.severity])).toEqual([["WAITING_PERIOD", "block"]]);   // no short notice for sick leave
+  });
+  it("T10b a request filed inside the wait for a date after the unlock counts the locked accrual", () => {
+    const b = balanceOf({ workerId: "wrk_0021", policyId: "top_sick_ca", typeKind: "sick", asOf: "2026-12-20", rows: [{ kind: "import", minutes: 1_040, effectiveDate: "2026-12-15" }], startDate: "2026-10-01", waitingDays: 90 });
+    expect(b).toMatchObject({ accruedLockedMinutes: 1_040, availableMinutes: 0 });
+    expect(availableOn(b, "2027-01-04", "2026-12-30")).toBe(1_040);
+    expect(availableOn(b, "2026-12-22", "2026-12-30")).toBe(0);
+    const checks = requestChecks({ ...baseCheck, typeKind: "sick", today: "2026-12-20", startDate: "2027-01-04", requestedMinutes: 480, projectedAvailable: availableOn(b, "2027-01-04", "2026-12-30") });
+    expect(checks.filter((c) => c.severity === "block")).toEqual([]);
   });
   it("blocks a use cap overrun and a partial day under the minimum increment", () => {
     const checks = requestChecks({ ...baseCheck, typeKind: "sick", requestedMinutes: 30, projectedAvailable: 600, usedThisYear: 2_400, annualUseCap: 2_400, partialDayMinutes: 30 });

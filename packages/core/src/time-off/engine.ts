@@ -44,6 +44,14 @@ export function balanceOf(input: { workerId: string; policyId: string; typeKind:
   };
 }
 
+/**
+ * Available on a request's start date as far as the waiting period goes: minutes locked today count once the start
+ * date is past the unlock date (spec 6.1), so a request filed inside the wait for a date after it is not starved.
+ */
+export function availableOn(b: TimeOffBalance, startDate: string, unlock: string): number {
+  return startDate >= unlock ? b.accruedUnlockedMinutes + b.accruedLockedMinutes - b.usedMinutes - b.holdsMinutes : b.availableMinutes;
+}
+
 /** Accrued minus used, ignoring holds and the lock: what final pay and the caps see. */
 export function postedBalance(rows: readonly LedgerEntry[], asOf: string): number {
   const p = sumLedger(rows, asOf);

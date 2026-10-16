@@ -7,7 +7,7 @@ import {
 } from "@weft/db";
 import { addDays, businessDaysBefore, isBusinessDay } from "../payroll/calendar";
 import {
-  balanceOf, coverageDays, paydayOf, perPeriodMinutes, periodEndsBetween, postedBalance, requestChecks, serviceMonths, unlockDate,
+  availableOn, balanceOf, coverageDays, paydayOf, perPeriodMinutes, periodEndsBetween, postedBalance, requestChecks, serviceMonths, unlockDate,
   type CoverageDay, type LedgerEntry, type RequestDay, type Tier,
 } from "./engine";
 
@@ -167,7 +167,7 @@ export async function checksForRequest(tx: DbTx, companyId: string, r: RequestRo
   const partial = days.length === 1 && days[0]!.minutes > 0 && days[0]!.minutes < 480 ? days[0]!.minutes : null;
   return requestChecks({
     typeKind: p.typeKind, today, startDate: start, days, requestedMinutes: r.requestedMinutes,
-    projectedAvailable: projectAvailable(bal.availableMinutes, p, w, today, start),
+    projectedAvailable: projectAvailable(availableOn(bal, start, unlock), p, w, today, start),
     locked: start < unlock ? { until: unlock } : null, usedThisYear, annualUseCap: p.annualUseCapMinutes, minIncrement: p.minIncrementMinutes,
     partialDayMinutes: partial, coverage, requestId: r.id, deadlineOverlap,
   });
