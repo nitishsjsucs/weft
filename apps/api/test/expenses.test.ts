@@ -185,7 +185,7 @@ describe("expenses self-service (portal)", () => {
   const form = (fields: Record<string, string>, receipt?: { type: string; bytes?: Buffer; name?: string }) => {
     const f = new FormData();
     for (const [k, v] of Object.entries(fields)) f.set(k, v);
-    if (receipt) f.set("receipt", new Blob([receipt.bytes ?? PNG], { type: receipt.type }), receipt.name ?? "lunch-receipt.png");
+    if (receipt) f.set("receipt", new Blob([new Uint8Array(receipt.bytes ?? PNG)], { type: receipt.type }), receipt.name ?? "lunch-receipt.png");
     return f;
   };
   const multipart = async (who: string, path: string, f: FormData) => {
