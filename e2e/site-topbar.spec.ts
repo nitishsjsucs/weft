@@ -62,15 +62,7 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await page.setViewportSize({ width: 1440, height: 900 });
     await openApp(page, "/app/people/wrk_0001");
     // Reach the bar from the keyboard: Tab until focus lands in the header, then walk it.
-    const inHeader = () => page.evaluate(() => !!document.activeElement?.closest("header"));
-    for (let i = 0; i < 40 && !(await inHeader()); i++) await page.keyboard.press("Tab");
-    const seen: string[] = [];
-    for (let i = 0; i < 12 && (await inHeader()); i++) {
-      const name = await page.evaluate(() => document.activeElement!.getAttribute("data-testid") ?? document.activeElement!.getAttribute("aria-label") ?? document.activeElement!.textContent ?? "");
-      await expect.poll(() => page.evaluate(() => getComputedStyle(document.activeElement!).boxShadow), { message: `${name} shows the blue ring`, timeout: 2_000 }).toMatch(BLUE_RING);
-      seen.push(name);
-      await page.keyboard.press("Tab");
-    }
+    const seen = await tabThroughHeader(page);
     expect(seen).toEqual(["Toggle sidebar", "People", TID.providerBadge, TID.simClock, TID.viewingAs, S.agentToggle]);
   });
 
@@ -131,5 +123,116 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await openApp(page, "/app/payroll/pay_2026_09_15");
     await expect(crumb).toContainText("Sep 1 to Sep 15");
     await expect(crumb).not.toContainText("pay_");
+  });
+});
+
+/** Walks the header with Tab from wherever focus starts and returns each stop's name once it has shown the ring. */
+async function tabThroughHeader(page: Page): Promise<string[]> {
+  const inHeader = () => page.evaluate(() => !!document.activeElement?.closest("header"));
+  for (let i = 0; i < 40 && !(await inHeader()); i++) await page.keyboard.press("Tab");
+  const seen: string[] = [];
+  for (let i = 0; i < 12 && (await inHeader()); i++) {
+    const name = await page.evaluate(() => document.activeElement!.getAttribute("data-testid") ?? document.activeElement!.getAttribute("aria-label") ?? document.activeElement!.textContent ?? "");
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.activeElement!).boxShadow), { message: `${name} shows the blue ring`, timeout: 2_000 }).toMatch(BLUE_RING);
+    seen.push(name);
+    await page.keyboard.press("Tab");
+  }
+  return seen;
+}
+
+const shown = { useInnerText: true } as const;
+
+test("GP19: the tiers, the keyboard and both drawers behave on every layout", async ({ page }) => {
+  const persona = page.getByTestId(TID.viewingAs);
+  const clock = page.getByTestId(TID.simClock);
+  const model = page.getByTestId(TID.providerBadge);
+  const toggleAgent = page.getByTestId(S.agentToggle);
+  const panel = page.locator(`#${DOM.agentPanel}`);
+
+  await test.step("1440 docked is Full: 'Viewing as Dana', the long clock, and no close X on the docked panel", async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openApp(page, "/app/inbox");
+    await expect(persona).toHaveText(/Viewing as\s*Dana/, shown);
+    await expect(clock).toHaveText(/Mon, Oct 26, 8:30\sAM/, shown);
+    await expect(model).toHaveText("Scripted", shown);
+    await expect(model).toHaveAttribute("aria-label", "Model: Scripted, no model calls");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Close agent panel" })).toHaveCount(0);
+  });
+
+  await test.step("1280 docked is Compact: the first name only and the short clock", async () => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(persona).not.toHaveText(/Viewing as/, shown);
+    await expect(persona).toHaveText(/Dana/, shown);
+    await expect(clock).toHaveText(/^Mon 8:30\sAM$/, shown);
+    await expect(model).toHaveText("Scripted", shown);
+  });
+
+  await test.step("keyboard: Enter opens the persona menu on an item, arrows move, Esc returns focus to the trigger", async () => {
+    await persona.focus();
+    await page.keyboard.press("Enter");
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("menuitemradio");
+    const before = await page.evaluate(() => document.activeElement?.textContent);
+    await page.keyboard.press("ArrowDown");
+    await expect.poll(() => page.evaluate(() => document.activeElement?.textContent)).not.toBe(before);
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(persona).toBeFocused();
+    await expect(persona).toHaveAttribute("aria-label", /Dana Whitfield/);
+  });
+
+  await test.step("keyboard: Enter opens the clock popover and Esc returns focus to the clock", async () => {
+    await clock.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId(S.clockPopover)).toBeVisible();
+    await expect(clock).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId(S.clockPopover)).toBeHidden();
+    await expect(clock).toBeFocused();
+  });
+
+  await test.step("New agent thread opens the closed panel with the composer focused", async () => {
+    await toggleAgent.click();
+    await expect(toggleAgent).toHaveAttribute("aria-pressed", "false");
+    await expect(panel).toHaveCount(0);
+    await page.getByTestId(S.newThread).click();
+    await expect(toggleAgent).toHaveAttribute("aria-pressed", "true");
+    await expect(panel).toBeVisible();
+    await expect(page.getByTestId(TID.agentComposer)).toBeFocused();
+  });
+
+  await test.step("1024: the agent overlays the page, so only there its header carries the close X", async () => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await expect(panel).toBeVisible();
+    await panel.getByRole("button", { name: "Close agent panel" }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(toggleAgent).toHaveAttribute("aria-pressed", "false");
+  });
+
+  await test.step("390 is Mini: the dot alone, the short clock, and the same ring on the bar's search icon", async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openApp(page, "/app/inbox");
+    await expect(model).toHaveText("", shown);
+    await expect(clock).toHaveText(/^Mon 8:30\sAM$/, shown);
+    const seen = await tabThroughHeader(page);
+    expect(seen).toEqual(["Toggle sidebar", "Search pages, people and payroll runs", TID.providerBadge, TID.simClock, TID.viewingAs, S.agentToggle]);
+  });
+
+  await test.step("390: the sidebar toggle opens the drawer, which has the same search at its top", async () => {
+    const toggle = header(page).getByRole("button", { name: "Toggle sidebar" });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId(S.sidebarSearch)).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(`#${DOM.sidebar}`)).toBeVisible();
+    await page.getByTestId(S.sidebarSearch).click();
+    await expect(page.getByTestId(TID.cmdkInput)).toBeVisible();
+    // The drawer closes as the command menu opens (the dialog hides the bar from the accessibility tree meanwhile).
+    await expect(page.locator(`#${DOM.sidebar}`)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId(TID.cmdkInput)).toBeHidden();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 });

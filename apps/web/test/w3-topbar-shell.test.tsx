@@ -40,7 +40,9 @@ describe("model segment", () => {
 
   it("puts the whole meaning in the accessible name, since narrow tiers drop the visible text", () => {
     expect(modelAria(OPENAI, "live")).toBe("Model: OpenAI gpt-5.6-luna, live and metered");
-    expect(modelAria(SCRIPTED, "scripted")).toBe("Model: Scripted, no model, scripted, no model calls");
+    expect(modelAria(SCRIPTED, "scripted")).toBe("Model: Scripted, no model calls");
+    expect(modelAria(LOCAL, "local")).toBe("Model: Local Qwen3.6-27B, live, local and unmetered");
+    expect(modelAria(undefined, "loading")).toBe("Model: checking");
     expect(modelAria(undefined, "offline")).toBe("Model: API offline");
   });
 

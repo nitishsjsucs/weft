@@ -37,7 +37,9 @@ export function modelLabel(provider: ProviderInfo | undefined, state: ModelState
 export function modelAria(provider: ProviderInfo | undefined, state: ModelState): string {
   if (state === "offline") return "Model: API offline";
   if (state === "loading" || !provider) return "Model: checking";
-  const how = state === "live" ? "live and metered" : state === "local" ? "live, local and unmetered" : "scripted, no model calls";
+  // The scripted provider's label already says it is not a model; name it once.
+  if (state === "scripted") return "Model: Scripted, no model calls";
+  const how = state === "live" ? "live and metered" : "live, local and unmetered";
   return `Model: ${provider.label}, ${how}`;
 }
 
