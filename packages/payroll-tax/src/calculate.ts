@@ -24,6 +24,18 @@ export function taxableWages(gross: number, pretax: PaycheckInput["pretax"], t: 
   return out;
 }
 
+/**
+ * Federal income tax on a paycheck that mixes regular and supplemental wages (wave 2, additive): the regular method
+ * on the regular part, the optional flat rate on the supplemental part. Pre-tax deductions reduce the regular part
+ * first, so the supplemental part is min(fit wages, supplemental cents).
+ */
+function splitFit(fitWages: number, suppCents: number, periods: number, w4: PaycheckInput["w4"], ytdSupplemental: number, t: TaxTables) {
+  const supp = Math.min(fitWages, suppCents);
+  const regular = federalIncomeTax({ fitWagesCents: fitWages - supp, periods, w4, supplemental: false, ytdSupplementalCents: ytdSupplemental }, t);
+  const flat = federalIncomeTax({ fitWagesCents: supp, periods, w4, supplemental: true, ytdSupplementalCents: ytdSupplemental }, t);
+  return { amountCents: regular.amountCents + flat.amountCents, trace: [...regular.trace, ...flat.trace, `FIT: regular ${fmt(regular.amountCents)} + supplemental ${fmt(flat.amountCents)} = ${fmt(regular.amountCents + flat.amountCents)}`] };
+}
+
 export function calculatePaycheck(input: PaycheckInput, tables: TaxTables = TAX_2026): PaycheckCalc {
   const t = tables;
   const periods = input.payPeriodsPerYear;
@@ -45,7 +57,9 @@ export function calculatePaycheck(input: PaycheckInput, tables: TaxTables = TAX_
   }
 
   const taxes: TaxCalcLine[] = [];
-  const fit = federalIncomeTax({ fitWagesCents: w.fit, periods, w4: input.w4, supplemental, ytdSupplementalCents: ytd("supplemental") }, t);
+  const suppCents = supplemental ? 0 : Math.max(0, input.supplementalCents ?? 0);
+  if (suppCents) assertCents("supplementalCents", suppCents);
+  const fit = suppCents ? splitFit(w.fit, suppCents, periods, input.w4, ytd("supplemental"), t) : federalIncomeTax({ fitWagesCents: w.fit, periods, w4: input.w4, supplemental, ytdSupplementalCents: ytd("supplemental") }, t);
   taxes.push({ code: "fit", jurisdiction: "US", payer: "employee", taxable_wages_cents: w.fit, rate: null, amount_cents: fit.amountCents });
   trace.push(...fit.trace);
   const f = fica({ ssWagesCents: w.ss, medicareWagesCents: w.medicare, ytdSsWagesCents: ytd("ss_wages"), ytdMedicareWagesCents: ytd("medicare_wages") }, t);
@@ -67,7 +81,7 @@ export function calculatePaycheck(input: PaycheckInput, tables: TaxTables = TAX_
   const net = gross - employeeTaxes - pretaxTotal - posttaxTotal;
   trace.push(`Net ${fmt(gross)} - employee taxes ${fmt(employeeTaxes)} - pre-tax ${fmt(pretaxTotal)} - post-tax ${fmt(posttaxTotal)} = ${fmt(net)} (reimbursements ${fmt(input.reimbursements_cents)} paid on top)`);
 
-  const ytdDeltas = ytdDeltasFromLines({ state, grossCents: gross, taxes, deductions: input.pretax, supplemental });
+  const ytdDeltas = ytdDeltasFromLines({ state, grossCents: gross, taxes, deductions: input.pretax, supplemental, supplementalCents: suppCents });
 
   return {
     gross_cents: gross, taxableWages: { ...w }, taxes,

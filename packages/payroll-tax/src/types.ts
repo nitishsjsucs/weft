@@ -25,6 +25,12 @@ export interface PaycheckInput {
   earnings: EarningLine[]; pretax: DeductionLine[]; posttax: DeductionLine[]; reimbursements_cents: number;
   w4: W4Input; state: StateWithholdingInput; ytd: Record<string, number>;
   employerRates: { sui: EmployerRateInput | null; ett: EmployerRateInput | null }; supplemental?: boolean;
+  /**
+   * Wave 2 (w2-offboarding, additive): cents of this paycheck's gross that are supplemental wages paid with regular
+   * wages (for example a bonus on an off-cycle run). Federal income tax withholds the regular method on the rest and
+   * the optional flat rate on these (Pub 15 section 7, separately identified). Ignored when `supplemental` is true.
+   */
+  supplementalCents?: number;
   /** NY DBL: the employer collects the employee share (default true). */
   collectNyDbl?: boolean;
 }

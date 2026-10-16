@@ -6,7 +6,7 @@
 import { Hono, type Context } from "hono";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
-  NotFound, OFFBOARDING_PROPOSAL_STEPS, OFFBOARDING_STEP_ORDER, TerminationInput, Unauthorized,
+  NotFound, OffCycleRequest, OFFBOARDING_PROPOSAL_STEPS, OFFBOARDING_STEP_ORDER, TerminationInput, Unauthorized,
   type HumanSession, type OffboardingCase, type OffboardingStep, type OffboardingStepKind, type ToolOutcome,
 } from "@weft/contracts";
 import { offboardingCases, offboardingSteps, proposals, type DbTx } from "@weft/db";
@@ -92,5 +92,16 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json((await caseDtos(weft.db, rows))[0]);
   });
 
-  return stubRoutes(r, "offboarding", ["POST /v1/workers/:id/terminate", "GET /v1/offboarding", "GET /v1/offboarding/:id"]);
+  // Off-cycle pay (GP10): always a proposal, so the person sees each earning line before anything is paid.
+  r.post("/v1/payrolls/off-cycle", async (c) => {
+    const s = session(c);
+    const body = OffCycleRequest.parse(await c.req.json().catch(() => ({})));
+    const args = { worker_ids: body.workerIds, period_start: body.periodStart, period_end: body.periodEnd, payday: body.payday, reason: body.reason, bonus_cents: body.bonusCents };
+    const propose = weft.executor.human.propose;
+    const out = propose ? await propose.call(weft.executor.human, s, "payroll.propose_off_cycle", args) : await weft.executor.human.exec({ ...s, via: "api_key", keyScope: "mcp" }, "payroll.propose_off_cycle", args);
+    await weft.scheduler.kick();
+    return refused(c, out) ?? c.json(out);
+  });
+
+  return stubRoutes(r, "offboarding", ["POST /v1/workers/:id/terminate", "GET /v1/offboarding", "GET /v1/offboarding/:id", "POST /v1/payrolls/off-cycle"]);
 }

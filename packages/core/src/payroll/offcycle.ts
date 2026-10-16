@@ -105,6 +105,8 @@ export function specialPaycheck(w: WorkerRow, spec: { periodStart: string; perio
     state: { filingStatus: profile?.stateFilingStatus ?? null, allowances: profile?.stateAllowances ?? 0 },
     ytd, employerRates: { sui: employerRateOn(world.employerRates, state, "sui", spec.payday), ett: state === "CA" ? employerRateOn(world.employerRates, state, "ett", spec.payday) : null },
   };
+  const supplementalCents = earnings.filter((e) => e.type === "bonus").reduce((s, e) => s + e.amountCents, 0);
+  if (supplementalCents > 0) input.supplementalCents = supplementalCents;
   const calc = calculatePaycheck(input, t);
   return {
     workerId: w.id, worker: w, rate, hoursX100: earnings.find((e) => e.hoursX100 !== null && e.type !== "pto_payout")?.hoursX100 ?? null,
@@ -167,4 +169,70 @@ export async function createSpecialRun(tx: DbTx, deps: { newId(p: IdPrefix): Pro
   await writeRunSummary(tx, deps, id, []);
   const [row] = await tx.select().from(payrollRuns).where(and(eq(payrollRuns.id, id), eq(payrollRuns.companyId, spec.companyId)));
   return row!;
+}
+
+// ------------------------------------------------------------------ off-cycle (GP10)
+
+export type OffCycleReason = "missed_payroll" | "bonus" | "correction" | "final_pay";
+export interface OffCycleInput { companyId: string; workerIds: string[]; periodStart: string; periodEnd: string; payday: string; reason: OffCycleReason; bonusCents: Record<string, number> }
+
+/** Calendar days from `from` through `to`, inclusive. */
+export function calendarDays(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+/**
+ * Salary for one period, split by calendar days when the rate changes inside it: each rate's line is
+ * annual / 24 x (its days / period days), one half-up rounding per line. Days before the start date or after the
+ * end date earn nothing. Returns one line per rate in effect.
+ */
+export function proratedSalaryLines(w: Pick<WorkerRow, "startDate" | "endDate">, rates: PayRateRow[], periodStart: string, periodEnd: string): SpecialEarning[] {
+  const total = calendarDays(periodStart, periodEnd);
+  const segs: { rate: PayRateRow; from: string; to: string; days: number }[] = [];
+  for (let d = periodStart; d <= periodEnd; d = addDays(d, 1)) {
+    if (d < w.startDate || (w.endDate !== null && d > w.endDate)) continue;
+    const r = rateOn(rates, d);
+    if (!r) continue;
+    const last = segs.at(-1);
+    if (last && last.rate.id === r.id && addDays(last.to, 1) === d) { last.to = d; last.days++; }
+    else segs.push({ rate: r, from: d, to: d, days: 1 });
+  }
+  return segs.map((s) => ({
+    type: "salary", hoursX100: null,
+    amountCents: roundCents(dec(s.rate.amountCents).dividedBy(SEMIMONTHLY_PERIODS).times(s.days).dividedBy(total)),
+    note: s.days === total ? `${total} of ${total} days at ${(s.rate.amountCents / 100).toFixed(2)} a year` : `${s.days} of ${total} days, ${s.from} to ${s.to}, at ${(s.rate.amountCents / 100).toFixed(2)} a year`,
+  }));
+}
+
+/** The earning lines of an off-cycle run: prorated salary (unless reason is bonus only) plus the bonus as supplemental wages. */
+export async function offCycleLines(tx: DbTx, req: OffCycleInput): Promise<SpecialLine[]> {
+  const ids = [...new Set(req.workerIds)].sort();
+  const world = await loadWorld(tx, req.companyId, ids);
+  const ws = await tx.select().from(workers).where(eq(workers.companyId, req.companyId));
+  const lines: SpecialLine[] = [];
+  for (const id of ids) {
+    const w = ws.find((x) => x.id === id);
+    if (!w || w.type !== "employee") throw new OffCycleRefusal("DOMAIN_NOT_EMPLOYEE", `${id} is not an employee of this company`);
+    const rates = world.rates.get(id) ?? [];
+    const earnings: SpecialEarning[] = [];
+    if (req.reason !== "bonus") {
+      if (rates.some((r) => r.kind === "hourly" && r.effectiveFrom <= req.periodEnd)) throw new OffCycleRefusal("DOMAIN_UNSUPPORTED_HOURLY", `${id} is paid hourly; off-cycle runs prorate salaried pay only`);
+      earnings.push(...proratedSalaryLines(w, rates, req.periodStart, req.periodEnd));
+    }
+    const bonus = req.bonusCents[id] ?? 0;
+    if (bonus > 0) earnings.push({ type: "bonus", amountCents: bonus, hoursX100: null, note: "supplemental wages, federal flat 22 percent" });
+    if (!earnings.length) throw new OffCycleRefusal("DOMAIN_EMPTY_RUN", `${id} has no earnings for ${req.periodStart} to ${req.periodEnd}`);
+    lines.push({ workerId: id, earnings });
+  }
+  return lines;
+}
+
+export class OffCycleRefusal extends Error {
+  constructor(readonly code: `DOMAIN_${string}`, message: string) { super(message); this.name = "OffCycleRefusal"; }
+}
+
+/** Settles at 06:00 PT on payday, or at the next tick when that has already passed. */
+export function specialSettleAt(payday: string, now: string): string {
+  const at = ptToUtc(payday, 6);
+  return at > now ? at : now;
 }
