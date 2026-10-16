@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import type { ToolOutcome } from "@weft/contracts";
 import { createTestWeft, type TestWeft } from "../src/testing";
+import { timeOffYearEnd } from "../src/time-off/year-end";
 
 type Req = { id: string; workerId: string; status: string; requestedMinutes: number; approverPrincipalId: string | null; checks: { rule: string; severity: string; message: string; evidence: { label: string; ref: string }[] }[]; days: { date: string; minutes: number; holiday: boolean }[]; routing: { principalId: string | null; why: string }[] };
 
@@ -127,5 +128,24 @@ describe("time-off routes", () => {
     const rows = await weft.db.all<{ worker_id: string; minutes: number; run_key: string }>(sql`SELECT worker_id, minutes, run_key FROM time_off_ledger WHERE kind = 'accrual' AND policy_id = 'top_vac_us' AND worker_id IN ('wrk_0004', 'wrk_0022') ORDER BY worker_id`);
     expect(rows.map((r) => [r.worker_id, r.minutes])).toEqual([["wrk_0004", 360], ["wrk_0022", 300]]);
     expect(rows.every((r) => r.run_key.startsWith("pay_2026_10_30:tasn_"))).toBe(true);
+  });
+
+  it("closes the year on the first tick of the next one: carryover caps, forfeits and front loads, once (T16)", async () => {
+    const forfeits = async () => weft.db.all<{ policy_id: string; n: number; m: number }>(sql`SELECT policy_id, COUNT(*) AS n, SUM(minutes) AS m FROM time_off_ledger WHERE kind = 'carryover_forfeit' GROUP BY policy_id ORDER BY policy_id`);
+    expect(await forfeits()).toEqual([]);
+    const tick = () => timeOffYearEnd({ db: weft.db, clock: weft.clock, executor: weft.executor, now: "2027-01-01T16:00:00.000Z" });
+    await tick();
+    const after = await forfeits();
+    // Vacation and CA sick carry everything; the TX and NYC banks and the prenatal bank never carry; NY sick carries 40 h.
+    expect(after.map((r) => r.policy_id)).toEqual(["top_prenatal_ny", "top_sick_ny", "top_sick_tx", "top_unpaid_nyc"]);
+    // Every NY sick balance over the cap ends the year at exactly the 2,400-minute carryover cap.
+    const ny = await weft.db.all<{ worker_id: string; bal: number }>(sql`SELECT worker_id, SUM(minutes) AS bal FROM time_off_ledger WHERE policy_id = 'top_sick_ny' AND kind NOT IN ('hold', 'hold_release') AND effective_date <= '2026-12-31' AND worker_id IN (SELECT worker_id FROM time_off_ledger WHERE kind = 'carryover_forfeit' AND policy_id = 'top_sick_ny') GROUP BY worker_id`);
+    expect(ny.length).toBeGreaterThan(0);
+    expect(ny.every((r) => r.bal === 2_400)).toBe(true);
+    const fronts = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_ledger WHERE kind = 'front_load' AND effective_date = '2027-01-01'`);
+    expect(fronts[0]!.n).toBeGreaterThan(0);
+    const n = (await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_ledger`))[0]!.n;
+    await tick();
+    expect((await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_ledger`))[0]!.n).toBe(n);
   });
 });

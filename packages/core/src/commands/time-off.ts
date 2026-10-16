@@ -247,6 +247,9 @@ const decide = writeCommand({
     const who = await deciderOf(deps.tx, ctx);
     if (!who || who.kind !== "human") throw new DomainRefusal("DOMAIN_NOT_APPROVER", "Only a person decides time off", "Propose the decision for the routed approver", null);
     if (who.role === "manager") {
+      // A manager whose own worker record is no longer active (offboarding, inactive) has lost the approve right.
+      const mine = who.workerId ? await workerOf(deps.tx, ctx.companyId, who.workerId) : null;
+      if (!mine || mine.status !== "active") throw new DomainRefusal("DOMAIN_NOT_APPROVER", `${who.display} is no longer an active manager`, "The People admin decides while the team has no manager", null);
       if (!who.workerId || w.managerId !== who.workerId) throw new DomainRefusal("DOMAIN_NOT_DIRECT_REPORT", `${who.display} decides time off only for direct reports; ${displayName(w)} is not one`, "Route the request to the worker's own manager or the People admin", null);
     } else if (!DECIDERS.has(who.role ?? "")) {
       throw new DomainRefusal("DOMAIN_NOT_APPROVER", `${who.display} (${who.role ?? "no role"}) cannot decide time off`, "The manager, an HR manager or the People admin decides", null);
