@@ -3,11 +3,18 @@ import { useEffect, useState } from "react";
 import { CalendarClock, FastForward, FlaskConical, Mail, MessageSquare, Zap } from "lucide-react";
 import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { cn } from "@weft/ui";
-import { NoticeScenario, TID, tid, type ArmedFault, type ChatMessageDto, type ToolOutcome } from "@weft/contracts";
+import { ApprovalCardW3, NoticeScenario, TID, tid, type ArmedFault, type ChatMessageDto, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, invalidate, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
 import { fmtDateTime, nextCronSlot, relative } from "../format";
 import { PageHeader } from "../page";
 import { useAgent } from "../agent-context";
+import { ApprovalCard } from "../agent/approval-card";
+
+/** A posted approval card with its live status (wave 3): the card JSON was built by the executor from the stored preview. */
+function SimChatCard({ card }: { card: ApprovalCardW3 }) {
+  const p = useGet("/v1/proposals/:id", { params: { id: card.proposalId }, refreshMs: 3_000 });
+  return <div className="mt-1.5"><ApprovalCard card={card} status={p.data?.status} taintedBy={p.data?.taintedBy ?? null} known={p.data !== undefined} compact /></div>;
+}
 
 const SCENARIOS: Record<(typeof NoticeScenario.options)[number], { label: string; note: string }> = {
   ca_de2088_rate_change: { label: "Deliver CA EDD DE 2088", note: "Revised 2026 UI rate, 3.4% to 1.5%" },
@@ -63,6 +70,7 @@ function ChatFeed({ channel }: { channel: (typeof CHANNELS)[number] }) {
           <li key={m.id} className="text-[13px] leading-5">
             <div className="flex items-baseline gap-2"><span className="font-medium">{m.author}</span><span className="text-0 text-gray-10">{fmtDateTime(m.ts)}</span></div>
             <p className="break-words whitespace-pre-wrap text-gray-12">{m.text}</p>
+            {(() => { const c = ApprovalCardW3.safeParse(m.card); return c.success ? <SimChatCard card={c.data} /> : null; })()}
           </li>
         ))}
       </ul>

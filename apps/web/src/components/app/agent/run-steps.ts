@@ -1,4 +1,4 @@
-import type { RunStepRow } from "@weft/contracts";
+import { ReportResult, type RunStepRow } from "@weft/contracts";
 import { humanTimes } from "../format";
 
 /** Tool names arrive in wire form (`payroll__explain_flags`); the UI shows the dotted command name. */
@@ -26,4 +26,19 @@ export function outcomeTone(o: RunStepRow["outcome"]): "ok" | "pending" | "refus
   if (o.startsWith("pending:")) return "pending";
   if (o.startsWith("refused:")) return "refused";
   return "error";
+}
+
+/** Wave 3: a reports.query step's chart, inline when the result was small, else the artifact the executor saved. */
+export type ReportRef = { stepN: number; report: ReportResult } | { stepN: number; artifactRef: string };
+export function reportOf(s: RunStepRow): ReportRef | null {
+  if (s.kind !== "tool_call" || toolLabel(s.toolName) !== "reports.query" || s.outcome !== "ok") return null;
+  const o = (s.result as { outcome?: { ok?: boolean; data?: unknown; artifactRef?: string | null } } | null)?.outcome;
+  if (!o?.ok) return null;
+  const inline = ReportResult.safeParse(o.data);
+  if (inline.success) return { stepN: s.n, report: inline.data };
+  return typeof o.artifactRef === "string" && o.artifactRef.startsWith("art_") ? { stepN: s.n, artifactRef: o.artifactRef } : null;
+}
+export function ranToolsLine(steps: RunStepRow[]): string | null {
+  const n = steps.filter(isChipStep).length;
+  return n > 0 ? `Ran ${n} ${n === 1 ? "tool" : "tools"}` : null;
 }

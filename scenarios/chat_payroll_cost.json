@@ -1,0 +1,18 @@
+{
+  "match": "payroll cost",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "reports__query", "arguments": { "metric": "payroll_cost_by_month", "from": null, "to": null, "group_by": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "reports__query", "ok": true, "status": "done" }] },
+        "output": [
+          { "type": "text", "text": "Payroll cost by month, from the runs Weft has paid: {{last.reports__query.data.rows.0.period_label}} {{last.reports__query.data.rows.0.total_display}} and {{last.reports__query.data.rows.1.period_label}} {{last.reports__query.data.rows.1.total_display}}. The chart splits each month into gross pay, employer taxes, employer benefits, reimbursements and contractor payouts; the table has every value." }
+        ]
+      }
+    ]
+  }
+}

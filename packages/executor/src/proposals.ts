@@ -1,9 +1,9 @@
 // Proposals, not effects (harness 5.5). A gated call stores the parsed args, the canonical preview and the
 // provenance; the card headline comes from structured fields only, free text goes to "Content to be sent".
-import { and, eq, lte, sql } from "drizzle-orm";
-import type { PolicyDecision, Preview, Proposal, ProposalKind, ProposalStatus, RiskClass, ToolOutcome } from "@weft/contracts";
-import { emitEvent, newId, type WeftCommand } from "@weft/core";
-import { payrollRuns, proposals, type DbTx } from "@weft/db";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import type { ApprovalCardW3, PolicyDecision, Preview, Proposal, ProposalKind, ProposalStatus, RiskClass, ToolOutcome } from "@weft/contracts";
+import { emitEvent, newId, payroll, type WeftCommand } from "@weft/core";
+import { payrollRuns, principals, proposals, routineRuns, routines, type Db, type DbTx } from "@weft/db";
 import { digestOf } from "./digest";
 import type { Engine } from "./engine";
 import { appendAudit } from "./chain";
@@ -92,18 +92,53 @@ export async function insertProposal(e: Engine, tx: DbTx, p: NewProposal): Promi
   return row;
 }
 
+export const CARD_MAX_FIELDS = 12;
+const EMPTY_BEFORE = new Set(["", "$0.00", "none", "None", "-"]);
+const CARD_STATUS: Record<string, ApprovalCardW3["status"]> = {
+  pending: "pending", approved: "approved", executed: "approved", failed: "approved", denied: "denied", dismissed: "denied", expired: "expired", superseded: "superseded",
+};
+
+/**
+ * The approval card (wave 3, ApprovalCardW3): every value comes from the proposal row the executor stored (its
+ * preview: headline, diff, money, subject and evidence) or from DB names, never from model text. Free-text content and
+ * the agent's note stay on the proposal page, where decide() re-renders the full preview.
+ */
+export async function approvalCardOf(db: Db | DbTx, row: ProposalRow): Promise<ApprovalCardW3> {
+  const diff = parse<Preview["diff"]>(row.diffJson, []);
+  const evidence = parse<Preview["evidence"]>(row.evidenceJson, []);
+  const lines = diff.map((d) => ({ label: plainText(d.label, 120), value: plainText(EMPTY_BEFORE.has(d.before.trim()) || d.before === d.after ? d.after : `${d.before} to ${d.after}`, 120) }));
+  const fields = lines.length > CARD_MAX_FIELDS ? [...lines.slice(0, CARD_MAX_FIELDS - 1), { label: "More", value: `${lines.length - (CARD_MAX_FIELDS - 1)} more lines on the proposal page` }] : lines;
+  const workerIds = [...new Set([...((row.subjectRef ?? "").match(/wrk_[A-Za-z0-9]+/g) ?? []), ...evidence.map((x) => x.ref).filter((r) => r.startsWith("wrk_"))])];
+  const names = await payroll.workerNames(db as DbTx, workerIds);
+  const demo = (n: string) => (n.endsWith(" (demo)") ? n : `${n} (demo)`);   // seeded people are fictional and say so
+  const one = workerIds.length === 1 ? names.get(workerIds[0]!)?.name : undefined;
+  const subjectName = one ? demo(one) : workerIds.length > 1 ? `${workerIds.length} workers` : null;
+  let routineName: string | null = null;
+  if (row.routineRunId) {
+    const [r] = await db.select({ name: routines.name }).from(routineRuns).innerJoin(routines, eq(routines.id, routineRuns.routineId)).where(eq(routineRuns.id, row.routineRunId)).limit(1);
+    routineName = r?.name ?? null;
+  }
+  const approverId = row.decidedBy ?? row.onBehalfOf;
+  const [approver] = approverId ? await db.select({ display: principals.display }).from(principals).where(inArray(principals.id, [approverId])).limit(1) : [];
+  return {
+    proposalId: row.id, headline: row.headline, risk: row.risk ?? "R1", moneyCents: row.moneyCents, routineName, subjectName,
+    approverName: approver?.display ?? null, fields, status: CARD_STATUS[row.status] ?? "pending",
+  };
+}
+
 /**
  * The proposal notifier's approval card (harness 6.9): the only writer of chat cards. Headline from structured
  * fields; the card opens the proposal page, where decide() re-renders it from the DB. Best-effort: a missing chat
- * simulator never blocks a proposal.
+ * simulator never blocks a proposal. Wave 3: the card JSON is the full ApprovalCardW3 built from the stored preview.
  */
 async function postCard(e: Engine, tx: DbTx, row: ProposalRow): Promise<void> {
   if (row.kind === "suggestion") return;
   try {
     const chat = (e.simulators({ db: tx, clock: e.clock }) as Partial<ReturnType<Engine["simulators"]>> | undefined)?.chat;
     if (!chat || typeof chat.post !== "function") return;
+    const card = await approvalCardOf(tx, row).catch(() => ({ proposalId: row.id, headline: row.headline, risk: row.risk ?? "R1", moneyCents: row.moneyCents }));
     await chat.post({ channel: row.domain === "payroll" || row.domain === "tax" ? "#payroll" : "#people-ops", author: "Weft agent",
-      text: `Approval needed: ${row.headline}`, card: { proposalId: row.id, headline: row.headline, risk: row.risk ?? "R1", moneyCents: row.moneyCents } });
+      text: `Approval needed: ${row.headline}`, card });
   } catch { /* the chat simulator is optional here */ }
 }
 

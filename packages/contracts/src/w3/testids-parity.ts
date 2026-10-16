@@ -5,6 +5,8 @@ export const W3_CHAT_TID = {
   card: (proposalId: string) => `chat-card-${proposalId}`,
   cardApprove: (proposalId: string) => `chat-card-approve-${proposalId}`,
   cardDeny: (proposalId: string) => `chat-card-deny-${proposalId}`,
+  cardTainted: (proposalId: string) => `chat-card-tainted-${proposalId}`,
+  ranTools: "agent-ran-tools",
 } as const;
 export const W3_ROUTINES_TID = {
   autonomy: (routineId: string) => `routine-autonomy-${routineId}`,

@@ -2,13 +2,17 @@
 // Runs execute in the background: POST returns { runId } at once; the UI follows GET .../events (SSE) and falls back
 // to polling GET .../trace every second. The trace adds the stage summary (timings, tokens, cache-hit ratio, USD) and
 // the run's proposals from the executor's table.
+import { readFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { Hono } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { CHAT_TOOLS, NotFound, Unauthorized, ValidationError, type Proposal, type RunStepRow } from "@weft/contracts";
-import { execRuns, notices, payrollRuns, principals, proposals, workers, type Db } from "@weft/db";
+import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type Proposal, type RunStepRow } from "@weft/contracts";
+import { execRuns, notices, payrollRuns, principals, proposals, runArtifacts, workers, type Db } from "@weft/db";
 import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
+import { approvalCardOf } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
+import { chooseChatTools } from "../agent/chat-allowlist";
 import { sse } from "../http/sse";
 import { stubRoutes } from "../http/stub";
 import { createMemoryRecall } from "../memory/recall";
@@ -83,9 +87,13 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     const session = c.get("session");
     if (!session) throw new Unauthorized();
     const body = StartBody.parse(await c.req.json());
-    const handle = await weft.executor.runs.openChatRun(session, { threadId: body.threadId ?? null, surface: "human_ui", allowlist: CHAT_TOOLS });
-    await weft.agent.startChat(handle, { text: body.text, recipe: "chat", pageContext: body.pageContext ?? null });
-    return c.json({ runId: handle.runId }, 202);
+    // Harness 5.3 wave 3 amendment: code picks the chat tools (reads, or proposals when the setting is on and the
+    // request reads as an action). With no registry wired (route tests), the wave 1 list stays.
+    const choice = await chooseChatTools({ db: weft.db, registry: weft.executor.registry, liveProvider: weft.provider?.live === true }, session, body.text);
+    const allowlist = choice.allowlist ?? [...CHAT_TOOLS];
+    const handle = await weft.executor.runs.openChatRun(session, { threadId: body.threadId ?? null, surface: "human_ui", allowlist });
+    await weft.agent.startChat(handle, { text: body.text, recipe: "chat", pageContext: body.pageContext ?? null, ...(choice.allowlist ? { allowlist } : {}) });
+    return c.json({ runId: handle.runId, chatMode: choice.mode }, 202);
   });
 
   r.get("/v1/agent/runs", async (c) => {
@@ -101,12 +109,16 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     const id = c.req.param("id");
     const run = await getRun(id);
     const steps = await store.steps(id);
-    const props = (await weft.db.select().from(proposals).where(eq(proposals.proposerRunId, id)).orderBy(desc(proposals.createdAt))).map(toProposal);
+    const propRows = await weft.db.select().from(proposals).where(eq(proposals.proposerRunId, id)).orderBy(desc(proposals.createdAt));
+    const props = propRows.map(toProposal);
+    // Wave 3: one approval card per proposal, built from the stored preview (never model text).
+    const cards: ApprovalCardW3[] = [];
+    for (const p of propRows) cards.push(await approvalCardOf(weft.db, p));
     const actions = steps.flatMap((s) => {
       const o = (s.result as { outcome?: { ok: boolean; status?: string; actionSeq?: number | null; summary?: string } } | null)?.outcome;
       return s.kind === "tool_call" && o?.ok && o.status === "done" && typeof o.actionSeq === "number" ? [{ seq: o.actionSeq, command: s.toolName ?? "", summary: o.summary ?? "" }] : [];
     });
-    return c.json(redactSafe(weft, { run, steps, proposals: props, actions, children: [], summary: summarize(steps), queuePosition: runtime.queue?.position(id) ?? null }));
+    return c.json(redactSafe(weft, { run, steps, proposals: props, cards, actions, children: [], summary: summarize(steps), queuePosition: runtime.queue?.position(id) ?? null }));
   });
 
   r.get("/v1/agent/runs/:id/events", async (c) => {
@@ -154,8 +166,35 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json({ day, daySpentUsd: daySettled / 1e6, liveSpentUsd: liveSettled / 1e6, provider: { id: weft.provider.id, model: weft.provider.model, label: weft.provider.label, live: weft.provider.live } });
   });
 
+  // Wave 3 (w3-parity-chat): a large tool result the executor saved to the run workspace (harness 7.4). Only the person
+  // a chat run acted for may read its artifacts; anyone else in the company needs view on the artifact's domain, and a
+  // routine run's artifacts follow the same domain rule. The file path comes from the row, never from the request.
+  r.get("/v1/agent/runs/:id/artifacts/:ref", async (c) => {
+    const s = c.get("session");
+    if (!s) throw new Unauthorized();
+    const id = c.req.param("id"), ref = c.req.param("ref");
+    const [run] = await weft.db.select({ companyId: execRuns.companyId, onBehalfOf: execRuns.onBehalfOf, routineRunId: execRuns.routineRunId, parentRunId: execRuns.parentRunId }).from(execRuns).where(eq(execRuns.id, id)).limit(1);
+    if (!run || run.companyId !== s.companyId) throw new NotFound(`No agent run ${id}`);
+    const [a] = await weft.db.select().from(runArtifacts).where(and(eq(runArtifacts.id, ref), eq(runArtifacts.runId, id))).limit(1);
+    if (!a) throw new NotFound(`No artifact ${ref} in run ${id}`);
+    if (!run.routineRunId && run.onBehalfOf && run.onBehalfOf !== s.principalId) throw new Forbidden(`Run ${id} belongs to another person`, { code: "NOT_PERMITTED" });
+    const [me] = await weft.db.select({ grantsJson: principals.grantsJson }).from(principals).where(and(eq(principals.id, s.principalId), eq(principals.companyId, s.companyId))).limit(1);
+    const grants = parse<Record<string, string>>(me?.grantsJson ?? null, {});
+    if (!grants[a.domain] || grants[a.domain] === "none") throw new Forbidden(`Artifact ${ref} needs view access to ${a.domain}`, { code: "NOT_PERMITTED" });
+    const root = resolve(weft.dataDir);
+    const file = resolve(join(root, a.path));
+    if (!file.startsWith(root + sep)) throw new NotFound(`No artifact ${ref} in run ${id}`);
+    let data: unknown;
+    try { data = JSON.parse(readFileSync(file, "utf8")); } catch { throw new NotFound(`Artifact ${ref} has no readable file`); }
+    const chart = ReportResult.safeParse(data);
+    return c.json(redactSafe(weft, {
+      ref: a.id, runId: a.runId, stepN: a.stepN, kind: chart.success ? "chart" : "rows", summary: a.summary, domain: a.domain, bytes: a.bytes, sha256: a.sha256,
+      taintedBy: a.taintedBy, data,
+    }));
+  });
+
   return stubRoutes(r, "agent", [
     "POST /v1/agent/runs", "GET /v1/agent/runs", "GET /v1/agent/runs/:id", "GET /v1/agent/runs/:id/trace", "GET /v1/agent/runs/:id/events",
-    "POST /v1/agent/runs/:id/cancel", "GET /v1/agent/costs",
+    "POST /v1/agent/runs/:id/cancel", "GET /v1/agent/costs", "GET /v1/agent/runs/:id/artifacts/:ref",
   ]);
 }

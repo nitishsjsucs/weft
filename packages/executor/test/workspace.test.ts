@@ -46,7 +46,9 @@ describe("run workspace", () => {
     const o = await ex.agent.exec(h, { callId: "1", command: "tax.update_rate", args: { rate_id: "etr_0001", rate: "0.015" } });
     expect(o.ok && o.status).toBe("pending_approval");
     expect(posts).toEqual([{ channel: "#payroll", author: "Weft agent", text: "Approval needed: Update CA SUI rate from 0.034 to 0.015 (etr_0001)",
-      card: { proposalId: "prp_0001", headline: "Update CA SUI rate from 0.034 to 0.015 (etr_0001)", risk: "R2", moneyCents: null } }]);
+      // Wave 3 (ApprovalCardW3): the extra fields come from the stored preview and DB names, never from model text.
+      card: { proposalId: "prp_0001", headline: "Update CA SUI rate from 0.034 to 0.015 (etr_0001)", risk: "R2", moneyCents: null,
+        routineName: null, subjectName: null, approverName: "Dana Whitfield (demo)", fields: [{ label: "rate", value: "0.034 to 0.015" }], status: "pending" } }]);
     void closeDb;
   });
 });
