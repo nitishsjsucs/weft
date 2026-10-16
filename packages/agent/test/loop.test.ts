@@ -216,6 +216,18 @@ describe("runLoop on chat", () => {
     { name: "payroll.get_run", effect: "read" as const, handler: () => done({ flagged: [{ worker: "Rowan Achebe (demo) (wrk_0014)", rule: "GROSS_CHANGE", before_cents: 400000, after_cents: 432000, action_seq: 41, result_id: "res_0041" }] }, "Read pay_2026_10_30 flagged rows", "res_0200") },
   ]);
 
+  it("a tool-call preamble at the answer-by step is never taken as the answer", async () => {
+    const fake = chatExec();
+    const read = { output: [{ type: "function_call" as const, name: "payroll__get_run", arguments: { run_id: "pay_2026_10_30", flagged_only: true } }] };
+    const script: Script = { match: "preamble", agents: { main: [read, read, read, { output: [{ type: "text", text: "Next I will read the raise action to confirm the change." }, read.output[0]!] }] } };
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { chat_preamble: script } }));
+    const h = handle();
+    await rt.startChat(h, { text: "preamble: why is the NY raise flagged?", recipe: "chat", pageContext: null });
+    const run = await rt.settled(h.runId);
+    expect(run).toMatchObject({ status: "done", terminalReason: "DONE" });
+    expect(run.summary).not.toContain("Next I will read");
+  });
+
   it("chat sees exactly the 14 read tools and an ungrounded answer gets one repair, then a grounded answer is done", async () => {
     const fake = chatExec();
     let seen: string[] = [];

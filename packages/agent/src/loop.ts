@@ -304,9 +304,8 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     history = [...history, { kind: "model", provider: provider.id, native: result.native }];
 
     // Chat at its answer-by step: the calls are not run; the person gets the grounded summary of what was read.
+    // Text that comes with tool calls is a preamble ("Next I will read X"), never the answer, so it is not used.
     if (chat && result.toolCalls.length > 0 && run.stepsUsed >= answerBy) {
-      const text = result.text.trim();
-      if (text && check(text, await allToolResults()).ok) return finish({ status: "done", reason: "DONE", summary: text });
       return finish({ status: "done", reason: "DONE", summary: await groundedTemplate(allToolResults) });
     }
 

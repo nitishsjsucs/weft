@@ -196,6 +196,12 @@ Instrumentation per model step: `admission_ms`, `assemble_ms`, `time_to_llm_ms` 
 | Wall-clock day, all runs, all companies | | | | $2.00 (`WEFT_DAY_USD_CAP`) | |
 | Live suite, cumulative across reruns | | | | $0.50 (`WEFT_LIVE_USD_CAP`) | |
 
+Wave 2 amendment (L3 stabilization, recorded in the review log): chat answers by its fourth model step
+(`CHAT_ANSWER_BY`, `WEFT_CHAT_ANSWER_STEPS` overrides it from 1 to 12). The step before gets an answer-now notice; at
+the fourth step tool calls are not run, and any text that came with them is treated as a preamble, so the person gets
+the grounded template of what was read. The 12-step budget above still bounds everything else. Claude runs get 6
+times the USD cap in the loop and the ledger (`RUN_CAP_SCALE`), since Opus 5.5 output costs about 17 times Luna's.
+
 A run stops when any of these holds, checked in code in this order:
 
 1. `cancelled` by a person.
@@ -270,6 +276,9 @@ The registry (`packages/executor/src/registry.ts`, T3) is the single source for 
 | `rt_new_hire` | `people.get`, `onboarding.get_checklist`, `tax.list_registrations`, `tax.register_state_account`, `it.create_account`, `it.order_device`, `onboarding.complete_task`, `comms.send_message` |
 | `rt_people_digest` | `comms.send_message`, `people.search` (counts come from the precheck, not from chat reads) |
 | Custom routines | at most 8, each an enum member of the main-tier names, validated by `routines.draft` |
+
+Wave 2 amendment: chat is offered 13 of these 14 tools. `comms.post_update` stays on the frozen allowlist but is
+not offered to chat (`CHAT_HIDDEN_TOOLS`), so a read-only question leaves no action row.
 
 A registry test asserts the `rt_new_hire` and `rt_people_digest` allowlists contain no command that can taint in the concise format, and scenarios S3 and S4 assert `tainted === false` at the end. `memory.write_note` is on no golden-path allowlist in P0.
 
