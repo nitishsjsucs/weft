@@ -2,10 +2,12 @@
 // Interactive approval card (wave 3, ApprovalCardW3). Every value on it comes from the proposal's stored preview,
 // built by the executor's approvalCardOf; the agent's own words never reach it. Approve and Deny call the same decide
 // route as the Inbox (inbox/decide.ts), so a double click or a race with another surface still executes once; Open
-// goes to the Inbox card with the full preview, the content to be sent and the agent's note.
+// goes to the Inbox card with the full preview, the content to be sent and the agent's note. A proposal from a run
+// that read untrusted content shows the Inbox's warning and is not approvable from the card: approve it in the Inbox,
+// where the full content is on screen (Deny stays, since denying never executes anything).
 import Link from "next/link";
 import { useState } from "react";
-import { Check, ExternalLink, X } from "lucide-react";
+import { Check, ExternalLink, ShieldAlert, X } from "lucide-react";
 import { formatCents, W3_CHAT_TID, type ApprovalCardW3, type DecisionResult, type ProposalStatus, type RiskClass } from "@weft/contracts";
 import { Button } from "@weft/ui/components";
 import { cn } from "@weft/ui";
@@ -23,8 +25,11 @@ const OUTCOME: Partial<Record<ProposalStatus, { text: string; tone: string }>> =
   superseded: { text: "Replaced by a newer proposal", tone: "text-gray-11" },
 };
 
-/** `status` is the proposal's live status when the caller has it (the run trace, a proposals read); else the card's. */
-export function ApprovalCard({ card, status, compact = false, onDecided }: { card: ApprovalCardW3; status?: ProposalStatus; compact?: boolean; onDecided?: (r: DecisionResult) => void }) {
+/**
+ * `status` is the proposal's live status when the caller has it (the run trace, a proposals read); else the card's.
+ * `taintedBy` is the proposal row's taint source (the trace's or the proposal read's `taintedBy`).
+ */
+export function ApprovalCard({ card, status, taintedBy = null, compact = false, onDecided }: { card: ApprovalCardW3; status?: ProposalStatus; taintedBy?: string | null; compact?: boolean; onDecided?: (r: DecisionResult) => void }) {
   const [result, setResult] = useState<DecisionResult | null>(null);
   const m = useMutation((decision: "approve" | "deny") => decideProposal(card.proposalId, decision, decision === "deny" ? { reasonCode: "not_needed", note: null } : undefined));
   const live: ProposalStatus = (result?.ok ? result.proposal.status : undefined) ?? status ?? (card.status === "approved" ? "approved" : card.status);
@@ -44,6 +49,12 @@ export function ApprovalCard({ card, status, compact = false, onDecided }: { car
         <span className="flex-1" />
         <span className="text-0 text-gray-10">{pending ? "Needs approval" : "Decided"}</span>
       </div>
+      {taintedBy ? (
+        <div data-testid={W3_CHAT_TID.cardTainted(card.proposalId)} role="alert" className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11">
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          <span className="min-w-0 break-words">This run read untrusted content: {taintedBy}.{pending ? " Review it in the Inbox before approving." : ""}</span>
+        </div>
+      ) : null}
       <p className="text-[13px] leading-5 font-medium break-words text-gray-12">{card.headline}</p>
       <dl className="flex flex-col gap-0.5 text-1 text-gray-11">
         {card.subjectName ? <div className="flex gap-1.5"><dt className="text-gray-10">For</dt><dd className="min-w-0 break-words">{card.subjectName}</dd></div> : null}
@@ -66,7 +77,7 @@ export function ApprovalCard({ card, status, compact = false, onDecided }: { car
       <div className="flex flex-wrap items-center gap-1.5">
         {pending ? (
           <>
-            <Button data-testid={W3_CHAT_TID.cardApprove(card.proposalId)} variant="primary" size="sm" disabled={m.pending} onClick={() => void decide("approve")}><Check /> Approve</Button>
+            {taintedBy ? null : <Button data-testid={W3_CHAT_TID.cardApprove(card.proposalId)} variant="primary" size="sm" disabled={m.pending} onClick={() => void decide("approve")}><Check /> Approve</Button>}
             <Button data-testid={W3_CHAT_TID.cardDeny(card.proposalId)} variant="secondary" size="sm" disabled={m.pending} onClick={() => void decide("deny")}><X /> Deny</Button>
           </>
         ) : null}

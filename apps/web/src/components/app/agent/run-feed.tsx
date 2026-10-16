@@ -29,7 +29,7 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
   // Wave 3: one card per proposal this run filed, built by the API from the stored preview (trace.cards).
   const trace = w.trace as (typeof w.trace & { cards?: ApprovalCardW3[]; proposals?: Proposal[] }) | null;
   const cards = trace?.cards ?? [];
-  const statusOf = (id: string) => trace?.proposals?.find((p) => p.id === id)?.status;
+  const proposalOf = (id: string) => trace?.proposals?.find((p) => p.id === id);
   const ran = working ? null : ranToolsLine(w.steps);
   return (
     <div className="flex flex-col gap-1.5" data-run-id={runId} data-stream-mode={w.mode}>
@@ -49,7 +49,7 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
         })}
       </ul>
       {reports.map((r) => <StepReport key={r.stepN} runId={runId} item={r} />)}
-      {cards.map((c) => <ApprovalCard key={c.proposalId} card={c} status={statusOf(c.proposalId)} onDecided={() => invalidate()} />)}
+      {cards.map((c) => <ApprovalCard key={c.proposalId} card={c} status={proposalOf(c.proposalId)?.status} taintedBy={proposalOf(c.proposalId)?.taintedBy ?? null} onDecided={() => invalidate()} />)}
       {ran ? <div data-testid={W3_CHAT_TID.ranTools} className="text-1 text-gray-10">{ran}</div> : null}
       <div data-testid={latest ? TID.agentStatus : undefined} data-status={status ?? "starting"} className="text-[13px]">
         {working ? <ShimmerText>Working...</ShimmerText>
