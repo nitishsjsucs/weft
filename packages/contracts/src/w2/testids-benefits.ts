@@ -1,2 +1,20 @@
 // Wave 2 E2E test ids for w2-benefits-contractors (docs/wave2.md). Owner: w2-benefits-contractors. Add entries here only; e2e specs import them from @weft/contracts.
-export const W2_BENEFITS_TID = {} as const;
+export const W2_BENEFITS_TID = {
+  tabPlans: "benefits-tab-plans",
+  tabRecon: "benefits-tab-reconciliation",
+  tabEnrollment: "benefits-tab-open-enrollment",
+  reconMonth: "recon-month",
+  reconRun: "recon-run",
+  reconTable: "recon-findings",
+  reconRow: (id: string) => `recon-finding-${id}`,
+  reconDispute: (id: string) => `recon-dispute-${id}`,
+  reconDisputeConfirm: "recon-dispute-confirm",
+  reconNotice: "recon-notice",
+  enrollmentTable: "open-enrollment-table",
+  enrollmentRow: (workerId: string) => `open-enrollment-${workerId}`,
+  enrollmentNudge: "open-enrollment-nudge",
+  payoutsTable: "contractor-payouts",
+  payoutRow: (id: string) => `contractor-payout-${id}`,
+  payoutsSchedule: "contractor-payouts-schedule",
+  fxTable: "contractor-fx",
+} as const;
