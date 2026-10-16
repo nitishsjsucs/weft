@@ -15,7 +15,7 @@
 //   --web-port N     web port (default 3070, e2e 3170; env WEFT_WEB_PORT)
 //   --api-only       start only the API
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 
@@ -58,8 +58,33 @@ async function checkPort(port: number, name: string): Promise<void> {
   if (!(await bindable(port))) { log(`port ${port} (${name}) cannot be bound on 127.0.0.1; pass --${name}-port`); process.exit(1); }
 }
 
+/** PIDs of a next dev (or its next-server child) already running in apps/web. Next 16 allows one per app directory. */
+function liveNextDev(webDir: string): string[] {
+  const r = spawnSync("pgrep", ["-f", "next dev|next-server"], { encoding: "utf8" });
+  if (r.error) return [];
+  return r.stdout.split("\n").map((s) => s.trim()).filter(Boolean).filter((pid) => {
+    const c = spawnSync("lsof", ["-a", "-p", pid, "-d", "cwd", "-Fn"], { encoding: "utf8" });
+    return (c.stdout ?? "").split("\n").some((l) => l === `n${webDir}`);
+  });
+}
+
 await checkPort(apiPort, "api");
 if (!apiOnly) await checkPort(webPort, "web");
+if (!apiOnly) {
+  const busy = liveNextDev(join(root, "apps/web"));
+  if (busy.length) {
+    log(`a next dev server is already running in this checkout (pid ${busy.join(", ")}); Next allows one per app directory. Stop it, or run from a separate clone`);
+    process.exit(1);
+  }
+}
+
+// next dev rewrites the tracked apps/web/next-env.d.ts (.next/types to .next/dev/types); put it back on stop.
+const nextEnvFile = join(root, "apps/web/next-env.d.ts");
+const nextEnvBefore = (() => { try { return readFileSync(nextEnvFile, "utf8"); } catch { return null; } })();
+function restoreNextEnv(): void {
+  if (nextEnvBefore === null) return;
+  try { if (readFileSync(nextEnvFile, "utf8") !== nextEnvBefore) writeFileSync(nextEnvFile, nextEnvBefore); } catch { /* best effort */ }
+}
 
 // ---- environment -----------------------------------------------------------------------------------------------
 
@@ -147,6 +172,7 @@ async function stop(code = 0): Promise<never> {
     for (const g of groups) if (groupAlive(g.pgid)) { log(`${g.name} did not stop on SIGTERM; sending SIGKILL to group ${g.pgid}`); killGroup(g.pgid, "SIGKILL"); }
     const hard = Date.now() + 3000;
     while (Date.now() < hard && groups.some((g) => groupAlive(g.pgid))) await sleep(50);
+    restoreNextEnv();
     log("stopped");
   }
   process.exit(code);

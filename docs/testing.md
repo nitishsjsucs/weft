@@ -13,7 +13,7 @@ Three layers, from fastest to slowest. None of them calls a live model: the prov
 
 ## The E2E run
 
-`pnpm e2e` starts `scripts/dev.ts --e2e`: a fresh seed in `.data-e2e/`, the scripted provider, a frozen clock (rate 0) at the seed time, web on 3170 and API on 4170, both on 127.0.0.1 after lsof port checks. Playwright waits for `/api/v1/health` through the web proxy, `e2e/global-setup.ts` warms every app page (so first compiles do not eat test time), then the specs run one at a time with one worker. On teardown Playwright sends SIGTERM to the runner, which stops both process groups.
+`pnpm e2e` starts `scripts/dev.ts --e2e`: a fresh seed in `.data-e2e/`, the scripted provider, a frozen clock (rate 0) at the seed time, web on 3170 and API on 4170, both on 127.0.0.1 after lsof port checks. Playwright waits for `/api/v1/health` through the web proxy, `e2e/global-setup.ts` warms every app page (so first compiles do not eat test time), then the specs run one at a time with one worker. On teardown Playwright sends SIGTERM to the runner, which stops both process groups. One checkout runs one web dev server: Next 16 allows a single `next dev` per app directory, so the runner refuses to start (before seeding) when another `next dev` is running in `apps/web`; run a second suite from a separate clone. On stop the runner restores `apps/web/next-env.d.ts`, which `next dev` rewrites.
 
 Before every golden path test the `freshWorld` fixture calls `POST /v1/sim/reset` and checks the clock is back at `2026-10-26T15:30:00.000Z` with rate 0. Specs drive the browser for every action a person takes and use the API (through the same proxy) only to read exact values back.
 

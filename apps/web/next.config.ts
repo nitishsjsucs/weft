@@ -7,6 +7,7 @@ const apiPort = process.env.WEFT_API_PORT ?? "4070";
 const config: NextConfig = {
   // next dev would otherwise write an untracked apps/web/AGENTS.md on every start.
   agentRules: false,
+  devIndicators: false,     // the dev badge covered the sidebar Settings link in every demo walk
   transpilePackages: ["@weft/ui", "@weft/contracts"],
   compress: false,          // SSE must not be buffered
   poweredByHeader: false,
