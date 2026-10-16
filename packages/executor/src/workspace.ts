@@ -22,10 +22,14 @@ export function runDir(dataDir: string, companyId: string, runId: string): strin
   return join(dataDir, "companies", companyId, "runs", runId);
 }
 
-function rowsOf(data: unknown): unknown[] {
+/** The rows of an offloaded result: the value itself when it is an array, else its longest array field (the first
+ * array field can be an empty list such as flags, which paged as "rows 1 to 0 of 0"), else the value as one row. */
+export function rowsOf(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
   if (data && typeof data === "object") {
-    for (const v of Object.values(data as Record<string, unknown>)) if (Array.isArray(v)) return v;
+    let best: unknown[] | null = null;
+    for (const v of Object.values(data as Record<string, unknown>)) if (Array.isArray(v) && (!best || v.length > best.length)) best = v;
+    if (best) return best;
   }
   return [data];
 }

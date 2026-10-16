@@ -10,6 +10,7 @@ import { actions, execRuns, proposals, runArtifacts } from "@weft/db";
 import type { Engine } from "./engine";
 import { codeFiles } from "./sandbox/files";
 import { sandboxCall } from "./sandbox/host";
+import { rowsOf } from "./workspace";
 import { sandboxFromEnv } from "./sandbox/select";
 
 const base = {
@@ -94,7 +95,7 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       const [a] = await deps.tx.select().from(runArtifacts).where(and(eq(runArtifacts.id, i.ref), inArray(runArtifacts.runId, family))).limit(1);
       if (!a) throw Object.assign(new Error(`No artifact ${i.ref} in this run`), { code: "UNKNOWN_REFERENCE" });
       const json = JSON.parse(readFileSync(join(e.dataDir, a.path), "utf8")) as unknown;
-      const rows = Array.isArray(json) ? json : json && typeof json === "object" ? (Object.values(json).find(Array.isArray) as unknown[] | undefined) ?? [json] : [json];
+      const rows = rowsOf(json);
       const off = i.offset ?? 0, lim = i.limit ?? 50;
       const page = rows.slice(off, off + lim);
       const out = { data: { artifact_ref: a.id, offset: off, row_count: rows.length, rows: page, has_more: off + lim < rows.length }, summary: `${a.summary} (rows ${off + 1} to ${off + page.length} of ${rows.length})` };

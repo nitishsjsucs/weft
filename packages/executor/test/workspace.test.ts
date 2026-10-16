@@ -50,3 +50,14 @@ describe("run workspace", () => {
     void closeDb;
   });
 });
+
+describe("artifact rows (wave 2 integrator fix)", () => {
+  it("pages the longest array field, so payroll.get_run's empty excluded_worker_ids no longer reads as 0 rows", async () => {
+    const { rowsOf } = await import("../src/workspace");
+    // The payroll.get_run shape: excluded_worker_ids (often empty) comes before the flagged paychecks.
+    expect(rowsOf({ run_id: "pay_2026_10_30", excluded_worker_ids: [], flagged: [{ id: "pyc_1" }, { id: "pyc_2" }], run_flags: [] })).toEqual([{ id: "pyc_1" }, { id: "pyc_2" }]);
+    expect(rowsOf([1, 2, 3])).toEqual([1, 2, 3]);
+    expect(rowsOf({ a: [1], b: [2] })).toEqual([1]);   // ties keep the first
+    expect(rowsOf({ only: "value" })).toEqual([{ only: "value" }]);
+  });
+});
