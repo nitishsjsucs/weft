@@ -12,6 +12,13 @@ import type { Weft, WeftEnv } from "../http/context";
 import { sse } from "../http/sse";
 import { stubRoutes } from "../http/stub";
 
+// Steps carry raw model call args, so the trace and the SSE stream go through the executor's redactor (harness 9).
+// Route tests that pass a fake executor without a redactor get the value unchanged.
+function redactSafe<T>(weft: Weft, v: T): T {
+  const r = (weft.executor as { redact?: (s: string) => string }).redact;
+  return typeof r === "function" ? (JSON.parse(r.call(weft.executor, JSON.stringify(v))) as T) : v;
+}
+
 const StartBody = z.object({ text: z.string().min(1).max(4000), pageContext: z.string().max(400).nullable().optional(), threadId: z.string().nullable().optional() });
 const TERMINAL = new Set(["waiting", "held", "done", "failed", "refused", "escalated", "expired", "cancelled"]);
 const parse = <T>(s: string | null, d: T): T => { if (!s) return d; try { return JSON.parse(s) as T; } catch { return d; } };
@@ -97,7 +104,7 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
       const o = (s.result as { outcome?: { ok: boolean; status?: string; actionSeq?: number | null; summary?: string } } | null)?.outcome;
       return s.kind === "tool_call" && o?.ok && o.status === "done" && typeof o.actionSeq === "number" ? [{ seq: o.actionSeq, command: s.toolName ?? "", summary: o.summary ?? "" }] : [];
     });
-    return c.json({ run, steps, proposals: props, actions, children: [], summary: summarize(steps), queuePosition: runtime.queue?.position(id) ?? null });
+    return c.json(redactSafe(weft, { run, steps, proposals: props, actions, children: [], summary: summarize(steps), queuePosition: runtime.queue?.position(id) ?? null }));
   });
 
   r.get("/v1/agent/runs/:id/events", async (c) => {
@@ -117,7 +124,8 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
       const forward = (s: RunStepRow) => {
         if (!live || seen.has(s.n)) return;
         seen.add(s.n);
-        send("step", s);
+        // Model call args are stored raw by the loop, so every streamed step goes through the redactor (harness 9).
+        send("step", redactSafe(weft, s));
         if (s.stage === "terminal") void store.getRun(id).then((row) => { if (row && TERMINAL.has(row.status)) finish(row.status); });
       };
       const stop = weft.agent.subscribe(id, forward);
