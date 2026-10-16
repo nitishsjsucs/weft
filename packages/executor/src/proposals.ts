@@ -110,7 +110,9 @@ export async function approvalCardOf(db: Db | DbTx, row: ProposalRow): Promise<A
   const fields = lines.length > CARD_MAX_FIELDS ? [...lines.slice(0, CARD_MAX_FIELDS - 1), { label: "More", value: `${lines.length - (CARD_MAX_FIELDS - 1)} more lines on the proposal page` }] : lines;
   const workerIds = [...new Set([...((row.subjectRef ?? "").match(/wrk_[A-Za-z0-9]+/g) ?? []), ...evidence.map((x) => x.ref).filter((r) => r.startsWith("wrk_"))])];
   const names = await payroll.workerNames(db as DbTx, workerIds);
-  const subjectName = workerIds.length === 1 ? (names.get(workerIds[0]!)?.name ?? null) : workerIds.length > 1 ? `${workerIds.length} workers` : null;
+  const demo = (n: string) => (n.endsWith(" (demo)") ? n : `${n} (demo)`);   // seeded people are fictional and say so
+  const one = workerIds.length === 1 ? names.get(workerIds[0]!)?.name : undefined;
+  const subjectName = one ? demo(one) : workerIds.length > 1 ? `${workerIds.length} workers` : null;
   let routineName: string | null = null;
   if (row.routineRunId) {
     const [r] = await db.select({ name: routines.name }).from(routineRuns).innerJoin(routines, eq(routines.id, routineRuns.routineId)).where(eq(routineRuns.id, row.routineRunId)).limit(1);
