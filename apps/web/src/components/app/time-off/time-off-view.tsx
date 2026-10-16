@@ -34,6 +34,7 @@ interface Calendar { departmentId: string; departmentName: string; from: string;
 export const hrs = (m: number) => `${(m / 60).toFixed(2)} h`;
 const SEVERITY_TONE = { block: "red", review: "amber", info: "gray" } as const;
 const STATUS_TONE: Record<string, "amber" | "green" | "red" | "gray" | "blue"> = { pending: "amber", approved: "green", denied: "red", cancelled: "gray", taken: "blue" };
+const STATUS_LABEL: Record<string, string> = { pending: "Pending", approved: "Approved", denied: "Denied", cancelled: "Cancelled", taken: "Taken" };
 const RULE_LABEL: Record<string, string> = {
   INSUFFICIENT_BALANCE: "Balance too low", WAITING_PERIOD: "Waiting period", USE_CAP: "Over the use cap", INCREMENT: "Below the minimum",
   COVERAGE_CONFLICT: "Coverage", OVERLAPS_PAYROLL_DEADLINE: "Payroll deadline", INCLUDES_HOLIDAY: "Includes holidays", SHORT_NOTICE: "Short notice",
@@ -50,7 +51,7 @@ const today = (iso: string | undefined) => (iso ? new Intl.DateTimeFormat("en-CA
 function Empty({ text }: { text: string }) { return <p className="px-4 py-4 text-[13px] text-gray-10">{text}</p>; }
 
 export function CheckChips({ checks }: { checks: TimeOffRequestRow["checks"] }) {
-  if (!checks.length) return <span className="text-1 text-gray-10">No checks fired</span>;
+  if (!checks.length) return <span className="text-1 text-gray-10">All checks passed</span>;
   return (
     <span className="flex flex-wrap gap-1">
       {checks.map((c) => <Badge key={c.rule} tone={SEVERITY_TONE[c.severity]} data-testid={TID.check(c.rule)} title={c.message}>{RULE_LABEL[c.rule] ?? c.rule}</Badge>)}
@@ -71,10 +72,10 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
         <span className="font-medium">{r.workerName}</span>
         <span className="text-[13px] text-gray-11">{r.policyName}</span>
         <span className="text-[13px] tabular-nums">{range(r)}</span>
-        <span className="font-mono text-1 text-gray-11">{hrs(r.requestedMinutes)}</span>
+        <span className="text-1 tabular-nums text-gray-11">{hrs(r.requestedMinutes)}</span>
         <span className="ml-auto flex items-center gap-1.5">
-          {external ? <Badge tone="outline" data-testid={TID.source(r.id)} title="Read-only in Weft: change it where it lives and the next sync updates it">Managed in {external}</Badge> : null}
-          <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{r.status}</Badge>
+          {external ? <Badge tone="outline" data-testid={TID.source(r.id)} title="Read-only in Weft: change it where it lives and the next sync updates it">Managed in {external}{r.source === "workday" ? " (simulated)" : ""}</Badge> : null}
+          <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{STATUS_LABEL[r.status] ?? r.status}</Badge>
         </span>
       </div>
       <CheckChips checks={r.checks} />
@@ -89,8 +90,9 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
         <div className="flex flex-wrap items-center gap-2">
           <input aria-label="Decision note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={400} placeholder="Note (optional)"
             className="h-8 min-w-0 flex-1 rounded-md bg-card px-2 text-[13px] shadow-[var(--shadow-border)] outline-none focus-visible:ring-2 focus-visible:ring-accent-8" />
-          <Button size="sm" variant="primary" data-testid={TID.decide("approve")} disabled={decide.pending || blocked} title={blocked ? "A block check stands" : undefined} onClick={() => void go("approve")}><Check /> Approve</Button>
+          <Button size="sm" variant="primary" data-testid={TID.decide("approve")} disabled={decide.pending || blocked} aria-describedby={blocked ? `${r.id}-blocked` : undefined} onClick={() => void go("approve")}><Check /> Approve</Button>
           <Button size="sm" data-testid={TID.decide("deny")} disabled={decide.pending} onClick={() => void go("deny")}><X /> Deny</Button>
+          {blocked ? <p id={`${r.id}-blocked`} className="w-full text-[12px] text-gray-11">Approve is off: {r.checks.filter((c) => c.severity === "block").map((c) => (RULE_LABEL[c.rule] ?? c.rule).toLowerCase()).join(", ")} blocks this request. Deny it, or wait until the check clears.</p> : null}
         </div>
       ) : r.status === "pending" && !external ? <p className="text-1 text-gray-10">Waiting on {principalName(r.approverPrincipalId)}.</p> : null}
     </li>
@@ -180,7 +182,7 @@ export function CalendarTab() {
                 <td className="sticky left-0 z-10 whitespace-nowrap bg-card px-3 py-1.5">{names.get(id)?.displayName ?? id}</td>
                 {weekdays.map((d) => {
                   const o = d.out.find((x) => x.workerId === id);
-                  return <td key={d.date} className={`h-7 px-0.5 text-center ${d.holiday ? "bg-gray-3" : ""}`}>{o ? <span className={`block h-5 rounded ${o.status === "pending" ? "bg-accent-3 outline outline-1 outline-dashed outline-accent-8" : "bg-accent-4"}`} title={`${o.requestId} (${o.status})`} /> : null}</td>;
+                  return <td key={d.date} className={`h-7 px-0.5 text-center ${d.holiday ? "bg-gray-3" : ""}`}>{o ? <span data-mark={o.status} className={`block h-5 rounded ${o.status === "pending" ? "bg-blue-3 outline outline-1 outline-dashed outline-blue-9" : "bg-blue-9"}`} title={`${o.requestId} (${o.status})`} /> : null}</td>;
                 })}
               </tr>
             ))}
