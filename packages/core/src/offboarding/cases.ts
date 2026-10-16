@@ -93,8 +93,8 @@ export async function insertCase(tx: DbTx, deps: { newId(p: "ofb_" | "ofs_"): Pr
  * Marks a step done in the executor's transaction (actionSeq is the seq the executor gives this call's action row),
  * then completes the case when every step is done or skipped: the case closes and the worker turns inactive.
  */
-export async function finishStep(tx: DbTx, input: { step: StepRow; c: CaseRow; actionSeq: number; proposalId: string | null; detail: string; now: string }): Promise<{ completed: boolean }> {
-  await tx.update(offboardingSteps).set({ status: "done", actionSeq: input.actionSeq, proposalId: input.proposalId, detail: input.detail, doneAt: input.now }).where(eq(offboardingSteps.id, input.step.id));
+export async function finishStep(tx: DbTx, input: { step: StepRow; c: CaseRow; actionSeq: number; proposalId: string | null; detail: string; now: string; status?: "done" | "skipped" }): Promise<{ completed: boolean }> {
+  await tx.update(offboardingSteps).set({ status: input.status ?? "done", actionSeq: input.actionSeq, proposalId: input.proposalId, detail: input.detail, doneAt: input.now }).where(eq(offboardingSteps.id, input.step.id));
   const steps = await stepsOf(tx, input.c.id);
   const completed = steps.every((s) => s.status === "done" || s.status === "skipped");
   if (completed) {

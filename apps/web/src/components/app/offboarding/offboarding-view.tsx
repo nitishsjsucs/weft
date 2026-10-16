@@ -77,6 +77,10 @@ export function OffboardingCaseView({ id }: { id: string }) {
     const body = step.kind === "final_pay" ? { case_id: id, pay_unused_pto: !step.detail.includes("no PTO payout") } : { case_id: id };
     return client.post("/v1/tools/:name", { params: { name: STEP_COMMAND[step.kind]! }, body });
   });
+  const [skipping, setSkipping] = useState<OffboardingStep["kind"] | null>(null);
+  const [skipReason, setSkipReason] = useState("");
+  const skip = useMutation(async (kind: OffboardingStep["kind"], reason: string) =>
+    client.post("/v1/tools/:name", { params: { name: "offboarding.skip_step" }, body: { case_id: id, step: kind, reason } }));
   const runRemaining = useMutation(async (steps: string[]) => {
     for (const step of steps) await client.post("/v1/tools/:name", { params: { name: "offboarding.run_step" }, body: { case_id: id, step } });
     return steps.length;
@@ -99,6 +103,15 @@ export function OffboardingCaseView({ id }: { id: string }) {
         ) : null} />
       {runRemaining.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(runRemaining.error)}</div> : null}
       {runNow.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(runNow.error)}</div> : null}
+      {skip.error ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(skip.error)}</div> : null}
+      {skipping ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+          <span>Skip {STEP_LABEL[skipping].toLowerCase()}: why does it not apply?</span>
+          <input data-testid={W2_OFFBOARDING_TID.skipReason} aria-label="Reason" value={skipReason} maxLength={200} onChange={(e) => setSkipReason(e.target.value)} className="h-8 min-w-[220px] flex-1 rounded-lg border border-[var(--app-border)] bg-card px-2" />
+          <Button data-testid={W2_OFFBOARDING_TID.skipConfirm} size="sm" variant="primary" disabled={!skipReason.trim() || skip.pending} onClick={() => void skip.run(skipping, skipReason.trim()).then((r) => { if (r !== undefined) { setSkipping(null); setSkipReason(""); } })}>Skip step</Button>
+          <Button size="sm" onClick={() => { setSkipping(null); setSkipReason(""); }}>Cancel</Button>
+        </div>
+      ) : null}
       {ran ? <div className="mb-3 text-1 text-gray-11" role="status">{ran}</div> : null}
       <Card className="overflow-x-auto">
         <Table data-testid={W2_OFFBOARDING_TID.caseSteps}>
@@ -113,6 +126,9 @@ export function OffboardingCaseView({ id }: { id: string }) {
                 <TD>
                   <span className="flex flex-wrap items-center gap-2">
                     {s.proposalId ? <Link data-testid={w2OffboardingTid.stepProposal(s.kind)} href={`/app/inbox?proposal=${s.proposalId}`} className="font-mono text-0 text-accent-11 hover:underline">{s.proposalId}</Link> : <span className="text-gray-10">-</span>}
+                    {c.status === "open" && s.status === "pending" ? (
+                      <Button data-testid={w2OffboardingTid.stepSkip(s.kind)} size="xs" variant="ghost" onClick={() => setSkipping(s.kind)}>Skip</Button>
+                    ) : null}
                     {c.status === "open" && s.status === "pending" && PROPOSAL_STEPS.has(s.kind) ? (
                       <Button data-testid={w2OffboardingTid.stepRunNow(s.kind)} size="xs" disabled={runNow.pending} title="No pending proposal: run this step now, as you" onClick={() => void runNow.run(s)}>Run now</Button>
                     ) : null}

@@ -5,6 +5,7 @@ export const W2_OFFBOARDING_TID = {
   terminateSubmit: "terminate-submit", terminateError: "terminate-error",
   personOffCycle: "person-off-cycle", offCyclePeriodStart: "off-cycle-period-start", offCyclePeriodEnd: "off-cycle-period-end",
   offCyclePayday: "off-cycle-payday", offCycleReason: "off-cycle-reason", offCycleBonus: "off-cycle-bonus", offCycleSubmit: "off-cycle-submit",
+  skipReason: "offboarding-skip-reason", skipConfirm: "offboarding-skip-confirm",
   caseStatus: "offboarding-case-status", caseSteps: "offboarding-case-steps", runRemaining: "offboarding-run-remaining", caseList: "offboarding-case-list",
 } as const;
 
@@ -15,4 +16,5 @@ export const w2OffboardingTid = {
   stepStatus: (kind: string) => `offboarding-step-status-${kind}`,
   stepProposal: (kind: string) => `offboarding-step-proposal-${kind}`,
   stepRunNow: (kind: string) => `offboarding-step-run-now-${kind}`,
+  stepSkip: (kind: string) => `offboarding-step-skip-${kind}`,
 };

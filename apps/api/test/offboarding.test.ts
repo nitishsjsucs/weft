@@ -58,6 +58,19 @@ describe("offboarding routes", () => {
     expect(again.steps.find((s) => s.kind === "directory_suspend")).toMatchObject({ status: "done", proposalId: ds.proposalId });
   });
 
+  it("a person skips a step that does not apply; the reason stays out of the step detail", async () => {
+    const [c] = OffboardingCase.array().parse(await (await call("GET", "/v1/offboarding")).json());
+    const res = await call("POST", "/v1/tools/offboarding.skip_step", { case_id: c!.id, step: "device_lock", reason: "Laptop returned in person" });
+    expect(res.status).toBe(200);
+    const after = OffboardingCase.parse(await (await call("GET", `/v1/offboarding/${c!.id}`)).json());
+    const step = after.steps.find((s) => s.kind === "device_lock")!;
+    expect(step.status).toBe("skipped");
+    expect(step.detail).toBe(`Skipped; the reason is in action ${step.actionSeq}`);
+    const [act] = await weft.db.all<{ command: string }>(sql`SELECT command FROM actions WHERE seq = ${step.actionSeq}`);
+    expect(act!.command).toBe("offboarding.skip_step");
+    expect((await call("POST", "/v1/tools/offboarding.skip_step", { case_id: c!.id, step: "device_lock", reason: "again" })).status).toBe(422);
+  });
+
   it("final pay skips wages a submitted regular run already paid, and still pays unused PTO", async () => {
     const submit = await call("POST", "/v1/tools/payroll.submit_run", { run_id: "pay_2026_10_30", exclude_blocked: true });
     expect(submit.status).toBe(200);

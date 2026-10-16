@@ -295,7 +295,33 @@ export const runStepCommand = writeCommand({
 });
 
 
+// ------------------------------------------------------------------ skip
+
+const SkipInput = z.object({ case_id: CaseId, step: z.enum(["final_pay", "directory_suspend", "sso_deactivate", "group_removal", "app_removal", "device_lock", "cobra_notice", "benefits_terminate"]), reason: z.string().min(1).max(200) });
+type SkipInput = z.infer<typeof SkipInput>;
+export const skipStepCommand = writeCommand({
+  name: "offboarding.skip_step", summary: "Skip an offboarding step that does not apply.",
+  description: "Marks one pending step of an offboarding case_id skipped with a reason (for example the laptop was returned in person). Skipping final pay pays nothing. An agent's call is a proposal; a person runs it directly. Writes an action row and offboarding.step_done; the case completes when nothing is left.",
+  input: SkipInput, domain: "people", needs: "edit", effect: "write", risk: () => "R2", approval: "always", reversible: false,
+  untrustedFields: [], lease: (i) => `offboarding:${i.case_id}:${i.step}`,
+  async preview(i, ctx, deps) {
+    const { c, step, worker } = await openStep(deps.tx, ctx.companyId, i.case_id, i.step);
+    return {
+      title: `Skip ${STEP_LABEL[i.step].toLowerCase()} for ${nameRef(worker.firstName, worker.lastName, worker.id)}`, diff: [{ label: STEP_LABEL[i.step], before: step.status, after: "skipped" }],
+      content: [{ label: "Reason", text: i.reason }], moneyCents: null, subjectRef: step.id, subjectHash: sha256Hex(canonicalJson({ case: c.id, step: step.id, status: step.status })),
+      evidence: [{ label: "Offboarding case", ref: c.id }],
+    };
+  },
+  async run(i, ctx, deps) {
+    const { c, step, worker } = await openStep(deps.tx, ctx.companyId, i.case_id, i.step);
+    // The free-text reason stays in the call's arguments (the action row), never in the step detail agents read.
+    const seq = await nextActionSeq(deps.tx);
+    const { completed } = await finishStep(deps.tx, { step, c, actionSeq: seq, proposalId: ctx.approvedProposalId, detail: `Skipped; the reason is in action ${seq}`, now: ctx.now, status: "skipped" });
+    return { data: { case_id: c.id, step_id: step.id, step: i.step, status: "skipped", case_complete: completed }, summary: `Skipped ${STEP_LABEL[i.step].toLowerCase()} for ${nameRef(worker.firstName, worker.lastName, worker.id)}`, events: [stepDone(c, step)] };
+  },
+});
+
 export const offboardingCommands: WeftCommand[] = [
-  listCases, getCase, terminateCommand, finalPayCommand, suspendDirectoryCommand, deactivateSsoCommand, lockDeviceCommand, runStepCommand,
+  listCases, getCase, terminateCommand, finalPayCommand, suspendDirectoryCommand, deactivateSsoCommand, lockDeviceCommand, runStepCommand, skipStepCommand,
   proposeOffCycleCommand,   // payroll.propose_off_cycle, defined in commands/payroll.ts
 ];
