@@ -77,19 +77,24 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ### Wave 2 gate
 
-2026-10-15 from 19:57 to 20:04 PDT, on a fresh clone of main after the six wave 2 merges and the integration commits
-(`83047f9`, then `ec13c75` for the e2e rerun). Every command below was run on that clone.
+2026-10-15 from 20:09 to 20:12 PDT, on a fresh clone of main at `213229e` (the six wave 2 merges, the integration
+commits and every fix below). Every command below was run on that clone.
 
 | Command | Outcome |
 |---|---|
 | `pnpm install --frozen-lockfile` | ok |
-| `pnpm test` | 577 passed, 0 failed (111 files), 70 s |
+| `pnpm test` | 579 passed, 0 failed (111 files), 73 s |
 | `pnpm typecheck --force` | 15 of 15 packages clean, nothing cached |
 | `pnpm build` | ok; the Next build includes `/app/hiring`, `/app/offboarding`, `/app/memory` and `/portal` |
-| `pnpm e2e` | 30 passed, 0 failed, twice (the 23 wave 1 specs, GP6, GP7, GP9, GP10, GP11, GP12 and the 1440 px layout spec), 40 s. The first run at `83047f9` had 29 of 30: the dev runner spec read the runner's output before it drained, fixed in `ec13c75` |
-| `pnpm demo` | exit 0 in 5 s; GP1 to GP12 on one world, payroll total cost $267,795.26, audit chain verifies |
-| `pnpm demo:tests` | 65 passed (20 files: GP1 to GP12 and S1 to S9) |
+| `pnpm e2e` | 30 passed, 0 failed (the 23 wave 1 specs, GP6, GP7, GP9, GP10, GP11, GP12 and the 1440 px layout spec), 46 s |
+| `pnpm demo` | exit 0 in 5 s; GP1 to GP12 on one world, payroll total cost $267,795.26, 3 October findings, audit chain verifies |
+| `pnpm demo:tests` | 67 passed (20 files: GP1 to GP12 and S1 to S9) |
 | `pnpm lint:prose --commits 9b88e26..HEAD`, `pnpm lint:brand` | ok |
+
+An earlier gate run at `83047f9` had 29 of 30 e2e specs: the dev runner spec read the runner's output before the pipe
+drained. Fixed in `ec13c75`; the full suite then passed twice on that clone and again here. `pnpm dev --fresh` on
+ports 4455 and 3455 served `/app/hiring`, `/app/offboarding`, `/app/memory`, `/app/benefits`, `/app/contractors` and
+`/portal`, and Ctrl+C stopped both process groups.
 
 Live on `gpt-5.6-luna` after the merge (`pnpm eval:live L1 L2 L4 L3x3`): L1 pass (2 steps, $0.0014), L2 pass (5 steps,
 $0.0022), L4 pass (2 steps, $0.0009), L3 pass three of three (2 steps each, $0.0028 in all); $0.0073 for the whole

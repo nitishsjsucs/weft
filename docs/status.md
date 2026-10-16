@@ -3,9 +3,10 @@
 ## Wave 2 integration (2026-10-15, 20:00 PDT)
 
 All six wave 2 tracks are merged on main with the integrator's wiring and fixes listed in `docs/wave2.md` under
-"What landed". On main: `pnpm test` and `pnpm typecheck` pass, `pnpm e2e` passes 30 of 30 (23 wave 1 specs, GP6,
-GP7, GP9, GP10, GP11, GP12 and the 1440 px layout spec), `pnpm demo` walks GP1 to GP12 and the audit chain verifies,
-and live L1, L2, L4 and L3 three times pass on Luna ($0.0073). The fresh-clone gate numbers are in README "Results".
+"What landed". On a fresh clone at `213229e`: `pnpm test` 579 of 579, `pnpm typecheck` 15 of 15, build ok, `pnpm e2e` 30 of 30 (23
+wave 1 specs, GP6, GP7, GP9, GP10, GP11, GP12 and the 1440 px layout spec), `pnpm demo` walks GP1 to GP12 and the
+audit chain verifies, `pnpm demo:tests` 67 of 67, both lints ok. Live L1, L2, L4 and L3 three times pass on Luna
+after the merge ($0.0073). Details in README "Results".
 
 ## Wave 2, track w2-reliability (2026-10-15, 19:15 PDT)
 
