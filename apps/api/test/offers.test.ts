@@ -37,7 +37,7 @@ describe("t2 registry rules (harness 5.4)", () => {
       if (c.autoAllow === "untainted") expect(risk, c.name).toBe("R3");
     }
     expect(findCommand("it.create_account").risk({ worker_id: "wrk_0001", system: "google_ws", groups: ["workspace-admin"] })).toBe("R4");
-    expect(t2.filter((c) => c.autoAllow === "untainted").map((c) => c.name).sort()).toEqual(["comms.send_message", "it.create_account"]);
+    expect(t2.filter((c) => c.autoAllow === "untainted").map((c) => c.name).sort()).toEqual(["comms.send_message", "it.create_account", "onboarding.send_checkins"]);
     expect(findCommand("tax.record_registration").access).toBe("system_only");
     expect(["people.accept_offer", "sim.deliver_notice"].map((n) => findCommand(n).access)).toEqual(["human_only", "human_only"]);
   });
@@ -51,6 +51,9 @@ describe("t2 registry rules (harness 5.4)", () => {
       "notices.get": { notice_id: "ntc_0001" }, "notices.draft_response": { notice_id: "ntc_0001" }, "notices.send_response": { notice_id: "ntc_0001" },
       "benefits.get_enrollment": { worker_id: "wrk_0001" }, "it.create_account": { worker_id: "wrk_0001", system: "chat" }, "it.order_device": { worker_id: "wrk_0001" },
       "comms.send_message": { text: "hi" }, "sim.deliver_notice": { scenario: "ca_de2088_rate_change" }, "it.record_delivery": { order_ref: "simd_0001" },
+      // wave 3 (w3-parity-routines)
+      "notices.escalate": { notice_id: "ntc_0001", reason_code: "missing_filing" }, "onboarding.send_checkins": { send: [], nudge: [] },
+      "onboarding.submit_checkin": { checkin_id: "chk_0001", answers: { overall: "good", equipped: "yes", unclear: "", better: "" } },
     };
     for (const c of t2) {
       const shape = (c.input as unknown as { shape?: Record<string, unknown> }).shape ?? {};
