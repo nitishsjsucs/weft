@@ -22,6 +22,9 @@ on 2026-10-15 between 17:58 and 18:30 PDT. Each finding was checked against the 
 | Design | repeated "Content to be sent" label, repeated evidence refs, raw rule ids in the flag popover, home widgets padded to 180px, lowercase badges | fix(web): drop repeated labels and raw rule ids from proposal cards and flag popovers |
 | Correctness | routine decisions lived only in memory, so a restart re-listed decided proposals | fix(routines): read proposal decisions through the ReadOnlyExecutor |
 | Correctness | addBusinessDays shifted the wall time across the DST change | fix(sim): addBusinessDays steps PT calendar dates |
+| Harness | routine run summaries were the model's prose | fix(agent): routine run summaries come from results and proposals, never the model's prose (no separate agent note yet) |
+| Design | all Deliver buttons disabled while polling; no word when no routine picks a notice up | fix(web): Deliver disables only the clicked notice row (the staged run feed reveal is still to do) |
+| Design | audit Summary squeezed; header search hidden at 1440 with the panel docked | fix(web): audit Summary column gets room; header search shows from a 720px header (routine names for run ids still to do) |
 | Correctness, harness | SPEC 12 L4 row did not match the relaxed live criterion | SPEC 12 L4 row now states the L4a criterion and names L4b as left (this commit) |
 
 Notes on the allowlist fix: a chat handle opened without an `allowlist` (only executor and scenario tests do this)
@@ -35,15 +38,14 @@ admin and cli keys on purpose, because their routes accept API keys.
 | Lens | Finding | Why not now |
 |---|---|---|
 | Harness | waiting routine runs lose their trigger and handle on restart (runtime.ts in-memory triggers, handles) | Needs the trigger stored in the context step and a DB-backed wake path in the runtime; larger than this round's budget. The routines half (decisions from memory) is fixed. Next step: read the trigger from the context step's RunSetup and pending proposals through actions.get_run |
-| Harness | routine run summaries are the model's prose, not grounded | A deterministic summary from checklist items and proposal titles plus a separate grounded agent note needs a contract field (agent_note) and UI work; left for the next round |
 | Harness | no Active Memory recall at task start, no dossier refresh, no timeline coarsening | A P1 feature (harness 9.5, 7.2), not a defect fix; it needs its own track |
 | Harness | live L4 cannot fail on injection behavior | L4b costs a live call; the SPEC row now says so plainly. Add the forced-read chat case in the next live round under the $0.50 cap |
 | Harness | grounding check treats short strings with spaces as identifiers | The rule exists for identifiers like "DE 2088" that carry a space; tightening it needs a corpus check. The self-grounding path it enabled (post_update echo) is closed |
 | Harness | spend ledger per-run cap keyed by reused run ids | Only bites after many live reruns on the same data dir; the loop already enforces the per-run budget. Key by a unique run key in the next live round |
 | Harness | sandbox gate missing | No code.run exists yet; add the SANDBOX_NOT_ALLOWED policy branch with code.run |
 | Harness | no cross-run prefix pin test | Worth adding with WEFT_PIN_PREFIX=1; not a defect today |
-| Design | paycheck table too wide with the agent panel docked; audit Summary column squeezed; command search hidden at 1440; payroll page does not show the pending submit proposal | Layout work that needs screenshots across breakpoints; the cn() fix already restores the 11px chips and 14px table text that caused much of the width |
-| Design | simulators: all Deliver buttons disabled for about 6s, no staged run feed reveal; approve gives no result strip | Interaction work across three components; next design round |
+| Design | paycheck table too wide with the agent panel docked; audit Actor shows a run id, not the routine name; payroll page does not show the pending submit proposal | Layout work that needs screenshots across breakpoints; the cn() fix already restores the 11px chips and 14px table text that caused much of the width |
+| Design | simulators: no staged run feed reveal when a run finishes before first paint; approve gives no result strip | Interaction work across three components; next design round |
 | Design | landing: no mobile menu, missing agent showcase and run log sections, hero mock reflows at 390, dark island density, stat tile spacing | New sections and responsive work; next design round. The heading line height and the API path in the Numbers heading are fixed |
 | Design | Bank batches raw headers, empty states without a next step, humanized enums and run id crumbs everywhere | Small but spread over many files; next design round |
 | Brand | research/ quotes reference marketing lines verbatim and they are in git history | The repo is local only and never pushed. Before any publish, paraphrase research/product.md and research/agent.md or move them out of the tracked tree and rewrite history |
