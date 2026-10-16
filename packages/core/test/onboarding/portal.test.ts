@@ -20,7 +20,7 @@ describe("document templates", () => {
     expect(t).toContain("DEMO DOCUMENT");
     expect(t).toContain("Ada Moss (demo)");
     expect(t).toContain("$123,456.00 a year");
-    expect(t).not.toMatch(/[–—]/);
+    expect([...t].some((ch) => ch.charCodeAt(0) === 0x2013 || ch.charCodeAt(0) === 0x2014)).toBe(false);
     expect(docSha(t)).toBe(createHash("sha256").update(t, "utf8").digest("hex"));
     expect(offerLetterText({ ...input, baseCents: 12_345_601 })).not.toBe(t);
     expect(confidentialityText(input)).toContain("offer offr_0002");
