@@ -12,6 +12,7 @@ Found while merging the six wave 2 tracks and wiring their contract requests; ea
 | Sent offers never expired unless the hire opened the portal or someone ran the sweep | `svc_scheduler` runs `documents.expire_offers` when one is due | integrate: offers expire on the sim clock (svc_scheduler runs documents.expire_offers only when one is due) |
 | Claude runs were priced with the Luna table, about 20 times too low | Prices per provider | integrate: prices per provider (Claude Opus 5.5 at $4, $0.20 and $20 per million) and compact tool descriptions for the local providers |
 | `POST /v1/sim/reset` left stored run handles behind while run ids restart | The reset clears `<dataDir>/run/handles` | integrate: POST /v1/sim/reset clears stored run handles, since run ids restart |
+| `e2e/site-dev-runner.spec.ts` "Ctrl+C stops every process group" failed once on a fresh clone: the processes were gone but "dev: stopped" was still in the pipe | The spec waits for the runner's `close` event (bounded at 5 s) before reading the output | fix(e2e): the dev runner spec waits for the runner's output to drain before reading "dev: stopped" |
 | Checked and fine: the new-hire persona's `PORTAL_ONLY` confinement holds against `..`, `%2e%2e` and mixed-case encodings of a path outside `/v1/portal/` | No change | |
 
 ## Wave 2: gate report fixes (track w2-reliability, 2026-10-15, 18:50 to 19:15 PDT)
