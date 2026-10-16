@@ -2,139 +2,177 @@
 
 Wave 3 goal 3 (docs/wave3.md section 3). Research: `research/wave3/integrations-hr.md`. Branch `track/w3-integrations-hr`.
 
-## What landed (round 1)
+## How to run it
 
-**Framework.**
+- Tests: `pnpm test` covers everything below. The track's own files are:
+  - `packages/sim/test/vendors/greenhouse.test.ts` and `packages/sim/test/vendors/workday.test.ts`
+  - `packages/integrations/test/{board,overlay,mode,real-greenhouse}.test.ts`
+  - `apps/api/test/integrations.test.ts`
+  - `tests/scenarios/gp17-greenhouse-hire.test.ts` and `tests/scenarios/gp17-workday-sync.test.ts`
+- E2E: `WEFT_E2E_WEB_PORT=4700 WEFT_E2E_API_PORT=4701 pnpm e2e e2e/gp17-greenhouse-hire.spec.ts`. The spec holds two
+  tests: the Greenhouse hire and the Workday sync.
+- In the app: open Integrations (`/app/integrations`).
+  - Greenhouse card: "Simulate a hire", "Change the start date", "Resend the last delivery".
+  - Workday card: "Sync now" first. Then "Promote someone in Workday" or "Approve two days off", and Sync now again.
+    The 15-minute poll also applies Workday changes on its own once Workday has been synced.
+- Live public smoke (opt-in, one read of a public board): `WEFT_LIVE_PUBLIC=1 pnpm vitest run packages/integrations/test/board.test.ts`.
 
-- `POST /v1/integrations/:vendor/webhook` is public. It reads the raw body, caps it at 1 MB (413), and asks the
-  vendor connector to verify the signature over the raw bytes in constant time (401 otherwise).
-- It dedupes on the delivery id in `integration_deliveries`. A duplicate answers 200 `{ ok, duplicate: true }` and
-  writes nothing. The row holds ids and a sha256 of the raw body, never the body.
-- It answers 200 only after `integrations.record_delivery` (svc_events) stored the row.
-- A Greenhouse `hire_candidate` or `offer_updated` delivery emits `integration.ats_hire_detected` (ids only, subject
-  the `dlv_` id). The handler re-reads the hire and applies it through `integrations.record_ats_hire`, which marks
-  the delivery applied.
-- Screening and e-signature vendors get their `VENDOR_APPLY_COMMAND` called with `W3VendorApplyArgs`
-  (`{ vendor, delivery_id, items }`, ids only). This is the agreement with w3-integrations-screening-esign.
-- `apps/api/src/integrations/poll.ts` runs on every scheduler tick. It delivers due simulated webhooks in process
-  through the same receiver as the public route. The `greenhouse.webhook` fault fails a delivery, which then retries
-  on the 7-attempt schedule of the sim clock (0, 1, 16, 76, 196, 436, 916 minutes).
-- The poll also runs `integrations.sync_now` as svc_scheduler every 15 sim minutes. It runs only when there is
-  something to read: an unlinked or newer simulated hire with no delivery still waiting, or a real connection. So
-  the existing tests, the demo and the seed see no new action rows.
-- Mode and overlay: `@weft/integrations` stays as scaffolded. New tests cover the overlay passing simulators through,
-  a missing secret, and `LIVE_INTEGRATION_IN_TEST`.
+## Real versus simulated
 
-**Greenhouse simulator** (`packages/sim/src/vendors/greenhouse.ts`). It follows Harvest v3 field names, with no
-vendored spec:
+| Vendor | Simulated (default, always in tests) | Real |
+|---|---|---|
+| Greenhouse | Harvest v3 shapes, signed webhooks, demo controls | Read-only Harvest v3 adapter, built and tested on a fake transport only. It runs only with `WEFT_INTEGRATIONS_REAL=1` and both client secrets in the secrets file. |
+| Workday | Workday REST and Get_Workers shapes, the time-off flow, demo controls | Stub (returns null, so the simulator stays). See left.md. |
+| Checkr, HireRight, DocuSign | Owned by w3-integrations-screening-esign | Owned by w3-integrations-screening-esign |
 
-- bare arrays, sorted by id descending
-- an opaque `Link rel="next"` cursor that must be the only query parameter (422 otherwise)
-- `per_page` from 1 to 500
-- `X-RateLimit-*` headers, and the `greenhouse.rateLimit` fault, which returns 429 with `Retry-After: 3`
-- versioned offers with `current_only`, and `custom_fields.salary { amount, unit }` in major units
-- signed `hire_candidate` deliveries: `Signature: sha256 <hex>` over the raw body, with `<`, `>` and `&` escaped the
-  way the vendor does, so a re-serialized body fails
-- the `greenhouse.offersHidden` fault, which is the empty-offers permission gap
+- Mode is per vendor. `integrationMode()` is real only when `WEFT_INTEGRATIONS_REAL=1` and every required secret
+  resolves from `WEFT_SECRETS_FILE`. Inside a test it throws `LIVE_INTEGRATION_IN_TEST`.
+- Secret values are read only by `readSecret` inside an adapter. The cards, the API and the logs show names with
+  present or missing, never a value. Tests assert this for every integrations route and for adapter error text.
+- No account was created, no terms were accepted and no credential was entered anywhere. No vendor spec file is
+  vendored; the simulators follow field names from the research.
 
-Demo controls (`W3GreenhouseSimControls`): simulate a hire, change the start date (offer version 2), resend the last
-delivery. The seed adds three fictional Larkspur jobs and two in-process candidates, and no hires. The Boulder field
-office is deliberately unmapped.
+## What exists
 
-**Hero flow (GP17).**
+### Framework (round 1)
 
-1. Simulate a hire. A signed delivery is verified, stored and re-read.
-2. Weft creates one draft offer through the existing `documents.create_offer` logic, linked in `ext_links`, and emits
-   `offer.imported`. The offer is for CO, uses Remote US, and is Hardware at 132,000.00.
-3. The unmapped office becomes an `unmapped_value` sync item.
-4. `rt_ats_hire` (8 tools, enabled, on `offer.imported`) reads the sync items and proposes `documents.send_offer`.
-5. Dana approves, and GP6 runs unchanged from there: the invite, the portal and signing.
+- `POST /v1/integrations/:vendor/webhook` is public. It reads the raw body with a 1 MB cap (413). The vendor
+  connector verifies the signature over the raw bytes in constant time (401 otherwise).
+- Deliveries are deduped on the delivery id in `integration_deliveries`, which holds ids and a sha256 of the body,
+  never the body. The route answers 200 only after `integrations.record_delivery` (svc_events) stored the row.
+- Greenhouse deliveries emit `integration.ats_hire_detected` (ids only). The handler re-reads the hire through
+  `integrations.record_ats_hire`.
+- Screening and e-signature vendors get `VENDOR_APPLY_COMMAND` with ids-only `W3VendorApplyArgs`.
+- `apps/api/src/integrations/poll.ts` runs on every scheduler tick:
+  - It delivers due simulated webhooks in process, through the same receiver as the public route. The
+    `greenhouse.webhook` fault makes a delivery retry on the 7-attempt sim-clock schedule.
+  - It syncs Greenhouse every 15 sim minutes, and Workday every 15 sim minutes once Workday has been synced. Each
+    sync runs only when there is something to read, so the seed, the demo and the older tests see no new action rows.
 
-After that:
+### Greenhouse simulator and the hero flow (round 1)
 
-- A second delivery with the same id is a no-op.
-- Offer version 2 with a new start date opens a human-only `sync_conflict`. The offer is never overwritten.
-- `integrations.resolve_sync_item` (human only) can keep the Weft value or take the vendor value, on drafts only.
+- The simulator follows Harvest v3:
+  - bare arrays sorted by id descending
+  - an opaque `Link rel="next"` cursor that must be the only query parameter
+  - `per_page` from 1 to 500, `X-RateLimit-*` headers, and a 429 with `Retry-After` under `greenhouse.rateLimit`
+  - versioned offers with `current_only`, and the salary custom field
+  - signed `hire_candidate` and `offer_updated` deliveries with the vendor's escaping
+  - the `greenhouse.offersHidden` permission gap
+- GP17: a simulated hire becomes exactly one draft offer, linked in `ext_links`, and emits `offer.imported`.
+  - The unmapped Boulder office opens an `unmapped_value` item.
+  - `rt_ats_hire` proposes `documents.send_offer`, and GP6 runs unchanged after Dana approves.
+  - A duplicate delivery is a no-op.
+  - Offer version 2 with a new start date opens a human-only `sync_conflict`.
 
-**Commands.** All are in `packages/core/src/integrations/commands.ts`:
+### Workday simulator and sync (round 2)
 
-| Command | Risk | Access | Note |
-|---|---|---|---|
-| `integrations.status` | R0 | all | |
-| `integrations.list_sync_items` | R0 | all | |
-| `ats.get_hire` | R0 | all | candidate name and email are untrusted fields |
-| `ats.list_jobs` | R0 | all | |
-| `integrations.sync_now` | R1 | all | reads the vendor and emits id-only detection events |
-| `integrations.map_value` | R2 | all | approval always |
-| `integrations.record_delivery` | R1 | system only | |
-| `integrations.record_ats_hire` | R1 | system only | |
-| `integrations.resolve_sync_item` | R2 | human only | |
+- `packages/sim/src/vendors/workday.ts`:
+  - `{ total, data }` collections, with `limit` at most 100 and `offset`
+  - `{ id, descriptor, href }` references with 32-character hex WIDs
+  - `Get_Workers` over the transaction log window, inclusive at both ends, with `Response_Results` paging
+  - the three-step time-off flow: eligible types, then valid dates, then `requestTimeOff`. That opens a business
+    process In Progress with Submitted entries; the manager's approval makes them Approved.
+  - balances, and the `workday.getWorkers` and `workday.requestTimeOff` faults
+- The seed builds the fictional tenant from the seeded employees: same work email, title, state and pay, so the first
+  sync has no conflict. The Workday connection row carries the absence type map read from the tenant.
+- `integrations.sync_now { vendor: "workday" }` detects:
+  - workers that are new to Weft, or whose Workday-owned values differ from the last snapshot
+  - linked workers with approved time off Weft has not imported
 
-**Routes.**
+  Detection compares content, not timestamps, so a frozen sim clock misses nothing.
+- `integrations.apply_hris_change` (system only, svc_events) re-reads those workers and:
+  - links each one to the Weft worker with the same work email, or opens an `unmapped_value` item
+  - applies a changed title when the Weft value is unchanged since the last apply, and otherwise opens a conflict
+  - never applies a pay-affecting change (base pay, work state, termination) silently. It opens a human-only
+    `sync_conflict` and emits `people.external_change`.
+  - imports each approved entry as one approved `time_off_requests` row, with `source = workday`, `ext_ref` set to the
+    entry WID and the Weft policy of the mapped type. It writes no ledger rows: when Workday owns time off, the
+    balances come from Workday.
+  - moves the cursor, and sets the ownership of people, compensation and time off to Workday
+- Reads: `hris.get_worker_external` compares Weft and Workday field by field. `hris.list_time_off` lists Workday
+  entries with the request Weft imported for each; the comment is an untrusted field.
+- `integrations.resolve_sync_item` on a worker conflict:
+  - Take Workday value applies a title.
+  - A pay change is refused with `DOMAIN_PAY_CHANGE_IN_PEOPLE`, because it belongs to the pay settings so payroll
+    previews it.
+  - Keep Weft value closes the item.
 
-- `GET /v1/integrations` returns five cards. Each card has the mode, the health, and the secret names with present or
-  missing, never a value.
-- Also landed: `GET /v1/integrations/:vendor`, `POST .../test`, `POST .../sync`, `POST .../simulate { kind }`,
-  `GET /v1/sync-items`, `POST /v1/sync-items/:id/resolve` and `GET /v1/ats/jobs`.
-- One read-only extra route is outside the route table: `GET /v1/integrations/greenhouse/imported`. It requires a
-  session and lists the imported offers with their Greenhouse link.
+### Real Greenhouse adapter (round 2)
 
-**Integrations screen** (`/app/integrations`):
+`packages/integrations/src/real/greenhouse.ts`:
 
-- five vendor cards: Simulated or Connected, health, the secrets file names, the free path, Test connection, Sync now
-- the Greenhouse simulate controls
-- the sync items, with Keep Weft value and Take Greenhouse value
-- the hires imported as draft offers
-- the open roles
+- client credentials with Basic `client_id:client_secret` to `auth.greenhouse.io/token`, with the token cached until
+  60 seconds before expiry
+- one token refresh on a 401
+- 429 waits `Retry-After` and retries up to 3 times
+- the Link cursor is sent alone
+- the hire is normalized exactly like the simulator's
+- `testConnection` reports the empty-offers permission gap, `auth_failed` with `http_<status>`, or unreachable
+- webhooks verify with `WEFT_GREENHOUSE_WEBHOOK_SECRET`
+- the board reads `WEFT_GREENHOUSE_BOARD_TOKEN` through `fetchBoardJobs`
+- `markHired` is refused, because the adapter is read-only
 
-**Public job board.** `parseBoardJobs` in `@weft/integrations` reads single_select metadata as a string and
-multi_select as an array. It is tested on a hand-written fictional Larkspur fixture. One live smoke read runs only
-with `WEFT_LIVE_PUBLIC=1`.
+### Commands
 
-**Tests.**
+| Command | Risk | Access |
+|---|---|---|
+| `integrations.status`, `integrations.list_sync_items`, `ats.get_hire`, `ats.list_jobs`, `hris.get_worker_external`, `hris.list_time_off` | R0 | all |
+| `integrations.sync_now` | R1 | all |
+| `integrations.map_value` | R2, approval always | all |
+| `integrations.record_delivery`, `integrations.record_ats_hire`, `integrations.apply_hris_change` | R1 | system only |
+| `integrations.resolve_sync_item` | R2 | human only |
 
-- `packages/sim/test/vendors/greenhouse.test.ts` (6 tests)
-- `apps/api/test/integrations.test.ts` (6 tests: cards and secret values, webhook refusals and the 1 MB cap, retry
-  and poll, registry rules)
-- `packages/integrations/test/{board,overlay}.test.ts`
-- `tests/scenarios/gp17-greenhouse-hire.test.ts` (4 tests)
-- `e2e/gp17-greenhouse-hire.spec.ts` (ports 4660 and 4661)
+### Routes and screen
 
-## Left for round 2
+- `GET /v1/integrations` (five cards) and `GET /v1/integrations/:vendor`
+- `POST .../test`, `.../sync` and `.../simulate`
+  - `simulate` takes the Greenhouse kinds, plus the Workday kinds `worker_change` and `time_off`
+  - Workday `sync` returns the apply result under `data.applied`
+- `GET /v1/sync-items` and `POST /v1/sync-items/:id/resolve`
+- `GET /v1/ats/jobs`
+- Two session-only reads outside the route table: `GET /v1/integrations/greenhouse/imported` and
+  `GET /v1/integrations/workday/imported`
+- The screen shows:
+  - the five cards, with mode, health, secret names, free path, Test connection, Sync now and the simulate controls
+  - the Workday ownership line (who owns People, Compensation and Time off)
+  - sync items with vendor-aware wording ("Take Workday value" is hidden for pay changes)
+  - the hires imported as draft offers, the time off from Workday (read-only) and the open roles
 
-These are in `.scratch/w3-integrations-hr/left.md`, matching the cut line:
+## Contract changes and shared files
 
-- the Workday simulator, `integrations.apply_hris_change` and the Workday scenario (workers and approved time off
-  read-only with `source = workday`)
-- the real Harvest v3 adapter (OAuth client credentials, read-only) and the Workday real adapter skeleton
-- `ats.mark_hired` and `hris.request_time_off` proposal stubs, and `unhire_candidate`
-- Inbox rendering of sync items
+- `contract: add rt_ats_hire to the pinned prebuilt routine lists` (round 1, separate commit). It touches
+  `packages/routines/test/engine.test.ts` and `apps/api/test/routines.test.ts`. Merging with the other wave 3
+  routines is a one-line union.
+- Additive, in owned paths:
+  - `packages/contracts/src/ext/w3-integrations-hr.ts`: the simulate kinds, the outbox and HTTP shapes, the simulator
+    controls, the retry schedule, the 1 MB cap, the poll interval and `W3VendorApplyArgs`
+  - `W3_INTEGRATIONS_HR_TID`, which gains `ownership`, `sync` and `workdayTimeOff` in round 2
+- No frozen contract changed. `apply_hris_change` runs as svc_events, which is already on that allowlist.
 
-## Shared files touched outside the owned paths
+## Merge notes
 
-- `packages/routines/test/engine.test.ts` and `apps/api/test/routines.test.ts` pin the prebuilt routine list. Both
-  gain `rt_ats_hire`, in the separate commit `contract: add rt_ats_hire to the pinned prebuilt routine lists`. Every
-  wave 3 track that adds a routine touches the same two lines, so merging is a one-line union.
-- Additive contracts: `packages/contracts/src/ext/w3-integrations-hr.ts` is exported through
-  `w3/testids-integrations.ts`. It holds:
-  - the simulate kinds
-  - the outbox delivery and HTTP response shapes
-  - the Greenhouse and Workday simulator controls
-  - the retry schedule, the 1 MB cap and the 15-minute poll interval
-  - `W3VendorApplyArgs`
+- The seed falls back to `tot_vacation` and `top_vac_us` (the same ids and values the w3_timeoff seed writes) only when
+  no vacation type exists. With w3-timeoff merged, its seed runs first and the fallback adds nothing.
+- `tests/scenarios/gp17-workday-sync.test.ts` inserts the same two rows with `INSERT OR IGNORE`.
+- Workday-sourced requests are approved rows with `decided_by` null and the note "Approved in Workday". w3-timeoff's
+  payroll leave lines read approved requests, so they join payroll through the one native path.
 
 ## Contract requests
 
-- Inbox: render open `sync_items` (kind, detail, Keep or Take) next to proposals. Today they live on the
-  Integrations screen only. The resolve route is `ui_only`, and the command is human only.
-- Route table: add `GET /v1/integrations/greenhouse/imported` (or a `source` column on offers) so the imported list
-  is typed.
+- w3-timeoff: refuse `time_off.cancel`, `time_off.reopen` and `time_off.decide` on rows with `source = workday`. Show
+  "Managed in Workday" when the Workday ownership says vendor for `time_off`. Today only the system record writes
+  those rows.
+- People and person view: lock title, pay and state edits with "Managed in Workday" when ownership is vendor.
+- Inbox: render open `sync_items` (kind, detail, Keep or Take) next to proposals. Today they live on Integrations only.
+- Route table: add the two `.../imported` reads so the client is typed.
 
 ## Notes
 
-- Simulated mode signs with a fixed demo key (`GREENHOUSE_SIM_SIGNING_KEY`). It is not a credential. Real mode will
-  verify with `WEFT_GREENHOUSE_WEBHOOK_SECRET`.
-- `documents.create_offer` still requires `*.example` candidate emails. A real Greenhouse hire would need that rule
-  relaxed behind real mode. That decision belongs to the integrator.
-- The Host allowlist means a real webhook through a tunnel needs its host allowed. Real mode on a laptop relies on
+- Simulated Greenhouse signs with a fixed demo key, `GREENHOUSE_SIM_SIGNING_KEY`. It is not a credential.
+- `documents.create_offer` still requires `*.example` candidate emails. A real Greenhouse hire needs that rule relaxed
+  behind real mode, which is the integrator's decision.
+- The Host allowlist means a real webhook through a tunnel needs its host allowed. On a laptop, real mode relies on
   polling.
+- Model spend this wave: $0.00 (no live model calls).
+
+What is left is in `.scratch/w3-integrations-hr/left.md`.
