@@ -73,7 +73,7 @@ function ModelSegment() {
             </>
           )}
         </PopoverTrigger>
-        <PopoverContent align="end" aria-label="Model" data-testid={W3_SHELL_TID.modelPopover} className="motion-reduce:data-[state=open]:animate-none">
+        <PopoverContent align="start" aria-label="Model" data-testid={W3_SHELL_TID.modelPopover} className="motion-reduce:data-[state=open]:animate-none">
           <div className="flex items-center gap-2 pb-1.5 font-semibold text-gray-12">
             <StatusDot state={state} />
             <span className="min-w-0 truncate">{state === "offline" ? "API offline" : provider?.label ?? "Checking the model"}</span>
@@ -125,7 +125,7 @@ function ClockSegment() {
         <span className="hidden @min-[760px]:inline">{now ? fmtClock(now) : "..."}</span>
         <span className="@min-[760px]:hidden">{now ? fmtShortClock(now) : "..."}</span>
       </PopoverTrigger>
-      <PopoverContent align="end" aria-label="Simulated time" data-testid={W3_SHELL_TID.clockPopover} className="motion-reduce:data-[state=open]:animate-none">
+      <PopoverContent align="center" aria-label="Simulated time" data-testid={W3_SHELL_TID.clockPopover} className="motion-reduce:data-[state=open]:animate-none">
         <div className="font-semibold text-gray-12">Simulated time</div>
         <div className="pt-1 pb-1.5 text-2 font-medium tabular text-gray-12">{now ? fmtLongClock(now) : "..."}</div>
         <Row k="Rate">{rateLabel(rate)}</Row>
