@@ -2,12 +2,13 @@
 // Breadcrumb titles for detail pages (research/wave3/topbar-design.md 7.1). A detail view renders <CrumbLabel> with
 // the same text as its H1, and the bar shows "People > Dana Whitfield (demo)" instead of the raw "wrk_0001". While
 // the record loads the bar shows the id in a small mono face.
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { usePathname } from "next/navigation";
 import { useGet } from "@/lib/api/hooks";
 import { period } from "../format";
 
-interface CrumbCtx { title: { path: string; label: string } | null; set: (v: { path: string; label: string } | null) => void }
+type Title = { path: string; label: string } | null;
+interface CrumbCtx { title: Title; set: Dispatch<SetStateAction<Title>> }
 const Ctx = createContext<CrumbCtx>({ title: null, set: () => {} });
 
 export function BreadcrumbProvider({ children }: { children: ReactNode }) {
@@ -29,7 +30,8 @@ export function CrumbLabel({ label }: { label: string | null | undefined }) {
   useEffect(() => {
     if (!label) return;
     set({ path: pathname, label });
-    return () => set(null);
+    // Clear only this label, so another CrumbLabel still mounted for the page keeps its title.
+    return () => set((cur) => (cur && cur.path === pathname && cur.label === label ? null : cur));
   }, [label, pathname, set]);
   return null;
 }
