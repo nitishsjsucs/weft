@@ -1,9 +1,9 @@
 // Time-off reads and ledger writes over the wave 3 tables (research/wave3/expenses-timeoff.md 6). Owner: w3-timeoff.
 // Pure rules live in ./engine; this module loads rows, derives balances, coverage and routing, and appends ledger rows.
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { COVERAGE_DEFAULTS, type TimeOffBalance, type TimeOffTypeKind, type W3Check } from "@weft/contracts";
+import { COVERAGE_DEFAULTS, type IdPrefix, type TimeOffBalance, type TimeOffTypeKind, type W3Check } from "@weft/contracts";
 import {
-  departments, holidays, holidayCalendars, offers, principals, timeOffAssignments, timeOffLedger, timeOffPolicies, timeOffRequests, timeOffTypes, workers, type DbTx,
+  departments, holidays, holidayCalendars, offers, principals, timeOffAssignments, timeOffLedger, timeOffPolicies, timeOffRequests, timeOffTypes, workers, workplaces, type DbTx,
 } from "@weft/db";
 import { addDays, businessDaysBefore, isBusinessDay } from "../payroll/calendar";
 import {
@@ -201,6 +201,41 @@ export async function appendLedger(tx: DbTx, newId: (p: "tol_") => Promise<strin
   const id = await newId("tol_");
   await tx.insert(timeOffLedger).values({ id, ...row });
   return id;
+}
+
+const NYC_CITIES = new Set(["New York", "New York City", "Brooklyn", "Manhattan", "Queens", "Bronx", "The Bronx", "Staten Island"]);
+
+/** Whether a policy's jurisdiction covers a worker: US for every employee, a state code for that work state, and
+ * NY-NYC for a New York worker unless the workplace is a known city outside New York City. A remote New York worker
+ * gets the NYC policies: they meet the state minimums too, and Larkspur has no separate New York State sick policy. */
+export function policyApplies(jurisdiction: string, workState: string | null, workplaceCity: string | null): boolean {
+  if (jurisdiction === "US") return true;
+  if (!workState) return false;
+  if (jurisdiction === workState) return true;
+  if (jurisdiction === "NY-NYC") return workState === "NY" && (workplaceCity === null || NYC_CITIES.has(workplaceCity));
+  return false;
+}
+
+/** An employee hired after the seed (Noor on offer acceptance) has no assignments yet: assign the policies their
+ * work state and workplace call for, effective from the later of the start date and the policy's, and post the
+ * on-hire front loads. Runs only for an employee with no assignment at all, so it never touches seeded workers. */
+export async function ensureAssignments(tx: DbTx, newId: (p: IdPrefix) => Promise<string>, w: WorkerRow, now: string): Promise<number> {
+  if (w.type !== "employee") return 0;
+  if ((await assignmentsOf(tx, [w.id])).length) return 0;
+  const [place] = w.workplaceId ? await tx.select({ city: workplaces.city }).from(workplaces).where(eq(workplaces.id, w.workplaceId)).limit(1) : [];
+  let n = 0;
+  for (const p of await loadPolicies(tx, w.companyId)) {
+    if (!policyApplies(p.jurisdiction, w.workState, place?.city ?? null)) continue;
+    if (p.effectiveTo !== null && p.effectiveTo < w.startDate) continue;
+    const from = w.startDate > p.effectiveFrom ? w.startDate : p.effectiveFrom;
+    const id = await newId("tasn_");
+    await tx.insert(timeOffAssignments).values({ id, policyId: p.id, workerId: w.id, assignedAt: now, effectiveFrom: from, effectiveTo: w.endDate, accrualRemainderMinutes: 0 });
+    n++;
+    if (p.schedule === "front_load_annual" && p.frontLoadMinutes) {
+      await appendLedger(tx, newId, { assignmentId: id, workerId: w.id, policyId: p.id, kind: "front_load", minutes: p.frontLoadMinutes, effectiveDate: from, sourceRef: null, runKey: `front:hire:${id}`, note: `front load on hire for ${from.slice(0, 4)}`, actionSeq: null, createdAt: now });
+    }
+  }
+  return n;
 }
 
 export async function assignmentFor(tx: DbTx, workerId: string, policyId: string): Promise<AssignmentRow | null> {

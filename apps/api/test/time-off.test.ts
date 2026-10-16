@@ -146,6 +146,28 @@ describe("time-off routes", () => {
     await weft.db.run(sql`DELETE FROM time_off_requests WHERE id = 'tor_0900'`);
   });
 
+  it("a hire after the seed gets the policies of their state on the first request, with the on-hire front load", async () => {
+    // A TX employee starting Oct 19, written the way an accepted offer writes a worker: no time-off assignments yet.
+    const cols = (await weft.db.all<{ name: string }>(sql`PRAGMA table_info(workers)`)).map((c) => c.name);
+    const pick = cols.map((c) => (c === "id" ? "'wrk_0900'" : c === "first_name" ? "'Rowan'" : c === "last_name" ? "'Pell'" : c === "preferred_name" ? "NULL" : c === "work_email" ? "'rowan.pell@larkspur.example'" : c === "start_date" ? "'2026-10-19'" : c === "end_date" ? "NULL" : c)).join(", ");
+    await weft.db.run(sql.raw(`INSERT INTO workers (${cols.join(", ")}) SELECT ${pick} FROM workers WHERE id = 'wrk_0038'`));
+    expect((await weft.db.all(sql`SELECT id FROM time_off_assignments WHERE worker_id = 'wrk_0900'`))).toHaveLength(0);
+    const res = await call("usr_dana", "POST", "/v1/time-off/requests?workerId=wrk_0900", { policyId: "top_sick_tx", startDate: "2026-11-04", endDate: "2026-11-04", reason: "Clinic visit" });
+    expect(res.status).toBe(200);
+    const asn = await weft.db.all<{ policy_id: string; effective_from: string }>(sql`SELECT policy_id, effective_from FROM time_off_assignments WHERE worker_id = 'wrk_0900' ORDER BY policy_id`);
+    expect(asn).toEqual([{ policy_id: "top_sick_tx", effective_from: "2026-10-19" }, { policy_id: "top_vac_us", effective_from: "2026-10-19" }]);
+    const b = (await call("usr_dana", "GET", "/v1/time-off/balances?workerId=wrk_0900")).json as { policyId: string; accruedUnlockedMinutes: number; holdsMinutes: number; availableMinutes: number }[];
+    expect(b.find((x) => x.policyId === "top_sick_tx")).toMatchObject({ accruedUnlockedMinutes: 2_400, holdsMinutes: 480, availableMinutes: 1_920 });
+    expect(b.find((x) => x.policyId === "top_vac_us")).toMatchObject({ accruedUnlockedMinutes: 0 });
+    // A second request does not assign again.
+    await call("usr_dana", "POST", "/v1/time-off/requests?workerId=wrk_0900", { policyId: "top_sick_tx", startDate: "2026-11-05", endDate: "2026-11-05" });
+    expect((await weft.db.all(sql`SELECT id FROM time_off_assignments WHERE worker_id = 'wrk_0900'`))).toHaveLength(2);
+    await weft.db.run(sql`DELETE FROM time_off_ledger WHERE worker_id = 'wrk_0900'`);
+    await weft.db.run(sql`DELETE FROM time_off_requests WHERE worker_id = 'wrk_0900'`);
+    await weft.db.run(sql`DELETE FROM time_off_assignments WHERE worker_id = 'wrk_0900'`);
+    await weft.db.run(sql`DELETE FROM workers WHERE id = 'wrk_0900'`);
+  });
+
   it("posts accruals once per processed regular run and assignment; re-running changes nothing", async () => {
     await weft.db.run(sql`UPDATE payroll_runs SET status = 'processed' WHERE id = 'pay_2026_10_30'`);
     const count = async () => (await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_ledger`))[0]!.n;

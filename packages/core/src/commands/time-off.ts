@@ -14,7 +14,7 @@ import { DomainRefusal, notFound, ptDateOf, readCommand, riskOf, writeCommand } 
 import { refreshOpenDrafts } from "../payroll/lifecycle";
 import { applyCaps, deemedWorkedMinutes, forfeitureProblem, perHourWorked, postedBalance, requestDays, yearEndCarry } from "../time-off/engine";
 import {
-  appendLedger, assignmentsOf, balanceFor, checksForRequest, displayName, employedOn, holidayMap, ledgerOf, loadPolicies, parseDays, periodAccrual,
+  appendLedger, assignmentsOf, balanceFor, checksForRequest, displayName, employedOn, ensureAssignments, holidayMap, ledgerOf, loadPolicies, parseDays, periodAccrual,
   policyById, routeRequest, teamCoverage, workerOf, type PolicyRow, type RequestRow,
 } from "../time-off/store";
 
@@ -309,6 +309,7 @@ export async function submitRequest(deps: CommandDeps, ctx: { companyId: string;
   if (!w || w.type !== "employee") throw notFound("employee", i.worker_id);
   const p = await policyById(tx, ctx.companyId, i.policy_id);
   if (!p) throw notFound("time-off policy", i.policy_id);
+  await ensureAssignments(tx, deps.newId, w, ctx.now);   // a hire after the seed gets the policies of their state first
   const asn = (await assignmentsOf(tx, [w.id])).find((a) => a.policyId === p.id);
   if (!asn) throw new DomainRefusal("DOMAIN_NOT_ASSIGNED", `${displayName(w)} is not on ${p.name}`, "Use a policy from time_off.get_balance for this worker", null);
   if (i.end_date < i.start_date) throw new DomainRefusal("DOMAIN_BAD_RANGE", "end_date is before start_date", "Pass end_date on or after start_date", null);
@@ -456,6 +457,7 @@ export async function postAccruals(deps: CommandDeps, companyId: string, runId: 
   for (const pc of pcs.sort((a, b) => (a.workerId < b.workerId ? -1 : 1))) {
     const w = ws.get(pc.workerId);
     if (!w) continue;
+    await ensureAssignments(tx, deps.newId, w, now);
     for (const a of await assignmentsOf(tx, [w.id])) {
       const p = pols.get(a.policyId);
       if (!p || a.effectiveFrom > run.periodEnd || (a.effectiveTo !== null && a.effectiveTo < run.periodStart)) continue;
