@@ -143,7 +143,12 @@ Local Qwen3.6-27B (GP1): not run. `WEFT_LLM=mlx` refuses with `PROVIDER_CONFIG` 
 and the installed `mlx_lm` 0.32.0 server offers only `/v1/completions` and `/v1/chat/completions`, while Weft's
 OpenAI provider calls `/v1/responses` only. Time and memory were not the reason.
 
-Screenshots of Weft's own UI from that dev server, 1440 by 900 unless noted, are in
+Wave 2 screenshots, taken at 1440 by 900 from `pnpm dev --fresh` on the gate clone at `adbf752` with the agent panel
+docked: `13-hiring` (an offer sent, the invite in the email simulator outbox), `14-portal` (the new-hire portal at 0
+of 7), `15-offboarding-case` (Imani's eight steps with four proposals), `16-benefits-reconciliation` (the three
+October findings) and `17-memory` (the company one-pager after a digest).
+
+Wave 1 screenshots of Weft's own UI from that dev server, 1440 by 900 unless noted, are in
 [docs/screenshots/](docs/screenshots): the landing page (`01-landing`, full page `01b-landing-full`, 390 px
 `12-landing-mobile`), app home, Simulators, the agent run view after the DE 2088 notice (`04-agent-run`), the Inbox
 with both proposals, the payroll list and the Oct 30 draft with its pending submit, People, Routines, the audit log
