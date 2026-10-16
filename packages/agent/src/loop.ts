@@ -19,6 +19,20 @@ export const BUDGETS = {
   routine_draft: { steps: 4, usd: 0.05, minutes: 5, toolCallsPerStep: 4 },
 } as const;
 
+/**
+ * Chat answers by this model step (SPEC 12 L3: at most 4). The step before it gets a budget notice; at it, tool calls
+ * are not run and an ungrounded answer gets the grounded template instead of a repair round. The hard budget above
+ * still bounds everything else. WEFT_CHAT_ANSWER_STEPS overrides it (1 to 12).
+ */
+export const CHAT_ANSWER_BY = 4;
+/** Chat is read-only: it is not offered the run-feed post, its one write, so a question leaves no action row. */
+export const CHAT_HIDDEN_TOOLS = new Set(["comms__post_update"]);
+
+export function chatAnswerBy(env: Record<string, string | undefined> = process.env): number {
+  const n = Number(env.WEFT_CHAT_ANSWER_STEPS);
+  return Number.isInteger(n) && n >= 1 && n <= BUDGETS.chat.steps ? n : CHAT_ANSWER_BY;
+}
+
 export const MAX_OUTPUT_TOKENS = 8_000;
 export const RETRY_OUTPUT_TOKENS = 16_000;
 /** Harness 5.3: no agent kind or routine sees more than 16 tools. */
@@ -30,7 +44,11 @@ export function assertToolCap(count: number, what: string): void {
 export const MAX_REQUEUES = 2;
 
 /** Stored on the context step so a requeued run rebuilds the same request. */
-export interface RunSetup { promptKind: PromptKind; allowlist: string[]; nonce: string; routineId: string | null; text: string; pack: true }
+export interface RunSetup {
+  promptKind: PromptKind; allowlist: string[]; nonce: string; routineId: string | null; text: string; pack: true;
+  /** Routine runs: the trigger the checklist is evaluated against, so a waiting run keeps it across a restart. */
+  trigger?: Record<string, unknown>;
+}
 
 export interface ChecklistState { id: string; label: string; passed: boolean }
 
@@ -130,7 +148,10 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
   const usdBudget = run.budget.usd || budget.usd;
   const prompt = frozenPrompt(setup.promptKind);
   assertToolCap(setup.allowlist.length, `runLoop: run ${run.id} allowlist`);
-  const tools: ToolSpec[] = executor.registry.toolSpecs({ agentKind: run.kind, allowlist: setup.allowlist });
+  const chat = setup.promptKind === "chat";
+  const answerBy = chat ? Math.min(chatAnswerBy(), stepBudget) : stepBudget;
+  const tools: ToolSpec[] = executor.registry.toolSpecs({ agentKind: run.kind, allowlist: setup.allowlist })
+    .filter((t) => !(chat && CHAT_HIDDEN_TOOLS.has(t.name)));
   const offered = new Set(tools.map((t) => t.name));
   assertToolCap(tools.length, `runLoop: run ${run.id} tool specs`);
   const settings = { model: run.model, effort: run.effort, parallelToolCalls: true, store: false, toolChoice: "auto" };
@@ -187,6 +208,12 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     if (run.stepsUsed >= stepBudget && run.model !== "template") return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: `Stopped at the step budget (${stepBudget} model steps).` });
     if (wall() - startedWall > budget.minutes * 60_000) {
       return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: "Stopped at the wall-clock budget." });
+    }
+    // Chat: the step before the answer-by step tells the model to answer now (gate report item 3).
+    if (chat && run.stepsUsed === answerBy - 1 && answerBy > 1 && !history.some((h) => h.kind === "notice" && h.notice === "budget" && h.attrs.code === "ANSWER_NOW")) {
+      const notice = { notice: "budget" as const, attrs: { n: setup.nonce, code: "ANSWER_NOW" }, text: "This is your last step. Write the answer now from the tool results above; any tool call in this step is not run." };
+      await append({ stage: "post", kind: "notice", result: notice });
+      history = [...history, { kind: "notice", ...notice }];
     }
     let attempt = 1;
     let maxOut = MAX_OUTPUT_TOKENS;
@@ -272,6 +299,13 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     await store.updateRun(run.id, { stepsUsed, consecutiveErrors: 0 });
     history = [...history, { kind: "model", provider: provider.id, native: result.native }];
 
+    // Chat at its answer-by step: the calls are not run; the person gets the grounded summary of what was read.
+    if (chat && result.toolCalls.length > 0 && run.stepsUsed >= answerBy) {
+      const text = result.text.trim();
+      if (text && check(text, await allToolResults()).ok) return finish({ status: "done", reason: "DONE", summary: text });
+      return finish({ status: "done", reason: "DONE", summary: await groundedTemplate(allToolResults) });
+    }
+
     // ---- dispatch
     if (result.toolCalls.length > 0) {
       const tDisp = wall();
@@ -347,7 +381,7 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     if (setup.promptKind === "chat") {
       const g = check(text, await allToolResults());
       if (g.ok) return finish({ status: "done", reason: "DONE", summary: text });
-      if (!corrected) {
+      if (!corrected && run.stepsUsed < answerBy) {
         corrected = true;
         const notice = { notice: "repair" as const, attrs: { n: setup.nonce, code: "UNGROUNDED" }, text: `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. Read the source or remove them, then answer again.` };
         await append({ stage: "post", kind: "notice", result: notice });

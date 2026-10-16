@@ -8,17 +8,25 @@ import { FlagChip } from "./flag-chip";
 
 const features = tableFeatures({});
 const h = createColumnHelper<typeof features, Paycheck>();
-const money = (label: string, get: (p: Paycheck) => string) => h.display({ id: label, header: label, cell: (c) => get(c.row.original), meta: { numeric: true } });
+const money = (label: string, get: (p: Paycheck) => string, optional = false) => h.display({ id: label, header: label, cell: (c) => get(c.row.original), meta: { numeric: true, optional } });
 const columns = h.columns([
   h.accessor("workerName", { header: "Employee", cell: (c) => c.getValue() }),
   h.display({ id: "Hours", header: "Hours", cell: (c) => hours(c.row.original.hoursX100), meta: { numeric: true } }),
   money("Gross pay", (p) => p.gross.display),
-  money("Reimbursements", (p) => p.reimbursements.display),
+  money("Reimbursements", (p) => p.reimbursements.display, true),
   money("Company taxes", (p) => p.companyTaxes.display),
   money("Employee taxes", (p) => p.employeeTaxes.display),
-  money("Company benefits", (p) => p.companyBenefits.display),
+  money("Company benefits", (p) => p.companyBenefits.display, true),
   money("Net pay", (p) => p.net.display),
 ]);
+
+type ColMeta = { numeric?: boolean; optional?: boolean } | undefined;
+/**
+ * Gate report item 4: with the agent panel docked at 1440 px the card is about 790 px wide, so the two columns the
+ * drawer repeats (reimbursements, company benefits) step aside below a 960 px card and Net pay stays in view. Narrower
+ * still, the table scrolls inside its card.
+ */
+const OPTIONAL_COL = "hidden @min-[960px]:table-cell";
 
 const GROUPS = [
   { key: "needs_review", label: "Needs Review", testid: TID.payrollGroupNeedsReview, wash: "bg-amber-9/20", dot: "bg-amber-9" },
@@ -32,13 +40,13 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
   const headers = table.getHeaderGroups();
   const ncol = columns.length;
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-card shadow-xs">
-      <Table className="min-w-[860px]">
+    <div data-testid="paycheck-table-card" className="@container min-w-0 overflow-hidden rounded-xl border border-[var(--app-border)] bg-card shadow-xs">
+      <Table className="min-w-[640px]">
         <THead>
           {headers.map((g) => (
             <TR key={g.id}>
               {g.headers.map((hd) => (
-                <TH key={hd.id} numeric={(hd.column.columnDef.meta as { numeric?: boolean } | undefined)?.numeric} className={cn(hd.column.id === "workerName" && "sticky left-0 z-10 bg-card")}>
+                <TH key={hd.id} numeric={(hd.column.columnDef.meta as ColMeta)?.numeric} className={cn(hd.column.id === "workerName" && "sticky left-0 z-10 bg-card", (hd.column.columnDef.meta as ColMeta)?.optional && OPTIONAL_COL)}>
                   {hd.isPlaceholder ? null : <table.FlexRender header={hd} />}
                 </TH>
               ))}
@@ -67,7 +75,8 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
                     className={cn("group cursor-pointer hover:bg-gray-2 focus-visible:bg-gray-2 focus-visible:outline-none", pc.status === "excluded" && "opacity-60")}
                   >
                     {r.getAllCells().map((cell) => {
-                      const numeric = (cell.column.columnDef.meta as { numeric?: boolean } | undefined)?.numeric;
+                      const meta = cell.column.columnDef.meta as ColMeta;
+                      const numeric = meta?.numeric;
                       if (cell.column.id === "workerName") {
                         return (
                           <TD key={cell.id} className="sticky left-0 z-10 bg-card py-2 group-hover:bg-gray-2">
@@ -82,7 +91,7 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
                           </TD>
                         );
                       }
-                      return <TD key={cell.id} numeric={numeric}><table.FlexRender cell={cell} /></TD>;
+                      return <TD key={cell.id} numeric={numeric} className={cn("whitespace-nowrap", meta?.optional && OPTIONAL_COL)}><table.FlexRender cell={cell} /></TD>;
                     })}
                   </TR>
                 );

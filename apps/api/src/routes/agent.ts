@@ -128,14 +128,14 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
         seen.add(s.n);
         // Model call args are stored raw by the loop, so every streamed step goes through the redactor (harness 9).
         send("step", redactSafe(weft, s));
-        if (s.stage === "terminal") void store.getRun(id).then((row) => { if (row && TERMINAL.has(row.status)) finish(row.status); });
+        if (s.stage === "terminal") void store.getRun(id).then((row) => { if (row && TERMINAL.has(row.status)) finish(row.status); }).catch(() => undefined);
       };
       const stop = weft.agent.subscribe(id, forward);
       void (async () => {
         for (const s of await store.steps(id)) forward(s);
         const row = await store.getRun(id);
         if (row && TERMINAL.has(row.status) && (runtime.queue?.position(id) ?? null) === null) finish(row.status);
-      })();
+      })().catch(() => undefined);
       return () => { live = false; stop(); };
     });
   });

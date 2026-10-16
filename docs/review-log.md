@@ -1,5 +1,21 @@
 # Review log
 
+## Wave 2: gate report fixes (track w2-reliability, 2026-10-15, 18:50 to 19:15 PDT)
+
+Each item of the wave 1 gate report, fixed on `track/w2-reliability` with a test. Notes in `docs/tracks/w2-reliability.md`.
+
+| Gate report item | Fix | Commit subject |
+|---|---|---|
+| `weft.close()` did not drain in-flight routine finalization; CLIENT_CLOSED went unhandled | Tracked finalizations and bounded drains in the routines engine and the agent queue, awaited by `close()` before the database closes; background reads and writes are caught | fix(api): weft.close() drains in-flight runs and routine finalizations before the database closes |
+| A waiting routine run lost its trigger and handle across an API restart | Trigger in the context step; handles in a 0600 file per open run under the data dir, never in run_steps; waiting runs rehydrated at boot; the routines engine watches again on the first decision | fix(agent): a waiting routine run keeps its trigger and handle across an API restart |
+| Live L3 flaky (a write on a read-only question; 5 and 8 steps) | Chat is not offered `comms__post_update`; chat answers by its fourth model step; the chat role asks for concise reads and folds a retry into the next batch; the eval logs every tool call and new action row. Live L3 6 of 6 twice for $0.010 | fix(agent): chat stays read-only and answers by its fourth model step; fix(agent): chat reads concise results and leaves unasked filters null; feat(evals): live cases log every tool call and every new action row |
+| Run Steps and paycheck tables clipped at 1440 px with the agent panel docked | Container queries hide the columns the drawer or metrics repeat below the card width; tables scroll inside their card below that | fix(web): the paycheck table reflows inside its card; fix(web): the run view says (live) only for a live model; Steps reflow beside the docked panel |
+| Headcount tile counted 51 people including contractors | Active employees, onboarding shown apart, matching `/v1/stats` | fix(web): the Headcount tile counts active employees and shows onboarding apart |
+| The run view said (live) on scripted runs | Scripted, no model and Template, no model; (live) only for a real model; the feed mode reads streaming | fix(web): the run view says (live) only for a live model |
+| Grounding treated short strings with spaces as identifiers | `isIdentifier()` admits spaced strings only as short capitals-and-digits codes; whole-token cuts | fix(grounding): short strings with spaces are not identifiers |
+| research/product.md and research/agent.md quoted reference marketing lines | Paraphrased with source keys kept; no denylist phrase left | docs(research): paraphrase the quoted reference marketing lines |
+| Found on the branch by e2e GP4: a reset world never finalized routine runs | The routines engine keys its watches by routine run and agent run, since agent run ids restart after a reset | fix(routines): watch each routine run and agent run pair |
+
 Round 2 review of main at e8bd7b8 (correctness, security, harness, product design and brand honesty lenses), fixed
 on 2026-10-15 between 17:58 and 18:30 PDT. Each finding was checked against the code before it was fixed or set aside.
 
@@ -38,15 +54,15 @@ admin and cli keys on purpose, because their routes accept API keys.
 
 | Lens | Finding | Why not now |
 |---|---|---|
-| Harness | waiting routine runs lose their trigger and handle on restart (runtime.ts in-memory triggers, handles) | Needs the trigger stored in the context step and a DB-backed wake path in the runtime; larger than this round's budget. The routines half (decisions from memory) is fixed. Next step: read the trigger from the context step's RunSetup and pending proposals through actions.get_run |
+| Harness | waiting routine runs lose their trigger and handle on restart (runtime.ts in-memory triggers, handles) | Fixed in wave 2 (w2-reliability, see above). Was: needs the trigger stored in the context step and a DB-backed wake path in the runtime; larger than this round's budget. The routines half (decisions from memory) is fixed. Next step: read the trigger from the context step's RunSetup and pending proposals through actions.get_run |
 | Harness | no Active Memory recall at task start, no dossier refresh, no timeline coarsening | A P1 feature (harness 9.5, 7.2), not a defect fix; it needs its own track |
 | Harness | live L4 cannot fail on injection behavior | L4b costs a live call; the SPEC row now says so plainly. Add the forced-read chat case in the next live round under the $0.50 cap |
-| Harness | grounding check treats short strings with spaces as identifiers | The rule exists for identifiers like "DE 2088" that carry a space; tightening it needs a corpus check. The self-grounding path it enabled (post_update echo) is closed |
+| Harness | grounding check treats short strings with spaces as identifiers | Fixed in wave 2 (w2-reliability). Was: the rule exists for identifiers like "DE 2088" that carry a space; tightening it needs a corpus check. The self-grounding path it enabled (post_update echo) is closed |
 | Harness | spend ledger per-run cap keyed by reused run ids | Only bites after many live reruns on the same data dir; the loop already enforces the per-run budget. Key by a unique run key in the next live round |
 | Harness | sandbox gate missing | No code.run exists yet; add the SANDBOX_NOT_ALLOWED policy branch with code.run |
 | Harness | no cross-run prefix pin test | Worth adding with WEFT_PIN_PREFIX=1; not a defect today |
-| Design | paycheck table too wide with the agent panel docked; audit Actor shows a run id, not the routine name; no row flash after a review | Layout work that needs screenshots across breakpoints; the cn() fix already restores the 11px chips and 14px table text that caused much of the width |
+| Design | paycheck table too wide with the agent panel docked; audit Actor shows a run id, not the routine name; no row flash after a review | The paycheck table is fixed in wave 2 (w2-reliability); the rest stands. Layout work that needs screenshots across breakpoints; the cn() fix already restores the 11px chips and 14px table text that caused much of the width |
 | Design | simulators: no staged run feed reveal when a run finishes before first paint; approve gives no result strip | Interaction work across three components; next design round |
 | Design | landing: no mobile menu, missing agent showcase and run log sections, hero mock reflows at 390, dark island density, stat tile spacing | New sections and responsive work; next design round. The heading line height and the API path in the Numbers heading are fixed |
 | Design | Bank batches raw headers, empty states without a next step, humanized enums and run id crumbs everywhere | Small but spread over many files; next design round |
-| Brand | research/ quotes reference marketing lines verbatim and they are in git history | The repo is local only and never pushed. Before any publish, paraphrase research/product.md and research/agent.md or move them out of the tracked tree and rewrite history |
+| Brand | research/ quotes reference marketing lines verbatim and they are in git history | The working files are paraphrased in wave 2 (w2-reliability); the history still holds the old lines. The repo is local only and never pushed. Before any publish, paraphrase research/product.md and research/agent.md or move them out of the tracked tree and rewrite history |

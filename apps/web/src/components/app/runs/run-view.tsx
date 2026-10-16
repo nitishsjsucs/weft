@@ -30,6 +30,19 @@ function OutcomeBadge({ o }: { o: RunStepRow["outcome"] }) {
   return <Badge tone={tone === "ok" ? "green" : tone === "pending" ? "amber" : "red"} className="max-w-[220px] truncate">{o}</Badge>;
 }
 
+/** Gate report item 6: only a run on a real model reads (live); scripted and template runs say so instead. */
+export function isLiveRun(run: { provider: string; model: string }): boolean {
+  return run.provider !== "scripted" && run.model !== "template" && run.model !== "none";
+}
+
+export function providerLabel(run: { provider: string; model: string }): string {
+  if (run.model === "template") return "Template, no model";
+  if (run.provider === "scripted") return "Scripted, no model";
+  return `${run.provider} ${run.model} (live)`;
+}
+
+const STEP_OPTIONAL = "hidden @min-[900px]:table-cell";
+
 const STEP_KIND: Partial<Record<RunStepRow["kind"], string>> = { context: "Context assembled", model_call: "Model call", verify: "Checks", recite: "Plan recited", notice: "Notice", error: "Error" };
 
 /** Run view (SPEC 11.3): stages, tool calls, outcomes, tokens, cache-hit ratio, USD and model time, checklist, proposals. */
@@ -40,6 +53,7 @@ export function RunView({ id }: { id: string }) {
   if (!run) return <div className="p-8 text-2 text-gray-10">{w.mode === "idle" ? "Loading run..." : "Waiting for the run..."}</div>;
   const modelMs = w.steps.reduce((a, s) => a + (s.timings?.modelMs ?? 0), 0);
   const working = run.status === "running" || run.status === "queued";
+  const live = isLiveRun(run);
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
@@ -49,11 +63,11 @@ export function RunView({ id }: { id: string }) {
           <>
             <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{run.status}</ShimmerText> : run.status}</Badge>
             {run.terminalReason && run.terminalReason.toLowerCase() !== run.status ? <code className="font-mono text-0 text-gray-10">{run.terminalReason}</code> : null}
-            <Badge tone="outline" size="md">{run.provider === "scripted" ? "Scripted, no model" : `${run.provider} ${run.model}`}</Badge>
+            <Badge data-testid="run-provider" data-live={live ? "true" : "false"} tone="outline" size="md">{providerLabel(run)}</Badge>
             <Badge tone={run.attended ? "blue" : "gray"} size="md">{run.attended ? "Attended" : "Unattended"}</Badge>
             <span className="text-1 text-gray-11">Trigger <code className="font-mono">{run.trigger}</code></span>
             <span className="text-1 text-gray-11">Started {fmtDateTime(run.createdAt)}</span>
-            <span className="text-1 text-gray-10">({w.mode === "sse" ? "live" : w.mode === "polling" ? "polling every 1 s" : "loaded"})</span>
+            <span data-testid="run-feed-mode" className="text-1 text-gray-10">({w.mode === "sse" ? "streaming" : w.mode === "polling" ? "polling every 1 s" : "loaded"})</span>
           </>
         }
       />
@@ -87,9 +101,11 @@ export function RunView({ id }: { id: string }) {
       ) : null}
       <section className="mb-6">
         <h2 className="mb-2 text-2 font-medium">Steps</h2>
-        <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-card shadow-xs">
-          <Table className="min-w-[880px] text-[13px]">
-            <THead><TR><TH>#</TH><TH>Stage</TH><TH>Step</TH><TH>Outcome</TH><TH numeric>Tokens in / cached / out</TH><TH numeric>Cache hit</TH><TH numeric>USD</TH><TH numeric>Model time</TH></TR></THead>
+        {/* Gate report item 4: with the agent panel docked at 1440 px this card is about 790 px wide; Cache hit and Model
+            time (both in the metrics above) step aside below a 900 px card, and narrower still the table scrolls inside it. */}
+        <div data-testid="run-steps-card" className="@container min-w-0 overflow-hidden rounded-xl border border-[var(--app-border)] bg-card shadow-xs">
+          <Table className="min-w-[640px] text-[13px]">
+            <THead><TR><TH>#</TH><TH>Stage</TH><TH>Step</TH><TH>Outcome</TH><TH numeric className="whitespace-nowrap">Tokens in / cached / out</TH><TH numeric className={STEP_OPTIONAL}>Cache hit</TH><TH numeric>USD</TH><TH numeric className={STEP_OPTIONAL}>Model time</TH></TR></THead>
             <TBody>
               {w.steps.map((s) => (
                 <TR key={s.n} data-testid={TID.runStep} data-stage={s.stage} data-kind={s.kind}>
@@ -102,10 +118,10 @@ export function RunView({ id }: { id: string }) {
                     </div>
                   </TD>
                   <TD className="h-10"><OutcomeBadge o={s.outcome} /></TD>
-                  <TD numeric className="h-10">{s.usage ? `${int(s.usage.input)} / ${int(s.usage.cached)} / ${int(s.usage.output)}` : "-"}</TD>
-                  <TD numeric className="h-10">{s.usage ? pct(s.usage.cached, s.usage.input) : "-"}</TD>
+                  <TD numeric className="h-10 whitespace-nowrap">{s.usage ? `${int(s.usage.input)} / ${int(s.usage.cached)} / ${int(s.usage.output)}` : "-"}</TD>
+                  <TD numeric className={cn("h-10", STEP_OPTIONAL)}>{s.usage ? pct(s.usage.cached, s.usage.input) : "-"}</TD>
                   <TD numeric className="h-10">{s.costUsdMicros ? usd(s.costUsdMicros) : "-"}</TD>
-                  <TD numeric className="h-10">{s.timings ? `${(s.timings.modelMs / 1000).toFixed(2)} s` : "-"}</TD>
+                  <TD numeric className={cn("h-10 whitespace-nowrap", STEP_OPTIONAL)}>{s.timings ? `${(s.timings.modelMs / 1000).toFixed(2)} s` : "-"}</TD>
                 </TR>
               ))}
               {w.steps.length === 0 ? <TR><TD colSpan={8} className="text-gray-10">No steps yet.</TD></TR> : null}
