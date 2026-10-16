@@ -9,7 +9,7 @@ import type { Redactor } from "../vault/redact";
 import { COMMITTER, git, serialGit } from "./git";
 import { digestKey, planCoarsen } from "./coarsen";
 import { renderDossiers, type DigestSources } from "./dossiers";
-import { backlinkIndex, bodyWithoutBacklinks, extractLinks, linkify, linkPath, withBacklinks, type LinkContext } from "./links";
+import { BACKLINKS_HEADING, backlinkIndex, bodyWithoutBacklinks, extractLinks, linkify, linkPath, withBacklinks, type LinkContext } from "./links";
 import { excerptOf, pickSubjects, recallTerms, renderRecall, CAPS, type AliasEntry, type RecallCandidate } from "./recall";
 import { stripLinks } from "./links";
 import { RECALL_BUDGET } from "@weft/contracts";
@@ -430,13 +430,19 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
     const view = new Map<string, string>();
     for (const p of tracked) if (!removed.has(p)) { const t = readText(p); if (t !== null) view.set(p, t); }
     for (const [p, t] of next) view.set(p, t);
-    const idx = backlinkIndex([...view.entries()].map(([path, text]) => ({ path, body: parseDoc(text).body })));
+    // Untrusted files (tainted_by, human decision notes) never feed a dossier, not even as a backlink path.
+    const trustedSource = (p: string, t: string) => !p.startsWith("knowledge/decisions/") && !parseDoc(t).frontmatter.taintedBy;
+    const idx = backlinkIndex([...view.entries()].filter(([path, text]) => trustedSource(path, text)).map(([path, text]) => ({ path, body: parseDoc(text).body })));
     for (const [p, t] of view) {
-      if (!(p.startsWith("entities/") || p.startsWith("knowledge/"))) continue;
+      if (!(p.startsWith("entities/") || p.startsWith("knowledge/")) || p.startsWith("knowledge/decisions/") || !t.startsWith("---\n")) continue;
       const d = parseDoc(t);
-      const body = withBacklinks(d.body, idx.get(p) ?? []);
-      const fm = { ...d.frontmatter, links: extractLinks(bodyWithoutBacklinks(body)) };
-      const text = t.startsWith("---\n") ? renderDoc(fm, body) : body;
+      const sources = idx.get(p) ?? [];
+      // Files nobody links to (and without a section to clear) stay byte-identical unless this digest wrote them.
+      if (sources.length === 0 && !d.body.includes(`\n${BACKLINKS_HEADING}\n`) && !next.has(p)) continue;
+      const body = withBacklinks(d.body, sources);
+      // Keep non-path links (a decision's proposal id, for example) and add the wiki-link targets in the body.
+      const links = [...new Set([...(d.frontmatter.links ?? []).filter((l) => !l.includes("/")), ...extractLinks(bodyWithoutBacklinks(body))])].sort();
+      const text = renderDoc({ ...d.frontmatter, links }, body);
       if (text !== t) next.set(p, text);
     }
 
