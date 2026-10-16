@@ -151,7 +151,7 @@ export function RunView({ id }: { id: string }) {
                 <code className="font-mono text-0 text-gray-10">{p.id}</code>
                 <span className="min-w-0 flex-1 truncate">{p.headline}</span>
                 <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "pending" ? "amber" : "red"}>{p.status}</Badge>
-                {p.decidedBy ? <span className="hidden text-1 text-gray-10 tablet:inline">{principalName(p.decidedBy)}</span> : null}
+                {p.decidedBy ? <span className="hidden text-1 text-gray-10 tablet:inline">Decided by {principalName(p.decidedBy)}</span> : null}
               </Link>
             ))}
           </Card>
