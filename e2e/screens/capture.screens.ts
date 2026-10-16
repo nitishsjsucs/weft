@@ -1,16 +1,30 @@
 // Screenshot capture for docs/screenshots/ (README Results). `pnpm screenshots` runs it through
 // playwright.screens.config.ts: the same dev runner, ports and fresh world per test as `pnpm e2e`, driving the golden
 // path flows far enough to show each screen. Never part of `pnpm e2e` (the file name is outside its testMatch).
-import { eventually, expect, openApp, test, TID, tid, viewAs, type Proposal } from "../fixtures";
+import { askAgent, eventually, expect, openApp, test, TID, tid, viewAs, type Proposal } from "../fixtures";
 import { W2_ONBOARDING_TID as T } from "../../packages/contracts/src/w2/testids-onboarding";
-import { W2_OFFBOARDING_TID as OT, W2_BENEFITS_TID as BT } from "../../packages/contracts/src/index";
+import { W2_OFFBOARDING_TID as OT, W2_BENEFITS_TID as BT, W3_CHAT_TID, W3_EXPENSES_TID as XT, W3_INTEGRATIONS_TID as IT, W3_SHELL_TID as S, W3_TIMEOFF_TID as TT } from "../../packages/contracts/src/index";
 import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 const OUT = process.env.SHOTS_DIR ?? fileURLToPath(new URL("../../docs/screenshots", import.meta.url));
+/** Moves focus and the pointer off the control a step last clicked, so a shot shows the resting state. */
+const rest = async (page: Page) => {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.mouse.move(1, page.viewportSize()!.height - 1);
+};
 const shot = async (page: Page, name: string, fullPage = false) => {
   await page.waitForTimeout(600);
+  await rest(page);
   await page.screenshot({ path: `${OUT}/${name}.png`, fullPage });
+};
+
+/** A crop of the top of the page (the app header and whatever menu hangs from it). */
+const top = async (page: Page, name: string, height: number, keepFocus = false) => {
+  await page.waitForTimeout(600);
+  if (!keepFocus) await rest(page);
+  const width = page.viewportSize()!.width;
+  await page.screenshot({ path: `${OUT}/${name}.png`, clip: { x: 0, y: 0, width, height } });
 };
 
 test("screens wave 1", async ({ page, weft }) => {
@@ -130,4 +144,58 @@ test("screens memory", async ({ page, weft }) => {
   await openApp(page, "/app/memory");
   await expect(page.getByTestId("memory-file")).toContainText("Headcount by state");
   await shot(page, "17-memory");
+});
+
+test("screens wave 3 top bar", async ({ page }) => {
+  await openApp(page, "/app/people/wrk_0001");
+  await viewAs(page, "dana");
+  await expect(page.locator(`header:has([data-testid="${S.envPill}"])`)).toBeVisible();
+  await top(page, "21-topbar", 120);
+  await page.getByTestId(TID.viewingAs).click();
+  await expect(page.getByRole("menu")).toContainText("Managers");
+  await top(page, "21b-topbar-persona-menu", 420, true);
+  await page.keyboard.press("Escape");
+  await page.getByTestId(TID.simClock).click();
+  await expect(page.getByTestId(S.clockPopover)).toContainText("Simulated time");
+  await top(page, "21c-topbar-clock", 420, true);
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openApp(page, "/app/people/wrk_0001");
+  await top(page, "21d-topbar-mobile", 120);
+});
+
+test("screens wave 3 expenses", async ({ page, weft }) => {
+  await openApp(page, "/app/expenses");
+  await viewAs(page, "dana");
+  await expect(page.getByTestId(XT.band("needs_review"))).toHaveAttribute("data-count", "8");
+  await shot(page, "22-expenses");
+  await weft.post("/v1/routines/rt_expense_review/trigger", {});
+  await eventually(() => weft.proposals("pending"), (ps) => { const mine = ps.filter((p: Proposal) => p.command === "expenses.decide"); return mine.length === 8 ? mine : null; }, "eight expense proposals", 60_000);
+  await page.reload();
+  await page.getByTestId(XT.row("exp_0007")).click();
+  await expect(page.getByTestId(XT.drawer).getByTestId(XT.check("DUPLICATE"))).toBeVisible();
+  await shot(page, "22b-expense-drawer");
+});
+
+test("screens wave 3 time off", async ({ page }) => {
+  await openApp(page, "/app/time-off");
+  await viewAs(page, "sam");
+  await page.getByTestId(TT.tab("requests")).click();
+  await expect(page.getByTestId(TT.requestRow("tor_0003")).getByTestId(TT.check("COVERAGE_CONFLICT"))).toBeVisible();
+  await shot(page, "23-time-off-requests");
+  await page.getByTestId(TT.tab("calendar")).click();
+  await expect(page.getByTestId(TT.calendarDay("2026-11-23"))).toHaveAttribute("data-over", "true");
+  await shot(page, "23b-time-off-calendar");
+});
+
+test("screens wave 3 integrations and chart", async ({ page }) => {
+  await openApp(page, "/app/integrations");
+  await viewAs(page, "dana");
+  for (const v of ["greenhouse", "workday", "checkr", "hireright", "docusign"]) await expect(page.getByTestId(IT.mode(v))).toHaveText("Simulated");
+  await shot(page, "24-integrations");
+  await openApp(page, "/app");
+  const answer = await askAgent(page, "Show payroll cost by month");
+  await expect(answer).toContainText("Sep 2026");
+  await expect(page.getByTestId(W3_CHAT_TID.chart).last().locator(".recharts-bar-rectangle").first()).toBeVisible();
+  await shot(page, "25-chat-chart");
 });
