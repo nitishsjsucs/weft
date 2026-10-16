@@ -200,10 +200,7 @@ time; the action chain verifies at the end of every scenario.
 - The offer builder has no Manager or Workplace field: the manager defaults to the department lead and the hire lands
   as Remote US (the API accepts `manager_id` and `workplace_id`).
 - Open enrollment reminders go to each person by email; #general gets only an anonymous count.
-- Seen in the final gate: the Outcome column of the run view's Steps table is cut off at 1440 px with the agent panel
-  docked on the agency notice run, whose step titles are long (the 1440 px spec checks a chat run only); an Inbox card
-  for a proposal a person made (off-cycle pay from the person header) labels the person's reason "Agent's note"; the
-  company one-pager prints the payroll approve-by time as a raw UTC timestamp.
+- Seen in the final gate: the company one-pager prints the payroll approve-by time as a raw UTC timestamp.
 - Set aside in the final review (reasons in [docs/review-log.md](docs/review-log.md)): a person's UI session still runs
   R4 money movers through `POST /v1/tools` directly (SPEC 10; API keys now get proposals); `code.run` holds the write
   lock for the whole script; recall lines lack the untrusted wrapper and sit outside the pack budget; the memory digest
