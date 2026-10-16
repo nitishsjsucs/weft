@@ -1,4 +1,4 @@
-import { Banknote, BookOpen, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
+import { Banknote, BookOpen, Cable, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
 
 export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox" | "simulated" | "soon" }
 export interface NavGroup { label: string | null; items: NavItem[] }
@@ -25,6 +25,7 @@ export const NAV: NavGroup[] = [
     { slug: "routines", label: "Routines", href: "/app/routines", icon: Repeat },
     { slug: "audit", label: "Audit log", href: "/app/audit", icon: ScrollText },
     { slug: "memory", label: "Memory", href: "/app/memory", icon: BookOpen },
+    { slug: "integrations", label: "Integrations", href: "/app/integrations", icon: Cable, badge: "simulated" },   // wave 3 (w3-integrations-hr)
     { slug: "simulators", label: "Simulators", href: "/app/simulators", icon: FlaskConical, badge: "simulated" },
   ] },
 ];

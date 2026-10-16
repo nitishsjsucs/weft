@@ -9,6 +9,7 @@ import { formatCents, W2_ONBOARDING_TID as T, type PortalTaskKind, type W2Onboar
 import { fmtDate } from "../app/format";
 import { ApiError, createClient } from "@/lib/api/client";
 import { WeftMark } from "@/components/app/weft-mark";
+import { PortalW3Sections } from "./w3-sections";
 
 const KEY = "weft.portalAs";
 const field = "h-9 w-full rounded-lg border border-[var(--app-border)] bg-card px-3 text-2 outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]";
@@ -100,6 +101,7 @@ export function PortalView() {
             </li>
           ))}
         </ol>
+        <PortalW3Sections workerId={view.worker.id} principal={as} />
         <p className="text-1 text-gray-10">Everything here is simulated: a fictional company, fictional people and no real tax, bank or identity data.</p>
       </div>
     </Shell>

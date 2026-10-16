@@ -1,6 +1,7 @@
 // /v1 settings routes (SPEC 10): permissions view and agent grants. Owner: t3-governance. Grant changes are human
 // only (UI session, admin), audited as an action row. Approve is never effective for agents.
 import { Hono } from "hono";
+import { stubRoutes } from "../http/stub";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { Forbidden, Unauthorized } from "@weft/contracts";
@@ -52,5 +53,5 @@ export function settingsRoutes(weft: Weft): Hono<WeftEnv> {
     await kick(weft);
     return c.json(await permissions(weft, s.companyId));
   });
-  return r;
+  return stubRoutes(r, "settings", ["GET /v1/settings/permissions", "PUT /v1/settings/agent-grants"]);   // wave 3 rows answer 501 until w3-parity-routines lands them
 }

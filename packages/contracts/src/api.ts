@@ -3,9 +3,11 @@
 export type Method = "GET" | "POST" | "PUT" | "DELETE";
 export interface RouteDef { method: Method; path: string; file: RouteFile; owner: TrackId; query?: string[]; body?: string; res: string; auth: "public" | "any" | "ui_only" | "not_mcp"; mutates: boolean }
 export type TrackId = "t1-payroll" | "t2-world" | "t3-governance" | "t4-agent" | "t5-app" | "t6-site"
-  | "w2-onboarding" | "w2-offboarding" | "w2-benefits-contractors" | "w2-memory" | "w2-providers-sandbox" | "w2-reliability";
+  | "w2-onboarding" | "w2-offboarding" | "w2-benefits-contractors" | "w2-memory" | "w2-providers-sandbox" | "w2-reliability"
+  | "w3-parity-routines" | "w3-parity-chat" | "w3-expenses" | "w3-timeoff" | "w3-integrations-hr" | "w3-integrations-screening-esign" | "w3-topbar-shell";
 export type RouteFile = "health" | "company" | "stats" | "workers" | "offers" | "payrolls" | "tax" | "notices" | "benefits" | "it" | "proposals" | "actions" | "tools" | "memory" | "events" | "settings" | "api-keys" | "agent" | "routines" | "sim"
-  | "portal" | "documents" | "offboarding" | "contractors";
+  | "portal" | "documents" | "offboarding" | "contractors"
+  | "expenses" | "time-off" | "reports" | "integrations" | "screening";   // wave 3
 
 const r = <M extends Method, P extends string, F extends RouteFile>(method: M, path: P, file: F, owner: TrackId, res: string, x: Partial<RouteDef> = {}) =>
   ({ owner, res, auth: "any", mutates: method !== "GET", ...x, method, path, file }) as RouteDef & { method: M; path: P; file: F };
@@ -103,6 +105,44 @@ export const ROUTES = [
   r("GET", "/v1/contractors/payouts", "contractors", "w2-benefits-contractors", "Page<ContractorPayout>", { query: ["workerId", "status", "limit", "afterId"] }),
   r("POST", "/v1/contractors/payouts", "contractors", "w2-benefits-contractors", "ToolOutcome", { body: "{ workerIds, scheduledFor }" }),
   r("GET", "/v1/contractors/fx", "contractors", "w2-benefits-contractors", "FxRate[]"),
+  // Wave 3 (docs/wave3.md). Stubs answer 501 until the owning track lands them.
+  r("GET", "/v1/expenses", "expenses", "w3-expenses", "Page<Expense>", { query: ["band", "status", "workerId", "category", "limit", "afterId"] }),
+  r("GET", "/v1/expenses/:id", "expenses", "w3-expenses", "Expense"),
+  r("GET", "/v1/expenses/:id/receipt", "expenses", "w3-expenses", "bytes (admins only)", { auth: "ui_only" }),
+  r("POST", "/v1/expenses", "expenses", "w3-expenses", "ToolOutcome", { auth: "not_mcp", body: "ExpenseSubmission plus multipart receipt" }),
+  r("POST", "/v1/expenses/:id/decide", "expenses", "w3-expenses", "ToolOutcome", { auth: "not_mcp", body: "ExpenseDecideBody" }),
+  r("POST", "/v1/expenses/:id/reopen", "expenses", "w3-expenses", "ToolOutcome", { auth: "ui_only" }),
+  r("GET", "/v1/expense-policy", "expenses", "w3-expenses", "ExpensePolicy"),
+  r("GET", "/v1/time-off/policies", "time-off", "w3-timeoff", "TimeOffPolicy[]"),
+  r("GET", "/v1/time-off/balances", "time-off", "w3-timeoff", "TimeOffBalance[]", { query: ["workerId", "asOf"] }),
+  r("GET", "/v1/time-off/ledger", "time-off", "w3-timeoff", "TimeOffLedgerRow[]", { query: ["workerId", "policyId"] }),
+  r("GET", "/v1/time-off/requests", "time-off", "w3-timeoff", "Page<TimeOffRequest>", { query: ["status", "workerId", "departmentId", "from", "to", "limit", "afterId"] }),
+  r("GET", "/v1/time-off/requests/:id", "time-off", "w3-timeoff", "TimeOffRequest"),
+  r("POST", "/v1/time-off/requests", "time-off", "w3-timeoff", "ToolOutcome", { auth: "not_mcp", body: "TimeOffSubmission" }),
+  r("POST", "/v1/time-off/requests/:id/decide", "time-off", "w3-timeoff", "ToolOutcome", { auth: "not_mcp", body: "TimeOffDecideBody" }),
+  r("POST", "/v1/time-off/requests/:id/cancel", "time-off", "w3-timeoff", "ToolOutcome", { auth: "not_mcp" }),
+  r("GET", "/v1/time-off/calendar", "time-off", "w3-timeoff", "TeamCalendar", { query: ["departmentId", "from", "to"] }),
+  r("GET", "/v1/time-off/holidays", "time-off", "w3-timeoff", "Holiday[]", { query: ["year"] }),
+  r("GET", "/v1/settings/agent", "settings", "w3-parity-routines", "{ chatCanPropose, allowAutoAutonomy }", { auth: "not_mcp" }),
+  r("PUT", "/v1/settings/agent", "settings", "w3-parity-routines", "{ chatCanPropose, allowAutoAutonomy }", { auth: "ui_only", body: "{ chatCanPropose?, allowAutoAutonomy? }" }),
+  r("POST", "/v1/routines/:id/autonomy", "routines", "w3-parity-routines", "ToolOutcome", { auth: "ui_only", body: "{ autonomy: 'recommend' | 'approve' | 'auto' } (a proposal, like enable)" }),
+  r("GET", "/v1/reports/:metric", "reports", "w3-parity-chat", "ReportResult", { query: ["from", "to", "groupBy"] }),
+  r("GET", "/v1/integrations", "integrations", "w3-integrations-hr", "IntegrationCard[]"),
+  r("GET", "/v1/integrations/:vendor", "integrations", "w3-integrations-hr", "IntegrationCard"),
+  r("POST", "/v1/integrations/:vendor/test", "integrations", "w3-integrations-hr", "ConnectorStatus", { auth: "ui_only" }),
+  r("POST", "/v1/integrations/:vendor/sync", "integrations", "w3-integrations-hr", "ToolOutcome", { auth: "not_mcp" }),
+  r("POST", "/v1/integrations/:vendor/simulate", "integrations", "w3-integrations-hr", "ToolOutcome", { auth: "not_mcp", body: "{ kind }" }),
+  r("POST", "/v1/integrations/:vendor/webhook", "integrations", "w3-integrations-hr", "{ ok }", { auth: "public", body: "raw vendor body, verified by HMAC" }),
+  r("GET", "/v1/sync-items", "integrations", "w3-integrations-hr", "SyncItem[]", { query: ["status", "vendor"] }),
+  r("POST", "/v1/sync-items/:id/resolve", "integrations", "w3-integrations-hr", "ToolOutcome", { auth: "ui_only", body: "{ take: 'weft' | 'vendor' }" }),
+  r("GET", "/v1/ats/jobs", "integrations", "w3-integrations-hr", "AtsJob[]", { query: ["source"] }),
+  r("GET", "/v1/screening/packages", "screening", "w3-integrations-screening-esign", "ScreeningPackage[]"),
+  r("GET", "/v1/screening/orders", "screening", "w3-integrations-screening-esign", "Page<ScreeningOrder>", { query: ["offerId", "status", "limit", "afterId"] }),
+  r("GET", "/v1/screening/orders/:id", "screening", "w3-integrations-screening-esign", "ScreeningOrder"),
+  r("POST", "/v1/offers/:id/screening", "screening", "w3-integrations-screening-esign", "ToolOutcome", { auth: "not_mcp", body: "{ packageSlug }" }),
+  r("POST", "/v1/screening/orders/:id/adjudicate", "screening", "w3-integrations-screening-esign", "ToolOutcome", { auth: "ui_only", body: "{ step: 'engage' | 'pre_adverse' | 'final_adverse' | 'cancel_adverse' | 'proceed_to_criminal' }" }),
+  r("GET", "/v1/offers/:id/envelope", "screening", "w3-integrations-screening-esign", "EsignEnvelope"),
+  r("POST", "/v1/portal/esign/url", "screening", "w3-integrations-screening-esign", "{ url, expiresAt }", { auth: "ui_only" }),
 ] as const satisfies readonly RouteDef[];
 
 export type RouteKey = `${(typeof ROUTES)[number]["method"]} ${(typeof ROUTES)[number]["path"]}`;

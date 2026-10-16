@@ -13,12 +13,12 @@ export const TimeSource = e("seed", "import"); export type TimeSource = z.infer<
 export const W4Version = e("2020", "pre2020"); export type W4Version = z.infer<typeof W4Version>;
 export const FilingStatus = e("single", "mfj", "hoh"); export type FilingStatus = z.infer<typeof FilingStatus>;
 export const HrSource = e("seed", "hr", "demo_bundle"); export type HrSource = z.infer<typeof HrSource>;
-export const OfferStatus = e("draft", "sent", "viewed", "accepted", "voided", "expired"); export type OfferStatus = z.infer<typeof OfferStatus>;
-export const OnboardingTaskKind = e("sign_offer", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts", "device", "state_registration", "sign_confidentiality"); export type OnboardingTaskKind = z.infer<typeof OnboardingTaskKind>;
+export const OfferStatus = e("draft", "sent", "viewed", "accepted", "voided", "expired", "declined"); export type OfferStatus = z.infer<typeof OfferStatus>;
+export const OnboardingTaskKind = e("sign_offer", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts", "device", "state_registration", "sign_confidentiality", "background_check"); export type OnboardingTaskKind = z.infer<typeof OnboardingTaskKind>;
 export const OnboardingTaskStatus = e("pending", "done", "blocked"); export type OnboardingTaskStatus = z.infer<typeof OnboardingTaskStatus>;
 export const OnboardingTaskOwner = e("employee", "hr", "agent"); export type OnboardingTaskOwner = z.infer<typeof OnboardingTaskOwner>;
 export const PrincipalKind = e("human", "agent", "service"); export type PrincipalKind = z.infer<typeof PrincipalKind>;
-export const HumanRole = e("admin", "payroll_admin", "hr_manager", "employee"); export type HumanRole = z.infer<typeof HumanRole>;
+export const HumanRole = e("admin", "payroll_admin", "hr_manager", "employee", "manager"); export type HumanRole = z.infer<typeof HumanRole>;
 export const ApiKeyScope = e("mcp", "cli", "admin"); export type ApiKeyScope = z.infer<typeof ApiKeyScope>;
 export const ApiKeySurface = e("mcp", "api"); export type ApiKeySurface = z.infer<typeof ApiKeySurface>;
 
@@ -28,7 +28,8 @@ export const PayrollRunStatus = e("draft", "pending", "processing", "processed",
 export const PaycheckStatus = e("draft", "processing", "processed", "failed", "blocked", "excluded"); export type PaycheckStatus = z.infer<typeof PaycheckStatus>;
 export const ReviewGroup = e("needs_review", "ready"); export type ReviewGroup = z.infer<typeof ReviewGroup>;
 export const ExplanationSource = e("agent", "template"); export type ExplanationSource = z.infer<typeof ExplanationSource>;
-export const FlagRule = e("GROSS_CHANGE", "HOURS_SPIKE", "NEW_IN_RUN", "MISSING_FROM_RUN", "PRORATED", "MISSING_BANK_ACCOUNT", "UNREGISTERED_STATE", "NEGATIVE_NET", "TOTAL_CHANGE"); export type FlagRule = z.infer<typeof FlagRule>;
+export const FlagRule = e("GROSS_CHANGE", "HOURS_SPIKE", "NEW_IN_RUN", "MISSING_FROM_RUN", "PRORATED", "MISSING_BANK_ACCOUNT", "UNREGISTERED_STATE", "NEGATIVE_NET", "TOTAL_CHANGE",
+  "DUPLICATE_SUPPLEMENTAL", "RAISE_NOT_APPLIED", "WITHHOLDING_CHANGED", "PENDING_TIME_OFF_IN_PERIOD", "PTO_LINE", "REIMBURSEMENT_SPIKE"); export type FlagRule = z.infer<typeof FlagRule>;   // wave 3 adds the last six rules
 export const FlagSeverity = e("info", "review", "block"); export type FlagSeverity = z.infer<typeof FlagSeverity>;
 export const TaxPayer = e("employee", "employer"); export type TaxPayer = z.infer<typeof TaxPayer>;
 
@@ -52,7 +53,7 @@ export const ItSystem = e("google_ws", "chat", "github", "sso"); export type ItS
 export const ItAccountStatus = e("provisioning", "active", "suspended"); export type ItAccountStatus = z.infer<typeof ItAccountStatus>;
 export const DeviceStatus = e("ordered", "shipped", "delivered", "assigned"); export type DeviceStatus = z.infer<typeof DeviceStatus>;
 export const ContractorPaymentStatus = e("scheduled", "paid", "failed");   // rail lifecycle: RailStatus in wave2.ts export type ContractorPaymentStatus = z.infer<typeof ContractorPaymentStatus>;
-export const ChatChannel = e("#people-ops", "#payroll", "#new-hires", "#general"); export type ChatChannel = z.infer<typeof ChatChannel>;
+export const ChatChannel = e("#people-ops", "#payroll", "#new-hires", "#general", "#leadership"); export type ChatChannel = z.infer<typeof ChatChannel>;
 
 export const ActorKind = e("human", "agent", "routine", "system"); export type ActorKind = z.infer<typeof ActorKind>;
 export const Reversibility = e("yes", "no", "na"); export type Reversibility = z.infer<typeof Reversibility>;

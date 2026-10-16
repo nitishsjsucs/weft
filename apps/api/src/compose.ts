@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import { closeDb, migrate, notices, openDb, type Db } from "@weft/db";
 import { commands, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
+import { createVendorOverlay } from "@weft/integrations";
 import { createExecutor, executorInternals } from "@weft/executor";
 import { createAgentRuntime, createProvider, createSpendLedger, loadSecret } from "@weft/agent";
 import { createRoutines, type WeftRoutinesEngine } from "@weft/routines";
@@ -121,8 +122,11 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   const db = openDb({ dataDir });
   await migrate(db);
   const clock = opts.clock ?? (await createSimClock({ db, initial: testMode ? { at: "2026-10-26T15:30:00.000Z", rate: 0 } : undefined }));
-  const sims = await tolerate<Simulators>("sim", () => createSimulators({ db, clock }), () => stubOf("sims"));
-  const executor = await tolerate<ExecutorBundle>("executor", () => createExecutor({ db, clock, dataDir, commands, simulators: createSimulators, testMode }), () => stubOf("executor"));
+  // Wave 3: real vendor adapters overlay the simulated ones only outside tests, with WEFT_INTEGRATIONS_REAL=1 and every secret present.
+  const vendors = testMode ? undefined : createVendorOverlay(process.env);
+  const simulators = (o: { db: Parameters<typeof createSimulators>[0]["db"]; clock: Parameters<typeof createSimulators>[0]["clock"] }) => createSimulators({ ...o, vendors });
+  const sims = await tolerate<Simulators>("sim", () => simulators({ db, clock }), () => stubOf("sims"));
+  const executor = await tolerate<ExecutorBundle>("executor", () => createExecutor({ db, clock, dataDir, commands, simulators, testMode }), () => stubOf("executor"));
   // Harness 6.4: provider keys may come from WEFT_SECRETS_FILE and never reach process.env; teach the redactor them too.
   for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) {
     const v = (() => { try { return loadSecret(k, process.env); } catch { return null; } })();

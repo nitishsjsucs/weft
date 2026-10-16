@@ -4,6 +4,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { formatCents, type Flag } from "@weft/contracts";
 import { actions, paychecks, payrollRuns, payRates, type DbTx } from "@weft/db";
 import type { ComputedPaycheck } from "./compute";
+import { loadW3FlagData, w3Flags, type W3FlagData } from "./w3-hooks";   // wave 3 rules
 
 export const GROSS_CHANGE_THRESHOLD = 0.10;
 export const HOURS_SPIKE_THRESHOLD = 0.25;
@@ -19,6 +20,8 @@ export interface FlagContext {
   recentHours: Map<string, number[]>;
   /** Rates that became effective after the previous run's period end, latest first. */
   rateChanges: Map<string, RateChange>;
+  /** Wave 3 rule data (payroll/w3-hooks.ts); absent in contexts built by hand. */
+  w3?: W3FlagData;
 }
 
 const pctString = (from: number, to: number) => (((to - from) / from) * 100).toFixed(1);
@@ -84,6 +87,7 @@ export function flagsFor(cp: ComputedPaycheck, ctx: FlagContext): Flag[] {
   if (cp.calc.net_cents <= 0) {
     flags.push({ rule: "NEGATIVE_NET", severity: "block", message: `Net pay ${money(cp.calc.net_cents)} is at or below zero`, evidence: { worker_id: w.id, net_cents: cp.calc.net_cents, net_display: money(cp.calc.net_cents) } });
   }
+  flags.push(...w3Flags(cp, ctx.w3));   // wave 3
   return flags;
 }
 
@@ -153,7 +157,8 @@ export async function loadFlagContext(tx: DbTx, input: { payScheduleId: string; 
       });
     }
   }
-  return { periodStart: input.periodStart, periodEnd: input.periodEnd, previousRunId: input.previousRunId, previous, recentHours, rateChanges, previousRunGrossCents };
+  const w3 = await loadW3FlagData(tx, input);   // wave 3
+  return { periodStart: input.periodStart, periodEnd: input.periodEnd, previousRunId: input.previousRunId, previous, recentHours, rateChanges, previousRunGrossCents, w3 };
 }
 
 export interface PrecheckSummary {

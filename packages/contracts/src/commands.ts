@@ -5,7 +5,8 @@ import type { DecisionInput, DecisionResult, ProposalDecided } from "./approvals
 
 export type Namespace = "people" | "payroll" | "tax" | "notices" | "benefits" | "it" | "comms" | "onboarding"
   | "memory" | "vault" | "actions" | "routines" | "agent" | "code"
-  | "documents" | "offboarding" | "contractors";   // wave 2
+  | "documents" | "offboarding" | "contractors"   // wave 2
+  | "expenses" | "time_off" | "reports" | "integrations" | "ats" | "hris" | "screening";   // wave 3
 export type Domain = "people" | "payroll" | "tax" | "benefits" | "it" | "comms" | "company";
 export type Grant = "none" | "view" | "edit" | "approve";
 export type Effect = "read" | "draft" | "write" | "external";
@@ -67,6 +68,8 @@ export interface CommandDef<I = unknown, O = unknown, D = unknown> {
   risk: (i: I) => RiskClass;
   approval: "never" | "always" | { overCents: number };
   autoAllow: "never" | "untainted";    // R3 only; never for task agents
+  /** Wave 3: an R2 command a routine at autonomy "auto" may run without approval, under this limits key (per call), untainted only. */
+  autoEligible?: string | null;
   amountCents: ((i: I, ctx: ExecContext, deps: D) => Promise<number | null>) | null;   // from DB rows, never args
   ceilingKey: string | null;           // per call; `${ceilingKey}_day` for the daily aggregate
   reversible: false | { reverse: string };

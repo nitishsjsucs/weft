@@ -280,6 +280,14 @@ The registry (`packages/executor/src/registry.ts`, T3) is the single source for 
 Wave 2 amendment: chat is offered 13 of these 14 tools. `comms.post_update` stays on the frozen allowlist but is
 not offered to chat (`CHAT_HIDDEN_TOOLS`), so a read-only question leaves no action row.
 
+Wave 3 amendment (docs/wave3.md, `packages/contracts/src/wave3.ts`), proposed and gated: the frozen 14 stay as the
+wave 1 record. Chat reads become `CHAT_TOOLS_W3` (16: `actions.get_run` leaves chat and stays on MCP; `reports.query`,
+`expenses.list` and `time_off.list_requests` join). When the company setting `agent.chat_can_propose` is on (default
+off until Nitish approves this line) and code, never the model, reads an action intent in the request, the run gets
+`CHAT_ACT_TOOLS` instead (16, including `payroll.propose_off_cycle`, `expenses.decide` and `time_off.decide`). Every
+write on it is R2 or R4 with `approval: "always"`, so chat can only file proposals; nothing executes from chat, grants
+still intersect with the asking person's, and a tainted run keeps today's refusals. There is no bulk decide command.
+
 A registry test asserts the `rt_new_hire` and `rt_people_digest` allowlists contain no command that can taint in the concise format, and scenarios S3 and S4 assert `tainted === false` at the end. `memory.write_note` is on no golden-path allowlist in P0.
 
 ### 5.4 Tiers, risk classes and one policy function

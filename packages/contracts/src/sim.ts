@@ -2,6 +2,7 @@
 import type { AgencyCode, AgencyNoticeKind as NoticeKind, ChatChannel, FaultKind, FaultMode, ItSystem, NoticeScenario, TaxAccountType as AccountType } from "./enums";
 import type { NoticeExtract } from "./domain";
 import type { BankVerifySim, EmailSim, PaymentRailSim } from "./wave2";
+import type { VendorConnectors } from "./wave3";
 
 export type { AgencyCode, AccountType, NoticeScenario, ChatChannel, ItSystem };
 
@@ -34,5 +35,6 @@ export interface FaultInjector { arm(f: { target: FaultTarget; kind: FaultKind; 
 export interface Simulators {
   agency: AgencySim; bank: BankSim; idp: IdpSim; devices: DeviceSim; chat: ChatSim; carrier: CarrierSim; faults: FaultInjector;
   email: EmailSim; rail: PaymentRailSim; bankVerify: BankVerifySim;   // wave 2
+  vendors: VendorConnectors;   // wave 3: simulated Greenhouse, Workday, Checkr, HireRight, DocuSign (real adapters overlay in apps/api compose)
   tick(now: string): Promise<SimEvent[]>;
 }

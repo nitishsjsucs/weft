@@ -18,6 +18,7 @@ export const workplaces = sqliteTable("workplaces", {
 export const departments = sqliteTable("departments", {
   id: text("id").primaryKey(), companyId: text("company_id").notNull().references(() => companies.id), name: text("name").notNull(),
   leadWorkerId: text("lead_worker_id"),
+  coverageMaxOutPct: integer("coverage_max_out_pct").notNull().default(30), coverageMinPresent: integer("coverage_min_present").notNull().default(2),   // wave 3 (w3-timeoff)
 });
 export const workers = sqliteTable("workers", {
   id: text("id").primaryKey(), companyId: text("company_id").notNull().references(() => companies.id), employeeNumber: text("employee_number"),
@@ -28,6 +29,7 @@ export const workers = sqliteTable("workers", {
   workplaceId: text("workplace_id"), workState: text("work_state"), country: text("country").notNull().default("US"),
   currency: text("currency").notNull().default("USD"), timezone: text("timezone").notNull(), startDate: text("start_date").notNull(),
   endDate: text("end_date"), ssnLast4: text("ssn_last4"), payScheduleId: text("pay_schedule_id"),
+  birthMonthDay: text("birth_month_day"),   // wave 3 (w3-parity-routines): synthetic MM-DD, never a year
   createdAt: ts("created_at").notNull(), updatedAt: ts("updated_at").notNull(),
 }, (t) => [index("workers_company_status").on(t.companyId, t.status), index("workers_state").on(t.workState)]);
 export const payRates = sqliteTable("pay_rates", {
@@ -101,7 +103,9 @@ export const payrollRuns = sqliteTable("payroll_runs", {
 export const paychecks = sqliteTable("paychecks", {
   id: text("id").primaryKey(), payrollRunId: text("payroll_run_id").notNull().references(() => payrollRuns.id), workerId: text("worker_id").notNull(),
   status: text("status").notNull(), reviewGroup: text("review_group").notNull(), hoursX100: integer("hours_x100"), grossCents: integer("gross_cents").notNull(),
-  netCents: integer("net_cents").notNull(), reimbursementsCents: integer("reimbursements_cents").notNull().default(0), earningsJson: json("earnings_json").notNull(),
+  netCents: integer("net_cents").notNull(), reimbursementsCents: integer("reimbursements_cents").notNull().default(0),
+  reimbursementsJson: json("reimbursements_json").notNull().default("[]"),   // wave 3 (w3-expenses): [{ expenseId, category, amountCents }]
+  earningsJson: json("earnings_json").notNull(),
   deductionsJson: json("deductions_json").notNull(), benefitsJson: json("benefits_json").notNull(), taxesJson: json("taxes_json").notNull(),
   flagsJson: json("flags_json").notNull().default("[]"), explanation: text("explanation"), explanationSource: text("explanation_source"), explanationRunId: text("explanation_run_id"),
 }, (t) => [uniqueIndex("paychecks_run_worker").on(t.payrollRunId, t.workerId)]);
@@ -327,3 +331,145 @@ export const memoryRecalls = sqliteTable("memory_recalls", {
 export const dossiers = sqliteTable("dossiers", {
   subjectRef: text("subject_ref").primaryKey(), path: text("path").notNull(), refreshedAt: ts("refreshed_at").notNull(), sourceDigest: text("source_digest").notNull(),
 });
+
+// 6.8 Wave 3 (docs/wave3.md, migration 0006_wave3.sql). Additive only; owners in docs/wave3.md.
+// Columns added to existing tables: paychecks.reimbursements_json (w3-expenses), departments.coverage_max_out_pct and
+// coverage_min_present (w3-timeoff), workers.birth_month_day (w3-parity-routines, synthetic MM-DD, never a year); see the migration.
+// w3-expenses
+export const expensePolicies = sqliteTable("expense_policies", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), version: integer("version").notNull(),
+  effectiveFrom: text("effective_from").notNull(), rulesJson: json("rules_json").notNull(),
+  sourcesJson: json("sources_json").notNull().default("[]")
+});
+export const expenses = sqliteTable("expenses", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), workerId: text("worker_id").notNull(),
+  category: text("category").notNull(), merchant: text("merchant").notNull(), amountCents: integer("amount_cents").notNull(),
+  currency: text("currency").notNull().default("USD"), transactionDate: text("transaction_date").notNull(),
+  submittedAt: ts("submitted_at").notNull(), businessPurpose: text("business_purpose").notNull(), attendees: text("attendees"),
+  milesX10: integer("miles_x10"), tripRef: text("trip_ref"), preApprovalRef: text("pre_approval_ref"),
+  receiptUploadId: text("receipt_upload_id"), receiptExtractJson: json("receipt_extract_json"), status: text("status").notNull(),
+  checksJson: json("checks_json").notNull().default("[]"), explanation: text("explanation"), explanationSource: text("explanation_source"),
+  explanationRunId: text("explanation_run_id"), approverPrincipalId: text("approver_principal_id"), decidedBy: text("decided_by"),
+  decidedAt: ts("decided_at"), decisionReasonCode: text("decision_reason_code"), decisionNote: text("decision_note"),
+  payrollRunId: text("payroll_run_id"), paycheckId: text("paycheck_id"), policyVersion: integer("policy_version").notNull().default(1),
+  actionSeq: integer("action_seq")
+}, (t) => [index("expenses_worker_status").on(t.workerId, t.status), index("expenses_status").on(t.status)]);
+// w3-timeoff
+export const timeOffTypes = sqliteTable("time_off_types", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), kind: text("kind").notNull(), name: text("name").notNull(),
+  paid: bool("paid").notNull(), countsAsVacation: bool("counts_as_vacation").notNull().default(false)
+});
+export const timeOffPolicies = sqliteTable("time_off_policies", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), typeId: text("type_id").notNull(), name: text("name").notNull(),
+  jurisdiction: text("jurisdiction").notNull(), schedule: text("schedule").notNull(), minutesPerPeriod: integer("minutes_per_period"),
+  tiersJson: json("tiers_json").notNull().default("[]"), workedMinutesPerChunk: integer("worked_minutes_per_chunk"),
+  minutesPerChunk: integer("minutes_per_chunk"), exemptDeemedMinutesPerWeek: integer("exempt_deemed_minutes_per_week"),
+  accrualCapMinutes: integer("accrual_cap_minutes"), annualAccrualCapMinutes: integer("annual_accrual_cap_minutes"),
+  carryoverCapMinutes: integer("carryover_cap_minutes"), annualUseCapMinutes: integer("annual_use_cap_minutes"),
+  frontLoadMinutes: integer("front_load_minutes"), waitingDaysBeforeUse: integer("waiting_days_before_use").notNull().default(0),
+  minIncrementMinutes: integer("min_increment_minutes").notNull().default(60),
+  allowNegativeMinutes: integer("allow_negative_minutes").notNull().default(0),
+  payOutAtSeparation: bool("pay_out_at_separation").notNull().default(false), reinstateWithinDays: integer("reinstate_within_days"),
+  yearStart: text("year_start").notNull().default("01-01"), effectiveFrom: text("effective_from").notNull(), effectiveTo: text("effective_to"),
+  sourcesJson: json("sources_json").notNull().default("[]")
+});
+export const timeOffAssignments = sqliteTable("time_off_assignments", {
+  id: text("id").primaryKey(), policyId: text("policy_id").notNull(), workerId: text("worker_id").notNull(),
+  assignedAt: ts("assigned_at").notNull(), effectiveFrom: text("effective_from").notNull(), effectiveTo: text("effective_to"),
+  accrualRemainderMinutes: integer("accrual_remainder_minutes").notNull().default(0)
+}, (t) => [uniqueIndex("time_off_assignments_key").on(t.policyId, t.workerId, t.effectiveFrom)]);
+export const timeOffLedger = sqliteTable("time_off_ledger", {
+  id: text("id").primaryKey(), assignmentId: text("assignment_id").notNull(), workerId: text("worker_id").notNull(),
+  policyId: text("policy_id").notNull(), kind: text("kind").notNull(), minutes: integer("minutes").notNull(),
+  effectiveDate: text("effective_date").notNull(), sourceRef: text("source_ref"), runKey: text("run_key"), note: text("note"),
+  actionSeq: integer("action_seq"), createdAt: ts("created_at").notNull()
+}, (t) => [index("time_off_ledger_worker").on(t.workerId, t.policyId, t.effectiveDate), uniqueIndex("time_off_ledger_run_key").on(t.runKey)]);
+export const timeOffRequests = sqliteTable("time_off_requests", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), workerId: text("worker_id").notNull(),
+  policyId: text("policy_id").notNull(), status: text("status").notNull(), startAt: text("start_at").notNull(),
+  endAt: text("end_at").notNull(), rangeType: text("range_type").notNull().default("date"), timeZone: text("time_zone").notNull(),
+  requestedMinutes: integer("requested_minutes").notNull(), daysJson: json("days_json").notNull(),
+  reason: text("reason").notNull().default(""), approverPrincipalId: text("approver_principal_id"),
+  routingJson: json("routing_json").notNull().default("[]"), checksJson: json("checks_json").notNull().default("[]"),
+  decidedBy: text("decided_by"), decidedAt: ts("decided_at"), decisionNote: text("decision_note"), payrollRunId: text("payroll_run_id"),
+  actionSeq: integer("action_seq"), source: text("source").notNull().default("weft"), extRef: text("ext_ref"), createdAt: ts("created_at").notNull()
+}, (t) => [index("time_off_requests_worker").on(t.workerId, t.status), index("time_off_requests_status").on(t.status)]);
+export const holidayCalendars = sqliteTable("holiday_calendars", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), name: text("name").notNull(), year: integer("year").notNull()
+});
+export const holidays = sqliteTable("holidays", {
+  id: text("id").primaryKey(), calendarId: text("calendar_id").notNull(), date: text("date").notNull(), name: text("name").notNull(),
+  minutes: integer("minutes").notNull().default(480), workerTypes: text("worker_types").notNull().default("employee")
+}, (t) => [uniqueIndex("holidays_calendar_date").on(t.calendarId, t.date)]);
+// w3-parity-routines
+export const checkins = sqliteTable("checkins", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), dueOn: text("due_on").notNull(), status: text("status").notNull(),
+  answersJson: json("answers_json"), sentAt: ts("sent_at"), nudgedAt: ts("nudged_at"), submittedAt: ts("submitted_at"),
+  createdAt: ts("created_at").notNull()
+}, (t) => [uniqueIndex("checkins_worker_due").on(t.workerId, t.dueOn)]);
+export const contractorTaxForms = sqliteTable("contractor_tax_forms", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), form: text("form").notNull(), signedOn: text("signed_on").notNull(),
+  expiresOn: text("expires_on"), documentId: text("document_id"), status: text("status").notNull(), createdAt: ts("created_at").notNull()
+}, (t) => [index("contractor_tax_forms_worker").on(t.workerId)]);
+// w3-integrations-hr
+export const integrationConnections = sqliteTable("integration_connections", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), vendor: text("vendor").notNull(), mode: text("mode").notNull(),
+  lastSyncAt: ts("last_sync_at"), cursor: text("cursor"), health: text("health").notNull().default("ok"), detail: text("detail"),
+  ownershipJson: json("ownership_json"), settingsJson: json("settings_json").notNull().default("{}"), updatedAt: ts("updated_at").notNull()
+}, (t) => [uniqueIndex("integration_connections_vendor").on(t.companyId, t.vendor)]);
+export const extLinks = sqliteTable("ext_links", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), vendor: text("vendor").notNull(), extType: text("ext_type").notNull(),
+  extId: text("ext_id").notNull(), weftType: text("weft_type").notNull(), weftId: text("weft_id").notNull(),
+  extVersion: integer("ext_version"), status: text("status").notNull().default("linked"), createdAt: ts("created_at").notNull(),
+  updatedAt: ts("updated_at").notNull()
+}, (t) => [uniqueIndex("ext_links_ext").on(t.vendor, t.extType, t.extId), index("ext_links_weft").on(t.weftType, t.weftId)]);
+export const extSnapshots = sqliteTable("ext_snapshots", {
+  vendor: text("vendor").notNull(), extType: text("ext_type").notNull(), extId: text("ext_id").notNull(), field: text("field").notNull(),
+  valueHash: text("value_hash").notNull(), seenAt: ts("seen_at").notNull()
+}, (t) => [primaryKey({ columns: [t.vendor, t.extType, t.extId, t.field] })]);
+export const integrationDeliveries = sqliteTable("integration_deliveries", {
+  id: text("id").primaryKey(), vendor: text("vendor").notNull(), dedupeKey: text("dedupe_key").notNull(), action: text("action"),
+  receivedAt: ts("received_at").notNull(), verified: bool("verified").notNull(), rawSha256: text("raw_sha256").notNull(),
+  appliedAt: ts("applied_at"), error: text("error")
+}, (t) => [uniqueIndex("integration_deliveries_key").on(t.vendor, t.dedupeKey)]);
+export const syncItems = sqliteTable("sync_items", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), vendor: text("vendor").notNull(), kind: text("kind").notNull(),
+  subjectRef: text("subject_ref").notNull(), status: text("status").notNull(), detailJson: json("detail_json").notNull(),
+  createdAt: ts("created_at").notNull(), resolvedAt: ts("resolved_at"), resolvedBy: text("resolved_by")
+}, (t) => [index("sync_items_status").on(t.status)]);
+// w3-integrations-screening-esign
+export const screeningPackages = sqliteTable("screening_packages", {
+  id: text("id").primaryKey(), vendor: text("vendor").notNull(), slug: text("slug").notNull(), name: text("name").notNull(),
+  priceCents: integer("price_cents").notNull(), screeningsJson: json("screenings_json").notNull(), phase: text("phase").notNull()
+}, (t) => [uniqueIndex("screening_packages_slug").on(t.vendor, t.slug)]);
+export const screeningOrders = sqliteTable("screening_orders", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), offerId: text("offer_id").notNull(), workerId: text("worker_id"),
+  vendor: text("vendor").notNull(), mode: text("mode").notNull(), packageSlug: text("package_slug").notNull(),
+  priceCents: integer("price_cents").notNull(), phase: text("phase").notNull(), status: text("status").notNull(), result: text("result"),
+  adjudication: text("adjudication").notNull().default("none"), timerPaused: bool("timer_paused").notNull().default(false),
+  vendorCandidateId: text("vendor_candidate_id"), vendorOrderId: text("vendor_order_id"), vendorReportId: text("vendor_report_id"),
+  applyUrl: text("apply_url"), etaOn: text("eta_on"), lastPolledAt: ts("last_polled_at"), createdAt: ts("created_at").notNull(),
+  completedAt: ts("completed_at"), proposalId: text("proposal_id"), actionSeq: integer("action_seq")
+}, (t) => [index("screening_orders_offer").on(t.offerId)]);
+export const esignEnvelopes = sqliteTable("esign_envelopes", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), offerId: text("offer_id").notNull(),
+  provider: text("provider").notNull(), mode: text("mode").notNull(), envelopeId: text("envelope_id").notNull(),
+  status: text("status").notNull(), sentAt: ts("sent_at").notNull(), deliveredAt: ts("delivered_at"), completedAt: ts("completed_at"),
+  voidedAt: ts("voided_at"), lastPolledAt: ts("last_polled_at"), combinedSha256: text("combined_sha256"),
+  certificateSha256: text("certificate_sha256")
+}, (t) => [uniqueIndex("esign_envelopes_envelope").on(t.provider, t.envelopeId), index("esign_envelopes_offer").on(t.offerId)]);
+export const signatureEvidence = sqliteTable("signature_evidence", {
+  signatureId: text("signature_id").primaryKey(), provider: text("provider").notNull(), envelopeId: text("envelope_id"), ip: text("ip"),
+  userAgent: text("user_agent")
+});
+// w3-integrations-hr
+export const simVendorRecords = sqliteTable("sim_vendor_records", {
+  id: text("id").primaryKey(), vendor: text("vendor").notNull(), kind: text("kind").notNull(), extId: text("ext_id").notNull(),
+  version: integer("version").notNull().default(1), bodyJson: json("body_json").notNull(), createdAt: ts("created_at").notNull(),
+  updatedAt: ts("updated_at").notNull()
+}, (t) => [uniqueIndex("sim_vendor_records_ext").on(t.vendor, t.kind, t.extId)]);
+export const simWebhookOutbox = sqliteTable("sim_webhook_outbox", {
+  id: text("id").primaryKey(), vendor: text("vendor").notNull(), dedupeKey: text("dedupe_key").notNull(),
+  bodyJson: json("body_json").notNull(), signature: text("signature").notNull(), attempt: integer("attempt").notNull().default(0),
+  nextAt: ts("next_at").notNull(), status: text("status").notNull(), deliveredAt: ts("delivered_at")
+}, (t) => [uniqueIndex("sim_webhook_outbox_key").on(t.vendor, t.dedupeKey)]);

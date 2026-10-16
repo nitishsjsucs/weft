@@ -1,6 +1,6 @@
 // Simulators (SPEC 8). Owner: t2-world. Stateless objects over a db handle, so the executor binds one to its
 // transaction: createSimulators({ db: tx, clock }). They write only sim_* tables and store only vault names.
-import type { SimClock, SimEvent, Simulators } from "@weft/contracts";
+import type { SimClock, SimEvent, Simulators, VendorConnectors } from "@weft/contracts";
 import type { DbTx } from "@weft/db";
 import { createAgencySim } from "./agency";
 import { createBankSim } from "./bank";
@@ -12,8 +12,10 @@ import { createEmailSim } from "./email";
 import { createRailSim } from "./rail";
 import { createBankVerifySim } from "./bank-verify";
 import { createCarrierSim } from "./carrier";
+import { createVendorSims } from "./vendors/index";
 
-export interface CreateSimulatorsOptions { db: DbTx; clock: SimClock }
+/** `vendors` (wave 3) lets apps/api overlay real adapters from @weft/integrations on the simulated set; tests never pass it. */
+export interface CreateSimulatorsOptions { db: DbTx; clock: SimClock; vendors?: (simulated: VendorConnectors) => VendorConnectors }
 export type SimulatorsFactory = (opts: CreateSimulatorsOptions) => Simulators;
 export interface WeftSimulators extends Simulators { chat: ChatSimInternal }
 
@@ -30,8 +32,10 @@ export const createSimulators = ((opts: CreateSimulatorsOptions): WeftSimulators
   const email = createEmailSim(db, clock, faults);
   const rail = createRailSim(db, clock, faults);
   const bankVerify = createBankVerifySim(db, clock, faults);
+  const simulatedVendors = createVendorSims(db, clock, faults);
+  const vendors = opts.vendors ? opts.vendors(simulatedVendors) : simulatedVendors;
   return {
-    agency, bank, idp, devices, chat, carrier, faults, email, rail, bankVerify,
+    agency, bank, idp, devices, chat, carrier, faults, email, rail, bankVerify, vendors,
     async tick(now: string): Promise<SimEvent[]> {
       await idp.tick(now);
       return [...(await agency.tick(now)), ...(await bank.tick(now)), ...(await devices.tick(now))];

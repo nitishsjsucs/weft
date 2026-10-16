@@ -27,6 +27,11 @@ import { portalRoutes } from "./routes/portal";
 import { documentsRoutes } from "./routes/documents";
 import { offboardingRoutes } from "./routes/offboarding";
 import { contractorsRoutes } from "./routes/contractors";
+import { expensesRoutes } from "./routes/expenses";
+import { timeOffRoutes } from "./routes/time-off";
+import { reportsRoutes } from "./routes/reports";
+import { integrationsRoutes } from "./routes/integrations";
+import { screeningRoutes } from "./routes/screening";
 
 export const ROUTE_MODULES = [
     healthRoutes,
@@ -53,6 +58,11 @@ export const ROUTE_MODULES = [
     documentsRoutes,
     offboardingRoutes,
     contractorsRoutes,
+    expensesRoutes,      // wave 3
+    timeOffRoutes,
+    reportsRoutes,
+    integrationsRoutes,
+    screeningRoutes,
 ] as const;
 
 export function buildApp(weft: Weft): Hono<WeftEnv> {

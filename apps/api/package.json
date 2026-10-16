@@ -24,6 +24,7 @@
     "@weft/grounding": "workspace:*",
     "@weft/routines": "workspace:*",
     "@weft/seed": "workspace:*",
+    "@weft/integrations": "workspace:*",
     "@weft/sim": "workspace:*",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.13",

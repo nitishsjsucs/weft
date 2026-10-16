@@ -1,0 +1,238 @@
+<!doctype html>
+<!-- Weft wave 3 top bar mockup (research only, not app code). Tokens are Weft's own (packages/ui/src/tokens.css).
+     Open in a browser; every row is the same component at a different header width or state. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weft top bar mockup</title>
+<style>
+  :root {
+    --gray-2: #f9f9f9; --gray-3: #efefef; --gray-6: #d9d9d9; --gray-8: #bbbbbb; --gray-9: #8d8d8d; --gray-10: #838383; --gray-11: #646464; --gray-12: #202020;
+    --gray-a3: #00000010; --gray-a4: #00000017;
+    --green-9: #30a46c; --blue-9: #0090ff; --red-9: #e5484d; --amber-3: #fff8e7; --amber-11: #ac6500; --accent-9: #d6264b;
+    --background: #ffffff; --card: #ffffff; --app-border: #e5e5e5; --app-sidebar-bg: #fafafa;
+    --shadow-border: 0 0 0 1px #00000014; --shadow-xs: 0 1px 2px rgba(0,0,0,.05);
+    --shadow-menu: var(--shadow-border), 0 1px 1px #00000005, 0 4px 8px -4px #0000000a, 0 16px 24px -8px #0000000f;
+    --tb-h: 48px; --tb-ctl: 32px; --tb-r: 8px; --tb-seg: 28px; --tb-seg-r: 6px;
+  }
+  .dark {
+    --gray-2: #2b2b2b; --gray-3: #333333; --gray-6: #464646; --gray-8: #696969; --gray-9: #757575; --gray-10: #808080; --gray-11: #b6b6b6; --gray-12: #eeeeee;
+    --gray-a3: #ffffff11; --gray-a4: #ffffff18; --amber-3: #302008; --amber-11: #ffca16;
+    --background: #242424; --card: #2b2b2b; --app-border: #3d3d3d; --app-sidebar-bg: #1f1f1f;
+    --shadow-border: 0 0 0 1px #ffffff1a; --shadow-xs: 0 1px 2px rgba(0,0,0,.3);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 48px; background: #e9e9e9; font: 14px/20px "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif; color: var(--gray-12); }
+  h2 { font-size: 12px; font-weight: 500; color: #646464; margin: 22px 0 6px; }
+  svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .frame { background: var(--background); max-width: 100%; overflow: hidden; border-radius: 6px; box-shadow: 0 0 0 1px #0000001a; }
+
+  /* top bar */
+  .tb { display: flex; align-items: center; gap: 8px; height: var(--tb-h); padding: 0 12px; border-bottom: 1px solid var(--app-border); background: var(--background); color: var(--gray-12); }
+  .icon-btn { display: grid; place-items: center; width: var(--tb-ctl); height: var(--tb-ctl); border-radius: var(--tb-r); color: var(--gray-11); background: transparent; border: 0; flex: none; }
+  .icon-btn:hover { background: var(--gray-a3); color: var(--gray-12); }
+  .icon-btn[aria-pressed="true"] { background: var(--gray-a3); color: var(--gray-12); }
+  .crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1; font-size: 14px; }
+  .crumbs a { color: var(--gray-11); text-decoration: none; white-space: nowrap; }
+  .crumbs .cur { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crumbs svg { width: 14px; height: 14px; color: var(--gray-8); }
+
+  /* environment pill */
+  .env { display: inline-flex; align-items: center; height: var(--tb-ctl); padding: 2px; border-radius: var(--tb-r); background: var(--card); box-shadow: var(--shadow-border), var(--shadow-xs); flex: none; }
+  .seg { display: inline-flex; align-items: center; gap: 6px; height: var(--tb-seg); padding: 0 8px; border-radius: var(--tb-seg-r); border: 0; background: transparent; color: var(--gray-12); font: 500 13px/20px inherit; font-family: inherit; white-space: nowrap; }
+  .seg:hover, .seg.is-hover { background: var(--gray-a3); }
+  .seg[aria-expanded="true"] { background: var(--gray-a4); }
+  .seg.is-focus { box-shadow: inset 0 0 0 2px var(--blue-9); }
+  .seg .ico { color: var(--gray-11); }
+  .seg .chev { width: 14px; height: 14px; color: var(--gray-10); }
+  .tab { font-variant-numeric: tabular-nums; }
+  .div { width: 1px; height: 16px; background: var(--gray-a4); margin: 0 2px; flex: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.live { background: var(--green-9); }
+  .dot.local { background: var(--blue-9); }
+  .dot.scripted { box-shadow: inset 0 0 0 1.5px var(--gray-8); }
+  .dot.down { background: var(--red-9); }
+  .avatar { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--amber-3); color: var(--amber-11); font-size: 10px; font-weight: 600; letter-spacing: .02em; flex: none; }
+  .seg.persona { padding-left: 4px; }
+  .seg.icon-only { width: var(--tb-seg); padding: 0; justify-content: center; }
+
+  /* tiers (the app uses container queries on the header; here classes stand in for them) */
+  .compact .full-only, .mini .full-only, .mini .compact-up { display: none; }
+  .mini .clock-ico { display: none; }
+
+  /* sidebar search row */
+  .side { width: 244px; background: var(--app-sidebar-bg); padding: 8px 12px; }
+  .ws { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px; }
+  .ws .mark { width: 20px; height: 20px; border-radius: 6px; background: var(--gray-12); }
+  .ws b { display: block; font-size: 14px; font-weight: 500; line-height: 18px; }
+  .ws small { display: block; font-size: 12px; line-height: 16px; color: var(--gray-11); }
+  .srow { display: flex; gap: 6px; margin: 6px 0 8px; }
+  .sfield { flex: 1; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px; border-radius: 8px; background: var(--card); box-shadow: var(--shadow-border), var(--shadow-xs); color: var(--gray-9); font-size: 13px; }
+  .sfield span { flex: 1; }
+  kbd { display: inline-grid; place-items: center; height: 18px; padding: 0 5px; border-radius: 4px; box-shadow: var(--shadow-border); background: var(--card); font: 500 11px/1 inherit; font-family: inherit; color: var(--gray-11); letter-spacing: .04em; }
+  .sq { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; background: var(--card); box-shadow: var(--shadow-border), var(--shadow-xs); color: var(--gray-11); }
+  .nav { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px; border-radius: 8px; font-size: 14px; }
+  .nav .tail { margin-left: auto; font-size: 12px; color: var(--gray-9); }
+  .nav .count { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent-9); color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; font-variant-numeric: tabular-nums; }
+  .nav svg { color: var(--gray-11); }
+
+  /* menus */
+  .menu { width: 300px; border-radius: 12px; background: var(--card); box-shadow: var(--shadow-menu); padding: 6px; font-size: 13px; }
+  .menu .lbl { font-size: 12px; font-weight: 500; color: var(--gray-11); padding: 6px 8px 4px; }
+  .menu .item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; }
+  .menu .item.on { background: var(--gray-a3); }
+  .menu .item .t { flex: 1; }
+  .menu .item .t b { display: block; font-weight: 500; }
+  .menu .item .t i { display: block; font-style: normal; font-size: 12px; color: var(--gray-11); }
+  .menu .sep { height: 1px; background: var(--app-border); margin: 6px 0; }
+  .menu .foot { font-size: 12px; color: var(--gray-11); padding: 6px 8px 4px; }
+  .pop { width: 320px; border-radius: 12px; background: var(--card); box-shadow: var(--shadow-menu); padding: 12px; font-size: 13px; }
+  .pop .row { display: flex; gap: 8px; padding: 3px 0; }
+  .pop .row span:first-child { width: 88px; color: var(--gray-11); flex: none; }
+  .pop .acts { display: flex; gap: 6px; margin-top: 10px; }
+  .pop .acts button { height: 24px; padding: 0 8px; border-radius: 6px; border: 0; background: var(--card); box-shadow: var(--shadow-border), var(--shadow-xs); font: 500 12px/1 inherit; font-family: inherit; color: var(--gray-12); }
+  .row-flex { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-pl" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-pr" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V21H3z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 12 5a5.5 5.5 0 0 0-10 3.5c0 2.3 1.5 4 3 5.5l7 7z"/></symbol>
+</svg>
+
+<h2>Full tier: header 856 px (1440 window, sidebar 244, agent docked 340). Live hosted model.</h2>
+<div class="frame" style="width:856px">
+  <header class="tb">
+    <button class="icon-btn" aria-label="Hide sidebar" aria-expanded="true"><svg><use href="#i-pl"/></svg></button>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="#">People</a><svg><use href="#i-right"/></svg><span class="cur" aria-current="page">Dana Whitfield (demo)</span></nav>
+    <div class="env" role="group" aria-label="Demo environment">
+      <button class="seg" aria-haspopup="dialog" aria-expanded="false" aria-label="Model: OpenAI gpt-5.6-luna, live and metered"><span class="dot live"></span><span class="compact-up"><span class="full-only">OpenAI </span>gpt-5.6-luna</span></button>
+      <span class="div" aria-hidden="true"></span>
+      <button class="seg" aria-haspopup="dialog" aria-expanded="false" aria-label="Simulated time: Monday, October 26, 8:30 AM Pacific"><svg class="ico clock-ico"><use href="#i-clock"/></svg><span class="tab"><span class="full-only">Mon, Oct 26, 8:30 AM</span></span></button>
+      <span class="div" aria-hidden="true"></span>
+      <button class="seg persona" aria-haspopup="menu" aria-expanded="false" aria-label="Viewing as Dana Whitfield (demo). Demo control: switches the signed-in human, dev auth only"><span class="avatar">DW</span><span><span class="full-only" style="color:var(--gray-11);font-weight:400">Viewing as </span>Dana</span><svg class="chev"><use href="#i-down"/></svg></button>
+    </div>
+    <button class="icon-btn" aria-label="Agent panel" aria-pressed="true"><svg><use href="#i-pr"/></svg></button>
+  </header>
+</div>
+
+<h2>Compact tier: header 696 px (1280 window, agent docked). Scripted provider. Clock segment hovered.</h2>
+<div class="frame compact" style="width:696px">
+  <header class="tb">
+    <button class="icon-btn" aria-label="Hide sidebar"><svg><use href="#i-pl"/></svg></button>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="#">Payroll</a><svg><use href="#i-right"/></svg><span class="cur">Sep 1 to Sep 15</span></nav>
+    <div class="env" role="group" aria-label="Demo environment">
+      <button class="seg"><span class="dot scripted"></span><span class="compact-up">Scripted</span></button>
+      <span class="div"></span>
+      <button class="seg is-hover"><svg class="ico clock-ico"><use href="#i-clock"/></svg><span class="tab">Mon 8:30 AM</span></button>
+      <span class="div"></span>
+      <button class="seg persona"><span class="avatar">TM</span><span>Theo</span><svg class="chev"><use href="#i-down"/></svg></button>
+    </div>
+    <button class="icon-btn" aria-label="Agent panel" aria-pressed="true"><svg><use href="#i-pr"/></svg></button>
+  </header>
+</div>
+
+<h2>Sidebar hidden (or below 1024 px): the search trigger moves into the top bar as an icon button. Model segment keyboard-focused.</h2>
+<div class="frame" style="width:780px">
+  <header class="tb">
+    <button class="icon-btn" aria-label="Show sidebar" aria-expanded="false"><svg><use href="#i-pl"/></svg></button>
+    <nav class="crumbs" aria-label="Breadcrumb"><span class="cur">Home</span></nav>
+    <button class="icon-btn" aria-label="Search (Command K)"><svg><use href="#i-search"/></svg></button>
+    <div class="env" role="group" aria-label="Demo environment">
+      <button class="seg is-focus"><span class="dot local"></span><span>Local Qwen3.6-27B</span></button>
+      <span class="div"></span>
+      <button class="seg"><svg class="ico"><use href="#i-clock"/></svg><span class="tab">Mon, Oct 26, 8:30 AM</span></button>
+      <span class="div"></span>
+      <button class="seg persona"><span class="avatar">DW</span><span>Dana</span><svg class="chev"><use href="#i-down"/></svg></button>
+    </div>
+    <button class="icon-btn" aria-label="Agent panel" aria-pressed="false"><svg><use href="#i-pr"/></svg></button>
+  </header>
+</div>
+
+<h2>Mini tier: 390 px phone. Model is a dot, persona is an avatar, the clock keeps weekday and time.</h2>
+<div class="frame mini" style="width:390px">
+  <header class="tb">
+    <button class="icon-btn" aria-label="Open navigation"><svg><use href="#i-pl"/></svg></button>
+    <nav class="crumbs" aria-label="Breadcrumb"><span class="cur">Taxes &amp; Compliance</span></nav>
+    <button class="icon-btn" aria-label="Search"><svg><use href="#i-search"/></svg></button>
+    <div class="env" role="group" aria-label="Demo environment">
+      <button class="seg icon-only" aria-label="Model: OpenAI gpt-5.6-luna, live"><span class="dot live"></span></button>
+      <span class="div"></span>
+      <button class="seg"><span class="tab">Mon 8:30 AM</span></button>
+      <span class="div"></span>
+      <button class="seg icon-only" aria-label="Viewing as Dana Whitfield (demo), demo control"><span class="avatar">DW</span></button>
+    </div>
+    <button class="icon-btn" aria-label="Agent panel"><svg><use href="#i-pr"/></svg></button>
+  </header>
+</div>
+
+<h2>Open states: persona menu (Radix DropdownMenu, radio items) and clock popover.</h2>
+<div class="row-flex">
+  <div class="menu" role="menu" aria-label="Viewing as">
+    <div class="lbl">Viewing as (demo control)</div>
+    <div class="item on" role="menuitemradio" aria-checked="true"><span class="avatar">DW</span><span class="t"><b>Dana Whitfield (demo)</b><i>Head of People, admin</i></span><svg><use href="#i-check"/></svg></div>
+    <div class="item" role="menuitemradio" aria-checked="false"><span class="avatar">TM</span><span class="t"><b>Theo Marsh (demo)</b><i>Payroll Lead, payroll admin</i></span></div>
+    <div class="item" role="menuitemradio" aria-checked="false"><span class="avatar">SO</span><span class="t"><b>Sam Okafor (demo)</b><i>HR Generalist, HR manager</i></span></div>
+    <div class="sep"></div>
+    <div class="lbl">New-hire portal</div>
+    <div class="item" role="menuitem"><span class="avatar">RQ</span><span class="t"><b>Rosa Quarles</b><i>Opens the portal as this new hire</i></span></div>
+    <div class="sep"></div>
+    <div class="foot">Switches the signed-in human. Dev auth only, and self-approval checks treat each persona as a different person on purpose.</div>
+  </div>
+  <div class="pop" role="dialog" aria-label="Simulated time">
+    <div style="font-weight:600">Simulated time</div>
+    <div class="tab" style="font-size:14px;font-weight:500;margin:6px 0 8px">Monday, October 26, 8:30 AM PT</div>
+    <div class="row"><span>Rate</span><span>Paused</span></div>
+    <div class="row"><span>Next routine</span><span class="tab">Mon 9:00 AM</span></div>
+    <div class="acts"><button>+1 hour</button><button>+1 day</button><button>Next routine</button></div>
+    <div style="margin-top:10px;font-size:12px;color:var(--gray-11)">Every date in Weft reads this clock. Open Simulators for the full controls.</div>
+  </div>
+  <div class="pop" role="dialog" aria-label="Model">
+    <div style="display:flex;align-items:center;gap:8px;font-weight:600"><span class="dot live"></span>OpenAI gpt-5.6-luna</div>
+    <div style="margin:8px 0 4px">
+      <div class="row"><span>Mode</span><span>Live, metered</span></div>
+      <div class="row"><span>Spent today</span><span class="tab">$0.04</span></div>
+      <div class="row"><span>Live total</span><span class="tab">$0.31</span></div>
+    </div>
+    <div style="margin-top:6px;font-size:12px;color:var(--gray-11)">Chosen when the API starts (WEFT_LLM). Restart the API to switch models.</div>
+  </div>
+</div>
+
+<h2>Sidebar head: search moves here (32 px field, single kbd chip) next to a new-thread button; workspace row on two lines; one pill style (Inbox count).</h2>
+<div class="frame" style="width:244px">
+  <div class="side">
+    <div class="ws"><span class="mark"></span><span style="flex:1;min-width:0"><b>Larkspur Robotics</b><small>Demo workspace, Admin</small></span><svg style="color:var(--gray-10)"><use href="#i-down"/></svg></div>
+    <div class="srow"><div class="sfield"><svg><use href="#i-search"/></svg><span>Search</span><kbd>⌘K</kbd></div><div class="sq" aria-label="New agent thread"><svg><use href="#i-plus"/></svg></div></div>
+    <div class="nav" style="background:#efefef;font-weight:500"><svg><use href="#i-home"/></svg>Home</div>
+    <div class="nav"><svg><use href="#i-inbox"/></svg>Inbox<span class="count">3</span></div>
+    <div class="nav"><svg><use href="#i-heart"/></svg>Benefits<span class="tail">Simulated</span></div>
+  </div>
+</div>
+
+<h2>Dark: same component, header 856 px.</h2>
+<div class="frame dark" style="width:856px">
+  <header class="tb">
+    <button class="icon-btn"><svg><use href="#i-pl"/></svg></button>
+    <nav class="crumbs"><a href="#">People</a><svg><use href="#i-right"/></svg><span class="cur">Dana Whitfield (demo)</span></nav>
+    <div class="env">
+      <button class="seg"><span class="dot live"></span><span>OpenAI gpt-5.6-luna</span></button>
+      <span class="div"></span>
+      <button class="seg"><svg class="ico"><use href="#i-clock"/></svg><span class="tab">Mon, Oct 26, 8:30 AM</span></button>
+      <span class="div"></span>
+      <button class="seg persona" aria-expanded="true"><span class="avatar">DW</span><span><span style="color:var(--gray-11);font-weight:400">Viewing as </span>Dana</span><svg class="chev"><use href="#i-down"/></svg></button>
+    </div>
+    <button class="icon-btn" aria-pressed="true"><svg><use href="#i-pr"/></svg></button>
+  </header>
+</div>
+</body>
+</html>

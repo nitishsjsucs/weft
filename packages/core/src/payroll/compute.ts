@@ -2,6 +2,8 @@
 // above 86.67 h), benefit deductions from active enrollments, employer rates effective at payday, YTD from the
 // ledger, then the pure engine. Reads only; lifecycle.ts writes.
 import { and, eq, inArray } from "drizzle-orm";
+import type { ReimbursementLine } from "@weft/contracts";
+import { EMPTY_W3_INPUTS, loadW3PayrollInputs, reimbursementsFor, timeOffEarnings, type W3PayrollInputs } from "./w3-hooks";   // wave 3 seams
 import {
   bankAccounts, benefitEnrollments, benefitPlans, employerTaxRates, payRates, paySchedules, taxAccounts, taxProfiles,
   timeEntries, workers, ytdLedger, type DbTx,
@@ -29,6 +31,7 @@ export interface ComputedPaycheck {
   benefits: BenefitJson[];
   calc: PaycheckCalc;
   reimbursementsCents: number;
+  reimbursementLines?: ReimbursementLine[];   // wave 3 (w3-expenses): written to paychecks.reimbursements_json
   bank: BankRow | null;
   hasW4: boolean;
   stateRegistered: boolean;
@@ -140,6 +143,7 @@ export interface WorldSnapshot {
   employerRates: (typeof employerTaxRates.$inferSelect)[];
   accounts: (typeof taxAccounts.$inferSelect)[];
   time: Map<string, (typeof timeEntries.$inferSelect)[]>;
+  w3?: W3PayrollInputs;   // wave 3: approved time off and scheduled reimbursements (payroll/w3-hooks.ts)
 }
 
 const group = <T, K>(rows: T[], key: (r: T) => K) => { const m = new Map<K, T[]>(); for (const r of rows) { const a = m.get(key(r)); if (a) a.push(r); else m.set(key(r), [r]); } return m; };
@@ -156,7 +160,9 @@ export async function loadWorld(tx: DbTx, companyId: string, workerIds: string[]
     tx.select().from(taxAccounts).where(eq(taxAccounts.companyId, companyId)),
     tx.select().from(timeEntries).where(inArray(timeEntries.workerId, ids)),
   ]);
+  const w3 = await loadW3PayrollInputs(tx, companyId, workerIds);
   return {
+    w3,
     rates: group(rates, (r) => r.workerId), profiles: new Map(profiles.map((p) => [p.workerId, p])), banks: group(banks, (b) => b.workerId),
     enrollments: group(enrollments, (e) => e.workerId), plans: new Map(plans.map((p) => [p.id, p])), employerRates: ers, accounts, time: group(time, (t) => t.workerId),
   };
@@ -199,6 +205,11 @@ export function computeWorkerPaycheck(w: WorkerRow, p: PeriodSpec, world: WorldS
     prorated = g.prorated;
     earnings = [{ type: "salary", amountCents: g.cents, hoursX100: null }];
   }
+  // Wave 3 seams (payroll/w3-hooks.ts): time off splits or adds earning lines; reimbursements ride outside gross unless taxable.
+  const w3 = world.w3 ?? EMPTY_W3_INPUTS;
+  earnings = timeOffEarnings(w, rate, earnings, p, w3.timeOff);
+  const reimb = reimbursementsFor(w, p, w3.expenses);
+  earnings = [...earnings, ...reimb.taxableEarnings];
   const gross = earnings.reduce((s, e) => s + e.amountCents, 0);
   const enrolls = (world.enrollments.get(w.id) ?? [])
     .filter((e) => e.status === "active" && e.effectiveFrom <= p.periodEnd && (e.effectiveTo === null || e.effectiveTo >= p.periodStart))
@@ -216,13 +227,13 @@ export function computeWorkerPaycheck(w: WorkerRow, p: PeriodSpec, world: WorldS
   const state = w.workState ?? "CA";
   const input: PaycheckInput = {
     payDate: p.payday, payPeriodsPerYear: SEMIMONTHLY_PERIODS, jurisdiction: state, earnings: earnings.map((e) => ({ type: e.type as "salary", amount_cents: e.amountCents, hours_x100: e.hoursX100 })),
-    pretax, posttax: [], reimbursements_cents: 0, w4: w4Of(profile),
+    pretax, posttax: [], reimbursements_cents: reimb.reimbursementsCents, w4: w4Of(profile),
     state: { filingStatus: profile?.stateFilingStatus ?? null, allowances: profile?.stateAllowances ?? 0, extraCents: profile?.stateExtraCents ?? 0 },
     ytd, employerRates: { sui: employerRateOn(world.employerRates, state, "sui", p.payday), ett: state === "CA" ? employerRateOn(world.employerRates, state, "ett", p.payday) : null },
   };
   const calc = calculatePaycheck(input, t);
   return {
-    workerId: w.id, worker: w, rate, hoursX100, earnings, benefits, calc, reimbursementsCents: 0,
+    workerId: w.id, worker: w, rate, hoursX100, earnings, benefits, calc, reimbursementsCents: reimb.reimbursementsCents, reimbursementLines: reimb.lines,
     deductions: pretax.map((d) => ({ code: d.code, pretax: true, amountCents: d.amount_cents })),
     bank: activeBank(world, w.id), hasW4: profile !== undefined, stateRegistered: stateRegistered(world.accounts, state), prorated,
   };

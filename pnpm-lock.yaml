@@ -157,6 +157,9 @@ importers:
       '@weft/grounding':
         specifier: workspace:*
         version: link:../../packages/grounding
+      '@weft/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       '@weft/routines':
         specifier: workspace:*
         version: link:../../packages/routines
@@ -431,6 +434,22 @@ importers:
         version: 5.0.4(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
   packages/grounding:
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+
+  packages/integrations:
+    dependencies:
+      '@weft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@types/node':
         specifier: 26.6.5

@@ -10,7 +10,7 @@ export interface ChecklistItem { id: string; label: string; check: string }   //
 export interface RoutineDef {
   id: string; name: string; description: string;
   ownerPrincipalId: string; enabled: boolean;
-  autonomy: "recommend" | "approve";               // P0 enforces approve
+  autonomy: "recommend" | "approve" | "auto";      // P0 enforces approve; "auto" is wave 3 (wave3.ts RoutineAutonomy)
   trigger: RoutineTrigger; filter: Record<string, unknown> | null;
   instructions: string;
   tools: string[];                                 // registry names, <= 8, enum of main-tier names

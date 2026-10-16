@@ -13,6 +13,9 @@ const TONE: Record<Flag["severity"], string> = {
 export const RULE_LABEL: Record<Flag["rule"], string> = {
   GROSS_CHANGE: "Gross change", HOURS_SPIKE: "Hours spike", NEW_IN_RUN: "New in run", MISSING_FROM_RUN: "Missing from run", PRORATED: "Prorated",
   MISSING_BANK_ACCOUNT: "No bank account", UNREGISTERED_STATE: "Unregistered state", NEGATIVE_NET: "Negative net", TOTAL_CHANGE: "Total change",
+  // wave 3 rules (docs/wave3.md)
+  DUPLICATE_SUPPLEMENTAL: "Duplicate supplemental", RAISE_NOT_APPLIED: "Raise not applied", WITHHOLDING_CHANGED: "Withholding changed",
+  PENDING_TIME_OFF_IN_PERIOD: "Pending time off", PTO_LINE: "Time off paid", REIMBURSEMENT_SPIKE: "Reimbursement spike",
 };
 
 function evidenceRows(ev: Record<string, unknown>): [string, string][] {

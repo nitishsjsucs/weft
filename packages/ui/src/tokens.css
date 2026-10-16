@@ -30,6 +30,15 @@
   /* app shell */
   --app-sidebar-bg: #fafafa; --app-sidebar-w: 244px; --app-header-h: 48px; --app-agent-w: 340px;
   --app-border: #e5e5e5; --app-item-active: #efefef;
+  /* app top bar (wave 3, research/wave3/topbar-design.md 5.2) */
+  --tb-h: 48px; --tb-pad-x: 12px; --tb-gap: 8px;
+  --tb-ctl: 32px; --tb-r: var(--radius-lg); --tb-seg: 28px; --tb-seg-r: var(--radius-md); --tb-seg-px: 8px; --tb-seg-gap: 6px;
+  --tb-divider: var(--gray-a4); --tb-fill-hover: var(--gray-a3); --tb-fill-open: var(--gray-a4); --tb-ring: 0 0 0 2px var(--blue-9);
+  --tb-surface: var(--card); --tb-edge: var(--shadow-border), var(--shadow-xs);
+  --tb-text: 13px; --tb-text-lh: 20px; --tb-icon: 16px; --tb-chevron: 14px; --tb-dot: 8px; --tb-avatar: 20px;
+  --status-live: var(--green-9); --status-local: var(--blue-9); --status-off: var(--red-9);
+  --demo-bg: var(--amber-3); --demo-fg: var(--amber-11);
+  --page-w-default: 1100px; --page-w-wide: 1280px; --page-w-narrow: 760px;
 
   /* type */
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
