@@ -67,7 +67,12 @@ pnpm --filter @weft/executor test        # sandbox engine and code.run through t
 WEFT_LLM=llama WEFT_LOCAL_BASE_URL=http://127.0.0.1:4381/v1 pnpm dev
 WEFT_LLM=claude WEFT_SECRETS_FILE=... WEFT_PRICES_JSON='{"inPerM":4,"cachedPerM":0.2,"outPerM":20}' pnpm dev
 WEFT_SANDBOX=quickjs pnpm dev            # code.run registered and runnable; still on no allowlist
+WEFT_E2E_WEB_PORT=4390 WEFT_E2E_API_PORT=4391 WEFT_E2E_RUNNER_PORT=4392 pnpm e2e   # this track's port range
 ```
+
+Gate on the branch (2026-10-15 19:30 PDT): `pnpm install --frozen-lockfile`, `pnpm typecheck --force` 15 of 15,
+`pnpm test` 442 of 442 in 77 files, `pnpm build`, `pnpm e2e` 23 of 23, `pnpm demo`, `pnpm lint:prose` and
+`pnpm lint:brand` all pass.
 
 The Claude request snapshot is `packages/agent/test/providers/__snapshots__/claude-request.json`; if the body changes
 on purpose, run the test with `-u` and review the diff. The response fixtures in
