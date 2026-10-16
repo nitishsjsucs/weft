@@ -29,11 +29,13 @@ function descendants(root: number): number[] {
 }
 const alive = (pids: number[]) => pids.filter((p) => { try { process.kill(p, 0); return true; } catch { return false; } });
 
-function startRunner(extraArgs: string[] = [], extraEnv: NodeJS.ProcessEnv = {}): { child: ChildProcess; ready: Promise<void>; output: () => string; exited: Promise<number | null> } {
+function startRunner(extraArgs: string[] = [], extraEnv: NodeJS.ProcessEnv = {}): { child: ChildProcess; ready: Promise<void>; output: () => string; exited: Promise<number | null>; closed: Promise<void> } {
   const child = spawn(join(ROOT, "node_modules/.bin/tsx"), ["scripts/dev.ts", "--api-only", "--api-port", String(PORT), "--web-port", String(PORT + 1), ...extraArgs], {
     cwd: ROOT, env: { ...process.env, WEFT_DATA_DIR: DATA, WEFT_E2E_DATA_DIR: join(DATA, "e2e"), WEFT_E2E: "1", ...extraEnv }, detached: true, stdio: ["ignore", "pipe", "pipe"],
   });
   const exited = new Promise<number | null>((r) => child.once("exit", (code) => r(code)));
+  // "close" fires once stdout and stderr are drained, which can be a moment after the processes are gone.
+  const closed = new Promise<void>((r) => child.once("close", () => r()));
   let out = "";
   const ready = new Promise<void>((resolve, reject) => {
     const on = (b: Buffer) => { out += b.toString(); if (out.includes("dev: ready")) resolve(); };
@@ -42,7 +44,7 @@ function startRunner(extraArgs: string[] = [], extraEnv: NodeJS.ProcessEnv = {})
     child.once("exit", (code) => reject(new Error(`runner exited early (${code}):\n${out}`)));
   });
   ready.catch(() => { /* a test that expects an early exit awaits `exited` instead */ });
-  return { child, ready, output: () => out, exited };
+  return { child, ready, output: () => out, exited, closed };
 }
 
 /** The initial environment of a process, from `ps -E` (values here never contain spaces). */
@@ -72,6 +74,7 @@ test.describe("dev runner", () => {
     expect(listening(PORT), r.output()).toBe("");
     expect(leftovers(PORT)).toBe("");
     expect(alive(tree)).toEqual([]);
+    await Promise.race([r.closed, sleep(5_000)]);
     expect(r.output()).toContain("dev: stopped");
   });
 
