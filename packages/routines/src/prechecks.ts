@@ -13,7 +13,7 @@ import { prechecks as w3Parity } from "./wave3/parity";
 import { prechecks as w3IntegrationsHr } from "./wave3/integrations-hr";
 import { prechecks as w3Screening } from "./wave3/screening";
 import { prechecks as w4Compliance } from "./wave4/compliance";
-import { prechecks as w4People } from "./wave4/people";
+import { outThisWeekLine, prechecks as w4People } from "./wave4/people";
 import { prechecks as w4Agent } from "./wave4/agent";
 import { prechecks as w4Admin } from "./wave4/admin";
 
@@ -142,7 +142,9 @@ export const peopleDigest: Precheck = async (ctx, exec) => {
   const text = byState.length
     ? `Weekly people digest: ${headcount} employees by work state (${states}). Open items are in the Weft inbox.`
     : `Weekly people digest: ${headcount} active people. Open items are in the Weft inbox.`;
-  return { action: "run", severity: "digest", subjectRefs: [], findings: { headcount, by_state: Object.fromEntries(byState), slot }, derivedArgs: { slot, "comms.send_message": { channel: "#people-ops", text } } };
+  // wave 4 (w4-parity-people, R6): the out-this-week line from the time-off ledger; null on a failed read, so the digest still posts.
+  const out = await outThisWeekLine(ctx, exec);
+  return { action: "run", severity: "digest", subjectRefs: [], findings: { headcount, by_state: Object.fromEntries(byState), slot }, derivedArgs: { slot, "comms.send_message": { channel: "#people-ops", text: `${text}${out ? ` ${out}` : ""}` } } };
 };
 
 export const openApprovals: Precheck = async (ctx, exec) => {

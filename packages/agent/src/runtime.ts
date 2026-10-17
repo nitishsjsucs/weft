@@ -11,6 +11,7 @@ import { chatPack, routineDraftPack, routinePack, type OpenLoop } from "./contex
 import { LUNA, pricesFor, ZERO_USAGE, type Prices } from "./cost";
 import { BUDGETS, MAX_REQUEUES, runLoop, traceWakeSegment, type ChecklistState, type RunSetup } from "./loop";
 import type { PromptKind } from "./prompts/index";
+import { PORTAL_PAGE_MARKER, ROLE_PORTAL, portalPack } from "./prompts/portal";
 import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
 import { createRunStore, type RunStore } from "./store";
 import { buildTrace } from "./trace";
@@ -237,8 +238,14 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       if (kind === "chat") {
         const c = (await opts.contextSource?.chat({ companyId, runId: handle.runId })) ?? { actingFor: "the person in this chat", grants: {}, companySummary: "No company summary is available.", openLoops: [] };
         principal = principalOf(c);
-        text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext });
-        text = withRecall(text, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "chat", query: input.text, subjectRefs: [] }));
+        if (typeof input.pageContext === "string" && input.pageContext.startsWith(PORTAL_PAGE_MARKER)) {
+          // Wave 4 (w4-parity-agent, T9): a portal run gets the portal pack and role. No company summary, no open-loops
+          // board and no recall block, since those can name other people; the portal tools read only the asker's record.
+          text = `${portalPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, request: input.text })}\n${ROLE_PORTAL}`;
+        } else {
+          text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext });
+          text = withRecall(text, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "chat", query: input.text, subjectRefs: [] }));
+        }
       } else {
         const channels = (await opts.contextSource?.channels?.(companyId)) ?? ["#people-ops", "#new-hires", "#payroll"];
         text = routineDraftPack({ nonce, now: opts.clock.now(), actingFor: "the person in this chat", request: input.text, channels, tools: [...CHAT_TOOLS, "comms.send_message"] });

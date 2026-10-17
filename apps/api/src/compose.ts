@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { INTEGRATION_OPTIONAL_SECRETS, INTEGRATION_SECRETS, IntegrationVendor, isWeftError, NotImplemented, type RunHandle, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
 import { eq } from "drizzle-orm";
 import { closeDb, migrate, notices, openDb, type Db } from "@weft/db";
-import { commands, createSimClock, handlers } from "@weft/core";
+import { commands, complianceNoticeVariant, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createVendorOverlay, readSecret } from "@weft/integrations";
 import { createExecutor, executorInternals } from "@weft/executor";
@@ -99,8 +99,12 @@ const placeholderProvider: ModelProvider = {
 // carries an injected line, so the browser GP5 exercises taint with the same delivery click as GP1. A live model
 // decides for itself (eval L4) and never sees this hook.
 const INJECTED_LINE = /ignore (all )?prior instructions/i;
-function scriptVariant(db: Db) {
+function scriptVariant(db: Db, clock: { now(): string }) {
+  // Wave 4 (w4-parity-compliance): rt_compliance_notices, rt_compliance_uploads and rt_compliance_training pick their
+  // script from the same plan the precheck derives (packages/core/src/compliance/script-variant.ts), on the sim clock.
+  const compliance = complianceNoticeVariant(db, () => clock.now());
   return async ({ routineId, trigger }: { routineId: string; trigger: Record<string, unknown> }): Promise<string | null> => {
+    if (routineId.startsWith("rt_compliance_")) return compliance({ routineId, trigger });
     if (routineId !== "rt_agency_notice" || typeof trigger.notice_id !== "string") return null;
     const rows = await db.select({ body: notices.bodyText }).from(notices).where(eq(notices.id, trigger.notice_id)).limit(1);
     return rows[0] && INJECTED_LINE.test(rows[0].body) ? "rt_agency_notice.injection" : null;
@@ -148,7 +152,7 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   Object.assign(executorInternals(executor)?.engine ?? {}, { observeCall: traceMcpCall });   // wave 4: a root TOOL span per MCP call
   const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
   const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({
-    env: process.env, ledger, testMode, scriptVariant: scriptVariant(db),
+    env: process.env, ledger, testMode, scriptVariant: scriptVariant(db, clock),
     // The local chat-completions providers send each tool's compact description (wave 2, w2-providers-sandbox request 1).
     compactDescriptions: (wire) => executorInternals(executor)?.engine.registry.def(wire)?.compactDescription || null,
   }), () => placeholderProvider));
