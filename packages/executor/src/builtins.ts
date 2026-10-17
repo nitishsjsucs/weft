@@ -4,13 +4,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
-import { DEFAULT_CODE_LIMITS, type Preview } from "@weft/contracts";
+import { DEFAULT_CODE_LIMITS, Refused, type Preview } from "@weft/contracts";
 import type { WeftCommand } from "@weft/core";
 import { actions, execRuns, proposals, runArtifacts } from "@weft/db";
 import type { Engine } from "./engine";
 import { codeFiles } from "./sandbox/files";
 import { sandboxCall } from "./sandbox/host";
-import { rowsOf } from "./workspace";
+import { artifactPage } from "./workspace";
 import { sandboxFromEnv } from "./sandbox/select";
 
 const base = {
@@ -33,26 +33,47 @@ export function builtinCommands(e: Engine): WeftCommand[] {
     },
   };
 
-  const listActions: WeftCommand<{ limit?: number; before_seq?: number; run_id?: string; command?: string; response_format?: "concise" | "detailed" }> = {
+  const listActions: WeftCommand<{ limit?: number; before_seq?: number; agent_run_id?: string; command?: string; response_format?: "concise" | "detailed" }> = {
     ...base, name: "actions.list", namespace: "actions", summary: "List recent actions from the audit log",
-    description: "List recent actions from the hash-chained audit log, newest first: seq, time, actor, command, summary, proposal id. Filter by run_id or command. Use it to answer how something changed. Example: { \"limit\": 10, \"command\": \"tax.update_rate\" }",
+    description: "List recent actions from the hash-chained audit log, newest first: seq, time, actor, command, summary, proposal id. limit is 1 to 50 (default 20). Filter by agent_run_id (an agent run, run_...; never a pay run) or an exact command name. Use it to answer how something changed. Example: { \"limit\": 10, \"command\": \"tax.update_rate\" }",
     compactDescription: "List recent audit log actions.",
-    input: z.object({ limit: z.number().int().min(1).max(50).optional(), before_seq: z.number().int().optional(), run_id: z.string().startsWith("run_").optional(), command: z.string().optional(), response_format: fmt }),
+    input: z.object({ limit: z.number().int().optional(), before_seq: z.number().int().optional(), agent_run_id: z.string().optional(), command: z.string().optional(), response_format: fmt }),
     domain: "company", needs: "view", effect: "read", risk: () => "R0", approval: "never", autoAllow: "never", tiers: { main: "executable", task: "executable" }, mcp: "read",
     sandbox: "read",
-    errorHints: { INVALID_INPUT: { hint: "limit is 1 to 50", example: { limit: 10 } } },
+    errorHints: { INVALID_INPUT: { hint: "limit is 1 to 50; agent_run_id is an agent run id (run_...)", example: { limit: 10 } } },
     async run(i, _ctx, deps) {
+      const runId = i.agent_run_id?.trim();
+      if (runId && !runId.startsWith("run_")) {
+        // Pay runs (pay_...) and agent runs (run_...) are different records; payroll.get_run reads a pay run and its approval.
+        const pay = runId.startsWith("pay_");
+        throw new Refused("INVALID_INPUT", `agent_run_id ${runId} is not an agent run id (run_...)`, {
+          hint: pay ? "That is a pay run. Read it with payroll.get_run (approved_by, approved_at, totals); for its audit rows filter actions.list by command, such as payroll.submit_run." : "Pass an agent run id (run_...), or filter by command instead.",
+          example: pay ? { command: "payroll.submit_run", limit: 10 } : { limit: 10 },
+        });
+      }
+      if (i.command && !e.registry.def(i.command)) {
+        const logged = (await deps.tx.selectDistinct({ c: actions.command }).from(actions)).map((r) => r.c);
+        if (!logged.includes(i.command)) {
+          const near = nearestNames(i.command, [...new Set([...e.registry.all().map((d) => d.name), ...logged])], new Set(logged));
+          throw new Refused("UNKNOWN_REFERENCE", `No command named ${i.command}; nearest: ${near.join(", ") || "none"}`, {
+            hint: "command is an exact registered name. Retry with one of the nearest names, or omit command to list the newest actions. Reads (get, list, search) are never in the audit log; their records answer from the read itself.",
+            example: near[0] ? { command: near[0], limit: 10 } : { limit: 10 },
+          });
+        }
+      }
+      const limit = Math.min(Math.max(Math.trunc(i.limit ?? 20) || 20, 1), 50);
       const conds = [];
       if (i.before_seq) conds.push(lt(actions.seq, i.before_seq));
-      if (i.run_id) conds.push(eq(actions.agentRunId, i.run_id));
+      if (runId) conds.push(eq(actions.agentRunId, runId));
       if (i.command) conds.push(eq(actions.command, i.command));
-      const rows = await deps.tx.select().from(actions).where(conds.length ? and(...conds) : undefined).orderBy(desc(actions.seq)).limit(i.limit ?? 20);
+      const rows = await deps.tx.select().from(actions).where(conds.length ? and(...conds) : undefined).orderBy(desc(actions.seq)).limit(limit);
       const detailed = i.response_format === "detailed";
       const data = rows.map((r) => ({
         seq: r.seq, ts: r.ts, actor: `${r.actorKind}:${r.actorId}`, command: r.command, summary: r.summary, proposal_id: r.proposalId, result_id: r.resultId,
         reversible: r.reversible, reverses_seq: r.reversesSeq, ...(detailed ? { on_behalf_of: r.onBehalfOf, run_id: r.agentRunId, routine_run_id: r.routineRunId, hash: r.hash } : {}),
       }));
-      return { data: { actions: data }, summary: `${data.length} actions${i.command ? ` for ${i.command}` : ""}` };
+      const clamped = i.limit !== undefined && i.limit !== limit;
+      return { data: { limit_applied: limit, ...(clamped ? { limit_note: `limit ${i.limit} is outside 1 to 50; used ${limit}` } : {}), actions: data }, summary: `${data.length} actions${i.command ? ` for ${i.command}` : ""}` };
     },
   };
 
@@ -80,9 +101,9 @@ export function builtinCommands(e: Engine): WeftCommand[] {
 
   const readArtifact: WeftCommand<{ ref: string; offset?: number; limit?: number }> = {
     ...base, name: "agent.read_artifact", namespace: "agent", summary: "Page through a large tool result saved to the run workspace",
-    description: "Page through a tool result that was too large to return inline (it came back with an artifact_ref). Returns up to 50 rows from offset. Example: { \"ref\": \"art_0001\", \"offset\": 10, \"limit\": 20 }",
+    description: "Page through a tool result that was too large to return inline (it came back with an artifact_ref). Returns up to 50 rows from offset, fewer when the rows are large (next_offset says where to continue), with total and row_count. Example: { \"ref\": \"art_0001\", \"offset\": 10, \"limit\": 20 }",
     compactDescription: "Page a saved large result by artifact_ref.",
-    input: z.object({ ref: z.string().startsWith("art_"), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(50).optional() }),
+    input: z.object({ ref: z.string().startsWith("art_"), offset: z.number().int().optional(), limit: z.number().int().optional() }),
     domain: "company", needs: "view", effect: "read", risk: () => "R0", approval: "never", autoAllow: "never", tiers: { main: "executable", task: "executable" },
     mcp: "hidden",
     errorHints: { UNKNOWN_REFERENCE: { hint: "use the artifact_ref returned by the earlier call", example: { ref: "art_0001", offset: 0, limit: 20 } } },
@@ -95,10 +116,8 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       const [a] = await deps.tx.select().from(runArtifacts).where(and(eq(runArtifacts.id, i.ref), inArray(runArtifacts.runId, family))).limit(1);
       if (!a) throw Object.assign(new Error(`No artifact ${i.ref} in this run`), { code: "UNKNOWN_REFERENCE" });
       const json = JSON.parse(readFileSync(join(e.dataDir, a.path), "utf8")) as unknown;
-      const rows = rowsOf(json);
-      const off = i.offset ?? 0, lim = i.limit ?? 50;
-      const page = rows.slice(off, off + lim);
-      const out = { data: { artifact_ref: a.id, offset: off, row_count: rows.length, rows: page, has_more: off + lim < rows.length }, summary: `${a.summary} (rows ${off + 1} to ${off + page.length} of ${rows.length})` };
+      const { data, summary } = artifactPage(a.id, a.summary, json, i.offset ?? 0, i.limit ?? 50);
+      const out = { data, summary };
       return a.taintedBy ? Object.assign(out, { taintedBy: `artifact:${a.id}` }) : out;
     },
   };
@@ -140,6 +159,38 @@ export function builtinCommands(e: Engine): WeftCommand[] {
     },
   };
   return [postUpdate, listActions, getRun, readArtifact, codeRun] as WeftCommand[];
+}
+
+/**
+ * Command names closest to an unknown one. A namespace of at most `wholeNs` commands is listed whole (names with audit
+ * rows first, so the retry can return something), since a guessed verb rarely shares letters with the real one
+ * ("payroll.approve" for payroll.submit_run); otherwise the `max` nearest by shared words, then edit distance.
+ */
+export function nearestNames(name: string, names: readonly string[], logged: ReadonlySet<string> = new Set(), max = 6, wholeNs = 10): string[] {
+  const q = name.toLowerCase();
+  const nsOf = (n: string) => n.toLowerCase().split(".")[0] ?? "";
+  const words = new Set(q.split(/[._\s]+/).filter(Boolean));
+  const score = (n: string) => {
+    const l = n.toLowerCase();
+    const shared = l.split(/[._]+/).filter((w) => words.has(w) || [...words].some((x) => x.length >= 4 && (w.startsWith(x) || x.startsWith(w)))).length;
+    return (logged.has(n) ? 50 : 0) + shared * 10 - editDistance(q, l) / 10;
+  };
+  const ranked = (list: string[]) => list.map((n) => [n, score(n)] as const).sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([n]) => n);
+  const pool = names.filter((n) => n !== name);
+  const same = ranked(pool.filter((n) => nsOf(n) === nsOf(q)));
+  const other = ranked(pool.filter((n) => nsOf(n) !== nsOf(q)));
+  const take = same.length && same.length <= wholeNs ? same.length : max;
+  return [...same, ...other].slice(0, Math.max(take, Math.min(max, same.length + other.length)));
+}
+
+function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length]!;
 }
 
 export type { Preview };
