@@ -2,6 +2,228 @@
 // Planned: benefits life events, windows and carrier submissions, people.out_this_week, comms.send_first_day_message. Append here only; commands/index.ts concatenates it, so the other namespace files stay untouched.
 // Honest risk and approval from the planned table, zod inputs with no z.record (strict schemas), preview for anything
 // that proposes, access "human_only" for a person's own submissions. Update the registry snapshot test in the same commit.
+//
+// Landed: life-event windows (benefits.report_life_event, human only; benefits.list_life_events and
+// benefits.list_windows, R0; benefits.send_window_reminders, R1; benefits.close_windows, the system date sweep) and the
+// 30-day check-in form (onboarding.submit_checkin_form, human only; the planned table has no row for it, see
+// docs/tracks/w4-parity-people.md). benefits.report_life_event is R2 with approval "always" rather than the planned
+// "never": a human caller executes either way (policy.ts), and the t2 registry rule asks every R2 command for approval.
+// The employee's own submissions need people:view like time_off.submit, so any employee with a worker record can file.
+import { and, eq } from "drizzle-orm";
+import { z } from "zod";
+import { LifeEventKind, Refused } from "@weft/contracts";
+import { benefitPlans, carrierSubmissions, checkins, enrollmentWindows, lifeEvents, workers } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
+import { DomainRefusal, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
+import { displayName } from "../people/names";
+import { lifeEventRule, windowFor } from "../life-events/rules";
+import { listLifeEvents, listWindows, reminderEmail, remindersDue, sweepPlan, workerOfPrincipal } from "../life-events/windows";
+import { CheckinAnswers, managerSummaryW4 } from "../life-events/checkin-form";
 
-export const w4PeopleCommands: WeftCommand[] = [];
+const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const FROM = "benefits@larkspur.example";
+
+// ---------------------------------------------------------------- life events and windows
+
+const ReportInput = z.object({ kind: LifeEventKind, event_date: Day, note: z.string().max(400).optional() });
+type ReportInput = z.infer<typeof ReportInput>;
+const reportLifeEvent = writeCommand<ReportInput>({
+  name: "benefits.report_life_event", summary: "Report a qualifying life event (the employee, human only)",
+  description: "Human only, the employee's own record: records a marriage, divorce, birth, adoption, move, loss of other coverage or a dependent's death and opens a special enrollment window from the event date for the rule's days, with its source. An event whose window already closed is recorded as rejected.",
+  input: ReportInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R2"), approval: "always", access: "human_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const tx = deps.tx;
+    const workerId = await workerOfPrincipal(tx, ctx.companyId, ctx.principal.id);
+    const [w] = workerId ? await tx.select().from(workers).where(and(eq(workers.id, workerId), eq(workers.companyId, ctx.companyId))).limit(1) : [];
+    if (!w) throw new DomainRefusal("DOMAIN_NO_WORKER", "Your sign-in has no worker record yet", "Sign the offer letter first", null);
+    if (w.type !== "employee" || !(w.status === "active" || w.status === "onboarding")) throw new DomainRefusal("DOMAIN_NOT_ELIGIBLE", `${displayName(w.firstName, w.lastName)} is not an active employee`, null, null);
+    const today = ptDateOf(ctx.now);
+    if (i.event_date > today) throw new DomainRefusal("DOMAIN_FUTURE_EVENT", `The event date ${i.event_date} is after today (${today})`, "Report the event on or after the day it happens", null);
+    const dup = await tx.select({ id: lifeEvents.id, status: lifeEvents.status }).from(lifeEvents).where(and(eq(lifeEvents.workerId, w.id), eq(lifeEvents.kind, i.kind), eq(lifeEvents.eventDate, i.event_date)));
+    if (dup.some((d) => d.status !== "rejected")) throw new DomainRefusal("DOMAIN_DUPLICATE_LIFE_EVENT", `This ${i.kind} on ${i.event_date} is already reported as ${dup[0]!.id}`, null, null);
+    const rule = lifeEventRule(i.kind);
+    const win = windowFor(i.kind, i.event_date);
+    const id = await deps.newId("lev_");
+    const base = { id, workerId: w.id, kind: i.kind, eventDate: i.event_date, note: i.note ?? "", reportedBy: ctx.principal.id, reportedAt: ctx.now };
+    const source = { basis: rule.basis, citation: rule.citation, source: rule.source, days: rule.days };
+    if (win.closesOn < today) {
+      await tx.insert(lifeEvents).values({ ...base, status: "rejected", windowId: null });
+      return { data: { life_event_id: id, status: "rejected", window_id: null, would_have_closed_on: win.closesOn, ...source },
+        summary: `Recorded the ${rule.label.toLowerCase()} on ${i.event_date}; its ${rule.days}-day window closed on ${win.closesOn}, so no window opened. The people team can review it.`,
+        events: [{ type: "life_event.reported", subjectRef: id, payload: { life_event_id: id, worker_id: w.id } }] };
+    }
+    const wid = await deps.newId("ewn_");
+    await tx.insert(enrollmentWindows).values({ id: wid, companyId: ctx.companyId, workerId: w.id, kind: "life_event", lifeEventId: id, opensOn: win.opensOn, closesOn: win.closesOn, status: "open", remindersSent: 0, createdAt: ctx.now });
+    await tx.insert(lifeEvents).values({ ...base, status: "window_open", windowId: wid });
+    return {
+      data: { life_event_id: id, status: "window_open", window_id: wid, opens_on: win.opensOn, closes_on: win.closesOn, ...source },
+      summary: `Recorded the ${rule.label.toLowerCase()} on ${i.event_date} and opened a benefits window until ${win.closesOn} (${rule.citation})`,
+      events: [
+        { type: "life_event.reported", subjectRef: id, payload: { life_event_id: id, worker_id: w.id } },
+        { type: "enrollment_window.opened", subjectRef: wid, payload: { window_id: wid } },
+      ],
+    };
+  },
+});
+
+const ListEventsInput = z.object({ worker_id: z.string().startsWith("wrk_").optional(), status: z.enum(["reported", "window_open", "elected", "closed_no_change", "expired", "rejected"]).optional(), ...responseFormatField });
+type ListEventsInput = z.infer<typeof ListEventsInput>;
+const listLifeEventsCommand = readCommand({
+  name: "benefits.list_life_events", domain: "benefits",
+  summary: "Reported life events with their window dates and the rule behind each window.",
+  description: "Life events employees reported (marriage, birth, move and the rest), optionally for one worker or status: kind, event date, status, the window's open and close dates, and the rule's citation and source URL. The employee's own note is never included. Example: {\"worker_id\":null,\"status\":\"window_open\"}",
+  input: ListEventsInput,
+  async run(i: ListEventsInput, ctx, deps) {
+    const rows = await listLifeEvents(deps.tx, ctx.companyId, { workerId: i.worker_id, status: i.status });
+    return { data: { count: rows.length, life_events: rows }, summary: `${rows.length} life events${i.status ? ` ${i.status}` : ""}` };
+  },
+});
+
+const ListWindowsInput = z.object({ worker_id: z.string().startsWith("wrk_").optional(), kind: z.enum(["new_hire", "life_event", "open_enrollment"]).optional(), status: z.enum(["scheduled", "open", "closed", "cancelled"]).optional(), ...responseFormatField });
+type ListWindowsInput = z.infer<typeof ListWindowsInput>;
+const listWindowsCommand = readCommand({
+  name: "benefits.list_windows", domain: "benefits",
+  summary: "Enrollment windows: who, which kind, open and close dates, reminders sent and the next reminder date.",
+  description: "Enrollment windows (new_hire, life_event, open_enrollment) with status, open and close dates, reminders sent, the next reminder date and the rule's source for life-event windows. Example: {\"worker_id\":null,\"kind\":\"life_event\",\"status\":\"open\"}",
+  input: ListWindowsInput,
+  async run(i: ListWindowsInput, ctx, deps) {
+    const rows = await listWindows(deps.tx, ctx.companyId, { workerId: i.worker_id, kind: i.kind, status: i.status });
+    return { data: { count: rows.length, windows: rows }, summary: `${rows.length} enrollment windows` };
+  },
+});
+
+const RemindInput = z.object({ window_ids: z.array(z.string().startsWith("ewn_")).max(50).optional(), as_of: Day.optional() });
+type RemindInput = z.infer<typeof RemindInput>;
+const sendWindowReminders = writeCommand<RemindInput>({
+  name: "benefits.send_window_reminders", summary: "Email reminders for open life-event windows that are due",
+  description: "Email each employee whose life-event window is open, who has not elected, and whose next reminder date (14, 7 and 2 days before the close) has come; one email per window per run. Due windows are recomputed here; window_ids narrows them. Example: {\"window_ids\":null,\"as_of\":null}",
+  input: RemindInput, domain: "benefits", needs: "edit", effect: "external", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
+  tiers: { main: "executable", task: "delegated" }, afterPending: "propose",
+  async run(i, ctx, deps) {
+    const due = (await remindersDue(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now))).filter((r) => !i.window_ids || i.window_ids.includes(r.window_id));
+    const sent: { window_id: string; worker_id: string; email_id: string; closes_on: string }[] = [];
+    for (const r of due) {
+      const [w] = await deps.tx.select({ email: workers.workEmail }).from(workers).where(eq(workers.id, r.worker_id));
+      const [ev] = await deps.tx.select({ eventDate: lifeEvents.eventDate }).from(lifeEvents).where(eq(lifeEvents.id, r.life_event_id));
+      if (!w || !ev) continue;
+      const m = reminderEmail(r.name, r.kind, ev.eventDate, r.closes_on);
+      const mail = await deps.sims.email.send({ to: w.email, from: FROM, subject: m.subject, body: m.body, kind: "nudge", relatedRef: r.window_id });
+      await deps.tx.update(enrollmentWindows).set({ remindersSent: r.sets_sent_to }).where(eq(enrollmentWindows.id, r.window_id));
+      sent.push({ window_id: r.window_id, worker_id: r.worker_id, email_id: mail.id, closes_on: r.closes_on });
+    }
+    return { data: { sent, count: sent.length }, summary: `Sent ${sent.length} benefits window reminders` };
+  },
+});
+
+const SweepInput = z.object({ as_of: Day.optional() });
+type SweepInput = z.infer<typeof SweepInput>;
+const closeWindows = writeCommand<SweepInput>({
+  name: "benefits.close_windows", summary: "System date sweep: open scheduled windows and close windows past their date",
+  description: "System command (svc_scheduler): opens scheduled windows whose open date has come and closes windows past their close date. A life event whose window closes with no election becomes expired.",
+  input: SweepInput, domain: "benefits", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", access: "system_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const tx = deps.tx;
+    const p = await sweepPlan(tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now));
+    const events: { type: string; subjectRef: string; payload: unknown }[] = [];
+    for (const o of p.to_open) {
+      await tx.update(enrollmentWindows).set({ status: "open" }).where(eq(enrollmentWindows.id, o.window_id));
+      events.push({ type: "enrollment_window.opened", subjectRef: o.window_id, payload: { window_id: o.window_id } });
+    }
+    const expired: string[] = [];
+    for (const c of p.to_close) {
+      await tx.update(enrollmentWindows).set({ status: "closed" }).where(eq(enrollmentWindows.id, c.window_id));
+      if (c.life_event_id) {
+        const [ev] = await tx.select({ status: lifeEvents.status }).from(lifeEvents).where(eq(lifeEvents.id, c.life_event_id));
+        if (ev?.status === "window_open") { await tx.update(lifeEvents).set({ status: "expired" }).where(eq(lifeEvents.id, c.life_event_id)); expired.push(c.life_event_id); }
+      }
+      events.push({ type: "enrollment_window.closed", subjectRef: c.window_id, payload: { window_id: c.window_id } });
+    }
+    return { data: { opened: p.to_open.map((o) => o.window_id), closed: p.to_close.map((c) => c.window_id), expired_life_events: expired }, summary: `Opened ${p.to_open.length} and closed ${p.to_close.length} enrollment windows`, events };
+  },
+});
+
+const ElectInput = z.object({
+  window_id: z.string().startsWith("ewn_"),
+  elections: z.array(z.object({ plan_id: z.string().startsWith("bpl_"), tier: z.enum(["ee", "ee_spouse", "ee_children", "family"]).optional(), deferral_bps: z.number().int().min(0).max(10_000).optional() })).max(6),
+  no_change: z.boolean().optional(),
+});
+type ElectInput = z.infer<typeof ElectInput>;
+const electInWindow = writeCommand<ElectInput>({
+  name: "benefits.elect_in_window", summary: "Make your benefit changes in an open window (the employee, human only)",
+  description: "Human only, the employee's own open life-event window: records the plan changes (one plan per type, a coverage tier for medical, dental and vision, a deferral for the 401(k)) or no change, and closes the window, which stops its reminders. Changes are queued for each carrier; filing them is benefits.submit_elections.",
+  input: ElectInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R2"), approval: "always", access: "human_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const tx = deps.tx;
+    const own = await workerOfPrincipal(tx, ctx.companyId, ctx.principal.id);
+    const [w] = await tx.select().from(enrollmentWindows).where(and(eq(enrollmentWindows.id, i.window_id), eq(enrollmentWindows.companyId, ctx.companyId)));
+    if (!w || !own || w.workerId !== own || w.kind !== "life_event" || !w.lifeEventId) throw new Refused("UNKNOWN_REFERENCE", `No window ${i.window_id}.`);
+    const today = ptDateOf(ctx.now);
+    if (w.status !== "open" || today > w.closesOn) throw new DomainRefusal("DOMAIN_WINDOW_CLOSED", `Window ${w.id} closed on ${w.closesOn}`, "Changes outside a window wait for open enrollment", null);
+    if (!i.no_change && i.elections.length === 0) throw new DomainRefusal("DOMAIN_NO_CHANGES", "Pick at least one plan change, or choose no change", null, { window_id: w.id, elections: [], no_change: true });
+    const plans = await tx.select().from(benefitPlans).where(eq(benefitPlans.companyId, ctx.companyId));
+    const seen = new Set<string>();
+    const lines: { plan_id: string; plan: string; type: string; carrier: string; tier: string | null; employee_cents: number | null; deferral_bps: number | null }[] = [];
+    for (const e of i.no_change ? [] : i.elections) {
+      const plan = plans.find((x) => x.id === e.plan_id);
+      if (!plan) throw new DomainRefusal("DOMAIN_NOT_FOUND", `No benefit plan ${e.plan_id}`, "Use a plan id from the plan list", null);
+      if (seen.has(plan.type)) throw new DomainRefusal("DOMAIN_DUPLICATE_PLAN_TYPE", `More than one ${plan.type} plan elected`, "Pick one plan per type", null);
+      seen.add(plan.type);
+      if (plan.type === "hsa") throw new DomainRefusal("DOMAIN_HSA_WITH_HR", "HSA contribution changes are set up with HR", null, null);
+      if (plan.type === "401k") {
+        const m = JSON.parse(plan.matchJson ?? "{}") as { min_deferral_bps?: number; max_deferral_bps?: number };
+        const bps = e.deferral_bps ?? -1;
+        if (bps < (m.min_deferral_bps ?? 0) || bps > (m.max_deferral_bps ?? 10_000)) throw new DomainRefusal("DOMAIN_BAD_DEFERRAL", `Deferral ${bps} bps is outside ${m.min_deferral_bps ?? 0} to ${m.max_deferral_bps ?? 10_000}`, null, null);
+        lines.push({ plan_id: plan.id, plan: plan.name, type: plan.type, carrier: plan.carrier, tier: null, employee_cents: null, deferral_bps: bps });
+      } else {
+        const prices = JSON.parse(plan.pricesJson) as Record<string, number>;
+        if (!e.tier || typeof prices[e.tier] !== "number") throw new DomainRefusal("DOMAIN_BAD_TIER", `${plan.name} needs a coverage tier`, "Use ee, ee_spouse, ee_children or family", null);
+        lines.push({ plan_id: plan.id, plan: plan.name, type: plan.type, carrier: plan.carrier, tier: e.tier, employee_cents: prices[e.tier]!, deferral_bps: null });
+      }
+    }
+    const queued: { submission_id: string; carrier: string; plans: string[] }[] = [];
+    for (const carrier of [...new Set(lines.map((l) => l.carrier))].sort()) {
+      const id = await deps.newId("csb_");
+      const mine = lines.filter((l) => l.carrier === carrier);
+      await tx.insert(carrierSubmissions).values({ id, workerId: own, windowId: w.id, carrier, electionsJson: JSON.stringify({ effective_on: w.opensOn, lines: mine }), status: "queued", sentAt: null, confirmedAt: null, receiptRef: null, proposalId: null, createdAt: ctx.now });
+      queued.push({ submission_id: id, carrier, plans: mine.map((l) => l.plan) });
+    }
+    await tx.update(enrollmentWindows).set({ status: "closed" }).where(eq(enrollmentWindows.id, w.id));
+    await tx.update(lifeEvents).set({ status: i.no_change ? "closed_no_change" : "elected" }).where(eq(lifeEvents.id, w.lifeEventId));
+    return {
+      data: { window_id: w.id, life_event_id: w.lifeEventId, status: i.no_change ? "closed_no_change" : "elected", queued },
+      summary: i.no_change ? `Recorded no change for window ${w.id} and closed it` : `Recorded ${lines.length} benefit changes for window ${w.id}; ${queued.length} carrier filings are queued`,
+      events: [{ type: "enrollment_window.closed", subjectRef: w.id, payload: { window_id: w.id } }],
+    };
+  },
+});
+
+// ---------------------------------------------------------------- the 30-day check-in form
+
+const SubmitFormInput = z.object({ checkin_id: z.string().startsWith("chk_"), answers: CheckinAnswers });
+type SubmitFormInput = z.infer<typeof SubmitFormInput>;
+const submitCheckinForm = writeCommand<SubmitFormInput>({
+  name: "onboarding.submit_checkin_form", summary: "Answer your first-month check-in (the hire, human only)",
+  description: "Human only, the hire's own open check-in: stores the five CHECKIN_QUESTIONS answers and emails the manager the scale and the two yes or no answers. The written answers stay in Weft for the hire and their manager and never reach an agent.",
+  input: SubmitFormInput, domain: "people", needs: "view", effect: "write", risk: riskOf("R1"), approval: "never", access: "human_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const tx = deps.tx;
+    const own = await workerOfPrincipal(tx, ctx.companyId, ctx.principal.id);
+    const [c] = await tx.select().from(checkins).where(eq(checkins.id, i.checkin_id));
+    // Someone else's check-in reads as missing, so ids cannot be probed.
+    if (!c || !own || c.workerId !== own) throw new Refused("UNKNOWN_REFERENCE", `No check-in ${i.checkin_id}.`);
+    if (c.status !== "sent" && c.status !== "nudged") throw new DomainRefusal("DOMAIN_CHECKIN_CLOSED", `Check-in ${c.id} is ${c.status}`, "Only an open check-in takes answers", null);
+    const [w] = await tx.select().from(workers).where(and(eq(workers.id, c.workerId), eq(workers.companyId, ctx.companyId)));
+    if (!w) throw new Refused("UNKNOWN_REFERENCE", `No check-in ${i.checkin_id}.`);
+    const [mgr] = w.managerId ? await tx.select({ email: workers.workEmail }).from(workers).where(eq(workers.id, w.managerId)) : [];
+    await tx.update(checkins).set({ status: "submitted", answersJson: JSON.stringify({ form: "w4", ...i.answers }), submittedAt: ctx.now }).where(eq(checkins.id, c.id));
+    const m = managerSummaryW4(displayName(w.firstName, w.lastName), i.answers);
+    const mail = await deps.sims.email.send({ to: mgr?.email ?? "people@larkspur.example", from: "agent@larkspur.example", subject: m.subject, body: m.body, kind: "generic", relatedRef: c.id });
+    return { data: { checkin_id: c.id, worker_id: w.id, status: "submitted", summary_email_id: mail.id }, summary: `Recorded the first-month check-in ${c.id} and emailed the manager a summary`,
+      events: [{ type: "checkin.submitted", subjectRef: c.id, payload: { checkin_id: c.id, worker_id: w.id } }] };
+  },
+});
+
+export const w4PeopleCommands: WeftCommand[] = [
+  reportLifeEvent, listLifeEventsCommand, listWindowsCommand, sendWindowReminders, closeWindows, electInWindow, submitCheckinForm,
+];
+
