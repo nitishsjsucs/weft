@@ -85,5 +85,17 @@ export function adminRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json(out.body, out.status);
   });
 
-  return stubRoutes(r, "admin", ["GET /v1/reports", "POST /v1/reports/:metric/send", "GET /v1/permissions/matrix", "POST /v1/permissions/agent-actions"]);
+  /** The routine gallery: created by, enabled at, last and next run, and approval and override counts per routine. */
+  r.get("/v1/routine-gallery", async (c) => {
+    const s = c.var.session;
+    if (!s) throw new Unauthorized();
+    // The prebuilt rows are written on first use, as GET /v1/routines does through the engine's list().
+    await (weft.routines as Partial<{ ensurePrebuilt(): Promise<void> }>).ensurePrebuilt?.();
+    const outcome = await weft.executor.human.exec(s, "routines.gallery", {});
+    if (!outcome.ok) { const out = outcomeResponse(weft, outcome); return c.json(out.body, out.status); }
+    if (outcome.status !== "done") throw new ValidationError("routines.gallery does not propose");
+    return c.json(redactJson(weft, (outcome.data as { rows: unknown[] }).rows));
+  });
+
+  return stubRoutes(r, "admin", ["GET /v1/reports", "POST /v1/reports/:metric/send", "GET /v1/permissions/matrix", "POST /v1/permissions/agent-actions", "GET /v1/routine-gallery"]);
 }

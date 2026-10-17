@@ -11,9 +11,10 @@
 //   text would be refused UNGROUNDED on approval. This command writes the text in code from the report rows and
 //   grounds it against them, as comms.send_exec_report does for the exec report.
 import { and, eq, sql } from "drizzle-orm";
+import { Cron } from "croner";
 import { z } from "zod";
-import { formatCents, Refused, ReportMetric, ReportMetricW4, type ChartSpec, type ExecContext, type PermissionMatrixRow } from "@weft/contracts";
-import { agentActionOverrides, agentGrants, principals, type DbTx } from "@weft/db";
+import { formatCents, Refused, ReportMetric, ReportMetricW4, type ChartSpec, type ExecContext, type PermissionMatrixRow, type RoutineGalleryRow } from "@weft/contracts";
+import { agentActionOverrides, agentGrants, principals, routines, type DbTx } from "@weft/db";
 import { check } from "@weft/grounding";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
@@ -426,4 +427,86 @@ export const setAgentActionOverrideCommand = writeCommand<SetOverrideInput>({
   },
 });
 
-export const w4AdminCommands: WeftCommand[] = [reportsBreakdownCommand, sendReportCommand, permissionMatrixCommand, setAgentActionOverrideCommand];
+// ------------------------------------------------------------------------------------------------ routine gallery (G10, G7, G8)
+
+/** Proposal statuses counted as a person approving the routine's work, and as a person overriding it. */
+export const GALLERY_APPROVED: readonly string[] = ["approved", "executed", "failed"];
+export const GALLERY_OVERRIDDEN: readonly string[] = ["denied", "superseded", "dismissed"];
+
+/** A gallery row with the display fields the screen needs beside the RoutineGalleryRow contract. */
+export type GalleryRow = RoutineGalleryRow & { createdByName: string | null; schedule: string; pending: number };
+
+type Trigger = { type: "cron"; cron: string; tz?: string } | { type: "event"; event: string } | { type: string };
+const parseJson = <T>(j: unknown, fallback: T): T => {
+  if (typeof j !== "string") return (j as T) ?? fallback;
+  try { return JSON.parse(j) as T; } catch { return fallback; }
+};
+
+/** The next cron slot strictly after `from` (croner, in the routine's time zone), the engine's nextRunAt rule. */
+export function nextCronRun(t: Trigger, enabled: boolean, from: string): string | null {
+  if (!enabled || t.type !== "cron" || !("cron" in t)) return null;
+  const c = new Cron(t.cron, { timezone: t.tz ?? "America/Los_Angeles", paused: true });
+  try { return c.nextRun(new Date(from))?.toISOString() ?? null; } catch { return null; } finally { c.stop(); }
+}
+
+function scheduleOf(t: Trigger): string {
+  if (t.type === "cron" && "cron" in t) return `cron ${t.cron}${t.tz ? ` (${t.tz})` : ""}`;
+  if (t.type === "event" && "event" in t) return `on ${t.event}`;
+  return t.type;
+}
+
+/**
+ * Every routine with who created it (the person whose request drafted it, from routine.drafted; prebuilt routines
+ * have none), when it was last enabled (the latest routine.enabled after any routine.disabled, or its creation for a
+ * routine that shipped enabled), its last run, its next cron slot after `now` (enabled cron routines only), and the
+ * decision counts on the proposals its runs filed: approved (approved, executed, failed after approval) and
+ * overridden (denied, edited and so superseded, or a dismissed suggestion), the same mapping as the learned
+ * approval preferences in memory.
+ */
+export async function routineGallery(tx: DbTx, companyId: string, now: string): Promise<GalleryRow[]> {
+  const rs = await tx.select().from(routines).where(eq(routines.companyId, companyId));
+  const names = new Map((await tx.select({ id: principals.id, display: principals.display }).from(principals).where(eq(principals.companyId, companyId))).map((p) => [p.id, p.display]));
+  const evs = await tx.all<{ type: string; ts: string; rid: string; by: string | null }>(sql`
+    SELECT type, ts, json_extract(payload_json, '$.routine_id') AS rid, requested_by AS by FROM events
+    WHERE type IN ('routine.drafted', 'routine.enabled', 'routine.disabled') ORDER BY ts, id`);
+  const last = await tx.all<{ rid: string; at: string | null; status: string }>(sql`
+    SELECT routine_id AS rid, coalesce(started_at, ended_at) AS at, status FROM (
+      SELECT routine_id, started_at, ended_at, status, row_number() OVER (PARTITION BY routine_id ORDER BY coalesce(started_at, ended_at) DESC, id DESC) AS k
+      FROM routine_runs) WHERE k = 1`);
+  const counts = await tx.all<{ rid: string; status: string; n: number }>(sql`
+    SELECT rr.routine_id AS rid, p.status AS status, count(*) AS n FROM proposals p JOIN routine_runs rr ON rr.id = p.routine_run_id
+    WHERE p.company_id = ${companyId} GROUP BY rr.routine_id, p.status`);
+  const rows: GalleryRow[] = [];
+  for (const r of [...rs].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
+    const mine = evs.filter((e) => e.rid === r.id);
+    const drafted = mine.find((e) => e.type === "routine.drafted") ?? null;
+    const createdBy = r.source === "custom" ? (drafted?.by ?? r.ownerPrincipalId) : null;
+    const toggles = mine.filter((e) => e.type !== "routine.drafted");
+    const lastToggle = toggles.at(-1) ?? null;
+    const enabledAt = !r.enabled ? null : lastToggle?.type === "routine.enabled" ? lastToggle.ts : r.createdAt;
+    const lr = last.find((x) => x.rid === r.id) ?? null;
+    const of = (statuses: readonly string[]) => counts.filter((c) => c.rid === r.id && statuses.includes(c.status)).reduce((a, c) => a + Number(c.n), 0);
+    const trigger = parseJson<Trigger>(r.triggerJson, { type: "manual" });
+    rows.push({
+      routineId: r.id, name: r.name, enabled: r.enabled, autonomy: (r.autonomy === "recommend" || r.autonomy === "auto" ? r.autonomy : "approve"),
+      source: r.source === "custom" ? "custom" : "prebuilt", createdBy, createdByName: createdBy ? (names.get(createdBy) ?? createdBy) : null, enabledAt,
+      lastRunAt: lr?.at ?? null, lastRunStatus: lr?.status ?? null, nextRunAt: nextCronRun(trigger, r.enabled, now),
+      approvals: of(GALLERY_APPROVED), overrides: of(GALLERY_OVERRIDDEN), pending: of(["pending"]), schedule: scheduleOf(trigger),
+    });
+  }
+  return rows;
+}
+
+const GalleryInput = z.object({});
+export const routineGalleryCommand = readCommand<z.infer<typeof GalleryInput>, Record<string, unknown>>({
+  name: "routines.gallery", domain: "company",
+  summary: "Every routine with created by, enabled at, last and next run, and approval and override counts",
+  description: "The routine gallery: each routine with who created it, when it was enabled, its last run and status, its next scheduled run (enabled cron routines), and how many of its proposals people approved or overrode (denied, edited or dismissed).",
+  input: GalleryInput,
+  async run(_i, ctx, deps) {
+    const rows = await routineGallery(deps.tx, ctx.companyId, ctx.now);
+    return { data: { rows }, summary: `${rows.length} routines, ${rows.filter((r) => r.enabled).length} enabled` };
+  },
+});
+
+export const w4AdminCommands: WeftCommand[] = [reportsBreakdownCommand, sendReportCommand, permissionMatrixCommand, setAgentActionOverrideCommand, routineGalleryCommand];
