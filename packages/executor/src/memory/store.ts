@@ -13,6 +13,7 @@ import { companyDay } from "./time";
 import { BACKLINKS_HEADING, backlinkIndex, bodyWithoutBacklinks, extractLinks, linkify, linkPath, withBacklinks, type LinkContext } from "./links";
 import { excerptOf, pickSubjects, recallTerms, renderRecall, CAPS, type AliasEntry, type RecallCandidate } from "./recall";
 import { stripLinks } from "./links";
+import { TIER_ORDER, folderRank, matchLine, queryWords, type MatchTier } from "./terms";
 import { RECALL_BUDGET } from "@weft/contracts";
 
 export const MEMORY_FOLDERS: MemoryFolder[] = ["entities", "comms", "timeline", "workstreams", "knowledge"];
@@ -94,6 +95,8 @@ export interface LocalMemory extends MemoryStore {
   history(path: string, limit?: number): Promise<MemoryHistoryEntry[]>;
 }
 export interface MemoryHistoryEntry { commit: string; date: string; author: string; subject: string; diff: string }
+/** A memory.search hit with how it matched the query (terms.ts): the phrase, every word, or some words. */
+export type SearchHit = MemoryHit & { match: MatchTier };
 export interface RecallOutcome { block: string; items: { path: string; kind: string; taintedBy: string | null }[]; searches: string[] }
 
 /** Extra fixed-string terms for a query that names an entity: its id and its wiki-link target (at most 5 entities). */
@@ -222,27 +225,38 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
       const limit = Math.max(1, Math.min(50, q.limit || 10));
       // Alias and wiki-link expansion (harness 18): a query naming an entity by alias or id also matches lines that
       // mention its id or link it, so "Theo Marsh" finds [[entities/people/wrk_0002|...]] and bare wrk_0002.
+      // Wave 4 (FM4): a multi-word query is also split into its topic words (terms.ts), so a keyword question finds
+      // lines that hold all of them, then lines that hold some; phrase hits still lead.
       const query = q.query.trim();
-      const expanded = q.at ? [] : expandQuery(query, await this.aliasIndex());
-      const terms = [query, ...expanded.filter((t) => t.toLowerCase() !== query.toLowerCase())];
+      const index = q.at ? [] : await this.aliasIndex();
+      const phraseTerms = [query, ...expandQuery(query, index)];
+      const words = queryWords(query);
+      const wordTerms = words.length > 1 || (words[0] && words[0].raw !== query.toLowerCase())
+        ? words.map((w) => [w.stem, ...(w.raw.length >= 4 ? expandQuery(w.raw, index) : [])]) : [];
+      const terms = [...new Map([...phraseTerms, ...wordTerms.flat()].map((t) => [t.toLowerCase(), t])).values()];
+      const multi = terms.length > 1;
       return serialGit(async () => {
         const commit = q.at ?? (await head(r));
         const args = ["grep", "-n", "-i", "--fixed-strings", ...terms.flatMap((t) => ["-e", t]), ...(q.at ? [q.at] : []), "--", ...folders];
         const out = await git(r, args).catch((e: { exitCode?: number | null }) => { if (e.exitCode === 1) return ""; throw e; });
         const date = (await git(r, ["log", "-1", "--format=%cI", commit])).trim();
-        const all: (MemoryHit & { score: number })[] = [];
+        const all: (SearchHit & { score: number; rank: number })[] = [];
         for (const line of out.split("\n")) {
           if (!line) continue;
           const rest = q.at && line.startsWith(`${q.at}:`) ? line.slice(q.at.length + 1) : line;
           const m = /^([^:]+):(\d+):(.*)$/.exec(rest);
           if (!m) continue;
-          const lower = m[3]!.toLowerCase();
-          const score = terms.filter((t) => lower.includes(t.toLowerCase())).length;
-          all.push({ path: m[1]!, line: Number(m[2]), snippet: opts.redactor.redact(m[3]!.slice(0, 240)), commit, date, cite: `${m[1]}#L${m[2]}`, taintedBy: null, score });
+          const hit = matchLine(m[3]!, phraseTerms, wordTerms);
+          // Frontmatter lines (id, aliases, links) count for a phrase or an entity, never for a loose word match.
+          if (!hit || (hit.tier !== "phrase" && (m[3] === "---" || /^[a-z_]+: /.test(m[3]!)))) continue;
+          all.push({ path: m[1]!, line: Number(m[2]), snippet: opts.redactor.redact(m[3]!.slice(0, 240)), commit, date, cite: `${m[1]}#L${m[2]}`, taintedBy: null, match: hit.tier, score: hit.score, rank: words.length > 1 ? folderRank(m[1]!) : 0 });
         }
-        // One term keeps git grep order (wave 1); expanded queries rank by matched terms, then path order.
-        const ranked = terms.length > 1 ? all.map((h, i) => ({ h, i })).sort((a, b) => b.h.score - a.h.score || a.i - b.i).map((x) => x.h) : all;
-        const hits: MemoryHit[] = ranked.slice(0, limit).map(({ score: _s, ...h }) => h);
+        // One term keeps git grep order (wave 1). Otherwise: phrase hits, then all words, then some words; within a
+        // tier, more matched concepts first; for a multi-word query, notes before entities before the timeline.
+        const ranked = multi
+          ? all.map((h, i) => ({ h, i })).sort((a, b) => TIER_ORDER[a.h.match] - TIER_ORDER[b.h.match] || b.h.score - a.h.score || a.h.rank - b.h.rank || a.i - b.i).map((x) => x.h)
+          : all;
+        const hits: SearchHit[] = ranked.slice(0, limit).map(({ score: _s, rank: _r, ...h }) => h);
         for (const h of hits) {
           const text = await git(r, ["show", `${commit}:${h.path}`]).catch(() => "");
           h.taintedBy = parseDoc(text).frontmatter.taintedBy ?? null;
@@ -327,13 +341,16 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
       return { outgoing, backlinks };
     },
     async recall(input) {
+      // Wave 4 (FM4): the one-pager leads when the digest has written it; without it, recall still builds a block
+      // from the subject dossiers, the preference lines and the term hits, so a world that never ran the digest
+      // (a fresh install, an eval trial) still sees the notes its request names.
       const onePager = await this.read(RECALL_BUDGET.onePager);
-      if (!onePager) return { block: "", items: [], searches: [] };
       const index = await this.aliasIndex();
       const subjects = pickSubjects(input.request, input.subjectRefs, index).slice(0, RECALL_BUDGET.maxSearches - 1);
       const terms = recallTerms(input.request, subjects, RECALL_BUDGET.maxSearches);
       const untrusted = (path: string, fm: string | null) => fm ?? (path.startsWith("knowledge/decisions/") ? `memory:${path}` : null);
-      const cands: RecallCandidate[] = [{ kind: "one_pager", path: RECALL_BUDGET.onePager, title: "Company one-pager", excerpt: excerptOf(onePager.body, CAPS.onePager), score: 100, asOf: onePager.frontmatter.updated || "", taintedBy: untrusted(RECALL_BUDGET.onePager, onePager.frontmatter.taintedBy) }];
+      const cands: RecallCandidate[] = onePager ? [{ kind: "one_pager", path: RECALL_BUDGET.onePager, title: "Company one-pager", excerpt: excerptOf(onePager.body, CAPS.onePager), score: 100, asOf: onePager.frontmatter.updated || "", taintedBy: untrusted(RECALL_BUDGET.onePager, onePager.frontmatter.taintedBy) }] : [];
+      const ids = new Map(index.map((e) => [e.path, e.id]));
       for (const [i, sub] of subjects.entries()) {
         const d = await this.read(sub.path);
         if (d) cands.push({ kind: "dossier", path: sub.path, title: /^# (.+)$/m.exec(d.body)?.[1] ?? sub.path, excerpt: excerptOf(d.body, CAPS.dossier), score: 50 - i, asOf: d.frontmatter.updated || "", taintedBy: untrusted(sub.path, d.frontmatter.taintedBy) });
@@ -357,7 +374,7 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
           if (!excerpt || seenText.has(excerpt)) return;
           included.add(h.path);
           seenText.add(excerpt);
-          cands.push({ kind: "hit", path: h.cite, title: h.path, excerpt: excerpt.length > CAPS.hit * 4 ? `${excerpt.slice(0, CAPS.hit * 4 - 12)} [clipped]` : excerpt, score: (RECALL_BUDGET.maxSearches - ti) * 10 - hi, asOf: h.date, taintedBy: untrusted(h.path, h.taintedBy) });
+          cands.push({ kind: "hit", path: h.cite, title: h.path, excerpt: excerpt.length > CAPS.hit * 4 ? `${excerpt.slice(0, CAPS.hit * 4 - 12)} [clipped]` : excerpt, score: (RECALL_BUDGET.maxSearches - ti) * 10 - hi, asOf: h.date, taintedBy: untrusted(h.path, h.taintedBy), noteId: ids.get(h.path) ?? null });
         });
       }
       const { block, kept } = renderRecall(input.trustedOnly ? cands.filter((c) => !c.taintedBy) : cands, RECALL_BUDGET.maxTokens);

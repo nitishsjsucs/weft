@@ -6,7 +6,8 @@ import { MODEL_WRITE_DENY, MODEL_WRITE_PREFIXES, type MemoryFolder } from "@weft
 import type { WeftCommand } from "@weft/core";
 import { digestOf } from "../digest";
 import type { Engine } from "../engine";
-import { MEMORY_FOLDERS, MemoryError, normalizeMemoryPath } from "./store";
+import { MEMORY_FOLDERS, MemoryError, normalizeMemoryPath, type SearchHit } from "./store";
+import { queryWords, tierSummary, type MatchTier } from "./terms";
 
 const base = {
   compactDescription: "", amountCents: null, ceilingKey: null, reversible: false as const, lease: null, sandbox: "hidden" as const, access: "all" as const,
@@ -27,15 +28,19 @@ export function modelWritePath(p: string): string {
 export function memoryCommands(e: Engine): WeftCommand[] {
   const search: WeftCommand<{ query: string; folders?: MemoryFolder[]; at?: string; limit?: number }> = {
     ...base, name: "memory.search", namespace: "memory", summary: "Search company memory",
-    description: "Search the company memory (Markdown in git) for a phrase. Returns hits with path, line, snippet and a cite like knowledge/procedures/x.md#L4. Example: { \"query\": \"SUI rate\", \"folders\": [\"knowledge\"] }",
-    compactDescription: "Search memory for a phrase.",
+    description: "Search company memory (decisions, procedures, preferences, people, timeline). Several words match three ways, ranked: the whole phrase, then every word, then some words; each hit's match says which. Question words are ignored; one or two distinctive words work best. Hits carry path, snippet and a cite like knowledge/procedures/x.md#L4. Example: { \"query\": \"SUI rate\", \"folders\": [\"knowledge\"] }",
+    compactDescription: "Search memory by phrase, then every word, then some words.",
     input: z.object({ query: z.string().min(1).max(200), folders: z.array(folder).optional(), at: z.string().optional(), limit: z.number().int().min(1).max(20).optional() }),
     domain: "company", needs: "view", effect: "read", risk: () => "R0", mcp: "read", sandbox: "read",
     errorHints: { INVALID_INPUT: { hint: "at is a 40-character hex commit; folders are entities, comms, timeline, workstreams, knowledge", example: { query: "SUI rate", folders: ["knowledge"] } } },
     async run(i) {
       const hits = await e.memory.search({ query: i.query, folders: i.folders ?? null, at: i.at ?? null, limit: i.limit ?? 10 });
       const tainted = hits.find((h) => h.taintedBy);
-      const out = { data: { hits }, summary: `${hits.length} memory hits for the query` };
+      // How the hits matched (phrase, every word, some words), so a weak any-word hit is not read as the answer.
+      const tiers = hits.map((h) => (h as SearchHit).match).filter((t): t is MatchTier => Boolean(t));
+      // The query's own words are never echoed: a result is evidence, and the model's arguments are not.
+      const how = tiers.length ? ` (${tierSummary(tiers)})` : hits.length === 0 && queryWords(i.query).length > 1 ? " (no line has the phrase or any of its words)" : "";
+      const out = { data: { hits }, summary: `${hits.length} memory hits for the query${how}` };
       return tainted ? Object.assign(out, { taintedBy: `memory:${tainted.path}`, untrusted: ["hits.snippet"] }) : out;
     },
   };
