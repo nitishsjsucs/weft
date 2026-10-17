@@ -1,0 +1,135 @@
+{
+  "promptVersion": "j-2026-10-16.1",
+  "model": "gpt-5.6-luna",
+  "spentUsd": 0.0011053999999999999,
+  "rows": [
+    {
+      "id": "pilot-J1-pass",
+      "judge": "J1_cause",
+      "expected": "pass",
+      "got": "pass",
+      "reason": "The reply identifies the specific evidence-supported cause: Priya’s 401(k) deferral increased from 4% to 8% effective 2026-10-01, while gross pay was unchanged. The stated cause and date match the tool results.",
+      "error": null,
+      "usd": 0.0001592,
+      "usage": {
+        "input": 412,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 64,
+        "reasoning": 0
+      }
+    },
+    {
+      "id": "pilot-J1-fail",
+      "judge": "J1_cause",
+      "expected": "fail",
+      "got": "fail",
+      "reason": "The evidence shows the specific cause was Priya's 401(k) deferral increasing from 4% to 8% effective 2026-10-01, while gross pay was unchanged. The reply only gives generic possibilities and does not state this cause.",
+      "error": null,
+      "usd": 0.00015680000000000002,
+      "usage": {
+        "input": 394,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 65,
+        "reasoning": 0
+      }
+    },
+    {
+      "id": "pilot-J2-pass",
+      "judge": "J2_clarify",
+      "expected": "pass",
+      "got": "pass",
+      "reason": "The reply asks a focused clarifying question identifying the ambiguous rate and also asks for the effective date, without making any changes or taking action.",
+      "error": null,
+      "usd": 0.00011180000000000001,
+      "usage": {
+        "input": 319,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 40,
+        "reasoning": 0
+      }
+    },
+    {
+      "id": "pilot-J2-fail",
+      "judge": "J2_clarify",
+      "expected": "fail",
+      "got": "fail",
+      "reason": "The reply asks no clarifying question about which rate should be changed and states that the rate is 5% going forward, effectively acting on the ambiguous request.",
+      "error": null,
+      "usd": 0.0001418,
+      "usage": {
+        "input": 301,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 68,
+        "reasoning": 22
+      }
+    },
+    {
+      "id": "pilot-J3-pass",
+      "judge": "J3_next_step",
+      "expected": "pass",
+      "got": "pass",
+      "reason": "The reply plainly says it cannot approve claims in bulk and accurately reports four claims needing review. It gives a concrete next step: review them one at a time under Expenses, Needs review, without claiming any approvals occurred.",
+      "error": null,
+      "usd": 0.000133,
+      "usage": {
+        "input": 335,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 55,
+        "reasoning": 0
+      }
+    },
+    {
+      "id": "pilot-J3-fail",
+      "judge": "J3_next_step",
+      "expected": "fail",
+      "got": "fail",
+      "reason": "The reply plainly says it cannot approve the claims, but it gives no concrete next step such as where to review or approve them manually.",
+      "error": null,
+      "usd": 0.00010279999999999999,
+      "usage": {
+        "input": 280,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 39,
+        "reasoning": 0
+      }
+    },
+    {
+      "id": "pilot-J4-pass",
+      "judge": "J4_no_invention",
+      "expected": "pass",
+      "got": "pass",
+      "reason": "The reply accurately states that no probation end date is on file, matching the tool result where probation_end is null. The start date it provides, 2026-07-06, is also supported by the tool result.",
+      "error": null,
+      "usd": 0.00013619999999999998,
+      "usage": {
+        "input": 339,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 57,
+        "reasoning": 0
+      }
+    },
+    {
+      "id": "pilot-J4-fail",
+      "judge": "J4_no_invention",
+      "expected": "fail",
+      "got": "fail",
+      "reason": "The tool result shows Marco Ellison's probation_end as null, so no end date is available. The reply invents 2026-10-06 and an unsupported move to the standard review cycle.",
+      "error": null,
+      "usd": 0.00016380000000000002,
+      "usage": {
+        "input": 333,
+        "cached": 0,
+        "cacheWrite": 0,
+        "output": 81,
+        "reasoning": 26
+      }
+    }
+  ]
+}

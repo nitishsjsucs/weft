@@ -160,6 +160,30 @@ describe("held-out test split", () => {
     for (const f of memoryFiles(TEST_MUTATOR_NAMES)) expect(f.path, f.path).toMatch(/^(knowledge\/(facts|procedures|decisions)\/|workstreams\/)[a-z0-9-]+\.md$/);
   });
 
+  // The suite loader's own rules (evals/suite/loader.ts on track/w4-eval-suite), restated here so the split keeps
+  // loading in the runner without this file importing it: a person principal, a typed routine event, no tuned
+  // regression tasks in the held-out split, read-only end-state checks, and no proposals on a refusal task.
+  it("follows the suite loader's rules for principals, events, kinds, end states and refusals", () => {
+    for (const t of tasks) {
+      expect(t.principal, t.id).toMatch(/^usr_[a-z0-9_]+$/);
+      expect(t.kind, t.id).not.toBe("regression");
+      expect(Number.isNaN(Date.parse(t.world.clock)), t.id).toBe(false);
+      if ("routine" in t.input && t.input.event) expect(t.input.event.type, t.id).toBeTruthy();
+      if (t.variants.includes("chat_can_propose")) expect(t.surface, t.id).toBe("chat");
+      for (const [v, e] of Object.entries(t.expect)) {
+        if (!e) continue;
+        for (const s of e.endState) expect(s.sql, `${t.id} ${v}`).toMatch(/^\s*select\s/i);
+        if (e.refusal !== "none") expect(e.proposals ?? [], `${t.id} ${v}`).toEqual([]);
+      }
+    }
+    // Notice tasks name a notice their own mutator inserts, through the event the product emits.
+    for (const t of tasks.filter((x) => "routine" in x.input && x.input.event?.type === "notice.received")) {
+      const id = ("routine" in t.input ? t.input.event?.notice_id : null) ?? "";
+      const inserted = t.world.mutators.flatMap((m) => TEST_MUTATORS[m]!.steps).some((s) => "sql" in s && s.sql.startsWith("INSERT INTO notices") && s.args?.[0] === id);
+      expect(inserted, t.id).toBe(true);
+    }
+  });
+
   it("stores notice extracts that equal what the agency parser reads from each notice body", () => {
     let checked = 0;
     for (const m of Object.values(TEST_MUTATORS)) {
@@ -189,6 +213,21 @@ describe("anti-leak scan", () => {
     const hits = scanForLeaks(FIXER_ROOTS, tokens, skipHeldOut);
     expect(hits.map((h) => `${h.taskId} ${h.kind} in ${h.file}`)).toEqual([]);
   });
+
+  // Other checkouts (main, the fixer worktrees) are scanned the same way when WEFT_ANTILEAK_ROOTS lists their roots,
+  // comma separated. Each root's own held-out paths are skipped, so an integration branch that carries the split
+  // still passes. Read only; hits name the task id, the token kind and the file.
+  const extra = (process.env.WEFT_ANTILEAK_ROOTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  it.runIf(extra.length > 0)("finds no test task string in the checkouts listed in WEFT_ANTILEAK_ROOTS", () => {
+    const hits: string[] = [];
+    for (const root of extra) {
+      const held = HELD_OUT.map((p) => join(root, relative(ROOT, p)));
+      const skip = (abs: string) => held.some((p) => abs === p || abs.startsWith(`${p}/`));
+      const dirs = FIXER_ROOTS.map((p) => join(root, relative(ROOT, p))).filter((d) => { try { return statSync(d).isDirectory(); } catch { return false; } });
+      for (const h of scanForLeaks(dirs, tokens, skip, root)) hits.push(`${h.taskId} ${h.kind} in ${root}: ${h.file}`);
+    }
+    expect(hits).toEqual([]);
+  }, 300_000);
 
   it("fails on a planted literal, a planted mutator name and a pasted prompt", () => {
     const dir = mkdtempSync(join(tmpdir(), "weft-leak-"));
@@ -328,6 +367,24 @@ describe("judge prompts and calls", () => {
   it("carries no test task string in the judge prompts or the judge code", () => {
     const hits = scanForLeaks([join(ROOT, "evals/suite/judges")], leakTokens(tasks), (abs) => abs.includes("/fixtures/"));
     expect(hits.map((h) => `${h.taskId} ${h.kind} in ${h.file}`)).toEqual([]);
+    // The synthetic pilot cases are not drawn from the test split either.
+    expect(scanForLeaks([join(ROOT, "evals/suite/judges/fixtures")], leakTokens(tasks)).map((h) => `${h.taskId} ${h.kind} in ${h.file}`)).toEqual([]);
+  });
+
+  it("keeps a recorded pilot on the current prompt version: one pass and one fail case per judge, every verdict parsed", () => {
+    const cases = JSON.parse(readFileSync(join(ROOT, "evals/suite/judges/fixtures/pilot-cases.json"), "utf8")) as { judge: string; expected: "pass" | "fail"; case: JudgeCase }[];
+    for (const j of JudgeId.options) expect(cases.filter((c) => c.judge === j).map((c) => c.expected).sort(), j).toEqual(["fail", "pass"]);
+    for (const c of cases) expect(renderCase(c.case).length, c.case.id).toBeLessThan(5_000);
+    const dir = join(ROOT, "evals/suite/judges/pilots");
+    const pilots = readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as { promptVersion: string; model: string; spentUsd: number; rows: { id: string; expected: string; got: string | null; error: string | null }[] });
+    const current = pilots.filter((p) => p.promptVersion === JUDGE_PROMPT_VERSION);
+    expect(current.length).toBeGreaterThan(0);
+    for (const p of current) {
+      expect(p.model).toBe("gpt-5.6-luna");
+      expect(p.spentUsd).toBeLessThan(0.01);
+      expect(p.rows.map((r) => r.id).sort()).toEqual(cases.map((c) => c.case.id).sort());
+      expect(p.rows.filter((r) => r.error !== null || r.got === null)).toEqual([]);
+    }
   });
 
   it("parses verdicts only with a reason that comes first", () => {
