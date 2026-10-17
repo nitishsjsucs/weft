@@ -50,10 +50,25 @@ describe("worlds", () => {
   // Every distinct world is rebuilt by `pnpm eval:suite digests` and before every trial (WORLD_DRIFT). Here a sample
   // covers the base world and each mutator family; WEFT_EVAL_ALL_DIGESTS=1 rebuilds all of them.
   it("worlds reproduce their pinned digests", async () => {
-    const sample = process.env.WEFT_EVAL_ALL_DIGESTS === "1" ? all.map((l) => l.task) : ["CQ-01", "CP-01", "RT-05", "AM-01"].map(task);
+    const sample = process.env.WEFT_EVAL_ALL_DIGESTS === "1" ? all.map((l) => l.task) : ["CQ-01", "CP-01", "RT-05", "AM-01", "OF-01", "MM-01"].map(task);
     const res = await digests(sample, { write: false, baseDir: tmp("weft-eval-digest-") });
     expect(res.filter((r) => r.pinned !== r.actual).map((r) => `${r.id} ${r.pinned} != ${r.actual}`)).toEqual([]);
   }, 600_000);
+});
+
+describe("worlds built through product routes", () => {
+  it("a mutator that goes through a route never ticks the scheduler during the build, so no routine runs", async () => {
+    const { buildWorld } = await import("../evals/suite/worlds/index");
+    const w = await buildWorld(task("ON-02").world, { dataDir: tmp("weft-eval-world-"), mode: "scripted" });
+    try {
+      expect(await w.q("SELECT COUNT(*) AS n FROM routine_runs")).toEqual([{ n: 0 }]);
+      expect(await w.q("SELECT COUNT(*) AS n FROM agent_runs")).toEqual([{ n: 0 }]);
+      expect(await w.q("SELECT COUNT(*) AS n FROM onboarding_tasks WHERE worker_id = 'wrk_0052'")).toEqual([{ n: 9 }]);
+      // The kick is restored for the trial itself.
+      const sched = w.weft.scheduler as unknown as { kick: () => Promise<unknown>; tick: () => Promise<unknown> };
+      expect(sched.kick).toBe(sched.tick);
+    } finally { await w.weft.close(); }
+  }, 120_000);
 });
 
 describe("runner on the scripted provider", () => {

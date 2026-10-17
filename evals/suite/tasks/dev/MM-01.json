@@ -1,0 +1,59 @@
+{
+  "id": "MM-01",
+  "group": "memory_recall",
+  "parity": [
+    "G8",
+    "harness 9"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "memoryDecision"
+    ],
+    "digest": "sha256:55d69e676a0b3f995753f16840eeefb6364b1dfb259f0e5de37b493fc583b6d2"
+  },
+  "input": {
+    "chat": "Why do we pay Ines Carvalho in EUR?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": {
+        "allowPaths": [],
+        "forbidCommit": true
+      },
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "DEC-0001"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/MM-01.md",
+  "legacyCase": null
+}
