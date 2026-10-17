@@ -34,7 +34,56 @@ export function rowsOf(data: unknown): unknown[] {
   return [data];
 }
 
+/** The total a result reports (its own numeric `total`), else the number of rows it holds. */
+function totalOf(data: unknown, rows: readonly unknown[]): number {
+  const t = data && typeof data === "object" && !Array.isArray(data) ? (data as { total?: unknown }).total : undefined;
+  return typeof t === "number" && Number.isFinite(t) ? t : rows.length;
+}
+
+/** Top-level scalar fields of a result (total, count, limit notes, a date window): they say what the rows are. */
+function scalarsOf(data: unknown): Record<string, unknown> {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+    if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = typeof v === "string" ? v.slice(0, 300) : v;
+    else if (k === "start_window" && typeof v === "object" && !Array.isArray(v)) out[k] = v;
+  }
+  return out;
+}
+
+/** When the command stored fewer rows than it matched (a clamped limit), say so, so the two numbers never disagree silently. */
+function totalNote(total: number, rowCount: number): Record<string, string> {
+  return total > rowCount ? { total_note: `total counts every match (${total}); this result holds ${rowCount} rows. Narrow the original call's filters to see the rest.` } : {};
+}
+
+/**
+ * One page of a stored artifact, capped to the inline budget: an `agent.read_artifact` page is never offloaded again
+ * (offloadIfLarge skips that command), so rows are dropped from the end of the page until it fits, and next_offset
+ * says where to continue. At least one row is always returned.
+ */
+export function artifactPage(ref: string, summary: string, stored: unknown, offset: number, limit: number): { data: Record<string, unknown>; summary: string } {
+  const rows = rowsOf(stored);
+  const lim = Math.max(1, Math.min(MAX_PAGE, Math.trunc(limit) || MAX_PAGE));
+  const off = Math.max(0, Math.trunc(offset) || 0);
+  const total = totalOf(stored, rows);
+  let page = rows.slice(off, off + lim);
+  const build = (p: unknown[]) => {
+    const next = off + p.length;
+    return { artifact_ref: ref, offset: off, total, row_count: rows.length, ...totalNote(total, rows.length), rows: p, returned: p.length, has_more: next < rows.length, next_offset: next < rows.length ? next : null };
+  };
+  let data = build(page);
+  while (page.length > 1 && JSON.stringify(data).length > OBSERVATION_CAP) {
+    page = page.slice(0, Math.max(1, Math.floor(page.length * 0.8)));
+    data = build(page);
+  }
+  return { data, summary: `${summary} (rows ${page.length ? off + 1 : off} to ${off + page.length} of ${rows.length})` };
+}
+
+/** The command whose result is an artifact page: never offloaded again (artifactPage keeps it under the cap). */
+export const READ_ARTIFACT = "agent.read_artifact";
+
 export async function offloadIfLarge(e: Engine, tx: DbTx, scope: CallScope, def: WeftCommand, data: unknown, summary: string): Promise<{ data: unknown; ref: string } | null> {
+  if (def.name === READ_ARTIFACT) return null;
   const json = JSON.stringify(data ?? null);
   if (json.length <= OBSERVATION_CAP || !scope.run) return null;
   const run = scope.run;
@@ -49,7 +98,8 @@ export async function offloadIfLarge(e: Engine, tx: DbTx, scope: CallScope, def:
     id, runId: run.id, stepN: step, path: relative(e.dataDir, file), bytes: Buffer.byteLength(json), sha256: createHash("sha256").update(json).digest("hex"),
     summary, domain: def.domain, needs: def.needs, taintedBy: scope.ctx.tainted ? (scope.taintedBy ?? "external") : null,
   });
-  return { ref: id, data: { summary, row_count: rows.length, preview: rows.slice(0, PREVIEW_ROWS), artifact_ref: id } };
+  const total = totalOf(data, rows);
+  return { ref: id, data: { ...scalarsOf(data), summary, total, row_count: rows.length, ...totalNote(total, rows.length), preview: rows.slice(0, PREVIEW_ROWS), artifact_ref: id } };
 }
 
 /** agent.read_artifact: resolved only within the run family (this run, its parent, its children). */
@@ -62,17 +112,14 @@ export async function readArtifactInTx(e: Engine, tx: DbTx, scope: CallScope, re
   for (const c of await tx.select({ id: execRuns.id }).from(execRuns).where(eq(execRuns.parentRunId, run.id))) family.add(c.id);
   const [a] = await tx.select().from(runArtifacts).where(and(eq(runArtifacts.id, ref), inArray(runArtifacts.runId, [...family]))).limit(1);
   if (!a) return refusal("UNKNOWN_REFERENCE", `No artifact ${ref} in this run`, t());
-  const lim = Math.max(1, Math.min(MAX_PAGE, Math.trunc(limit) || MAX_PAGE));
-  const off = Math.max(0, Math.trunc(offset) || 0);
-  const rows = rowsOf(JSON.parse(readFileSync(join(e.dataDir, a.path), "utf8")));
+  const stored = JSON.parse(readFileSync(join(e.dataDir, a.path), "utf8")) as unknown;
   if (a.taintedBy) {
     await markTainted(tx, run.id, `artifact:${a.id}`, scope.ctx.run?.stepN ?? 0);
     if (!scope.ctx.tainted) { scope.ctx.tainted = true; scope.taintedBy = `artifact:${a.id}`; }
   }
-  const page = rows.slice(off, off + lim);
+  const page = artifactPage(a.id, a.summary, stored, offset, limit);
   return {
-    ok: true, status: "done", resultId: a.id, data: { artifact_ref: a.id, offset: off, row_count: rows.length, rows: page, has_more: off + lim < rows.length },
-    summary: `${a.summary} (rows ${off + 1} to ${off + page.length} of ${rows.length})`, actionSeq: null, artifactRef: a.id, tainted: scope.ctx.tainted, label: "synthetic",
+    ok: true, status: "done", resultId: a.id, data: page.data, summary: page.summary, actionSeq: null, artifactRef: a.id, tainted: scope.ctx.tainted, label: "synthetic",
   };
 }
 

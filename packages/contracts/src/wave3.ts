@@ -128,6 +128,19 @@ export const CHAT_ACT_TOOLS = [
   "reports.query", "expenses.list", "expenses.get", "time_off.list_requests", "time_off.get_balance",
   "payroll.propose_off_cycle", "expenses.decide", "time_off.decide",
 ] as const;
+/**
+ * Wave 4 chat domain routing (docs/evals/error-analysis.md FM2). Both chat lists hold comms.post_update, which the loop
+ * never offers to chat, so that slot can carry one domain read without breaking the cap of 16. Code (never the model)
+ * picks it from the person's words when the run opens, and it is frozen in the run's allowlist like every other name.
+ * Every route is a read: a routed run can look more up, never change more.
+ */
+export const CHAT_ROUTE_SLOT = "comms.post_update" as const;
+export const CHAT_DOMAIN_ROUTES = [
+  { domain: "benefits_reconcile", tool: "benefits.list_findings" },
+  { domain: "integrations_sync", tool: "integrations.list_sync_items" },
+  { domain: "team_calendar", tool: "time_off.team_calendar" },
+] as const;
+export type ChatDomainRoute = (typeof CHAT_DOMAIN_ROUTES)[number]["domain"];
 export const W3_SETTINGS = { chatCanPropose: "agent.chat_can_propose", allowAutoAutonomy: "agent.allow_auto_autonomy" } as const;
 /** New ceiling keys (limits rows seeded by the owning track's seed step; `${key}_day` is the daily aggregate). */
 export const W3_CEILINGS = { expense: "agent.expense_cents", expenseAuto: "agent.expense_auto_cents", screening: "agent.screening_cents" } as const;
