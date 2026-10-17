@@ -6,7 +6,7 @@ import { proposals } from "@weft/db";
 import type { Engine } from "./engine";
 import { refusal } from "./outcome";
 import { priorCall, recordCall, runInTx } from "./pipeline";
-import { agentScope, resolveRun } from "./scope";
+import { agentScope, loadActionOverrides, narrowAllowlist, resolveRun } from "./scope";
 import { readTaint } from "./taint";
 import { readArtifactInTx } from "./workspace";
 import { afterCommit } from "./timeline";
@@ -53,6 +53,12 @@ export function createAgentExecutor(e: Engine): AgentExecutor {
         const scope = await agentScope(e, tx, row, handle.token, null, null);
         return readArtifactInTx(e, tx, scope, ref, offset, limit);
       }));
+    },
+    async toolAllowlist(handle, allowlist) {
+      // The tool list the model is shown: a denied command is never offered (and is refused if named anyway).
+      const row = await resolveRun(e.db, handle);
+      if (!row) return [];
+      return narrowAllowlist(allowlist, await loadActionOverrides(e.db, row.companyId, [row.principalId, row.onBehalfOf]));
     },
     async runState(handle) {
       const row = await resolveRun(e.db, handle);

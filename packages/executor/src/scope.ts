@@ -1,8 +1,8 @@
 // ExecContext is derived from executor rows on every call (harness 6.1). Caller-supplied values do not exist.
 import { createHash, timingSafeEqual } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
-import type { AgentKind, ExecContext, HumanSession, RunHandle, Surface } from "@weft/contracts";
-import { execRuns, type DbTx } from "@weft/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import type { AgentActionOverrideMode, AgentKind, ExecContext, HumanSession, RunHandle, Surface } from "@weft/contracts";
+import { agentActionOverrides, execRuns, type DbTx } from "@weft/db";
 import type { BatchState, Engine } from "./engine";
 import type { Caller } from "./policy";
 import { agentPrincipalId, capAgent, intersect, loadAgentGrants, loadPrincipal, noGrants, type Grants } from "./store";
@@ -24,6 +24,63 @@ export interface CallScope {
   batch: BatchState | null;
   callId: string | null;
   systemAllowed: boolean;
+  /** Wave 4 (w4-parity-admin): per-action narrowing of an agent run below its domain grant. Absent outside agent runs. */
+  overrides?: ActionOverrides;
+}
+
+// ------------------------------------------------------------------------------------------------ per-action overrides (G1)
+//
+// A person (or an admin for the agent itself) narrows the agent per command below the domain grant: `deny` takes the
+// command away and `propose_only` makes every call to it a proposal. The agent's own row binds every run; a person's
+// row binds the runs that act for them. Overrides are rows in agent_action_overrides, written only by an approved
+// settings.set_agent_action_override proposal. They only ever narrow: nothing here widens a grant or an allowlist.
+
+export interface ActionOverrides { deny: ReadonlySet<string>; proposeOnly: ReadonlySet<string> }
+export const NO_OVERRIDES: ActionOverrides = Object.freeze({ deny: new Set<string>(), proposeOnly: new Set<string>() });
+
+/** The overrides binding a run of `agentId` acting for `onBehalfOf`; deny wins when the two rows disagree. */
+export async function loadActionOverrides(tx: DbTx, companyId: string, principalIds: readonly (string | null | undefined)[]): Promise<ActionOverrides> {
+  const ids = [...new Set(principalIds.filter((x): x is string => !!x))];
+  if (!ids.length) return NO_OVERRIDES;
+  const rows = await tx.select({ command: agentActionOverrides.command, mode: agentActionOverrides.mode }).from(agentActionOverrides)
+    .where(and(eq(agentActionOverrides.companyId, companyId), inArray(agentActionOverrides.principalId, ids)));
+  if (!rows.length) return NO_OVERRIDES;
+  const deny = new Set(rows.filter((r) => r.mode === "deny").map((r) => r.command));
+  const proposeOnly = new Set(rows.filter((r) => r.mode === "propose_only" && !deny.has(r.command)).map((r) => r.command));
+  return { deny, proposeOnly };
+}
+
+/** An allowlist without the denied commands: the tool list the model is shown for this run (harness 5.3 stays a subset). */
+export function narrowAllowlist(allowlist: readonly string[], o: ActionOverrides): string[] {
+  return o.deny.size ? allowlist.filter((n) => !o.deny.has(n)) : [...allowlist];
+}
+
+/** The override for one command in a call scope (the pipeline reads it after the domain grant check). */
+export function actionOverrideOf(scope: Pick<CallScope, "caller" | "overrides">, command: string): AgentActionOverrideMode | null {
+  if (scope.caller !== "agent" || !scope.overrides) return null;
+  if (scope.overrides.deny.has(command)) return "deny";
+  return scope.overrides.proposeOnly.has(command) ? "propose_only" : null;
+}
+
+/** propose_only turns an execute into a propose for any non-read; a refusal or an existing proposal stays as it is. */
+export function narrowDecision<D extends { decision: "execute" | "propose" | "refuse"; reason: string }>(decision: D, mode: AgentActionOverrideMode | null, isRead: boolean): D {
+  if (mode !== "propose_only" || isRead || decision.decision !== "execute") return decision;
+  return { ...decision, decision: "propose", reason: "a per-action override makes this command always a proposal for the agent" };
+}
+
+/**
+ * The run row an agent call sees, with denied commands taken off its frozen allowlist, so the pipeline's allowlist
+ * check refuses them as UNAVAILABLE. A run opened without an allowlist (test handles) gets every registered command
+ * but the denied ones, which is the same set it could call before, minus the denials.
+ */
+function narrowedRun(e: Engine, row: ExecRunRow, o: ActionOverrides): ExecRunRow {
+  if (!o.deny.size) return row;
+  let allow: string[];
+  try {
+    const parsed = row.allowlistJson === null || row.allowlistJson === undefined ? null : JSON.parse(row.allowlistJson);
+    allow = Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : parsed === null ? e.registry.all().map((d) => d.name) : [];
+  } catch { allow = []; }
+  return { ...row, allowlistJson: JSON.stringify(narrowAllowlist(allow, o).sort()) };
 }
 
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
@@ -56,6 +113,7 @@ export async function agentScope(e: Engine, tx: DbTx, row: ExecRunRow, token: st
   if (e.lastBatch.get(row.id) !== key) { e.lastBatch.set(row.id, key); e.batches.delete(row.id); }
   let batch = e.batches.get(row.id);
   if (!batch) { batch = { blocked: false, pending: false }; e.batches.set(row.id, batch); }
+  const overrides = await loadActionOverrides(tx, row.companyId, [row.principalId, row.onBehalfOf]);
   return {
     caller: "agent",
     ctx: {
@@ -75,10 +133,11 @@ export async function agentScope(e: Engine, tx: DbTx, row: ExecRunRow, token: st
     nonce: nonceFromToken(token),
     actor: { kind: row.routineRunId ? "routine" : "agent", id: row.principalId },
     stamp: { attended: row.attended, requestedBy: row.onBehalfOf },
-    run: row,
+    run: narrowedRun(e, row, overrides),
     batch,
     callId,
     systemAllowed: false,
+    overrides,
   };
 }
 

@@ -11,6 +11,7 @@ import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
 import { AUTONOMY_COPY, AutonomyControl } from "./autonomy-control";
 import { RoutineGallery, RunTimes, type RoutineRow } from "./gallery";
+import { RoutineDecisionCounts, RoutineGalleryW4 } from "./gallery/routine-gallery-w4";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /** Readable trigger: "Mondays 9:00 PT", "Weekdays 9:00 PT", "On notice.received". Falls back to the raw cron. */
@@ -66,6 +67,7 @@ export function RoutinesView() {
       <PageHeader title="Routines" subtitle="Standing jobs the agent runs on a schedule or an event. Deterministic prechecks decide whether a model is needed at all." />
       <RoutineGallery rows={list.data ?? []} />
       <DraftBox />
+      <RoutineGalleryW4 />
       {list.error ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(list.error)}</div> : null}
       <div className="grid gap-4 tablet:grid-cols-2">
         {(list.data ?? []).map((r) => (
@@ -133,6 +135,7 @@ export function RoutineDetail({ id }: { id: string }) {
         </Card>
         <div className="flex flex-col gap-4">
           <AutonomyControl routine={d} />
+          <RoutineDecisionCounts routineId={d.id} />
           <Card className="p-4">
             <h2 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Checklist (done when every item holds)</h2>
             <ul className="flex flex-col gap-1.5">{d.checklist.map((c) => <li key={c.id} className="text-[13px]">{c.label}<div className="font-mono text-0 break-all text-gray-10">{c.check}</div></li>)}</ul>

@@ -1,0 +1,26 @@
+// Test ids for the Reports and permissions screens (wave 4, w4-parity-admin). Plain strings with no app imports, so
+// the e2e specs import this file directly.
+export const W4_ADMIN_TID = {
+  reportsPage: "reports-page",
+  metric: (m: string) => `reports-metric-${m}`,
+  metricSelect: "reports-metric-select",
+  from: "reports-from",
+  to: "reports-to",
+  groupBy: "reports-group-by",
+  chart: "reports-chart",
+  table: "reports-table",
+  emailOpen: "reports-email-open",
+  emailRecipients: "reports-email-recipients",
+  emailSend: "reports-email-send",
+  emailResult: "reports-email-result",
+  permissionsPage: "permissions-page",
+  matrix: "permissions-matrix",
+  matrixRow: (principalId: string) => `permissions-row-${principalId}`,
+  matrixCell: (principalId: string, domain: string) => `permissions-cell-${principalId}-${domain}`,
+  overrideList: (principalId: string) => `permissions-overrides-${principalId}`,
+  overrideCommand: "permissions-override-command",
+  overridePrincipal: "permissions-override-principal",
+  overrideMode: "permissions-override-mode",
+  overrideSubmit: "permissions-override-submit",
+  overrideResult: "permissions-override-result",
+} as const;

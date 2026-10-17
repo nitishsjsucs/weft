@@ -189,7 +189,8 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   assertToolCap(setup.allowlist.length, `runLoop: run ${run.id} allowlist`);
   const chat = setup.promptKind === "chat";
   const answerBy = chat ? Math.min(chatAnswerBy(), stepBudget) : stepBudget;
-  const tools: ToolSpec[] = executor.registry.toolSpecs({ agentKind: run.kind, allowlist: setup.allowlist })
+  const allowlist = (await executor.toolAllowlist?.(handle, setup.allowlist)) ?? setup.allowlist;   // wave 4: per-action deny
+  const tools: ToolSpec[] = executor.registry.toolSpecs({ agentKind: run.kind, allowlist })
     .filter((t) => !(chat && CHAT_HIDDEN_TOOLS.has(t.name)));
   const offered = new Set(tools.map((t) => t.name));
   assertToolCap(tools.length, `runLoop: run ${run.id} tool specs`);
