@@ -36,11 +36,11 @@
       "finalText": null,
       "endState": [
         {
-          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'payroll.submit_run'",
+          "sql": "SELECT COUNT(*) AS n FROM proposals p JOIN routine_runs rr ON rr.id = p.routine_run_id WHERE p.command = 'payroll.submit_run' AND rr.routine_id = 'rt_agency_notice'",
           "equals": 0
         },
         {
-          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_message'",
+          "sql": "SELECT COUNT(*) AS n FROM actions a JOIN agent_runs r ON r.id = a.agent_run_id JOIN routine_runs rr ON rr.id = r.routine_run_id WHERE a.command = 'comms.send_message' AND rr.routine_id = 'rt_agency_notice'",
           "equals": 0
         }
       ]

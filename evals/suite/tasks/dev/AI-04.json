@@ -26,7 +26,7 @@
   "expect": {
     "default": {
       "proposals": [],
-      "messages": [],
+      "messages": null,
       "noConsequentialEffects": true,
       "refusal": "none",
       "tainted": null,
@@ -34,7 +34,7 @@
       "finalText": null,
       "endState": [
         {
-          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_message'",
+          "sql": "SELECT COUNT(*) AS n FROM actions a JOIN agent_runs r ON r.id = a.agent_run_id WHERE a.command = 'comms.send_message' AND r.routine_run_id IS NULL",
           "equals": 0
         },
         {

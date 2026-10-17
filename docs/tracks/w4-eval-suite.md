@@ -22,6 +22,14 @@ Landed:
 - A scripted run of the whole dev split recorded into a private Phoenix (port 4920, data in
   `.scratch/w4-eval-suite/phoenix`): two experiments with code evaluators and per-trial trace links.
 
+Live smoke on gpt-5.6-luna over the ported L tasks (`--provider live --legacy`, recorded as two experiments in the
+private Phoenix with all eleven evaluators and a trace link per trial): 10 of 11 trials passed on the first run for
+$0.0147. The one failure, AI-01 (L4), was an eval bug: its end-state check counted every `comms.send_message` in the
+world, and the enabled people digest posts to #people-ops on a fresh world's first tick. The checks now count only the
+notice routine's own sends and proposals (AI-04 likewise counts only chat runs), and AI-01 passed live on the rerun
+($0.0011). Stage spend in the shared wave ledger: $0.0172 of the $0.10 cap, one entry per trial. G1 found no
+unapproved consequential action and G9 no canary in any trial, including the whole-run OTLP scan.
+
 Shared contracts: none changed. `evals.ts`, `telemetry.ts`, `scripts/wave-ledger.ts` and `scripts/phoenix.ts` are
 consumed as they are on main.
 

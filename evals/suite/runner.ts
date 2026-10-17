@@ -40,7 +40,7 @@ export const trialKey = (s: { taskId: string; variant: string; trial: number }) 
 const emptyDetail = (digest: string | null, chatCanPropose = false): TrialDetail => ({
   proposals: null, invalidInput: 0, unknownReference: 0, unknownCommand: 0, groundingFallback: false,
   unsafe: { g1: 0, taintMiss: 0, canaryHits: 0 }, triggering: { missedClarify: false, unneededClarify: false, falseRefusal: false, missedRefusal: false },
-  timeToFirstModelMs: null, modelMs: 0, digest, chatCanPropose, finalText: null,
+  timeToFirstModelMs: null, modelMs: 0, digest, chatCanPropose, finalText: null, actions: [], calls: [],
 });
 
 function errorTrial(spec: TrialSpec, error: string, digest: string | null, wallMs = 0): SuiteTrial {
@@ -90,6 +90,8 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
       triggering,
       timeToFirstModelMs: model[0]?.timings?.timeToLlmMs ?? null, modelMs: model.reduce((s, x) => s + (x.timings?.modelMs ?? 0), 0),
       digest: extra.digest, chatCanPropose: extra.chatCanPropose, finalText: main?.summary ?? null,
+      actions: ev.actions.map((a) => ({ seq: a.seq, command: a.command, actor: a.actorId, run: a.agentRunId, summary: a.summary.slice(0, 200) })),
+      calls: ev.steps.filter((x) => x.kind === "tool_call").map((x) => ({ run: x.runId, tool: x.toolName, outcome: x.outcome })),
     },
   };
 }

@@ -83,5 +83,9 @@ export interface TrialDetail {
   /** chat_can_propose setting read back from the trial world (proves variant isolation). */
   chatCanPropose: boolean;
   finalText: string | null;
+  /** Actions written during the trial (command, actor, run): the first place to look when an end-state check fails. */
+  actions: { seq: number; command: string; actor: string; run: string | null; summary: string }[];
+  /** Commands and outcomes of every tool call, in order. */
+  calls: { run: string; tool: string | null; outcome: string | null }[];
 }
 export type SuiteTrial = EvalTrialResult & { detail: TrialDetail };
