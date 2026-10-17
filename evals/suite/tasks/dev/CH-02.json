@@ -31,7 +31,13 @@
       "memory": null,
       "finalText": {
         "grounded": true,
-        "mustMention": [],
+        "mustMention": [
+          "Engineering",
+          "Finance",
+          "Go-to-market|Go to market|GTM",
+          "Hardware",
+          "Operations"
+        ],
         "judges": []
       },
       "endState": [

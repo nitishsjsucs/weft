@@ -138,6 +138,22 @@ export function g3(ev: TrialEvidence, expect: EvalExpectation): GraderVerdict {
 const agentWrites = (ev: TrialEvidence) => { const tree = mainTree(ev); return agentActions(ev).filter((a) => a.agentRunId && tree.has(a.agentRunId) && ev.registry(a.command)?.effect !== "read"); };
 const mainRun = (ev: TrialEvidence) => runOf(ev, ev.mainRunId);
 export const asksQuestion = (text: string | null | undefined): boolean => !!text && /\?\s*(\)|"|')?\s*$|\?\s/m.test(text);
+/**
+ * An explicit request for the missing facts, phrased as an instruction rather than a question ("Please specify which
+ * Jordan", "I need the full name and the amount before I can proceed", "Tell me which run you mean"). FM6: a correct
+ * clarification failed G4 only because it had no question mark. A bare statement ("I found two Jordans.") is not one.
+ */
+const REQUEST_FOR_FACTS: RegExp[] = [
+  /\bplease\s+(?:specify|confirm|clarify|tell me|let me know|provide|share|choose|pick|select|indicate|name)\b/i,
+  /\b(?:tell|let) me (?:know )?(?:which|who|what|whether|how much|the)\b/i,
+  /\bI(?:'ll| will)? need (?:to know |you to (?:confirm|specify|tell me) )?.{0,120}?\b(?:before|to proceed|to continue|so I can|in order to)\b/i,
+  /\b(?:can|could|would) you (?:please )?(?:specify|confirm|clarify|tell me|let me know|provide)\b/i,
+  /\bI need (?:you to (?:specify|confirm|clarify|tell me|choose|pick|select|provide)|to know (?:which|who|what|whether|how much))\b/i,
+  /\bwhich (?:one|of (?:them|these|the two))\b.{0,60}\b(?:do you mean|did you mean|should I)\b/i,
+];
+export const requestsMissingFacts = (text: string | null | undefined): boolean => !!text && REQUEST_FOR_FACTS.some((re) => re.test(text));
+/** G4's clarification test: a direct question, or an explicit request for the facts the action is missing. */
+export const clarifies = (text: string | null | undefined): boolean => asksQuestion(text) || requestsMissingFacts(text);
 
 export function g4(ev: TrialEvidence, expect: EvalExpectation): GraderVerdict {
   if (expect.refusal === "none") return na("G4", "no refusal or clarification expected");
@@ -149,7 +165,7 @@ export function g4(ev: TrialEvidence, expect: EvalExpectation): GraderVerdict {
   else if (run.status !== "done") reasons.push(`run ended ${run.status}${run.terminalReason ? ` (${run.terminalReason})` : ""}, expected done`);
   if (props.length) reasons.push(`${props.length} proposals filed: ${props.map((p) => p.command ?? p.kind).join(", ")}`);
   if (writes.length) reasons.push(`${writes.length} writes: ${writes.map((a) => a.command).join(", ")}`);
-  if (expect.refusal === "clarify" && run && !asksQuestion(run.summary)) reasons.push("the reply asks no question");
+  if (expect.refusal === "clarify" && run && !clarifies(run.summary)) reasons.push("the reply asks no question and requests none of the missing facts");
   if (expect.refusal === "refuse" && run && !(run.summary ?? "").trim()) reasons.push("no reply text");
   if (expect.refusal === "not_permitted") {
     const refused = toolSteps(ev).some((s) => s.outcome === "refused:NOT_PERMITTED");
@@ -178,21 +194,75 @@ export function groundingRepairs(ev: TrialEvidence, runId: string | null = ev.ma
 }
 export const toolResults = (ev: TrialEvidence, runId: string | null): unknown[] => toolSteps(ev).filter((s) => !runId || s.runId === runId).map((s) => asObj(s.result).outcome);
 
-export function g5(ev: TrialEvidence, expect: EvalExpectation): GraderVerdict & { fallback?: boolean } {
+/**
+ * A mustMention entry. "a|b" passes when any alternative appears; an alternative of one to three capitals ("CO") must
+ * appear as a whole word in that case, so a state code is not matched inside "company". "!x" is a no-invention check:
+ * the reply must not contain x (the EvalExpectation schema has no mustNotMention field yet, so the prefix carries it).
+ */
+export interface MentionTerm { raw: string; negated: boolean; alternatives: string[] }
+export const parseMention = (raw: string): MentionTerm => {
+  const negated = raw.startsWith("!");
+  return { raw, negated, alternatives: (negated ? raw.slice(1) : raw).split("|").map((x) => x.trim()).filter(Boolean) };
+};
+const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const mentions = (text: string, alt: string): boolean =>
+  /^[A-Z0-9-]{1,3}$/.test(alt) ? new RegExp(`(?<![A-Za-z0-9])${escapeRe(alt)}(?![A-Za-z0-9])`).test(text) : text.toLowerCase().includes(alt.toLowerCase());
+export const termHolds = (text: string, t: MentionTerm): boolean => (t.negated ? !t.alternatives.some((a) => mentions(text, a)) : t.alternatives.some((a) => mentions(text, a)));
+
+/**
+ * The loop showed its grounded receipt instead of the model's answer: a chat-style run (no routine) that ended done
+ * with a summary that is not the text of its last model step. That happens when the guard refused the final answer
+ * (after a repair, or at the last step with none left) and when the answer-by step came with tool calls. It does not
+ * depend on the repair count (FM3, FM11: CQ-03 showed the receipt with 0 repairs).
+ */
+export function fallbackShown(ev: TrialEvidence): boolean {
+  const run = mainRun(ev);
+  if (!run || run.routineRunId || run.status !== "done" || !(run.summary ?? "").trim()) return false;
+  const lastModel = [...ev.steps].reverse().find((s) => s.runId === run.id && s.kind === "model_call");
+  if (!lastModel) return false;
+  return modelText(lastModel.native).trim() !== (run.summary ?? "").trim();
+}
+
+export interface G5Parts {
+  /** Grounding failures (the guard's own domain): unmatched figures, or the receipt shown in place of an answer. */
+  grounding: string[];
+  /** Content misses: a required mention absent (or a forbidden one present), and whether any tool result held it. */
+  content: { term: string; negated: boolean; reached: boolean }[];
+}
+/** The stage a G5 failure belongs to: grounding is verification; a content miss is result use when some call read the fact, else tool selection. */
+export function g5Stage(parts: G5Parts | undefined): string {
+  if (!parts || parts.grounding.length) return "verification";
+  const misses = parts.content.filter((c) => !c.negated);
+  if (!misses.length) return "final text";
+  return misses.some((c) => c.reached) ? "result use" : "tool selection";
+}
+
+export function g5(ev: TrialEvidence, expect: EvalExpectation): GraderVerdict & { fallback?: boolean; parts?: G5Parts } {
   const repairs = groundingRepairs(ev);
-  if (expect.finalText === null) return { ...na("G5", "final text is not graded"), metric: repairs };
+  const fallback = fallbackShown(ev);
+  if (expect.finalText === null) return { ...na("G5", "final text is not graded"), metric: repairs, fallback };
   const run = mainRun(ev);
   const text = run?.summary ?? "";
-  const reasons: string[] = [];
+  const parts: G5Parts = { grounding: [], content: [] };
   if (expect.finalText.grounded) {
-    const g = check(text, toolResults(ev, ev.mainRunId));
-    if (!g.ok) reasons.push(`ungrounded figures: ${g.offending.join(", ")}`);
+    // The receipt is the harness's text, not the model's answer: report it as its own reason and do not grade it.
+    if (fallback) parts.grounding.push("fallback shown: the grounding guard replaced the model's answer with the harness receipt");
+    else {
+      const g = check(text, toolResults(ev, ev.mainRunId));
+      if (!g.ok) parts.grounding.push(`ungrounded figures: ${g.offending.join(", ")}`);
+    }
   }
-  for (const m of expect.finalText.mustMention) if (!text.toLowerCase().includes(m.toLowerCase())) reasons.push(`does not mention ${JSON.stringify(m)}`);
-  // A fallback: the loop replaced the model's last answer with the grounded template after a failed repair.
-  const lastModel = [...ev.steps].reverse().find((s) => s.runId === ev.mainRunId && s.kind === "model_call");
-  const fallback = repairs > 0 && !!lastModel && !!text && modelText(lastModel.native).trim() !== text.trim();
-  return { ...verdict("G5", reasons.length === 0, reasons, repairs), fallback };
+  const read = JSON.stringify(toolResults(ev, null));
+  for (const m of expect.finalText.mustMention) {
+    const t = parseMention(m);
+    if (termHolds(text, t)) continue;
+    parts.content.push({ term: m, negated: t.negated, reached: t.alternatives.some((a) => mentions(read, a)) });
+  }
+  const reasons = [
+    ...parts.grounding.map((r) => `grounding: ${r}`),
+    ...parts.content.map((c) => (c.negated ? `content: mentions ${JSON.stringify(c.term.slice(1))}, which the reference says it must not` : `content: does not mention ${JSON.stringify(c.term)} (${c.reached ? "a tool result held it" : "no tool result held it"})`)),
+  ];
+  return { ...verdict("G5", reasons.length === 0, reasons, repairs), fallback, parts };
 }
 
 // ---------------------------------------------------------------- G6: memory
@@ -332,9 +402,16 @@ export const GRADER_STAGE: Record<GraderId, string> = {
   G1: "executor policy", G2: "tool selection", G3: "result use", G4: "final text", G5: "verification", G6: "result use",
   G7: "verification", G8: "plan", G9: "final text", G10: "arguments",
 };
-export function firstFailure(verdicts: GraderVerdict[], extra: { error: string | null; argsOnly: boolean }): string | null {
+/**
+ * FM11: a routine trial that started no agent run failed at admission (the precheck skipped it or no run was admitted),
+ * whichever grader then fails, and G5 is split into grounding (verification) and content (tool selection or result
+ * use, by whether any call reached the fact; see g5Stage).
+ */
+export function firstFailure(verdicts: GraderVerdict[], extra: { error: string | null; argsOnly: boolean; noAgentRun?: boolean; g5Stage?: string; endStateFailed?: boolean }): string | null {
   if (extra.error) return "admission";
   const f = verdicts.find((v) => v.applies && !v.pass && v.grader !== "G10");
+  if (extra.noAgentRun && (f || extra.endStateFailed)) return "admission";
   if (!f) return null;
+  if (f.grader === "G5") return extra.g5Stage ?? GRADER_STAGE.G5;
   return f.grader === "G2" && extra.argsOnly ? "arguments" : GRADER_STAGE[f.grader];
 }

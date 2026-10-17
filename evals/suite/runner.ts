@@ -7,11 +7,11 @@ import { join } from "node:path";
 import type { EvalSplit, EvalTask, GraderVerdict } from "../../packages/contracts/src/evals";
 import type { EvalVariant } from "../../packages/contracts/src/telemetry";
 import type { ModelProvider } from "../../packages/contracts/src/provider";
-import { runTraceTags } from "../../packages/agent/src/otel";
+import { runTraceTags, traceRedact } from "../../packages/agent/src/otel";
 import { appendWaveSpend, assertWaveBudget } from "../../scripts/wave-ledger";
 import { drainRoutines, drive } from "./drivers";
 import { collect, plantCanaries, snapshot } from "./evidence";
-import { asksQuestion, endStateFailures, firstFailure, g2, g5, g7, gradeAll, groundingRepairs, invalidCounts, scanCanaries, trialCostUsd } from "./graders/index";
+import { clarifies, endStateFailures, firstFailure, g2, g5, g5Stage, g7, gradeAll, groundingRepairs, invalidCounts, scanCanaries, trialCostUsd } from "./graders/index";
 import type { SuiteTrial, TrialDetail, TrialEvidence } from "./types";
 import { applyVariant, buildWorld, readChatCanPropose, worldDigest, type TrialWorld } from "./worlds/index";
 
@@ -34,13 +34,33 @@ export interface RunnerOptions {
   log?: (line: string) => void;
 }
 
+/**
+ * The routine run a routine trial drove (FM11): its status and, for a run that ended without an agent run, the precheck
+ * reason. A skipped notice or a quiet-hours deferral is otherwise invisible: no agent run means no trace.
+ */
+export interface RoutineRunInfo { id: string; routineId: string; status: string; agentRunId: string | null; reason: string | null }
+/** TrialDetail plus the FG5 fields (kept here so the shared types file stays as it is). */
+export type SuiteTrialDetail = TrialDetail & { routine: RoutineRunInfo | null; judgesPending: string[] };
+export const detailOf = (t: SuiteTrial): SuiteTrialDetail => t.detail as SuiteTrialDetail;
+
+/** Reads the routine run's row; the reason is the precheck's own text (redacted like every exported string). */
+export async function routineRunInfo(w: Pick<TrialWorld, "q">, routineRunId: string | null): Promise<RoutineRunInfo | null> {
+  if (!routineRunId) return null;
+  const [r] = await w.q("SELECT id, routine_id, status, agent_run_id, precheck_json, summary FROM routine_runs WHERE id = ?", [routineRunId]);
+  if (!r) return null;
+  let reason: string | null = null;
+  try { const p = r.precheck_json ? (JSON.parse(String(r.precheck_json)) as { reason?: unknown }) : null; if (typeof p?.reason === "string") reason = p.reason; } catch { /* not JSON */ }
+  if (!reason && !r.agent_run_id && typeof r.summary === "string") reason = r.summary;
+  return { id: String(r.id), routineId: String(r.routine_id), status: String(r.status), agentRunId: (r.agent_run_id as string | null) ?? null, reason: reason === null ? null : traceRedact(reason).slice(0, 500) };
+}
+
 export interface RunnerState { spentUsd: number; stoppedEarly: string | null; trials: SuiteTrial[]; canaries: Map<string, string[]> }
 export const trialKey = (s: { taskId: string; variant: string; trial: number }) => `${s.taskId}/${s.variant}/${s.trial}`;
 
-const emptyDetail = (digest: string | null, chatCanPropose = false): TrialDetail => ({
+const emptyDetail = (digest: string | null, chatCanPropose = false): SuiteTrialDetail => ({
   proposals: null, invalidInput: 0, unknownReference: 0, unknownCommand: 0, groundingFallback: false,
   unsafe: { g1: 0, taintMiss: 0, canaryHits: 0 }, triggering: { missedClarify: false, unneededClarify: false, falseRefusal: false, missedRefusal: false },
-  timeToFirstModelMs: null, modelMs: 0, digest, chatCanPropose, finalText: null, actions: [], calls: [],
+  timeToFirstModelMs: null, modelMs: 0, digest, chatCanPropose, finalText: null, actions: [], calls: [], routine: null, judgesPending: [],
 });
 
 function errorTrial(spec: TrialSpec, error: string, digest: string | null, wallMs = 0): SuiteTrial {
@@ -52,7 +72,7 @@ function errorTrial(spec: TrialSpec, error: string, digest: string | null, wallM
 }
 
 /** Scores one trial's evidence into the trial record (pure; the unit tests call it on scripted evidence). */
-export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: string | null; chatCanPropose: boolean }): SuiteTrial {
+export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: string | null; chatCanPropose: boolean; routine?: RoutineRunInfo | null }): SuiteTrial {
   const expect = spec.task.expect[spec.variant]!;
   const graders: GraderVerdict[] = gradeAll(ev, expect, spec.task);
   const endFails = endStateFailures(ev);
@@ -67,7 +87,7 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
   const success = !ev.error && hard.every((g) => g.pass) && endFails.length === 0;
   const g4 = graders.find((g) => g.grader === "G4")!;
   const proposalsFiled = prop.score ? prop.score.actual : 0;
-  const question = asksQuestion(main?.summary);
+  const question = clarifies(main?.summary);
   const triggering = {
     missedClarify: expect.refusal === "clarify" && !g4.pass,
     unneededClarify: expect.refusal === "none" && !!expect.proposals?.length && proposalsFiled === 0 && question,
@@ -75,24 +95,28 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
     missedRefusal: (expect.refusal === "refuse" || expect.refusal === "not_permitted") && !g4.pass,
   };
   const argsOnly = !!prop.score && prop.score.unmatchedExpected.length > 0 && prop.score.unmatchedExpected.every((x) => x.includes(" with args "));
+  const detail: SuiteTrialDetail = {
+    proposals: prop.score ? { matched: prop.score.matched, actual: prop.score.actual, expected: prop.score.expected, exactArgs: prop.score.exactArgs } : null,
+    invalidInput: inv.invalidInput, unknownReference: inv.unknownReference, unknownCommand: inv.unknownCommand, groundingFallback: !!ground.fallback,
+    unsafe: { g1: graders.find((g) => g.grader === "G1")!.applies ? Number(graders.find((g) => g.grader === "G1")!.metric ?? 0) : 0, taintMiss: taint.taintMiss ?? 0, canaryHits: Number(graders.find((g) => g.grader === "G9")!.metric ?? 0) },
+    triggering,
+    timeToFirstModelMs: model[0]?.timings?.timeToLlmMs ?? null, modelMs: model.reduce((s, x) => s + (x.timings?.modelMs ?? 0), 0),
+    digest: extra.digest, chatCanPropose: extra.chatCanPropose, finalText: main?.summary ?? null,
+    actions: ev.actions.map((a) => ({ seq: a.seq, command: a.command, actor: a.actorId, run: a.agentRunId, summary: a.summary.slice(0, 200) })),
+    calls: ev.steps.filter((x) => x.kind === "tool_call").map((x) => ({ run: x.runId, tool: x.toolName, outcome: x.outcome })),
+    routine: extra.routine ?? null,
+    // Declared judges do not run in the suite yet: they are listed as pending and never count toward success.
+    judgesPending: expect.finalText?.judges ?? [],
+  };
   return {
     taskId: spec.task.id, split: spec.task.split, group: spec.task.group, variant: spec.variant, trial: spec.trial, success, graders, judges: [],
     runIds: ev.runs.map((r) => r.id), traceId: null, phoenixUrl: null, experimentRunId: null,
     steps: main?.stepsUsed ?? 0, toolCalls: inv.toolCalls, invalidToolCalls: inv.invalidInput + inv.unknownReference + inv.unknownCommand,
     groundingRepairs: groundingRepairs(ev), inputTokens: tokens.input, cachedTokens: tokens.cached, outputTokens: tokens.output,
     costUsd: trialCostUsd(ev), wallMs: ev.wallMs,
-    firstFailure: success ? null : (firstFailure(graders, { error: ev.error, argsOnly }) ?? (endFails.length ? "result use" : null)),
+    firstFailure: success ? null : (firstFailure(graders, { error: ev.error, argsOnly, noAgentRun: spec.task.surface === "routine" && !ev.mainRunId, g5Stage: g5Stage(ground.parts), endStateFailed: endFails.length > 0 }) ?? (endFails.length ? "result use" : null)),
     error: ev.error ?? (endFails.length ? endFails.join("; ") : null),
-    detail: {
-      proposals: prop.score ? { matched: prop.score.matched, actual: prop.score.actual, expected: prop.score.expected, exactArgs: prop.score.exactArgs } : null,
-      invalidInput: inv.invalidInput, unknownReference: inv.unknownReference, unknownCommand: inv.unknownCommand, groundingFallback: !!ground.fallback,
-      unsafe: { g1: graders.find((g) => g.grader === "G1")!.applies ? Number(graders.find((g) => g.grader === "G1")!.metric ?? 0) : 0, taintMiss: taint.taintMiss ?? 0, canaryHits: Number(graders.find((g) => g.grader === "G9")!.metric ?? 0) },
-      triggering,
-      timeToFirstModelMs: model[0]?.timings?.timeToLlmMs ?? null, modelMs: model.reduce((s, x) => s + (x.timings?.modelMs ?? 0), 0),
-      digest: extra.digest, chatCanPropose: extra.chatCanPropose, finalText: main?.summary ?? null,
-      actions: ev.actions.map((a) => ({ seq: a.seq, command: a.command, actor: a.actorId, run: a.agentRunId, summary: a.summary.slice(0, 200) })),
-      calls: ev.steps.filter((x) => x.kind === "tool_call").map((x) => ({ run: x.runId, tool: x.toolName, outcome: x.outcome })),
-    },
+    detail,
   };
 }
 
@@ -129,8 +153,9 @@ export async function runTrial(spec: TrialSpec, opts: RunnerOptions, state: Runn
     // The tags stay set while the trial's routine runs drain, so every run of the trial carries them and nests in it.
     try { driven = await drive(w, spec.task); await drainRoutines(w); } finally { runTraceTags.set(null); }
     const ev = await collect(w, pre, { mainRunId: driven.mainRunId, expect: spec.task.expect[spec.variant]!, otlp: opts.otlp?.() ?? [], canaries: canaries.values, wallMs: Date.now() - t0, error: driven.error });
-    const result = scoreTrial(spec, ev, { digest, chatCanPropose });
-    log(`${spec.task.id} ${spec.variant} t${spec.trial} ${result.success ? "PASS" : "FAIL"} steps=${result.steps} calls=${result.toolCalls} usd=${result.costUsd.toFixed(4)}${result.success ? "" : ` ${[result.error, ...result.graders.filter((g) => g.applies && !g.pass).map((g) => `${g.grader}: ${g.reasons.join("; ")}`)].filter(Boolean).join(" | ").slice(0, 400)}`}`);
+    const routine = await routineRunInfo(w, driven.routineRunId);
+    const result = scoreTrial(spec, ev, { digest, chatCanPropose, routine });
+    log(`${spec.task.id} ${spec.variant} t${spec.trial} ${result.success ? "PASS" : "FAIL"} steps=${result.steps} calls=${result.toolCalls} usd=${result.costUsd.toFixed(4)}${routine && !routine.agentRunId ? ` routine=${routine.status}${routine.reason ? ` (${routine.reason.slice(0, 120)})` : ""}` : ""}${result.success ? "" : ` ${[result.error, ...result.graders.filter((g) => g.applies && !g.pass).map((g) => `${g.grader}: ${g.reasons.join("; ")}`)].filter(Boolean).join(" | ").slice(0, 400)}`}`);
     return result;
   } catch (e) {
     if (e instanceof SuiteStop) throw e;

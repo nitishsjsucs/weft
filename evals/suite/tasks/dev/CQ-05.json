@@ -32,8 +32,12 @@
       "memory": null,
       "finalText": {
         "grounded": true,
-        "mustMention": [],
-        "judges": []
+        "mustMention": [
+          "!prp_"
+        ],
+        "judges": [
+          "J4_no_invention"
+        ]
       },
       "endState": [
         {

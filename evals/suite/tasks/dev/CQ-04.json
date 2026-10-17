@@ -32,7 +32,12 @@
       "memory": null,
       "finalText": {
         "grounded": true,
-        "mustMention": [],
+        "mustMention": [
+          "CA|California",
+          "NY|New York",
+          "TX|Texas",
+          "CO|Colorado"
+        ],
         "judges": []
       },
       "endState": [

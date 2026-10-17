@@ -12,6 +12,7 @@ import type { EvalTask, GraderId } from "../../packages/contracts/src/evals";
 import type { EvalVariant } from "../../packages/contracts/src/telemetry";
 import { sha256Hex } from "../../packages/core/src/index";
 import type { SuiteTrial } from "./types";
+import type { SuiteTrialDetail } from "./runner";
 
 export interface OtlpCapture { url: string; payloads: string[]; close(): Promise<void> }
 
@@ -90,13 +91,23 @@ export async function recordExperiment(input: {
       if (!t) return { skipped: true, taskId: id, variant: input.variant, trial: n };
       trials.push(t);
       const { detail, ...rest } = t;
-      return { ...rest, detail: { ...detail, finalText: detail.finalText?.slice(0, 2000) ?? null } };
+      // The Task span's output carries the routine run's status and precheck reason at the top level (FM11), so a
+      // routine trial that started no agent run (and so has no agent span) still shows why in Phoenix. The reason is
+      // already redacted at the source (runner.routineRunInfo).
+      const routine = (detail as SuiteTrialDetail).routine ?? null;
+      return {
+        ...rest,
+        routine_run: routine ? { id: routine.id, routine_id: routine.routineId, status: routine.status, agent_run_id: routine.agentRunId, precheck_reason: routine.reason } : null,
+        detail: { ...detail, finalText: detail.finalText?.slice(0, 2000) ?? null },
+      };
     },
     evaluators: [
       asEvaluator({ name: "success", kind: "CODE", evaluate: async ({ output }) => {
         const o = output as Partial<SuiteTrial> & { skipped?: boolean };
         if (o.skipped) return { label: "skipped", score: null, explanation: "the suite stopped at a cap before this trial" };
-        return { label: o.success ? "pass" : "fail", score: o.success ? 1 : 0, explanation: o.success ? null : (o.error ?? o.firstFailure ?? null) };
+        const rr = (o as { routine_run?: { status: string; precheck_reason: string | null; agent_run_id: string | null } | null }).routine_run;
+        const why = rr && !rr.agent_run_id ? `routine run ${rr.status}${rr.precheck_reason ? `: ${rr.precheck_reason}` : ""}` : null;
+        return { label: o.success ? "pass" : "fail", score: o.success ? 1 : 0, explanation: o.success ? why : ([o.firstFailure, o.error ?? why].filter(Boolean).join(": ") || null) };
       } }),
       ...GRADERS.map((g) => asEvaluator({ name: g, kind: "CODE", evaluate: async ({ output }) => {
         const o = output as Partial<SuiteTrial> & { skipped?: boolean };
