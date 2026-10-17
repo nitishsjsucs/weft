@@ -1,4 +1,4 @@
-// GP20 (number provisional; the integrator numbers wave 4 golden paths). Wave 4 compliance (w4-parity-compliance): the Taxes & Compliance calendar lists filings, deposits and contractor
+// GP20. Wave 4 compliance (w4-parity-compliance): the Taxes & Compliance calendar lists filings, deposits and contractor
 // forms by due date; the Q3 Form 941 is prepared from the processed runs and filing it goes to the Inbox as a pending
 // R4 proposal, never a direct filing.
 import { eventually, expect, openApp, test, type Proposal } from "./fixtures";

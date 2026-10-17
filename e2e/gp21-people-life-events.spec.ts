@@ -1,9 +1,9 @@
-// Life events and the first-month check-in in the portal (wave 4, docs/wave4.md; provisional number, the integrator numbers GP20 on). Owner of the spec: w4-parity-people.
+// Life events and the first-month check-in in the portal (GP21, wave 4, docs/wave4.md). Owner of the spec: w4-parity-people.
 // A new hire reports a marriage in the portal; the window it opens shows its close date and the rule it follows; the
 // hire picks a medical tier and the window closes with one carrier filing queued. Then the hire answers the five-question
 // check-in, and the manager's summary email carries the scale and the yes or no answers but none of the written words.
 // Last, the hire asks for a day off with the Request time off form and sees it waiting for approval.
-// Run on the track ports, for example: WEFT_E2E_WEB_PORT=4846 WEFT_E2E_API_PORT=4847 pnpm e2e gp20-people
+// Run on the track ports, for example: WEFT_E2E_WEB_PORT=4846 WEFT_E2E_API_PORT=4847 pnpm e2e gp21-people
 import { expect, test, WeftApi } from "./fixtures";
 
 const T = {

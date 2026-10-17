@@ -1,4 +1,4 @@
-// Reports (wave 4, w4-parity-admin). At 1440 with the agent docked: the sidebar opens Reports, every metric in the
+// GP23. Reports (wave 4, w4-parity-admin). At 1440 with the agent docked: the sidebar opens Reports, every metric in the
 // catalog draws a chart and a table, the range and grouping refetch, and "Email this report" files a proposal that
 // sends nothing until it is approved. At 390 the metric list is a select and nothing scrolls sideways.
 import type { Page } from "@playwright/test";

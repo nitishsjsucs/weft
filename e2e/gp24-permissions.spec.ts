@@ -1,4 +1,4 @@
-// Permissions (wave 4, w4-parity-admin). At 1440 with the agent docked: the matrix shows each person's View, Edit or
+// GP24. Permissions (wave 4, w4-parity-admin). At 1440 with the agent docked: the matrix shows each person's View, Edit or
 // Approve level per domain with what the agent may do for them (never Approve), and the agent's own row; an override
 // is filed as a proposal and appears only after approval. At 390 the matrix scrolls inside its card, not the page.
 import type { Page } from "@playwright/test";

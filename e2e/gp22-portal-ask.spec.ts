@@ -1,4 +1,4 @@
-// GP20. Portal questions (docs/wave4.md, T9). Owner: w4-parity-agent. A signed new hire asks the portal question box
+// GP22. Portal questions (docs/wave4.md, T9). Owner: w4-parity-agent. A signed new hire asks the portal question box
 // about company policy and gets the policy answer; asks about a coworker's pay and is told the agent sees only their
 // own record; asks about medical leave and is handed to a person on the HR team with no model run. A second test drives
 // the Simulators panel's inbound controls: a message that tags @weft gets one read-only answer in its channel, and an
@@ -8,7 +8,7 @@ import { W4_ASK_TID as A } from "../packages/contracts/src/ext/w4-parity-agent";
 
 const C = { first: "Tamsin", last: "Quarry", email: "tamsin.quarry@candidate.example" };
 
-test("GP20: the portal question box answers from the asker's own record and hands sensitive topics to a person", async ({ page, weft, request }) => {
+test("GP22: the portal question box answers from the asker's own record and hands sensitive topics to a person", async ({ page, weft, request }) => {
   let persona = "";
   await test.step("a fictional new hire signs the offer letter", async () => {
     const draft = await weft.post<{ data: { offer_id: string } }>("/v1/offers", { candidateFirst: C.first, candidateLast: C.last, candidateEmail: C.email, title: "Test Technician", departmentId: "dpt_operations", workState: "CA", baseCents: 9_000_000, startDate: "2026-11-16" });
@@ -49,7 +49,7 @@ test("GP20: the portal question box answers from the asker's own record and hand
   });
 });
 
-test("GP20: a chat mention gets one read-only answer and an emailed receipt files one expense", async ({ page, weft }) => {
+test("GP22: a chat mention gets one read-only answer and an emailed receipt files one expense", async ({ page, weft }) => {
   await openApp(page, "/app/simulators");
 
   await test.step("tagging @weft in #payroll gets one answer in the channel and changes nothing", async () => {
