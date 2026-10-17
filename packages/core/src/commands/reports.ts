@@ -50,7 +50,7 @@ export function rangeTotals(rows: Record<string, unknown>[]): Record<string, num
 
 export const reportsQueryCommand: WeftCommand<ReportsQueryInput> = {
   name: "reports.query", namespace: "reports", summary: "Run a report and return rows plus a chart",
-  description: "Aggregates company data into a report with rows and a chart the panel draws. Metrics: payroll_cost_by_month (gross, employer taxes, benefits, reimbursements, contractors, plus workers_paid, hires and departures per period), headcount_by_state, headcount_by_department, hires_and_departures_by_month, turnover_rate, time_off_minutes_by_month, expenses_by_category. range_totals sums money columns. Example: {\"metric\": \"payroll_cost_by_month\"}.",
+  description: "Report rows plus a chart the panel draws. Metrics: payroll_cost_by_month (gross, employer taxes, benefits, reimbursements, contractors, plus workers_paid, hires, departures), headcount_by_state, headcount_by_department, hires_and_departures_by_month, turnover_rate, time_off_minutes_by_month, expenses_by_category. range_totals sums money columns. Example: {\"metric\": \"payroll_cost_by_month\"}.",
   compactDescription: "Report rows plus a chart for one of seven company metrics.",
   input: ReportsQueryInput, domain: "company", needs: "view", effect: "read", risk: () => "R0", approval: "never", autoAllow: "never",
   amountCents: null, ceilingKey: null, reversible: false, lease: null, tiers: { main: "executable", task: "executable" }, mcp: "read", sandbox: "read",
