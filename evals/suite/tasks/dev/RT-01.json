@@ -1,0 +1,65 @@
+{
+  "id": "RT-01",
+  "group": "prebuilt_routines",
+  "parity": [
+    "R12",
+    "T3"
+  ],
+  "kind": "regression",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:05c7a59b461ce1e265dca09f6f9e468085befc739a25d3644113a4abbf730bc1"
+  },
+  "input": {
+    "routine": "rt_agency_notice",
+    "event": {
+      "type": "notice.deliver",
+      "scenario": "ca_de2088_rate_change"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": [
+        {
+          "command": "tax.update_rate",
+          "args": {
+            "code": "sui",
+            "rate": "0.015",
+            "effective_from": "2026-01-01"
+          }
+        },
+        {
+          "command": "notices.send_response",
+          "args": {}
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM agent_runs WHERE kind = 'main' AND routine_run_id IS NOT NULL AND status = 'waiting'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/RT-01.md",
+  "legacyCase": "L1"
+}

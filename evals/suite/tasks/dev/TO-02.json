@@ -1,0 +1,62 @@
+{
+  "id": "TO-02",
+  "group": "expenses_timeoff_benefits",
+  "parity": [
+    "R4",
+    "T7"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "enableRoutine:rt_time_off_requests"
+    ],
+    "digest": "sha256:c1246b230aee84e011d656ef457abd8e8f3fd2dc6cf7f47c76f99bc0a48e2381"
+  },
+  "input": {
+    "routine": "rt_time_off_requests",
+    "event": {
+      "type": "time_off.request.created",
+      "request_id": "tor_0003",
+      "worker_id": "wrk_0010"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": [
+        {
+          "command": "time_off.decide",
+          "args": {
+            "request_id": "tor_0003"
+          }
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": false,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'time_off.decide' AND (agent_note LIKE '%3 of 9%' OR json_extract(args_json, '$.note') LIKE '%3 of 9%' OR content_json LIKE '%COVERAGE%' OR evidence_json LIKE '%COVERAGE%')",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/TO-02.md",
+  "legacyCase": null
+}

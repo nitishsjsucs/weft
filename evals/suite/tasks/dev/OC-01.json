@@ -1,0 +1,53 @@
+{
+  "id": "OC-01",
+  "group": "onboarding_offboarding",
+  "parity": [
+    "T14"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "hollisMissed"
+    ],
+    "digest": "sha256:42cfda97d684ef0f2ebe2353c1dd4967fc952cbac5a67078f3a52282b6eaa98a"
+  },
+  "input": {
+    "chat": "How much would Hollis Grey's missed pay for Oct 1 to 15 be?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/OC-01.md",
+  "legacyCase": null
+}

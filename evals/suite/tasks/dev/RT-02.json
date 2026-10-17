@@ -1,0 +1,59 @@
+{
+  "id": "RT-02",
+  "group": "prebuilt_routines",
+  "parity": [
+    "R3"
+  ],
+  "kind": "regression",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:05c7a59b461ce1e265dca09f6f9e468085befc739a25d3644113a4abbf730bc1"
+  },
+  "input": {
+    "routine": "rt_pre_payroll",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [
+        {
+          "command": "payroll.submit_run",
+          "args": {
+            "exclude_blocked": true
+          }
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' AND review_group = 'needs_review' AND explanation IS NOT NULL",
+          "equals": 4
+        },
+        {
+          "sql": "SELECT COUNT(*) >= 3 AS ok FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' AND review_group = 'needs_review' AND explanation_source = 'agent'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/RT-02.md",
+  "legacyCase": "L2"
+}

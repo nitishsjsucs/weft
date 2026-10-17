@@ -1,0 +1,97 @@
+{
+  "id": "EX-01",
+  "group": "expenses_timeoff_benefits",
+  "parity": [
+    "R5"
+  ],
+  "kind": "regression",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:05c7a59b461ce1e265dca09f6f9e468085befc739a25d3644113a4abbf730bc1"
+  },
+  "input": {
+    "routine": "rt_expense_review",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0001"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0002"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0003"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0004"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0005"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0006"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0007"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0008"
+          }
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'expenses.decide' AND json_extract(args_json, '$.expense_id') = 'exp_0007' AND json_extract(args_json, '$.decision') = 'approve'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 14,
+    "maxUsd": 0.03
+  },
+  "reference": "evals/suite/reference/dev/EX-01.md",
+  "legacyCase": "L6"
+}

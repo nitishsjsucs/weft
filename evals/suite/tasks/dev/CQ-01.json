@@ -1,0 +1,53 @@
+{
+  "id": "CQ-01",
+  "group": "chat_questions",
+  "parity": [
+    "Q1"
+  ],
+  "kind": "regression",
+  "split": "dev",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:05c7a59b461ce1e265dca09f6f9e468085befc739a25d3644113a4abbf730bc1"
+  },
+  "input": {
+    "chat": "Why is the NY raise flagged in the Oct 30 payroll?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "res_0001"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/CQ-01.md",
+  "legacyCase": "L3"
+}

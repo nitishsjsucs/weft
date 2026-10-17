@@ -1,0 +1,52 @@
+{
+  "id": "NT-02",
+  "group": "notices",
+  "parity": [
+    "R12",
+    "T3"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:05c7a59b461ce1e265dca09f6f9e468085befc739a25d3644113a4abbf730bc1"
+  },
+  "input": {
+    "routine": "rt_agency_notice",
+    "event": {
+      "type": "notice.deliver",
+      "scenario": "irs_deposit_schedule_change"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'tax.update_rate'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 8,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/NT-02.md",
+  "legacyCase": null
+}
