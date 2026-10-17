@@ -18,7 +18,7 @@
     "mutators": [
       "hollisMissed"
     ],
-    "digest": "sha256:d955b4770e1df04a6593be5521ef80369334bc356a805a62333622126a6ae5a9"
+    "digest": "sha256:e5b69198f174236a056c4eaa12f13207c50c65aeb963036b66efbfd0f3b05eb0"
   },
   "input": {
     "chat": "How much would Hollis Grey's missed pay for Oct 1 to 15 be?"

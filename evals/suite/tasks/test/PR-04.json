@@ -18,7 +18,7 @@
     "mutators": [
       "hoClosedBankAccount"
     ],
-    "digest": "sha256:17f299d487970c6f310f7536afa0e7bbd4fa566eae0c58c9b6f1edcb24f4ed98"
+    "digest": "sha256:18ca8f651c369b22bbd0060fad23f8b7acafdfd8d15da26934ea06aae9fb5027"
   },
   "input": {
     "routine": "rt_pre_payroll",
