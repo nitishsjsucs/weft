@@ -53,3 +53,4 @@ export { FX_LABEL, FX_USD_PER_UNIT, toUsdCents } from "./fx";
 export { SCENARIOS, fixtureText, renderScenarioAt, type RenderedNotice } from "./notices/scenarios";
 export { parseNotice, percentToRate, parseDate } from "./notices/parser";
 export { addBusinessDays, addDays, ptDate, isWeekendPt } from "./time";
+export { CARRIER_INTAKE, fileElections, type CarrierFiling, type CarrierReceipt } from "./carriers/index";   // wave 4 (w4-parity-people)
