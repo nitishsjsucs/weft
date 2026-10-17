@@ -1,5 +1,22 @@
 # Status
 
+## Wave 4 scaffold (2026-10-16, 18:12 PDT)
+
+The wave 4 plan is in `docs/wave4.md`: finish the agent's parity capabilities (recurring filings and the compliance
+calendar, notice upload and every notice kind with specialist hand-offs, life-event windows, portal questions, required
+training, tagging the agent in chat, email expense submission, the digest line, the check-in form, a Reports screen, a
+permissions screen, wait-and-resume steps and the rest), trace every run into a local Arize Phoenix with OpenInference
+spans, and run an eval program of about 100 tasks with deterministic graders first, validated judges and held-out
+test tasks, in seven tracks with disjoint owned paths. Chat proposals and auto autonomy stay off by default. The
+scaffold commit `8b7bbb6` lands `wave4.ts`, `telemetry.ts`, `evals.ts`, migration `0007_wave4.sql`, 32 route rows
+answering 501 in six new route files, per-track command, handler, routine and seed modules, the telemetry seam
+`packages/agent/src/otel.ts`, `pnpm phoenix:up`, `phoenix:down` and `phoenix:status` (Phoenix 20.23.0 on
+127.0.0.1:6206, gRPC 6207, data in `~/Developer/projects/weft-notes/phoenix`; started, reused and stopped on this
+machine) and `pnpm wave:ledger` for the shared wave spend ledger. Fresh clone of the scaffold (e2e on ports 4800 and
+4801): `pnpm test` 898 passed and 1 skipped (162 files), `pnpm typecheck` 16 of 16, build ok, `pnpm e2e` 44 passed and
+1 skipped, `pnpm demo` exit 0 with the audit chain verifying, and lint:prose, lint:brand and brand:overlap ok. Live
+spend so far in wave 4: $0.00.
+
 ## Wave 3 integration and fixer round (2026-10-16, 17:10 PDT)
 
 The seven wave 3 tracks are merged (rounds 1 and 2 in `docs/wave3.md` section 10) and a fixer round closed the
