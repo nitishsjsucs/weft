@@ -10,7 +10,8 @@ import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor, type Re
 import type { ModelProvider, ModelStepResult, PrecheckResult, RoutineDef, RoutineRun, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
 import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, runTraceTags, scriptedProvider, setTraceRedactor, type Script, type WeftAgentRuntime } from "../src/index";
-import { recallDocs, traceMcpCall } from "../src/otel";
+import { recallDocs, ROUTINE_RUN_SPAN, traceMcpCall, traceRoutineRunSpan } from "../src/otel";
+import { routineRecallQuery } from "../src/runtime";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
@@ -464,6 +465,106 @@ describe("canary: no secret reaches a span", () => {
     expect(ev.length).toBeGreaterThan(0);
     expect(ev.every((e) => !("exception.stacktrace" in (e.attributes ?? {})))).toBe(true);
     expect(spans.find((s) => s.name === "agent.run")!.status.code).toBe(SpanStatusCode.ERROR);
+    assertNoSecret(spans);
+  });
+});
+
+describe("wave 4 round 1: routine runs without an agent run, empty recall and provider retries (FM11)", () => {
+  const routineScript: Script = { agents: { main: [
+    { output: [{ type: "function_call", name: "tax__update_rate", arguments: "{{derived.tax.update_rate}}" }] },
+    { output: [{ type: "text", text: "Proposed the rate change." }] },
+  ] } };
+  const rateExec = () => createFakeExecutor([
+    { name: "notices.get", effect: "read", handler: () => done({ notice_id: "ntc_0001" }, "Read the notice") },
+    { name: "tax.update_rate", effect: "write", gated: true },
+    { name: "notices.draft_response", effect: "draft" },
+  ]);
+  const withRecall = (recall: () => Promise<string>, seen: { query: string; subjectRefs: string[] }[] = []) => ({
+    contextSource: {
+      chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics (demo).", openLoops: [] }),
+      recall: async (i: { query: string; subjectRefs: string[] }) => { seen.push({ query: i.query, subjectRefs: i.subjectRefs }); return recall(); },
+    },
+  });
+
+  it("a skipped routine run is one CHAIN span with its status and the precheck reason, in its routine run session", () => {
+    traceRoutineRunSpan({ routineId: "rt_agency_notice", routineRunId: "rtr_0009", triggerRef: "evt_0004", attended: false, status: "skipped", reason: "Notice ntc_0004 is already escalated.", precheck: "agency_notice", event: "notice.received", at: "2026-10-26T16:00:00.000Z" });
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map((s) => [s.name, kind(s)])).toEqual([[ROUTINE_RUN_SPAN, "CHAIN"]]);
+    const s = spans[0]!;
+    expect(s.parentSpanContext?.spanId).toBeUndefined();
+    expect(s.attributes).toMatchObject({ "weft.status": "skipped", "weft.precheck_reason": "Notice ntc_0004 is already escalated.", "weft.routine_id": "rt_agency_notice", "weft.routine_run_id": "rtr_0009", "weft.agent_run": false, "session.id": "routine_run:rtr_0009", "user.id": "routine:rt_agency_notice", "output.value": "Notice ntc_0004 is already escalated." });
+    expect(JSON.parse(String(s.attributes["tag.tags"]))).toEqual(["routine", "rt_agency_notice", "no_agent_run", "status:skipped", "unattended"]);
+    expect(JSON.parse(String(s.attributes.metadata))).toMatchObject({ routine_id: "rt_agency_notice", status: "skipped", agent_run: false });
+    expect(s.status.code).toBe(SpanStatusCode.OK);
+  });
+
+  it("during an eval trial the skip nests under the trial's span and carries the eval tags", async () => {
+    const tracer = trace.getTracer("test");
+    await tracer.startActiveSpan("trial", async (trial) => {
+      runTraceTags.set({ eval_task_id: "NT-01", eval_split: "dev", eval_variant: "default", eval_trial: 1 });
+      traceRoutineRunSpan({ routineId: "rt_people_digest", routineRunId: "rtr_0010", triggerRef: "cron:2026-10-26T16:00:00.000Z", attended: false, status: "skipped", reason: "Nothing new since the last run.", precheck: "people_digest", event: null, at: "2026-10-26T16:00:00.000Z" });
+      runTraceTags.set(null);
+      trial.end();
+    });
+    const spans = exporter.getFinishedSpans();
+    const skip = spans.find((s) => s.name === ROUTINE_RUN_SPAN)!;
+    expect(skip.parentSpanContext?.spanId).toBe(spans.find((s) => s.name === "trial")!.spanContext().spanId);
+    expect(JSON.parse(String(skip.attributes["tag.tags"]))).toEqual(expect.arrayContaining(["eval", "NT-01", "variant:default"]));
+  });
+
+  it("an empty run-start recall is a RETRIEVER with 0 documents and its reason; the query carries the precheck findings (FM4)", async () => {
+    const seen: { query: string; subjectRefs: string[] }[] = [];
+    const rt = runtimeWith(rateExec(), scriptedProvider({ scriptsDir: dataDir, scripts: { rt_agency_notice: routineScript } }), withRecall(async () => "", seen));
+    const h = handle();
+    const pre: PrecheckResult = { ...precheck, findings: { notice: { id: "ntc_0002", agency: "ny_dtf", kind: "missing_filing", form: "ny_nys45", form_code: "NYS-45", period: "2026-Q3", status: "new" }, plan: "file_return" } };
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck: pre });
+    await rt.settled(h.runId);
+    expect(seen[0]!.query).toBe("Agency notice handling file_return file return missing_filing missing filing ny_dtf ny dtf ny_nys45 ny nys45 NYS-45 2026-Q3");
+    expect(seen[0]!.query).not.toContain("ntc_0002");
+    const spans = exporter.getFinishedSpans();
+    const r = spans.filter((s) => kind(s) === "RETRIEVER");
+    expect(r.map((s) => s.name)).toEqual(["memory.recall"]);
+    expect(r[0]!.attributes).toMatchObject({ "weft.documents": 0, "weft.recall_reason": "no_block", "input.value": seen[0]!.query });
+    expect(r[0]!.parentSpanContext?.spanId).toBe(spans.find((s) => s.name === "assemble")!.spanContext().spanId);
+  });
+
+  it("a recall source that throws leaves the pack unchanged, the run still starts, and the span says recall_error", async () => {
+    const rt = runtimeWith(rateExec(), scriptedProvider({ scriptsDir: dataDir, scripts: { rt_agency_notice: routineScript } }), withRecall(async () => { throw new Error("git grep failed"); }));
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
+    expect((await rt.settled(h.runId)).status).toBe("waiting");
+    const r = exporter.getFinishedSpans().find((s) => kind(s) === "RETRIEVER")!;
+    expect(r.attributes).toMatchObject({ "weft.documents": 0, "weft.recall_reason": "recall_error", "weft.recall_detail": "git grep failed" });
+  });
+
+  it("a provider retry is tagged on the LLM span that retries, with the code it retries", async () => {
+    const rt = runtimeWith(chatExec(), plantingProvider());
+    const h = handle();
+    await rt.startChat(h, { text: "Why is the NY raise flagged?", recipe: "chat", pageContext: null });
+    await rt.settled(h.runId);
+    const llm = exporter.getFinishedSpans().filter((s) => kind(s) === "LLM").sort((a, b) => Number(a.attributes["weft.llm_call"]) - Number(b.attributes["weft.llm_call"]));
+    expect(llm.slice(0, 3).map((s) => [s.attributes["weft.llm_call"], s.attributes["weft.retry"], s.attributes["weft.retry_of"] ?? null])).toEqual([[1, false, null], [2, true, "PROVIDER_UNAVAILABLE"], [3, false, null]]);
+    expect(llm.filter((s) => s.attributes["weft.retry"] === true)).toHaveLength(1);
+    expect(llm[0]!.attributes["weft.error_retryable"]).toBe(true);
+  });
+
+  it("routineRecallQuery keeps the routine name first and leaves ids, numbers and long text out", () => {
+    expect(routineRecallQuery("Weekly people digest", { headcount: 48, by_state: { CA: 22 }, slot: "cron:x" })).toBe("Weekly people digest");
+    expect(routineRecallQuery("Agency notice handling", { notice: { id: "ntc_0001", agency: "ca_edd", kind: "rate_change", code: "sui", respond_by: "2026-11-05" }, impact: { rate_delta: "0.019" } }))
+      .toBe("Agency notice handling rate_change rate change ca_edd ca edd sui");
+  });
+
+  it("canary: a planted secret in a precheck reason, the recall query and a recall error never lands", async () => {
+    setTraceRedactor(canaryRedact);
+    traceRoutineRunSpan({ routineId: "rt_agency_notice", routineRunId: "rtr_0011", triggerRef: `evt ${planted()}`, attended: true, status: "skipped", reason: `Notice could not be read: ${planted()}`, precheck: "agency_notice", event: "notice.received", at: "2026-10-26T16:00:00.000Z" });
+    const rt = runtimeWith(rateExec(), scriptedProvider({ scriptsDir: dataDir, scripts: { rt_agency_notice: routineScript } }), withRecall(async () => { throw new Error(`recall broke ${planted()}`); }));
+    const h = handle();
+    const pre: PrecheckResult = { ...precheck, findings: { notice: { kind: `rate_change ${FAKE_KEY}`, agency: VAULT_VALUE, form: planted().slice(0, 30) } } };
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck: pre });
+    await rt.settled(h.runId);
+    const spans = exporter.getFinishedSpans();
+    expect(spans.some((s) => s.name === ROUTINE_RUN_SPAN)).toBe(true);
+    expect(spans.some((s) => s.attributes["weft.recall_reason"] === "recall_error")).toBe(true);
     assertNoSecret(spans);
   });
 });

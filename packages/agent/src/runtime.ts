@@ -16,7 +16,10 @@ import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
 import { createRunStore, type RunStore } from "./store";
 import { buildTrace } from "./trace";
 import { DEFAULT_SCRIPTS_DIR } from "./providers/factory";
-import { scriptedProvider } from "./providers/scripted";
+import { parseContext, scriptedProvider } from "./providers/scripted";
+import { noteRunRecall, traceRoutineRunSpan, type RecallNote, type RoutineRunSpan } from "./otel";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 export { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
 import { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
@@ -40,6 +43,60 @@ export interface ChatContextSource {
 /** The acting principal for telemetry (user.id): the source's id, else the "(prn_...)" id inside actingFor. */
 export function principalOf(c: { actingFor: string; principalId?: string | null }): string | null {
   return c.principalId ?? /\(([a-z]{2,5}_[A-Za-z0-9_]+)\)/.exec(c.actingFor)?.[1] ?? null;
+}
+
+/** Findings keys whose short scalar values name what a routine run is about (a notice's kind, agency, form, period). */
+const RECALL_FINDING_KEYS = ["kind", "agency", "form", "form_code", "period", "code", "jurisdiction", "state", "plan"] as const;
+
+/**
+ * The run-start recall query of a routine run (wave 4 round 1, FM4): the routine's name plus the precheck findings
+ * that say what this run is about, read from the top level and one level down (for a notice: kind, agency, form and
+ * period). Underscored codes also appear as words ("missing_filing" adds "missing filing"), so a note written in
+ * prose matches. Ids, amounts and long text never join the query.
+ */
+export function routineRecallQuery(name: string, findings: unknown): string {
+  const out: string[] = [name];
+  const seen = new Set<string>([name.toLowerCase()]);
+  const add = (v: unknown) => {
+    if (typeof v !== "string" || !v || v.length > 40 || /^[a-z]{2,5}_[0-9]{3,}$/.test(v)) return;
+    for (const t of v.includes("_") && /[a-z]/.test(v) ? [v, v.replaceAll("_", " ")] : [v]) {
+      if (!seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); }
+    }
+  };
+  const visit = (o: unknown, depth: number) => {
+    if (!o || typeof o !== "object" || Array.isArray(o)) return;
+    const rec = o as Record<string, unknown>;
+    for (const k of RECALL_FINDING_KEYS) add(rec[k]);
+    if (depth < 1) for (const v of Object.values(rec)) visit(v, depth + 1);
+  };
+  visit(findings, 0);
+  return out.join(" ");
+}
+
+/**
+ * The scripted and template stand-ins cannot branch on a derived plan the way a model reads one, so a routine run
+ * whose precheck derived `plan` plays <routine>.<plan>.json when that script exists (for example
+ * rt_agency_notice.file_return); otherwise the routine's own script and the composition root's variant hook apply as
+ * before. Only the request handed to the stand-in changes; the run row and a live provider never see this.
+ */
+function planScripted(p: ModelProvider, scriptsDir: string): ModelProvider {
+  if (p.id !== "scripted") return p;
+  const exists = new Map<string, boolean>();
+  const has = (name: string) => {
+    if (!exists.has(name)) exists.set(name, existsSync(join(scriptsDir, `${name}.json`)));
+    return exists.get(name)!;
+  };
+  return {
+    ...p,
+    step: (req) => {
+      const parts = req.cacheKey.split(":");
+      const routine = parts[2] ?? "chat";
+      const plan = routine === "chat" || routine === "routine_draft" ? null : parseContext(req.history).derived.plan;
+      if (typeof plan !== "string" || !/^[a-z_]{1,40}$/.test(plan) || !has(`${routine}.${plan}`)) return p.step(req);
+      parts[2] = `${routine}.${plan}`;
+      return p.step({ ...req, cacheKey: parts.join(":") });
+    },
+  };
 }
 
 /** Appends a non-empty recall block inside the context pack (wave 2, w2-memory); "" or undefined leaves it unchanged. */
@@ -81,6 +138,8 @@ export interface WeftAgentRuntime extends AgentRuntime {
   idle(): Promise<void>;
   /** Waits up to `timeoutMs` for queued and running runs to settle (weft.close() calls it). Resolves true when the queue went idle. */
   drain(timeoutMs?: number): Promise<boolean>;
+  /** Wave 4 round 1 (FM11): a span for a routine run that ended without an agent run (the routines engine calls it). */
+  traceRoutineRun(t: RoutineRunSpan): void;
 }
 
 export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRuntime {
@@ -149,12 +208,32 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
   }
 
   /** Unattended runs under a live provider use the deterministic templates unless WEFT_BACKGROUND_LLM=1 (SPEC 9.6). */
-  const templateProvider: ModelProvider = { ...scriptedProvider({ scriptsDir: env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR }), model: "template", label: "Template, no model" };
+  const scriptsDir = env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR;
+  const templateProvider: ModelProvider = planScripted({ ...scriptedProvider({ scriptsDir }), model: "template", label: "Template, no model" }, scriptsDir);
+  const mainProvider = planScripted(opts.provider, scriptsDir);
   const useTemplates = (attended: boolean) => opts.provider.live && !attended && env.WEFT_BACKGROUND_LLM !== "1";
-  const providerFor = (run: { provider: string; model: string }) => (run.model === "template" ? templateProvider : opts.provider);
+  const providerFor = (run: { provider: string; model: string }) => (run.model === "template" ? templateProvider : mainProvider);
+
+  /**
+   * The run-start recall, with the reason when it adds nothing (wave 4 round 1, FM11): the tracer shows an empty
+   * RETRIEVER span instead of no span. A recall source that throws leaves the pack unchanged; the run still starts.
+   */
+  async function recallFor(runId: string, input: { kind: "chat" | "routine"; query: string; subjectRefs: string[] }): Promise<string> {
+    const note = (n: Omit<RecallNote, "query">) => noteRunRecall(runId, { query: input.query, ...n });
+    if (!opts.contextSource?.recall) { note({ reason: "no_recall_source", chars: 0 }); return ""; }
+    let block = "";
+    try {
+      block = await opts.contextSource.recall({ companyId, runId, ...input });
+    } catch (e) {
+      note({ reason: "recall_error", chars: 0, detail: (e instanceof Error ? e.message : String(e)).slice(0, 200) });
+      return "";
+    }
+    note(block ? { reason: null, chars: block.length } : { reason: "no_block", chars: 0 });
+    return block;
+  }
 
   const loopDeps = {
-    store, executor: opts.executor, provider: opts.provider, ledger: opts.ledger, clock: opts.clock, prices, checklist,
+    store, executor: opts.executor, provider: mainProvider, ledger: opts.ledger, clock: opts.clock, prices, checklist,
     isCancelled: (id: string) => cancelled.has(id),
     signalFor: (id: string) => aborts.get(id)?.signal,
     // A local model gets its 180 s step budget (harness 11.4) plus a margin, so the provider's own timer reports first.
@@ -175,7 +254,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     void queue.push(runId, async () => {
       try {
         const current = await store.getRun(runId);
-        const row = await runLoop({ ...loopDeps, provider: current ? providerFor(current) : opts.provider }, handle);
+        const row = await runLoop({ ...loopDeps, provider: current ? providerFor(current) : mainProvider }, handle);
         // Template fallback (SPEC 9.6): a routine whose real model failed (live, or a local server that is down)
         // finishes on the deterministic templates. The scripted provider never falls back, so scenarios stay exact.
         if (row.trigger.startsWith("routine:") && row.model !== "template" && (opts.provider.live || opts.provider.id === "openai_compat") && row.status === "failed"
@@ -242,9 +321,10 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
           // Wave 4 (w4-parity-agent, T9): a portal run gets the portal pack and role. No company summary, no open-loops
           // board and no recall block, since those can name other people; the portal tools read only the asker's record.
           text = `${portalPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, request: input.text })}\n${ROLE_PORTAL}`;
+          noteRunRecall(handle.runId, { query: input.text, reason: "portal_run", chars: 0 });
         } else {
           text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext });
-          text = withRecall(text, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "chat", query: input.text, subjectRefs: [] }));
+          text = withRecall(text, await recallFor(handle.runId, { kind: "chat", query: input.text, subjectRefs: [] }));
         }
       } else {
         const channels = (await opts.contextSource?.channels?.(companyId)) ?? ["#people-ops", "#new-hires", "#payroll"];
@@ -265,7 +345,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         routine: { id: input.routine.id, name: input.routine.name, instructions: input.routine.instructions }, trigger,
         precheck: { severity: input.precheck.severity, findings: input.precheck.findings, derivedArgs: input.precheck.derivedArgs }, checklist: input.routine.checklist,
       });
-      const text = withRecall(packed, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "routine", query: input.routine.name, subjectRefs: input.precheck.subjectRefs ?? [] }));
+      const text = withRecall(packed, await recallFor(handle.runId, { kind: "routine", query: routineRecallQuery(input.routine.name, input.precheck.findings), subjectRefs: input.precheck.subjectRefs ?? [] }));
       await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true, trigger, principal: input.routine.ownerPrincipalId ?? null });
       enqueue(handle.runId);
     },
@@ -334,6 +414,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       return new Promise((r) => settledWaiters.set(runId, [...(settledWaiters.get(runId) ?? []), r]));
     },
     idle: () => queue.idle(),
+    traceRoutineRun: (t) => traceRoutineRunSpan(t),
     async drain(timeoutMs = 5_000) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const idle = await Promise.race([queue.idle().then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timeoutMs); })]);

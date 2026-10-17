@@ -288,6 +288,20 @@ off until Nitish approves this line) and code, never the model, reads an action 
 write on it is R2 or R4 with `approval: "always"`, so chat can only file proposals; nothing executes from chat, grants
 still intersect with the asking person's, and a tainted run keeps today's refusals. There is no bulk decide command.
 
+Wave 4 round 1 amendment (FG1, `docs/evals/error-analysis.md` FM1): `rt_agency_notice` answers `notice.received`
+for every kind, and `rt_compliance_notices` is folded into it (its row stays, disabled, and its precheck always skips).
+Its allowlist becomes `notices.get`, `notices.draft_response`, `notices.send_response`, `notices.escalate`,
+`tax.update_rate`, `tax.prepare_filing`, `tax.file_return`, `tax.set_deposit_schedule` (8). `tax.get_rates` and
+`tax.rate_change_impact` leave it: the precheck reads the impact into the findings. The precheck derives a plan
+(`planNotice`), and each run is offered only that plan's subset with that plan's checklist items, frozen at run start.
+Escalation is one command, `notices.escalate` with a derived `{notice_id, reason_code}`; a missing-filing checklist
+accepts the reply path or an escalation, so a recalled procedure can steer the run. An informational notice
+(`acknowledge`) is skipped with its reason. No approval changes: `tax.update_rate`, `tax.file_return`,
+`tax.set_deposit_schedule` and `notices.send_response` are still always proposals; `notices.escalate`,
+`notices.draft_response` and `tax.prepare_filing` stay R1. The routine now acts, approval-gated, on the GP16
+missing-filing notice (it prepares the NYS-45 return and proposes filing it and the reply), and the notice stays open
+for a person to escalate.
+
 A registry test asserts the `rt_new_hire` and `rt_people_digest` allowlists contain no command that can taint in the concise format, and scenarios S3 and S4 assert `tainted === false` at the end. `memory.write_note` is on no golden-path allowlist in P0.
 
 ### 5.4 Tiers, risk classes and one policy function
@@ -499,6 +513,14 @@ Dossiers are work-relevant only. No inferred traits, no persuasion notes, no fac
 ### 9.5 Recall at run start [P1]
 
 Code collects subject refs from the trigger, runs at most 4 searches, keeps hits within 1,200 tokens, and adds them to the pack once per run. Tainted hits taint the run.
+
+Wave 4 round 1 (FG1, FM4 and FM11): a routine run's recall query is the routine name plus the precheck findings that
+say what the run is about (for a notice: kind, agency, form and period, with underscored codes also as words), never
+ids or amounts. A recall that adds nothing is traced as a `memory.recall` RETRIEVER with 0 documents and
+`weft.recall_reason` (`no_block`, `no_recall_source`, `recall_error`); a recall source that throws leaves the pack
+unchanged and the run still starts. A routine run that ends without an agent run (precheck skip, quiet hours, nothing
+new) exports a `routine.run` CHAIN span with its status and reason, and an LLM span that retries a failed provider
+call carries `weft.retry` and `weft.retry_of`. Every new attribute passes the trace redactor at the source.
 
 ---
 

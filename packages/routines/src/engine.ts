@@ -8,7 +8,8 @@ import { Cron } from "croner";
 import { agentRuns, routineRuns, routines, runSteps, type Db } from "@weft/db";
 import { lockedWrite } from "./busy";
 import type { AgentRuntime, PrecheckResult, ProposalDecided, ReadOnlyExecutor, RoutineDef, RoutineRun, RoutineRunAuthority, RoutineRunStatus, RoutinesEngine, SimClock, ToolOutcome, WeftEvent } from "@weft/contracts";
-import { evaluateChecklist, type RunCall, type RunFacts } from "./checks";
+import { checklistFor, evaluateChecklist, type RunCall, type RunFacts } from "./checks";
+import { agencyNoticePlanTools } from "./agency-notice";
 import { PREBUILT, TZ } from "./prebuilt";
 import { runPrecheck } from "./prechecks";
 import { bumpFollowUp, dueWaits, matchesEvent, openWait, openWaitsOf, segmentText, settleWait, waitItems, waitsForEvent } from "./waits";
@@ -74,6 +75,36 @@ export function nextRunAt(r: Pick<RoutineDef, "enabled" | "trigger">, from: stri
 
 /** One routine's last run and next run, for the routines list and gallery (wave 3 rank 11). */
 export interface RoutineOverview { routineId: string; lastRun: { id: string; status: RoutineRunStatus; startedAt: string | null; summary: string | null } | null; nextRunAt: string | null }
+
+/** Per-plan tool subsets, by routine id: a run is offered only the tools its derived plan needs (frozen at run start). */
+const PLAN_TOOLS: Record<string, (plan: unknown) => readonly string[] | null> = { rt_agency_notice: agencyNoticePlanTools };
+
+/**
+ * The routine as one run sees it (wave 4 round 1): checklist items gated to another plan are left out, and a routine
+ * with per-plan tools offers only that plan's subset of its own list. The stored row is unchanged.
+ */
+export function routineForRun(routine: RoutineDef, pre: PrecheckResult): RoutineDef {
+  if (pre.action !== "run") return routine;
+  const derived = pre.derivedArgs ?? {};
+  const scope = Object.fromEntries(Object.entries(derived).filter(([, v]) => typeof v !== "object"));
+  const subset = PLAN_TOOLS[routine.id]?.(derived.plan) ?? null;
+  return { ...routine, tools: subset ? routine.tools.filter((t) => subset.includes(t)) : routine.tools, checklist: checklistFor(routine.checklist, scope) };
+}
+
+/** What a routine run that never started an agent run exports as its own span (wave 4 round 1, FM11). */
+export interface RoutineRunTrace {
+  routineId: string; routineRunId: string; triggerRef: string; attended: boolean; status: RoutineRunStatus; reason: string;
+  precheck: string | null; event: string | null; at: string;
+}
+type TracingAgent = AgentRuntime & { traceRoutineRun?: (t: RoutineRunTrace) => void };
+
+/** The code-owned fields of a prebuilt routine; enabled, autonomy and the owner stay whatever the company set. */
+function codeOwned(r: RoutineDef) {
+  return {
+    name: r.name, description: r.description, instructions: r.instructions, triggerJson: JSON.stringify(r.trigger), filterJson: r.filter ? JSON.stringify(r.filter) : null,
+    toolsJson: JSON.stringify(r.tools), precheck: r.precheck, checklistJson: JSON.stringify(r.checklist), budgetJson: JSON.stringify(r.budget), surfaceJson: JSON.stringify(r.surface), taintedBy: r.taintedBy,
+  };
+}
 
 export function runKey(routineId: string, triggerRef: string): string {
   return createHash("sha256").update(JSON.stringify({ routine_id: routineId, trigger_ref: triggerRef })).digest("hex");
@@ -145,9 +176,18 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     // only trusted while the prebuilt rows are still there.
     if (seeded && (await db.select({ id: routines.id }).from(routines).where(eq(routines.id, PREBUILT[0]!.id)).limit(1)).length) return;
     seeded = true;
-    const existing = new Set((await db.select({ id: routines.id }).from(routines)).map((r) => r.id));
+    const rows = new Map((await db.select().from(routines)).map((r) => [r.id, r]));
     for (const r of PREBUILT) {
-      if (existing.has(r.id)) continue;
+      const row = rows.get(r.id);
+      if (row) {
+        // A prebuilt routine's definition is code: a database seeded by an older build gets the current tools,
+        // checklist and instructions (rt_agency_notice gained its notice plans in wave 4 round 1), never a new
+        // enabled flag or autonomy level.
+        const want = codeOwned(r);
+        const stale = row.source === "prebuilt" && (Object.keys(want) as (keyof typeof want)[]).some((k) => (row[k] ?? null) !== (want[k] ?? null));
+        if (stale) await lockedWrite(() => db.update(routines).set(want).where(eq(routines.id, r.id)));
+        continue;
+      }
       await lockedWrite(() => db.insert(routines).values({
         id: r.id, companyId, name: r.name, description: r.description, ownerPrincipalId: r.ownerPrincipalId, enabled: r.enabled, autonomy: r.autonomy,
         triggerJson: JSON.stringify(r.trigger), filterJson: r.filter ? JSON.stringify(r.filter) : null, instructions: r.instructions, toolsJson: JSON.stringify(r.tools),
@@ -294,7 +334,7 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     watch(routineRunId, handle.runId);
     const run = (await getRun(routineRunId))!;
     const trigger = event ? { ...event, payload: { ...event.payload } } : null;
-    await agent.startRoutineRun(handle, { routine, routineRun: run, trigger, precheck });
+    await agent.startRoutineRun(handle, { routine: routineForRun(routine, precheck), routineRun: run, trigger, precheck });
   }
 
   /** Expires a wait past its timeout: the routine run fails with what a person should check (until waits resume instead). */
@@ -344,32 +384,32 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     await lockedWrite(() => db.insert(routineRuns).values({ id, routineId: routine.id, runKey: key, triggerRef: input.triggerRef, status: "running", attended: input.attended, startedAt: now }).onConflictDoNothing());
     // A cron slot is judged at its own time, so a catch-up tick on Wednesday still skips Monday's and Tuesday's slots.
     const pre = await runPrecheck(routine.precheck, { companyId, now: input.at ?? now, triggerRef: input.triggerRef, payload: input.payload }, readOnly);
-    if (pre.action === "skip") {
-      await updateRun(id, { status: "skipped", precheckJson: JSON.stringify(pre), summary: pre.reason, endedAt: now });
-      return (await getRun(id))!;
-    }
+    // Wave 4 round 1 (FM11): a routine run that ends without an agent run still leaves a span with its reason.
+    const skipped = async (summary: string, extra: Partial<typeof routineRuns.$inferInsert> = {}) => {
+      await updateRun(id, { status: "skipped", precheckJson: JSON.stringify(pre), summary, endedAt: now, ...extra });
+      const row = (await getRun(id))!;
+      try {
+        (agent as TracingAgent).traceRoutineRun?.({ routineId: routine.id, routineRunId: id, triggerRef: input.triggerRef, attended: input.attended, status: row.status, reason: summary, precheck: routine.precheck, event: input.event?.type ?? null, at: input.at ?? now });
+      } catch { /* tracing never breaks a routine run */ }
+      return row;
+    };
+    if (pre.action === "skip") return skipped(pre.reason);
     const isCron = routine.trigger.type === "cron" && !input.attended;
     // Quiet hours defer only digest-severity cron posts; the weekly digest itself is never deferred.
-    if (isCron && pre.severity === "digest" && routine.id !== "rt_people_digest" && inQuietHours(input.at ?? now)) {
-      await updateRun(id, { status: "skipped", precheckJson: JSON.stringify(pre), summary: "Deferred by quiet hours (19:00 to 07:00 PT).", endedAt: now });
-      return (await getRun(id))!;
-    }
+    if (isCron && pre.severity === "digest" && routine.id !== "rt_people_digest" && inQuietHours(input.at ?? now)) return skipped("Deferred by quiet hours (19:00 to 07:00 PT).");
     // Worth surfacing: a background run posts only when its findings changed since the last surfaced run.
     const hash = surfaceHash(pre.findings);
     if (isCron && routine.surface.worthSurfacing) {
       const last = (await db.select().from(routineRuns).where(eq(routineRuns.routineId, routine.id)).orderBy(desc(routineRuns.startedAt)))
         .find((r) => r.id !== id && r.surfaceHash !== null && r.status !== "skipped");
-      if (last && last.surfaceHash === hash) {
-        await updateRun(id, { status: "skipped", precheckJson: JSON.stringify(pre), summary: "Nothing new since the last run.", surfaceHash: hash, endedAt: now });
-        return (await getRun(id))!;
-      }
+      if (last && last.surfaceHash === hash) return skipped("Nothing new since the last run.", { surfaceHash: hash });
     }
     await updateRun(id, { precheckJson: JSON.stringify(pre), surfaceHash: hash });
     const handle = await runs.openRoutineRun({ routineId: routine.id, routineRunId: id, triggerRef: input.triggerRef, attended: input.attended });
     await updateRun(id, { agentRunId: handle.runId });
     watch(id, handle.runId);
     const run = (await getRun(id))!;
-    await agent.startRoutineRun(handle, { routine, routineRun: run, trigger: input.event ? { ...input.event, payload: { ...input.event.payload } } : null, precheck: pre });
+    await agent.startRoutineRun(handle, { routine: routineForRun(routine, pre), routineRun: run, trigger: input.event ? { ...input.event, payload: { ...input.event.payload } } : null, precheck: pre });
     return (await getRun(id))!;
   }
 
