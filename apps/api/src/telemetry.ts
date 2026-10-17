@@ -7,7 +7,7 @@
 // and read back through traceRedact) over every string attribute, event attribute and status message in onEnding,
 // while the span is still writable. Layer 1, at the source in packages/agent/src/otel.ts, is the one that counts.
 import { LazyOpenInferenceSpanProcessor, OTLPTraceExporter, register, type NodeTracerProvider } from "@arizeai/phoenix-otel";
-import type { AttributeValue } from "@opentelemetry/api";
+import { trace, type AttributeValue } from "@opentelemetry/api";
 import type { ReadableSpan, Span, SpanExporter, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { PHOENIX, TRACE_ENV } from "@weft/contracts";
 import { traceRedact } from "@weft/agent";
@@ -61,6 +61,11 @@ export interface Tracing {
   forceFlush(): Promise<void>;
   /** Flushes and detaches the global provider, so the OTel API is a no-op again. */
   shutdown(): Promise<void>;
+}
+
+/** True when a recording provider is registered (a probe span; nothing is exported because it never ends). */
+export function isTracingActive(): boolean {
+  return trace.getTracer("weft-probe").startSpan("probe").isRecording();
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
