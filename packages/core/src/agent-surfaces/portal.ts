@@ -143,6 +143,8 @@ export async function policyEntries(tx: DbTx, companyId: string): Promise<Policy
     { topic: "expenses", title: "Submission window", text_display: `Submit expenses within ${r.accountableWindowDays} days of the purchase.`, source: "Expense policy v1" },
     { topic: "expenses", title: "Equipment", text_display: `Equipment over ${formatCents(r.equipmentPreApprovalCents)} needs a pre-approval reference.`, source: "Expense policy v1" },
     { topic: "expenses", title: "Mileage", text_display: "Mileage is reimbursed at the IRS standard rate for the trip date: 72.5 cents a mile through June 30, 2026, then 76 cents.", source: "Expense policy v1" },
+    { topic: "time_off", title: "Requesting time off", text_display: "The portal has no time off request form yet. Ask your manager or the people team to file the request in Weft; it is checked against your balance, team coverage and company holidays, then goes to your manager for a decision.", source: "Weft time off" },
+    { topic: "expenses", title: "Submitting an expense", text_display: "Use Submit an expense in the My expenses section of the portal, or email the receipt from your work address on file.", source: "Weft expenses" },
     { topic: "expenses", title: "Email submission", text_display: "You can email a receipt from your work address on file; it becomes a submitted expense and goes through the normal review.", source: "Weft expenses" },
   ];
   const types = new Map((await tx.select().from(timeOffTypes).where(eq(timeOffTypes.companyId, companyId))).map((t) => [t.id, t]));
@@ -187,7 +189,7 @@ const HUMAN_ONLY: [PortalTopic, RegExp][] = [
 ];
 const ROUTINE: [PortalTopic, RegExp][] = [
   ["tax_forms", /\b(w-?2|w-?4|1099|tax forms?|withholding certificate)\b/i],
-  ["time_off", /\b(pto|vacation|time off|sick (time|days?|hours?|leave balance)|holidays?|leave balance|days off)\b/i],
+  ["time_off", /\b(pto|vacation|time off|sick (time|days?|hours?|leave balance)|holidays?|leave balance|days? off)\b/i],
   ["benefits", /\b(benefits?|medical plan|dental|vision|401\s?\(?k\)?|insurance|enroll\w*|hsa|fsa)\b/i],
   ["pay", /\b(make|makes|earn|earns|earning|pay|paid|paycheck|paystub|pay stub|salary|wages?|net|gross|withh[eo]ld\w*|deductions?|bonus|direct deposit|payday)\b/i],
   ["policy", /\b(polic(y|ies)|expenses?|reimburs\w*|per diem|mileage|receipts?|handbook|meals?)\b/i],

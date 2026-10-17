@@ -2,7 +2,7 @@
 // handed to a person by code, and @weft mentions answered once in the thread by a tainted, read-only run.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { PORTAL_TOOLS } from "@weft/contracts";
+import { CHAT_TOOLS_W3, PORTAL_TOOLS } from "@weft/contracts";
 import { existsSync, readFileSync } from "node:fs";
 import type { WeftAgentRuntime } from "@weft/agent";
 import type { WeftRoutinesEngine } from "@weft/routines";
@@ -10,7 +10,8 @@ import { emitEvent } from "@weft/core";
 import { join } from "node:path";
 import { actions, agentMentions, agentRuns, events, execRuns, expenseIntake, expenses, handoffCases, proposals, routineWaits, routines as routinesTable, devices as devicesTable, runSteps, runTaint, simChatMessages, uploads, workers } from "@weft/db";
 import { createTestWeft, type TestWeft } from "../src/testing";
-import { MENTION_AUTHOR, mentionAnswered } from "../src/routes/agent-surfaces";
+import { MENTION_AUTHOR, MENTION_TOOLS, mentionAnswered } from "../src/routes/agent-surfaces";
+import { plainAnswer } from "../../../packages/core/src/agent-surfaces/present";
 import { classifyPortalTopic } from "../../../packages/core/src/agent-surfaces/portal";
 import { mentionsAgent, stripMention } from "../../../packages/sim/src/chat";
 import { portalPack, ROLE_PORTAL } from "../../../packages/agent/src/prompts/portal";
@@ -44,6 +45,7 @@ describe("the portal topic classifier (code, never the model)", () => {
     expect(classifyPortalTopic("my manager keeps harassing me in meetings")).toBe("workplace_concern");
     expect(classifyPortalTopic("How much sick time do I have left?")).toBe("time_off");
     expect(classifyPortalTopic("When is my next paycheck?")).toBe("pay");
+    expect(classifyPortalTopic("How do I request a day off?")).toBe("time_off");
     expect(classifyPortalTopic("What is the meal limit for client lunches?")).toBe("policy");
     expect(classifyPortalTopic("Where do I park?")).toBe("other");
   });
@@ -95,6 +97,28 @@ describe("portal questions", () => {
     expect(own.ok && own.status === "done" && (own.data as { worker: { name: string } }).worker.name).toBe("Remy Thorn");
   });
 
+  it("policy search has the how-to entries, so the agent never has to invent a portal screen", async () => {
+    const { persona } = await hire("Odile", "Fenn");
+    const s = { principalId: persona, companyId: "cmp_larkspur", via: "ui" as const, keyScope: null };
+    const out = await weft.executor.human.exec(s, "portal.policy_search", { query: "how do I request a day off", response_format: null });
+    const hits = (out.ok && out.status === "done" ? (out.data as { hits: { title: string; text_display: string }[] }).hits : []);
+    expect(hits[0]?.title).toBe("Requesting time off");
+    expect(hits[0]?.text_display).toMatch(/no time off request form yet/);
+    const exp = await weft.executor.human.exec(s, "portal.policy_search", { query: "how do I submit an expense", response_format: null });
+    expect(exp.ok && exp.status === "done" && (exp.data as { hits: { title: string }[] }).hits.map((h) => h.title)).toContain("Submitting an expense");
+  });
+
+  it("a how-to question is answered from the how-to entry, in plain text with no result id", async () => {
+    const { persona } = await hire("Pell", "Ashby");
+    const r = await call(persona, "POST", "/v1/portal/agent/runs", { text: "How do I request a day off next Friday?" });
+    expect(r.json).toMatchObject({ topic: "time_off", status: "done" });
+    expect(r.json.answer).toMatch(/^The portal has no time off request form yet\. Ask your manager or the people team/);
+    expect(r.json.answer).not.toMatch(/res_|\(result/);
+    // The run itself still cites the result: only the employee's copy is plain.
+    const [run] = await weft.db.select().from(agentRuns).where(eq(agentRuns.id, r.json.runId));
+    expect(run!.summary).toMatch(/\(result res_\w+\)/);
+  });
+
   it("answers a policy question from company policy", async () => {
     const { persona } = await hire("Ines", "Marlow");
     const r = await call(persona, "POST", "/v1/portal/agent/runs", { text: "What is the meal limit for a client lunch?" });
@@ -125,6 +149,19 @@ describe("portal questions", () => {
     const [sam] = await weft.db.select().from(workers).where(eq(workers.workEmail, "sam.okafor@larkspur.example"));
     if (!sam) expect([r.status, r.json.code ?? r.json.extra?.code]).toEqual([403, "NO_WORKER"]);
     else expect(r.status).toBe(200);
+  });
+});
+
+describe("plain answers for the portal and chat threads", () => {
+  it("drops cited result ids and markdown emphasis, and keeps every number and sentence", () => {
+    expect(plainAnswer("The client lunch limit is **$75.00 per person**. Source: Expense policy v1, result `res_0006`.")).toBe("The client lunch limit is $75.00 per person. Source: Expense policy v1.");
+    expect(plainAnswer("Your first paycheck will appear after your first payday. (Result `res_0007`)")).toBe("Your first paycheck will appear after your first payday.");
+    expect(plainAnswer("It has 48 paychecks, 44 ready. The deadline is October 29, 2026. (res_0014)")).toBe("It has 48 paychecks, 44 ready. The deadline is October 29, 2026.");
+    expect(plainAnswer("Gross rose by $12.00 (see res_0003 and res_0004) because the rate changed (effective 2026-10-01).")).toBe("Gross rose by $12.00 because the rate changed (effective 2026-10-01).");
+    expect(plainAnswer("No balances yet (result `res_0008`).\n\nAsk the people team.")).toBe("No balances yet.\n\nAsk the people team.");
+    // An id that is part of the sentence stays, and so do ids that are not result ids.
+    expect(plainAnswer("res_0001 and res_0002 show it.")).toBe("res_0001 and res_0002 show it.");
+    expect(plainAnswer("The run pay_2026_10_30 pays on 2026-10-30... soon.")).toBe("The run pay_2026_10_30 pays on 2026-10-30... soon.");
   });
 });
 
@@ -162,6 +199,11 @@ describe("mentions", () => {
     expect(await weft.db.select().from(proposals).where(eq(proposals.proposerRunId, r.json.runId))).toEqual([]);
     const [run] = await weft.db.select().from(execRuns).where(eq(execRuns.id, r.json.runId));
     expect(JSON.parse(run!.allowlistJson!)).not.toContain("comms.send_message");
+    // The same read list a question asked in the app gets (wave 3), minus every write but comms.post_update.
+    const offered = JSON.parse(run!.allowlistJson!) as string[];
+    expect(offered).toEqual(expect.arrayContaining(["reports.query", "expenses.list", "time_off.list_requests", "comms.post_update"]));
+    expect(offered.every((n) => (CHAT_TOOLS_W3 as readonly string[]).includes(n))).toBe(true);
+    expect(MENTION_TOOLS(weft as never).filter((n) => n !== "comms.post_update" && (weft.executor.registry as { get(n: string): { effect?: string } | undefined }).get(n)?.effect !== "read")).toEqual([]);
     // Exactly one reply, from the agent, after the mention.
     const after = await weft.db.select().from(simChatMessages).where(eq(simChatMessages.channel, "#payroll"));
     expect(after.length).toBe(before + 2);
@@ -170,6 +212,7 @@ describe("mentions", () => {
     const notices = await weft.db.select().from(runSteps).where(and(eq(runSteps.runId, r.json.runId), eq(runSteps.kind, "notice")));
     expect(notices.filter((n) => (n.resultJson ?? "").includes("UNGROUNDED"))).toEqual([]);
     expect(replies[0]!.text).toMatch(/pays on \d{4}-\d{2}-\d{2}/);
+    expect(replies[0]!.text).not.toMatch(/\bres_\w+/);
     expect(replies[0]!.inbound).toBe(false);
     const listed = await call("usr_dana", "GET", "/v1/agent/mentions?status=answered");
     expect(listed.json.map((x: { id: string }) => x.id)).toContain(r.json.mentionId);

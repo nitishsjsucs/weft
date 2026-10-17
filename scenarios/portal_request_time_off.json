@@ -1,0 +1,19 @@
+{
+  "match": "how (do|can) i (request|ask for|book|take) (a )?(day|days|time) off|request (pto|time off|vacation)",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "portal__my_time_off", "arguments": { "response_format": null } },
+          { "type": "function_call", "name": "portal__policy_search", "arguments": { "query": "request time off", "response_format": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "portal__my_time_off", "ok": true, "status": "done" }, { "tool": "portal__policy_search", "ok": true, "status": "done" }] },
+        "output": [
+          { "type": "text", "text": "{{last.portal__policy_search.data.hits.0.text_display}} (result {{last.portal__policy_search.resultId}})" }
+        ]
+      }
+    ]
+  }
+}
