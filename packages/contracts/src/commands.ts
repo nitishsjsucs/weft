@@ -111,6 +111,8 @@ export interface AgentExecutor {
   exec(run: RunHandle, call: AgentCall): Promise<ToolOutcome>;   // deduped on (runId, callId)
   readArtifact(run: RunHandle, ref: string, offset: number, limit: number): Promise<ToolOutcome>;
   runState(run: RunHandle): Promise<{ tainted: boolean; taintedBy: string | null; pendingProposalIds: string[] }>;
+  /** Wave 4: `allowlist` without the commands a per-action override denies for this run (only ever narrows). */
+  toolAllowlist?(run: RunHandle, allowlist: readonly string[]): Promise<string[]>;
 }
 
 /** Prechecks and checklist predicates. exec refuses anything but effect "read". */
