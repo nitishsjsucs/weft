@@ -32,7 +32,7 @@ const status = readCommand({
       const c = await getConnection(deps.tx, ctx.companyId, v);
       out.push({ vendor: v, category: VENDOR_CATEGORY[v], mode: s.mode, health: c?.health ?? s.health, last_sync_at: c?.lastSyncAt ?? null, open_sync_items: open.filter((r) => r.vendor === v).length });
     }
-    return { data: { integrations: out }, summary: out.map((x) => `${x.vendor} ${x.mode}`).join(", ") };
+    return { data: { integrations: out }, summary: out.map((x) => `${x.vendor} ${x.mode} ${x.health}, ${x.last_sync_at ? `last sync ${x.last_sync_at}` : "never synced"}, ${x.open_sync_items} open`).join("; ") };
   },
 });
 
@@ -40,12 +40,20 @@ const ListSyncInput = z.object({ status: z.enum(["open", "resolved", "dismissed"
 const listSync = readCommand({
   name: "integrations.list_sync_items", domain: "people",
   summary: "Open integration sync items: conflicts and values Weft could not map.",
-  description: "List sync items: kind (sync_conflict, unmapped_value, orphaned, permission_gap), vendor, subject (an offer id or a vendor record), status and detail (field, Weft value, vendor value, fallback). Default status open. Resolving a sync item is a human decision in the Integrations screen.",
+  description: "List sync items: kind (sync_conflict, unmapped_value, orphaned, permission_gap), vendor, subject, status and detail (field, Weft value, vendor value, fallback). Default status open. Rows come only from syncs, so each vendor's last_sync_at is returned: null means it never synced, and an empty list is then no proof of being in sync. Resolving an item is a human decision in the Integrations screen.",
   input: ListSyncInput, untrustedFields: ["items.*.detail.ext_name", "items.*.detail.vendor_value"],
   async run(i, ctx, deps) {
-    const rows = await listSyncItems(deps.tx, ctx.companyId, { status: i.status ?? "open", vendor: i.vendor, subjectRef: i.subject_ref });
+    const status = i.status ?? "open";
+    const rows = await listSyncItems(deps.tx, ctx.companyId, { status, vendor: i.vendor, subjectRef: i.subject_ref });
     const items = rows.map(toSyncItem).map((s) => ({ id: s.id, vendor: s.vendor, kind: s.kind, subject_ref: s.subjectRef, status: s.status, detail: s.detail, created_at: s.createdAt }));
-    return { data: { count: items.length, items }, summary: `${items.length} sync item(s)` };
+    // What the list covers (round 1 R5): the rows come from syncs, so a vendor that never synced has none to list.
+    const vendors = [];
+    for (const v of i.vendor ? [i.vendor] : IntegrationVendor.options) vendors.push({ vendor: v, last_sync_at: (await getConnection(deps.tx, ctx.companyId, v))?.lastSyncAt ?? null });
+    const never = vendors.filter((v) => v.last_sync_at === null).map((v) => v.vendor);
+    const scope = `${status === "all" ? "" : `${status} `}sync item(s)${i.vendor ? ` for ${i.vendor}` : ""}${i.subject_ref ? ` on ${i.subject_ref}` : ""}`;
+    const synced = vendors.filter((v) => v.last_sync_at !== null).map((v) => `${v.vendor} last synced ${v.last_sync_at}`);
+    const state = [...synced, ...(never.length ? [`never synced: ${never.join(", ")}${items.length === 0 ? ", so an empty list is not proof of being in sync" : ""}`] : [])].join("; ");
+    return { data: { count: items.length, items, status_filter: status, vendors }, summary: `${items.length === 0 ? "No" : items.length} ${scope}; ${state}` };
   },
 });
 
