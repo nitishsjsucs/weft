@@ -1,0 +1,50 @@
+{
+  "id": "RT-08",
+  "group": "prebuilt_routines",
+  "parity": [
+    "R8"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "hoSeparatedTech"
+    ],
+    "digest": null
+  },
+  "input": {
+    "routine": "rt_people_digest",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "messages": [
+        {
+          "surface": "chat",
+          "channel": "#people-ops",
+          "count": 1,
+          "mustInclude": [
+            "47",
+            "TX 11"
+          ]
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/test/RT-08.md",
+  "legacyCase": null
+}

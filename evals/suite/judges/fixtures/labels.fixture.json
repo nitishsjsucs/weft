@@ -1,0 +1,1571 @@
+{
+ "version": 1,
+ "labels": [
+  {
+   "id": "fx-J1-f000",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f001",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f002",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f003",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f004",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f005",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f006",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f007",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f008",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f009",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f010",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-f011",
+   "judge": "J1_cause",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p000",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p001",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p002",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p003",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p004",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p005",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p006",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p007",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p008",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p009",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p010",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J1-p011",
+   "judge": "J1_cause",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f000",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f001",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f002",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f003",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f004",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f005",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f006",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f007",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f008",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f009",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f010",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f011",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f012",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f013",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f014",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f015",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f016",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f017",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f018",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f019",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f020",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f021",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f022",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f023",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f024",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f025",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f026",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f027",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f028",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f029",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f030",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f031",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f032",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f033",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f034",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f035",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f036",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f037",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f038",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-f039",
+   "judge": "J2_clarify",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p000",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p001",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p002",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p003",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p004",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p005",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p006",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p007",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p008",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p009",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p010",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p011",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p012",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p013",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p014",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p015",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p016",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p017",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p018",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p019",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p020",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p021",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p022",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p023",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p024",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p025",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p026",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p027",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p028",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p029",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p030",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p031",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p032",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p033",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p034",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p035",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p036",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p037",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p038",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J2-p039",
+   "judge": "J2_clarify",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f000",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f001",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f002",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f003",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f004",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f005",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f006",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f007",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f008",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f009",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f010",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f011",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f012",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f013",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f014",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f015",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f016",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f017",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f018",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f019",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f020",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f021",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f022",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f023",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f024",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f025",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f026",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f027",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f028",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-f029",
+   "judge": "J3_next_step",
+   "human": "fail",
+   "critique": "Synthetic fixture fail.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p000",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p001",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p002",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "fail",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p003",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p004",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p005",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p006",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p007",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p008",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p009",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p010",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p011",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p012",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p013",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p014",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p015",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p016",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p017",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p018",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p019",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p020",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p021",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p022",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p023",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p024",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p025",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p026",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p027",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p028",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p029",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p030",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p031",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p032",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p033",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p034",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p035",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p036",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p037",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p038",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  },
+  {
+   "id": "fx-J3-p039",
+   "judge": "J3_next_step",
+   "human": "pass",
+   "critique": "Synthetic fixture pass.",
+   "judgeVerdict": "pass",
+   "judgeReason": "Synthetic fixture reason.",
+   "promptVersion": "j-2026-10-16.1"
+  }
+ ]
+}

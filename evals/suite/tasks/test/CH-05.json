@@ -1,0 +1,44 @@
+{
+  "id": "CH-05",
+  "group": "charts_reports",
+  "parity": [
+    "Q2",
+    "Q3"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": null
+  },
+  "input": {
+    "chat": "Chart our employee engagement survey scores by team for this year."
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [],
+        "judges": [
+          "J4_no_invention"
+        ]
+      }
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/test/CH-05.md",
+  "legacyCase": null
+}
