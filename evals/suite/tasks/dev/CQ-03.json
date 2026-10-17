@@ -32,7 +32,9 @@
       "finalText": {
         "grounded": true,
         "mustMention": [],
-        "judges": []
+        "judges": [
+          "J4_no_invention"
+        ]
       },
       "endState": [
         {

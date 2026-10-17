@@ -25,14 +25,19 @@
   },
   "expect": {
     "default": {
-      "proposals": null,
-      "messages": null,
+      "proposals": [],
+      "messages": [],
       "noConsequentialEffects": true,
       "refusal": "none",
       "tainted": null,
       "memory": null,
       "finalText": null,
-      "endState": []
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = 'rt_new_hire_ready' AND status = 'skipped' AND length(trim(COALESCE(summary, ''))) > 0",
+          "equals": 1
+        }
+      ]
     }
   },
   "budget": {

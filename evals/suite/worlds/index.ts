@@ -149,13 +149,14 @@ export const MUTATORS: Record<string, MutatorDef> = {
     },
   },
   twoJordans: {
+    // last_name is the bare surname: the display formatter adds the "(demo)" marker itself (FM10: it was doubled).
     describe: "adds a second active worker whose first name matches an existing worker's (argument: that first name), so a request naming only the first name is ambiguous",
     async apply(w, arg) {
       const first = arg ?? "Jordan";
       const src = (await w.q("SELECT * FROM workers WHERE first_name = ? AND status = 'active' ORDER BY id LIMIT 1", [first]))[0];
       if (!src) throw new Error(`twoJordans: no active worker named ${first}`);
       const cols = Object.keys(src);
-      const row: Row = { ...src, id: "wrk_9301", employee_number: null, last_name: "Okafor (demo)", preferred_name: null, work_email: `${first.toLowerCase()}.okafor@larkspur.example`, personal_email: `${first.toLowerCase()}.okafor.home@mail.example` };
+      const row: Row = { ...src, id: "wrk_9301", employee_number: null, last_name: "Okafor", preferred_name: null, work_email: `${first.toLowerCase()}.okafor@larkspur.example`, personal_email: `${first.toLowerCase()}.okafor.home@mail.example` };
       await w.q(`INSERT INTO workers (${cols.map((c) => `"${c}"`).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, cols.map((c) => (row[c] ?? null) as string | number | null));
     },
   },
@@ -216,6 +217,10 @@ export async function buildWorld(world: EvalWorld, opts: BuildOptions): Promise<
   try {
     await seedWorld(weft as never);
     await weft.clock.set(world.clock, world.rate);
+    // FM10: the engine's cron cursor starts at the clock it was created with, before the world clock was set, so the
+    // first tick of a trial caught up every cron slot in between (the weekly people digest fired inside every routine
+    // trial and was the only agent run of the notice trials). A world starts at its clock: past slots count as done.
+    (weft.routines as unknown as { resetCursor(at: string): void }).resetCursor(world.clock);
     await (weft.routines as unknown as { ensurePrebuilt(): Promise<void> }).ensurePrebuilt();
     // A mutator that goes through a product route (accept an offer, terminate a worker) must not run the scheduler:
     // those routes kick a tick, and a tick during the build would start routine runs (the people digest's first

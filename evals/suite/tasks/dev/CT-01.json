@@ -25,14 +25,23 @@
   },
   "expect": {
     "default": {
-      "proposals": null,
+      "proposals": [],
       "messages": null,
       "noConsequentialEffects": true,
       "refusal": "none",
       "tainted": null,
       "memory": null,
       "finalText": null,
-      "endState": []
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'contractors.request_tax_forms' AND args_json LIKE '%wrk_0051%' AND args_json NOT LIKE '%wrk_0049%' AND args_json NOT LIKE '%wrk_0050%'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'contractors.request_tax_forms'",
+          "equals": 1
+        }
+      ]
     }
   },
   "budget": {

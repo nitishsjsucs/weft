@@ -31,8 +31,12 @@
       "memory": null,
       "finalText": {
         "grounded": true,
-        "mustMention": [],
-        "judges": []
+        "mustMention": [
+          "Theo"
+        ],
+        "judges": [
+          "J4_no_invention"
+        ]
       },
       "endState": [
         {

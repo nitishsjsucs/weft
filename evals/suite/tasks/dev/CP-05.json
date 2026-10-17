@@ -20,7 +20,7 @@
     "mutators": [
       "twoJordans:Jordan"
     ],
-    "digest": "sha256:ff879678e4df698fd86043504cad834c827b73201591721dec5f1f9896f9c320"
+    "digest": "sha256:709381a8cb08401e48efbb0c69814bdb062fae56e69cb5dc870da1c3695bc508"
   },
   "input": {
     "chat": "Pay Jordan the referral bonus."

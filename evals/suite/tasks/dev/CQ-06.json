@@ -31,7 +31,10 @@
       "memory": null,
       "finalText": {
         "grounded": true,
-        "mustMention": [],
+        "mustMention": [
+          "Theo",
+          "Oct 13|October 13|2026-10-13|10/13"
+        ],
         "judges": []
       },
       "endState": [

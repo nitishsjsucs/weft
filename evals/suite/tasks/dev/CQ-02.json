@@ -32,7 +32,9 @@
       "memory": null,
       "finalText": {
         "grounded": true,
-        "mustMention": [],
+        "mustMention": [
+          "hire|hiring|raise|headcount|new employee|joined"
+        ],
         "judges": []
       },
       "endState": [
