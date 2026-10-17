@@ -24,7 +24,8 @@ export const SYSTEM_ALLOWLISTS: Record<SystemPrincipal, readonly string[]> = {
     // wave 3 (docs/wave3.md): reimbursements, accruals and final-pay payout, vendor records applied after a re-read
     "expenses.schedule", "expenses.mark_paid", "time_off.post_accruals", "time_off.record_payout",
     "integrations.record_ats_hire", "integrations.apply_hris_change", "integrations.record_delivery", "screening.apply_vendor_event", "documents.apply_esign_event"],
-  svc_sim: ["tax.record_registration"],
+  svc_sim: ["tax.record_registration",
+    "agent.record_mention", "expenses.intake_email"],   // wave 4 (w4-parity-agent): simulated inbound chat mentions and emailed receipts (R1 records)
   svc_digest: ["comms.post_update"],
 };
 
