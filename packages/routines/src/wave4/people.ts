@@ -9,6 +9,10 @@
 // - rt_life_event_window: when a life-event window closes (enrollment_window.closed), propose filing the employee's
 //   queued elections with the carrier and the 401(k) provider (benefits.submit_elections, R3, always a proposal). The
 //   scheduler records each carrier receipt once the filing is sent. A manual run files every queued filing. Disabled.
+// - rt_first_day_message: daily 08:00 PT. Each hire whose start date is today gets a welcome email and their manager and
+//   up to eight teammates a note that they start today (comms.send_first_day_message, R3, autoAllow untainted like the
+//   check-in emails: the text is Weft's template with names and dates). Once per hire: the command emits
+//   worker.first_day and skips anyone who already has one. Disabled.
 import type { Precheck, ReadOnlyExecutor, RoutineDef } from "@weft/contracts";
 import type { Predicate } from "../checks";
 
@@ -35,6 +39,17 @@ export const RT_LIFE_EVENT_WINDOW: RoutineDef = {
   precheck: "life_event_filing",
   checklist: [{ id: "filed", label: "propose filing the queued elections", check: "proposal_exists:benefits.submit_elections:{first_submission}" }],
   budget: { steps: 6, usd: 0.05, minutes: 10 }, surface: { worthSurfacing: true, channel: null }, source: "prebuilt", taintedBy: null,
+};
+
+export const RT_FIRST_DAY_MESSAGE: RoutineDef = {
+  id: "rt_first_day_message", name: "First-day welcome",
+  description: "Every morning, welcome each hire whose first day is today by email and tell their manager and team they start today, once per hire.",
+  ownerPrincipalId: OWNER, enabled: false, autonomy: "approve", trigger: { type: "cron", cron: "0 8 * * *", tz: TZ }, filter: null,
+  instructions: "Call comms.send_first_day_message with the derived arguments; it writes each email itself and skips anyone already welcomed. Then write a one-line final message.",
+  tools: ["onboarding.list_first_days", "comms.send_first_day_message"],
+  precheck: "first_day_message",
+  checklist: [{ id: "welcomed", label: "welcome every hire starting today", check: "first_day_messages_sent:{due_count}" }],
+  budget: { steps: 6, usd: 0.05, minutes: 10 }, surface: { worthSurfacing: false, channel: null }, source: "prebuilt", taintedBy: null,
 };
 
 type Obj = Record<string, unknown>;
@@ -78,15 +93,39 @@ export const lifeEventFiling: Precheck = async (ctx, exec) => {
   };
 };
 
+/** Hires starting today with no first-day message yet (the command rechecks before it sends). */
+export const firstDayMessage: Precheck = async (ctx, exec) => {
+  const asOf = ptDate(ctx.now);
+  const d = await read(exec, ctx.companyId, "onboarding.list_first_days", { as_of: asOf });
+  if (!d) return { action: "skip", reason: "The first days could not be read." };
+  const due = (Array.isArray(d.due) ? d.due : []) as { worker_id: string; start_date: string }[];
+  if (due.length === 0) return { action: "skip", reason: `No hire starts on ${asOf} without a welcome.` };
+  const ids = due.map((h) => h.worker_id).slice(0, 20);
+  return {
+    action: "run", severity: "digest", subjectRefs: ids,
+    findings: { as_of: asOf, hires: due.slice(0, 20).map((h) => ({ worker_id: h.worker_id, start_date: h.start_date })) },
+    derivedArgs: { as_of: asOf, due_count: ids.length, "comms.send_first_day_message": { worker_ids: ids, as_of: asOf } },
+  };
+};
+
 const callsTo = (facts: Parameters<Predicate>[1], command: string) => facts.calls.filter((c) => c.command.replace("__", ".") === command);
 
-export const routines: RoutineDef[] = [RT_BENEFITS_WINDOW_REMINDERS, RT_LIFE_EVENT_WINDOW];
-export const prechecks: Record<string, Precheck> = { benefits_window_reminders: benefitsWindowReminders, life_event_filing: lifeEventFiling };
+export const routines: RoutineDef[] = [RT_BENEFITS_WINDOW_REMINDERS, RT_LIFE_EVENT_WINDOW, RT_FIRST_DAY_MESSAGE];
+export const prechecks: Record<string, Precheck> = { benefits_window_reminders: benefitsWindowReminders, life_event_filing: lifeEventFiling, first_day_message: firstDayMessage };
 export const predicates: Record<string, Predicate> = {
   /** The reminders call ran and covered the due windows (a count of 0 passes without a call). */
   window_reminders_sent: ([count = "0"], f) => {
     const want = Number(count) || 0;
     if (want === 0) return true;
     return callsTo(f, "benefits.send_window_reminders").some((c) => c.status === "done" && ((c.data ?? {}) as { count?: number }).count !== undefined);
+  },
+  /** Every hire due a welcome got one (or the call waits on a live approval); a count of 0 passes without a call. */
+  first_day_messages_sent: ([count = "0"], f) => {
+    const want = Number(count) || 0;
+    if (want === 0) return true;
+    return callsTo(f, "comms.send_first_day_message").some((c) => {
+      if (c.status === "done") return (((c.data ?? {}) as { count?: number }).count ?? 0) >= want;
+      return c.status === "pending_approval" && c.proposalId !== null && !["denied", "expired", "failed", "superseded", "dismissed"].includes(f.proposalStatus(c.proposalId) ?? "pending");
+    });
   },
 };

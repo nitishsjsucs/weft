@@ -35,7 +35,7 @@ async function names(tx: DbTx, ids: string[]): Promise<Map<string, string>> {
 export function toWindowDto(w: WindowRow, ev: LifeEventRow | undefined, name: string | null): WindowDto {
   const rule = ev ? lifeEventRule(ev.kind as LifeEventKind) : null;
   const reportedOn = ev ? ev.reportedAt.slice(0, 10) : w.createdAt.slice(0, 10);
-  const next = w.status === "open" && (!ev || ev.status === "window_open") ? reminderDates(w.closesOn, reportedOn)[w.remindersSent] ?? null : null;
+  const next = w.status === "open" && w.kind !== "open_enrollment" && (!ev || ev.status === "window_open") ? reminderDates(w.closesOn, reportedOn)[w.remindersSent] ?? null : null;
   return {
     id: w.id, workerId: w.workerId, kind: w.kind as EnrollmentWindowKind, lifeEventId: w.lifeEventId, opensOn: w.opensOn, closesOn: w.closesOn,
     status: w.status as EnrollmentWindowStatus, remindersSent: w.remindersSent, createdAt: w.createdAt,

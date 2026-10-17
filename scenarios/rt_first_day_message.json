@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "comms__send_first_day_message", "arguments": "{{derived.comms.send_first_day_message}}" }] },
+      { "output": [{ "type": "text", "text": "Sent the first-day welcomes." }] }
+    ]
+  }
+}

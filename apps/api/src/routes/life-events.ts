@@ -8,7 +8,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
-import { CheckinAnswers, Forbidden, LifeEventReport, Unauthorized, ValidationError, type ExecutorBundle, type HumanSession, type ToolOutcome } from "@weft/contracts";
+import { CheckinAnswers, Forbidden, LifeEventReport, TimeOffSubmission, Unauthorized, ValidationError, type ExecutorBundle, type HumanSession, type ToolOutcome } from "@weft/contracts";
 import { lifeEvents as le, pageById, ptDateOf } from "@weft/core";
 import { benefitPlans, carrierSubmissions, type Db } from "@weft/db";
 import { fileElections, type CarrierFiling } from "@weft/sim";
@@ -84,6 +84,32 @@ export function lifeEventsRoutes(weft: Weft): Hono<WeftEnv> {
     if (!body.success) throw new ValidationError("Body must be { elections: [{ planId, tier, deferralBps }], noChange }", issues(body.error));
     const elections = body.data.elections.map((e) => ({ plan_id: e.planId, ...(e.tier ? { tier: e.tier } : {}), ...(e.deferralBps !== null && e.deferralBps !== undefined ? { deferral_bps: e.deferralBps } : {}) }));
     return write(c, "benefits.elect_in_window", { window_id: c.req.param("id"), elections, ...(body.data.noChange ? { no_change: true } : {}) });
+  });
+
+  // The portal Request time off form (wave 3 left it open): the caller's own balances and requests, and a request for
+  // the caller's own worker through time_off.submit (human only; mayActFor refuses anyone else). Not yet table rows.
+  r.get("/v1/portal/time-off", async (c) => {
+    uiOnly(c);
+    const w = await ownWorker(c);
+    if (!w) return c.json({ workerId: null, balances: [], requests: [] });
+    const bal = await read(c, "time_off.get_balance", { worker_id: w });
+    if (bal instanceof Response) return bal;
+    const reqs = await read(c, "time_off.list_requests", { worker_id: w });
+    if (reqs instanceof Response) return reqs;
+    const balances = (bal.data.balances as { policyId: string; policyName: string; typeName: string; availableMinutes: number; available_display: string }[])
+      .map((b) => ({ policyId: b.policyId, policyName: b.policyName, typeName: b.typeName, availableMinutes: b.availableMinutes, available: b.available_display }));
+    const requests = (reqs.data.requests as { id: string; policyName: string; status: string; startDate?: string; endDate?: string; startAt?: string; endAt?: string; requestedMinutes: number }[])
+      .map((x) => ({ id: x.id, policyName: x.policyName, status: x.status, startDate: (x.startDate ?? x.startAt ?? "").slice(0, 10), endDate: (x.endDate ?? x.endAt ?? "").slice(0, 10), requestedMinutes: x.requestedMinutes }));
+    return c.json({ workerId: w, balances, requests });
+  });
+  r.post("/v1/portal/time-off/requests", async (c) => {
+    uiOnly(c);
+    const body = TimeOffSubmission.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) throw new ValidationError("Body must be a TimeOffSubmission { policyId, startDate, endDate, partialDayMinutes, reason }", issues(body.error));
+    const w = await ownWorker(c);
+    if (!w) throw new Forbidden("NO_WORKER", { code: "NO_WORKER" });
+    return write(c, "time_off.submit", { worker_id: w, policy_id: body.data.policyId, start_date: body.data.startDate, end_date: body.data.endDate,
+      ...(body.data.partialDayMinutes !== null ? { partial_day_minutes: body.data.partialDayMinutes } : {}), ...(body.data.reason ? { reason: body.data.reason } : {}) });
   });
 
   r.get("/v1/portal/checkins", async (c) => {

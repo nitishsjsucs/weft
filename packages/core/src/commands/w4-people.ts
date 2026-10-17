@@ -13,6 +13,9 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { LifeEventKind, Refused } from "@weft/contracts";
 import { benefitPlans, carrierSubmissions, checkins, enrollmentWindows, lifeEvents, workers } from "@weft/db";
+import { closeOutStragglers, ensureEnrollmentRows, liveOpenEnrollment, OPEN_ENROLLMENT_MAX_DAYS, planYearOf } from "../life-events/open-enrollment";
+import { firstDayEmails, firstDayPlan, outThisWeek } from "../life-events/people-week";
+import { addDays, daysBetween } from "../life-events/rules";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { displayName } from "../people/names";
@@ -129,18 +132,27 @@ const closeWindows = writeCommand<SweepInput>({
     const events: { type: string; subjectRef: string; payload: unknown }[] = [];
     for (const o of p.to_open) {
       await tx.update(enrollmentWindows).set({ status: "open" }).where(eq(enrollmentWindows.id, o.window_id));
+      if (o.kind === "open_enrollment") {
+        const [row] = await tx.select({ closesOn: enrollmentWindows.closesOn }).from(enrollmentWindows).where(eq(enrollmentWindows.id, o.window_id));
+        if (row) await ensureEnrollmentRows(tx, ctx.companyId, planYearOf(row.closesOn), deps.newId);
+      }
       events.push({ type: "enrollment_window.opened", subjectRef: o.window_id, payload: { window_id: o.window_id } });
     }
     const expired: string[] = [];
+    const closedOut: { window_id: string; plan_year: number; people: { worker_id: string; name: string; was: string }[] }[] = [];
     for (const c of p.to_close) {
       await tx.update(enrollmentWindows).set({ status: "closed" }).where(eq(enrollmentWindows.id, c.window_id));
+      // Open enrollment closes on its date: whoever still had not chosen is closed out as waived (the active default).
+      if (c.kind === "open_enrollment") closedOut.push({ window_id: c.window_id, plan_year: planYearOf(c.closes_on), people: await closeOutStragglers(tx, ctx.companyId, planYearOf(c.closes_on)) });
       if (c.life_event_id) {
         const [ev] = await tx.select({ status: lifeEvents.status }).from(lifeEvents).where(eq(lifeEvents.id, c.life_event_id));
         if (ev?.status === "window_open") { await tx.update(lifeEvents).set({ status: "expired" }).where(eq(lifeEvents.id, c.life_event_id)); expired.push(c.life_event_id); }
       }
       events.push({ type: "enrollment_window.closed", subjectRef: c.window_id, payload: { window_id: c.window_id } });
     }
-    return { data: { opened: p.to_open.map((o) => o.window_id), closed: p.to_close.map((c) => c.window_id), expired_life_events: expired }, summary: `Opened ${p.to_open.length} and closed ${p.to_close.length} enrollment windows`, events };
+    const waived = closedOut.reduce((n, x) => n + x.people.length, 0);
+    return { data: { opened: p.to_open.map((o) => o.window_id), closed: p.to_close.map((c) => c.window_id), expired_life_events: expired, open_enrollment_closed_out: closedOut },
+      summary: `Opened ${p.to_open.length} and closed ${p.to_close.length} enrollment windows${closedOut.length ? `; ${waived} ${waived === 1 ? "person" : "people"} had not chosen and are recorded as waived` : ""}`, events };
   },
 });
 
@@ -291,6 +303,102 @@ const recordCarrierReceipt = writeCommand<ReceiptInput>({
   },
 });
 
+// ---------------------------------------------------------------- open enrollment with real dates
+
+const OpenWindowInput = z.object({ kind: z.literal("open_enrollment"), opens_on: Day, closes_on: Day });
+type OpenWindowInput = z.infer<typeof OpenWindowInput>;
+const openWindow = writeCommand<OpenWindowInput>({
+  name: "benefits.open_window", summary: "Schedule the company's open enrollment with real open and close dates",
+  description: "Schedules open enrollment for the plan year after closes_on: one company window, at most 60 days, one live at a time. The scheduler opens it on its date and closes it after the close date; whoever had not chosen is then recorded as waived. Example: {\"kind\":\"open_enrollment\",\"opens_on\":\"2026-11-02\",\"closes_on\":\"2026-11-20\"}",
+  input: OpenWindowInput, domain: "benefits", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const tx = deps.tx;
+    const today = ptDateOf(ctx.now);
+    if (i.closes_on < i.opens_on) throw new DomainRefusal("DOMAIN_BAD_DATES", `The close date ${i.closes_on} is before the open date ${i.opens_on}`, "Close on or after the open date", null);
+    if (i.closes_on < today) throw new DomainRefusal("DOMAIN_BAD_DATES", `The close date ${i.closes_on} has passed (today is ${today})`, "Pick a close date from today on", null);
+    const span = daysBetween(i.opens_on, i.closes_on) + 1;
+    if (span > OPEN_ENROLLMENT_MAX_DAYS) throw new DomainRefusal("DOMAIN_WINDOW_TOO_LONG", `Open enrollment of ${span} days is longer than ${OPEN_ENROLLMENT_MAX_DAYS}`, `Close by ${addDays(i.opens_on, OPEN_ENROLLMENT_MAX_DAYS - 1)}`, null);
+    const live = await liveOpenEnrollment(tx, ctx.companyId);
+    if (live) throw new DomainRefusal("DOMAIN_OPEN_ENROLLMENT_LIVE", `Open enrollment ${live.id} is already ${live.status} (${live.opensOn} to ${live.closesOn})`, null, null);
+    const planYear = planYearOf(i.closes_on);
+    const opensNow = i.opens_on <= today;
+    const id = await deps.newId("ewn_");
+    await tx.insert(enrollmentWindows).values({ id, companyId: ctx.companyId, workerId: null, kind: "open_enrollment", lifeEventId: null, opensOn: i.opens_on, closesOn: i.closes_on, status: opensNow ? "open" : "scheduled", remindersSent: 0, createdAt: ctx.now });
+    const added = opensNow ? await ensureEnrollmentRows(tx, ctx.companyId, planYear, deps.newId) : 0;
+    return {
+      data: { window_id: id, plan_year: planYear, opens_on: i.opens_on, closes_on: i.closes_on, status: opensNow ? "open" : "scheduled", enrollment_rows_added: added },
+      summary: `${opensNow ? "Opened" : "Scheduled"} open enrollment for ${planYear}, ${i.opens_on} to ${i.closes_on}`,
+      events: opensNow ? [{ type: "enrollment_window.opened", subjectRef: id, payload: { window_id: id } }] : [],
+    };
+  },
+});
+
+// ---------------------------------------------------------------- the people week: out this week and first days
+
+const OutInput = z.object({ as_of: Day.optional(), department_id: z.string().startsWith("dpt_").optional(), ...responseFormatField });
+type OutInput = z.infer<typeof OutInput>;
+const outThisWeekCommand = readCommand({
+  name: "people.out_this_week", domain: "people",
+  summary: "Who is out this week (Monday to Sunday), from approved time off, as one digest line.",
+  description: "People with approved or taken time off on a working day of the week holding as_of (default today), Monday to Sunday, with the days they are out and a ready digest line. Names and days only: never the kind of leave or the employee's reason. Example: {\"as_of\":null,\"department_id\":null}",
+  input: OutInput,
+  async run(i: OutInput, ctx, deps) {
+    const r = await outThisWeek(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now), { departmentId: i.department_id });
+    return { data: r, summary: r.line };
+  },
+});
+
+const FirstDaysInput = z.object({ as_of: Day.optional(), ...responseFormatField });
+type FirstDaysInput = z.infer<typeof FirstDaysInput>;
+const listFirstDays = readCommand({
+  name: "onboarding.list_first_days", domain: "people",
+  summary: "Hires whose first day is today, and whether their first-day message already went out.",
+  description: "Employees whose start date is as_of (default today): due (no first-day message yet) with their manager and up to eight teammates, and sent (worker ids already welcomed). Example: {\"as_of\":null}",
+  input: FirstDaysInput,
+  async run(i: FirstDaysInput, ctx, deps) {
+    const p = await firstDayPlan(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now));
+    return { data: p, summary: `${p.due.length} first-day messages due, ${p.sent.length} already sent` };
+  },
+});
+
+const FirstDayInput = z.object({ worker_ids: z.array(z.string().startsWith("wrk_")).min(1).max(20), as_of: Day.optional() });
+type FirstDayInput = z.infer<typeof FirstDayInput>;
+async function firstDayWork(i: FirstDayInput, ctx: { companyId: string; now: string }, deps: Parameters<WeftCommand["run"]>[2]) {
+  const p = await firstDayPlan(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now));
+  return p.due.filter((h) => i.worker_ids.includes(h.worker_id));
+}
+const sendFirstDayMessage = writeCommand<FirstDayInput>({
+  name: "comms.send_first_day_message", summary: "Email the welcome to each hire whose first day is today, and tell their team",
+  description: "On a hire's start date, emails the hire a welcome (their manager's name, the portal) and emails the manager and up to eight teammates that the hire starts today. Names and dates only, written by Weft, not the model. Once per hire: anyone already welcomed or not starting today is skipped. R3 like the check-in emails. Example: {\"worker_ids\":[\"wrk_0049\"],\"as_of\":null}",
+  input: FirstDayInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
+  afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
+  async preview(i, ctx, deps) {
+    const due = await firstDayWork(i, ctx, deps);
+    return { title: `Send ${due.length} first-day ${due.length === 1 ? "welcome" : "welcomes"}`, diff: [],
+      content: due.map((h) => ({ label: h.name, text: `Welcome to ${h.name}; a note to ${[h.manager, ...h.team.map((t) => t.name)].filter(Boolean).length} teammates` })), moneyCents: null,
+      subjectRef: due.map((h) => h.worker_id).join(",") || "first_day", subjectHash: sha256Hex(canonicalJson(due.map((h) => [h.worker_id, h.start_date]))), evidence: due.map((h) => ({ label: "worker", ref: h.worker_id })) };
+  },
+  async run(i, ctx, deps) {
+    const due = await firstDayWork(i, ctx, deps);
+    const ids = [...new Set(due.flatMap((h) => [h.worker_id, ...(h.manager_id ? [h.manager_id] : []), ...h.team.map((t) => t.worker_id)]))];
+    const mail = new Map((ids.length ? await deps.tx.select({ id: workers.id, email: workers.workEmail }).from(workers).where(inArray(workers.id, ids)) : []).map((r) => [r.id, r.email]));
+    const sent: { worker_id: string; hire_email_id: string | null; team_email_ids: string[] }[] = [];
+    for (const h of due) {
+      const m = firstDayEmails(h);
+      const to = mail.get(h.worker_id);
+      const hireId = to ? (await deps.sims.email.send({ to, from: "people@larkspur.example", subject: m.hire.subject, body: m.hire.body, kind: "generic", relatedRef: h.worker_id })).id : null;
+      const team: string[] = [];
+      for (const t of [...(h.manager_id ? [h.manager_id] : []), ...h.team.map((x) => x.worker_id)]) {
+        const addr = mail.get(t);
+        if (addr) team.push((await deps.sims.email.send({ to: addr, from: "people@larkspur.example", subject: m.team.subject, body: m.team.body, kind: "generic", relatedRef: h.worker_id })).id);
+      }
+      sent.push({ worker_id: h.worker_id, hire_email_id: hireId, team_email_ids: team });
+    }
+    return { data: { sent, count: sent.length }, summary: `Sent ${sent.length} first-day ${sent.length === 1 ? "welcome" : "welcomes"}`,
+      events: sent.map((s) => ({ type: "worker.first_day", subjectRef: s.worker_id, payload: { worker_id: s.worker_id } })) };
+  },
+});
+
 // ---------------------------------------------------------------- the 30-day check-in form
 
 const SubmitFormInput = z.object({ checkin_id: z.string().startsWith("chk_"), answers: CheckinAnswers });
@@ -320,5 +428,6 @@ const submitCheckinForm = writeCommand<SubmitFormInput>({
 export const w4PeopleCommands: WeftCommand[] = [
   reportLifeEvent, listLifeEventsCommand, listWindowsCommand, sendWindowReminders, closeWindows, electInWindow,
   listCarrierSubmissions, submitElections, recordCarrierReceipt, submitCheckinForm,
+  openWindow, outThisWeekCommand, listFirstDays, sendFirstDayMessage,
 ];
 
