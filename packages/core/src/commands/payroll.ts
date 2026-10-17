@@ -1,10 +1,10 @@
 // payroll.* commands. Owner: t1-payroll. Append WeftCommand definitions to this array; commands/index.ts concatenates it.
 // Refusals are thrown as `Refused(code, message)` (contracts/errors.ts); the executor maps them to ToolOutcome refusals
 // with this registry entry's errorHints. Money in results is *_cents plus *_display.
-import { and, eq, max } from "drizzle-orm";
+import { and, eq, inArray, max } from "drizzle-orm";
 import { z } from "zod";
 import { formatCents, NotFound, Refused, type ExecContext, type Flag, type Preview } from "@weft/contracts";
-import { actions, paychecks, proposals, type DbTx } from "@weft/db";
+import { actions, paychecks, principals, proposals, type DbTx } from "@weft/db";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import {
   concisePayrollRun, createDraft, getRun, groundExplanation, listRuns, markFailed, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
@@ -50,20 +50,33 @@ const base = {
 
 // ---------------------------------------------------------------- reads
 
+/** Readable approver names for runs that were submitted: the principal's display name, or the id when it has none. */
+async function approverNames(tx: DbTx, companyId: string, ids: readonly (string | null)[]): Promise<Map<string, string>> {
+  const want = [...new Set(ids.filter((x): x is string => Boolean(x)))];
+  if (!want.length) return new Map();
+  const rows = await tx.select({ id: principals.id, display: principals.display }).from(principals).where(and(eq(principals.companyId, companyId), inArray(principals.id, want)));
+  return new Map(rows.map((r) => [r.id, r.display]));
+}
+/** approved_by (readable name), its principal id and approved_at; all null until the run is approved and submitted. */
+function approvalOf(r: { approvedBy: string | null; approvedAt: string | null }, names: Map<string, string>) {
+  return { approved_by: r.approvedBy ? (names.get(r.approvedBy) ?? r.approvedBy) : null, approved_by_id: r.approvedBy ?? null, approved_at: r.approvedAt ?? null };
+}
+
 const ListRunsInput = z.object({ status: z.enum(["draft", "processing", "processed", "failed"]).optional(), limit: z.number().int().optional(), response_format: ResponseFormat });
 type ListRunsInput = z.infer<typeof ListRunsInput>;
 export const listRunsCommand: WeftCommand<ListRunsInput> = {
   ...base, name: "payroll.list_runs", summary: "List pay runs",
-  description: "Lists pay runs (newest last) with status, period, payday, paycheck counts, review counts and total cost. Call it to find a run id. Example: {\"status\": \"draft\"}.",
+  description: "Lists pay runs (newest last) with status, period, payday, paycheck counts, review counts, total cost and, once submitted, who approved it (approved_by, approved_at). Call it to find a run id. Example: {\"status\": \"processed\"}.",
   compactDescription: "List pay runs with status, period, counts and total cost.",
   input: ListRunsInput, needs: "view", effect: "read", risk: () => "R0", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "read", sandbox: "read",
   async run(i, ctx, deps) {
     const { rows, counts } = await listRuns(deps.tx, ctx.companyId, { limit: Math.min(Math.max(i.limit ?? 25, 1), 100), status: i.status ?? null });
+    const names = await approverNames(deps.tx, ctx.companyId, rows.map((r) => r.approvedBy));
     const data = rows.map((r) => {
       const t = totalsFromDto(r.totalsJson);
       const s = r.anomalySummaryJson ? (JSON.parse(r.anomalySummaryJson) as { needsReview: number; ready: number }) : null;
-      return { run_id: r.id, status: r.status, period: `${r.periodStart} to ${r.periodEnd}`, payday: r.payday, approval_deadline: r.approvalDeadline, paychecks: counts.get(r.id) ?? 0, needs_review: s?.needsReview ?? 0, ready: s?.ready ?? 0, total_cost_cents: t?.totalCost ?? 0, total_cost_display: formatCents(t?.totalCost ?? 0) };
+      return { run_id: r.id, status: r.status, period: `${r.periodStart} to ${r.periodEnd}`, payday: r.payday, approval_deadline: r.approvalDeadline, paychecks: counts.get(r.id) ?? 0, needs_review: s?.needsReview ?? 0, ready: s?.ready ?? 0, total_cost_cents: t?.totalCost ?? 0, total_cost_display: formatCents(t?.totalCost ?? 0), ...approvalOf(r, names) };
     });
     return { data: { runs: data }, summary: `${data.length} pay runs` };
   },
@@ -73,13 +86,14 @@ const GetRunInput = z.object({ run_id: RunId, response_format: ResponseFormat, f
 type GetRunInput = z.infer<typeof GetRunInput>;
 export const getRunCommand: WeftCommand<GetRunInput> = {
   ...base, name: "payroll.get_run", summary: "Read one pay run",
-  description: "Reads a pay run: totals, counts by section and every flagged paycheck with its flag evidence (before and after cents; for GROSS_CHANGE the pay rate id, action seq and result id). Filters: flagged_only, worker_id, state. Example: {\"run_id\": \"pay_2026_10_30\"}.",
+  description: "Reads a pay run: totals, counts by section, who approved it and when (approved_by, approved_at; null before submit) and every flagged paycheck with its flag evidence (before and after cents; for GROSS_CHANGE the pay rate id, action seq and result id). Filters: flagged_only, worker_id, state. Example: {\"run_id\": \"pay_2026_10_30\"}.",
   compactDescription: "Read a pay run: totals, counts and flagged paychecks with evidence.",
   input: GetRunInput, needs: "view", effect: "read", risk: () => "R0", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "read", sandbox: "read", errorHints: { UNKNOWN_REFERENCE: RUN_HINT },
-  async run(i, _ctx, deps) {
+  async run(i, ctx, deps) {
     const run = await getRun(deps.tx, i.run_id);
-    const data = await concisePayrollRun(deps.tx, run, { flaggedOnly: i.flagged_only, workerId: i.worker_id, state: i.state, detailed: i.response_format === "detailed" });
+    const view = await concisePayrollRun(deps.tx, run, { flaggedOnly: i.flagged_only, workerId: i.worker_id, state: i.state, detailed: i.response_format === "detailed" });
+    const data = { ...view, ...approvalOf(run, await approverNames(deps.tx, ctx.companyId, [run.approvedBy])) };
     return { data, summary: `${run.id} ${run.status}: ${data.counts.needs_review} need review, ${data.counts.ready} ready` };
   },
 };
