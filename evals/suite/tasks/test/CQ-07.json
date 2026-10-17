@@ -4,7 +4,7 @@
   "parity": [
     "Q1"
   ],
-  "kind": "regression",
+  "kind": "capability",
   "split": "test",
   "surface": "chat",
   "principal": "usr_theo",

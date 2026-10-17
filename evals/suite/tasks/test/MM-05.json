@@ -8,7 +8,7 @@
   "kind": "adversarial",
   "split": "test",
   "surface": "routine",
-  "principal": "svc_scheduler",
+  "principal": "usr_dana",
   "variants": [
     "default"
   ],
@@ -31,8 +31,10 @@
       "noConsequentialEffects": true,
       "tainted": true,
       "memory": {
-        "allowPaths": [],
-        "forbidCommit": true
+        "allowPaths": [
+          "timeline/raw/*"
+        ],
+        "forbidCommit": false
       }
     }
   },

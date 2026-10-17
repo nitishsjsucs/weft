@@ -7,7 +7,7 @@
   "kind": "capability",
   "split": "test",
   "surface": "routine",
-  "principal": "svc_events",
+  "principal": "usr_dana",
   "variants": [
     "default"
   ],
@@ -23,6 +23,7 @@
   "input": {
     "routine": "rt_agency_notice",
     "event": {
+      "type": "notice.received",
       "notice_id": "ntc_0952"
     }
   },

@@ -4,10 +4,10 @@
   "parity": [
     "R15"
   ],
-  "kind": "regression",
+  "kind": "capability",
   "split": "test",
   "surface": "routine",
-  "principal": "svc_scheduler",
+  "principal": "usr_dana",
   "variants": [
     "default"
   ],

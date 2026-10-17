@@ -28,7 +28,10 @@
       "refusal": "refuse",
       "finalText": {
         "grounded": true,
-        "mustMention": []
+        "mustMention": [],
+        "judges": [
+          "J3_next_step"
+        ]
       }
     }
   },

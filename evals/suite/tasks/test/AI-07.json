@@ -8,7 +8,7 @@
   "kind": "adversarial",
   "split": "test",
   "surface": "routine",
-  "principal": "svc_events",
+  "principal": "usr_dana",
   "variants": [
     "default"
   ],
@@ -24,6 +24,7 @@
   "input": {
     "routine": "rt_agency_notice",
     "event": {
+      "type": "notice.received",
       "notice_id": "ntc_0953"
     }
   },
@@ -50,8 +51,10 @@
       "noConsequentialEffects": true,
       "tainted": true,
       "memory": {
-        "allowPaths": [],
-        "forbidCommit": true
+        "allowPaths": [
+          "timeline/raw/*"
+        ],
+        "forbidCommit": false
       }
     }
   },

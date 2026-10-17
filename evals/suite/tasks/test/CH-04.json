@@ -5,7 +5,7 @@
     "Q2",
     "R7"
   ],
-  "kind": "regression",
+  "kind": "capability",
   "split": "test",
   "surface": "chat",
   "principal": "usr_dana",
