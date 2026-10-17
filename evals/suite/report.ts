@@ -4,6 +4,9 @@
 import type { EvalSuiteResult } from "../../packages/contracts/src/evals";
 import type { EvalVariant } from "../../packages/contracts/src/telemetry";
 import type { SuiteTrial } from "./types";
+import type { SuiteTrialDetail } from "./runner";
+
+const detailOf = (t: SuiteTrial): Partial<SuiteTrialDetail> => t.detail as Partial<SuiteTrialDetail>;
 
 export type SuiteResultFile = Omit<EvalSuiteResult, "trials"> & { trials: SuiteTrial[]; variants: EvalVariant[]; canaryHitsWholeRun: number };
 
@@ -108,9 +111,28 @@ function variantSection(r: SuiteResultFile, v: EvalVariant, testOnly: boolean): 
   if (heldOut) lines.push(`The ${heldOut} held-out test trials count in the tables above; their task rows are not shown.`, "");
   lines.push("| Task | Trial | Result | Steps | Calls | Cost | First failure | Why |", "|---|---|---|---|---|---|---|---|");
   for (const t of r.trials.filter((x) => x.variant === v && x.split !== "test")) {
-    const why = t.success ? "" : [t.error, ...t.graders.filter((g) => g.applies && !g.pass).map((g) => `${g.grader}: ${g.reasons.join("; ")}`)].filter(Boolean).join(" / ").replace(/\|/g, "/").slice(0, 300);
+    const rr = detailOf(t).routine ?? null;
+    const routineWhy = rr && !rr.agentRunId ? `routine run ${rr.status}${rr.reason ? ` (${rr.reason})` : ""}, no agent run` : null;
+    const why = t.success ? "" : [routineWhy, t.error, ...t.graders.filter((g) => g.applies && !g.pass).map((g) => `${g.grader}: ${g.reasons.join("; ")}`)].filter(Boolean).join(" / ").replace(/\|/g, "/").slice(0, 300);
     const link = t.phoenixUrl ? `[${t.taskId}](${t.phoenixUrl})` : t.taskId;
     lines.push(`| ${link} | ${t.trial} | ${t.success ? "pass" : "FAIL"} | ${t.steps} | ${t.toolCalls} | ${usd(t.costUsd)} | ${t.firstFailure ?? ""} | ${why} |`);
+  }
+  lines.push("");
+  return lines;
+}
+
+/** Declared judges are not run by the suite yet; the report lists them as pending so a task never looks judged. */
+export function judgesSection(r: SuiteResultFile, testOnly: boolean): string[] {
+  const pending = new Map<string, Set<string>>();
+  for (const t of r.trials) for (const j of detailOf(t).judgesPending ?? []) pending.set(j, (pending.get(j) ?? new Set()).add(testOnly || t.split === "test" ? "held-out" : t.taskId));
+  const lines = ["## Judges", ""];
+  if (!pending.size) return [...lines, "No trial in this run declares a judge. Success counts only the deterministic graders.", ""];
+  lines.push("Declared judges are pending: the suite does not run them yet, so they never count toward success (success counts only the deterministic graders).", "");
+  lines.push("| Judge | Status | Tasks |", "|---|---|---|");
+  for (const [j, ids] of [...pending].sort(([a], [b]) => a.localeCompare(b))) {
+    const named = [...ids].filter((x) => x !== "held-out").sort();
+    const held = ids.has("held-out") ? `${named.length ? ", " : ""}held-out tasks` : "";
+    lines.push(`| ${j} | pending | ${named.join(", ")}${held} |`);
   }
   lines.push("");
   return lines;
@@ -131,6 +153,6 @@ export function renderReport(r: SuiteResultFile, prev: SuiteResultFile | null): 
     lines.push("## Flipped against the last baseline", "");
     lines.push(prev ? (flips.length ? flips.map((f) => `- ${f.taskId} (${f.variant}): ${f.was ? "pass" : "fail"} to ${f.now ? "pass" : "fail"}`).join("\n") : `No task flipped against ${prev.startedAt.slice(0, 10)} at ${prev.harnessSha}.`) : "No earlier suite result on these tasks.", "");
   }
-  lines.push("## Judges", "", "No judge is built yet (evals.md 6.2: judges come after the taxonomy). Success counts only the deterministic graders.", "");
+  lines.push(...judgesSection(r, testOnly));
   return lines.join("\n");
 }
