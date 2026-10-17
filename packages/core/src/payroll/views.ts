@@ -75,7 +75,9 @@ export async function concisePayrollRun(tx: DbTx, run: RunRow, filters: { flagge
     const n = names.get(p.workerId);
     return { paycheck_id: p.id, worker: `${n?.name ?? p.workerId} (${p.workerId})`, state: n?.state ?? null, status: p.status, hours_x100: p.hoursX100, gross_cents: p.grossCents, gross_display: formatCents(p.grossCents), net_cents: p.netCents, net_display: formatCents(p.netCents) };
   };
-  const listOthers = filters.detailed || ((filters.workerId || filters.state) && !filters.flaggedOnly);
+  // flagged_only wins in every mode: a detailed flagged read lists the flagged rows only (round 1 R7: detailed mode
+  // used to append every ready paycheck, which offloaded 44 rows to an artifact and cost three steps to page).
+  const listOthers = !filters.flaggedOnly && (filters.detailed || filters.workerId || filters.state);
   return {
     run_id: run.id, status: run.status, period: `${run.periodStart} to ${run.periodEnd}`, payday: run.payday, approval_deadline: run.approvalDeadline,
     previous_run_id: run.previousRunId, tax_data_version: run.taxDataVersion, label: "synthetic",

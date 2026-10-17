@@ -96,6 +96,21 @@ describe("reads", () => {
     const one = await exec("payroll.get_run", { run_id: "pay_2026_10_30", worker_id: ids.caOct19, flagged_only: true });
     expect((one.data as { flagged: unknown[] }).flagged).toHaveLength(1);
   });
+  it("get_run honors flagged_only in detailed mode: the flagged rows only, never the ready list (round 1 R7)", async () => {
+    const all = await exec("payroll.get_run", { run_id: "pay_2026_10_30", response_format: "detailed" });
+    expect((all.data as { ready?: unknown[] }).ready).toHaveLength(44);
+    const flagged = await exec("payroll.get_run", { run_id: "pay_2026_10_30", response_format: "detailed", flagged_only: true });
+    const d = flagged.data as { flagged: unknown[]; ready?: unknown[]; counts: { ready: number } };
+    expect(d.flagged).toHaveLength(4);
+    expect(d.ready).toBeUndefined();
+    // The counts still say how many are ready, so the answer can name them without the rows.
+    expect(d.counts.ready).toBe(44);
+    const concise = await exec("payroll.get_run", { run_id: "pay_2026_10_30", flagged_only: true });
+    expect(JSON.stringify(flagged.data).length).toBe(JSON.stringify(concise.data).length);
+    const tx = await exec("payroll.get_run", { run_id: "pay_2026_10_30", response_format: "detailed", flagged_only: true, state: "TX" });
+    expect((tx.data as { flagged: unknown[]; ready?: unknown[] }).flagged).toHaveLength(1);
+    expect((tx.data as { ready?: unknown[] }).ready).toBeUndefined();
+  });
 });
 
 describe("drafts and explanations", () => {
