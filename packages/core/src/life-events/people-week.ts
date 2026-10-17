@@ -4,7 +4,8 @@
 // of leave, the employee's reason, or anything the hire typed, so the digest line and the first-day emails can go out
 // without a model writing them.
 import { and, eq, inArray } from "drizzle-orm";
-import { events, timeOffRequests, workers, type DbTx } from "@weft/db";
+import { events, timeOffRequests, workers, workplaces, type DbTx } from "@weft/db";
+import { assignmentsOf, loadPolicies, policyApplies } from "../time-off/store";
 import { displayName } from "../people/names";
 import { addDays } from "./rules";
 
@@ -102,3 +103,20 @@ export const firstDayEmails = (h: FirstDayHire) => ({
     body: `Hi,\n\n${h.name} joins the team today, ${h.start_date}${h.manager ? `, reporting to ${h.manager}` : ""}. Please say hello and help them settle in.\n\nLarkspur Robotics people team (sent by the Weft agent)`,
   },
 });
+
+// ---------------------------------------------------------------- the portal Request time off form
+
+/**
+ * The policies a worker can request against: their assignments when they have any, else the policies their work
+ * state and workplace call for (a hire after the seed is assigned on their first request, by time_off.submit). Read only.
+ */
+export async function requestablePolicies(tx: DbTx, companyId: string, workerId: string): Promise<{ policyId: string; policyName: string; typeName: string; assigned: boolean }[]> {
+  const [w] = await tx.select().from(workers).where(and(eq(workers.id, workerId), eq(workers.companyId, companyId))).limit(1);
+  if (!w || w.type !== "employee") return [];
+  const pols = await loadPolicies(tx, companyId);
+  const asn = new Set((await assignmentsOf(tx, [w.id])).map((a) => a.policyId));
+  if (asn.size) return pols.filter((p) => asn.has(p.id)).map((p) => ({ policyId: p.id, policyName: p.name, typeName: p.typeName, assigned: true }));
+  const [place] = w.workplaceId ? await tx.select({ city: workplaces.city }).from(workplaces).where(eq(workplaces.id, w.workplaceId)).limit(1) : [];
+  return pols.filter((p) => policyApplies(p.jurisdiction, w.workState, place?.city ?? null) && (p.effectiveTo === null || p.effectiveTo >= w.startDate))
+    .map((p) => ({ policyId: p.id, policyName: p.name, typeName: p.typeName, assigned: false }));
+}

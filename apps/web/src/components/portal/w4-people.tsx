@@ -1,10 +1,11 @@
 "use client";
 // Portal sections (wave 4, docs/wave4.md). Owner: w4-parity-people. Life events: report a marriage, birth, move and
 // the rest, see the window it opened (with the rule it follows) and make benefit changes or choose no change before it
-// closes. First-month check-in: the five fixed CHECKIN_QUESTIONS on the caller's own open check-in. Calls go to
+// closes. First-month check-in: the five fixed CHECKIN_QUESTIONS on the caller's own open check-in. Request time off:
+// the caller's own balances and requests, and a new request routed to their approver. Calls go to
 // /v1/portal/* as the portal principal (the new hire persona reaches only /v1/portal/*).
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { CalendarHeart, MessageSquareHeart } from "lucide-react";
+import { CalendarHeart, CalendarPlus, MessageSquareHeart } from "lucide-react";
 import { Badge, Button, Card, CardHeading } from "@weft/ui/components";
 import { CHECKIN_QUESTIONS, LifeEventKind } from "@weft/contracts";
 import { fmtDate } from "../app/format";
@@ -16,6 +17,8 @@ export const W4_PEOPLE_TID = {
   electPlan: (type: string) => `portal-elect-plan-${type}`, electTier: (type: string) => `portal-elect-tier-${type}`, electDeferral: "portal-elect-deferral",
   electSubmit: "portal-elect-submit", electNoChange: "portal-elect-no-change",
   checkinSection: "portal-checkin", checkinField: (k: string) => `portal-checkin-${k}`, checkinSubmit: "portal-checkin-submit", status: "portal-w4-status", error: "portal-w4-error",
+  timeOffSection: "portal-time-off", timeOffBalance: (id: string) => `portal-time-off-balance-${id}`, timeOffPolicy: "portal-time-off-policy", timeOffStart: "portal-time-off-start",
+  timeOffEnd: "portal-time-off-end", timeOffReason: "portal-time-off-reason", timeOffSubmit: "portal-time-off-submit", timeOffRow: (id: string) => `portal-time-off-request-${id}`,
 } as const;
 const T = W4_PEOPLE_TID;
 
@@ -36,6 +39,13 @@ interface Win { id: string; status: string; opensOn: string; closesOn: string; l
 interface Plan { id: string; name: string; type: string; carrier: string }
 interface Mine { workerId: string | null; lifeEvents: Ev[]; windows: Win[]; plans: Plan[] }
 interface Checkin { id: string; dueOn: string; status: string; submittedAt: string | null }
+interface Balance { policyId: string; policyName: string; typeName: string; availableMinutes: number | null; available: string | null }
+interface TimeOffReq { id: string; policyName: string; status: string; startDate: string; endDate: string; requestedMinutes: number }
+interface MyTimeOff { workerId: string | null; balances: Balance[]; requests: TimeOffReq[] }
+const REQ_STATUS: Record<string, { label: string; tone: "green" | "gray" | "amber" | "blue" | "red" }> = {
+  pending: { label: "Waiting for approval", tone: "amber" }, approved: { label: "Approved", tone: "green" }, denied: { label: "Not approved", tone: "red" },
+  cancelled: { label: "Cancelled", tone: "gray" }, taken: { label: "Taken", tone: "gray" },
+};
 type Body = { ok?: boolean; summary?: string; message?: string; issues?: { path: string; message: string }[]; extra?: { issues?: { path: string; message: string }[] } } | null;
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -60,10 +70,12 @@ export function PortalW4People({ principal }: { workerId: string; principal: str
   const api = usePortal(principal);
   const [mine, setMine] = useState<Mine | null>(null);
   const [checks, setChecks] = useState<Checkin[]>([]);
+  const [timeOff, setTimeOff] = useState<MyTimeOff | null>(null);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const load = useCallback(async () => {
     setMine(await api.get<Mine>("/v1/portal/life-events"));
     setChecks((await api.get<Checkin[]>("/v1/portal/checkins")) ?? []);
+    setTimeOff(await api.get<MyTimeOff>("/v1/portal/time-off"));
   }, [api]);
   useEffect(() => { void load(); }, [load]);
   const after = async (r: { ok: boolean; text: string }) => { setNote(r); if (r.ok) await load(); return r.ok; };
@@ -95,7 +107,49 @@ export function PortalW4People({ principal }: { workerId: string; principal: str
           <ReportForm onSubmit={(b) => api.post("/v1/portal/life-events", b).then(after)} />
         </Card>
       </section>
+      {timeOff?.workerId ? <TimeOffSection mine={timeOff} onSubmit={(b) => api.post("/v1/portal/time-off/requests", b).then(after)} /> : null}
     </>
+  );
+}
+
+function TimeOffSection({ mine, onSubmit }: { mine: MyTimeOff; onSubmit: (b: { policyId: string; startDate: string; endDate: string; reason: string }) => Promise<boolean> }) {
+  const blank = { policyId: mine.balances[0]?.policyId ?? "", startDate: "", endDate: "", reason: "" };
+  const [f, setF] = useState(blank);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => { e.preventDefault(); setBusy(true); if (await onSubmit({ ...f, endDate: f.endDate || f.startDate })) setF(blank); setBusy(false); };
+  const recent = [...mine.requests].sort((a, b) => (a.startDate < b.startDate ? 1 : -1)).slice(0, 6);
+  return (
+    <section data-testid={T.timeOffSection} className="flex flex-col gap-3">
+      <CardHeading icon={<CalendarPlus />}>Request time off</CardHeading>
+      <Card className="p-4">
+        {mine.balances.length ? (
+          <ul className="mb-4 flex flex-wrap gap-x-6 gap-y-2">
+            {mine.balances.map((b) => <li key={b.policyId} data-testid={T.timeOffBalance(b.policyId)} className="text-2"><span className="text-gray-11">{b.policyName}</span> {b.available !== null ? <><span className="font-medium tabular-nums">{b.available}</span> <span className="text-1 text-gray-10">available</span></> : <span className="text-1 text-gray-10">starts with your first request</span>}</li>)}
+          </ul>
+        ) : <p className="mb-3 text-2 text-gray-11">You have no time-off policies yet. The people team sets them up.</p>}
+        {mine.balances.length ? (
+          <form onSubmit={(e) => void submit(e)} className="grid gap-3 sm:grid-cols-3">
+            <Field label="Type"><select data-testid={T.timeOffPolicy} className={field} value={f.policyId} onChange={(e) => setF({ ...f, policyId: e.target.value })}>{mine.balances.map((b) => <option key={b.policyId} value={b.policyId}>{b.policyName}</option>)}</select></Field>
+            <Field label="First day off"><input data-testid={T.timeOffStart} type="date" required className={field} value={f.startDate} onChange={(e) => setF({ ...f, startDate: e.target.value })} /></Field>
+            <Field label="Last day off"><input data-testid={T.timeOffEnd} type="date" className={field} value={f.endDate} min={f.startDate || undefined} onChange={(e) => setF({ ...f, endDate: e.target.value })} /></Field>
+            <div className="sm:col-span-3"><Field label="Note for your approver (optional)"><textarea data-testid={T.timeOffReason} maxLength={400} className={area} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field></div>
+            <p className="text-1 text-gray-10 sm:col-span-3">Weekends and company holidays do not count against your balance.</p>
+            <div><Button type="submit" variant="primary" disabled={busy} data-testid={T.timeOffSubmit}>{busy ? "Sending..." : "Request time off"}</Button></div>
+          </form>
+        ) : null}
+        {recent.length ? (
+          <ul className="mt-4 flex flex-col gap-2 border-t border-[var(--app-border)] pt-3">
+            {recent.map((r) => (
+              <li key={r.id} data-testid={T.timeOffRow(r.id)} data-status={r.status} className="flex flex-wrap items-center gap-2 text-2">
+                <span className="font-medium">{r.policyName}</span>
+                <span className="text-gray-10">{fmtDate(r.startDate, { month: "short", day: "numeric" })}{r.endDate !== r.startDate ? ` to ${fmtDate(r.endDate, { month: "short", day: "numeric" })}` : ""}</span>
+                <Badge tone={REQ_STATUS[r.status]?.tone ?? "gray"}>{REQ_STATUS[r.status]?.label ?? r.status}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </Card>
+    </section>
   );
 }
 

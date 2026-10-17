@@ -2,6 +2,7 @@
 // A new hire reports a marriage in the portal; the window it opens shows its close date and the rule it follows; the
 // hire picks a medical tier and the window closes with one carrier filing queued. Then the hire answers the five-question
 // check-in, and the manager's summary email carries the scale and the yes or no answers but none of the written words.
+// Last, the hire asks for a day off with the Request time off form and sees it waiting for approval.
 // Run on the track ports, for example: WEFT_E2E_WEB_PORT=4846 WEFT_E2E_API_PORT=4847 pnpm e2e gp20-people
 import { expect, test, WeftApi } from "./fixtures";
 
@@ -10,11 +11,13 @@ const T = {
   lifeRow: (id: string) => `portal-life-event-${id}`, windowCard: (id: string) => `portal-window-${id}`,
   electPlan: (t: string) => `portal-elect-plan-${t}`, electTier: (t: string) => `portal-elect-tier-${t}`, electSubmit: "portal-elect-submit",
   checkin: "portal-checkin", checkinField: (k: string) => `portal-checkin-${k}`, checkinSubmit: "portal-checkin-submit", status: "portal-w4-status",
+  timeOff: "portal-time-off", timeOffPolicy: "portal-time-off-policy", timeOffStart: "portal-time-off-start", timeOffEnd: "portal-time-off-end",
+  timeOffReason: "portal-time-off-reason", timeOffSubmit: "portal-time-off-submit", timeOffRow: (id: string) => `portal-time-off-request-${id}`,
 } as const;
 
 type Mine = { lifeEvents: { id: string; status: string; windowId: string | null; closesOn: string | null }[]; windows: { id: string; status: string }[]; plans: { id: string; name: string; type: string }[] };
 
-test("portal life event and check-in: report, elect in the window, answer the check-in", async ({ page, weft, request }) => {
+test("portal life event, check-in and time off: report, elect in the window, answer the check-in, request a day off", async ({ page, weft, request }) => {
   const offerId = (await weft.post<{ data: { offer_id: string } }>("/v1/offers", { candidateFirst: "Wren", candidateLast: "Abara", candidateEmail: "wren.abara@candidate.example", title: "Controls Engineer", departmentId: "dpt_hardware", workState: "CA", baseCents: 12_400_000, startDate: "2026-11-02" })).data.offer_id;
   const sent = (await weft.post<{ data: { persona_principal_id: string; reserved_worker_id: string } }>(`/v1/offers/${offerId}/send`)).data;
   const persona = new WeftApi(request, sent.persona_principal_id);
@@ -68,5 +71,22 @@ test("portal life event and check-in: report, elect in the window, answer the ch
     await expect(page.getByTestId(T.checkin)).toHaveCount(0);
     const checks = await persona.get<{ id: string; status: string; settled: number }[]>("/v1/portal/checkins");
     expect(checks).toEqual([expect.objectContaining({ status: "submitted", settled: 4 })]);
+  });
+
+  await test.step("the Request time off form files a day off for the hire's own record", async () => {
+    const box = page.getByTestId(T.timeOff);
+    await expect(box).toBeVisible();
+    const before = await persona.get<{ balances: { policyId: string; policyName: string }[]; requests: unknown[] }>("/v1/portal/time-off");
+    expect(before.balances.length).toBeGreaterThan(0);
+    expect(before.requests).toHaveLength(0);
+    await box.getByTestId(T.timeOffPolicy).selectOption(before.balances[0]!.policyId);
+    await box.getByTestId(T.timeOffStart).fill("2026-11-25");
+    await box.getByTestId(T.timeOffEnd).fill("2026-11-25");
+    await box.getByTestId(T.timeOffReason).fill("Travel the day before the holiday");
+    await box.getByTestId(T.timeOffSubmit).click();
+    await expect(page.getByTestId(T.status)).toContainText("Requested");
+    const after = await persona.get<{ requests: { id: string; status: string; startDate: string }[] }>("/v1/portal/time-off");
+    expect(after.requests).toEqual([expect.objectContaining({ status: "pending", startDate: "2026-11-25" })]);
+    await expect(box.getByTestId(T.timeOffRow(after.requests[0]!.id))).toHaveAttribute("data-status", "pending");
   });
 });

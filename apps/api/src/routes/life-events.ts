@@ -96,8 +96,11 @@ export function lifeEventsRoutes(weft: Weft): Hono<WeftEnv> {
     if (bal instanceof Response) return bal;
     const reqs = await read(c, "time_off.list_requests", { worker_id: w });
     if (reqs instanceof Response) return reqs;
-    const balances = (bal.data.balances as { policyId: string; policyName: string; typeName: string; availableMinutes: number; available_display: string }[])
-      .map((b) => ({ policyId: b.policyId, policyName: b.policyName, typeName: b.typeName, availableMinutes: b.availableMinutes, available: b.available_display }));
+    const s = need(c.var.session);
+    const assigned = (bal.data.balances as { policyId: string; policyName: string; typeName: string; availableMinutes: number; available_display: string }[])
+      .map((b) => ({ policyId: b.policyId, policyName: b.policyName, typeName: b.typeName, availableMinutes: b.availableMinutes as number | null, available: b.available_display as string | null }));
+    // A hire after the seed has no assignments until the first request: offer the policies their state calls for.
+    const balances = assigned.length ? assigned : (await le.requestablePolicies(weft.db, s.companyId, w)).map((p) => ({ policyId: p.policyId, policyName: p.policyName, typeName: p.typeName, availableMinutes: null, available: null }));
     const requests = (reqs.data.requests as { id: string; policyName: string; status: string; startDate?: string; endDate?: string; startAt?: string; endAt?: string; requestedMinutes: number }[])
       .map((x) => ({ id: x.id, policyName: x.policyName, status: x.status, startDate: (x.startDate ?? x.startAt ?? "").slice(0, 10), endDate: (x.endDate ?? x.endAt ?? "").slice(0, 10), requestedMinutes: x.requestedMinutes }));
     return c.json({ workerId: w, balances, requests });
