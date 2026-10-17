@@ -117,3 +117,9 @@ result. For the test split the report shows per-group counts only.
 Every live trial first checks the suite cap and the shared ledger (`scripts/wave-ledger.ts`, `assertWaveBudget`
 with the task's worst case) and appends its cost after (`appendWaveSpend`, one entry per trial), on top of the repo's
 spend ledger and live guard. The run stops cleanly with `stoppedEarly` set when the next trial could cross a cap.
+
+A model priced above Luna scales each task's worst case (`budget.maxUsd`, written at Luna prices) by its run cap factor
+(10 for `gpt-5.6-terra`). For an experiment kept on its own ledger, `WEFT_WAVE_LEDGER` names the file and
+`WEFT_WAVE_USD_CAP` sets its total cap (default the wave 4 cap, $3.00). Each live run records `model`, `effort`
+(`WEFT_EFFORT` or the per-stage `low`), `effort_source`, `background_llm` (`WEFT_BACKGROUND_LLM=1`), `k` and the full
+`harness_commit` in the Phoenix experiment metadata and the result file, and each trial's `detail.reasoningTokens`.

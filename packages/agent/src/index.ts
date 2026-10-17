@@ -2,7 +2,7 @@
 // Imports only @weft/contracts, @weft/grounding, its own run store tables and its providers (tests/boundaries.test.ts).
 export { createSpendLedger, capsFromEnv, SpendLockTimeout, type SpendLedgerOptions, type SpendCaps, type WeftSpendLedger } from "./spend";
 export type { SpendLedgerOptions as CreateSpendLedgerOptions } from "./spend";
-export { createProvider, isTestEnv, ProviderError, DEFAULT_MODEL, DEFAULT_SCRIPTS_DIR, type CreateProviderOptions } from "./providers/factory";
+export { createProvider, isTestEnv, ProviderError, DEFAULT_MODEL, DEFAULT_SCRIPTS_DIR, EFFORT_OVERRIDES, effortOverrideFromEnv, openaiSettingsFromEnv, type CreateProviderOptions } from "./providers/factory";
 export { openaiProvider, createOpenAIClient, buildResponsesRequest, handleResponse, historyToInput, mapUsage, renderNotice, OPENAI_FIXED, OPENAI_ERRORS, type OpenAIProviderOptions } from "./providers/openai";
 export { scriptedProvider, applyTemplates, parseContext, SCRIPTED_LABEL, ScriptExpectationError, type Script, type ScriptStep, type ScriptOutput, type ScriptedProviderOptions } from "./providers/scripted";
 export { createAgentRuntime, CHAT_TOOLS, DRAFT_TOOLS, DEFAULT_COMPANY_ID, type CreateAgentRuntimeOptions, type RoutinesView, type ChatContextSource, type WeftAgentRuntime } from "./runtime";
@@ -12,7 +12,7 @@ export { buildTrace, summarize, stageLabel, type TraceSummary, type StageRow } f
 export { createRunQueue, concurrencyFor, type RunQueue } from "./queue";
 export { routinePack, chatPack, routineDraftPack, approxTokens, ROUTINE_BUDGET_TOKENS, CHAT_BUDGET_TOKENS, type OpenLoop } from "./context";
 export { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
-export { LUNA, CLAUDE_OPUS_5_5, PRICES_BY_PROVIDER, stepCostUsd, reserveUsd, usdToMicros, pricesFromEnv, pricesFor, type Prices } from "./cost";
+export { LUNA, CLAUDE_OPUS_5_5, TERRA, PRICES_BY_PROVIDER, PRICES_BY_MODEL, RUN_CAP_SCALE_BY_MODEL, runCapScaleFor, stepCostUsd, reserveUsd, usdToMicros, pricesFromEnv, pricesFor, type Prices } from "./cost";
 export { loadSecret, parseSecretsFile } from "./secrets";
 export { canonicalJson, sha256, newNonce, escapeTagText } from "./canonical";
 export { lockedWrite, isBusy } from "./busy";

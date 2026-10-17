@@ -19,6 +19,15 @@ export function readWaveSpend(path = waveLedgerPath()): WaveSpendEntry[] {
   return parsed.map((e) => WaveSpendEntry.parse(e));
 }
 
+/** The ledger's total cap: WAVE4_USD_CAP, or WEFT_WAVE_USD_CAP for a ledger kept for another spend (an experiment). */
+export function waveCapUsd(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.WEFT_WAVE_USD_CAP;
+  if (raw === undefined || raw.trim() === "") return WAVE4_USD_CAP;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 10) throw new Error(`WEFT_WAVE_USD_CAP=${raw.slice(0, 20)} is not $0 to $10`);
+  return n;
+}
+
 export function waveSpentUsd(path = waveLedgerPath()): number {
   return readWaveSpend(path).reduce((s, e) => s + e.usd, 0);
 }
@@ -28,7 +37,9 @@ export function assertWaveBudget(input: { stage: string; stageCapUsd: number; ne
   const entries = readWaveSpend(path);
   const spent = entries.reduce((s, e) => s + e.usd, 0);
   const stageSpent = entries.filter((e) => e.stage === input.stage).reduce((s, e) => s + e.usd, 0);
-  if (spent + input.nextUsd > WAVE4_USD_CAP) throw new Error(`WAVE_CAP: wave 4 has spent $${spent.toFixed(4)} of $${WAVE4_USD_CAP.toFixed(2)}; $${input.nextUsd.toFixed(4)} more would cross it`);
+  const cap = waveCapUsd();
+  const who = process.env.WEFT_WAVE_USD_CAP?.trim() ? "this ledger" : "wave 4";
+  if (spent + input.nextUsd > cap) throw new Error(`WAVE_CAP: ${who} has spent $${spent.toFixed(4)} of $${cap.toFixed(2)}; $${input.nextUsd.toFixed(4)} more would cross it`);
   if (stageSpent + input.nextUsd > input.stageCapUsd) throw new Error(`WAVE_CAP: stage ${input.stage} has spent $${stageSpent.toFixed(4)} of its $${input.stageCapUsd.toFixed(2)}`);
   return { spent, stageSpent };
 }
@@ -65,6 +76,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const entries = readWaveSpend();
   const byStage = new Map<string, number>();
   for (const e of entries) byStage.set(e.stage, (byStage.get(e.stage) ?? 0) + e.usd);
-  console.log(`wave 4 ledger ${waveLedgerPath()}: $${waveSpentUsd().toFixed(4)} of $${WAVE4_USD_CAP.toFixed(2)} in ${entries.length} entries`);
+  console.log(`wave 4 ledger ${waveLedgerPath()}: $${waveSpentUsd().toFixed(4)} of $${waveCapUsd().toFixed(2)} in ${entries.length} entries`);
   for (const [stage, usd] of byStage) console.log(`  ${stage}: $${usd.toFixed(4)}`);
 }

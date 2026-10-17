@@ -19,6 +19,8 @@ import { loadTasks, REPO_ROOT } from "./loader";
 import { finalCanaryScan, newState, planTrials, runPlain, runTrial, settleTrial, SuiteStop, type RunnerOptions } from "./runner";
 import { metrics, renderReport, type SuiteResultFile } from "./report";
 import { buildWorld, worldDigest, worldKey } from "./worlds/index";
+import { effortOverrideFromEnv } from "../../packages/agent/src/providers/factory";
+import { runCapScaleFor } from "../../packages/agent/src/cost";
 
 export interface CliArgs {
   cmd: "run" | "validate" | "digests"; write: boolean; gate: boolean; splits: EvalSplit[]; variants: EvalVariant[] | null; k: number; ids: string[] | null; legacy: boolean;
@@ -60,6 +62,20 @@ function selectTasks(args: CliArgs): EvalTask[] {
 }
 
 const sha = () => { try { return execSync("git rev-parse --short HEAD", { cwd: REPO_ROOT }).toString().trim(); } catch { return "nogit"; } };
+const fullSha = () => { try { return execSync("git rev-parse HEAD", { cwd: REPO_ROOT }).toString().trim(); } catch { return "nogit"; } };
+
+/**
+ * What a run records about its model setup (experiment metadata and the result file): the model (WEFT_MODEL, default
+ * Luna), the reasoning effort (WEFT_EFFORT when set, else the per-stage default "low"), whether unattended routine runs
+ * call the model (WEFT_BACKGROUND_LLM=1) and the cost factor on each task's worst case. A bad WEFT_EFFORT throws here,
+ * before any world is built or any money is spent.
+ */
+export function runSetup(provider: CliArgs["provider"], env: NodeJS.ProcessEnv = process.env): { model: string; effort: string; effortSource: "WEFT_EFFORT" | "default"; backgroundLlm: boolean; costScale: number } {
+  if (provider !== "live") return { model: "scripted", effort: "low", effortSource: "default", backgroundLlm: false, costScale: 1 };
+  const model = (env.WEFT_MODEL ?? "").trim() || "gpt-5.6-luna";
+  const override = effortOverrideFromEnv(env);
+  return { model, effort: override ?? "low", effortSource: override ? "WEFT_EFFORT" : "default", backgroundLlm: env.WEFT_BACKGROUND_LLM === "1", costScale: runCapScaleFor("openai", model) };
+}
 
 /** Rebuilds each distinct world once and compares (or, with --write, pins) every task's digest. */
 export async function digests(tasks: EvalTask[], opts: { write: boolean; baseDir: string; files?: Map<string, string> }): Promise<{ id: string; pinned: string | null; actual: string }[]> {
@@ -117,8 +133,11 @@ export async function main(argv: string[]): Promise<number> {
   const tasks = selectTasks(args);
   const variants: EvalVariant[] = args.variants ?? ["default", "chat_can_propose"];
   const harnessSha = sha();
+  const harnessCommit = fullSha();
+  const setup = runSetup(args.provider);
+  if (args.provider === "live") console.error(`model ${setup.model}, effort ${setup.effort} (${setup.effortSource}), WEFT_BACKGROUND_LLM ${setup.backgroundLlm ? "1" : "unset"}, commit ${harnessCommit}`);
   const opts: RunnerOptions = {
-    mode: args.provider, baseDir, suiteCapUsd: args.cap, harnessSha, requireDigest: true,
+    mode: args.provider, baseDir, suiteCapUsd: args.cap, harnessSha, requireDigest: true, costScale: setup.costScale,
     wave: { stage: args.stage, stageCapUsd: args.stageCap ?? args.cap },
     log: (l) => console.error(l),
   };
@@ -144,7 +163,10 @@ export async function main(argv: string[]): Promise<number> {
         const name = args.experiment ? (combos.length === 1 ? args.experiment : `${args.experiment}-${split}-${variant}`) : `weft-eval-${startedAt.slice(0, 10)}-${harnessSha}-${variant}`;
         const { record } = await ph.recordExperiment({
           baseUrl: capture.url, publicUrl, split, variant, tasks: these, k: args.k, name,
-          metadata: { harness_sha: harnessSha, model: process.env.WEFT_MODEL || "gpt-5.6-luna", provider: args.provider, effort: "low", split, phoenix_version: version, label: args.experiment, default_settings: variant === "default" },
+          metadata: {
+            harness_sha: harnessSha, harness_commit: harnessCommit, model: setup.model, provider: args.provider, effort: setup.effort, effort_source: setup.effortSource,
+            background_llm: setup.backgroundLlm, k: args.k, split, phoenix_version: version, label: args.experiment, default_settings: variant === "default",
+          },
           trial: async (task, n) => {
             if (state.stoppedEarly) return null;
             try { const t = await runTrial({ task, variant, trial: n }, opts, state); settleTrial(t, opts, state); return t; } catch (e) { if (e instanceof SuiteStop) return null; throw e; }
@@ -163,8 +185,8 @@ export async function main(argv: string[]): Promise<number> {
   }
   const wholeRun = finalCanaryScan(state, capture?.payloads ?? []);
   const result: SuiteResultFile = {
-    startedAt, endedAt: new Date().toISOString(), harnessSha, promptVersion: await promptVersion(), model: args.provider === "live" ? (process.env.WEFT_MODEL || "gpt-5.6-luna") : "scripted",
-    effort: "low", phoenixProject, experimentIds, splits: [...new Set(tasks.map((t) => t.split))].sort() as EvalSplit[], k: args.k,
+    startedAt, endedAt: new Date().toISOString(), harnessSha, harnessCommit, backgroundLlm: setup.backgroundLlm, promptVersion: await promptVersion(), model: setup.model,
+    effort: setup.effort, phoenixProject, experimentIds, splits: [...new Set(tasks.map((t) => t.split))].sort() as EvalSplit[], k: args.k,
     suiteCapUsd: args.cap, spentUsd: state.spentUsd, stoppedEarly: state.stoppedEarly, trials: state.trials, variants, canaryHitsWholeRun: wholeRun,
   };
   mkdirSync(args.outDir, { recursive: true });

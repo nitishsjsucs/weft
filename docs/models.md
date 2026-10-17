@@ -17,7 +17,8 @@ Weft puts every model behind one `ModelProvider` interface (`packages/contracts/
 Notes:
 
 - Luna is called only through `/v1/responses`. On `/v1/chat/completions` it rejects function tools unless reasoning is off, so that endpoint is never used with tools.
-- `gpt-5.6-terra` is an optional escalation model id (`WEFT_ESCALATION_MODEL`), unset and off by default (P1).
+- `gpt-5.6-terra` is an optional escalation model id (`WEFT_ESCALATION_MODEL`), unset and off by default (P1). `WEFT_MODEL=gpt-5.6-terra` selects it for the agent and the eval runner; it is priced from its own row in `PRICES_BY_MODEL` ($2.00 input, $0.20 cached input, $12.00 output per million) and its runs get a 10x run cap (`RUN_CAP_SCALE_BY_MODEL`), or its first step would not fit the $0.10 cap.
+- `WEFT_EFFORT=low|medium|high` is an experiment-only override, unset by default. When set, the OpenAI provider sends that reasoning effort on every call, and the runtime records it on every run it opens with that provider (run row, prefix hash, trace). Unset, each stage keeps its own effort (`low` today). Any other value throws `PROVIDER_CONFIG`. It never changes a default.
 - Unattended cron runs use deterministic templates unless `WEFT_BACKGROUND_LLM` is set; attended runs ("Run review now", chat) use the configured provider.
 - Automated tests always use `scripted`. The provider factory throws `LIVE_PROVIDER_IN_TEST` for openai, claude, mlx and llama under vitest unless `WEFT_LIVE_OPENAI=1`.
 - A missing setting throws `PROVIDER_CONFIG` naming the variable: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `WEFT_LOCAL_BASE_URL` (validated with `LocalProviderConfig`).

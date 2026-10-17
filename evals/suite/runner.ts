@@ -32,6 +32,9 @@ export interface RunnerOptions {
   /** Collects the OTLP payload exported so far (the capture proxy in phoenix.ts); default none. */
   otlp?: () => string[];
   log?: (line: string) => void;
+  /** Live: the factor on each task's worst case (budget.maxUsd, written at Luna prices) for a model priced above Luna,
+   * runCapScaleFor(provider, model); default 1. */
+  costScale?: number;
 }
 
 /**
@@ -50,6 +53,8 @@ export type SuiteTrialDetail = TrialDetail & {
   groundingStrict?: StrictGrounding | null;
   /** Who served the task's run: headline metrics count "model" trials only; the others get their own table. */
   providerKind?: TrialProviderKind;
+  /** Reasoning tokens over the trial's model calls (a part of outputTokens, already priced as output). */
+  reasoningTokens?: number;
 };
 export const detailOf = (t: SuiteTrial): SuiteTrialDetail => t.detail as SuiteTrialDetail;
 
@@ -71,7 +76,7 @@ const emptyDetail = (digest: string | null, chatCanPropose = false): SuiteTrialD
   proposals: null, invalidInput: 0, unknownReference: 0, unknownCommand: 0, groundingFallback: false,
   unsafe: { g1: 0, taintMiss: 0, canaryHits: 0 }, triggering: { missedClarify: false, unneededClarify: false, falseRefusal: false, missedRefusal: false },
   timeToFirstModelMs: null, modelMs: 0, digest, chatCanPropose, finalText: null, actions: [], calls: [], routine: null, judgesPending: [],
-  groundedBy: null, recallGap: null, groundingStrict: null, providerKind: "no_run",
+  groundedBy: null, recallGap: null, groundingStrict: null, providerKind: "no_run", reasoningTokens: 0,
 });
 
 function errorTrial(spec: TrialSpec, error: string, digest: string | null, wallMs = 0): SuiteTrial {
@@ -94,7 +99,7 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
   const taint = g7(ev, expect);
   const inv = invalidCounts(ev);
   const model = ev.steps.filter((s) => s.kind === "model_call");
-  const tokens = model.reduce((t, s) => ({ input: t.input + (s.usage?.input ?? 0), cached: t.cached + (s.usage?.cached ?? 0), output: t.output + (s.usage?.output ?? 0) }), { input: 0, cached: 0, output: 0 });
+  const tokens = model.reduce((t, s) => ({ input: t.input + (s.usage?.input ?? 0), cached: t.cached + (s.usage?.cached ?? 0), output: t.output + (s.usage?.output ?? 0), reasoning: t.reasoning + (s.usage?.reasoning ?? 0) }), { input: 0, cached: 0, output: 0, reasoning: 0 });
   const hard = graders.filter((g) => g.applies && g.grader !== "G10");
   const success = !ev.error && hard.every((g) => g.pass) && endFails.length === 0;
   const g4 = graders.find((g) => g.grader === "G4")!;
@@ -123,6 +128,7 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
     recallGap: gap,
     groundingStrict: ground.strict ?? null,
     providerKind: providerKind(ev),
+    reasoningTokens: tokens.reasoning,
   };
   return {
     taskId: spec.task.id, split: spec.task.split, group: spec.task.group, variant: spec.variant, trial: spec.trial, success, graders, judges: [],
@@ -137,8 +143,8 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
 }
 
 /** Throws a STOP reason when the next trial's worst case would cross the suite cap or the wave cap. */
-export function checkCaps(state: Pick<RunnerState, "spentUsd">, task: EvalTask, opts: Pick<RunnerOptions, "suiteCapUsd" | "wave" | "mode">): string | null {
-  const next = task.budget.maxUsd;
+export function checkCaps(state: Pick<RunnerState, "spentUsd">, task: EvalTask, opts: Pick<RunnerOptions, "suiteCapUsd" | "wave" | "mode" | "costScale">): string | null {
+  const next = task.budget.maxUsd * (opts.mode === "live" ? Math.max(1, opts.costScale ?? 1) : 1);
   if (state.spentUsd + next > opts.suiteCapUsd) return `SUITE_CAP: spent $${state.spentUsd.toFixed(4)} of the $${opts.suiteCapUsd.toFixed(2)} suite cap; ${task.id} may cost up to $${next.toFixed(4)}`;
   if (opts.wave) {
     try { assertWaveBudget({ stage: opts.wave.stage, stageCapUsd: opts.wave.stageCapUsd, nextUsd: opts.mode === "live" ? next : 0 }, opts.wave.ledgerPath); } catch (e) { return (e as Error).message; }

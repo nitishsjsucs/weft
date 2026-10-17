@@ -5,7 +5,7 @@
 // the variable to set.
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LocalProviderConfig, type ModelProvider, type SpendLedger } from "@weft/contracts";
+import { LocalProviderConfig, type Effort, type ModelProvider, type SpendLedger } from "@weft/contracts";
 import { loadSecret, type Env } from "../secrets";
 import { chatCompletionsProvider, LOCAL_DEFAULT_MODELS, type LocalMode } from "./chat-completions";
 import { CLAUDE_MODEL, claudeProvider } from "./claude";
@@ -42,6 +42,29 @@ export function localConfigFromEnv(env: Env, mode: LocalMode): LocalProviderConf
   return parsed.data;
 }
 
+/** The efforts WEFT_EFFORT accepts. */
+export const EFFORT_OVERRIDES = ["low", "medium", "high"] as const satisfies readonly Effort[];
+
+/**
+ * The experiment-only reasoning effort override (WEFT_EFFORT=low|medium|high). When set, the OpenAI provider sends it
+ * on every model call and the runtime records it on every run it opens with that provider; unset (or empty) returns
+ * null and today's per-stage efforts apply unchanged. Any other value throws PROVIDER_CONFIG before a call is made.
+ */
+export function effortOverrideFromEnv(env: Env): Effort | null {
+  const raw = (env.WEFT_EFFORT ?? "").trim();
+  if (!raw) return null;
+  if (!(EFFORT_OVERRIDES as readonly string[]).includes(raw)) {
+    throw new ProviderError("PROVIDER_CONFIG", `WEFT_EFFORT=${raw.slice(0, 20)} is not one of ${EFFORT_OVERRIDES.join(", ")}; unset it for the per-stage defaults`);
+  }
+  return raw as Effort;
+}
+
+/** The OpenAI provider's settings from the environment: WEFT_MODEL (default Luna), WEFT_EFFORT and WEFT_STRIP_REPLAY_IDS. */
+export function openaiSettingsFromEnv(env: Env): { model: string; effort?: Effort; stripReplayIds: boolean } {
+  const effort = effortOverrideFromEnv(env);
+  return { model: (env.WEFT_MODEL ?? "").trim() || DEFAULT_MODEL, ...(effort ? { effort } : {}), stripReplayIds: env.WEFT_STRIP_REPLAY_IDS === "1" };
+}
+
 export function isTestEnv(env: Env, testMode: boolean): boolean {
   return testMode || Boolean(env.VITEST) || env.NODE_ENV === "test";
 }
@@ -57,7 +80,7 @@ export function createProvider(opts: CreateProviderOptions): ModelProvider {
     case "openai": {
       const apiKey = loadSecret("OPENAI_API_KEY", env);
       if (!apiKey) throw new ProviderError("PROVIDER_CONFIG", "OPENAI_API_KEY is not set in the environment or in WEFT_SECRETS_FILE");
-      return openaiProvider({ apiKey, model: (env.WEFT_MODEL ?? "").trim() || DEFAULT_MODEL, stripReplayIds: env.WEFT_STRIP_REPLAY_IDS === "1" });
+      return openaiProvider({ apiKey, ...openaiSettingsFromEnv(env) });
     }
     case "claude": {
       const apiKey = loadSecret("ANTHROPIC_API_KEY", env);

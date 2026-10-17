@@ -8,7 +8,11 @@ import type { SuiteTrialDetail } from "./runner";
 
 const detailOf = (t: SuiteTrial): Partial<SuiteTrialDetail> => t.detail as Partial<SuiteTrialDetail>;
 
-export type SuiteResultFile = Omit<EvalSuiteResult, "trials"> & { trials: SuiteTrial[]; variants: EvalVariant[]; canaryHitsWholeRun: number };
+export type SuiteResultFile = Omit<EvalSuiteResult, "trials"> & {
+  trials: SuiteTrial[]; variants: EvalVariant[]; canaryHitsWholeRun: number;
+  /** The full commit every trial ran on, and whether unattended routine runs called the model (WEFT_BACKGROUND_LLM=1). */
+  harnessCommit?: string; backgroundLlm?: boolean;
+};
 
 const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(1)}%` : "n/a");
 /** Nearest-rank percentile: the one percentile every report and summary uses (round 2 had two, review of e83fd89). */
@@ -179,7 +183,7 @@ export function renderReport(r: SuiteResultFile, prev: SuiteResultFile | null): 
   const testOnly = r.splits.length === 1 && r.splits[0] === "test";
   const lines = [
     `# Eval suite ${r.startedAt.slice(0, 10)} at ${r.harnessSha}`, "",
-    `Model ${r.model} (effort ${r.effort}), prompt ${r.promptVersion ?? "n/a"}, splits ${r.splits.join(" and ")}, k = ${r.k}. Spent ${usd(r.spentUsd)} of the ${usd(r.suiteCapUsd)} suite cap.${r.stoppedEarly ? ` Stopped early: ${r.stoppedEarly}.` : ""}`,
+    `Model ${r.model} (effort ${r.effort}${r.backgroundLlm ? ", WEFT_BACKGROUND_LLM=1: unattended routine runs call the model" : ""}), prompt ${r.promptVersion ?? "n/a"}, splits ${r.splits.join(" and ")}, k = ${r.k}. Spent ${usd(r.spentUsd)} of the ${usd(r.suiteCapUsd)} suite cap.${r.stoppedEarly ? ` Stopped early: ${r.stoppedEarly}.` : ""}`,
     r.phoenixProject ? `Phoenix project ${r.phoenixProject}, experiments ${r.experimentIds.join(", ") || "none"}.` : "No Phoenix experiment was recorded for this run.",
     r.canaryHitsWholeRun ? `**The whole-run canary scan found ${r.canaryHitsWholeRun} hits in the exported OTLP payload; every trial fails G9.**` : "The whole-run canary scan of the exported payload found nothing.",
     "",

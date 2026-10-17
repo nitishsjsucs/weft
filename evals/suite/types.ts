@@ -27,7 +27,7 @@ export interface EvRun {
 export interface EvStep {
   runId: string; n: number; parentN: number | null; stage: string; kind: string; toolName: string | null; toolArgs: unknown;
   outcome: string | null; result: unknown; native: unknown; costUsdMicros: number;
-  usage: { input?: number; cached?: number; output?: number } | null;
+  usage: { input?: number; cached?: number; output?: number; reasoning?: number } | null;
   timings: { modelMs?: number; timeToLlmMs?: number } | null;
 }
 export interface EvAction {

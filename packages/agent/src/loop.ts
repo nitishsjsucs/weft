@@ -8,7 +8,7 @@ import type {
 } from "@weft/contracts";
 import { check, requestTrustOf, runEvidence, type RunEvidence } from "@weft/grounding";
 import { canonicalJson } from "./canonical";
-import { addUsage, reserveUsd, RUN_CAP_SCALE, stepCostUsd, usdToMicros, type Prices } from "./cost";
+import { addUsage, reserveUsd, runCapScaleFor, stepCostUsd, usdToMicros, type Prices } from "./cost";
 import { approxTokens } from "./context";
 import { NOOP_LOOP_TRACE, recallDocs, runInputOf, traceRun, type LoopTrace } from "./otel";
 import { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
@@ -193,8 +193,8 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   if (!setup) throw new Error(`runLoop: run ${run.id} has no context step`);
   const budget = BUDGETS[setup.promptKind];
   const stepBudget = run.budget.steps || budget.steps;
-  // A provider priced far above Luna (Claude) gets a scaled run cap, here and in the ledger, or no step fits.
-  const runCapScale = RUN_CAP_SCALE[provider.id] ?? 1;
+  // A provider or model priced far above Luna (Claude, Terra) gets a scaled run cap, here and in the ledger, or no step fits.
+  const runCapScale = runCapScaleFor(provider.id, run.model);
   const usdBudget = (run.budget.usd || budget.usd) * runCapScale;
   const prompt = frozenPrompt(setup.promptKind);
   assertToolCap(setup.allowlist.length, `runLoop: run ${run.id} allowlist`);

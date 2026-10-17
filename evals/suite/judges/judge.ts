@@ -51,7 +51,7 @@ export async function runJudge(input: RunJudgeInput): Promise<RunJudgeResult> {
   const env = input.env ?? process.env;
   const frozenPrompt = judgeSystemPrompt(judge, input.fewShot ?? []);
   const userText = renderCase(input.case);
-  const prices = pricesFor(provider.id, env);
+  const prices = pricesFor(provider.id, env, provider.model);
   const approxInput = Math.ceil((frozenPrompt.length + userText.length) / 3.5);
   const worst = reserveUsd(approxInput, JUDGE_MAX_OUTPUT_TOKENS, prices);
   if (worst > JUDGE_CALL_USD_CAP) return { verdict: null, error: `JUDGE_BUDGET: worst case $${worst.toFixed(4)} is over $${JUDGE_CALL_USD_CAP}`, usage: null, costUsd: 0 };

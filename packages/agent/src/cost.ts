@@ -7,8 +7,13 @@ export const LUNA: Prices = { inPerM: 0.2, cachedPerM: 0.02, outPerM: 1.2 } as c
 /** Claude Opus 5.5 from the bundled claude-api docs (shared/models.md, shared/prompt-caching.md): $4 input, $0.20
  * cache reads, $5 five-minute cache writes (1.25x input), $20 output. */
 export const CLAUDE_OPUS_5_5: Prices = { inPerM: 4, cachedPerM: 0.2, outPerM: 20, cacheWritePerM: 5 } as const;
+/** gpt-5.6-terra from the official OpenAI pricing page: $2.00 input, $0.20 cached input, $12.00 output. */
+export const TERRA: Prices = { inPerM: 2, cachedPerM: 0.2, outPerM: 12 } as const;
 export const ZERO_PRICES: Prices = { inPerM: 0, cachedPerM: 0, outPerM: 0 } as const;
 export const PRICES_BY_PROVIDER: Record<ProviderId, Prices> = { openai: LUNA, claude: CLAUDE_OPUS_5_5, openai_compat: ZERO_PRICES, scripted: LUNA };
+
+/** Per-model prices that win over the provider's table, so a WEFT_MODEL other than Luna is never priced as Luna. */
+export const PRICES_BY_MODEL: Record<string, Prices> = { "gpt-5.6-luna": LUNA, "gpt-5.6-terra": TERRA };
 
 export function pricesFromEnv(env: Record<string, string | undefined>, base: Prices = LUNA): Prices {
   const raw = env.WEFT_PRICES_JSON;
@@ -22,9 +27,10 @@ export function pricesFromEnv(env: Record<string, string | undefined>, base: Pri
   }
 }
 
-/** The price table for one provider, still overridable by WEFT_PRICES_JSON. */
-export function pricesFor(provider: ProviderId, env: Record<string, string | undefined>): Prices {
-  return pricesFromEnv(env, PRICES_BY_PROVIDER[provider] ?? LUNA);
+/** The price table for one provider (and model, when PRICES_BY_MODEL knows it), still overridable by WEFT_PRICES_JSON. */
+export function pricesFor(provider: ProviderId, env: Record<string, string | undefined>, model?: string): Prices {
+  const byModel = model !== undefined && Object.hasOwn(PRICES_BY_MODEL, model) ? PRICES_BY_MODEL[model] : undefined;
+  return pricesFromEnv(env, byModel ?? PRICES_BY_PROVIDER[provider] ?? LUNA);
 }
 
 /** USD for one model attempt. Cache writes (inside u.input) cost cacheWritePerM when the provider sets it. */
@@ -35,6 +41,13 @@ export function stepCostUsd(u: Usage, p: Prices = LUNA): number {
 
 /** Run cap factor per provider: Claude Opus 5.5 output costs about 17x Luna, so its runs get 6x the Luna cap. */
 export const RUN_CAP_SCALE: Partial<Record<ProviderId, number>> = { claude: 6 };
+/** Run cap factor per model, ahead of the provider's: gpt-5.6-terra is priced 10x Luna on every token class. */
+export const RUN_CAP_SCALE_BY_MODEL: Record<string, number> = { "gpt-5.6-terra": 10 };
+
+export function runCapScaleFor(provider: ProviderId, model?: string): number {
+  if (model !== undefined && Object.hasOwn(RUN_CAP_SCALE_BY_MODEL, model)) return RUN_CAP_SCALE_BY_MODEL[model]!;
+  return RUN_CAP_SCALE[provider] ?? 1;
+}
 
 export function usdToMicros(usd: number): number {
   return Math.ceil(usd * 1e6);

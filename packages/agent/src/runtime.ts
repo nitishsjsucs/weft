@@ -15,7 +15,7 @@ import { PORTAL_PAGE_MARKER, ROLE_PORTAL, portalPack } from "./prompts/portal";
 import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
 import { createRunStore, type RunStore } from "./store";
 import { buildTrace } from "./trace";
-import { DEFAULT_SCRIPTS_DIR } from "./providers/factory";
+import { DEFAULT_SCRIPTS_DIR, effortOverrideFromEnv } from "./providers/factory";
 import { parseContext, scriptedProvider } from "./providers/scripted";
 import { noteRunRecall, traceRoutineRunSpan, type RecallNote, type RoutineRunSpan } from "./otel";
 import { existsSync } from "node:fs";
@@ -187,7 +187,10 @@ export interface WeftAgentRuntime extends AgentRuntime {
 
 export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRuntime {
   const env = opts.env ?? process.env;
-  const prices: Prices = opts.provider.live ? pricesFor(opts.provider.id, env) : LUNA;
+  const prices: Prices = opts.provider.live ? pricesFor(opts.provider.id, env, opts.provider.model) : LUNA;
+  // WEFT_EFFORT (experiments only): the OpenAI provider sends it on every call, so the runs it serves record it too
+  // (run row, prefix hash, trace). Unset keeps the per-stage default below.
+  const effortOverride = opts.provider.id === "openai" ? effortOverrideFromEnv(env) : null;
   const listeners = new Map<string, Set<(s: RunStepRow) => void>>();
   const store = createRunStore(opts.db, {
     onStep: (s) => { for (const cb of listeners.get(s.runId) ?? []) { try { cb(s); } catch { /* a listener never breaks a run */ } } },
@@ -322,7 +325,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     const provider = p.kind === "routine" && useTemplates(p.attended) ? templateProvider : opts.provider;
     return {
       id: handle.runId, companyId, kind: "main", parentRunId: null, threadId: null, routineRunId: p.routineRunId, trigger: p.trigger, attended: p.attended,
-      provider: provider.id, model: provider.model, effort: "low", cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
+      provider: provider.id, model: provider.model, effort: provider === opts.provider && effortOverride ? effortOverride : "low", cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
       status: "queued", terminalReason: null, tainted: false, taintedBy: null, checklist: null, budget: { steps: b.steps, usd: b.usd, minutes: b.minutes },
       stepsUsed: 0, requeues: 0, consecutiveErrors: 0, costUsdMicros: 0, tokens: { ...ZERO_USAGE }, createdAt: opts.clock.now(), endedAt: null, summary: null,
     };

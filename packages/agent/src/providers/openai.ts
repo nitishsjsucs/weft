@@ -2,7 +2,7 @@
 // encrypted reasoning carried in every request, strict function tools, reasoning effort low, a prompt_cache_key per
 // agent kind and routine, maxRetries 0 (the loop retries and reserves every attempt). Never /v1/chat/completions.
 import OpenAI from "openai";
-import type { HistoryItem, ModelProvider, ModelStepRequest, ModelStepResult, SpendLedger, Usage } from "@weft/contracts";
+import type { Effort, HistoryItem, ModelProvider, ModelStepRequest, ModelStepResult, SpendLedger, Usage } from "@weft/contracts";
 import { escapeTagText } from "../canonical";
 
 export interface OpenAIProviderOptions {
@@ -15,6 +15,9 @@ export interface OpenAIProviderOptions {
   stripReplayIds?: boolean;
   /** For tests: a client with the same responses.create shape. */
   client?: Pick<OpenAI, "responses">;
+  /** Experiment-only override (WEFT_EFFORT): when set, every request of this provider sends this effort instead of the
+   * per-stage effort the caller asked for. Unset keeps today's per-stage defaults. */
+  effort?: Effort;
 }
 
 export const OPENAI_FIXED = {
@@ -67,7 +70,8 @@ export function historyToInput(history: HistoryItem[], stripIds = false): InputI
 }
 
 /** The exact request body of harness 11.2. Snapshot-tested. */
-export function buildResponsesRequest(req: ModelStepRequest, opts: { stripReplayIds?: boolean } = {}): Record<string, unknown> {
+export function buildResponsesRequest(req: ModelStepRequest, opts: { stripReplayIds?: boolean; effort?: Effort } = {}): Record<string, unknown> {
+  const effort = opts.effort ?? req.effort;
   const tools = [...req.tools]
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters, strict: true }));
@@ -77,7 +81,7 @@ export function buildResponsesRequest(req: ModelStepRequest, opts: { stripReplay
     tools,
     tool_choice: OPENAI_FIXED.tool_choice,
     parallel_tool_calls: OPENAI_FIXED.parallel_tool_calls,
-    reasoning: { effort: req.effort === "none" ? "none" : req.effort },
+    reasoning: { effort },
     store: OPENAI_FIXED.store,
     include: [...OPENAI_FIXED.include],
     prompt_cache_key: req.cacheKey,
@@ -172,7 +176,7 @@ export function openaiProvider(opts: OpenAIProviderOptions): ModelProvider {
     label: `OpenAI ${opts.model}`,
     live: true,
     async step(req) {
-      const body = buildResponsesRequest(req, { stripReplayIds: opts.stripReplayIds });
+      const body = buildResponsesRequest(req, { stripReplayIds: opts.stripReplayIds, effort: opts.effort });
       try {
         const res = (await client.responses.create(body as never, { signal: req.signal })) as unknown as RawResponse;
         return handleResponse(res, req.model);
