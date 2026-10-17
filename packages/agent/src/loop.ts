@@ -6,7 +6,7 @@ import type {
   AgentExecutor, AgentRunRow, HistoryItem, ModelProvider, ModelStepRequest, ModelStepResult, RunHandle, RunStepRow, RunStatus,
   SimClock, SpendLedger, StepTimings, TerminalReason, ToolOutcome, ToolSpec,
 } from "@weft/contracts";
-import { check } from "@weft/grounding";
+import { check, type CheckOptions } from "@weft/grounding";
 import { canonicalJson } from "./canonical";
 import { addUsage, reserveUsd, RUN_CAP_SCALE, stepCostUsd, usdToMicros, type Prices } from "./cost";
 import { approxTokens } from "./context";
@@ -22,8 +22,10 @@ export const BUDGETS = {
 
 /**
  * Chat answers by this model step (SPEC 12 L3: at most 4). The step before it gets a budget notice; at it, tool calls
- * are not run and an ungrounded answer gets the grounded template instead of a repair round. The hard budget above
- * still bounds everything else. WEFT_CHAT_ANSWER_STEPS overrides it (1 to 12).
+ * are not run. An ungrounded answer gets one repair before this step and one more reserved for an answer at or after
+ * it (that repaired answer is the run's last model step, with tool calls not run), then the grounded receipt. A batch
+ * of identical re-reads after a repair is served from the run and does not count toward this step (once per run).
+ * The hard budget above still bounds everything else. WEFT_CHAT_ANSWER_STEPS overrides it (1 to 12).
  */
 export const CHAT_ANSWER_BY = 4;
 /** Chat is read-only: it is not offered the run-feed post, its one write, so a question leaves no action row. */
@@ -131,7 +133,31 @@ function outcomeCode(o: ToolOutcome): RunStepRow["outcome"] {
   return "ok";
 }
 
-interface Terminal { status: RunStatus; reason: TerminalReason; summary: string | null }
+interface Terminal { status: RunStatus; reason: TerminalReason; summary: string | null; fallback?: boolean }
+
+/** What a chat answer is checked against: this run's results and the extra evidence of CheckOptions. */
+interface Evidence { results: unknown[]; opts: CheckOptions }
+
+/** Every string inside a tool call's arguments (an answer cannot ground a numeral on its own input echoed back). */
+function stringsOf(v: unknown, out: Set<string>): void {
+  if (typeof v === "string") out.add(v);
+  else if (Array.isArray(v)) for (const x of v) stringsOf(x, out);
+  else if (v && typeof v === "object") for (const x of Object.values(v)) stringsOf(x, out);
+}
+
+function parseArgs(json: string): unknown {
+  try { return json.trim() ? JSON.parse(json) : {}; } catch { return undefined; }
+}
+
+/** A read's identity: the wire name and the canonical arguments. Unparseable arguments have none and never match. */
+function readKey(name: string, args: unknown): string | null {
+  return args === undefined ? null : `${name} ${canonicalJson(args ?? {})}`;
+}
+
+/** The pack escapes the request (context.ts escapeTagText); grounding reads the person's words as they wrote them. */
+function unescapeTagText(s: string): string {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
 
 /**
  * Drive one run until it reaches waiting or a terminal state. Safe to call again after a requeue: the history is
@@ -200,6 +226,29 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   const startedWall = wall();
   const failuresByTool = new Map<string, number>();
   let corrected = steps.some((s) => s.kind === "notice" && (s.result as { notice?: string } | null)?.notice === "repair");
+  // Chat grounding repairs (FM3): one before the answer-by step, one reserved for an answer at or after it.
+  const repairAt = steps.flatMap((s) => {
+    const a = s.kind === "notice" ? (s.result as { attrs?: { code?: string; at?: string } } | null)?.attrs : undefined;
+    return a?.code === "UNGROUNDED" ? [a.at === "last" ? "last" : "early"] : [];
+  });
+  let earlyRepairUsed = repairAt.includes("early");
+  let lastRepairUsed = repairAt.includes("last");
+  // A post-repair batch of identical re-reads served from the run moves the answer-by step back by one, once.
+  let rereadRefunded = steps.some((s) => s.kind === "recite" && (s.result as { served?: boolean } | null)?.served === true);
+  let answerAt = answerBy + (rereadRefunded ? 1 : 0);
+  // Grounding evidence beyond the tool results: the person's own request and the run clock. The request counts only
+  // when the run was untainted before its first model step (a tagged thread or a tainted suggestion carries other
+  // people's text into it); the decision is stored on the first assemble row so a resumed segment keeps it.
+  const firstAssemble = steps.find((s) => s.stage === "assemble" && s.kind === "context");
+  const storedTrust = (firstAssemble?.result as { requestTrusted?: unknown } | null)?.requestTrusted;
+  const requestTrusted = !chat ? false
+    : typeof storedTrust === "boolean" ? storedTrust
+    : steps.some((s) => s.kind === "model_call") ? false
+    : !(await executor.runState(handle).catch(() => ({ tainted: true }))).tainted;
+  const groundingBase: CheckOptions = {
+    request: requestTrusted ? unescapeTagText(/<request>([\s\S]*?)<\/request>/.exec(setup.text)?.[1] ?? "") : null,
+    now: /^now: (\S+)$/m.exec(setup.text)?.[1] ?? deps.clock.now(),
+  };
 
   await store.updateRun(run.id, { status: "running" });
   run = { ...run, status: "running" };
@@ -214,7 +263,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
     return row;
   };
 
-  const finish = (t: Terminal): Promise<AgentRunRow> => lt.stage("terminal", { "weft.status": t.status, "weft.terminal_reason": t.reason }, async (span) => {
+  const finish = (t: Terminal): Promise<AgentRunRow> => lt.stage("terminal", { "weft.status": t.status, "weft.terminal_reason": t.reason, ...(t.fallback ? { "weft.grounding_fallback": true } : {}) }, async (span) => {
     const t0 = wall();
     const terminalStates: RunStatus[] = ["done", "failed", "refused", "escalated", "expired", "cancelled"];
     const endedAt = terminalStates.includes(t.status) ? deps.clock.now() : null;
@@ -225,24 +274,34 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       status: t.status, terminalReason: t.reason, summary: t.summary ?? run!.summary, endedAt,
       tainted: state?.tainted ?? run!.tainted, taintedBy: state?.taintedBy ?? run!.taintedBy,
     });
-    const row = await append({ stage: "terminal", kind: "verify", outcome: "ok", result: { status: t.status, reason: t.reason, ms: wall() - t0 }, timings: emptyTimings() });
+    const row = await append({ stage: "terminal", kind: "verify", outcome: "ok", result: { status: t.status, reason: t.reason, ms: wall() - t0, ...(t.fallback ? { groundingFallback: true } : {}) }, timings: emptyTimings() });
     span.set({ "weft.step_n": row.n });
     return (await store.getRun(run!.id))!;
   });
 
-  const allToolResults = async (): Promise<unknown[]> => {
+  const evidence = async (): Promise<Evidence> => {
     const rows = await store.steps(run!.id);
-    const out: unknown[] = [];
+    const results: unknown[] = [];
+    const echoes = new Set<string>();
     for (const r of rows) {
       if (r.kind !== "tool_call") continue;
       // Model-authored text (run feed updates) is not evidence: the answer cannot ground itself on it.
       if (r.toolName === "comms__post_update") continue;
+      stringsOf(r.toolArgs, echoes);
       const o = (r.result as { outcome?: ToolOutcome } | null)?.outcome;
-      if (o && o.ok && o.status === "done") out.push({ resultId: o.resultId, data: o.data, summary: o.summary, actionSeq: o.actionSeq });
-      else if (o && o.ok) out.push({ proposalId: o.proposalId, title: o.title });
+      if (o && o.ok && o.status === "done") results.push({ resultId: o.resultId, data: o.data, summary: o.summary, actionSeq: o.actionSeq });
+      else if (o && o.ok) results.push({ proposalId: o.proposalId, title: o.title });
     }
-    return out;
+    return { results, opts: { ...groundingBase, echoes } };
   };
+  const allToolResults = async (): Promise<unknown[]> => (await evidence()).results;
+  // Reads this run already made, by tool and canonical arguments (served again after a repair instead of re-run).
+  const reads = new Map<string, ToolOutcome>();
+  for (const r of steps) {
+    const o = (r.result as { outcome?: ToolOutcome } | null)?.outcome;
+    const k = r.kind === "tool_call" && r.toolName ? readKey(r.toolName, r.toolArgs) : null;
+    if (k !== null && o && o.ok && o.status === "done" && o.actionSeq === null && !(r.result as { servedFrom?: string } | null)?.servedFrom) reads.set(k, o);
+  }
 
   for (;;) {
     // Rule 1: cancelled by a person.
@@ -257,7 +316,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: "Stopped at the wall-clock budget." });
     }
     // Chat: the step before the answer-by step tells the model to answer now (gate report item 3).
-    if (chat && run.stepsUsed === answerBy - 1 && answerBy > 1 && !history.some((h) => h.kind === "notice" && h.notice === "budget" && h.attrs.code === "ANSWER_NOW")) {
+    if (chat && run.stepsUsed === answerAt - 1 && answerAt > 1 && !history.some((h) => h.kind === "notice" && h.notice === "budget" && h.attrs.code === "ANSWER_NOW")) {
       const notice = { notice: "budget" as const, attrs: { n: setup.nonce, code: "ANSWER_NOW" }, text: "This is your last step. Write the answer now from the tool results above; any tool call in this step is not run." };
       await append({ stage: "post", kind: "notice", result: notice });
       history = [...history, { kind: "notice", ...notice }];
@@ -295,7 +354,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
         signal: cancel ? AbortSignal.any([cancel, stepTimer]) : stepTimer,
       };
       const assembleMs = wall() - tAsm;
-      await append({ stage: "assemble", kind: "context", attempt, prefixHash: pHash, result: { items: history.length, estInputTokens: estInput }, timings: { ...emptyTimings(), assembleMs } });
+      await append({ stage: "assemble", kind: "context", attempt, prefixHash: pHash, result: { items: history.length, estInputTokens: estInput, ...(chat ? { requestTrusted } : {}) }, timings: { ...emptyTimings(), assembleMs } });
 
       // ---- model
       const tModel = wall();
@@ -361,10 +420,37 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
     await store.updateRun(run.id, { stepsUsed, consecutiveErrors: 0 });
     history = [...history, { kind: "model", provider: provider.id, native: result.native }];
 
+    // Chat after a grounding repair: a batch that only repeats reads this run already made is served from the run
+    // (nothing is re-run) and, once per run, does not count toward the answer-by step (FM3, CH-02).
+    const served = chat && (earlyRepairUsed || lastRepairUsed) && !rereadRefunded && result.toolCalls.length > 0
+      ? result.toolCalls.map((c) => { const k = readKey(c.name, parseArgs(c.argumentsJson)); return k === null ? null : reads.get(k) ?? null; })
+      : null;
+    if (served && served.every((o) => o !== null)) {
+      rereadRefunded = true;
+      answerAt += 1;
+      const batch = served as ToolOutcome[];
+      const items = await deps.checklist(run);
+      const plan = renderPlan(items, run.stepsUsed, stepBudget, run.costUsdMicros / 1e6);
+      const toolOutputs = result.toolCalls.map((c, i) => ({
+        callId: c.callId, name: c.name,
+        output: canonicalJson({ ...batch[i]!, _weft_served: "Same call and arguments as earlier in this run: this is that stored result, not run again.", ...(i === batch.length - 1 ? { _weft_plan: plan } : {}) }),
+      }));
+      for (let i = 0; i < toolOutputs.length; i++) {
+        const c = result.toolCalls[i]!;
+        await append({
+          stage: "dispatch", kind: "tool_call", parentN: modelStepRow!.n, callId: c.callId, toolName: c.name, toolArgs: parseArgs(c.argumentsJson), outcome: "ok",
+          result: { output: toolOutputs[i]!.output, outcome: batch[i]!, servedFrom: (batch[i] as { resultId?: string }).resultId ?? null }, timings: emptyTimings(),
+        });
+      }
+      history = [...history, { kind: "tool_outputs", outputs: toolOutputs }];
+      await append({ stage: "post", kind: "recite", result: { plan, served: true, ms: 0, batchDispatchMs: 0 }, timings: emptyTimings() });
+      continue;
+    }
+
     // Chat at its answer-by step: the calls are not run; the person gets the grounded summary of what was read.
     // Text that comes with tool calls is a preamble ("Next I will read X"), never the answer, so it is not used.
-    if (chat && result.toolCalls.length > 0 && run.stepsUsed >= answerBy) {
-      return finish({ status: "done", reason: "DONE", summary: await groundedTemplate(allToolResults) });
+    if (chat && result.toolCalls.length > 0 && run.stepsUsed >= answerAt) {
+      return finish({ status: "done", reason: "DONE", summary: await groundedFallback(null, evidence), fallback: true });
     }
 
     // ---- dispatch
@@ -407,6 +493,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
         }
         toolSpan.outcome(outcome, args, threw);
         if (!outcome.ok) failuresByTool.set(call.name, (failuresByTool.get(call.name) ?? 0) + 1);
+        else if (outcome.status === "done" && outcome.actionSeq === null) { const k = readKey(call.name, args); if (k !== null) reads.set(k, outcome); }
         const consecutiveErrors: number = outcome.ok ? 0 : run.consecutiveErrors + 1;
         run = { ...run, consecutiveErrors };
         outputs.push({
@@ -452,18 +539,28 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
     // ---- the model ended its turn with no function calls (rule 6)
     const text = result.text.trim();
     if (setup.promptKind === "chat") {
-      const g = await lt.stage("post", {}, () => lt.guard("grounding", text, async () => check(text, await allToolResults()), (r) => ({
+      const g = await lt.stage("post", {}, () => lt.guard("grounding", text, async () => { const ev = await evidence(); return check(text, ev.results, ev.opts); }, (r) => ({
         "weft.grounded": r.ok, "weft.unmatched": r.offending.join(", "),
       })));
       if (g.ok) return finish({ status: "done", reason: "DONE", summary: text });
-      if (!corrected && run.stepsUsed < answerBy) {
+      // One repair before the answer-by step, and one reserved for an answer at or after it, inside the hard budget.
+      const last = run.stepsUsed >= answerAt;
+      const canRepair = last ? !lastRepairUsed && run.stepsUsed < stepBudget : !earlyRepairUsed;
+      if (canRepair) {
         corrected = true;
-        const notice = { notice: "repair" as const, attrs: { n: setup.nonce, code: "UNGROUNDED" }, text: `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. Read the source or remove them, then answer again.` };
+        if (last) lastRepairUsed = true;
+        else earlyRepairUsed = true;
+        const notice = {
+          notice: "repair" as const, attrs: { n: setup.nonce, code: "UNGROUNDED", ...(last ? { at: "last" } : {}) },
+          text: last
+            ? `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. This is your last step: answer again from the tool results above without them; any tool call is not run.`
+            : `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. Read the source or remove them, then answer again.`,
+        };
         await append({ stage: "post", kind: "notice", result: notice });
         history = [...history, { kind: "notice", ...notice }];
         continue;
       }
-      return finish({ status: "done", reason: "DONE", summary: await groundedTemplate(allToolResults) });
+      return finish({ status: "done", reason: "DONE", summary: await groundedFallback(text, evidence), fallback: true });
     }
     const items = await deps.checklist(run);
     if (items) await store.updateRun(run.id, { checklist: items });
@@ -497,10 +594,41 @@ async function routineSummary(results: () => Promise<unknown[]>): Promise<string
   return parts.length ? parts.slice(0, 8).join("; ") : "Checked; nothing needed a change.";
 }
 
-async function groundedTemplate(results: () => Promise<unknown[]>): Promise<string> {
-  const rs = (await results()) as { resultId?: string; summary?: string; proposalId?: string; title?: string }[];
-  const lines = rs.slice(0, 8).map((r) => (r.resultId ? `${r.summary ?? "result"} (${r.resultId})` : `${r.title ?? "proposal"} (${r.proposalId})`));
-  return lines.length
-    ? `I could not verify every number in my answer, so here is what I read instead:\n${lines.join("\n")}`
-    : "I could not verify my answer against any tool result, so I am not showing it.";
+const MAX_RECEIPT_LINES = 8;
+
+/** Sentences of a draft answer, split after ., ! or ? followed by whitespace, and at line breaks. */
+function sentences(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+(?=[A-Z0-9*"(\[-])|\n+/).map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * The grounded receipt (harness 4.8) when an answer stays ungrounded. It leads with what can be shown: the draft's
+ * sentences that pass the checker on their own, with a count of those left out, then the results it read. The whole
+ * receipt passes the same checker; a line that does not is dropped, and if the joined text still fails, only the
+ * results are shown.
+ */
+async function groundedFallback(draft: string | null, ev: () => Promise<Evidence>): Promise<string> {
+  const { results, opts } = await ev();
+  const ok = (t: string) => check(t, results, opts).ok;
+  const rs = results as { resultId?: string; summary?: string; proposalId?: string; title?: string }[];
+  const lines = rs.slice(0, MAX_RECEIPT_LINES)
+    .map((r) => (r.resultId ? `- ${r.summary ?? "result"} (${r.resultId})` : `- ${r.title ?? "proposal"} (${r.proposalId})`))
+    .filter(ok);
+  const read = lines.length ? `What I read:\n${lines.join("\n")}` : "";
+  const parts = draft ? sentences(draft) : [];
+  const kept = parts.filter(ok);
+  const left = parts.length - kept.length;
+  const candidates: string[] = [];
+  if (kept.length) {
+    const note = left > 0 ? `I left out ${left} statement${left === 1 ? "" : "s"} whose figures I could not match to a record in this run.` : "";
+    candidates.push([kept.join(" "), note, read].filter(Boolean).join("\n\n"));
+  }
+  if (lines.length) {
+    const lead = draft
+      ? "I could not match the figures in my answer to the records I read, so here is what those records say."
+      : "I ran out of steps before I could finish the answer, so here is what the records I read say.";
+    candidates.push(`${lead}\n\n${read}`);
+  }
+  for (const c of candidates) if (ok(c)) return c;
+  return "I could not verify my answer against any tool result, so I am not showing it.";
 }

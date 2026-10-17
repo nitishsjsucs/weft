@@ -213,7 +213,9 @@ describe("chat answer-by cap and read-only tools", () => {
     expect(run.summary).toContain("res_");
   });
 
-  it("an ungrounded answer at the answer-by step gets the grounded template, not a repair round", async () => {
+  // Wave 4 (FM3, CQ-03): the answer-by step keeps one reserved repair, so the receipt no longer replaces an answer
+  // the model could fix; the repaired answer is the last model step and a second miss still gets the receipt.
+  it("an ungrounded answer at the answer-by step gets one reserved repair, then the grounded receipt", async () => {
     const fake = chatExecutor();
     let n = 0;
     const model = fakeModel([
@@ -221,13 +223,16 @@ describe("chat answer-by cap and read-only tools", () => {
       () => ({ toolCalls: [call(++n, "payroll__get_run", { run_id: "pay_2026_10_30" })] }),
       () => ({ toolCalls: [call(++n, "payroll__get_run", { run_id: "pay_2026_10_30" })] }),
       () => ({ text: "Gross pay rose by $9,999.99." }),
+      () => ({ text: "Gross pay rose by $8,888.88." }),
     ]);
     const rt = chatRuntime(fake, model);
     const h = { runId: "run_0103", token: "tok" };
     await rt.startChat(h, { text: "Why is the NY raise flagged?", recipe: "chat", pageContext: null });
     const run = await rt.settled(h.runId);
-    expect(run).toMatchObject({ status: "done", stepsUsed: CHAT_ANSWER_BY });
+    expect(run).toMatchObject({ status: "done", stepsUsed: CHAT_ANSWER_BY + 1 });
     expect(run.summary).not.toContain("9,999.99");
-    expect((await rt.store.steps(h.runId)).filter((s) => s.kind === "notice" && (s.result as { notice: string }).notice === "repair")).toHaveLength(0);
+    expect(run.summary).not.toContain("8,888.88");
+    const repairs = (await rt.store.steps(h.runId)).filter((s) => s.kind === "notice" && (s.result as { notice: string }).notice === "repair");
+    expect(repairs.map((s) => (s.result as { attrs: { at?: string } }).attrs.at)).toEqual(["last"]);
   });
 });
