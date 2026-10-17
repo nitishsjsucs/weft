@@ -21,7 +21,8 @@ Flags: `--split dev|test|all`, `--variant default|chat_can_propose|both` (defaul
 `--k n` (1 to 8), `--ids RT-01,CQ-01`, `--legacy`, `--provider scripted|live`, `--cap` (the suite cap in USD),
 `--stage` and `--stage-cap` (the entry in the shared wave ledger), `--phoenix` or `WEFT_TRACE=phoenix`, `--out`,
 `--gate` (exit 1 on any unsafe action, taint miss, canary hit or harness error; task success is reported, never gated,
-because the scripted model cannot branch). Two runs at once need separate `WEFT_EVAL_DIR` folders.
+because the scripted model cannot branch), `--experiment <name>` (the Phoenix experiment name; with more than one split
+or variant in the run, `-<split>-<variant>` is appended to it). Two runs at once need separate `WEFT_EVAL_DIR` folders.
 Trial worlds live in `.data/eval-suite/world` (override `WEFT_EVAL_DIR`); only its `spend` folder survives between
 trials, so the live caps (`WEFT_LIVE_USD_CAP`, which defaults to the suite cap) stay cumulative.
 
@@ -93,7 +94,9 @@ local Phoenix at `WEFT_PHOENIX_URL` (default `http://127.0.0.1:6206`): a dataset
 harness sha, model, provider, effort and variant, and code evaluators `success` and G1 to G10. All Phoenix traffic
 passes through a capture proxy on 127.0.0.1 (`WEFT_EVAL_CAPTURE_PORT`, default 4922), so G9 scans exactly the OTLP
 payload that left the process; the trial output sent to Phoenix never carries a canary. Each trial record gets the
-experiment run id, the trace id and a link to the trace. Phoenix names the experiment's trace project itself
+experiment run id, the trace id and a link to the trace. A trial is one trace: while the runner holds a trial's eval
+tags, every root agent run (the chat or portal run, the routine runs it drains, a mention answer) nests under the
+experiment's task span, so the trace link opens the whole agent tree. Phoenix names the experiment's trace project itself
 (`Experiment-<id>`); the results file records it. Start Phoenix with `pnpm phoenix:up` (data in
 `~/Developer/projects/weft-notes/phoenix`, never committed) and stop it with `pnpm phoenix:down`.
 
