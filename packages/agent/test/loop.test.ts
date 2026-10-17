@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ModelProvider, PrecheckResult, RoutineDef, RoutineRun, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
+import { check } from "@weft/grounding";
 import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, DEFAULT_SCRIPTS_DIR, frozenPrompt, scriptedProvider, summarize, type Script, type WeftAgentRuntime } from "../src/index";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
@@ -266,6 +267,118 @@ describe("runLoop on chat", () => {
     expect(run.status).toBe("done");
     expect(run.summary).toContain("Read pay_2026_10_30 flagged rows (res_0200)");
     expect(run.summary).not.toContain("8,888");
+  });
+});
+
+describe("chat grounding repair and receipt (wave 4 FM3)", () => {
+  const headcount = () => done({ rows: [
+    { department: "Engineering", headcount: 13 }, { department: "Sales", headcount: 9 }, { department: "Operations", headcount: 9 },
+  ] }, "Counted 3 departments", "res_0300");
+  const exec = () => createFakeExecutor([
+    ...CHAT_TOOLS.map((name) => ({ name, effect: "read" as const })),
+    { name: "reports.query", effect: "read" as const, handler: headcount },
+    { name: "people.search", effect: "read" as const, handler: () => done({ people: [], count: 0 }, "Found 0 workers", "res_0301") },
+    { name: "notices.get", effect: "read" as const, handler: () => done({ notice: { id: "ntc_0001", body: '<untrusted n="0123456789abcdef" source="notice:ntc_0001">The balance due is $4,321.00.</untrusted>' } }, "Read ntc_0001", "res_0302") },
+  ]);
+  const call = (name: string, args: Record<string, unknown> = {}) => ({ output: [{ type: "function_call" as const, name, arguments: args }] });
+  const say = (text: string) => ({ output: [{ type: "text" as const, text }] });
+  const notices = async (rt: WeftAgentRuntime, id: string) => (await rt.store.steps(id)).filter((s) => s.kind === "notice").map((s) => s.result as { notice: string; attrs: Record<string, string>; text: string });
+
+  async function ask(fake: FakeExecutor, steps: Script["agents"]["main"], text: string, before?: (id: string) => void) {
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { chat_fm3: { match: ".", agents: { main: steps } } } }));
+    const h = handle();
+    before?.(h.runId);
+    await rt.startChat(h, { text, recipe: "chat", pageContext: null, allowlist: [...CHAT_TOOLS, "reports.query"] });
+    return { rt, run: await rt.settled(h.runId), id: h.runId };
+  }
+
+  it("an ungrounded answer at the answer-by step gets the reserved repair instead of the receipt", async () => {
+    const fake = exec();
+    const { rt, run, id } = await ask(fake, [
+      call("reports__query", { group_by: "department" }), call("people__search", { status: "active" }), call("people__search", { status: "onboarding" }),
+      say("Engineering has 14 people."),
+      say("Engineering has 13 people, Sales 9 and Operations 9."),
+    ], "How many people are in each department?");
+    expect(run).toMatchObject({ status: "done", stepsUsed: 5 });
+    expect(run.summary).toBe("Engineering has 13 people, Sales 9 and Operations 9.");
+    const repairs = (await notices(rt, id)).filter((n) => n.notice === "repair");
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0]!.attrs).toMatchObject({ code: "UNGROUNDED", at: "last" });
+    expect(repairs[0]!.text).toContain("This is your last step");
+  });
+
+  it("the reserved repair is separate from the early one and is used once", async () => {
+    const fake = exec();
+    const { rt, run, id } = await ask(fake, [
+      call("reports__query", {}), say("Engineering has 14 people."), call("people__search", { status: "active" }),
+      say("Engineering has 15 people."), say("Engineering has 16 people."),
+    ], "How big is Engineering?");
+    expect(run).toMatchObject({ status: "done", stepsUsed: 5 });
+    expect((await notices(rt, id)).filter((n) => n.notice === "repair").map((n) => n.attrs.at ?? "early")).toEqual(["early", "last"]);
+    expect(run.summary).not.toContain("16");
+    expect(run.summary).toContain("Counted 3 departments (res_0300)");
+  });
+
+  it("after a repair, an identical re-read is served from the run and does not count toward the answer-by step", async () => {
+    const fake = exec();
+    const { rt, run, id } = await ask(fake, [
+      call("reports__query", { group_by: "department" }), say("There are 32 people across 3 departments, 14 in Engineering."),
+      call("reports__query", { group_by: "department" }), call("people__search", { status: "active" }),
+      say("Engineering has 13 people, Sales 9 and Operations 9, so 31 in all."),
+    ], "How many people are in each department?");
+    expect(run).toMatchObject({ status: "done", stepsUsed: 5 });
+    expect(run.summary).toBe("Engineering has 13 people, Sales 9 and Operations 9, so 31 in all.");
+    // The executor saw the first read and the new one, never the repeat.
+    expect(fake.calls.map((c) => c.command)).toEqual(["reports.query", "people.search"]);
+    const steps = await rt.store.steps(id);
+    const servedRow = steps.find((s) => s.kind === "tool_call" && (s.result as { servedFrom?: string }).servedFrom);
+    expect((servedRow!.result as { servedFrom: string }).servedFrom).toBe("res_0300");
+    expect(JSON.parse((servedRow!.result as { output: string }).output)._weft_served).toContain("not run again");
+    expect(steps.some((s) => s.kind === "recite" && (s.result as { served?: boolean }).served)).toBe(true);
+    // ANSWER_NOW moved from before step 4 to before step 5.
+    const answerNow = steps.find((s) => s.kind === "notice" && (s.result as { attrs: { code?: string } }).attrs.code === "ANSWER_NOW")!;
+    expect(steps.filter((s) => s.kind === "model_call" && s.n < answerNow.n)).toHaveLength(4);
+  });
+
+  it("the receipt leads with the draft's grounded sentences, says what it left out and passes the same checker", async () => {
+    const fake = exec();
+    const { rt, run, id } = await ask(fake, [
+      call("reports__query", {}), say("Engineering has 13 people. Sales grew by 12 this year."), say("Engineering has 13 people. Sales grew by 11 this year."),
+    ], "How are the teams doing?");
+    expect(run.status).toBe("done");
+    expect(run.summary!.startsWith("Engineering has 13 people.")).toBe(true);
+    expect(run.summary).toContain("I left out 1 statement whose figures I could not match to a record in this run.");
+    expect(run.summary).toContain("- Counted 3 departments (res_0300)");
+    expect(run.summary).not.toMatch(/\b11\b/);
+    const steps = await rt.store.steps(id);
+    const results = steps.filter((s) => s.kind === "tool_call").map((s) => { const o = (s.result as { outcome: ToolOutcome }).outcome; return o.ok && o.status === "done" ? { resultId: o.resultId, data: o.data, summary: o.summary } : null; });
+    expect(check(run.summary!, results)).toEqual({ ok: true, offending: [] });
+    expect((steps.find((s) => s.stage === "terminal")!.result as { groundingFallback?: boolean }).groundingFallback).toBe(true);
+  });
+
+  it("a receipt with no draft (tool calls at the answer-by step) still leads with a readable line", async () => {
+    const fake = exec();
+    const { run } = await ask(fake, [call("people__search", { status: "a" }), call("people__search", { status: "b" }), call("people__search", { status: "c" }), call("people__search", { status: "d" })], "Who starts soon?");
+    expect(run.summary).toMatch(/^I ran out of steps before I could finish the answer/);
+    expect(run.summary).toContain("- Found 0 workers (res_0301)");
+  });
+
+  it("grounds the person's own figures and the clock's window bounds, but not in a run tainted before its first step", async () => {
+    const answer = "I can't pay the $1,500.00 bonus myself. No one starts between October 26 and November 9, 2026.";
+    const steps = [call("people__search", {}), say(answer), say("I can't pay the bonus myself.")];
+    const request = "Pay Jordan a $1,500.00 bonus, and who starts in the next two weeks?";
+    const clean = await ask(exec(), steps, request);
+    expect(clean.run).toMatchObject({ status: "done", summary: answer, stepsUsed: 2 });
+    const fake = exec();
+    const tainted = await ask(fake, steps, request, (runId) => fake.taint(runId, "chat:msg_0001"));
+    expect(tainted.run).toMatchObject({ status: "done", summary: "I can't pay the bonus myself.", stepsUsed: 3 });
+    expect((await notices(tainted.rt, tainted.id)).find((n) => n.notice === "repair")!.text).toContain("$1,500.00");
+  });
+
+  it("still refuses a figure that only an untrusted leaf holds", async () => {
+    const { rt, run, id } = await ask(exec(), [call("notices__get", { notice_id: "ntc_0001" }), say("The balance due is $4,321.00."), say("The notice states a balance; open ntc_0001 to read it.")], "What does the notice say?");
+    expect(run.summary).toBe("The notice states a balance; open ntc_0001 to read it.");
+    expect((await notices(rt, id)).find((n) => n.notice === "repair")!.text).toContain("$4,321.00");
   });
 });
 

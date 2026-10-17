@@ -24,7 +24,10 @@ describe("check() with spaced result strings", () => {
   });
 
   it("does not treat a summary sentence as a name", () => {
-    expect(check("Ran 48 checks and found 13 flags.", [{ summary: "Ran 48 checks" }])).toEqual({ ok: false, offending: ["48", "13"] });
+    // Wave 4 (3a): an untainted summary is evidence for the numerals it states, so 48 is grounded and 13 is not.
+    expect(check("Ran 48 checks and found 13 flags.", [{ summary: "Ran 48 checks" }])).toEqual({ ok: false, offending: ["13"] });
+    // Wrapped as untrusted it is neither a name nor evidence.
+    expect(check("Ran 48 checks and found 13 flags.", [{ summary: '<untrusted n="abc" source="notice">Ran 48 checks</untrusted>' }])).toEqual({ ok: false, offending: ["48", "13"] });
     expect(check("Ran 48 checks and found 13 flags.", [{ summary: "Ran 48 checks", checks: 48, flags: 13 }]).ok).toBe(true);
   });
 
