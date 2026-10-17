@@ -57,6 +57,7 @@ describe("t2 registry rules (harness 5.4)", () => {
       // wave 4 (w4-parity-people)
       "benefits.report_life_event": { kind: "marriage", event_date: "2026-10-20" }, "benefits.elect_in_window": { window_id: "ewn_0001", elections: [] },
       "onboarding.submit_checkin_form": { checkin_id: "chk_0001", answers: { settled: 4, tools: true, clarity: true } },
+      "benefits.open_window": { kind: "open_enrollment", opens_on: "2026-11-02", closes_on: "2026-11-20" }, "comms.send_first_day_message": { worker_ids: ["wrk_0049"] },
     };
     for (const c of t2) {
       const shape = (c.input as unknown as { shape?: Record<string, unknown> }).shape ?? {};
