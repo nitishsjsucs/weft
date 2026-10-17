@@ -557,13 +557,18 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
 }
 
 /** A routine run's summary from its effects and proposals (harness 4.3), e.g. "Proposed Update CA SUI ... (prp_0001)". */
-async function routineSummary(results: () => Promise<unknown[]>): Promise<string> {
+// Proposals come first (they are what a person must decide), and a cut list says how many it left out, so a run with
+// eight saved notes never hides its proposals (review of e83fd89, round 2 O2).
+export const ROUTINE_SUMMARY_PARTS = 8;
+export async function routineSummary(results: () => Promise<unknown[]>): Promise<string> {
   const rs = (await results()) as { resultId?: string; summary?: string; proposalId?: string; title?: string; actionSeq?: number | null }[];
   const parts = [
-    ...rs.filter((r) => r.resultId && r.actionSeq !== null && r.actionSeq !== undefined).map((r) => `${r.summary ?? "Done"} (#${r.actionSeq})`),
     ...rs.filter((r) => r.proposalId).map((r) => `Proposed ${r.title ?? "a change"} (${r.proposalId})`),
+    ...rs.filter((r) => r.resultId && r.actionSeq !== null && r.actionSeq !== undefined).map((r) => `${r.summary ?? "Done"} (#${r.actionSeq})`),
   ];
-  return parts.length ? parts.slice(0, 8).join("; ") : "Checked; nothing needed a change.";
+  if (!parts.length) return "Checked; nothing needed a change.";
+  const shown = parts.slice(0, ROUTINE_SUMMARY_PARTS).join("; ");
+  return parts.length > ROUTINE_SUMMARY_PARTS ? `${shown}; and ${parts.length - ROUTINE_SUMMARY_PARTS} more` : shown;
 }
 
 const MAX_RECEIPT_LINES = 8;
