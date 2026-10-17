@@ -130,7 +130,8 @@ export async function main(argv: string[]): Promise<number> {
   try {
     if (args.phoenix) {
       const ph = await import("./phoenix");
-      const publicUrl = process.env[TRACE_ENV.url] ?? `http://${PHOENIX.host}:${process.env.WEFT_PHOENIX_PORT ?? PHOENIX.httpPort}`;
+      // Only a Phoenix on this machine: the capture proxy forwards every dataset, experiment and span to this URL.
+      const publicUrl = (await import("./judges/phoenix")).assertLocal(process.env[TRACE_ENV.url] ?? `http://${PHOENIX.host}:${process.env.WEFT_PHOENIX_PORT ?? PHOENIX.httpPort}`);
       const version = await ph.phoenixUp(publicUrl);
       if (!version) { console.error(`no Phoenix at ${publicUrl}; start one (pnpm phoenix:up) or drop --phoenix`); return 2; }
       capture = await ph.startOtlpCapture(publicUrl, Number(process.env.WEFT_EVAL_CAPTURE_PORT ?? 4922));

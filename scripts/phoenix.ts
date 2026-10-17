@@ -3,11 +3,15 @@
 // SQLite data in ~/Developer/projects/weft-notes/phoenix (outside the repo, never committed). One long-lived instance
 // serves the whole wave: `up` reuses a running one. The server gets a minimal environment, so no key from this shell
 // (OPENAI_API_KEY and the rest) ever reaches it. `down` stops only the process group this script started.
+// Phoenix binds its gRPC collector to [::] whatever PHOENIX_HOST says, so the server starts through
+// scripts/phoenix-loopback.py (which rewrites that bind to 127.0.0.1), and `up` verifies with lsof that every port
+// the process group listens on is loopback only: otherwise it stops the group and refuses to report ready.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { PHOENIX } from "../packages/contracts/src/telemetry";
+import { isLoopbackAddress, listenAddresses } from "./phoenix-net";
 
 const httpPort = Number(process.env.WEFT_PHOENIX_PORT ?? PHOENIX.httpPort);
 const grpcPort = Number(process.env.WEFT_PHOENIX_GRPC_PORT ?? PHOENIX.grpcPort);
@@ -20,6 +24,10 @@ const FORBIDDEN = [3070, 4070, 3170, 4170];
 
 function listening(port: number): boolean {
   return spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { encoding: "utf8" }).stdout.trim().length > 0;
+}
+/** Addresses on the HTTP and gRPC ports that are not loopback (empty when both are local only). */
+function exposed(): string[] {
+  return [httpPort, grpcPort].flatMap((p) => listenAddresses(spawnSync("lsof", ["-nP", `-iTCP:${p}`, "-sTCP:LISTEN"], { encoding: "utf8" }).stdout)).filter((a) => !isLoopbackAddress(a));
 }
 async function version(): Promise<string | null> {
   try {
@@ -37,6 +45,8 @@ async function up(): Promise<void> {
   const running = await version();
   if (running) {
     if (running !== PHOENIX.version) throw new Error(`Phoenix ${running} is on ${url}; wave 4 pins ${PHOENIX.version}`);
+    const open = exposed();
+    if (open.length) throw new Error(`Phoenix ${running} at ${url} listens beyond loopback (${open.join(", ")}); restart it with pnpm phoenix:down and pnpm phoenix:up`);
     console.log(`Phoenix ${running} already running at ${url} (data ${workDir})`);
     return;
   }
@@ -49,14 +59,26 @@ async function up(): Promise<void> {
   };
   for (const k of ["UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "XDG_CACHE_HOME", "XDG_DATA_HOME"]) if (process.env[k]) env[k] = process.env[k] as string;
   const log = openSync(logFile, "a");
-  const child = spawn("uvx", ["--python", PHOENIX.python, "--from", `arize-phoenix==${PHOENIX.version}`, "phoenix", "serve"], { env, detached: true, stdio: ["ignore", log, log] });
+  const bootstrap = resolve(import.meta.dirname, "phoenix-loopback.py");
+  const child = spawn("uvx", ["--python", PHOENIX.python, "--from", `arize-phoenix==${PHOENIX.version}`, "python", "-I", bootstrap, "serve"], { env, detached: true, stdio: ["ignore", log, log] });
   if (!child.pid) throw new Error("could not start uvx");
   writeFileSync(pgidFile, String(child.pid));   // detached: the child leads its own process group
   child.unref();
   const deadline = Date.now() + 180_000;   // the first uvx run downloads CPython and the wheels
   while (Date.now() < deadline) {
     const v = await version();
-    if (v) { console.log(`Phoenix ${v} up at ${url} (data ${workDir}, log ${logFile}, pgid ${child.pid})`); return; }
+    if (v) {
+      // gRPC can come up a moment after HTTP; wait for it, then refuse anything that listens beyond loopback.
+      for (let i = 0; i < 20 && !listening(grpcPort); i++) await sleep(250);
+      const open = exposed();
+      if (open.length) {
+        try { process.kill(-child.pid, "SIGTERM"); } catch { /* already gone */ }
+        rmSync(pgidFile, { force: true });
+        throw new Error(`Phoenix listened beyond loopback (${open.join(", ")}); stopped it (pgid ${child.pid})`);
+      }
+      console.log(`Phoenix ${v} up at ${url}, gRPC on 127.0.0.1:${grpcPort} (data ${workDir}, log ${logFile}, pgid ${child.pid})`);
+      return;
+    }
     if (child.exitCode !== null) break;
     await sleep(1000);
   }
@@ -78,7 +100,8 @@ async function down(): Promise<void> {
 
 async function status(): Promise<void> {
   const v = await version();
-  console.log(v ? `Phoenix ${v} at ${url} (data ${workDir}, pgid ${readPgid() ?? "not started here"})` : `Phoenix is not running on ${url}`);
+  const open = v ? exposed() : [];
+  console.log(v ? `Phoenix ${v} at ${url} (data ${workDir}, pgid ${readPgid() ?? "not started here"})${open.length ? `; WARNING listens beyond loopback: ${open.join(", ")}` : ""}` : `Phoenix is not running on ${url}`);
 }
 
 const cmd = process.argv[2];

@@ -13,12 +13,14 @@ import type { EvalVariant } from "../../packages/contracts/src/telemetry";
 import { sha256Hex } from "../../packages/core/src/index";
 import type { SuiteTrial } from "./types";
 import type { SuiteTrialDetail } from "./runner";
+import { traceRedact } from "../../packages/agent/src/otel";
+import { assertLocal } from "./judges/phoenix";
 
 export interface OtlpCapture { url: string; payloads: string[]; close(): Promise<void> }
 
 /** A pass-through proxy to Phoenix on 127.0.0.1:<port> that keeps every /v1/traces body (gunzipped, as latin1 text). */
 export async function startOtlpCapture(target: string, port: number): Promise<OtlpCapture> {
-  const t = new URL(target);
+  const t = new URL(assertLocal(target));
   const payloads: string[] = [];
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -94,12 +96,14 @@ export async function recordExperiment(input: {
       // The Task span's output carries the routine run's status and precheck reason at the top level (FM11), so a
       // routine trial that started no agent run (and so has no agent span) still shows why in Phoenix. The reason is
       // already redacted at the source (runner.routineRunInfo).
+      // runExperiment's own tracer provider has neither redaction layer, so the whole record (error, firstFailure,
+      // grader reasons, final text) goes through the trace redactor here before it becomes the Task span's output.
       const routine = (detail as SuiteTrialDetail).routine ?? null;
-      return {
+      return traceRedact({
         ...rest,
         routine_run: routine ? { id: routine.id, routine_id: routine.routineId, status: routine.status, agent_run_id: routine.agentRunId, precheck_reason: routine.reason } : null,
         detail: { ...detail, finalText: detail.finalText?.slice(0, 2000) ?? null },
-      };
+      });
     },
     evaluators: [
       asEvaluator({ name: "success", kind: "CODE", evaluate: async ({ output }) => {
