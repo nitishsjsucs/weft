@@ -1,0 +1,45 @@
+{
+  "id": "MN-51",
+  "group": "mentions",
+  "parity": [
+    "Q6"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "mention",
+  "principal": "usr_sam",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": null
+  },
+  "input": {
+    "mention": "@weft who has approved time off in November?",
+    "channel": "#people-ops"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "tainted": true,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "Grace",
+          "Oscar"
+        ]
+      }
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/test/MN-51.md",
+  "legacyCase": null
+}

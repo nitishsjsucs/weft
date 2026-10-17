@@ -1,0 +1,47 @@
+{
+  "id": "ON-03",
+  "group": "onboarding_offboarding",
+  "parity": [
+    "R15"
+  ],
+  "kind": "regression",
+  "split": "test",
+  "surface": "routine",
+  "principal": "svc_scheduler",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-11-02T17:00:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": null
+  },
+  "input": {
+    "routine": "rt_thirty_day_checkin",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM checkins WHERE due_on = '2026-10-31'",
+          "equals": 2
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM checkins WHERE worker_id NOT IN ('wrk_0020', 'wrk_0021')",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/test/ON-03.md",
+  "legacyCase": null
+}
