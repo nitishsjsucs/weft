@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "comms__send_report", "arguments": "{{derived.comms.send_report}}" }] },
+      { "output": [{ "type": "text", "text": "Proposed the weekly cost by state email to leadership; it waits for approval." }] }
+    ]
+  }
+}

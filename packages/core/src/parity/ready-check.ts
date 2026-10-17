@@ -7,6 +7,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { ReadyCheckItem } from "@weft/contracts";
 import { bankAccounts, benefitEnrollments, devices, itAccounts, onboardingTasks, taxAccounts, taxProfiles, workers, type DbTx } from "@weft/db";
 import { displayName } from "../people/names";
+import { addWorkingDays } from "../life-events/business-days";
+import { holidayMap } from "../time-off/store";
 
 export type ReadyOwner = "the hire" | "IT" | "payroll" | "HR";
 export const READY_ITEMS: readonly { item: ReadyCheckItem; label: string; owner: ReadyOwner }[] = [
@@ -41,7 +43,8 @@ export function addBusinessDays(from: string, n: number): string {
 /** One hire, or every employee starting in [asOf, asOf + N business days]. */
 export async function readyCheck(tx: DbTx, companyId: string, asOf: string, opts: { businessDays?: number; workerId?: string } = {}): Promise<ReadyCheckResult> {
   const n = opts.businessDays ?? READY_WINDOW_BUSINESS_DAYS;
-  const end = addBusinessDays(asOf, n);
+  // wave 4 (w4-parity-people, R2): the three business days skip the company holiday calendar too.
+  const end = addWorkingDays(asOf, n, await holidayMap(tx, companyId));
   const all = await tx.select().from(workers).where(and(eq(workers.companyId, companyId), eq(workers.type, "employee")));
   const hires = all
     .filter((w) => (opts.workerId ? w.id === opts.workerId : w.startDate >= asOf && w.startDate <= end && ["onboarding", "active"].includes(w.status)))

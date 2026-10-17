@@ -6,6 +6,7 @@ import { tid, type Proposal } from "@weft/contracts";
 import { errorText, useGet } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 import { ProposalCard } from "./proposal-card";
+import { HandoffsPanel } from "../compliance/w4-calendar";   // wave 4: hand-off cases for a tax specialist, an HR person or a vendor specialist
 
 function List({ items, empty, failed }: { items: Proposal[] | undefined; empty: string; failed?: boolean }) {
   if (!items) return <div className="text-2 text-gray-10">{failed ? "The Inbox is not available right now." : "Loading..."}</div>;
@@ -48,10 +49,12 @@ export function InboxView() {
           <TabsTrigger value="pending">Approvals {pending?.length ? <Badge tone="accent" size="xs">{pending.length}</Badge> : null}</TabsTrigger>
           <TabsTrigger value="suggestions">Suggestions {suggestions?.length ? <Badge size="xs">{suggestions.length}</Badge> : null}</TabsTrigger>
           <TabsTrigger value="decided">Decided</TabsTrigger>
+          <TabsTrigger value="handoffs">Hand-offs</TabsTrigger>
         </TabsList>
         <TabsContent value="pending"><List items={pending} failed={!!all.error} empty="Nothing waiting for a decision." /></TabsContent>
         <TabsContent value="suggestions"><List items={suggestions} failed={!!all.error} empty="No suggestions right now." /></TabsContent>
         <TabsContent value="decided"><List items={decided} failed={!!all.error} empty="No decisions yet." /></TabsContent>
+        <TabsContent value="handoffs"><HandoffsPanel /></TabsContent>
       </Tabs>
     </div>
   );
