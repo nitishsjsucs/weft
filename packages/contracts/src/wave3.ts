@@ -133,12 +133,19 @@ export const CHAT_ACT_TOOLS = [
  * never offers to chat, so that slot can carry one domain read without breaking the cap of 16. Code (never the model)
  * picks it from the person's words when the run opens, and it is frozen in the run's allowlist like every other name.
  * Every route is a read: a routed run can look more up, never change more.
+ * Round 2 (docs/evals/round1-analysis.md R5, R6): a domain may have a second read. It takes CHAT_ROUTE_SPARE, the tax
+ * registrations read, which no routed domain question needs; that name is on the default read list only, so in act
+ * mode (and when the request names tax words) the domain brings its first read alone. Each entry names the slot it
+ * takes, so every routed name is still listed here once, and the list never grows past 16.
  */
 export const CHAT_ROUTE_SLOT = "comms.post_update" as const;
+export const CHAT_ROUTE_SPARE = "tax.list_registrations" as const;
 export const CHAT_DOMAIN_ROUTES = [
-  { domain: "benefits_reconcile", tool: "benefits.list_findings" },
-  { domain: "integrations_sync", tool: "integrations.list_sync_items" },
-  { domain: "team_calendar", tool: "time_off.team_calendar" },
+  { domain: "benefits_reconcile", tool: "benefits.list_findings", slot: CHAT_ROUTE_SLOT },
+  { domain: "integrations_sync", tool: "integrations.list_sync_items", slot: CHAT_ROUTE_SLOT },
+  { domain: "integrations_sync", tool: "integrations.status", slot: CHAT_ROUTE_SPARE },
+  { domain: "team_calendar", tool: "time_off.team_calendar", slot: CHAT_ROUTE_SLOT },
+  { domain: "contractor_payouts", tool: "contractors.list_payouts", slot: CHAT_ROUTE_SLOT },
 ] as const;
 export type ChatDomainRoute = (typeof CHAT_DOMAIN_ROUTES)[number]["domain"];
 /**

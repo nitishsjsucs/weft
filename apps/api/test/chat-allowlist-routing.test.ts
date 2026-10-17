@@ -1,9 +1,11 @@
 // Wave 4 chat domain routing (docs/evals/error-analysis.md FM2): the comms.post_update slot, which chat is never
-// offered, carries one domain read chosen by code from the person's words. Read-only, at most 16 names, frozen in the
-// run's allowlist when the run opens. Scripted provider only; nothing here calls a live model.
+// offered, carries one domain read chosen by code from the person's words. Round 2 (round1-analysis.md R5, R6): the
+// integrations domain also swaps integrations.status into the tax registrations slot, and a contractors route brings
+// contractors.list_payouts. Read-only, at most 16 names, frozen in the run's allowlist when the run opens. Scripted
+// provider only; nothing here calls a live model.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { CHAT_ACT_TOOLS, CHAT_DOMAIN_ROUTES, CHAT_ROUTE_SLOT, CHAT_TOOLS_W3, W3_SETTINGS } from "@weft/contracts";
+import { CHAT_ACT_TOOLS, CHAT_DOMAIN_ROUTES, CHAT_ROUTE_SLOT, CHAT_ROUTE_SPARE, CHAT_TOOLS_W3, W3_SETTINGS } from "@weft/contracts";
 import { execRuns, settings } from "@weft/db";
 import { createTestWeft, type TestWeft } from "../src/testing";
 import { chooseChatTools, registered, routedDomain, routeInto } from "../src/agent/chat-allowlist";
@@ -27,6 +29,11 @@ describe("routedDomain", () => {
     expect(routedDomain("Is the Greenhouse sync healthy?")?.tool).toBe("integrations.list_sync_items");
     expect(routedDomain("Who's out next week?")?.tool).toBe("time_off.team_calendar");
     expect(routedDomain("Is anyone on leave in Engineering?")?.tool).toBe("time_off.team_calendar");
+    for (const t of ["How much are we paying our contractors this month?", "Which payouts are still pending?", "What is owed to the contractor in Lisbon?", "Did the pay-out to Ines go through?"]) {
+      expect(routedDomain(t)?.tool, t).toBe("contractors.list_payouts");
+    }
+    // Earlier routes win ties: a carrier bill that is owed is a benefits question.
+    expect(routedDomain("What do we owe the benefits carrier?")?.tool).toBe("benefits.list_findings");
     for (const t of ["What's left on Imani's offboarding?", "Is Noor ready for Monday?", "Who approved the last payroll?", "Why did Hollis's gross change?", "", "   "]) {
       expect(routedDomain(t), t).toBeNull();
     }
@@ -44,10 +51,11 @@ describe("chooseChatTools with routing", () => {
   it("swaps the routed read into the comms.post_update slot: still 16 at most, still read-only", async () => {
     await setCanPropose(false);
     const base = registered(reg(), CHAT_TOOLS_W3)!;
-    for (const [text, tool] of [["Did the benefits carrier overbill us this month?", "benefits.list_findings"], ["Fix the Workday conflict for Ruth.", "integrations.list_sync_items"], ["Who's out next week?", "time_off.team_calendar"]] as const) {
+    for (const [text, tool] of [["Did the benefits carrier overbill us this month?", "benefits.list_findings"], ["Fix the Workday conflict for Ruth.", "integrations.list_sync_items"], ["Who's out next week?", "time_off.team_calendar"], ["How much are we paying our contractors this month?", "contractors.list_payouts"]] as const) {
       const c = await chooseChatTools({ db: weft.db, registry: reg() }, session("usr_dana"), text);
+      const domain = CHAT_DOMAIN_ROUTES.find((r) => r.tool === tool)!.domain;
       expect(c.mode, text).toBe("read");
-      expect(c.routed, text).toEqual({ domain: CHAT_DOMAIN_ROUTES.find((r) => r.tool === tool)!.domain, tool });
+      expect(c.routed, text).toEqual({ domain, tool, tools: CHAT_DOMAIN_ROUTES.filter((r) => r.domain === domain).map((r) => r.tool) });
       expect(c.allowlist!.length).toBeLessThanOrEqual(16);
       expect(c.allowlist!.length).toBe(base.length);
       expect(c.allowlist).toContain(tool);
@@ -57,6 +65,29 @@ describe("chooseChatTools with routing", () => {
       // Read-only: every name on a routed default run is a read.
       expect(c.allowlist!.filter((n) => reg().def(n)?.effect !== "read")).toEqual([]);
     }
+  });
+
+  it("the integrations route also swaps integrations.status into the tax registrations slot (R5)", async () => {
+    await setCanPropose(false);
+    const base = registered(reg(), CHAT_TOOLS_W3)!;
+    const c = await chooseChatTools({ db: weft.db, registry: reg() }, session("usr_dana"), "Is Workday in sync for the new hires?");
+    expect(c.routed).toEqual({ domain: "integrations_sync", tool: "integrations.list_sync_items", tools: ["integrations.list_sync_items", "integrations.status"] });
+    expect(c.allowlist!.length).toBe(base.length);
+    expect(c.allowlist!.indexOf("integrations.list_sync_items")).toBe(base.indexOf(CHAT_ROUTE_SLOT));
+    expect(c.allowlist!.indexOf("integrations.status")).toBe(base.indexOf(CHAT_ROUTE_SPARE));
+    expect(c.allowlist).not.toContain(CHAT_ROUTE_SPARE);
+    expect(c.allowlist!.filter((n) => reg().def(n)?.effect !== "read")).toEqual([]);
+    // The other one-read routes leave the tax registrations read in place.
+    for (const text of ["Did the carrier overbill us?", "Who's out next week?", "Which payouts are still pending?"]) {
+      expect((await chooseChatTools({ db: weft.db, registry: reg() }, session("usr_dana"), text)).allowlist, text).toContain(CHAT_ROUTE_SPARE);
+    }
+  });
+
+  it("a request that names tax words keeps the tax registrations read: only the anchor read is routed", async () => {
+    const c = await chooseChatTools({ db: weft.db, registry: reg() }, session("usr_dana"), "Is the Workday sync done, and are we registered for withholding in CO?");
+    expect(c.routed).toEqual({ domain: "integrations_sync", tool: "integrations.list_sync_items", tools: ["integrations.list_sync_items"] });
+    expect(c.allowlist).toContain(CHAT_ROUTE_SPARE);
+    expect(c.allowlist).not.toContain("integrations.status");
   });
 
   it("an unrouted question keeps the wave 3 list, and route: false turns routing off", async () => {
@@ -80,6 +111,16 @@ describe("chooseChatTools with routing", () => {
     // A list without the slot never grows.
     const noSlot = names.filter((n) => n !== CHAT_ROUTE_SLOT);
     expect(routeInto(reg(), noSlot, "Who's out next week?")).toEqual({ names: noSlot, routed: null });
+    // Per read: a second read that fails leaves its slot alone and the anchor still routes...
+    const noStatus = { get: (n: string) => (n === "integrations.status" ? undefined : reg().get(n)) };
+    const one = routeInto(noStatus, names, "Is Workday in sync?");
+    expect(one.routed).toEqual({ domain: "integrations_sync", tool: "integrations.list_sync_items", tools: ["integrations.list_sync_items"] });
+    expect(one.names).toContain(CHAT_ROUTE_SPARE);
+    // ...but without the anchor nothing is routed, not even a second read that would pass.
+    const noAnchor = { get: (n: string) => (n === "integrations.list_sync_items" ? undefined : reg().get(n)) };
+    expect(routeInto(noAnchor, names, "Is Workday in sync?")).toEqual({ names, routed: null });
+    // A list that never had the slot cannot be routed into by the second read alone either.
+    expect(routeInto(reg(), noSlot, "Is Workday in sync?")).toEqual({ names: noSlot, routed: null });
   });
 
   it("the chat_can_propose variant routes the same read and keeps every act write proposal-only", async () => {
@@ -88,6 +129,9 @@ describe("chooseChatTools with routing", () => {
       const c = await chooseChatTools({ db: weft.db, registry: reg() }, session("usr_dana"), "Please fix the Workday conflict for Ruth");
       expect(c.mode).toBe("act");
       expect(c.routed?.tool).toBe("integrations.list_sync_items");
+      // The act list has no tax registrations slot, so the second read is not routed in act mode.
+      expect(c.routed?.tools).toEqual(["integrations.list_sync_items"]);
+      expect(c.allowlist).not.toContain("integrations.status");
       expect(c.allowlist!.length).toBeLessThanOrEqual(16);
       expect(c.allowlist).not.toContain(CHAT_ROUTE_SLOT);
       const writes = c.allowlist!.filter((n) => reg().def(n)?.effect !== "read");
@@ -99,11 +143,13 @@ describe("chooseChatTools with routing", () => {
   });
 
   it("a live provider keeps the routed reads (their schemas pass the strict check)", async () => {
-    for (const text of ["Did the carrier overbill us?", "Fix the Workday conflict", "Who's out next week?"]) {
+    for (const text of ["Did the carrier overbill us?", "Fix the Workday conflict", "Who's out next week?", "Which payouts are still pending?"]) {
       const c = await chooseChatTools({ db: weft.db, registry: reg(), liveProvider: true }, session("usr_dana"), text);
       expect(c.dropped, text).toEqual([]);
       expect(c.routed, text).not.toBeNull();
     }
+    const both = await chooseChatTools({ db: weft.db, registry: reg(), liveProvider: true }, session("usr_dana"), "Fix the Workday conflict");
+    expect(both.routed?.tools).toEqual(["integrations.list_sync_items", "integrations.status"]);
   });
 });
 
@@ -126,5 +172,25 @@ describe("POST /v1/agent/runs freezes the routed list in the run", () => {
     expect(ok.ok).toBe(true);
     const no = await weft.executor.agent.exec(h, { callId: "c2", command: "comms.post_update", args: { text: "hi" } });
     expect(!no.ok && no.refusal.code).toBe("UNAVAILABLE");
+  });
+
+  it("an integrations run freezes both reads; the swapped-out tax registrations read is refused", async () => {
+    const res = await weft.app.request("/v1/agent/runs", { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: JSON.stringify({ text: "Is Workday in sync?", pageContext: null }) });
+    expect(res.status).toBe(202);
+    const { runId } = (await res.json()) as { runId: string };
+    const rt = weft.agent as unknown as { settled?: (id: string) => Promise<unknown> };
+    if (typeof rt.settled === "function") await rt.settled(runId);
+    const [row] = await weft.db.select().from(execRuns).where(eq(execRuns.id, runId)).limit(1);
+    const frozen = JSON.parse(String((row as { allowlistJson?: string }).allowlistJson ?? "null")) as string[];
+    expect(frozen).toEqual(expect.arrayContaining(["integrations.list_sync_items", "integrations.status"]));
+    expect(frozen).not.toContain(CHAT_ROUTE_SPARE);
+    expect(frozen.length).toBeLessThanOrEqual(16);
+    const h = await weft.executor.runs.openChatRun(session("usr_dana"), { threadId: null, surface: "human_ui", allowlist: frozen });
+    const st = await weft.executor.agent.exec(h, { callId: "c1", command: "integrations.status", args: {} });
+    expect(st.ok).toBe(true);
+    const sync = await weft.executor.agent.exec(h, { callId: "c2", command: "integrations.list_sync_items", args: { vendor: "workday", status: "all" } });
+    expect(sync.ok && (sync as { data?: { vendors?: unknown } }).data).toBeTruthy();
+    const tax = await weft.executor.agent.exec(h, { callId: "c3", command: "tax.list_registrations", args: {} });
+    expect(!tax.ok && tax.refusal.code).toBe("UNAVAILABLE");
   });
 });

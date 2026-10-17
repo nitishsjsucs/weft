@@ -1,8 +1,8 @@
 // contractors.* commands (wave 2, docs/wave2.md). Owner: w2-benefits-contractors. Append WeftCommand definitions to this array; commands/index.ts concatenates it.
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { formatCents } from "@weft/contracts";
-import { contractorPayments } from "@weft/db";
+import { contractorPayments, workers } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
@@ -11,17 +11,25 @@ import { listFxRates, listPayouts, PAYOUT_CREDENTIAL_REF, planPayouts, toPayoutD
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date is YYYY-MM-DD");
 
-const ListInput = z.object({ worker_id: z.string().optional(), rail_status: z.enum(["pending", "sent", "delivered", "returned"]).optional(), ...responseFormatField });
+const Month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month is YYYY-MM");
+const ListInput = z.object({ worker_id: z.string().optional(), rail_status: z.enum(["pending", "sent", "delivered", "returned"]).optional(), month: Month.optional(), ...responseFormatField });
 type ListInput = z.infer<typeof ListInput>;
 const listPayoutsCmd = readCommand({
   name: "contractors.list_payouts", domain: "payroll",
   summary: "List contractor payouts with currency, fixed FX rate, USD cents and rail status.",
-  description: "List global contractor payouts: contractor, amount in the contractor's currency (minor units), the fixed FX rate used, the USD amount in cents with display, scheduled date and payment rail status (pending, sent, delivered, returned) with sent and delivered times.",
+  description: "List global contractor payouts, optionally for one scheduled month (YYYY-MM): contractor, amount in the contractor's currency (minor units), the fixed FX rate, USD cents with display, scheduled date and rail status (pending, sent, delivered, returned). total_usd sums the listed payouts. A payout exists only once one is scheduled and approved.",
   input: ListInput,
   async run(i: ListInput, ctx, deps) {
-    const rows = await listPayouts(deps.tx, ctx.companyId, { workerId: i.worker_id, status: i.rail_status });
+    const rows = (await listPayouts(deps.tx, ctx.companyId, { workerId: i.worker_id, status: i.rail_status })).filter((r) => !i.month || r.scheduledFor.startsWith(`${i.month}-`));
     const payouts = rows.map(toPayoutDto).map((p) => ({ ...p, usd_display: formatCents(p.usdCents) }));
-    return { data: { count: payouts.length, payouts }, summary: `Listed ${payouts.length} payouts` };
+    const total = payouts.reduce((a, p) => a + p.usdCents, 0);
+    const [{ c: onFile } = { c: 0 }] = await deps.tx.select({ c: count() }).from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.type, "contractor")));
+    // What an empty list covers (round 1 R5, R6): no row means nothing was scheduled, not that nothing is owed by contract.
+    const scope = [i.month ? `scheduled in ${i.month}` : "", i.rail_status ? `with rail status ${i.rail_status}` : "", i.worker_id ? `for ${i.worker_id}` : ""].filter(Boolean).join(" ");
+    const summary = payouts.length === 0
+      ? `No contractor payouts${scope ? ` ${scope}` : ""}; ${onFile} contractors on file, and a payout exists only once one is scheduled and approved`
+      : `Listed ${payouts.length} payouts${scope ? ` ${scope}` : ""}, total ${formatCents(total)}`;
+    return { data: { count: payouts.length, payouts, total_usd_cents: total, total_usd_display: formatCents(total), month: i.month ?? null, contractors_on_file: onFile }, summary };
   },
 });
 
