@@ -97,7 +97,7 @@ type RemindInput = z.infer<typeof RemindInput>;
 const sendWindowReminders = writeCommand<RemindInput>({
   name: "benefits.send_window_reminders", summary: "Email reminders for open life-event windows that are due",
   description: "Email each employee whose life-event window is open, who has not elected, and whose next reminder date (14, 7 and 2 days before the close) has come; one email per window per run. Due windows are recomputed here; window_ids narrows them. Example: {\"window_ids\":null,\"as_of\":null}",
-  input: RemindInput, domain: "benefits", needs: "edit", effect: "external", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
+  input: RemindInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   tiers: { main: "executable", task: "delegated" }, afterPending: "propose",
   async run(i, ctx, deps) {
     const due = (await remindersDue(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now))).filter((r) => !i.window_ids || i.window_ids.includes(r.window_id));

@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "benefits__send_window_reminders", "arguments": "{{derived.benefits.send_window_reminders}}" }] },
+      { "output": [{ "type": "text", "text": "Sent the benefits window reminders that were due." }] }
+    ]
+  }
+}
