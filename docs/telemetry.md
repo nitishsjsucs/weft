@@ -34,22 +34,41 @@ from `@weft/agent` before a trial and `runTraceTags.set(null)` after.
 
 ## The span tree
 
-One trace per `runLoop` call. A run woken after an approval is a second trace with the same `weft.run_id` and
-`session.id`.
+One trace per `runLoop` call (`weft.segment = loop`). A run woken after an approval is a second trace with the same
+`weft.run_id` and `session.id`; a zero-token wake that finishes the run in code (the checklist passed and nothing is
+pending) is a short trace of its own, `weft.segment = zero_token_wake`, with only a `terminal` CHAIN under it.
 
 ```
 agent.run                 AGENT      input = the chat turn or "routine: <id> ..." and the trigger; output = the summary
 ├── admission             CHAIN      weft.outcome (ok or refused:BUDGET_EXCEEDED), reserve micros, weft.step_n
 ├── assemble              CHAIN      items, estimated input tokens, weft.prefix_hash
+│   └── memory.recall     RETRIEVER  the run-start recall (first assemble of the run only): query in, the <recall> lines as documents
 ├── model                 CHAIN      weft.attempt, weft.stop, weft.request_id (one per attempt, retries included)
 │   └── llm.responses     LLM        messages, tools, invocation parameters, tokens (cached, cache write, reasoning), llm.cost.*
 ├── dispatch              CHAIN      batch size, the model step it came from
 │   └── <tool wire name>  TOOL       tool.id = call id, tool.parameters, output = the outcome, weft.outcome, weft.refusal_code, weft.proposal_id
+│       └── memory.search RETRIEVER  under memory__search only: the query, each hit as a document (cite, snippet, path, line, taint)
 ├── post                  CHAIN      the recited plan, a notice (repair, budget), or the chat answer check
 │   └── grounding.check   GUARDRAIL  the answer in, weft.grounded and the unmatched numbers out
 └── terminal              CHAIN      weft.status, weft.terminal_reason
     └── taint.check       GUARDRAIL  weft.tainted, weft.tainted_by, pending proposals
 ```
+
+The recall RETRIEVER is a projection of the block the runtime packed into the context (recall returns only the
+rendered block, so there are no scores); `weft.source = context_pack` says so. Untrusted lines carry
+`metadata.untrusted = true`.
+
+**MCP calls.** An MCP client calls `POST /v1/tools/:name`, which runs in the executor and never enters the loop. The
+executor's pipeline has an optional call observer for calls from the MCP surface (`engine.observeCall`, set in
+`compose.ts` to `traceMcpCall` from `@weft/agent`; the executor imports no OpenTelemetry). Each call is a root trace:
+
+```
+<tool wire name>          TOOL       user.id = the key's principal, tag.tags = ["mcp", <name>], metadata.kind = mcp,
+│                                    weft.outcome, weft.refusal_code, weft.proposal_id, weft.tainted (always true: MCP input is untrusted)
+└── memory.search         RETRIEVER  for memory__search, as above
+```
+
+A person's own UI or API key calls open no span. An `agent_ask` from MCP starts an ordinary chat run, traced as above.
 
 Every span carries, from context set once at run start: `session.id` (the chat thread id, else
 `routine_run:<id>`, else the eval task id), `user.id` (the acting principal, `routine:<id>` for unattended
@@ -72,6 +91,8 @@ curl -s "$PHX/v1/projects/$P/spans?span_kind=TOOL&attribute=weft.outcome:%22prop
 curl -s "$PHX/v1/projects/$P/spans?span_kind=TOOL&attribute=weft.refusal_code:%22UNAVAILABLE%22"
 curl -s "$PHX/v1/projects/$P/spans?attribute=session.id:%22routine_run:rtr_...%22"
 curl -s "$PHX/v1/projects/$P/sessions"
+curl -s "$PHX/v1/projects/$P/spans?span_kind=RETRIEVER"                                   # recall and memory search
+curl -s "$PHX/v1/projects/$P/spans?span_kind=TOOL&attribute=user.id:%22usr_...%22"        # MCP calls (parent_id null) by key principal
 ```
 
 Ingestion is asynchronous: right after a flush a query can come back empty or short, so poll.
@@ -91,11 +112,13 @@ Ingestion is asynchronous: right after a flush a query can come back empty or sh
    attribute, event attribute and status message. It does not exist inside Phoenix's `runExperiment` provider, which is
    why layer 1 is the one that counts and why the tracer is looked up on every span.
 
-Tests: `packages/agent/test/otel.test.ts` (span tree for chat and routine runs, a canary that plants a fake key and a
-vault value in raw, base64 and hex form plus routing and account numbers in a tool result, tool arguments, model text,
-an error message, an exception and a memory hit, and a control run that proves the canary would catch a leak) and
-`tests/telemetry-api.test.ts` (the switch, the tree through `createWeft`, and the canary with the executor's real
-Redactor with and without the processor).
+Tests: `packages/agent/test/otel.test.ts` (span tree for chat and routine runs, both RETRIEVERs, MCP spans and the
+zero-token wake segment, a canary that plants a fake key and a vault value in raw, base64 and hex form plus routing and
+account numbers in a tool result, tool arguments, model text, an error message, an exception, a recalled memory line
+and MCP arguments, hits and refusals, and a control run that proves the canary would catch a leak) and
+`tests/telemetry-api.test.ts` (the switch, the tree through `createWeft` for a chat, the GP1 routine and MCP calls with
+the seeded mcp key, and the canary with the executor's real Redactor with and without the processor, for a chat and
+for MCP calls). `tests/telemetry-phoenix.test.ts` reads the same spans back from a private Phoenix.
 
 ## Cost: Weft and Phoenix
 
