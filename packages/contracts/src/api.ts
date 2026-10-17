@@ -4,10 +4,12 @@ export type Method = "GET" | "POST" | "PUT" | "DELETE";
 export interface RouteDef { method: Method; path: string; file: RouteFile; owner: TrackId; query?: string[]; body?: string; res: string; auth: "public" | "any" | "ui_only" | "not_mcp"; mutates: boolean }
 export type TrackId = "t1-payroll" | "t2-world" | "t3-governance" | "t4-agent" | "t5-app" | "t6-site"
   | "w2-onboarding" | "w2-offboarding" | "w2-benefits-contractors" | "w2-memory" | "w2-providers-sandbox" | "w2-reliability"
-  | "w3-parity-routines" | "w3-parity-chat" | "w3-expenses" | "w3-timeoff" | "w3-integrations-hr" | "w3-integrations-screening-esign" | "w3-topbar-shell";
+  | "w3-parity-routines" | "w3-parity-chat" | "w3-expenses" | "w3-timeoff" | "w3-integrations-hr" | "w3-integrations-screening-esign" | "w3-topbar-shell"
+  | "w4-parity-compliance" | "w4-parity-people" | "w4-parity-agent" | "w4-parity-admin" | "w4-telemetry" | "w4-eval-suite" | "w4-eval-heldout";
 export type RouteFile = "health" | "company" | "stats" | "workers" | "offers" | "payrolls" | "tax" | "notices" | "benefits" | "it" | "proposals" | "actions" | "tools" | "memory" | "events" | "settings" | "api-keys" | "agent" | "routines" | "sim"
   | "portal" | "documents" | "offboarding" | "contractors"
-  | "expenses" | "time-off" | "reports" | "integrations" | "screening";   // wave 3
+  | "expenses" | "time-off" | "reports" | "integrations" | "screening"   // wave 3
+  | "compliance" | "training" | "life-events" | "handoffs" | "agent-surfaces" | "admin";   // wave 4
 
 const r = <M extends Method, P extends string, F extends RouteFile>(method: M, path: P, file: F, owner: TrackId, res: string, x: Partial<RouteDef> = {}) =>
   ({ owner, res, auth: "any", mutates: method !== "GET", ...x, method, path, file }) as RouteDef & { method: M; path: P; file: F };
@@ -150,6 +152,39 @@ export const ROUTES = [
   r("GET", "/v1/portal/screening", "screening", "w3-integrations-screening-esign", "W3ScreeningPortalView[]"),
   r("POST", "/v1/portal/screening/consent", "screening", "w3-integrations-screening-esign", "{ ok, orderId }", { auth: "ui_only", body: "{ orderId, typedName } (simulated apply page only)" }),
   r("POST", "/v1/portal/esign/finish", "screening", "w3-integrations-screening-esign", "{ ok, envelopeId, outcome, offerStatus }", { auth: "ui_only", body: "{ envelopeId, outcome: 'signed' | 'declined' } (simulated signing page only)" }),
+  // Wave 4 (docs/wave4.md). Stubs answer 501 until the owning track lands them.
+  r("GET", "/v1/compliance/calendar", "compliance", "w4-parity-compliance", "ComplianceItem[]", { query: ["from", "to", "kind", "status"] }),
+  r("GET", "/v1/filings", "compliance", "w4-parity-compliance", "Page<Filing>", { query: ["form", "period", "status", "limit", "afterId"] }),
+  r("GET", "/v1/filings/:id", "compliance", "w4-parity-compliance", "FilingDetail"),
+  r("POST", "/v1/filings/:id/prepare", "compliance", "w4-parity-compliance", "ToolOutcome", { auth: "not_mcp" }),
+  r("POST", "/v1/filings/:id/file", "compliance", "w4-parity-compliance", "ToolOutcome (a proposal: tax.file_return is R4)", { auth: "not_mcp" }),
+  r("POST", "/v1/notices/upload", "compliance", "w4-parity-compliance", "ToolOutcome", { auth: "ui_only", body: "NoticeUploadBody (the upload is made first through the uploads route)" }),
+  r("GET", "/v1/training/courses", "training", "w4-parity-compliance", "TrainingCourse[]"),
+  r("GET", "/v1/training/assignments", "training", "w4-parity-compliance", "Page<TrainingAssignment>", { query: ["status", "workerId", "courseCode", "limit", "afterId"] }),
+  r("POST", "/v1/training/assignments/:id/complete", "training", "w4-parity-compliance", "ToolOutcome", { auth: "ui_only" }),
+  r("GET", "/v1/portal/training", "training", "w4-parity-compliance", "TrainingAssignment[] (the caller's own)", { auth: "ui_only" }),
+  r("POST", "/v1/portal/training/:id/complete", "training", "w4-parity-compliance", "ToolOutcome", { auth: "ui_only", body: "{ certificateUploadId? }" }),
+  r("GET", "/v1/handoffs", "handoffs", "w4-parity-compliance", "Page<HandoffCase>", { query: ["kind", "status", "limit", "afterId"] }),
+  r("GET", "/v1/handoffs/:id", "handoffs", "w4-parity-compliance", "HandoffCase"),
+  r("POST", "/v1/handoffs/:id/resolve", "handoffs", "w4-parity-compliance", "ToolOutcome", { auth: "ui_only", body: "{ note }" }),
+  r("GET", "/v1/life-events", "life-events", "w4-parity-people", "Page<LifeEvent>", { query: ["workerId", "status", "limit", "afterId"] }),
+  r("GET", "/v1/enrollment-windows", "life-events", "w4-parity-people", "EnrollmentWindow[]", { query: ["workerId", "kind", "status"] }),
+  r("GET", "/v1/carrier-submissions", "life-events", "w4-parity-people", "CarrierSubmission[]", { query: ["workerId", "status"] }),
+  r("POST", "/v1/portal/life-events", "life-events", "w4-parity-people", "ToolOutcome", { auth: "ui_only", body: "LifeEventReport" }),
+  r("GET", "/v1/portal/checkins", "life-events", "w4-parity-people", "Checkin[] (the caller's own)", { auth: "ui_only" }),
+  r("POST", "/v1/portal/checkins/:id/submit", "life-events", "w4-parity-people", "ToolOutcome", { auth: "ui_only", body: "CheckinAnswers" }),
+  r("GET", "/v1/checkins", "life-events", "w4-parity-people", "CheckinSummary[] (manager view: direct reports only)", { query: ["status"] }),
+  r("POST", "/v1/portal/agent/runs", "agent-surfaces", "w4-parity-agent", "{ runId, threadId, handoffId }", { auth: "ui_only", body: "PortalAskBody" }),
+  r("GET", "/v1/agent/mentions", "agent-surfaces", "w4-parity-agent", "AgentMention[]", { query: ["status"] }),
+  r("POST", "/v1/sim/chat/inbound", "agent-surfaces", "w4-parity-agent", "{ messageRef, mentionId }", { auth: "ui_only", body: "{ channel, from, text, threadRef? } (simulated chat only)" }),
+  r("POST", "/v1/sim/email/inbound", "agent-surfaces", "w4-parity-agent", "{ intakeId, status }", { auth: "ui_only", body: "SimInboundEmail (simulated email only)" }),
+  r("GET", "/v1/expense-intake", "agent-surfaces", "w4-parity-agent", "ExpenseIntake[]", { query: ["status"] }),
+  r("GET", "/v1/routine-runs/:id/waits", "agent-surfaces", "w4-parity-agent", "RoutineWait[]"),
+  r("GET", "/v1/routine-gallery", "admin", "w4-parity-admin", "RoutineGalleryRow[]"),
+  r("GET", "/v1/reports", "admin", "w4-parity-admin", "{ metric, label, unit }[] (the Reports screen catalog)"),
+  r("POST", "/v1/reports/:metric/send", "admin", "w4-parity-admin", "ToolOutcome (a proposal: comms.send_message)", { auth: "not_mcp", body: "{ from, to, groupBy?, recipients }" }),
+  r("GET", "/v1/permissions/matrix", "admin", "w4-parity-admin", "PermissionMatrixRow[]", { auth: "not_mcp" }),
+  r("POST", "/v1/permissions/agent-actions", "admin", "w4-parity-admin", "ToolOutcome (a proposal)", { auth: "ui_only", body: "{ principalId, command, mode: 'deny' | 'propose_only' | 'clear' }" }),
 ] as const satisfies readonly RouteDef[];
 
 export type RouteKey = `${(typeof ROUTES)[number]["method"]} ${(typeof ROUTES)[number]["path"]}`;

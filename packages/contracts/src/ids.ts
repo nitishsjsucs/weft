@@ -12,12 +12,15 @@ export const ID_PREFIXES = [
   "doc_", "sig_", "upl_", "obs_", "ofb_", "ofs_", "rcf_", "oen_", "eml_", "simr_", "simk_",
   // wave 3 (packages/contracts/src/wave3.ts WAVE3_ID_PREFIXES)
   "exp_", "epol_", "tot_", "top_", "tasn_", "tol_", "tor_", "hcal_", "hol_", "extl_", "dlv_", "syn_", "scr_", "spk_", "env_", "chk_", "ctf_", "simx_", "simo_",
+  // wave 4 (packages/contracts/src/wave4.ts WAVE4_ID_PREFIXES)
+  "cal_", "hnd_", "trc_", "tra_", "lev_", "ewn_", "csb_", "mnt_", "exi_", "rwt_", "aov_",
 ] as const;
 export type IdPrefix = (typeof ID_PREFIXES)[number];
 
 /** Prefixes whose ids may appear in event payloads (SPEC 6.5: ids only, never free text). */
 export const EVENT_PAYLOAD_PREFIXES = ["offr_", "wrk_", "ntc_", "pay_", "txa_", "prp_", "rt_", "rtr_", "sima_", "simb_", "pyc_", "run_", "act_",
-  "exp_", "tor_", "top_", "syn_", "scr_", "env_", "chk_"] as const;   // wave 3
+  "exp_", "tor_", "top_", "syn_", "scr_", "env_", "chk_",   // wave 3
+  "cal_", "fil_", "upl_", "hnd_", "tra_", "lev_", "ewn_", "csb_", "mnt_", "exi_", "rwt_"] as const;   // wave 4
 
 export function formatId(prefix: IdPrefix, n: number): string {
   return `${prefix}${String(n).padStart(4, "0")}`;

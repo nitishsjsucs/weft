@@ -26,3 +26,6 @@ export * from "./w3/testids-timeoff";
 export * from "./w3/testids-parity";
 export * from "./w3/testids-integrations";
 export * from "./w3/testids-shell";
+export * from "./wave4";
+export * from "./telemetry";
+export * from "./evals";

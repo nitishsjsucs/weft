@@ -16,3 +16,4 @@ export { LUNA, CLAUDE_OPUS_5_5, PRICES_BY_PROVIDER, stepCostUsd, reserveUsd, usd
 export { loadSecret, parseSecretsFile } from "./secrets";
 export { canonicalJson, sha256, newNonce, escapeTagText } from "./canonical";
 export { lockedWrite, isBusy } from "./busy";
+export { setTraceRedactor, traceRedact, runTraceTags } from "./otel";   // wave 4 telemetry seam (w4-telemetry)

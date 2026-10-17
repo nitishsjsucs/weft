@@ -11,6 +11,10 @@ import { predicates as w3TimeOff } from "./wave3/time-off";
 import { predicates as w3Parity } from "./wave3/parity";
 import { predicates as w3IntegrationsHr } from "./wave3/integrations-hr";
 import { predicates as w3Screening } from "./wave3/screening";
+import { predicates as w4Compliance } from "./wave4/compliance";
+import { predicates as w4People } from "./wave4/people";
+import { predicates as w4Agent } from "./wave4/agent";
+import { predicates as w4Admin } from "./wave4/admin";
 
 export interface RunCall { command: string; args: unknown; status: "done" | "pending_approval" | "refused"; proposalId: string | null; data: unknown }
 export interface RunFacts { calls: RunCall[]; proposalStatus: (proposalId: string) => string | null }
@@ -46,6 +50,7 @@ export const PREDICATES: Record<string, Predicate> = {
   device_proposed: ([workerId = ""], f) => callsTo(f, "it.order_device").some((c) => c.status === "pending_approval" && live(f, c) && mentions(c.args, workerId)),
   ...w2Onboarding, ...w2Benefits, ...w2Memory,   // wave 2
   ...w3Expenses, ...w3TimeOff, ...w3Parity, ...w3IntegrationsHr, ...w3Screening,   // wave 3
+  ...w4Compliance, ...w4People, ...w4Agent, ...w4Admin,   // wave 4
 };
 
 /** Expand `{field}` from the scope (trigger payload first, then derived values). Unknown fields expand to "". */

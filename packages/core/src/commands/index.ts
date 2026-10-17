@@ -19,10 +19,15 @@ import { reportsCommands } from "./reports";
 import { integrationsCommands } from "./integrations";
 import { screeningCommands } from "./screening";
 import { parityCommands } from "./parity";
+import { w4ComplianceCommands } from "./w4-compliance";
+import { w4PeopleCommands } from "./w4-people";
+import { w4AgentCommands } from "./w4-agent";
+import { w4AdminCommands } from "./w4-admin";
 
 export const commands: WeftCommand[] = [
   ...payrollCommands, ...peopleCommands, ...taxCommands, ...noticesCommands, ...benefitsCommands,
   ...itCommands, ...commsCommands, ...onboardingCommands, ...demoCommands, ...routinesCommands,
   ...documentsCommands, ...offboardingCommands, ...contractorsCommands,   // wave 2
   ...expensesCommands, ...timeOffCommands, ...reportsCommands, ...integrationsCommands, ...screeningCommands, ...parityCommands,   // wave 3
+  ...w4ComplianceCommands, ...w4PeopleCommands, ...w4AgentCommands, ...w4AdminCommands,   // wave 4
 ];

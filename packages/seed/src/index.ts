@@ -20,6 +20,9 @@ import { seedW3TimeOff } from "./w3-timeoff";
 import { seedW3Parity } from "./w3-parity";
 import { seedW3IntegrationsHr } from "./w3-integrations-hr";
 import { seedW3ScreeningEsign } from "./w3-screening-esign";
+import { seedW4Compliance } from "./w4-compliance";
+import { seedW4People } from "./w4-people";
+import { seedW4Agent } from "./w4-agent";
 
 export type { SeedContext, SeedStep } from "./context";
 export { DIGEST_EXCLUDE, digestDb, dumpDb } from "./digest";
@@ -38,6 +41,7 @@ export const SEED_STEPS: readonly (readonly [string, SeedStep])[] = [
   ["w2_onboarding", seedW2Onboarding], ["w2_offboarding", seedW2Offboarding], ["w2_benefits_contractors", seedW2BenefitsContractors],
   // wave 3 (docs/wave3.md)
   ["w3_expenses", seedW3Expenses], ["w3_timeoff", seedW3TimeOff], ["w3_parity", seedW3Parity], ["w3_integrations_hr", seedW3IntegrationsHr], ["w3_screening_esign", seedW3ScreeningEsign],
+  ["w4_compliance", seedW4Compliance], ["w4_people", seedW4People], ["w4_agent", seedW4Agent],
 ];
 
 export async function seedWorld(weft: SeedTarget, opts: { log?: (line: string) => void } = {}): Promise<void> {

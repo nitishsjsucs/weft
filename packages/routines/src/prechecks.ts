@@ -12,6 +12,10 @@ import { prechecks as w3TimeOff } from "./wave3/time-off";
 import { prechecks as w3Parity } from "./wave3/parity";
 import { prechecks as w3IntegrationsHr } from "./wave3/integrations-hr";
 import { prechecks as w3Screening } from "./wave3/screening";
+import { prechecks as w4Compliance } from "./wave4/compliance";
+import { prechecks as w4People } from "./wave4/people";
+import { prechecks as w4Agent } from "./wave4/agent";
+import { prechecks as w4Admin } from "./wave4/admin";
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
@@ -152,6 +156,7 @@ export const PRECHECKS: Record<string, Precheck> = {
   agency_notice: agencyNotice, pre_payroll: prePayroll, new_hire: newHire, people_digest: peopleDigest, open_approvals: openApprovals,
   ...w2Onboarding, ...w2Benefits, ...w2Memory,   // wave 2
   ...w3Expenses, ...w3TimeOff, ...w3Parity, ...w3IntegrationsHr, ...w3Screening,   // wave 3
+  ...w4Compliance, ...w4People, ...w4Agent, ...w4Admin,   // wave 4
 };
 
 export async function runPrecheck(name: string | null, ctx: Parameters<Precheck>[0], exec: ReadOnlyExecutor): Promise<PrecheckResult> {

@@ -32,6 +32,12 @@ import { timeOffRoutes } from "./routes/time-off";
 import { reportsRoutes } from "./routes/reports";
 import { integrationsRoutes } from "./routes/integrations";
 import { screeningRoutes } from "./routes/screening";
+import { complianceRoutes } from "./routes/compliance";
+import { trainingRoutes } from "./routes/training";
+import { lifeEventsRoutes } from "./routes/life-events";
+import { handoffsRoutes } from "./routes/handoffs";
+import { agentSurfacesRoutes } from "./routes/agent-surfaces";
+import { adminRoutes } from "./routes/admin";
 
 export const ROUTE_MODULES = [
     healthRoutes,
@@ -63,6 +69,12 @@ export const ROUTE_MODULES = [
     reportsRoutes,
     integrationsRoutes,
     screeningRoutes,
+    complianceRoutes,    // wave 4
+    trainingRoutes,
+    lifeEventsRoutes,
+    handoffsRoutes,
+    agentSurfacesRoutes,
+    adminRoutes,
 ] as const;
 
 export function buildApp(weft: Weft): Hono<WeftEnv> {

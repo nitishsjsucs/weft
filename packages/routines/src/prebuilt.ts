@@ -9,6 +9,10 @@ import { routines as w3TimeOff } from "./wave3/time-off";
 import { routines as w3Parity } from "./wave3/parity";
 import { routines as w3IntegrationsHr } from "./wave3/integrations-hr";
 import { routines as w3Screening } from "./wave3/screening";
+import { routines as w4Compliance } from "./wave4/compliance";
+import { routines as w4People } from "./wave4/people";
+import { routines as w4Agent } from "./wave4/agent";
+import { routines as w4Admin } from "./wave4/admin";
 
 export const TZ = "America/Los_Angeles";
 export const OWNER = "usr_dana";
@@ -70,4 +74,4 @@ export const RT_PEOPLE_DIGEST: RoutineDef = {
   budget, surface: { worthSurfacing: false, channel: "#people-ops" }, source: "prebuilt", taintedBy: null,
 };
 
-export const PREBUILT: RoutineDef[] = [RT_AGENCY_NOTICE, RT_PRE_PAYROLL, RT_NEW_HIRE, RT_PEOPLE_DIGEST, ...w2Onboarding, ...w2Benefits, ...w2Memory, ...w3Expenses, ...w3TimeOff, ...w3Parity, ...w3IntegrationsHr, ...w3Screening];
+export const PREBUILT: RoutineDef[] = [RT_AGENCY_NOTICE, RT_PRE_PAYROLL, RT_NEW_HIRE, RT_PEOPLE_DIGEST, ...w2Onboarding, ...w2Benefits, ...w2Memory, ...w3Expenses, ...w3TimeOff, ...w3Parity, ...w3IntegrationsHr, ...w3Screening, ...w4Compliance, ...w4People, ...w4Agent, ...w4Admin];

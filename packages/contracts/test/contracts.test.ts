@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CODE_LIMITS, EVENT_TYPES, formatCents, formatId, idPrefixOf, MODEL_WRITE_PREFIXES, NotImplemented, parseEventBody, ROUTE_FILES, ROUTES, tid, TOTALS_FIELDS, WeftError } from "../src/index";
 
 describe("contracts", () => {
-  it("route table has unique method and path pairs and covers 29 route files (20, plus 4 from wave 2 and 5 from wave 3)", () => {
+  it("route table has unique method and path pairs and covers 35 route files (20, plus 4 from wave 2, 5 from wave 3 and 6 from wave 4)", () => {
     const keys = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(ROUTE_FILES).toHaveLength(29);
+    expect(ROUTE_FILES).toHaveLength(35);
     expect(ROUTES.filter((r) => r.path.includes("/approve")).every((r) => r.auth === "ui_only")).toBe(true);
   });
   it("events are id-only and include the scaffold-required types", () => {

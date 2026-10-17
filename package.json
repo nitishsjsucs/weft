@@ -24,6 +24,10 @@
     "db:reset": "tsx packages/seed/src/cli.ts reset",
     "db:digest": "tsx packages/seed/src/cli.ts digest",
     "eval:live": "tsx evals/live/run.ts",
+    "phoenix:up": "tsx scripts/phoenix.ts up",
+    "phoenix:down": "tsx scripts/phoenix.ts down",
+    "phoenix:status": "tsx scripts/phoenix.ts status",
+    "wave:ledger": "tsx scripts/wave-ledger.ts",
     "memory:bundle": "tsx scripts/memory-bundle.ts",
     "memory:restore": "tsx scripts/memory-restore.ts"
   },

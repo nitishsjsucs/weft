@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Wave2EventBody } from "./wave2";
 import { Wave3EventBody } from "./wave3";
+import { Wave4EventBody } from "./wave4";
 // Domain events (SPEC 6.5, 15 item 4): a discriminated union on `type` with id-only payloads, never free text.
 // The executor stamps `attended` and `requestedBy` (SPEC 9.0 amendment 3); stored in the events table.
 const ref = (p: string) => z.string().startsWith(p);
@@ -48,5 +49,6 @@ export function parseEventBody(body: unknown): EventBody {
   const t = (body as { type?: unknown } | null)?.type;
   if (typeof t === "string" && !EVENT_TYPES.includes(t as EventType) && Wave2EventBody.options.some((o) => o.shape.type.value === t)) return Wave2EventBody.parse(body) as unknown as EventBody;
   if (typeof t === "string" && !EVENT_TYPES.includes(t as EventType) && Wave3EventBody.options.some((o) => o.shape.type.value === t)) return Wave3EventBody.parse(body) as unknown as EventBody;   // wave 3
+  if (typeof t === "string" && !EVENT_TYPES.includes(t as EventType) && Wave4EventBody.options.some((o) => o.shape.type.value === t)) return Wave4EventBody.parse(body) as unknown as EventBody;   // wave 4
   return EventBody.parse(body);
 }

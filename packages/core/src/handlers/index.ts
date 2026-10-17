@@ -6,5 +6,9 @@ import { taxHandlers } from "../tax/handlers";
 import { expensesHandlers } from "../expenses/handlers";
 import { timeOffHandlers } from "../time-off/handlers";
 import { integrationsHandlers } from "../integrations/handlers";
+import { complianceHandlers } from "../compliance/handlers";
+import { lifeEventsHandlers } from "../life-events/handlers";
+import { agentSurfacesHandlers } from "../agent-surfaces/handlers";
 
-export const handlers: EventHandler[] = [...payrollHandlers, ...onboardingHandlers, ...taxHandlers, ...expensesHandlers, ...timeOffHandlers, ...integrationsHandlers];   // wave 3 after the wave 1 three
+export const handlers: EventHandler[] = [...payrollHandlers, ...onboardingHandlers, ...taxHandlers, ...expensesHandlers, ...timeOffHandlers, ...integrationsHandlers,   // wave 3 after the wave 1 three
+  ...complianceHandlers, ...lifeEventsHandlers, ...agentSurfacesHandlers];   // wave 4

@@ -129,10 +129,12 @@ export const notices = sqliteTable("notices", {
   title: text("title").notNull(), receivedAt: ts("received_at").notNull(), respondBy: text("respond_by"), status: text("status").notNull(),
   taxAccountId: text("tax_account_id"), fileName: text("file_name").notNull(), bodyText: text("body_text").notNull(), extractedJson: json("extracted_json"),
   draftsJson: json("drafts_json").notNull().default("[]"), resolutionJson: json("resolution_json"), responseConfirmation: text("response_confirmation"),
+  source: text("source").notNull().default("simulated"), uploadId: text("upload_id"),   // wave 4 (0007_wave4.sql, w4-parity-compliance)
 });
 export const filings = sqliteTable("filings", {
   id: text("id").primaryKey(), taxAccountId: text("tax_account_id").notNull(), form: text("form").notNull(), period: text("period").notNull(),
   status: text("status").notNull(), filedAt: ts("filed_at"), confirmation: text("confirmation"),
+  dueOn: text("due_on"), preparedJson: json("prepared_json"), proposalId: text("proposal_id"),   // wave 4 (0007_wave4.sql, w4-parity-compliance)
 });
 
 // 6.4 Benefits, IT, contractors
@@ -352,7 +354,8 @@ export const expenses = sqliteTable("expenses", {
   explanationRunId: text("explanation_run_id"), approverPrincipalId: text("approver_principal_id"), decidedBy: text("decided_by"),
   decidedAt: ts("decided_at"), decisionReasonCode: text("decision_reason_code"), decisionNote: text("decision_note"),
   payrollRunId: text("payroll_run_id"), paycheckId: text("paycheck_id"), policyVersion: integer("policy_version").notNull().default(1),
-  actionSeq: integer("action_seq")
+  actionSeq: integer("action_seq"),
+  source: text("source").notNull().default("portal")   // wave 4 (0007_wave4.sql, w4-parity-agent): portal, email or chat
 }, (t) => [index("expenses_worker_status").on(t.workerId, t.status), index("expenses_status").on(t.status)]);
 // w3-timeoff
 export const timeOffTypes = sqliteTable("time_off_types", {
@@ -473,3 +476,68 @@ export const simWebhookOutbox = sqliteTable("sim_webhook_outbox", {
   bodyJson: json("body_json").notNull(), signature: text("signature").notNull(), attempt: integer("attempt").notNull().default(0),
   nextAt: ts("next_at").notNull(), status: text("status").notNull(), deliveredAt: ts("delivered_at")
 }, (t) => [uniqueIndex("sim_webhook_outbox_key").on(t.vendor, t.dedupeKey)]);
+
+// 6.9 Wave 4 (docs/wave4.md, migration 0007_wave4.sql). Additive only; owners in docs/wave4.md.
+// Columns added to existing tables: notices.source and upload_id, filings.due_on, prepared_json and proposal_id
+// (w4-parity-compliance), expenses.source (w4-parity-agent); see the migration.
+// w4-parity-compliance
+export const complianceItems = sqliteTable("compliance_items", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), kind: text("kind").notNull(), title: text("title").notNull(),
+  jurisdiction: text("jurisdiction"), agency: text("agency"), form: text("form"), period: text("period"), dueOn: text("due_on").notNull(),
+  status: text("status").notNull(), subjectRef: text("subject_ref"), ownerPrincipalId: text("owner_principal_id"), proposalId: text("proposal_id"),
+  createdAt: ts("created_at").notNull(), doneAt: ts("done_at")
+}, (t) => [uniqueIndex("compliance_items_key").on(t.companyId, t.kind, t.form, t.period, t.subjectRef), index("compliance_items_due").on(t.companyId, t.dueOn)]);
+export const handoffCases = sqliteTable("handoff_cases", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), kind: text("kind").notNull(), reason: text("reason").notNull(),
+  subjectRef: text("subject_ref"), workerId: text("worker_id"), summary: text("summary").notNull(), evidenceJson: json("evidence_json").notNull().default("[]"),
+  status: text("status").notNull(), assigneePrincipalId: text("assignee_principal_id"), openedBy: text("opened_by").notNull(), runId: text("run_id"),
+  createdAt: ts("created_at").notNull(), resolvedAt: ts("resolved_at"), resolutionNote: text("resolution_note")
+}, (t) => [index("handoff_cases_status").on(t.companyId, t.status)]);
+export const trainingCourses = sqliteTable("training_courses", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), code: text("code").notNull(), title: text("title").notNull(),
+  jurisdiction: text("jurisdiction"), audience: text("audience").notNull(), minutes: integer("minutes").notNull(),
+  dueWithinDays: integer("due_within_days").notNull(), repeatMonths: integer("repeat_months"), sourceUrl: text("source_url").notNull()
+}, (t) => [uniqueIndex("training_courses_code").on(t.companyId, t.code)]);
+export const trainingAssignments = sqliteTable("training_assignments", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), courseId: text("course_id").notNull(), dueOn: text("due_on").notNull(),
+  status: text("status").notNull(), assignedAt: ts("assigned_at").notNull(), remindedAt: ts("reminded_at"), completedAt: ts("completed_at"),
+  certificateUploadId: text("certificate_upload_id"), proposalId: text("proposal_id")
+}, (t) => [uniqueIndex("training_assignments_worker_course_due").on(t.workerId, t.courseId, t.dueOn)]);
+// w4-parity-people
+export const lifeEvents = sqliteTable("life_events", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), kind: text("kind").notNull(), eventDate: text("event_date").notNull(),
+  note: text("note").notNull().default(""), status: text("status").notNull(), reportedBy: text("reported_by").notNull(),
+  reportedAt: ts("reported_at").notNull(), windowId: text("window_id")
+}, (t) => [index("life_events_worker").on(t.workerId)]);
+export const enrollmentWindows = sqliteTable("enrollment_windows", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), workerId: text("worker_id"), kind: text("kind").notNull(),
+  lifeEventId: text("life_event_id"), opensOn: text("opens_on").notNull(), closesOn: text("closes_on").notNull(), status: text("status").notNull(),
+  remindersSent: integer("reminders_sent").notNull().default(0), createdAt: ts("created_at").notNull()
+}, (t) => [index("enrollment_windows_worker").on(t.workerId, t.status)]);
+export const carrierSubmissions = sqliteTable("carrier_submissions", {
+  id: text("id").primaryKey(), workerId: text("worker_id").notNull(), windowId: text("window_id"), carrier: text("carrier").notNull(),
+  electionsJson: json("elections_json").notNull(), status: text("status").notNull(), sentAt: ts("sent_at"), confirmedAt: ts("confirmed_at"),
+  receiptRef: text("receipt_ref"), proposalId: text("proposal_id"), createdAt: ts("created_at").notNull()
+}, (t) => [index("carrier_submissions_worker").on(t.workerId)]);
+// w4-parity-agent
+export const agentMentions = sqliteTable("agent_mentions", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), channel: text("channel").notNull(), messageRef: text("message_ref").notNull(),
+  threadRef: text("thread_ref"), mentionedBy: text("mentioned_by").notNull(), status: text("status").notNull(), runId: text("run_id"),
+  createdAt: ts("created_at").notNull(), answeredAt: ts("answered_at")
+}, (t) => [uniqueIndex("agent_mentions_message").on(t.messageRef)]);
+export const expenseIntake = sqliteTable("expense_intake", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), source: text("source").notNull(), fromAddress: text("from_address").notNull(),
+  workerId: text("worker_id"), messageRef: text("message_ref").notNull(), uploadId: text("upload_id"), status: text("status").notNull(),
+  expenseId: text("expense_id"), receivedAt: ts("received_at").notNull()
+}, (t) => [uniqueIndex("expense_intake_message").on(t.messageRef)]);
+export const routineWaits = sqliteTable("routine_waits", {
+  id: text("id").primaryKey(), routineRunId: text("routine_run_id").notNull(), checklistItemId: text("checklist_item_id").notNull(),
+  kind: text("kind").notNull(), event: text("event"), subjectRef: text("subject_ref"), untilAt: ts("until_at"), status: text("status").notNull(),
+  followUps: integer("follow_ups").notNull().default(0), nextFollowUpAt: ts("next_follow_up_at"), createdAt: ts("created_at").notNull(),
+  resumedAt: ts("resumed_at")
+}, (t) => [index("routine_waits_open").on(t.status, t.event, t.subjectRef)]);
+// w4-parity-admin
+export const agentActionOverrides = sqliteTable("agent_action_overrides", {
+  id: text("id").primaryKey(), companyId: text("company_id").notNull(), principalId: text("principal_id").notNull(), command: text("command").notNull(),
+  mode: text("mode").notNull(), setBy: text("set_by").notNull(), setAt: ts("set_at").notNull(), proposalId: text("proposal_id")
+}, (t) => [uniqueIndex("agent_action_overrides_key").on(t.companyId, t.principalId, t.command)]);

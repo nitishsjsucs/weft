@@ -6,7 +6,8 @@ import type { DecisionInput, DecisionResult, ProposalDecided } from "./approvals
 export type Namespace = "people" | "payroll" | "tax" | "notices" | "benefits" | "it" | "comms" | "onboarding"
   | "memory" | "vault" | "actions" | "routines" | "agent" | "code"
   | "documents" | "offboarding" | "contractors"   // wave 2
-  | "expenses" | "time_off" | "reports" | "integrations" | "ats" | "hris" | "screening";   // wave 3
+  | "expenses" | "time_off" | "reports" | "integrations" | "ats" | "hris" | "screening"   // wave 3
+  | "compliance" | "handoffs" | "training" | "portal" | "settings";   // wave 4
 export type Domain = "people" | "payroll" | "tax" | "benefits" | "it" | "comms" | "company";
 export type Grant = "none" | "view" | "edit" | "approve";
 export type Effect = "read" | "draft" | "write" | "external";
