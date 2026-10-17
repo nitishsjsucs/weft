@@ -10,6 +10,7 @@ import { fmtDate } from "../app/format";
 import { ApiError, createClient } from "@/lib/api/client";
 import { WeftMark } from "@/components/app/weft-mark";
 import { PortalW3Sections } from "./w3-sections";
+import { PortalAskBox } from "./w4-ask";   // wave 4 (w4-parity-agent): the portal question box
 import { EsignSigningPage, esignParams, signOrRedirect } from "./screening/esign";
 
 const KEY = "weft.portalAs";
@@ -105,6 +106,7 @@ export function PortalView() {
           ))}
         </ol>
         <PortalW3Sections workerId={view.worker.id} principal={as} />
+        <PortalAskBox principal={as} />
         <p className="text-1 text-gray-10">Everything here is simulated: a fictional company, fictional people and no real tax, bank or identity data.</p>
       </div>
     </Shell>
