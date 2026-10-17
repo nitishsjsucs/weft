@@ -11,7 +11,7 @@ import { runTraceTags, traceRedact } from "../../packages/agent/src/otel";
 import { appendWaveSpend, assertWaveBudget } from "../../scripts/wave-ledger";
 import { drainRoutines, drive } from "./drivers";
 import { collect, plantCanaries, snapshot } from "./evidence";
-import { clarifies, endStateFailures, firstFailure, g2, g5, g5Stage, g7, gradeAll, groundingRepairs, invalidCounts, recallGap, scanCanaries, trialCostUsd, type GroundedBy, type RecallGap } from "./graders/index";
+import { clarifies, endStateFailures, firstFailure, g2, g5, g5Stage, g7, gradeAll, groundingRepairs, invalidCounts, providerKind, recallGap, scanCanaries, trialCostUsd, type GroundedBy, type RecallGap, type StrictGrounding, type TrialProviderKind } from "./graders/index";
 import type { SuiteTrial, TrialDetail, TrialEvidence } from "./types";
 import { applyVariant, buildWorld, readChatCanPropose, worldDigest, type TrialWorld } from "./worlds/index";
 
@@ -46,6 +46,10 @@ export type SuiteTrialDetail = TrialDetail & {
   groundedBy?: GroundedBy | null;
   /** R2: the recalled note the task needed reached the model without its rule (firstFailure is then "context"). */
   recallGap?: RecallGap | null;
+  /** The independent grounding check (tool results only; never fails a trial, reported beside G5). */
+  groundingStrict?: StrictGrounding | null;
+  /** Who served the task's run: headline metrics count "model" trials only; the others get their own table. */
+  providerKind?: TrialProviderKind;
 };
 export const detailOf = (t: SuiteTrial): SuiteTrialDetail => t.detail as SuiteTrialDetail;
 
@@ -67,7 +71,7 @@ const emptyDetail = (digest: string | null, chatCanPropose = false): SuiteTrialD
   proposals: null, invalidInput: 0, unknownReference: 0, unknownCommand: 0, groundingFallback: false,
   unsafe: { g1: 0, taintMiss: 0, canaryHits: 0 }, triggering: { missedClarify: false, unneededClarify: false, falseRefusal: false, missedRefusal: false },
   timeToFirstModelMs: null, modelMs: 0, digest, chatCanPropose, finalText: null, actions: [], calls: [], routine: null, judgesPending: [],
-  groundedBy: null, recallGap: null,
+  groundedBy: null, recallGap: null, groundingStrict: null, providerKind: "no_run",
 });
 
 function errorTrial(spec: TrialSpec, error: string, digest: string | null, wallMs = 0): SuiteTrial {
@@ -117,6 +121,8 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
     judgesPending: expect.finalText?.judges ?? [],
     groundedBy: ground.groundedBy ?? null,
     recallGap: gap,
+    groundingStrict: ground.strict ?? null,
+    providerKind: providerKind(ev),
   };
   return {
     taskId: spec.task.id, split: spec.task.split, group: spec.task.group, variant: spec.variant, trial: spec.trial, success, graders, judges: [],
@@ -169,7 +175,8 @@ export async function runTrial(spec: TrialSpec, opts: RunnerOptions, state: Runn
     return result;
   } catch (e) {
     if (e instanceof SuiteStop) throw e;
-    return errorTrial(spec, `HARNESS: ${e instanceof Error ? e.message : String(e)}`.slice(0, 600), digest, Date.now() - t0);
+    // Redacted while the trial world's redactor is still installed (the world closes in the finally below).
+    return errorTrial(spec, traceRedact(`HARNESS: ${e instanceof Error ? e.message : String(e)}`).slice(0, 600), digest, Date.now() - t0);
   } finally {
     if (w) { await drainRoutines(w).catch(() => undefined); await w.weft.close().catch(() => undefined); }
   }

@@ -70,6 +70,7 @@ export async function collect(w: TrialWorld, pre: Snapshot, input: { mainRunId: 
     id: String(r.id), kind: String(r.kind), parentRunId: (r.parent_run_id as string | null) ?? null, routineRunId: (r.routine_run_id as string | null) ?? null,
     status: String(r.status), terminalReason: (r.terminal_reason as string | null) ?? null, tainted: Number(r.tainted) === 1, taintedBy: (r.tainted_by as string | null) ?? null,
     stepsUsed: Number(r.steps_used ?? 0), costUsd: Number(r.cost_usd_micros ?? 0) / 1e6, summary: (r.summary as string | null) ?? null,
+    model: (r.model as string | null) ?? null,
   }));
   const steps: EvStep[] = [];
   for (const r of runs) {

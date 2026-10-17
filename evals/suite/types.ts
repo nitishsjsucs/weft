@@ -21,6 +21,8 @@ export type RegistryLookup = (command: string) => CommandFacts | null;
 export interface EvRun {
   id: string; kind: string; parentRunId: string | null; routineRunId: string | null; status: string; terminalReason: string | null;
   tainted: boolean; taintedBy: string | null; stepsUsed: number; costUsd: number; summary: string | null;
+  /** The run's model ("template" for the deterministic routine templates a live unattended run uses). */
+  model?: string | null;
 }
 export interface EvStep {
   runId: string; n: number; parentN: number | null; stage: string; kind: string; toolName: string | null; toolArgs: unknown;
