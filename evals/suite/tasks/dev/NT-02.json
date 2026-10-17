@@ -39,6 +39,10 @@
         {
           "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'tax.update_rate'",
           "equals": 0
+        },
+        {
+          "sql": "SELECT ((SELECT COUNT(*) FROM actions WHERE command = 'notices.escalate') + (SELECT COUNT(*) FROM proposals WHERE command IN ('notices.escalate', 'notices.send_response'))) >= 1 AS ok",
+          "equals": 1
         }
       ]
     }
