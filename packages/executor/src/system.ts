@@ -19,7 +19,8 @@ export const SYSTEM_PRINCIPALS: SystemPrincipal[] = ["svc_scheduler", "svc_event
 /** Exact allowlists. Additions are requested in docs/tracks/t3-governance.md; nothing at R2 or above is ever allowed. */
 export const SYSTEM_ALLOWLISTS: Record<SystemPrincipal, readonly string[]> = {
   svc_scheduler: ["comms.post_update", "documents.expire_offers",   // expire_offers: wave 2, the offer expiry sweep (R1)
-    "time_off.close_year", "integrations.sync_now", "integrations.record_delivery"],   // wave 3 (docs/wave3.md): year end, vendor polling
+    "time_off.close_year", "integrations.sync_now", "integrations.record_delivery",   // wave 3 (docs/wave3.md): year end, vendor polling
+    "benefits.close_windows"],   // wave 4 (w4-parity-people): the enrollment window date sweep
   svc_events: ["tax.record_registration", "payroll.mark_processed", "payroll.mark_failed", "onboarding.complete_task", "it.record_delivery", "comms.post_update",
     // wave 3 (docs/wave3.md): reimbursements, accruals and final-pay payout, vendor records applied after a re-read
     "expenses.schedule", "expenses.mark_paid", "time_off.post_accruals", "time_off.record_payout",
