@@ -1,5 +1,26 @@
 # Status
 
+## Wave 4 improvement round 2 merged (2026-10-17, 01:35 PDT)
+
+The four round 2 fix branches are merged in order, `improve/r2-FG1` to `improve/r2-FG4`, with no textual conflicts
+(their changed files are disjoint). FG1: G5 grades with the guard's evidence, `regrade.ts` re-grades a saved run from
+its Phoenix spans at $0 (round 1 dev 49 of 55 becomes 53 of 55), a recalled note whose rule never reached the model is
+labeled `context`, and new dev tasks for the penalty, informational and unknown notice plans and a mention. FG2: a
+procedure or decision hit is recalled as the note, and `notices.escalate` takes a `procedure_ref` the executor checks
+against memory. FG3: `flagged_only` in detailed `payroll.get_run`, cost rows with workers paid, hires and departures,
+reconcile and sync coverage on empty reads, contractor payout totals, the integrations status and contractors chat
+routes, and prompt `w4.r2`. FG4: `runEvidence` in `@weft/grounding` for the guard and G5, month day ranges read as two
+dates, only the request derives a window bound, and a resumed chat run keeps its request trust. Integration fixes: G5
+calls `runEvidence` and FG1's local copy is gone; FG1's dev NT-03 and NT-04 shared ids with held-out tasks, which
+stopped `pnpm eval:ci` from loading, so they are NT-06 and NT-07 (worlds and digests unchanged) and a held-out test
+now refuses a shared id; the solvability lint drops the IN-01 and CT-02 gaps the new routes close. Chat proposals and
+auto autonomy stay off by default. Fresh clone (e2e on ports 5100 and 5101): `pnpm test` 1260 passed and 6 skipped,
+`pnpm typecheck` 16 of 16, `pnpm e2e` 52 passed and 1 skipped, `pnpm demo` exit 0 with GP1 to GP24 and the audit
+chain verifying, `pnpm eval:ci` gate passed (79 of 119 scripted trials, no world drift), and lint:prose, lint:brand and
+brand:overlap ok. Left: CT-02 needs a scheduled payout mutator, a content check and a re-pin; BN-02 and IN-01 content
+checks; `peekInvoice` on the carrier simulator; compliance and portal dev tasks; and the round 2 measurement run
+(scripted, then live k=1, beside round 1 graded and re-graded).
+
 ## Wave 4 improvement round 1 merged (2026-10-17, 00:15 PDT)
 
 The five round 1 fix branches from the round 2 error analysis are merged in order, `improve/r1-FG1` to
