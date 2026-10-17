@@ -5,10 +5,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { formatCents, type ExecContext, type SimClock, type Simulators } from "@weft/contracts";
-import { actions, benefitEnrollments, benefitPlans, benefitReconFindings, integrationConnections, simCarrierInvoices, syncItems, type Db } from "@weft/db";
+import { actions, benefitEnrollments, benefitPlans, benefitReconFindings, contractorPayments, integrationConnections, simCarrierInvoices, syncItems, workers, type Db } from "@weft/db";
 import { idMinter } from "../src/shared/ids";
 import { benefitsCommands } from "../src/commands/benefits";
 import { hrIntegrationCommands } from "../src/integrations/commands";
+import { contractorsCommands } from "../src/commands/contractors";
 import { computeFindings, type ReconInvoice } from "../src/benefits/recon";
 import type { CommandDeps } from "../src/shared/deps";
 import { buildFixtureWorld, CO, fakeBank, openTempDb, TS } from "./payroll/fixture-world";
@@ -55,7 +56,7 @@ function carrier(withPeek: boolean) {
 const vendorSims = Object.fromEntries(["greenhouse", "workday", "checkr", "hireright", "docusign"].map((v) => [v, { status: async () => ({ mode: "simulated", health: "ok" }) }]));
 const deps = (c = carrier(true)): CommandDeps => ({ tx: db, sims: { bank: fakeBank().bank, carrier: c, vendors: vendorSims } as unknown as Simulators, clock, newId: idMinter(db), resolveCredential: async (ref) => `secret-for-${ref}` });
 const ctx = (): ExecContext => ({ companyId: CO, principal: { id: "usr_theo", kind: "human", role: "payroll_admin" }, onBehalfOf: null, surface: "human_ui", agentKind: null, run: null, tainted: false, routineRunId: null, approvedProposalId: null, now: TS });
-const all = [...benefitsCommands, ...hrIntegrationCommands];
+const all = [...benefitsCommands, ...hrIntegrationCommands, ...contractorsCommands];
 async function exec<T = Record<string, unknown>>(name: string, args: unknown, d = deps()): Promise<{ data: T; summary: string }> {
   const def = all.find((c) => c.name === name)!;
   const out = await def.run(def.input.parse(args) as never, ctx(), d);
@@ -151,5 +152,30 @@ describe("integrations.list_sync_items says which vendors ever synced", () => {
     expect(out.data.integrations.find((x) => x.vendor === "greenhouse")).toMatchObject({ last_sync_at: "2026-10-25T12:00:00.000Z", open_sync_items: 1 });
     expect(out.summary).toContain("greenhouse simulated ok, last sync 2026-10-25T12:00:00.000Z, 1 open");
     expect(out.summary).toContain("workday simulated ok, never synced, 0 open");
+  });
+});
+
+type Payouts = { count: number; total_usd_cents: number | null; total_usd_display: string | null; month: string | null; contractors_on_file: number; payouts: { id: string }[] };
+
+describe("contractors.list_payouts says what an empty list covers (R6)", () => {
+  it("no payout rows: no total (not $0.00), the contractors on file, and that contract rates are not shown", async () => {
+    await db.insert(workers).values({ id: "wrk_0901", companyId: CO, employeeNumber: "CTR-0901", type: "contractor", workerType: "intl_contractor", status: "active", firstName: "Ines", lastName: "Example (demo)", workEmail: "ines@larkspur.example", title: "Designer", timezone: "Europe/Lisbon", startDate: "2026-01-01", endDate: null, createdAt: TS, updatedAt: TS });
+    const out = await exec<Payouts>("contractors.list_payouts", { month: MONTH });
+    expect(out.data).toMatchObject({ count: 0, total_usd_cents: null, total_usd_display: null, month: MONTH, contractors_on_file: 1 });
+    expect(out.summary).toBe(`No contractor payouts scheduled in ${MONTH}; 1 contractors on file. This list holds scheduled and sent payouts only, so it does not show what contract rates accrue before a payout is scheduled and approved`);
+  });
+
+  it("filters by scheduled month and totals the listed payouts", async () => {
+    const row = { workerId: "wrk_0901", currency: "EUR", fxRate: "1.08", status: "scheduled", railStatus: "pending", railRef: null, sentAt: null, deliveredAt: null };
+    await db.insert(contractorPayments).values([
+      { ...row, id: "cpy_0001", amountMinor: 400_000, usdCents: 432_000, scheduledFor: `${MONTH}-30` },
+      { ...row, id: "cpy_0002", amountMinor: 100_000, usdCents: 108_000, scheduledFor: "2026-09-30" },
+    ]);
+    const oct = await exec<Payouts>("contractors.list_payouts", { month: MONTH });
+    expect(oct.data).toMatchObject({ count: 1, total_usd_cents: 432_000, total_usd_display: formatCents(432_000) });
+    expect(oct.data.payouts.map((p) => p.id)).toEqual(["cpy_0001"]);
+    expect(oct.summary).toBe(`Listed 1 payouts scheduled in ${MONTH}, total ${formatCents(432_000)}`);
+    const every = await exec<Payouts>("contractors.list_payouts", {});
+    expect(every.data).toMatchObject({ count: 2, total_usd_cents: 540_000, month: null });
   });
 });

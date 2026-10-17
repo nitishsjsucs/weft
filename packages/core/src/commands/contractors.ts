@@ -17,7 +17,7 @@ type ListInput = z.infer<typeof ListInput>;
 const listPayoutsCmd = readCommand({
   name: "contractors.list_payouts", domain: "payroll",
   summary: "List contractor payouts with currency, fixed FX rate, USD cents and rail status.",
-  description: "List global contractor payouts, optionally for one scheduled month (YYYY-MM): contractor, amount in the contractor's currency (minor units), the fixed FX rate, USD cents with display, scheduled date and rail status (pending, sent, delivered, returned). total_usd sums the listed payouts. A payout exists only once one is scheduled and approved.",
+  description: "List global contractor payouts, optionally for one scheduled month (YYYY-MM): contractor, amount in the contractor's currency (minor units), the fixed FX rate, USD cents with display, scheduled date and rail status (pending, sent, delivered, returned). total_usd sums the listed payouts (null when none). A payout exists only once scheduled and approved.",
   input: ListInput,
   async run(i: ListInput, ctx, deps) {
     const rows = (await listPayouts(deps.tx, ctx.companyId, { workerId: i.worker_id, status: i.rail_status })).filter((r) => !i.month || r.scheduledFor.startsWith(`${i.month}-`));
@@ -26,10 +26,12 @@ const listPayoutsCmd = readCommand({
     const [{ c: onFile } = { c: 0 }] = await deps.tx.select({ c: count() }).from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.type, "contractor")));
     // What an empty list covers (round 1 R5, R6): no row means nothing was scheduled, not that nothing is owed by contract.
     const scope = [i.month ? `scheduled in ${i.month}` : "", i.rail_status ? `with rail status ${i.rail_status}` : "", i.worker_id ? `for ${i.worker_id}` : ""].filter(Boolean).join(" ");
+    // An empty list is not a zero balance: with no payout rows there is no total, and the summary says what is missing.
     const summary = payouts.length === 0
-      ? `No contractor payouts${scope ? ` ${scope}` : ""}; ${onFile} contractors on file, and a payout exists only once one is scheduled and approved`
+      ? `No contractor payouts${scope ? ` ${scope}` : ""}; ${onFile} contractors on file. This list holds scheduled and sent payouts only, so it does not show what contract rates accrue before a payout is scheduled and approved`
       : `Listed ${payouts.length} payouts${scope ? ` ${scope}` : ""}, total ${formatCents(total)}`;
-    return { data: { count: payouts.length, payouts, total_usd_cents: total, total_usd_display: formatCents(total), month: i.month ?? null, contractors_on_file: onFile }, summary };
+    const totals = payouts.length ? { total_usd_cents: total, total_usd_display: formatCents(total) } : { total_usd_cents: null, total_usd_display: null };
+    return { data: { count: payouts.length, payouts, ...totals, month: i.month ?? null, contractors_on_file: onFile }, summary };
   },
 });
 
