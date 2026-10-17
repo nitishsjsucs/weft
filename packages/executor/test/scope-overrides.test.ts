@@ -2,6 +2,7 @@
 // deny takes a command off an agent run's allowlist, so the model is never shown it and a call to it is refused
 // UNAVAILABLE; propose_only turns an execute into a proposal. The agent's own row binds every run, a person's row
 // binds runs that act for them, and nothing here widens a grant.
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunHandle } from "@weft/contracts";
 import { agentActionOverrides } from "@weft/db";
@@ -95,6 +96,26 @@ describe("propose_only", () => {
     expect(narrowAllowlist(["a.b"], NO_OVERRIDES)).toEqual(["a.b"]);
   });
 
-  // Needs the two-line hook in pipeline.ts (owned by w4-telemetry; .scratch/contract-requests/w4-parity-admin.md).
-  it.todo("an agent call to a propose_only command returns pending_approval through the pipeline");
+  it("an agent call to a propose_only command returns pending_approval through the pipeline", async () => {
+    // Without an override the untainted main agent's post runs (R3, autoAllow untainted).
+    const free = await chat("usr_dana");
+    expect(await call(free, "comms.send_message", { channel: "#general", text: "hello" })).toMatchObject({ ok: true, status: "done" });
+    await override("usr_dana", "comms.send_message", "propose_only");
+    const h = await chat("usr_dana");
+    const o = await call(h, "comms.send_message", { channel: "#general", text: "hello again" });
+    expect(o).toMatchObject({ ok: true, status: "pending_approval" });
+    const id = (o as { proposalId: string }).proposalId;
+    const [p] = await w.db.all<{ status: string; command: string }>(sql`SELECT status, command FROM proposals WHERE id = ${id}`);
+    expect(p).toEqual({ status: "pending", command: "comms.send_message" });
+    // Reads under the same override still run, and the person's own calls are never narrowed.
+    await override("usr_dana", "people.search", "propose_only");
+    expect(await call(h, "people.search", { query: "Sam" })).toMatchObject({ ok: true, status: "done" });
+    expect(await w.executor.human.exec(w.ui("usr_dana"), "comms.send_message", { channel: "#general", text: "from Dana" })).toMatchObject({ ok: true, status: "done" });
+  });
+
+  it("forces a proposal in a run acting for another person only when that person set it", async () => {
+    await override("usr_sam", "comms.send_message", "propose_only");
+    expect(await call(await chat("usr_dana"), "comms.send_message", { channel: "#general", text: "one" })).toMatchObject({ ok: true, status: "done" });
+    expect(await call(await chat("usr_sam"), "comms.send_message", { channel: "#general", text: "two" })).toMatchObject({ ok: true, status: "pending_approval" });
+  });
 });

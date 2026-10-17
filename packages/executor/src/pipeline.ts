@@ -14,7 +14,7 @@ import { loadAutonomyFacts, policy, RISK_RANK, riskOf } from "./policy";
 import { agentNoteOf, genericPreview, insertProposal, proposeCall, type ProposalRow } from "./proposals";
 import { findUnknownReference } from "./references";
 import { tierFor } from "./registry";
-import type { CallScope } from "./scope";
+import { actionOverrideOf, narrowDecision, type CallScope } from "./scope";
 import { GRANT_RANK, loadLimits } from "./store";
 import { nullToUndefined } from "./strict-schema";
 import { runAllowlist } from "./runs";
@@ -166,11 +166,11 @@ export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: st
 
   // Wave 3: the autonomy of the routine an agent call runs in (recommend, approve, auto); policy() applies it.
   const autonomy = scope.caller === "agent" && ctx.routineRunId ? await loadAutonomyFacts(tx, ctx.companyId, ctx.routineRunId, def.autoEligible ?? null) : null;
-  const decision = policy(def, input, {
+  const decision = narrowDecision(policy(def, input, {
     caller: scope.caller, agentKind: ctx.agentKind, tainted: scope.caller === "approved" ? false : ctx.tainted, taintedBy: scope.taintedBy,
     blockedInBatch: scope.batch?.blocked ?? false, pendingInBatch: scope.batch?.pending ?? false, amountCents: amount, ceiling, openR4,
     systemAllowed: scope.systemAllowed, autonomy,
-  });
+  }), actionOverrideOf(scope, def.name), def.effect === "read");   // wave 4: a propose_only override (scope.ts) never widens
   if (decision.decision === "refuse") return refuse(decision.code ?? "NOT_PERMITTED", decision.reason);
 
   if (opts.approved && preview && opts.approved.subjectHash && preview.subjectHash !== opts.approved.subjectHash) {
