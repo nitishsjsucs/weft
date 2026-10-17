@@ -9,12 +9,50 @@
 // stays read-only so the existing refusal answers it. MCP sessions (tainted from the start) never get the act list.
 // Names a track has not registered yet are dropped, so the list can only shrink, never exceed the cap of 16, and an
 // act-mode write that is not proposal-only (approval always, no auto-allow) is dropped too.
+// Wave 4 domain routing (FM2): when the request names the benefits carrier bill, an integration sync or who is out,
+// the comms.post_update slot (never offered to chat) carries that domain's read instead. The choice is made here once,
+// before the run opens, so it is frozen in the run's allowlist. Only a registered read is ever routed in.
 import { eq } from "drizzle-orm";
-import { CHAT_ACT_TOOLS, CHAT_TOOLS_W3, W3_SETTINGS, type HumanSession } from "@weft/contracts";
+import { CHAT_ACT_TOOLS, CHAT_DOMAIN_ROUTES, CHAT_ROUTE_SLOT, CHAT_TOOLS_W3, W3_SETTINGS, type ChatDomainRoute, type HumanSession } from "@weft/contracts";
 import { settings, type Db } from "@weft/db";
 
 export type ChatMode = "read" | "act";
-export interface ChatToolChoice { mode: ChatMode; intent: boolean; canPropose: boolean; allowlist: string[] | null; dropped: string[] }
+export interface ChatToolChoice {
+  mode: ChatMode; intent: boolean; canPropose: boolean; allowlist: string[] | null; dropped: string[];
+  /** The domain read routed into the comms.post_update slot for this run, if any. */
+  routed: { domain: ChatDomainRoute; tool: string } | null;
+}
+
+/** The words that name each routed domain, matched on the person's own text. Order breaks ties. */
+const ROUTE_WORDS: Record<ChatDomainRoute, RegExp> = {
+  benefits_reconcile: /\b(carriers?|over-?bill\w*|over-?charg\w*|reconcil\w*)\b|\bbenefits?\b[^.?!]*\b(bill\w*|invoices?|premiums?|charg\w*)\b/i,
+  integrations_sync: /\b(workday|greenhouse|checkr|hireright|docusign|integrations?|sync\w*|hris|ats)\b/i,
+  team_calendar: /\b(who'?s|who is|who are|anyone|anybody)\s+(out|off|away|on leave|on vacation|on pto)\b|\b(team calendar|time-?off calendar|out of (the )?office|ooo|coverage)\b/i,
+};
+
+/** The domain a request names, deterministically (first matching route in CHAT_DOMAIN_ROUTES order), or null. */
+export function routedDomain(text: string): (typeof CHAT_DOMAIN_ROUTES)[number] | null {
+  const t = text.trim();
+  if (!t) return null;
+  return CHAT_DOMAIN_ROUTES.find((r) => ROUTE_WORDS[r.domain].test(t)) ?? null;
+}
+
+/**
+ * Swaps the routed read into the slot. Fails closed: no registry, an unregistered name, a name the main agent cannot
+ * use, or anything that is not a read leaves the list unchanged. The list never grows.
+ */
+export function routeInto(registry: RegistryLike | undefined, names: readonly string[], text: string): { names: string[]; routed: ChatToolChoice["routed"] } {
+  const r = routedDomain(text);
+  const at = names.indexOf(CHAT_ROUTE_SLOT);
+  if (!r || at < 0 || !registry || names.includes(r.tool)) return { names: [...names], routed: null };
+  const known = registry.get(r.tool);
+  const d = typeof registry.def === "function" ? registry.def(r.tool) : undefined;
+  const effect = d?.effect ?? known?.effect;
+  if (!known || known.tiers.main === "unavailable" || effect !== "read") return { names: [...names], routed: null };
+  const out = [...names];
+  out[at] = r.tool;
+  return { names: out, routed: { domain: r.domain, tool: r.tool } };
+}
 
 /** Verbs that ask the agent to do something rather than explain something. */
 const ACT_VERB = /\b(pay|propose|approve|deny|decline|reject|reimburse|issue|request|book|schedule|submit|file|run an off-cycle|send an off-cycle|make up|fix)\b/i;
@@ -89,13 +127,17 @@ export function registered(registry: RegistryLike | undefined, names: readonly s
   return names.filter((n) => { const d = registry.get(n); return Boolean(d && d.tiers.main !== "unavailable"); });
 }
 
-/** `liveProvider`: the run goes to a real model with strict tool schemas (the scripted provider never validates them). */
-export async function chooseChatTools(deps: { db: Db; registry?: RegistryLike; liveProvider?: boolean }, session: Pick<HumanSession, "keyScope">, text: string): Promise<ChatToolChoice> {
+/**
+ * `liveProvider`: the run goes to a real model with strict tool schemas (the scripted provider never validates them).
+ * `route: false` turns domain routing off (the pre-wave-4 lists, for comparison runs).
+ */
+export async function chooseChatTools(deps: { db: Db; registry?: RegistryLike; liveProvider?: boolean; route?: boolean }, session: Pick<HumanSession, "keyScope">, text: string): Promise<ChatToolChoice> {
   const intent = readsActionIntent(text);
   const canPropose = intent ? await chatCanPropose(deps.db) : false;
   const mode: ChatMode = intent && canPropose && session.keyScope !== "mcp" ? "act" : "read";
-  const names = registered(deps.registry, mode === "act" ? CHAT_ACT_TOOLS : CHAT_TOOLS_W3);
+  const listed = registered(deps.registry, mode === "act" ? CHAT_ACT_TOOLS : CHAT_TOOLS_W3);
+  const { names, routed } = listed && deps.route !== false ? routeInto(deps.registry, listed, text) : { names: listed, routed: null };
   const loose = names && mode === "act" ? notProposalOnly(deps.registry, names) : [];
   const dropped = [...loose, ...(names && deps.liveProvider ? strictUnsafe(deps.registry, names.filter((n) => !loose.includes(n))) : [])];
-  return { mode, intent, canPropose, allowlist: names ? names.filter((n) => !dropped.includes(n)) : null, dropped };
+  return { mode, intent, canPropose, allowlist: names ? names.filter((n) => !dropped.includes(n)) : null, dropped, routed: routed && !dropped.includes(routed.tool) ? routed : null };
 }
