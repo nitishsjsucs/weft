@@ -4,8 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { PORTAL_TOOLS } from "@weft/contracts";
 import { existsSync, readFileSync } from "node:fs";
+import type { WeftAgentRuntime } from "@weft/agent";
+import type { WeftRoutinesEngine } from "@weft/routines";
+import { emitEvent } from "@weft/core";
 import { join } from "node:path";
-import { actions, agentMentions, agentRuns, events, execRuns, expenseIntake, expenses, handoffCases, proposals, runSteps, runTaint, simChatMessages, uploads, workers } from "@weft/db";
+import { actions, agentMentions, agentRuns, events, execRuns, expenseIntake, expenses, handoffCases, proposals, routineWaits, routines as routinesTable, devices as devicesTable, runSteps, runTaint, simChatMessages, uploads, workers } from "@weft/db";
 import { createTestWeft, type TestWeft } from "../src/testing";
 import { MENTION_AUTHOR, mentionAnswered } from "../src/routes/agent-surfaces";
 import { classifyPortalTopic } from "../../../packages/core/src/agent-surfaces/portal";
@@ -229,5 +232,68 @@ describe("email expense intake", () => {
     expect(mail.filter((m) => m.to === w.workEmail && m.subject.startsWith("Not filed")).length).toBe(2);
     const listed = await call("usr_dana", "GET", "/v1/expense-intake?status=bounced_no_receipt");
     expect(listed.json.length).toBe(2);
+  });
+});
+
+describe("wait and resume (rt_laptop_hand_delivery)", () => {
+  const eng = () => weft.routines as unknown as WeftRoutinesEngine;
+  const settle = async () => { await (weft.agent as unknown as WeftAgentRuntime).idle(); await eng().drain(); await (weft.agent as unknown as WeftAgentRuntime).idle(); await eng().drain(); };
+  const at = (days: number) => new Date(Date.parse("2026-10-26T15:30:00.000Z") + days * 86_400_000).toISOString();
+  const waitRows = async (rtr: string) => weft.db.select().from(routineWaits).where(eq(routineWaits.routineRunId, rtr));
+  const reminders = async (needle: string) => (await weft.db.select().from(simChatMessages).where(eq(simChatMessages.channel, "#new-hires"))).filter((m) => m.text.includes(needle));
+
+  beforeAll(async () => {
+    // Only this routine reacts: every other routine stays out of the ticks below.
+    await weft.db.update(routinesTable).set({ enabled: false });
+    await weft.clock.set(at(0), 0);
+    await eng().tick(at(0));
+  });
+
+  it("parks in waiting_event, follows up on schedule, resumes once when the delivery arrives", async () => {
+    const austin = (await weft.db.select().from(workers).where(eq(workers.workplaceId, "wkp_austin")))[0]!;
+    const def = (await eng().list()).find((r) => r.id === "rt_laptop_hand_delivery")!;
+    const run = await eng().fire(def, { triggerRef: `test:${austin.id}`, payload: { worker_id: austin.id }, attended: false, event: null });
+    await settle();
+    expect((await eng().getRun(run.id))!.status).toBe("waiting_event");
+    let [w] = await waitRows(run.id);
+    expect(w).toMatchObject({ kind: "event", event: "sim.device_delivered", subjectRef: austin.id, status: "waiting", followUps: 0 });
+
+    await weft.clock.set(at(2.1), 0);
+    await eng().tick(at(2.1));
+    await settle();
+    [w] = await waitRows(run.id);
+    expect(w!.followUps).toBe(1);
+    expect((await reminders("Reminder for")).length).toBe(1);
+    expect((await eng().getRun(run.id))!.status).toBe("waiting_event");
+
+    await weft.db.insert(devicesTable).values({ id: "dev_w4wait", workerId: austin.id, model: "Larkspur standard laptop (sim)", status: "delivered", orderRef: "ord_w4wait", priceCents: 189_900 });
+    const evt = { body: { type: "sim.device_delivered" as const, payload: { order_ref: "ord_w4wait", worker_id: austin.id } }, subjectRef: "ord_w4wait", attended: false, requestedBy: null };
+    await emitEvent(weft.db, weft.clock, evt);
+    await emitEvent(weft.db, weft.clock, evt);
+    await eng().tick(at(2.2));
+    await settle();
+    [w] = await waitRows(run.id);
+    expect(w).toMatchObject({ status: "resumed" });
+    expect((await eng().getRun(run.id))!.status).toBe("done");
+    // Resumed once: one thank-you, even though the event arrived twice.
+    expect((await reminders("was delivered")).length).toBe(1);
+    const listed = await call("usr_dana", "GET", `/v1/routine-runs/${run.id}/waits`);
+    expect(listed.json.map((x: { status: string }) => x.status)).toEqual(["resumed"]);
+  });
+
+  it("expires after its timeout and leaves the check to a person", async () => {
+    const austin = (await weft.db.select().from(workers).where(eq(workers.workplaceId, "wkp_austin")))[1]!;
+    const def = (await eng().list()).find((r) => r.id === "rt_laptop_hand_delivery")!;
+    const run = await eng().fire(def, { triggerRef: `test:${austin.id}:expiry`, payload: { worker_id: austin.id }, attended: false, event: null });
+    await settle();
+    expect((await eng().getRun(run.id))!.status).toBe("waiting_event");
+    await weft.clock.set(at(20), 0);
+    await eng().tick(at(20));
+    await settle();
+    const [w] = await waitRows(run.id);
+    expect(w!.status).toBe("expired");
+    const rr = (await eng().getRun(run.id))!;
+    expect(rr.status).toBe("failed");
+    expect(rr.leftForHuman.join(" ")).toMatch(/Check by hand: the laptop reached the new hire/);
   });
 });

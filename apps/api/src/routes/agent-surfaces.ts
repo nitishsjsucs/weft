@@ -14,7 +14,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { and, asc, eq, or } from "drizzle-orm";
 import { ChatChannel, Forbidden, PORTAL_TOOLS, PortalAskBody, SimInboundEmail, Unauthorized, ValidationError, CHAT_TOOLS, type HumanSession, type ToolOutcome } from "@weft/contracts";
-import { principals } from "@weft/db";
+import { principals, routineWaits } from "@weft/db";
 import type { WeftAgentRuntime } from "@weft/agent";
 import { executorInternals } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
@@ -180,7 +180,14 @@ export function agentSurfacesRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json(await listIntake(weft.db, s.companyId, c.req.query("status") ?? null));
   });
 
-  return stubRoutes(r, "agent-surfaces", ["POST /v1/portal/agent/runs", "GET /v1/agent/mentions", "POST /v1/sim/chat/inbound", "POST /v1/sim/email/inbound", "GET /v1/expense-intake"]);
+  // Wait and resume (G6): a routine run's waits, oldest first.
+  r.get("/v1/routine-runs/:id/waits", async (c) => {
+    need(c.var.session);
+    const rows = await weft.db.select().from(routineWaits).where(eq(routineWaits.routineRunId, c.req.param("id"))).orderBy(asc(routineWaits.createdAt), asc(routineWaits.id));
+    return c.json(rows.map((w) => ({ id: w.id, routineRunId: w.routineRunId, checklistItemId: w.checklistItemId, kind: w.kind, event: w.event, subjectRef: w.subjectRef, untilAt: w.untilAt, status: w.status, followUps: w.followUps, createdAt: w.createdAt, resumedAt: w.resumedAt })));
+  });
+
+  return stubRoutes(r, "agent-surfaces", ["POST /v1/portal/agent/runs", "GET /v1/agent/mentions", "POST /v1/sim/chat/inbound", "POST /v1/sim/email/inbound", "GET /v1/expense-intake", "GET /v1/routine-runs/:id/waits"]);
 }
 
 /** Read tools from the chat set plus comms.post_update: a mention run can look things up, never change them. */
