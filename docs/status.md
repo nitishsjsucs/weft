@@ -1,5 +1,24 @@
 # Status
 
+## Wave 4 improvement round 1 merged (2026-10-17, 00:15 PDT)
+
+The five round 1 fix branches from the round 2 error analysis are merged in order, `improve/r1-FG1` to
+`improve/r1-FG5`, with no textual conflicts (their changed files are disjoint). FG1: `rt_agency_notice` handles every
+notice kind through per-plan tools and checklists, `rt_compliance_notices` is folded in, and routine runs without an
+agent run are traced. FG2: grounding accepts string leaves, the request, relative dates and count totals, and the loop
+keeps one repair for the answer-by step. FG3: richer people and payroll reads, artifact pages inline, `actions.list`
+filter hints and frozen per-run domain routing into the `comms.post_update` slot. FG4: prompt `w4.r1` with the chat
+guide rendered from the allowlists, the clarify and memory rules, recall without the one-pager and topic-word memory
+search. FG5: G4 and G5 fixes, tightened dev tasks, widened notice outcomes and worlds that start their cron cursor at
+the world clock. Integration fixes: every dev and test world digest is re-pinned and the held-out manifest rewritten
+with it (only task hashes move); the prompt dev-literal scan reads the `a|b` and `!x` mustMention forms; trace
+metadata no longer tags every wave 3 or routed chat run `chat_can_propose`; the solvability lint counts routed reads.
+Chat proposals and auto autonomy stay off by default. Fresh clone (e2e on ports 5100 and 5101): `pnpm test` 1194
+passed and 6 skipped, `pnpm typecheck` 16 of 16, `pnpm e2e` 52 passed and 1 skipped, `pnpm demo` exit 0 with GP1 to
+GP24 and the audit chain verifying, `pnpm eval:ci` gate passed, and lint:prose, lint:brand and brand:overlap ok. Left:
+mention runs still use the unrouted chat list, `time_off.team_calendar` needs a department, the BN-02 and IN-02 seed
+checks, running the declared judges, `finalText.mustNotMention` in the evals contract, and a live k=3 rebaseline.
+
 ## Wave 4 scaffold (2026-10-16, 18:12 PDT)
 
 The wave 4 plan is in `docs/wave4.md`: finish the agent's parity capabilities (recurring filings and the compliance
