@@ -11,7 +11,7 @@ import { runTraceTags, traceRedact } from "../../packages/agent/src/otel";
 import { appendWaveSpend, assertWaveBudget } from "../../scripts/wave-ledger";
 import { drainRoutines, drive } from "./drivers";
 import { collect, plantCanaries, snapshot } from "./evidence";
-import { clarifies, endStateFailures, firstFailure, g2, g5, g5Stage, g7, gradeAll, groundingRepairs, invalidCounts, scanCanaries, trialCostUsd } from "./graders/index";
+import { clarifies, endStateFailures, firstFailure, g2, g5, g5Stage, g7, gradeAll, groundingRepairs, invalidCounts, recallGap, scanCanaries, trialCostUsd, type GroundedBy, type RecallGap } from "./graders/index";
 import type { SuiteTrial, TrialDetail, TrialEvidence } from "./types";
 import { applyVariant, buildWorld, readChatCanPropose, worldDigest, type TrialWorld } from "./worlds/index";
 
@@ -40,7 +40,13 @@ export interface RunnerOptions {
  */
 export interface RoutineRunInfo { id: string; routineId: string; status: string; agentRunId: string | null; reason: string | null }
 /** TrialDetail plus the FG5 fields (kept here so the shared types file stays as it is). */
-export type SuiteTrialDetail = TrialDetail & { routine: RoutineRunInfo | null; judgesPending: string[] };
+export type SuiteTrialDetail = TrialDetail & {
+  routine: RoutineRunInfo | null; judgesPending: string[];
+  /** R1: figures in the final text that only the request or only the run clock grounds (G5 accepts them, as the guard does). */
+  groundedBy?: GroundedBy | null;
+  /** R2: the recalled note the task needed reached the model without its rule (firstFailure is then "context"). */
+  recallGap?: RecallGap | null;
+};
 export const detailOf = (t: SuiteTrial): SuiteTrialDetail => t.detail as SuiteTrialDetail;
 
 /** Reads the routine run's row; the reason is the precheck's own text (redacted like every exported string). */
@@ -61,6 +67,7 @@ const emptyDetail = (digest: string | null, chatCanPropose = false): SuiteTrialD
   proposals: null, invalidInput: 0, unknownReference: 0, unknownCommand: 0, groundingFallback: false,
   unsafe: { g1: 0, taintMiss: 0, canaryHits: 0 }, triggering: { missedClarify: false, unneededClarify: false, falseRefusal: false, missedRefusal: false },
   timeToFirstModelMs: null, modelMs: 0, digest, chatCanPropose, finalText: null, actions: [], calls: [], routine: null, judgesPending: [],
+  groundedBy: null, recallGap: null,
 });
 
 function errorTrial(spec: TrialSpec, error: string, digest: string | null, wallMs = 0): SuiteTrial {
@@ -78,7 +85,8 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
   const endFails = endStateFailures(ev);
   const main = ev.runs.find((r) => r.id === ev.mainRunId) ?? null;
   const prop = g2(ev, expect);
-  const ground = g5(ev, expect);
+  const ground = g5(ev, expect, spec.task);
+  const gap = recallGap(ev, expect);
   const taint = g7(ev, expect);
   const inv = invalidCounts(ev);
   const model = ev.steps.filter((s) => s.kind === "model_call");
@@ -107,6 +115,8 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
     routine: extra.routine ?? null,
     // Declared judges do not run in the suite yet: they are listed as pending and never count toward success.
     judgesPending: expect.finalText?.judges ?? [],
+    groundedBy: ground.groundedBy ?? null,
+    recallGap: gap,
   };
   return {
     taskId: spec.task.id, split: spec.task.split, group: spec.task.group, variant: spec.variant, trial: spec.trial, success, graders, judges: [],
@@ -114,7 +124,7 @@ export function scoreTrial(spec: TrialSpec, ev: TrialEvidence, extra: { digest: 
     steps: main?.stepsUsed ?? 0, toolCalls: inv.toolCalls, invalidToolCalls: inv.invalidInput + inv.unknownReference + inv.unknownCommand,
     groundingRepairs: groundingRepairs(ev), inputTokens: tokens.input, cachedTokens: tokens.cached, outputTokens: tokens.output,
     costUsd: trialCostUsd(ev), wallMs: ev.wallMs,
-    firstFailure: success ? null : (firstFailure(graders, { error: ev.error, argsOnly, noAgentRun: spec.task.surface === "routine" && !ev.mainRunId, g5Stage: g5Stage(ground.parts), endStateFailed: endFails.length > 0 }) ?? (endFails.length ? "result use" : null)),
+    firstFailure: success ? null : (firstFailure(graders, { error: ev.error, argsOnly, noAgentRun: spec.task.surface === "routine" && !ev.mainRunId, g5Stage: g5Stage(ground.parts), endStateFailed: endFails.length > 0, recallGap: gap }) ?? (endFails.length ? "result use" : null)),
     error: ev.error ?? (endFails.length ? endFails.join("; ") : null),
     detail,
   };
