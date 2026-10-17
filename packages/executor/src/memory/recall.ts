@@ -1,6 +1,7 @@
 // Recall at run start (harness 9.5 and 18 item 4). Code, never the model, picks the subject refs from the trigger
 // and the request, runs at most RECALL_BUDGET.maxSearches searches, and keeps the hits within maxTokens. The
-// one-pager always leads. Recalled text is memory content: it is escaped as data and never carries instructions.
+// one-pager always leads when it exists (wave 4: recall no longer waits for it). Recalled text is memory content:
+// it is escaped as data and never carries instructions.
 import { RECALL_BUDGET, type RecallItem } from "@weft/contracts";
 
 export const approxTokens = (s: string) => Math.ceil(s.length / 4);
@@ -10,7 +11,8 @@ const DOSSIER_MAX_TOKENS = 220;
 const HIT_MAX_TOKENS = 90;
 
 export interface AliasEntry { path: string; id: string; aliases: string[] }
-export interface RecallCandidate extends RecallItem { taintedBy: string | null; kind: "one_pager" | "dossier" | "hit" }
+/** `noteId` is the file's frontmatter id; it is shown when the path does not carry it, so the note can be cited. */
+export interface RecallCandidate extends RecallItem { taintedBy: string | null; kind: "one_pager" | "dossier" | "hit"; noteId?: string | null }
 
 const STOP = new Set(["about", "after", "again", "their", "there", "these", "those", "which", "where", "while", "would", "could", "should", "what", "when", "with", "from", "this", "that", "have", "has", "does", "show", "tell", "please", "today", "everything", "anything"]);
 const ENTITY_ID = /\b(wrk|ntc|txa|bpl|cmp)_[A-Za-z0-9_]+\b/g;
@@ -58,13 +60,22 @@ export function excerptOf(body: string, maxTokens: number): string {
 
 export const CAPS = { onePager: ONE_PAGER_MAX_TOKENS, dossier: DOSSIER_MAX_TOKENS, hit: HIT_MAX_TOKENS };
 
+/** "id X. " when the note has an id that neither its path nor its excerpt shows; otherwise nothing. */
+function idLabel(c: RecallCandidate): string {
+  const id = c.noteId?.trim();
+  if (!id || c.path.toLowerCase().includes(id.toLowerCase()) || c.excerpt.toLowerCase().includes(id.toLowerCase())) return "";
+  return `id ${id}. `;
+}
+
 /**
  * The <recall> block within the token budget (the whole block, tags included). The one-pager is always kept
  * (clipped if needed); dossiers, then hits by score, fill the rest; anything that does not fit is dropped.
  */
 export function renderRecall(candidates: RecallCandidate[], maxTokens: number = RECALL_BUDGET.maxTokens): { block: string; kept: RecallCandidate[] } {
   const open = `<recall note="${RECALL_NOTE}">`, close = "</recall>";
-  const line = (c: RecallCandidate) => `- ${escapeData(c.path)} (${c.kind.replace("_", "-")}, as of ${c.asOf.slice(0, 10)}${c.taintedBy ? ", untrusted" : ""}): ${escapeData(c.excerpt)}`;
+  // Untrusted items keep their path and note id: the label tells the model to read them as data, and the id and path
+  // are what an answer cites (a decision note is untrusted by rule, and a "why" answer must still name it).
+  const line = (c: RecallCandidate) => `- ${escapeData(c.path)} (${c.kind.replace("_", "-")}, as of ${c.asOf.slice(0, 10)}${c.taintedBy ? ", untrusted" : ""}): ${escapeData(`${idLabel(c)}${c.excerpt}`)}`;
   const order = { one_pager: 0, dossier: 1, hit: 2 } as const;
   const sorted = [...candidates].sort((a, b) => order[a.kind] - order[b.kind] || b.score - a.score || a.path.localeCompare(b.path));
   const kept: RecallCandidate[] = [];
