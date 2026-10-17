@@ -54,6 +54,9 @@ describe("t2 registry rules (harness 5.4)", () => {
       // wave 3 (w3-parity-routines)
       "notices.escalate": { notice_id: "ntc_0001", reason_code: "missing_filing" }, "onboarding.send_checkins": { send: [], nudge: [] },
       "onboarding.submit_checkin": { checkin_id: "chk_0001", answers: { overall: "good", equipped: "yes", unclear: "", better: "" } },
+      // wave 4 (w4-parity-compliance)
+      "tax.get_filing": { filing_id: "fil_0001" }, "tax.prepare_filing": { filing_id: "fil_0001" }, "tax.file_return": { filing_id: "fil_0001" },
+      "tax.set_deposit_schedule": { tax_account_id: "txa_0001", schedule: "semiweekly", effective_from: "2027-01-01", source_notice_id: "ntc_0002" }, "notices.acknowledge": { notice_id: "ntc_0001" },
     };
     for (const c of t2) {
       const shape = (c.input as unknown as { shape?: Record<string, unknown> }).shape ?? {};
