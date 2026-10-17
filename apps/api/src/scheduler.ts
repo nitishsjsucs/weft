@@ -11,6 +11,7 @@ import { emitEvent, ptDateOf } from "@weft/core";
 import { syncContractorRail } from "./routes/contractors";
 import { pollIntegrations } from "./integrations/poll";
 import { timeOffYearEnd } from "./time-off/year-end";
+import { sweepEnrollmentWindows } from "./routes/life-events";
 
 export const HANDLER_CURSOR_KEY = "scheduler.handlers_cursor";
 const MAX_HANDLER_PASSES = 5;
@@ -78,6 +79,7 @@ export function createScheduler(o: CreateSchedulerOptions): WeftScheduler {
     });
     await step("integrations.poll", () => pollIntegrations({ db: o.db, clock: o.clock, executor: o.executor, now }));   // wave 3
     await step("time_off.year_end", () => timeOffYearEnd({ db: o.db, clock: o.clock, executor: o.executor, now }));   // wave 3
+    await step("benefits.windows", () => sweepEnrollmentWindows({ db: o.db, executor: o.executor, now }));   // wave 4 (w4-parity-people)
     await step("executor.expireProposals", () => o.executor.expireProposals(now));
     await step("handlers", runHandlers);
     await step("routines.tick", () => o.routines.tick(now));
