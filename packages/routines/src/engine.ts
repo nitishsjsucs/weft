@@ -11,6 +11,7 @@ import type { AgentRuntime, PrecheckResult, ProposalDecided, ReadOnlyExecutor, R
 import { evaluateChecklist, type RunCall, type RunFacts } from "./checks";
 import { PREBUILT, TZ } from "./prebuilt";
 import { runPrecheck } from "./prechecks";
+import { bumpFollowUp, dueWaits, matchesEvent, openWait, openWaitsOf, segmentText, settleWait, waitItems, waitsForEvent } from "./waits";
 
 /** settings.notify.quiet_hours default (harness 8): digest-severity cron posts wait; event posts and the weekly digest never do. */
 export const QUIET_HOURS = { start: "19:00", end: "07:00", tz: TZ };
@@ -179,8 +180,15 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     }
   }
 
-  async function factsFor(agentRunId: string): Promise<RunFacts> {
-    const rows = await db.select().from(runSteps).where(and(eq(runSteps.runId, agentRunId), eq(runSteps.kind, "tool_call"))).orderBy(asc(runSteps.n));
+  /**
+   * The observed facts of one agent run, or (wave 4, waits) of every segment of its routine run: a resumed run's
+   * checklist counts what the earlier segments already did, so asking twice is never needed to pass an item.
+   */
+  async function factsFor(agentRunId: string, routineRunId: string | null = null): Promise<RunFacts> {
+    const segments = routineRunId ? (await db.select({ id: agentRuns.id }).from(agentRuns).where(eq(agentRuns.routineRunId, routineRunId)).orderBy(asc(agentRuns.createdAt))).map((r) => r.id) : [];
+    const ids = segments.length > 1 ? segments : [agentRunId];
+    const rows = [];
+    for (const id of ids) rows.push(...await db.select().from(runSteps).where(and(eq(runSteps.runId, id), eq(runSteps.kind, "tool_call"))).orderBy(asc(runSteps.n)));
     const calls: RunCall[] = [];
     for (const r of rows) {
       const res = parse<{ outcome?: ToolOutcome } | null>(r.resultJson, null);
@@ -198,19 +206,35 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     // decision callback and this read.
     const stored = new Map<string, string>();
     if (readOnly && calls.some((c) => c.proposalId)) {
-      const out = await readOnly.exec(companyId, "actions.get_run", { run_id: agentRunId }).catch(() => null);
-      const listed = out && out.ok && out.status === "done" ? ((out.data as { proposals?: { id: string; status: string }[] } | null)?.proposals ?? []) : [];
-      for (const p of listed) if (p.status !== "pending") stored.set(p.id, p.status);
+      for (const id of ids) {
+        const out = await readOnly.exec(companyId, "actions.get_run", { run_id: id }).catch(() => null);
+        const listed = out && out.ok && out.status === "done" ? ((out.data as { proposals?: { id: string; status: string }[] } | null)?.proposals ?? []) : [];
+        for (const p of listed) if (p.status !== "pending") stored.set(p.id, p.status);
+      }
     }
     return { calls, proposalStatus: (id) => stored.get(id) ?? decisions.get(id) ?? null };
   }
 
-  async function checklist(input: { routine: RoutineDef; agentRunId: string; companyId: string; trigger: Record<string, unknown> }) {
-    const rr = (await db.select().from(routineRuns).where(eq(routineRuns.agentRunId, input.agentRunId)).limit(1))[0];
+  async function scopeOf(rr: RunSelect | undefined, trigger: Record<string, unknown>): Promise<Record<string, unknown>> {
     const pre = parse<PrecheckResult | null>(rr?.precheckJson, null);
     const derived = pre && pre.action === "run" ? (pre.derivedArgs ?? {}) : {};
-    const scope = { ...Object.fromEntries(Object.entries(derived).filter(([, v]) => typeof v !== "object")), ...input.trigger };
-    return evaluateChecklist(input.routine, scope, await factsFor(input.agentRunId), { companyId: input.companyId, agentRunId: input.agentRunId, read: readOnly });
+    return { ...Object.fromEntries(Object.entries(derived).filter(([, v]) => typeof v !== "object")), ...trigger };
+  }
+
+  /** The real checklist of a routine run: every segment's facts, wait items evaluated like any other item. */
+  async function realChecklist(routine: RoutineDef, rr: RunSelect, agentRunId: string, trigger: Record<string, unknown>) {
+    return evaluateChecklist(routine, await scopeOf(rr, trigger), await factsFor(agentRunId, rr.id), { companyId, agentRunId, read: readOnly });
+  }
+
+  async function checklist(input: { routine: RoutineDef; agentRunId: string; companyId: string; trigger: Record<string, unknown> }) {
+    const rr = (await db.select().from(routineRuns).where(eq(routineRuns.agentRunId, input.agentRunId)).limit(1))[0];
+    const waiting = waitItems(input.routine);
+    const items = await evaluateChecklist(input.routine, await scopeOf(rr, input.trigger), await factsFor(input.agentRunId, waiting.length && rr ? rr.id : null), { companyId: input.companyId, agentRunId: input.agentRunId, read: readOnly });
+    if (!waiting.length) return items;
+    // Wave 4: an item with a wait is the engine's to watch, not the model's to finish in this segment. The agent sees it
+    // as handed over, so it ends the segment instead of being told to keep working on something only time can do.
+    const w = new Set(waiting.map((x) => x.id));
+    return items.map((i) => (w.has(i.id) && !i.passed ? { ...i, passed: true, label: `${i.label} (Weft waits for this after the run; nothing to do now)` } : i));
   }
 
   async function finalizeFromAgent(routineRunId: string, agentRunId: string) {
@@ -223,8 +247,92 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     const level = rr ? (await db.select({ autonomy: routines.autonomy }).from(routines).where(eq(routines.id, rr.routineId)).limit(1))[0]?.autonomy : null;
     const verb = level === "recommend" ? "Review the suggestion" : "Approve";
     const left = facts.calls.filter((c) => c.status === "pending_approval" && c.proposalId && facts.proposalStatus(c.proposalId) === null).map((c) => `${verb} ${c.command.replace("__", ".")} (${c.proposalId})`);
-    const status: RoutineRunStatus = a.status === "waiting" ? "waiting_approval" : a.status === "done" ? "done" : a.status === "cancelled" ? "cancelled" : "failed";
-    await updateRun(routineRunId, { status, summary: a.summary ?? null, leftForHumanJson: JSON.stringify(left), costUsdMicros: a.costUsdMicros, endedAt: status === "waiting_approval" ? null : clock.now() });
+    let status: RoutineRunStatus = a.status === "waiting" ? "waiting_approval" : a.status === "done" ? "done" : a.status === "cancelled" ? "cancelled" : "failed";
+    let summary = a.summary ?? null;
+    // Wave 4 waits: a segment that ends done with a wait item still open parks the routine run in waiting_event.
+    const full = rr ? (await db.select().from(routineRuns).where(eq(routineRuns.id, routineRunId)).limit(1))[0] : undefined;
+    const routine = rr ? await get(rr.routineId) : null;
+    const waiting = routine ? waitItems(routine) : [];
+    if (full && routine && waiting.length && status === "done") {
+      const trigger = await triggerOfSegment(agentRunId);
+      const items = await realChecklist(routine, full, agentRunId, trigger);
+      const open = waiting.filter((w) => items.find((i) => i.id === w.id)?.passed === false);
+      if (open.length) {
+        const scope = await scopeOf(full, trigger);
+        for (const item of open) await openWait(db, clock.now(), { routineRunId, item, scope });
+        status = "waiting_event";
+        summary = `${summary ?? "Checked."} Waiting: ${open.map((i) => i.label).join("; ")}.`;
+      } else {
+        for (const w of await openWaitsOf(db, routineRunId)) await settleWait(db, w.id, "resumed", clock.now());
+      }
+    }
+    const parked = status === "waiting_approval" || status === "waiting_event";
+    await updateRun(routineRunId, { status, summary, leftForHumanJson: JSON.stringify(left), costUsdMicros: a.costUsdMicros, endedAt: parked ? null : clock.now() });
+  }
+
+  /** The trigger a segment ran with, from its context step (the brain wrote it; the engine only reads it back). */
+  async function triggerOfSegment(agentRunId: string): Promise<Record<string, unknown>> {
+    const rows = await db.select().from(runSteps).where(and(eq(runSteps.runId, agentRunId), eq(runSteps.kind, "context"))).orderBy(asc(runSteps.n)).limit(1);
+    return parse<{ trigger?: Record<string, unknown> } | null>(rows[0]?.resultJson, null)?.trigger ?? {};
+  }
+
+  /**
+   * Starts one more agent run segment for a parked routine run (wave 4): after the awaited event or time, or to follow
+   * up while it still waits. The precheck is the run's own, with the segment's text from `<reason>_text`.
+   */
+  async function startSegment(routineRunId: string, reason: "resumed" | "follow_up", w: { id: string; followUps: number }, event: WeftEvent | null) {
+    const rr = (await db.select().from(routineRuns).where(eq(routineRuns.id, routineRunId)).limit(1))[0];
+    if (!rr) return;
+    const routine = await get(rr.routineId);
+    const pre = parse<PrecheckResult | null>(rr.precheckJson, null);
+    if (!routine || !pre || pre.action !== "run") return;
+    const derived = { ...(pre.derivedArgs ?? {}) };
+    const text = segmentText(derived, reason, w.followUps);
+    const precheck: PrecheckResult = { ...pre, derivedArgs: { ...derived, ...(text ? { text } : {}), segment: reason, wait_id: w.id, follow_ups: w.followUps } };
+    const handle = await runs.openRoutineRun({ routineId: routine.id, routineRunId, triggerRef: `${rr.triggerRef}#${w.id}:${reason}:${w.followUps}`, attended: false });
+    await updateRun(routineRunId, { status: "running", agentRunId: handle.runId, endedAt: null });
+    watch(routineRunId, handle.runId);
+    const run = (await getRun(routineRunId))!;
+    const trigger = event ? { ...event, payload: { ...event.payload } } : null;
+    await agent.startRoutineRun(handle, { routine, routineRun: run, trigger, precheck });
+  }
+
+  /** Expires a wait past its timeout: the routine run fails with what a person should check (until waits resume instead). */
+  async function timeOut(w: { id: string; routineRunId: string; kind: string; checklistItemId: string; createdAt: string; untilAt: string | null }) {
+    if (w.kind === "until") {
+      if (await settleWait(db, w.id, "resumed", clock.now())) await startSegment(w.routineRunId, "resumed", { id: w.id, followUps: 0 }, null);
+      return;
+    }
+    if (!(await settleWait(db, w.id, "expired", clock.now()))) return;
+    const rr = await getRun(w.routineRunId);
+    const routine = rr ? await get(rr.routineId) : null;
+    const label = (routine?.checklist ?? []).find((i) => i.id === w.checklistItemId)?.label ?? w.checklistItemId;
+    const days = w.untilAt ? Math.round((Date.parse(w.untilAt) - Date.parse(w.createdAt)) / 86_400_000) : 0;
+    await updateRun(w.routineRunId, {
+      status: "failed", summary: `Stopped waiting after ${days} days: ${label} did not happen.`,
+      leftForHumanJson: JSON.stringify([...(rr?.leftForHuman ?? []), `Check by hand: ${label} (waited ${days} days)`]), endedAt: clock.now(),
+    });
+  }
+
+  /** Wave 4: resume waits an event satisfies (once each), then time out and follow up on the waits that are due. */
+  async function sweepWaits(now: string, evt: WeftEvent | null) {
+    if (evt) {
+      for (const w of await waitsForEvent(db, evt.type)) {
+        if (!matchesEvent(w, evt)) continue;
+        if (await settleWait(db, w.id, "resumed", now)) await startSegment(w.routineRunId, "resumed", { id: w.id, followUps: w.followUps }, evt);
+      }
+      return;
+    }
+    const due = await dueWaits(db, now);
+    for (const w of due.timedOut) await timeOut(w);
+    for (const w of due.followUps) {
+      const rr = await getRun(w.routineRunId);
+      const routine = rr ? await get(rr.routineId) : null;
+      const every = routine ? waitItems(routine).find((i) => i.id === w.checklistItemId)?.wait.followUpEveryDays ?? null : null;
+      // A follow-up waits for the previous segment to finish; the next sweep picks it up.
+      if (!every || !rr || rr.status !== "waiting_event") continue;
+      if (await bumpFollowUp(db, w, every, now)) await startSegment(w.routineRunId, "follow_up", { id: w.id, followUps: w.followUps + 1 }, null);
+    }
   }
 
   async function fire(routine: RoutineDef, input: { triggerRef: string; payload: Record<string, unknown>; attended: boolean; event: WeftEvent | null; at?: string }): Promise<RoutineRun> {
@@ -309,9 +417,11 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
             if (!r.enabled || r.trigger.type !== "event" || r.trigger.event !== evt.type) continue;
             await fire(r, { triggerRef: evt.id, payload: { ...evt.payload }, attended: evt.attended, event: evt });
           }
+          await sweepWaits(now, evt);
           await opts.events.consume(evt.id);
         }
       }
+      await sweepWaits(now, null);
     },
     async trigger(routineId, input) {
       const r = await get(routineId);

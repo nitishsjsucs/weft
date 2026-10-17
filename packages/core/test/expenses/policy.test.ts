@@ -124,7 +124,8 @@ describe("expense policy engine (hand-computed cases)", () => {
 describe("E13 no bulk decide (registry)", () => {
   it("no expenses command decides more than one item, and the only decide takes exactly one id", () => {
     const all = commands.filter((c) => c.name.startsWith("expenses."));
-    expect(all.map((c) => c.name).sort()).toEqual(expensesCommands.map((c) => c.name).sort());
+    // expenses.intake_email (wave 4, w4-parity-agent) is a system record that files one claim per email; it decides nothing.
+    expect(all.map((c) => c.name).sort()).toEqual([...expensesCommands.map((c) => c.name), "expenses.intake_email"].sort());
     expect(all.some((c) => /approve_all|bulk|decide_all|decide_many/.test(c.name))).toBe(false);
     const decide = all.find((c) => c.name === "expenses.decide")!;
     expect(decide.approval).toBe("always");
@@ -142,7 +143,7 @@ describe("E13 no bulk decide (registry)", () => {
     // Planned risk, access and approval match the contract, and every planned expenses command is registered.
     for (const c of all) if (c.access !== "all") expect(c.tiers.main, c.name).toBe("unavailable");
     const planned = W3_PLANNED_COMMANDS.filter((c) => c.name.startsWith("expenses."));
-    expect(all.map((c) => c.name).sort()).toEqual(planned.map((c) => c.name).sort());
+    expect(all.map((c) => c.name).filter((n) => n !== "expenses.intake_email").sort()).toEqual(planned.map((c) => c.name).sort());   // intake_email is planned in wave 4
     for (const p of planned) {
       const c = all.find((x) => x.name === p.name)!;
       expect([c.risk({} as never), c.access ?? "all", c.approval], p.name).toEqual([p.risk, p.access, p.approval]);

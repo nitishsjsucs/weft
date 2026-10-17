@@ -24,8 +24,8 @@ const hands = ["packages/executor", "packages/core", "packages/sim", "packages/p
 
 /** Rule 1 bans: domain packages, executor internals, drizzle domain tables. */
 const BRAIN_BANNED = [/^@weft\/integrations(\/|$)/, /(^|\/)packages\/integrations\//, /^@weft\/core(\/|$)/, /^@weft\/sim(\/|$)/, /^@weft\/payroll-tax(\/|$)/, /^@weft\/seed(\/|$)/, /^@weft\/executor\/src\/(vault|memory|sandbox|taint|runs)/, /(^|\/)packages\/(core|sim|payroll-tax|seed)\//, /(^|\/)executor\/src\/(vault|memory|sandbox|taint|runs)/];
-/** Run-store tables the brain may touch through @weft/db; any other table import is a domain table. */
-const RUN_STORE = new Set(["agentRuns", "runSteps", "routineRuns", "routines", "openDb", "closeDb", "withWriteLock", "ready", "migrate", "Db", "DbTx", "Schema", "type"]);
+/** Run-store tables the brain may touch through @weft/db; any other table import is a domain table. routineWaits: wave 4, the engine's wait-and-resume rows (docs/wave4.md). */
+const RUN_STORE = new Set(["agentRuns", "runSteps", "routineRuns", "routines", "routineWaits", "openDb", "closeDb", "withWriteLock", "ready", "migrate", "Db", "DbTx", "Schema", "type"]);
 
 describe("import boundaries", () => {
   it("scans real files", () => {

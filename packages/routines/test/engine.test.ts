@@ -58,10 +58,10 @@ let runN = 0;
 const runs = { openRoutineRun: async () => ({ runId: `run_${String(++runN).padStart(4, "0")}`, token: "t" }) };
 
 describe("routines engine", () => {
-  it("lists the prebuilt routines (wave 1, wave 2 and wave 3) and reads one", async () => {
+  it("lists the prebuilt routines (waves 1 to 4) and reads one", async () => {
     const eng = createRoutines({ db, clock: mutableClock("2026-10-26T15:30:00.000Z"), agent: fakeAgent(), runs, readOnly: fakeRead() });
     const all = await eng.list();
-    expect(all.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_ats_hire", "rt_benefits_window_reminders", "rt_compliance_notices", "rt_compliance_reminders", "rt_compliance_training", "rt_compliance_uploads", "rt_contractor_forms", "rt_exec_briefing", "rt_expense_review", "rt_first_day_message", "rt_life_event_window", "rt_memory_digest", "rt_milestones", "rt_monthly_exec_report", "rt_new_hire", "rt_new_hire_ready", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll", "rt_screening_follow_up", "rt_thirty_day_checkin", "rt_time_off_requests", "rt_weekly_cost_by_state"]);
+    expect(all.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_ats_hire", "rt_benefits_window_reminders", "rt_compliance_notices", "rt_compliance_reminders", "rt_compliance_training", "rt_compliance_uploads", "rt_contractor_forms", "rt_exec_briefing", "rt_expense_review", "rt_first_day_message", "rt_laptop_hand_delivery", "rt_life_event_window", "rt_memory_digest", "rt_milestones", "rt_monthly_exec_report", "rt_new_hire", "rt_new_hire_ready", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll", "rt_screening_follow_up", "rt_thirty_day_checkin", "rt_time_off_requests", "rt_weekly_cost_by_state"]);
     for (const r of PREBUILT) expect(r.tools.length).toBeLessThanOrEqual(8);
     expect(all.find((r) => r.id === "rt_pre_payroll")!.trigger).toEqual({ type: "cron", cron: "0 9 * * 1-5", tz: "America/Los_Angeles" });
   });

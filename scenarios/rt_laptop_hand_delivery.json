@@ -1,0 +1,17 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "comms__send_message", "arguments": { "channel": "{{derived.channel}}", "worker_id": null, "text": "{{derived.text}}" } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "comms__send_message", "ok": true }] },
+        "output": [
+          { "type": "text", "text": "Posted in {{derived.channel}} for {{derived.worker_id}}." }
+        ]
+      }
+    ]
+  }
+}

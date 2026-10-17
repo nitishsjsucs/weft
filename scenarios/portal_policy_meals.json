@@ -1,0 +1,18 @@
+{
+  "match": "meal (limit|policy)|reimburse(d)? for (a )?(business )?meals?",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "portal__policy_search", "arguments": { "query": "meals per person attendees", "response_format": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "portal__policy_search", "ok": true, "status": "done" }] },
+        "output": [
+          { "type": "text", "text": "From the company expense policy: {{last.portal__policy_search.data.hits.0.text_display}} (source: {{last.portal__policy_search.data.hits.0.source}})." }
+        ]
+      }
+    ]
+  }
+}

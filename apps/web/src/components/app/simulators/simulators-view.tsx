@@ -9,6 +9,7 @@ import { fmtDateTime, nextCronSlot, relative } from "../format";
 import { PageHeader } from "../page";
 import { useAgent } from "../agent-context";
 import { ApprovalCard } from "../agent/approval-card";
+import { SimInboundControls } from "./w4-inbound";   // wave 4 (w4-parity-agent): inbound chat mentions and emailed receipts
 
 /** A posted approval card with its live status (wave 3): the card JSON was built by the executor from the stored preview. */
 function SimChatCard({ card }: { card: ApprovalCardW3 }) {
@@ -211,6 +212,7 @@ export function SimulatorsView() {
           <CardHeading icon={<FlaskConical />}>Device orders</CardHeading>
           <Card className="overflow-hidden"><Generic testid="sim-device-orders" rows={s.deviceOrders} empty="No device orders." /></Card>
         </section>
+        <SimInboundControls />
         <section className="min-w-0 laptop:col-span-2">
           <CardHeading icon={<MessageSquare />}>Chat (simulated)</CardHeading>
           <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">{CHANNELS.map((c) => <ChatFeed key={c} channel={c} />)}</div>

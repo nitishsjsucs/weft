@@ -1,0 +1,24 @@
+{
+  "match": "how much does .+ (make|earn)|what (is|does) .+'s (salary|pay)",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "people__search", "arguments": { "query": "Hollis", "state": null, "status": null, "department": null, "limit": null, "response_format": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "people__search", "ok": false, "code": "UNAVAILABLE" }] },
+        "output": [
+          { "type": "function_call", "name": "portal__my_profile", "arguments": { "response_format": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "portal__my_profile", "ok": true, "status": "done" }] },
+        "output": [
+          { "type": "text", "text": "I can only see your own record here, so I cannot share anything about another person's pay. If you have a question about your own pay, time off or benefits, ask away." }
+        ]
+      }
+    ]
+  }
+}

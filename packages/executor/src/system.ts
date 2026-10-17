@@ -27,7 +27,8 @@ export const SYSTEM_ALLOWLISTS: Record<SystemPrincipal, readonly string[]> = {
     "integrations.record_ats_hire", "integrations.apply_hris_change", "integrations.record_delivery", "screening.apply_vendor_event", "documents.apply_esign_event",
     // wave 4 (w4-parity-compliance): the compliance calendar refresh and the uploaded-notice extraction, both R1 system records
     "compliance.refresh_calendar", "notices.ingest_upload"],
-  svc_sim: ["tax.record_registration"],
+  svc_sim: ["tax.record_registration",
+    "agent.record_mention", "expenses.intake_email"],   // wave 4 (w4-parity-agent): simulated inbound chat mentions and emailed receipts (R1 records)
   svc_digest: ["comms.post_update"],
 };
 
