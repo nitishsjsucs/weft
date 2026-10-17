@@ -10,6 +10,7 @@ import { check } from "@weft/grounding";
 import { canonicalJson } from "./canonical";
 import { addUsage, reserveUsd, RUN_CAP_SCALE, stepCostUsd, usdToMicros, type Prices } from "./cost";
 import { approxTokens } from "./context";
+import { NOOP_LOOP_TRACE, runInputOf, traceRun, type LoopTrace } from "./otel";
 import { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
 import type { NewStep, RunStore } from "./store";
 
@@ -48,6 +49,8 @@ export interface RunSetup {
   promptKind: PromptKind; allowlist: string[]; nonce: string; routineId: string | null; text: string; pack: true;
   /** Routine runs: the trigger the checklist is evaluated against, so a waiting run keeps it across a restart. */
   trigger?: Record<string, unknown>;
+  /** The acting principal (telemetry user.id); never shown to the model. */
+  principal?: string | null;
 }
 
 export interface ChecklistState { id: string; label: string; passed: boolean }
@@ -135,6 +138,17 @@ interface Terminal { status: RunStatus; reason: TerminalReason; summary: string 
  * rebuilt from the run's own rows, and the executor dedupes calls on (run, call id).
  */
 export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentRunRow> {
+  // Telemetry (wave 4): one AGENT span per call, wrapping the loop below; a missing run or setup throws untraced.
+  const r0 = await deps.store.getRun(handle.runId);
+  const s0 = r0 && ["queued", "running", "waiting"].includes(r0.status) ? setupOf(await deps.store.steps(r0.id)) : null;
+  if (!r0 || !s0) return driveLoop(deps, handle, NOOP_LOOP_TRACE);
+  return traceRun({
+    run: r0, promptKind: s0.promptKind, allowlist: s0.allowlist, routineId: s0.routineId, principal: s0.principal ?? null,
+    input: runInputOf(s0.text), prompt: frozenPrompt(s0.promptKind),
+  }, (lt) => driveLoop(deps, handle, lt));
+}
+
+async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Promise<AgentRunRow> {
   const { store, executor, provider, ledger } = deps;
   const wall = deps.wallNow ?? Date.now;
   let run = await store.getRun(handle.runId);
@@ -166,24 +180,31 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
   await store.updateRun(run.id, { status: "running" });
   run = { ...run, status: "running" };
 
-  const append = (s: Partial<NewStep> & Pick<NewStep, "stage" | "kind">) =>
-    store.appendStep(run!.id, {
+  const append = async (s: Partial<NewStep> & Pick<NewStep, "stage" | "kind">) => {
+    const row = await store.appendStep(run!.id, {
       parentN: null, callId: null, toolName: null, toolArgs: null, outcome: null, result: null, native: null, usage: null,
       costUsdMicros: 0, attempt: 1, requestId: null, prefixHash: null, timings: null, ...s,
     });
+    // Rows with no span of their own around them get a CHAIN span after the fact (telemetry is a projection of the rows).
+    if (row.stage === "admission" || row.stage === "assemble" || row.stage === "post") lt.row(row);
+    return row;
+  };
 
-  const finish = async (t: Terminal): Promise<AgentRunRow> => {
+  const finish = (t: Terminal): Promise<AgentRunRow> => lt.stage("terminal", { "weft.status": t.status, "weft.terminal_reason": t.reason }, async (span) => {
     const t0 = wall();
     const terminalStates: RunStatus[] = ["done", "failed", "refused", "escalated", "expired", "cancelled"];
     const endedAt = terminalStates.includes(t.status) ? deps.clock.now() : null;
-    const state = await executor.runState(handle).catch(() => null);
+    const state = await lt.guard("taint", { runId: run!.id }, () => executor.runState(handle).catch(() => null), (s) => ({
+      "weft.tainted": s?.tainted ?? run!.tainted, "weft.tainted_by": s?.taintedBy ?? run!.taintedBy, "weft.pending_proposals": s?.pendingProposalIds.length ?? null,
+    }));
     await store.updateRun(run!.id, {
       status: t.status, terminalReason: t.reason, summary: t.summary ?? run!.summary, endedAt,
       tainted: state?.tainted ?? run!.tainted, taintedBy: state?.taintedBy ?? run!.taintedBy,
     });
-    await append({ stage: "terminal", kind: "verify", outcome: "ok", result: { status: t.status, reason: t.reason, ms: wall() - t0 }, timings: emptyTimings() });
+    const row = await append({ stage: "terminal", kind: "verify", outcome: "ok", result: { status: t.status, reason: t.reason, ms: wall() - t0 }, timings: emptyTimings() });
+    span.set({ "weft.step_n": row.n });
     return (await store.getRun(run!.id))!;
-  };
+  });
 
   const allToolResults = async (): Promise<unknown[]> => {
     const rows = await store.steps(run!.id);
@@ -255,10 +276,13 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
       // ---- model
       const tModel = wall();
       const timeToLlmMs = tModel - tAdm;
+      const modelStage = lt.begin("model", { "weft.attempt": attempt, "weft.prefix_hash": pHash });
       let res: ModelStepResult;
       try {
-        res = await provider.step(req);
+        res = await lt.llm(modelStage, req, provider.id, () => provider.step(req));
       } catch (e) {
+        modelStage.fail(e instanceof Error ? e.message : String(e));
+        modelStage.end();
         await ledger.settle(rsv.reservationId, 0);
         throw e; // scripted expectation failures and programming errors surface to the caller
       }
@@ -269,6 +293,7 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
       const modelMs = wall() - tModel;
       const usd = stepCostUsd(res.usage, deps.prices);
       const actualMicros = provider.live ? usdToMicros(usd) : 0;
+      lt.llmSettled(res, deps.prices, actualMicros);
       if (res.stop === "error" && res.usage.input === 0) await ledger.settle(rsv.reservationId, provider.live ? usdToMicros(reserveUsd(estInput, 0, deps.prices)) : 0);
       else await ledger.settle(rsv.reservationId, actualMicros);
       const tokens = addUsage(run.tokens, res.usage);
@@ -282,6 +307,9 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
         usage: res.usage, costUsdMicros: actualMicros, requestId: res.requestId, prefixHash: pHash,
         timings: { admissionMs, assembleMs, timeToLlmMs, modelMs, dispatchMs: 0, tokensPerSecond: modelMs > 0 && res.usage.output > 0 ? Math.round((res.usage.output / modelMs) * 1000) : null },
       });
+      modelStage.set({ "weft.step_n": modelStepRow.n, "weft.outcome": ok ? "ok" : "error", "weft.stop": res.stop, "weft.request_id": res.requestId });
+      if (res.stop === "error") modelStage.fail(`${res.error?.code ?? "error"}: ${res.error?.message ?? ""}`);
+      modelStage.end();
 
       if (res.stop === "refusal") return finish({ status: "refused", reason: "REFUSED", summary: res.refusal?.text ?? res.text });
       if (res.stop === "incomplete") {
@@ -318,6 +346,8 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     // ---- dispatch
     if (result.toolCalls.length > 0) {
       const tDisp = wall();
+      const dispatchStage = lt.begin("dispatch", { "weft.batch_size": result.toolCalls.length, "weft.parent_n": modelStepRow!.n });
+      const toolSpans: ReturnType<LoopTrace["tool"]>[] = [];
       const outputs: { callId: string; name: string; outcome: ToolOutcome; row: NewStep }[] = [];
       let index = 0;
       for (const call of result.toolCalls) {
@@ -325,7 +355,10 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
         if (deps.isCancelled(run.id)) break;
         let outcome: ToolOutcome;
         let args: unknown = null;
+        let threw = false;
         const tCall = wall();
+        const toolSpan = lt.tool(dispatchStage, call.name, call.callId);
+        toolSpans.push(toolSpan);
         if (!offered.has(call.name)) {
           // Defense in depth for harness 5.3: never dispatch a tool the run was not given (the executor refuses it too).
           outcome = refusal("UNAVAILABLE", `${call.name} is not one of this run's tools; it was not run.`, "Call only the tools listed for this run.");
@@ -341,12 +374,14 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
             outcome = refusal("INVALID_INPUT", "The arguments are not valid JSON.", "Send one JSON object that matches the tool schema.");
           } else {
             try {
-              outcome = await executor.exec(handle, { callId: call.callId, command: call.name, args });
+              outcome = await toolSpan.run(() => executor.exec(handle, { callId: call.callId, command: call.name, args }));
             } catch (e) {
+              threw = true;
               outcome = refusal("INTERNAL", `The executor failed: ${e instanceof Error ? e.message.slice(0, 200) : "error"}`);
             }
           }
         }
+        toolSpan.outcome(outcome, args, threw);
         if (!outcome.ok) failuresByTool.set(call.name, (failuresByTool.get(call.name) ?? 0) + 1);
         const consecutiveErrors: number = outcome.ok ? 0 : run.consecutiveErrors + 1;
         run = { ...run, consecutiveErrors };
@@ -361,9 +396,13 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
       }
       // Every call id gets an output, including calls skipped by a cancellation.
       for (const call of result.toolCalls.slice(outputs.length)) {
+        const skipped = lt.tool(dispatchStage, call.name, call.callId);
+        skipped.outcome(refusal("CANCELLED", "The run was cancelled before this call ran."), null);
+        toolSpans.push(skipped);
         outputs.push({ callId: call.callId, name: call.name, outcome: refusal("CANCELLED", "The run was cancelled before this call ran."), row: { stage: "dispatch", kind: "tool_call", parentN: modelStepRow!.n, callId: call.callId, toolName: call.name, toolArgs: null, outcome: "error", result: null, native: null, usage: null, costUsdMicros: 0, attempt: 1, requestId: null, prefixHash: null, timings: emptyTimings() } });
       }
       await store.updateRun(run.id, { consecutiveErrors: run.consecutiveErrors });
+      dispatchStage.end();
 
       // ---- post: recite from observed state into the last output of the batch
       const tPost = wall();
@@ -372,7 +411,8 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
       const plan = renderPlan(items, run.stepsUsed, stepBudget, run.costUsdMicros / 1e6);
       const toolOutputs = outputs.map((o, i) => ({ callId: o.callId, name: o.name, output: outputFor(o.outcome, i === outputs.length - 1 ? plan : null) }));
       for (let i = 0; i < outputs.length; i++) {
-        await append({ ...outputs[i]!.row, result: { output: toolOutputs[i]!.output, outcome: outputs[i]!.outcome } });
+        const row = await append({ ...outputs[i]!.row, result: { output: toolOutputs[i]!.output, outcome: outputs[i]!.outcome } });
+        toolSpans[i]?.end(row);
       }
       history = [...history, { kind: "tool_outputs", outputs: toolOutputs }];
       await append({ stage: "post", kind: "recite", result: { plan, ms: wall() - tPost, batchDispatchMs: tPost - tDisp }, timings: { ...emptyTimings(), dispatchMs: tPost - tDisp } });
@@ -388,7 +428,9 @@ export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentR
     // ---- the model ended its turn with no function calls (rule 6)
     const text = result.text.trim();
     if (setup.promptKind === "chat") {
-      const g = check(text, await allToolResults());
+      const g = await lt.stage("post", {}, () => lt.guard("grounding", text, async () => check(text, await allToolResults()), (r) => ({
+        "weft.grounded": r.ok, "weft.unmatched": r.offending.join(", "),
+      })));
       if (g.ok) return finish({ status: "done", reason: "DONE", summary: text });
       if (!corrected && run.stepsUsed < answerBy) {
         corrected = true;
