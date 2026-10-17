@@ -6,6 +6,7 @@ import { NotImplemented, type ExecutorBundle, type SandboxEngine, type SimClock 
 import { createMemoryStore } from "./memory/store";
 import { seedMemoryFiles } from "./memory/seed-content";
 import { memoryCommands } from "./memory/commands";
+import { withMemoryCitations } from "./memory/citations";
 import { type Db } from "@weft/db";
 import type { WeftCommand } from "@weft/core";
 import { createAgentExecutor } from "./agent";
@@ -81,7 +82,8 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
   engine.memory = memory;
   const mine = [...builtinCommands(engine), ...memoryCommands(engine)];
   const own = new Set(mine.map((c) => c.name));
-  engine.registry = createRegistry([...opts.commands.filter((c) => !own.has(c.name)), ...mine]);
+  // Wave 4 round 2 (R3): a command that cites a memory note (notices.escalate procedure_ref) is checked against memory.
+  engine.registry = createRegistry(withMemoryCitations(memory, [...opts.commands.filter((c) => !own.has(c.name)), ...mine]));
   await vault.primeRedactor().catch(() => undefined);
   for (const f of ["demo-api-key.txt", "demo-mcp-key.txt"]) {
     try { redactor.add(readFileSync(join(opts.dataDir, f), "utf8").trim()); } catch { /* not seeded yet */ }

@@ -305,26 +305,37 @@ const submitCheckin = writeCommand<SubmitCheckinInput>({
 
 // ---------------------------------------------------------------- notice escalation
 
-const EscalateInput = z.object({ notice_id: z.string().startsWith("ntc_"), reason_code: EscalationReason });
+/**
+ * A procedure the escalation follows (wave 4 round 2, R3): a path under knowledge/procedures/. This schema checks the
+ * shape only; the executor checks that the note exists and is untainted before the command runs
+ * (packages/executor/src/memory/citations.ts), so a run can never cite a note that is missing or untrusted. The
+ * citation is a structured field, never prose: the result data and summary name it, and a routine summary is built
+ * from result summaries (harness 4.3).
+ */
+export const PROCEDURE_REF = /^knowledge\/procedures\/[A-Za-z0-9][A-Za-z0-9._/-]{0,150}\.md$/;
+const EscalateInput = z.object({ notice_id: z.string().startsWith("ntc_"), reason_code: EscalationReason, procedure_ref: z.string().regex(PROCEDURE_REF).optional() });
 type EscalateInput = z.infer<typeof EscalateInput>;
 const escalateNotice = writeCommand<EscalateInput>({
   name: "notices.escalate", summary: "Hand an agency notice to a tax specialist with an evidence pack",
-  description: "Escalate a notice that needs a person with judgment or power of attorney: sets it to escalated and sends a simulated tax specialist the notice, its tax account, the account's filings and the parser's extract. reason_code: agency_call_needed, penalty_dispute, unrecognized_notice, missing_filing or amount_mismatch. Example: {\"notice_id\":\"ntc_0001\",\"reason_code\":\"agency_call_needed\"}",
+  description: "Escalate a notice needing judgment or power of attorney: sets it escalated and sends a simulated specialist the notice, tax account, filings and parser extract. reason_code: agency_call_needed, penalty_dispute, unrecognized_notice, missing_filing or amount_mismatch. procedure_ref (optional): the knowledge/procedures/ note it follows. Example: {\"notice_id\":\"ntc_0001\",\"reason_code\":\"missing_filing\"}",
   input: EscalateInput, domain: "tax", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   tiers: { main: "executable", task: "delegated" },
+  errorHints: { UNKNOWN_REFERENCE: { hint: "procedure_ref must be a knowledge/procedures/ path from <recall> or memory.search; leave it null when no procedure applies", example: { notice_id: "ntc_0001", reason_code: "missing_filing", procedure_ref: null } } },
   async run(i, ctx, deps) {
     const [n] = await deps.tx.select().from(notices).where(eq(notices.id, i.notice_id));
     if (!n || n.companyId !== ctx.companyId) throw new Refused("UNKNOWN_REFERENCE", `No notice ${i.notice_id}.`);
     if (n.status === "resolved" || n.status === "escalated") throw new DomainRefusal("DOMAIN_NOTICE_CLOSED", `Notice ${n.id} is already ${n.status}`, "Only an open notice can be escalated", null);
+    const procedure = i.procedure_ref ?? null;
     const e: Escalation = {
       outcome: "escalated", reason_code: i.reason_code, reason: REASON_LABEL[i.reason_code], specialist: SPECIALIST.name, specialist_principal: SPECIALIST.principal,
       escalated_at: ctx.now, escalated_by: ctx.principal.kind === "human" ? ctx.principal.id : ctx.onBehalfOf ?? ctx.principal.id, previous_status: n.status, evidence: await evidencePack(deps.tx, n),
+      ...(procedure ? { procedure_ref: procedure } : {}),
     };
     await deps.tx.update(notices).set({ status: "escalated", resolutionJson: JSON.stringify(e) }).where(eq(notices.id, n.id));
     const m = specialistEmail(n, e);
     const mail = await deps.sims.email.send({ to: SPECIALIST.email, from: "agent@larkspur.example", subject: m.subject, body: m.body, kind: "generic", relatedRef: n.id });
-    return { data: { notice_id: n.id, status: "escalated", reason_code: i.reason_code, specialist: SPECIALIST.name, evidence: e.evidence, email_id: mail.id },
-      summary: `Escalated ${n.id} to the ${SPECIALIST.name.toLowerCase()} with ${e.evidence.length} evidence items` };
+    return { data: { notice_id: n.id, status: "escalated", reason_code: i.reason_code, specialist: SPECIALIST.name, evidence: e.evidence, email_id: mail.id, procedure_ref: procedure },
+      summary: `Escalated ${n.id} to the ${SPECIALIST.name.toLowerCase()} with ${e.evidence.length} evidence items${procedure ? ` per ${procedure}` : ""}` };
   },
 });
 
