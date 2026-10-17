@@ -3,9 +3,14 @@ import type { ReadOnlyExecutor, ToolOutcome } from "@weft/contracts";
 import { PRECHECKS } from "../src/index";
 
 const done = (data: unknown): ToolOutcome => ({ ok: true, status: "done", resultId: "res_1", data, summary: "ok", actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" });
-const exec = (answers: Record<string, unknown>): ReadOnlyExecutor & { seen: { command: string; args: unknown }[] } => {
+type Answer = unknown | ((args: Record<string, unknown>) => unknown);
+const exec = (answers: Record<string, Answer>): ReadOnlyExecutor & { seen: { command: string; args: unknown }[] } => {
   const seen: { command: string; args: unknown }[] = [];
-  return { seen, async exec(_c, command, args) { seen.push({ command, args }); return done(answers[command] ?? {}); } };
+  return { seen, async exec(_c, command, args) {
+    seen.push({ command, args });
+    const a = answers[command];
+    return done(typeof a === "function" ? (a as (x: Record<string, unknown>) => unknown)(args as Record<string, unknown>) : a ?? {});
+  } };
 };
 const ctx = (payload: unknown) => ({ companyId: "cmp_larkspur", now: "2026-10-26T16:00:00.000Z", triggerRef: "evt_0001", payload });
 
@@ -20,9 +25,11 @@ describe("prechecks on the t1 and t2 read shapes", () => {
     expect(ex.seen.find((s) => s.command === "tax.rate_change_impact")?.args).toMatchObject({ jurisdiction: "CA", code: "sui", new_rate: "0.015" });
   });
 
-  it("agency_notice skips a notice that is not a rate change", async () => {
-    const r = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), exec({ "notices.get": { notice: { id: "ntc_0002", kind: "missing_filing", extracted: { rates: [] } } } }));
-    expect(r.action).toBe("skip");
+  it("agency_notice plans a notice that is not a rate change instead of skipping it (FM1)", async () => {
+    const r = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), exec({ "notices.get": { notice: { id: "ntc_0002", kind: "missing_filing", agency: "ny_dtf", form_code: "NYS-45", extracted: { rates: [] } } } }));
+    // No form code in the extract, so no filing can be matched: the planner escalates with notices.escalate.
+    expect(r).toMatchObject({ action: "run", derivedArgs: { plan: "escalate", "notices.escalate": { notice_id: "ntc_0002", reason_code: "missing_filing" } } });
+    expect(JSON.stringify(r)).not.toContain("handoffs.open");
   });
 
   it("new_hire derives accounts, the welcome, registrations for unregistered accounts and the laptop", async () => {
@@ -39,15 +46,23 @@ describe("prechecks on the t1 and t2 read shapes", () => {
   });
 
   it("people_digest posts counts from the precheck to #people-ops", async () => {
-    const r = await PRECHECKS.people_digest!(ctx({ slot: "cron:2026-10-26T16:00:00.000Z" }), exec({ "people.search": { total: 48 } }));
+    const r = await PRECHECKS.people_digest!(ctx({ slot: "cron:2026-10-26T16:00:00.000Z" }), exec({ "people.search": (a: Record<string, unknown>) => (a.status === "active" ? { total: 48 } : { total: 0 }) }));
     expect(r).toMatchObject({ action: "run", severity: "digest", derivedArgs: { slot: "cron:2026-10-26T16:00:00.000Z", "comms.send_message": { channel: "#people-ops", text: expect.stringContaining("48 active people") } } });
   });
 
   it("people_digest cites the per-state employee counts that comms grounding knows (contractors carry no state)", async () => {
-    const r = await PRECHECKS.people_digest!(ctx({ slot: "cron:2026-10-26T16:00:00.000Z" }), exec({ "people.search": { total: 51, by_state: { TX: 12, CA: 22, NY: 14 } } }));
+    const r = await PRECHECKS.people_digest!(ctx({ slot: "cron:2026-10-26T16:00:00.000Z" }), exec({ "people.search": (a: Record<string, unknown>) => (a.status === "active" ? { total: 51, by_state: { TX: 12, CA: 22, NY: 14 } } : { total: 0, by_state: {} }) }));
     expect(r).toMatchObject({ action: "run", findings: { headcount: 48, by_state: { CA: 22, NY: 14, TX: 12 } } });
     const text = (r as { derivedArgs: Record<string, { text: string }> }).derivedArgs["comms.send_message"]!.text;
     expect(text).toBe("Weekly people digest: 48 employees by work state (CA 22, NY 14, TX 12). Open items are in the Weft inbox.");
     expect(text).not.toContain("51");
+  });
+
+  it("people_digest counts current employees with a status filter: onboarding and offboarding count, others do not (FM10)", async () => {
+    const ex = exec({ "people.search": (a: Record<string, unknown>) => ({ active: { total: 48, by_state: { CA: 22, NY: 14, TX: 12 } }, onboarding: { total: 1, by_state: { CO: 1 } }, offboarding: { total: 1, by_state: { CA: 1 } } } as Record<string, unknown>)[String(a.status)] ?? { total: 99, by_state: { CA: 99 } } });
+    const r = await PRECHECKS.people_digest!(ctx({ slot: "cron:2026-10-26T16:00:00.000Z" }), ex);
+    expect(ex.seen.filter((s) => s.command === "people.search").map((s) => (s.args as { status: string }).status)).toEqual(["active", "onboarding", "offboarding"]);
+    expect(r).toMatchObject({ action: "run", findings: { headcount: 50, by_state: { CA: 23, CO: 1, NY: 14, TX: 12 } } });
+    expect((r as { derivedArgs: Record<string, { text: string }> }).derivedArgs["comms.send_message"]!.text).toContain("50 employees by work state (CA 23, CO 1, NY 14, TX 12)");
   });
 });

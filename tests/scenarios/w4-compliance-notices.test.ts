@@ -1,13 +1,14 @@
-// Wave 4 compliance scenarios (w4-parity-compliance), scripted provider with the rt_compliance_notices variant
-// chooser (scenarios/rt_compliance_notices.<plan>.json). Every seeded notice kind reaches its NOTICE_HANDLING branch;
-// an unknown kind becomes a tax specialist hand-off with an evidence pack. The due-soon reminder routine posts the
-// calendar to #payroll. Both routines ship disabled; the tests enable them in their own world.
+// Wave 4 compliance scenarios (w4-parity-compliance), scripted provider. Wave 4 round 1 (FG1): rt_compliance_notices is
+// folded into rt_agency_notice, which is enabled and plays scenarios/rt_agency_notice.<plan>.json for the plan its
+// precheck derives. Every seeded notice kind reaches its NOTICE_HANDLING branch; escalation is notices.escalate with
+// the evidence pack; an informational kind is skipped with its reason. The due-soon reminder routine posts the
+// calendar to #payroll; it ships disabled and the test enables it in its own world.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { AgentRunRow, RoutineRun } from "@weft/contracts";
 import { NOTICE_HANDLING } from "@weft/contracts";
 import { emitEvent } from "@weft/core";
-import { filings, handoffCases, notices, proposals, routineRuns, routines, simChatMessages, taxAccounts } from "@weft/db";
+import { filings, notices, proposals, routineRuns, simChatMessages, taxAccounts } from "@weft/db";
 import { scriptedProvider } from "../../packages/agent/src/providers/scripted";
 import { DEFAULT_SCRIPTS_DIR } from "../../packages/agent/src/providers/factory";
 import { complianceNoticeVariant } from "../../packages/core/src/compliance/script-variant";
@@ -19,8 +20,8 @@ beforeAll(async () => {
   const variant = (info: { routineId: string; trigger: Record<string, unknown> }) => complianceNoticeVariant(weft.db)(info);
   weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR, variant }) });
   await weft.scheduler.tick();   // seeds the prebuilt routines
-  await weft.db.update(routines).set({ enabled: true }).where(eq(routines.id, "rt_compliance_notices"));
 });
+const NOTICE_ROUTINE = "rt_agency_notice";
 afterAll(async () => {
   const engine = weft.routines as unknown as { drain(ms?: number): Promise<boolean> };
   await engine.drain(5_000);
@@ -30,11 +31,11 @@ afterAll(async () => {
 const post = (path: string, body: unknown, who = "usr_dana") => weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders(who), "content-type": "application/json" }, body: JSON.stringify(body) });
 const settled = (runId: string) => (weft.agent as unknown as { settled(id: string): Promise<AgentRunRow> }).settled(runId);
 
-/** Runs the scheduler until rt_compliance_notices has handled `noticeId`, then returns its run and the run's proposals. */
+/** Runs the scheduler until rt_agency_notice has handled `noticeId`, then returns its run and the run's proposals. */
 async function handled(noticeId: string) {
   for (let i = 0; i < 25; i++) {
     await weft.scheduler.tick();
-    const runs = await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, "rt_compliance_notices"));
+    const runs = await weft.db.select().from(routineRuns).where(eq(routineRuns.routineId, NOTICE_ROUTINE));
     const rr = runs.find((r) => JSON.stringify(r.precheckJson ?? "").includes(noticeId));
     if (!rr) continue;
     if (!rr.agentRunId) return { rr, run: null, open: [] as (typeof proposals.$inferSelect)[] };
@@ -44,7 +45,7 @@ async function handled(noticeId: string) {
     const open = (await weft.db.select().from(proposals)).filter((p) => p.status === "pending" && p.proposerRunId === rr.agentRunId);
     return { rr: after!, run, open };
   }
-  throw new Error(`rt_compliance_notices never ran for ${noticeId}`);
+  throw new Error(`${NOTICE_ROUTINE} never ran for ${noticeId}`);
 }
 
 /** A notice of a kind the simulator has no scenario for, stored with structured fields, then notice.received. */
@@ -62,25 +63,30 @@ async function insertNotice(kind: string, extra: { formCode: string; agency: str
   return id;
 }
 
-describe("rt_compliance_notices", () => {
-  it("ships disabled with at most 8 tools; every seeded notice kind has a handling", () => {
-    const r = PREBUILT.find((x) => x.id === "rt_compliance_notices");
-    expect(r).toMatchObject({ enabled: false, trigger: { type: "event", event: "notice.received" } });
+describe("rt_agency_notice handles every notice kind (rt_compliance_notices folded in)", () => {
+  it("one routine answers notice.received with at most 8 tools; the folded routine stays disabled and never runs", async () => {
+    const r = PREBUILT.find((x) => x.id === NOTICE_ROUTINE);
+    expect(r).toMatchObject({ enabled: true, trigger: { type: "event", event: "notice.received" } });
     expect(r!.tools.length).toBeLessThanOrEqual(8);
+    expect(r!.tools).toContain("notices.escalate");
+    expect(r!.tools).not.toContain("handoffs.open");
+    expect(PREBUILT.find((x) => x.id === "rt_compliance_notices")).toMatchObject({ enabled: false });
+    expect(PREBUILT.filter((x) => x.enabled && x.trigger.type === "event" && x.trigger.event === "notice.received").map((x) => x.id)).toEqual([NOTICE_ROUTINE]);
     expect(Object.keys(NOTICE_HANDLING).sort()).toEqual(["benefit_charge", "deposit_schedule_change", "futa_credit_reduction", "late_deposit_penalty", "missing_filing", "rate_change", "registration_confirmed"]);
   });
 
-  it("a rate change is left to rt_agency_notice", async () => {
+  it("a rate change keeps the GP1 batch: draft, propose the rate and the reply", async () => {
     const res = await post("/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" });
     const id = (await res.json()).data.notice_id as string;
-    const { rr } = await handled(id);
-    expect(rr.status).toBe("skipped");
+    const { rr, open } = await handled(id);
+    expect(open.map((p) => p.command).sort()).toEqual(["notices.send_response", "tax.update_rate"]);
+    expect(rr.status).not.toBe("failed");
   });
 
   it("missing_filing with the return on record but not filed: prepares it, proposes filing (R4) and the reply", async () => {
     const res = await post("/v1/sim/notices/deliver", { scenario: "ny_missing_filing" });
     const id = (await res.json()).data.notice_id as string;
-    const { rr, open } = await handled(id);
+    const { rr, run, open } = await handled(id);
     expect(open.map((p) => p.command).sort()).toEqual(["notices.send_response", "tax.file_return"]);
     const ret = open.find((p) => p.command === "tax.file_return")!;
     expect(ret.risk).toBe("R4");
@@ -90,7 +96,10 @@ describe("rt_compliance_notices", () => {
     expect(f!.preparedJson).not.toBeNull();
     const [n] = await weft.db.select().from(notices).where(eq(notices.id, id));
     expect(JSON.parse(n!.draftsJson as string).at(-1).body).toContain("is prepared from our processed payroll");
+    // The notice stays open for a person: a human can still escalate it afterwards (GP16).
+    expect(["new", "in_review", "proposed"]).toContain(n!.status);
     expect(rr.status).not.toBe("failed");
+    expect(run?.status).toBe("waiting");
   });
 
   it("deposit_schedule_change proposes the schedule the notice states; approving updates the account", async () => {
@@ -105,38 +114,39 @@ describe("rt_compliance_notices", () => {
     expect((await weft.db.select().from(notices).where(eq(notices.id, id)))[0]!.status).toBe("resolved");
   });
 
-  it("late_deposit_penalty requests abatement in a proposed reply and hands the payment decision to a specialist", async () => {
+  it("late_deposit_penalty requests abatement in a proposed reply and escalates the payment decision", async () => {
     const id = await insertNotice("late_deposit_penalty", { formCode: "CP161", agency: "irs", taxAccountId: "txa_0001" });
     const { open } = await handled(id);
     expect(open.map((p) => p.command)).toEqual(["notices.send_response"]);
-    const [c] = await weft.db.select().from(handoffCases).where(eq(handoffCases.subjectRef, id));
-    expect(c).toMatchObject({ kind: "tax_specialist", reason: "judgment_needed", status: "open" });
+    const [n] = await weft.db.select().from(notices).where(eq(notices.id, id));
+    expect(n!.status).toBe("escalated");
+    expect(JSON.parse(n!.resolutionJson as string)).toMatchObject({ outcome: "escalated", reason_code: "penalty_dispute" });
   });
 
-  it("futa_credit_reduction and registration_confirmed are acknowledged", async () => {
+  it("futa_credit_reduction and registration_confirmed are informational: skipped with the reason, nothing changes", async () => {
     const id = await insertNotice("futa_credit_reduction", { formCode: "FUTA credit reduction", agency: "irs", taxAccountId: "txa_0001" });
-    const { open } = await handled(id);
+    const { rr, open } = await handled(id);
     expect(open).toEqual([]);
-    expect((await weft.db.select().from(notices).where(eq(notices.id, id)))[0]).toMatchObject({ status: "resolved" });
+    expect(rr.status).toBe("skipped");
+    expect(rr.summary).toContain("informational");
   });
 
-  it("benefit_charge escalates to a tax specialist with the evidence pack", async () => {
+  it("benefit_charge escalates to the tax specialist with the evidence pack", async () => {
     const id = await insertNotice("benefit_charge", { formCode: "DE 428T", agency: "ca_edd", taxAccountId: "txa_0002" });
     await handled(id);
-    const [c] = await weft.db.select().from(handoffCases).where(eq(handoffCases.subjectRef, id));
-    expect(c).toMatchObject({ kind: "tax_specialist", reason: "judgment_needed" });
-    expect((await weft.db.select().from(notices).where(eq(notices.id, id)))[0]!.status).toBe("escalated");
+    const [n] = await weft.db.select().from(notices).where(eq(notices.id, id));
+    expect(n!.status).toBe("escalated");
+    expect(JSON.parse(n!.resolutionJson as string)).toMatchObject({ outcome: "escalated", reason_code: "agency_call_needed" });
   });
 
-  it("an unknown kind becomes a tax specialist hand-off with the evidence pack, listed for the Inbox", async () => {
+  it("an unknown kind is escalated as unrecognized with the evidence pack", async () => {
     const id = await insertNotice("power_of_attorney_request", { formCode: "Form 2848", agency: "irs", taxAccountId: "txa_0001" });
     await handled(id);
-    const [c] = await weft.db.select().from(handoffCases).where(eq(handoffCases.subjectRef, id));
-    expect(c).toMatchObject({ kind: "tax_specialist", reason: "unknown_notice_kind", status: "open" });
-    const evidence = JSON.parse(c!.evidenceJson as string) as { label: string; ref: string }[];
-    expect(evidence.map((e) => e.label)).toEqual(expect.arrayContaining(["notice", "tax account", "parser extract"]));
-    const page = await (await weft.app.request("/v1/handoffs?status=open", { headers: weft.uiHeaders("usr_dana") })).json();
-    expect(page.data.map((x: { subjectRef: string }) => x.subjectRef)).toContain(id);
+    const [n] = await weft.db.select().from(notices).where(eq(notices.id, id));
+    expect(n!.status).toBe("escalated");
+    const r = JSON.parse(n!.resolutionJson as string) as { reason_code: string; evidence: { label: string; ref: string }[] };
+    expect(r.reason_code).toBe("unrecognized_notice");
+    expect(r.evidence.map((e) => e.label)).toEqual(expect.arrayContaining(["notice", "tax account", "parser extract"]));
   });
 });
 

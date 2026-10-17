@@ -398,6 +398,72 @@ export function recallDocs(packText: string): RetrievedDoc[] | null {
   return docs;
 }
 
+// ---------------------------------------------------------------------------------------------------- run-start recall notes
+
+/**
+ * What the runtime saw when it asked for the run-start recall (wave 4 round 1, FM11). A non-empty block becomes the
+ * memory.recall RETRIEVER as before, now with the query recall was given; an empty one becomes a RETRIEVER with 0
+ * documents and its reason, so a silent recall is visible in Phoenix. Every value is redacted when the span is set.
+ */
+export interface RecallNote {
+  query: string;
+  /** null when a block was added; otherwise why nothing was: no_block, no_recall_source, recall_error, portal_run. */
+  reason: string | null;
+  chars: number;
+  detail?: string;
+}
+const RECALL_NOTES_MAX = 500;
+const recallNotes = new Map<string, RecallNote>();
+export function noteRunRecall(runId: string, note: RecallNote): void {
+  recallNotes.delete(runId);
+  recallNotes.set(runId, note);
+  while (recallNotes.size > RECALL_NOTES_MAX) recallNotes.delete(recallNotes.keys().next().value!);
+}
+function takeRecallNote(runId: string): RecallNote | undefined {
+  const n = recallNotes.get(runId);
+  recallNotes.delete(runId);
+  return n;
+}
+
+// ---------------------------------------------------------------------------------------------------- routine runs without an agent run
+
+/** A routine run that ended without an agent run: a precheck skip, quiet hours, or nothing new since the last run. */
+export interface RoutineRunSpan {
+  routineId: string; routineRunId: string; triggerRef: string; attended: boolean; status: string; reason: string;
+  precheck: string | null; event: string | null; at: string;
+}
+
+/** Span name for a routine run that never started an agent run. */
+export const ROUTINE_RUN_SPAN = "routine.run";
+
+/**
+ * One CHAIN span per routine run that ends without an agent run (wave 4 round 1, FM11), with the run's status and
+ * the precheck's reason, in the routine run's session. During an eval trial it nests under the trial's task span,
+ * so a skipped routine shows up in the trial's trace instead of leaving it empty.
+ */
+export function traceRoutineRunSpan(t: RoutineRunSpan): void {
+  const tg = runTraceTags.current();
+  let ctx = clearUser(clearSession(evalParent ?? ROOT_CONTEXT));
+  ctx = setSession(ctx, { sessionId: text(traceSessionId({ threadId: null, routineRunId: t.routineRunId }, tg?.eval_task_id ?? null) ?? t.routineRunId) });
+  ctx = setUser(ctx, { userId: text(`routine:${t.routineId}`) });
+  const meta = {
+    kind: "routine", routine_id: t.routineId, routine_run_id: t.routineRunId, attended: t.attended, status: t.status, agent_run: false,
+    harness_sha: tg?.harness_sha ?? null, golden_path: tg?.golden_path ?? null, eval_task_id: tg?.eval_task_id ?? null, eval_split: tg?.eval_split ?? null,
+    eval_variant: tg?.eval_variant ?? null, eval_trial: tg?.eval_trial ?? null,
+  };
+  const tagList = ["routine", t.routineId, "no_agent_run", `status:${t.status}`, ...(t.attended ? [] : ["unattended"]), ...(tg?.eval_task_id ? ["eval", tg.eval_task_id] : []), ...(tg?.golden_path ? [tg.golden_path] : []), ...(tg?.eval_variant ? [`variant:${tg.eval_variant}`] : [])];
+  ctx = setTags(setMetadata(ctx, redact(meta) as unknown as Record<string, unknown>), tagList.map(text));
+  context.with(ctx, () => {
+    const span = startSpan(ROUTINE_RUN_SPAN, "CHAIN", {
+      ...inputAttrs({ routine: t.routineId, trigger_ref: t.triggerRef, event: t.event, at: t.at }),
+      ...outputAttrs(t.reason),
+      ...clean({ "weft.routine_id": t.routineId, "weft.routine_run_id": t.routineRunId, "weft.status": t.status, "weft.precheck": t.precheck, "weft.precheck_reason": t.reason, "weft.agent_run": false }),
+    });
+    span.setStatus({ code: SpanStatusCode.OK });
+    span.end();
+  });
+}
+
 // ---------------------------------------------------------------------------------------------------- the loop's tracer
 
 /** A TOOL span: active while the executor runs (child runs nest under it), ended once its run_steps row exists. */
@@ -472,9 +538,12 @@ function handleOf(span: Span): StageHandle {
   };
 }
 
-function makeLoopTrace(agent: Span, recall: { query: string; docs: RetrievedDoc[] } | null = null): LoopTrace {
+function makeLoopTrace(agent: Span, recall: { query: string; docs: RetrievedDoc[]; extra?: Record<string, AttributeValue | null | undefined> } | null = null): LoopTrace {
   let lastLlm: Span = NOOP_SPAN;
   let pendingRecall = recall;
+  // Provider retries (wave 4 round 1, FM11): the call after a failed one is tagged as a retry of that error.
+  let llmCalls = 0;
+  let lastLlmError: { code: string; retryable: boolean } | null = null;
   const recording = agent.isRecording();
   return {
     recording,
@@ -498,7 +567,7 @@ function makeLoopTrace(agent: Span, recall: { query: string; docs: RetrievedDoc[
       const span = startSpan(name, "CHAIN", rowAttrs(row), { startTime });
       if (row.outcome === "error" || row.kind === "error") span.setStatus({ code: SpanStatusCode.ERROR });
       if (row.stage === "assemble" && pendingRecall) {
-        retriever(SPAN_NAMES.recall, trace.setSpan(context.active(), span), pendingRecall.query, pendingRecall.docs, { "weft.source": "context_pack" }, startTime);
+        retriever(SPAN_NAMES.recall, trace.setSpan(context.active(), span), pendingRecall.query, pendingRecall.docs, { "weft.source": "context_pack", ...pendingRecall.extra }, startTime);
         pendingRecall = null;
       }
       span.end();
@@ -506,15 +575,25 @@ function makeLoopTrace(agent: Span, recall: { query: string; docs: RetrievedDoc[
     async llm(parent, req, providerId, fn) {
       const span = startSpan(SPAN_NAMES.llm, "LLM", {}, { ctx: parent.ctx });
       lastLlm = span;
-      if (span.isRecording()) span.setAttributes(llmRequestAttrs(req, providerId));
+      llmCalls++;
+      const retryOf = lastLlmError;
+      if (span.isRecording()) {
+        span.setAttributes(llmRequestAttrs(req, providerId));
+        span.setAttributes(clean({ "weft.llm_call": llmCalls, "weft.retry": retryOf !== null, "weft.retry_of": retryOf?.code ?? null }));
+      }
       try {
         const res = await context.with(trace.setSpan(parent.ctx, span), fn);
-        if (res.stop === "error") span.setStatus({ code: SpanStatusCode.ERROR, message: text(`${res.error?.code ?? "error"}: ${res.error?.message ?? ""}`.slice(0, 300)) });
+        if (res.stop === "error") {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: text(`${res.error?.code ?? "error"}: ${res.error?.message ?? ""}`.slice(0, 300)) });
+          if (span.isRecording()) span.setAttributes(clean({ "weft.error_retryable": res.error?.retryable ?? false }));
+          lastLlmError = { code: res.error?.code ?? "error", retryable: res.error?.retryable ?? false };
+        } else lastLlmError = null;
         return res;
       } catch (e) {
         recordError(span, e);
         span.end();
         lastLlm = NOOP_SPAN;
+        lastLlmError = { code: "exception", retryable: false };
         throw e;
       }
     },
@@ -576,7 +655,13 @@ export async function traceRun(i: RunTraceInput, fn: (t: LoopTrace) => Promise<A
   return context.with(ctx, async () => {
     const span = startSpan(SPAN_NAMES.run, "AGENT", { [SC.AGENT_NAME]: AGENT_NAME, [WEFT_ATTR.runId]: i.run.id, ...inputAttrs(i.input), ...clean({ "weft.segment": i.segment ?? "loop" }) });
     try {
-      const recall = i.recall?.length ? { query: i.input, docs: i.recall } : null;
+      // The note is the first loop segment's (the wake segment and later segments never show recall again).
+      const note = i.segment ? undefined : takeRecallNote(i.run.id);
+      const recall = i.recall?.length
+        ? { query: note?.query ?? i.input, docs: i.recall, extra: { "weft.recall_chars": note?.chars ?? null } }
+        : note && note.reason !== "portal_run"
+          ? { query: note.query, docs: [], extra: { "weft.recall_reason": note.reason ?? (i.recall ? "no_parsed_lines" : "no_block"), "weft.recall_detail": note.detail ?? null } }
+          : null;
       const row = await context.with(trace.setSpan(context.active(), span), () => fn(makeLoopTrace(span, recall)));
       if (span.isRecording()) {
         span.setAttributes({

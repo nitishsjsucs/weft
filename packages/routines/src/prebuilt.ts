@@ -13,23 +13,26 @@ import { routines as w4Compliance } from "./wave4/compliance";
 import { routines as w4People } from "./wave4/people";
 import { routines as w4Agent } from "./wave4/agent";
 import { routines as w4Admin } from "./wave4/admin";
+import { AGENCY_NOTICE_CHECKLIST, AGENCY_NOTICE_TOOLS } from "./agency-notice";
 
 export const TZ = "America/Los_Angeles";
 export const OWNER = "usr_dana";
 const budget = { steps: 6, usd: 0.1, minutes: 10 };
 
+/**
+ * Every agency notice kind (wave 4 round 1, FG1): the precheck derives a plan (packages/routines/src/agency-notice.ts),
+ * and the run gets that plan's tools and checklist items. A rate change keeps the GP1 batch; a missing filing replies
+ * with the filing on record or prepares and proposes the return; a deposit schedule change is proposed; a penalty
+ * gets an abatement reply and an escalation; anything unknown or uncertain is escalated with notices.escalate.
+ */
 export const RT_AGENCY_NOTICE: RoutineDef = {
   id: "rt_agency_notice", name: "Agency notice handling",
-  description: "When an agency notice arrives, read it, compute the impact, draft a reply and propose the rate change and the filing.",
+  description: "When an agency notice arrives, handle it by its kind: propose a rate change with a drafted reply, reply with the filing on record or prepare and propose a missing return, propose a deposit schedule change, request penalty abatement, or escalate it to the tax specialist.",
   ownerPrincipalId: OWNER, enabled: true, autonomy: "approve", trigger: { type: "event", event: "notice.received" }, filter: null,
-  instructions: "Use the derived arguments. In one batch: draft the response with a one-sentence note, propose tax.update_rate with the derived arguments, and propose notices.send_response for the notice. Then write a short final message.",
-  tools: ["notices.get", "tax.get_rates", "tax.rate_change_impact", "tax.update_rate", "notices.draft_response", "notices.send_response"],
+  instructions: "Follow the derived plan with the derived arguments, executable calls first, in one batch where you can: draft, prepare or escalate, then propose. For plan update_rate: draft the response with a one-sentence note, propose tax.update_rate and propose notices.send_response. For plan escalate, call notices.escalate with the derived arguments. If a procedure in <recall> says to escalate this kind of notice, escalate with notices.escalate instead of replying. Then write a short final message.",
+  tools: [...AGENCY_NOTICE_TOOLS],
   precheck: "agency_notice",
-  checklist: [
-    { id: "draft", label: "draft reply", check: "draft_exists:{notice_id}" },
-    { id: "rate", label: "propose tax.update_rate", check: "proposal_exists:tax.update_rate:{notice_id}" },
-    { id: "send", label: "propose notices.send_response", check: "proposal_exists:notices.send_response:{notice_id}" },
-  ],
+  checklist: AGENCY_NOTICE_CHECKLIST,
   budget, surface: { worthSurfacing: true, channel: "#payroll" }, source: "prebuilt", taintedBy: null,
 };
 

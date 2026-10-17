@@ -144,3 +144,80 @@ describe("quiet hours and worth surfacing", () => {
     expect(second).toMatchObject({ status: "skipped", summary: "Nothing new since the last run." });
   });
 });
+
+describe("wave 4 round 1: rt_agency_notice plans, prebuilt refresh and skip spans (FG1)", () => {
+  const notice = (n: Record<string, unknown>): ReadOnlyExecutor => ({
+    async exec(_c, command) {
+      if (command === "notices.get") return done({ notice: n });
+      if (command === "tax.list_filings") return done({ filings: [{ id: "fil_0007", status: "draft", confirmation: null, filed_at: null }] });
+      return done({});
+    },
+  });
+  const event = (id: string) => ({ id: "evt_0001", type: "notice.received", ts: "2026-10-26T16:00:00.000Z", subjectRef: id, payload: { notice_id: id }, attended: true, requestedBy: "usr_dana" });
+
+  it("a missing-filing notice starts an agent run with only its plan's tools and checklist items", async () => {
+    const agent = fakeAgent();
+    const engine = createRoutines({ db, clock: mutableClock("2026-10-26T16:00:00.000Z"), agent, runs, readOnly: notice({ id: "ntc_0002", kind: "missing_filing", status: "new", agency: "ny_dtf", form_code: "NYS-45", tax_account_id: "txa_0004", extracted: { formCode: "NYS-45", period: "2026-Q3", agency: "ny_dtf" } }) });
+    const r = PREBUILT.find((x) => x.id === "rt_agency_notice")!;
+    const run = await engine.fire(r, { triggerRef: "evt_0001", payload: { notice_id: "ntc_0002" }, attended: true, event: event("ntc_0002") as never });
+    expect(run.status).toBe("running");
+    const got = agent.started[0]!;
+    expect(got.precheck).toMatchObject({ action: "run", derivedArgs: { plan: "file_return", "tax.prepare_filing": { filing_id: "fil_0007" }, "notices.escalate": { notice_id: "ntc_0002", reason_code: "missing_filing" } } });
+    expect(got.routine.tools).toEqual(["notices.get", "notices.draft_response", "notices.send_response", "notices.escalate", "tax.prepare_filing", "tax.file_return"]);
+    expect(got.routine.checklist.map((c) => c.id)).toEqual(["file_return"]);
+    // The stored row keeps the whole list.
+    expect((await engine.view.get("rt_agency_notice"))!.tools).toHaveLength(8);
+  });
+
+  it("the missing-filing checklist passes on the reply path or on an escalation, and fails on neither", async () => {
+    const r = PREBUILT.find((x) => x.id === "rt_agency_notice")!;
+    const { evaluateChecklist } = await import("../src/checks");
+    const scope = { notice_id: "ntc_0002", plan: "file_return" };
+    const ctx = { companyId: "cmp_larkspur", agentRunId: "run_0001", read: notice({}) };
+    const facts = (calls: { command: string; status: "done" | "pending_approval"; args: unknown }[]) => ({ calls: calls.map((c, i) => ({ ...c, proposalId: c.status === "pending_approval" ? `prp_000${i}` : null, data: null })), proposalStatus: () => null });
+    const reply = facts([{ command: "tax.prepare_filing", status: "done", args: { filing_id: "fil_0007" } }, { command: "notices.draft_response", status: "done", args: { notice_id: "ntc_0002" } }, { command: "tax.file_return", status: "pending_approval", args: { filing_id: "fil_0007" } }, { command: "notices.send_response", status: "pending_approval", args: { notice_id: "ntc_0002" } }]);
+    const escalated = facts([{ command: "notices__escalate", status: "done", args: { notice_id: "ntc_0002", reason_code: "missing_filing" } }]);
+    const draftOnly = facts([{ command: "notices.draft_response", status: "done", args: { notice_id: "ntc_0002" } }]);
+    for (const [f, want] of [[reply, true], [escalated, true], [draftOnly, false]] as const) {
+      const items = await evaluateChecklist(r, scope, f, ctx);
+      expect(items.map((i) => [i.id, i.passed])).toEqual([["file_return", want]]);
+    }
+    // A rate change still has the three GP1 items.
+    expect((await evaluateChecklist(r, { notice_id: "ntc_0001", plan: "update_rate" }, facts([]), ctx)).map((i) => i.id)).toEqual(["draft", "rate", "send"]);
+  });
+
+  it("a skipped routine run reports its reason to the tracer; an informational notice is skipped with why", async () => {
+    const agent = fakeAgent() as ReturnType<typeof fakeAgent> & { traced: unknown[]; traceRoutineRun(t: unknown): void };
+    agent.traced = [];
+    agent.traceRoutineRun = (t) => { agent.traced.push(t); };
+    const engine = createRoutines({ db, clock: mutableClock("2026-10-26T16:00:00.000Z"), agent, runs, readOnly: notice({ id: "ntc_0003", kind: "futa_credit_reduction", status: "new", agency: "irs", form_code: "FUTA", extracted: { formCode: "FUTA", agency: "irs" } }) });
+    const r = PREBUILT.find((x) => x.id === "rt_agency_notice")!;
+    const run = await engine.fire(r, { triggerRef: "evt_0003", payload: { notice_id: "ntc_0003" }, attended: false, event: event("ntc_0003") as never });
+    expect(run.status).toBe("skipped");
+    expect(run.summary).toContain("informational");
+    expect(agent.started).toHaveLength(0);
+    expect(agent.traced).toEqual([expect.objectContaining({ routineId: "rt_agency_notice", routineRunId: run.id, status: "skipped", reason: run.summary, precheck: "agency_notice", event: "notice.received", attended: false })]);
+  });
+
+  it("the folded rt_compliance_notices never runs even when enabled", async () => {
+    const agent = fakeAgent();
+    const engine = createRoutines({ db, clock: mutableClock("2026-10-26T16:00:00.000Z"), agent, runs, readOnly: notice({ id: "ntc_0002", kind: "missing_filing", status: "new" }) });
+    const r = { ...PREBUILT.find((x) => x.id === "rt_compliance_notices")!, enabled: true };
+    const run = await engine.fire(r, { triggerRef: "evt_0002", payload: { notice_id: "ntc_0002" }, attended: true, event: event("ntc_0002") as never });
+    expect(run.status).toBe("skipped");
+    expect(agent.started).toHaveLength(0);
+  });
+
+  it("ensurePrebuilt refreshes a prebuilt row's code-owned fields from an older build and keeps enabled and autonomy", async () => {
+    const { routines } = await import("@weft/db");
+    const { eq } = await import("drizzle-orm");
+    const engine = createRoutines({ db, clock: mutableClock("2026-10-26T16:00:00.000Z"), agent: fakeAgent(), runs, readOnly: notice({}) });
+    await engine.ensurePrebuilt();
+    await db.update(routines).set({ toolsJson: JSON.stringify(["notices.get", "tax.get_rates"]), checklistJson: "[]", enabled: false, autonomy: "recommend" }).where(eq(routines.id, "rt_agency_notice"));
+    const again = createRoutines({ db, clock: mutableClock("2026-10-26T16:00:00.000Z"), agent: fakeAgent(), runs, readOnly: notice({}) });
+    const r = (await again.view.get("rt_agency_notice"))!;
+    expect(r.tools).toEqual(PREBUILT.find((x) => x.id === "rt_agency_notice")!.tools);
+    expect(r.checklist.length).toBeGreaterThan(3);
+    expect(r).toMatchObject({ enabled: false, autonomy: "recommend" });
+  });
+});

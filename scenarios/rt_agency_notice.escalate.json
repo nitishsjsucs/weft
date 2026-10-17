@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "notices__escalate",
+            "arguments": "{{derived.notices.escalate}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Escalated the notice to the tax specialist with the evidence pack."
+          }
+        ]
+      }
+    ]
+  }
+}

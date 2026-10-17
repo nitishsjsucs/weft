@@ -1,0 +1,33 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "notices__draft_response",
+            "arguments": "{{derived.notices.draft_response}}"
+          },
+          {
+            "type": "function_call",
+            "name": "notices__escalate",
+            "arguments": "{{derived.notices.escalate}}"
+          },
+          {
+            "type": "function_call",
+            "name": "notices__send_response",
+            "arguments": "{{derived.notices.send_response}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Drafted an abatement request, escalated the payment decision to the tax specialist, and proposed sending the reply."
+          }
+        ]
+      }
+    ]
+  }
+}

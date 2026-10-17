@@ -16,6 +16,7 @@ import { prechecks as w4Compliance } from "./wave4/compliance";
 import { outThisWeekLine, prechecks as w4People } from "./wave4/people";
 import { prechecks as w4Agent } from "./wave4/agent";
 import { prechecks as w4Admin } from "./wave4/admin";
+import { agencyNotice } from "./agency-notice";
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
@@ -35,39 +36,8 @@ export function ptDate(iso: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 }
 
-const AGENCY_JURISDICTION: Record<string, string> = { irs: "US", ca_edd: "CA", ny_dtf: "NY", ny_dol: "NY", tx_twc: "TX", co_dor: "CO", co_cdle: "CO" };
-
-/** notices.get (t2-world): data.notice.{kind, tax_account_id, extracted: { agency, kind, taxAccountId, effectiveFrom, respondBy, rates: [{ code, oldRate, newRate }] }}. */
-export const agencyNotice: Precheck = async (ctx, exec) => {
-  const payload = obj(ctx.payload);
-  const noticeId = str(payload.notice_id);
-  if (!noticeId) return { action: "skip", reason: "The event carries no notice id." };
-  const data = await read(exec, ctx.companyId, "notices.get", { notice_id: noticeId });
-  if (!data) return { action: "skip", reason: `Notice ${noticeId} could not be read.` };
-  const notice = obj(pick(data, "notice") ?? data);
-  const ex = obj(pick(notice, "extracted"));
-  const kind = str(pick(notice, "kind")) ?? str(pick(ex, "kind"));
-  const rates = arr(pick(ex, "rates"));
-  const change = rates.find((r) => r.code === "sui") ?? rates[0];
-  const rate = change ? str(pick(change, "newRate", "new_rate")) : null;
-  const code = change ? str(pick(change, "code")) : null;
-  const effective = str(pick(ex, "effectiveFrom", "effective_from"));
-  const account = str(pick(notice, "tax_account_id")) ?? str(pick(ex, "taxAccountId"));
-  if (kind !== "rate_change" || !rate || !code || !effective || !account) return { action: "skip", reason: `Notice ${noticeId} is not a rate change with an account, code, rate and effective date.` };
-  const jurisdiction = AGENCY_JURISDICTION[str(pick(ex, "agency")) ?? str(pick(notice, "agency")) ?? ""] ?? null;
-  const impact = jurisdiction ? await read(exec, ctx.companyId, "tax.rate_change_impact", { jurisdiction, code, new_rate: rate, effective_from: effective }) : null;
-  return {
-    action: "run", severity: "interrupt", subjectRefs: [noticeId, account],
-    findings: { notice: { id: noticeId, agency: pick(ex, "agency"), kind, code, old_rate: change ? pick(change, "oldRate") : null, new_rate: rate, effective_from: effective, respond_by: pick(ex, "respondBy") }, impact },
-    derivedArgs: {
-      notice_id: noticeId,
-      "tax.rate_change_impact": jurisdiction ? { jurisdiction, code, new_rate: rate, effective_from: effective } : null,
-      "tax.update_rate": { tax_account_id: account, code, rate, effective_from: effective, source_notice_id: noticeId },
-      "notices.draft_response": { notice_id: noticeId },
-      "notices.send_response": { notice_id: noticeId },
-    },
-  };
-};
+/** rt_agency_notice: every notice kind (wave 4 round 1), in agency-notice.ts. */
+export { agencyNotice };
 
 function templateExplanation(row: Obj): string {
   const flags = arr(pick(row, "flags"));
@@ -129,13 +99,29 @@ export const newHire: Precheck = async (ctx, exec) => {
   };
 };
 
+/** The worker statuses that count as current employees (comms grounding's employees_count uses the same set). */
+export const DIGEST_STATUSES = ["active", "onboarding", "offboarding"] as const;
+
 export const peopleDigest: Precheck = async (ctx, exec) => {
-  const people = await read(exec, ctx.companyId, "people.search", { status: "active", limit: 50 });
-  // comms.send_message grounds its numbers against company facts (employees by work state, not every active worker,
-  // since contractors carry no work state), so the digest cites the per-state counts and their sum.
-  const byState = Object.entries(obj(pick(people ?? {}, "by_state")))
-    .map(([state, n]) => [state, Number(n)] as const).filter(([, n]) => Number.isFinite(n) && n > 0).sort(([a], [b]) => a.localeCompare(b));
-  const total = Number(pick(people ?? {}, "total", "count") ?? arr(pick(people ?? {}, "items", "workers", "results")).length);
+  // comms.send_message grounds its numbers against company facts: employees by work state and the employee count in
+  // active, onboarding and offboarding status (contractors carry no work state). Wave 4 round 1 (FM10, RT-04): the
+  // digest counts with that same status filter, one people.search per status, so a new hire who is still onboarding
+  // is counted and the total matches the fact the post is checked against.
+  const byStateMap = new Map<string, number>();
+  let read0: Obj | null = null;
+  let counted = 0;
+  for (const status of DIGEST_STATUSES) {
+    const people = await read(exec, ctx.companyId, "people.search", { status, limit: 1 });
+    if (!people) continue;
+    counted++;
+    if (status === "active") read0 = people;
+    for (const [state, n] of Object.entries(obj(pick(people, "by_state")))) {
+      const v = Number(n);
+      if (Number.isFinite(v) && v > 0) byStateMap.set(state, (byStateMap.get(state) ?? 0) + v);
+    }
+  }
+  const byState = [...byStateMap.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const total = Number(pick(read0 ?? {}, "total", "count") ?? arr(pick(read0 ?? {}, "items", "workers", "results")).length);
   const headcount = byState.length ? byState.reduce((sum, [, n]) => sum + n, 0) : total;
   const slot = str(obj(ctx.payload).slot) ?? ctx.triggerRef;
   const states = byState.map(([state, n]) => `${state} ${n}`).join(", ");
@@ -144,7 +130,7 @@ export const peopleDigest: Precheck = async (ctx, exec) => {
     : `Weekly people digest: ${headcount} active people. Open items are in the Weft inbox.`;
   // wave 4 (w4-parity-people, R6): the out-this-week line from the time-off ledger; null on a failed read, so the digest still posts.
   const out = await outThisWeekLine(ctx, exec);
-  return { action: "run", severity: "digest", subjectRefs: [], findings: { headcount, by_state: Object.fromEntries(byState), slot }, derivedArgs: { slot, "comms.send_message": { channel: "#people-ops", text: `${text}${out ? ` ${out}` : ""}` } } };
+  return { action: "run", severity: "digest", subjectRefs: [], findings: { headcount, by_state: Object.fromEntries(byState), statuses: [...DIGEST_STATUSES], status_reads: counted, slot }, derivedArgs: { slot, "comms.send_message": { channel: "#people-ops", text: `${text}${out ? ` ${out}` : ""}` } } };
 };
 
 export const openApprovals: Precheck = async (ctx, exec) => {

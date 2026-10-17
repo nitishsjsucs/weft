@@ -15,6 +15,7 @@ import { predicates as w4Compliance } from "./wave4/compliance";
 import { predicates as w4People } from "./wave4/people";
 import { predicates as w4Agent } from "./wave4/agent";
 import { predicates as w4Admin } from "./wave4/admin";
+import { predicates as agencyNotice } from "./agency-notice";
 
 export interface RunCall { command: string; args: unknown; status: "done" | "pending_approval" | "refused"; proposalId: string | null; data: unknown }
 export interface RunFacts { calls: RunCall[]; proposalStatus: (proposalId: string) => string | null }
@@ -51,7 +52,25 @@ export const PREDICATES: Record<string, Predicate> = {
   ...w2Onboarding, ...w2Benefits, ...w2Memory,   // wave 2
   ...w3Expenses, ...w3TimeOff, ...w3Parity, ...w3IntegrationsHr, ...w3Screening,   // wave 3
   ...w4Compliance, ...w4People, ...w4Agent, ...w4Admin,   // wave 4
+  ...agencyNotice,   // wave 4 round 1: rt_agency_notice per-plan items
 };
+
+/**
+ * Plan gating (wave 4 round 1): an item whose check starts with "@plan=a|b " applies only when the precheck derived
+ * one of those plans; it is left out of the run's checklist otherwise. Items without the prefix always apply.
+ */
+const PLAN_GATE = /^@plan=([A-Za-z0-9_|]+)\s+/;
+export function appliesTo(item: Pick<ChecklistItem, "check">, scope: Record<string, unknown>): boolean {
+  const g = PLAN_GATE.exec(item.check);
+  return !g || g[1]!.split("|").includes(String(scope.plan ?? ""));
+}
+export function ungated(check: string): string {
+  return check.replace(PLAN_GATE, "");
+}
+/** The items of a checklist that apply to this run's derived plan. */
+export function checklistFor<T extends Pick<ChecklistItem, "check">>(items: readonly T[], scope: Record<string, unknown>): T[] {
+  return items.filter((i) => appliesTo(i, scope));
+}
 
 /** Expand `{field}` from the scope (trigger payload first, then derived values). Unknown fields expand to "". */
 export function expand(template: string, scope: Record<string, unknown>): string {
@@ -73,8 +92,8 @@ export async function evaluateChecklist(
   routine: Pick<RoutineDef, "checklist">, scope: Record<string, unknown>, facts: RunFacts, ctx: { companyId: string; agentRunId: string; read: ReadOnlyExecutor },
 ): Promise<{ id: string; label: string; passed: boolean }[]> {
   const out: { id: string; label: string; passed: boolean }[] = [];
-  for (const item of routine.checklist as ChecklistItem[]) {
-    const { name, args } = parseCheck(item.check, scope);
+  for (const item of checklistFor(routine.checklist as ChecklistItem[], scope)) {
+    const { name, args } = parseCheck(ungated(item.check), scope);
     const p = PREDICATES[name];
     out.push({ id: item.id, label: item.label, passed: p ? Boolean(await p(args, facts, ctx)) : false });
   }

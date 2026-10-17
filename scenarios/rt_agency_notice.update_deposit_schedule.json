@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "tax__set_deposit_schedule",
+            "arguments": "{{derived.tax.set_deposit_schedule}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Proposed the deposit schedule change the notice states."
+          }
+        ]
+      }
+    ]
+  }
+}
