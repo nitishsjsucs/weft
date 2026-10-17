@@ -73,7 +73,7 @@ describe("rt_weekly_cost_by_state", () => {
     // Every state's total in the email is the report's own figure.
     const report = (await (await post("/v1/tools/reports.breakdown", { metric: "payroll_cost_by_state", from: "2026-01-01", to: "2026-10-26" })).json()) as { data: { rows: { state: string; total_cents: number }[] } };
     for (const r of report.data.rows) expect(sent[0]!.body).toContain(r.state);
-    expect(sent[0]!.body).not.toMatch(/—/);
+    expect(sent[0]!.body).not.toMatch(/\u2014/);
 
     // The approval wakes the run, which ends done with no model step; the gallery shows the run and the approval.
     const engine = weft.routines as unknown as { drain(ms?: number): Promise<boolean>; getRun(id: string): Promise<RoutineRun> };
