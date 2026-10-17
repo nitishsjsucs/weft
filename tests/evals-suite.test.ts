@@ -269,14 +269,15 @@ describe("FG5 task fixes", () => {
 
   it("solvability lint: every tool a chat reference relies on is on that variant's chat surface", async () => {
     const { readFileSync } = await import("node:fs");
-    const { CHAT_ACT_TOOLS, CHAT_TOOLS_W3 } = await import("../packages/contracts/src/wave3");
-    const surface = { default: CHAT_TOOLS_W3.filter((x) => x !== "comms.post_update") as string[], chat_can_propose: [...CHAT_ACT_TOOLS] as string[] };
-    // Known gaps, each owned by a fix group; when one lands the lint fails here until the entry is removed.
+    const { CHAT_ACT_TOOLS, CHAT_DOMAIN_ROUTES, CHAT_TOOLS_W3 } = await import("../packages/contracts/src/wave3");
+    // A domain read routed into the comms.post_update slot (chooseChatTools, both variants) is on the surface too.
+    const routed = CHAT_DOMAIN_ROUTES.map((r) => r.tool as string);
+    const surface = { default: [...CHAT_TOOLS_W3.filter((x) => x !== "comms.post_update"), ...routed] as string[], chat_can_propose: [...CHAT_ACT_TOOLS, ...routed] as string[] };
+    // Known gaps; when one is closed the lint fails here until the entry is removed.
     const PENDING: Record<string, string> = {
-      "OF-01 offboarding.get_case": "FG3 item 1 (people.get carries the case steps)",
-      "ON-02 onboarding.get_checklist": "FG3 item 1 (people.get carries the checklist)",
-      "IN-01 integrations.status": "FG3 item 2 (per-run routing of the integrations read)",
-      "TO-01 time_off.team_calendar": "FG3 item 2 (per-run routing of the team calendar)",
+      "OF-01 offboarding.get_case": "people.get now carries the case steps (FG3); the reference still names the case read",
+      "ON-02 onboarding.get_checklist": "people.get now carries the open checklist items (FG3); the reference still names the checklist read",
+      "IN-01 integrations.status": "routing offers integrations.list_sync_items, not the status read",
       "RD-01 routines.draft": "the routine-draft role has its own tool surface",
     };
     const gaps: string[] = [];

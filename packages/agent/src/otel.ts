@@ -12,7 +12,7 @@ import { context, ROOT_CONTEXT, trace, SpanStatusCode, type Attributes, type Att
 import { clearSession, clearUser, OITracer, setMetadata, setSession, setTags, setUser } from "@arizeai/openinference-core";
 import { MimeType, OpenInferenceSpanKind, SemanticConventions as SC } from "@arizeai/openinference-semantic-conventions";
 import {
-  CHAT_TOOLS, SPAN_NAMES, traceSessionId, toolOutcomeCode, WEFT_ATTR,
+  CHAT_DOMAIN_ROUTES, CHAT_TOOLS, CHAT_TOOLS_W3, PORTAL_TOOLS, SPAN_NAMES, traceSessionId, toolOutcomeCode, WEFT_ATTR,
   type AgentRunRow, type EvalTraceTags, type HistoryItem, type ModelStepRequest, type ModelStepResult, type RunStepRow, type RunTraceTags,
   type ToolOutcome, type TraceRedact, type TraceRunMeta, type WeftSpanKind,
 } from "@weft/contracts";
@@ -144,11 +144,16 @@ export interface RunTraceInput {
   segment?: string;
 }
 
-/** chat_can_propose: the labeled eval variant, or a chat run offered any tool beyond the read-only chat list. */
+/**
+ * Every tool a chat run may be offered without chat_can_propose: the wave 1 and wave 3 read-only lists, the domain
+ * reads routed into the comms.post_update slot, and the portal reads.
+ */
+const CHAT_READ_SURFACE = new Set<string>([...CHAT_TOOLS, ...CHAT_TOOLS_W3, ...CHAT_DOMAIN_ROUTES.map((r) => r.tool), ...PORTAL_TOOLS]);
+
+/** chat_can_propose: the labeled eval variant, or a chat run offered any tool beyond the read-only chat surface. */
 function chatCanPropose(i: RunTraceInput, t: Partial<EvalTraceTags> | null): boolean {
   if (t?.eval_variant === "chat_can_propose") return true;
-  const reads = new Set<string>(CHAT_TOOLS);
-  return i.promptKind === "chat" && i.allowlist.some((n) => !reads.has(n));
+  return i.promptKind === "chat" && i.allowlist.some((n) => !CHAT_READ_SURFACE.has(n));
 }
 
 export function runMeta(i: RunTraceInput, t: Partial<EvalTraceTags> | null = runTraceTags.current()): TraceRunMeta {

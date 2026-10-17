@@ -7,10 +7,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor, type ReadableSpan } from "@opentelemetry/sdk-trace-base";
+import { CHAT_ACT_TOOLS, CHAT_DOMAIN_ROUTES, CHAT_TOOLS_W3, PORTAL_TOOLS } from "@weft/contracts";
 import type { ModelProvider, ModelStepResult, PrecheckResult, RoutineDef, RoutineRun, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
 import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, runTraceTags, scriptedProvider, setTraceRedactor, type Script, type WeftAgentRuntime } from "../src/index";
-import { recallDocs, ROUTINE_RUN_SPAN, traceMcpCall, traceRoutineRunSpan } from "../src/otel";
+import { recallDocs, ROUTINE_RUN_SPAN, runMeta, traceMcpCall, traceRoutineRunSpan, type RunTraceInput } from "../src/otel";
 import { routineRecallQuery } from "../src/runtime";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
@@ -574,5 +575,24 @@ describe("otel.ts hygiene", () => {
     const src = readFileSync(join(import.meta.dirname, "../src/otel.ts"), "utf8");
     expect(src).not.toMatch(/process\.env/);
     expect(src).not.toMatch(/(KEY|SECRET|TOKEN)\b/);
+  });
+});
+
+describe("chat_can_propose run metadata", () => {
+  const input = (allowlist: readonly string[], promptKind: RunTraceInput["promptKind"] = "chat"): RunTraceInput => ({
+    run: { id: "run_meta", companyId: "co_1", trigger: "chat", attended: true, provider: "scripted", model: "m", routineRunId: null } as unknown as RunTraceInput["run"],
+    promptKind, allowlist, routineId: null, principal: "usr_0001", input: "q", prompt: "p",
+  });
+
+  it("is false for the wave 3 chat list, a routed domain read and the portal list, true for the act list", () => {
+    expect(runMeta(input(CHAT_TOOLS_W3), null).chat_can_propose).toBe(false);
+    for (const r of CHAT_DOMAIN_ROUTES) {
+      const routed = CHAT_TOOLS_W3.map((n) => (n === "comms.post_update" ? r.tool : n));
+      expect(runMeta(input(routed), null).chat_can_propose, r.tool).toBe(false);
+    }
+    expect(runMeta(input(PORTAL_TOOLS), null).chat_can_propose).toBe(false);
+    expect(runMeta(input(CHAT_ACT_TOOLS), null).chat_can_propose).toBe(true);
+    expect(runMeta(input(CHAT_TOOLS_W3), { eval_variant: "chat_can_propose" }).chat_can_propose).toBe(true);
+    expect(runMeta(input(["tax.update_rate"], "routine"), null).chat_can_propose).toBe(false);
   });
 });

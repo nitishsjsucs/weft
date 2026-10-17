@@ -107,10 +107,17 @@ describe("prompt version and hygiene", () => {
     const dir = join(root, "evals/suite/tasks/dev");
     const lits = new Set<string>();
     const norm = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
-    const generic = new Set(["NY", "USD", "EUR", "Q3", "Oct", "Monday", "Approve", "Please", "OpenAI"]);
+    const generic = new Set(["NY", "USD", "EUR", "Q3", "Oct", "Monday", "Approve", "Please", "OpenAI", "Operations"]);
     for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
       const t = JSON.parse(readFileSync(join(dir, f), "utf8")) as { input: Record<string, unknown>; world: { mutators: string[] }; expect: Record<string, { finalText?: { mustMention?: string[] } | null }> };
-      for (const v of Object.values(t.expect)) for (const m of v.finalText?.mustMention ?? []) lits.add(m);
+      // A mustMention entry is 'a|b' alternatives or a '!x' no-invention check (evals/suite/graders). A '!x' entry
+      // names what the reply must not say, so it is no leak. An alternative of only lower-case letters and spaces
+      // is a plain word (a driver such as "hire" or "headcount"; an id like res_0001 still counts), and a department
+      // name that is also a word of the persona ("people-operations lead") is generic. Every other one is a literal.
+      for (const v of Object.values(t.expect)) for (const m of v.finalText?.mustMention ?? []) {
+        if (m.startsWith("!")) continue;
+        for (const alt of m.split("|")) if (!/^[a-z ]+$/.test(alt) && !generic.has(alt)) lits.add(alt);
+      }
       for (const m of t.world.mutators) lits.add(m.split(":")[0]!);
       const input = String(t.input.chat ?? t.input.portal ?? t.input.mention ?? "");
       if (input.split(/\s+/).length >= 4) lits.add(input);
