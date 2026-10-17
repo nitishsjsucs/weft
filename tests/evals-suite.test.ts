@@ -279,6 +279,7 @@ describe("FG5 task fixes", () => {
       "ON-02 onboarding.get_checklist": "people.get now carries the open checklist items (FG3); the reference still names the checklist read",
       "IN-01 integrations.status": "routing offers integrations.list_sync_items, not the status read",
       "RD-01 routines.draft": "the routine-draft role has its own tool surface",
+      "CT-02 contractors.list_payouts": "chat has no contractors read until FG3's contractors route lands (R6)",
     };
     const gaps: string[] = [];
     for (const { task: t } of all) {
