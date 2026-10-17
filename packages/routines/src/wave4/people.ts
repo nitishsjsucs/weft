@@ -108,6 +108,16 @@ export const firstDayMessage: Precheck = async (ctx, exec) => {
   };
 };
 
+/**
+ * The "out this week" line for the Monday people digest (contract request: the people_digest precheck in
+ * packages/routines/src/prechecks.ts appends it to its text). Names and days only, from people.out_this_week; null
+ * when the read fails, so the digest still posts.
+ */
+export async function outThisWeekLine(ctx: { companyId: string; now: string }, exec: ReadOnlyExecutor): Promise<string | null> {
+  const d = await read(exec, ctx.companyId, "people.out_this_week", { as_of: ptDate(ctx.now) });
+  return d && typeof d.line === "string" ? d.line : null;
+}
+
 const callsTo = (facts: Parameters<Predicate>[1], command: string) => facts.calls.filter((c) => c.command.replace("__", ".") === command);
 
 export const routines: RoutineDef[] = [RT_BENEFITS_WINDOW_REMINDERS, RT_LIFE_EVENT_WINDOW, RT_FIRST_DAY_MESSAGE];

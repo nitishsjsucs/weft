@@ -71,3 +71,18 @@ describe("first-day message (rt_first_day_message)", () => {
     expect(await mailFor()).toHaveLength(mail.length);
   });
 });
+
+describe("the digest line and the holiday-aware business days (helpers for the contract requests)", () => {
+  it("outThisWeekLine reads people.out_this_week through the read-only executor", async () => {
+    const { outThisWeekLine } = await import("../../packages/routines/src/wave4/people");
+    const line = await outThisWeekLine({ companyId: "cmp_larkspur", now: "2026-10-26T16:00:00.000Z" }, weft.executor.readOnly);
+    expect(line).toMatch(/^Out this week: /);
+    expect(line).not.toMatch(/vacation|sick|reason/i);
+  });
+  it("addWorkingDays skips weekends and company holidays", async () => {
+    const { lifeEvents } = await import("@weft/core");
+    // Wed Nov 25 2026 plus 3: Thu Nov 26 (Thanksgiving) and Fri Nov 27 are holidays, then the weekend.
+    expect(lifeEvents.addWorkingDays("2026-11-25", 3, new Set(["2026-11-26", "2026-11-27"]))).toBe("2026-12-02");
+    expect(lifeEvents.addWorkingDays("2026-11-25", 3, new Set())).toBe("2026-11-30");
+  });
+});
