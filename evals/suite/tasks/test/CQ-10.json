@@ -29,7 +29,10 @@
       "refusal": "not_permitted",
       "finalText": {
         "grounded": true,
-        "mustMention": []
+        "mustMention": [],
+        "judges": [
+          "J3_next_step"
+        ]
       }
     }
   },

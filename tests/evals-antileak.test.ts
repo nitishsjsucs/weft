@@ -10,6 +10,7 @@ import { EvalGroup, EvalTask } from "../packages/contracts/src/evals";
 import { parseNotice } from "../packages/sim/src/notices/parser";
 import { buildTestManifest, manifestDrift, MANIFEST_PATH, testTaskFiles } from "../evals/suite/tasks/test/manifest";
 import { memoryFiles, sqlSteps, TEST_MUTATOR_NAMES, TEST_MUTATORS } from "../evals/suite/tasks/test/worlds";
+import { BLOCKED_ON_HARNESS, NULL_ORACLE, oracleFor, PRODUCT_PATH_PASSES, TEST_ORACLES, WAITING_ON_PARITY } from "../evals/suite/tasks/test/oracles";
 import { JudgeId } from "../packages/contracts/src/evals";
 import type { ModelProvider, ModelStepRequest, ModelStepResult } from "../packages/contracts/src/index";
 import { createProvider, createSpendLedger } from "../packages/agent/src/index";
@@ -135,7 +136,7 @@ describe("held-out test split", () => {
     const m = buildTestManifest(ROOT);
     expect(m.taskCount).toBe(41);
     expect(Object.values(m.groups).reduce((a, b) => a + b, 0)).toBe(41);
-    expect(Object.keys(m.files)).toHaveLength(41 * 2 + 1);
+    expect(Object.keys(m.files)).toHaveLength(41 * 2 + 2);
   });
 
   it("detects an edited task through the manifest", () => {
@@ -158,6 +159,32 @@ describe("held-out test split", () => {
     for (const n of TEST_MUTATOR_NAMES) expect(used.has(n), n).toBe(true);
     expect(() => sqlSteps(["noSuchMutator"])).toThrow(/UNKNOWN_MUTATOR/);
     for (const f of memoryFiles(TEST_MUTATOR_NAMES)) expect(f.path, f.path).toMatch(/^(knowledge\/(facts|procedures|decisions)\/|workstreams\/)[a-z0-9-]+\.md$/);
+  });
+
+  // Solvability status is machine-checked: every task variant has an oracle, is passed by the product's own scripted
+  // path, or is listed as waiting on a parity track; blocked variants keep the oracle that fails today.
+  it("gives every task variant a solvability status: an oracle, the product path, or a parity track it waits on", () => {
+    const ids = new Set(tasks.map((t) => t.id));
+    for (const key of Object.keys(TEST_ORACLES)) {
+      const [id, variant] = key.split("/");
+      expect(ids.has(id!), key).toBe(true);
+      if (variant) expect(tasks.find((t) => t.id === id)!.variants, key).toContain(variant);
+    }
+    for (const id of [...PRODUCT_PATH_PASSES, ...WAITING_ON_PARITY]) expect(ids.has(id), id).toBe(true);
+    for (const key of BLOCKED_ON_HARNESS) expect(oracleFor(key.split("/")[0]!, key.split("/")[1]!), key).not.toBeNull();
+    const uncovered: string[] = [];
+    for (const t of tasks) for (const v of t.variants) {
+      const covered = oracleFor(t.id, v) !== null || PRODUCT_PATH_PASSES.includes(t.id) || WAITING_ON_PARITY.includes(t.id);
+      if (!covered && !BLOCKED_ON_HARNESS.includes(`${t.id}/${v}`)) uncovered.push(`${t.id}/${v}`);
+    }
+    expect(uncovered).toEqual([]);
+    // Oracles call tools by wire name and only for chat or routine tasks; the null oracle is one plain reply.
+    for (const [key, s] of Object.entries(TEST_ORACLES)) {
+      for (const step of s.agents.main ?? []) for (const o of step.output) if (o.type === "function_call") expect(o.name, key).toMatch(/^[a-z_]+__[a-z_]+$/);
+      const t = tasks.find((x) => x.id === key.split("/")[0])!;
+      expect(["chat", "routine"], key).toContain(t.surface);
+    }
+    expect(NULL_ORACLE.agents.main).toHaveLength(1);
   });
 
   // The suite loader's own rules (evals/suite/loader.ts on track/w4-eval-suite), restated here so the split keeps

@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 export const TASK_DIR = "evals/suite/tasks/test";
 export const REFERENCE_DIR = "evals/suite/reference/test";
 export const MANIFEST_PATH = "evals/suite/test-manifest.json";
-export const HASHED_EXTRA = [`${TASK_DIR}/worlds.ts`];
+export const HASHED_EXTRA = [`${TASK_DIR}/worlds.ts`, `${TASK_DIR}/oracles.ts`];
 
 export interface TestManifest {
   split: "test";
