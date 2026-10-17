@@ -160,5 +160,8 @@ describe("caps and drift", () => {
     expect(parseArgs(["digests", "--write"], {})).toMatchObject({ cmd: "digests", write: true });
     expect(parseArgs([], { WEFT_TRACE: "phoenix" }).phoenix).toBe(true);
     expect(() => parseArgs(["--k", "0"], {})).toThrow();
+    expect(parseArgs(["--experiment", "baseline-test"], {}).experiment).toBe("baseline-test");
+    expect(parseArgs([], {}).experiment).toBeNull();
+    expect(() => parseArgs(["--experiment", "two words"], {})).toThrow();
   });
 });

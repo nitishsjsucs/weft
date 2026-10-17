@@ -3,6 +3,7 @@
 //   pnpm eval:suite digests [--write]                rebuild every world, compare (or pin) the digests
 //   pnpm eval:suite [--split dev|test] [--variant default|chat_can_propose] [--k n] [--ids RT-01,CQ-01] [--legacy]
 //                   [--provider scripted|live] [--cap 0.15] [--stage w4-eval-suite --stage-cap 0.10] [--phoenix] [--gate]
+//                   [--experiment baseline]   the Phoenix experiment name (one split and variant; else -<split>-<variant> is added)
 // --gate (CI: `pnpm eval:ci`, the scripted provider over both splits and both variants, no network) exits 1 on any unsafe
 // action, taint miss, canary hit or harness error. Task success is reported, never gated: the scripted model cannot branch.
 // Live runs are opt-in (WEFT_LIVE_OPENAI=1 WEFT_LLM=openai, the key only from WEFT_SECRETS_FILE). WEFT_TRACE=phoenix or
@@ -21,11 +22,11 @@ import { buildWorld, worldDigest, worldKey } from "./worlds/index";
 
 export interface CliArgs {
   cmd: "run" | "validate" | "digests"; write: boolean; gate: boolean; splits: EvalSplit[]; variants: EvalVariant[] | null; k: number; ids: string[] | null; legacy: boolean;
-  provider: "scripted" | "live"; cap: number; stage: string; stageCap: number | null; phoenix: boolean; outDir: string;
+  provider: "scripted" | "live"; cap: number; stage: string; stageCap: number | null; phoenix: boolean; outDir: string; experiment: string | null;
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliArgs {
-  const a: CliArgs = { cmd: "run", write: false, gate: false, splits: ["dev"], variants: null, k: 1, ids: null, legacy: false, provider: "scripted", cap: 0.15, stage: env.WEFT_EVAL_STAGE ?? "w4-eval-suite", stageCap: null, phoenix: env[TRACE_ENV.switch] === "phoenix", outDir: join(REPO_ROOT, "evals/results") };
+  const a: CliArgs = { cmd: "run", write: false, gate: false, splits: ["dev"], variants: null, k: 1, ids: null, legacy: false, provider: "scripted", cap: 0.15, stage: env.WEFT_EVAL_STAGE ?? "w4-eval-suite", stageCap: null, phoenix: env[TRACE_ENV.switch] === "phoenix", outDir: join(REPO_ROOT, "evals/results"), experiment: null };
   const rest = [...argv];
   if (rest[0] && !rest[0].startsWith("--")) { const c = rest.shift()!; if (c !== "run" && c !== "validate" && c !== "digests") throw new Error(`unknown command ${c}`); a.cmd = c; }
   const val = (flag: string) => { const v = rest.shift(); if (v === undefined || v.startsWith("--")) throw new Error(`${flag} needs a value`); return v; };
@@ -45,6 +46,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     else if (f === "--write") a.write = true;
     else if (f === "--gate") a.gate = true;
     else if (f === "--out") a.outDir = resolve(val(f));
+    else if (f === "--experiment") { a.experiment = val(f); if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(a.experiment)) throw new Error("--experiment is 1 to 80 letters, digits, dots, dashes or underscores"); }
     else throw new Error(`unknown flag ${f}`);
   }
   return a;
@@ -133,23 +135,23 @@ export async function main(argv: string[]): Promise<number> {
       if (!version) { console.error(`no Phoenix at ${publicUrl}; start one (pnpm phoenix:up) or drop --phoenix`); return 2; }
       capture = await ph.startOtlpCapture(publicUrl, Number(process.env.WEFT_EVAL_CAPTURE_PORT ?? 4922));
       opts.otlp = () => capture!.payloads;
-      for (const split of [...new Set(tasks.map((t) => t.split))]) {
-        for (const variant of variants) {
-          const these = tasks.filter((t) => t.split === split && t.variants.includes(variant));
-          if (!these.length || state.stoppedEarly) continue;
-          const name = `weft-eval-${startedAt.slice(0, 10)}-${harnessSha}-${variant}`;
-          const { record } = await ph.recordExperiment({
-            baseUrl: capture.url, publicUrl, split, variant, tasks: these, k: args.k, name,
-            metadata: { harness_sha: harnessSha, model: process.env.WEFT_MODEL || "gpt-5.6-luna", provider: args.provider, effort: "low", split, phoenix_version: version },
-            trial: async (task, n) => {
-              if (state.stoppedEarly) return null;
-              try { const t = await runTrial({ task, variant, trial: n }, opts, state); settleTrial(t, opts, state); return t; } catch (e) { if (e instanceof SuiteStop) return null; throw e; }
-            },
-          });
-          experimentIds.push(record.experimentId);
-          phoenixProject ??= record.projectName;
-          console.error(`experiment ${name}: ${record.compareUrl}`);
-        }
+      const combos = [...new Set(tasks.map((t) => t.split))].flatMap((split) => variants.map((variant) => ({ split, variant })))
+        .filter(({ split, variant }) => tasks.some((t) => t.split === split && t.variants.includes(variant)));
+      for (const { split, variant } of combos) {
+        const these = tasks.filter((t) => t.split === split && t.variants.includes(variant));
+        if (!these.length || state.stoppedEarly) continue;
+        const name = args.experiment ? (combos.length === 1 ? args.experiment : `${args.experiment}-${split}-${variant}`) : `weft-eval-${startedAt.slice(0, 10)}-${harnessSha}-${variant}`;
+        const { record } = await ph.recordExperiment({
+          baseUrl: capture.url, publicUrl, split, variant, tasks: these, k: args.k, name,
+          metadata: { harness_sha: harnessSha, model: process.env.WEFT_MODEL || "gpt-5.6-luna", provider: args.provider, effort: "low", split, phoenix_version: version, label: args.experiment, default_settings: variant === "default" },
+          trial: async (task, n) => {
+            if (state.stoppedEarly) return null;
+            try { const t = await runTrial({ task, variant, trial: n }, opts, state); settleTrial(t, opts, state); return t; } catch (e) { if (e instanceof SuiteStop) return null; throw e; }
+          },
+        });
+        experimentIds.push(record.experimentId);
+        phoenixProject ??= record.projectName;
+        console.error(`experiment ${name}: ${record.compareUrl}`);
       }
       await new Promise((r) => setTimeout(r, 1500));   // the last task span's export
     } else {

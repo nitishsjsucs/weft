@@ -126,8 +126,8 @@ export async function runTrial(spec: TrialSpec, opts: RunnerOptions, state: Runn
     const pre = await snapshot(w);
     runTraceTags.set({ eval_task_id: spec.task.id, eval_split: spec.task.split, eval_variant: spec.variant, eval_trial: spec.trial, golden_path: null, harness_sha: opts.harnessSha });
     let driven;
-    try { driven = await drive(w, spec.task); } finally { runTraceTags.set(null); }
-    await drainRoutines(w);
+    // The tags stay set while the trial's routine runs drain, so every run of the trial carries them and nests in it.
+    try { driven = await drive(w, spec.task); await drainRoutines(w); } finally { runTraceTags.set(null); }
     const ev = await collect(w, pre, { mainRunId: driven.mainRunId, expect: spec.task.expect[spec.variant]!, otlp: opts.otlp?.() ?? [], canaries: canaries.values, wallMs: Date.now() - t0, error: driven.error });
     const result = scoreTrial(spec, ev, { digest, chatCanPropose });
     log(`${spec.task.id} ${spec.variant} t${spec.trial} ${result.success ? "PASS" : "FAIL"} steps=${result.steps} calls=${result.toolCalls} usd=${result.costUsd.toFixed(4)}${result.success ? "" : ` ${[result.error, ...result.graders.filter((g) => g.applies && !g.pass).map((g) => `${g.grader}: ${g.reasons.join("; ")}`)].filter(Boolean).join(" | ").slice(0, 400)}`}`);

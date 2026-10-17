@@ -235,6 +235,30 @@ describe("span tree", () => {
     const agent = exporter.getFinishedSpans().find((s) => s.name === "agent.run")!;
     expect(agent.parentSpanContext).toBeUndefined();
   });
+
+  it("during an eval trial a run nests under the span that was active when the trial set its tags", async () => {
+    const fake = chatExec();
+    const script: Script = { match: "flagged", agents: { main: [{ output: [{ type: "text", text: "Nothing is flagged." }] }] } };
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { chat_x: script } }));
+    const task = trace.getTracer("t").startSpan("Task: eval");
+    const h = handle();
+    // The tags are set inside the task span; the run itself starts outside it (as a drained routine run would).
+    context.with(trace.setSpan(context.active(), task), () => runTraceTags.set({ eval_task_id: "CQ-01", eval_variant: "default", eval_split: "dev", eval_trial: 1 }));
+    await rt.startChat(h, { text: "Is anything flagged?", recipe: "chat", pageContext: null });
+    await rt.settled(h.runId);
+    runTraceTags.set(null);
+    task.end();
+    const agent = exporter.getFinishedSpans().find((s) => s.name === "agent.run")!;
+    expect(agent.parentSpanContext?.spanId).toBe(task.spanContext().spanId);
+    expect(agent.spanContext().traceId).toBe(task.spanContext().traceId);
+    expect(agent.attributes["session.id"]).toBe("CQ-01");
+    // Cleared tags restore the old behavior: the next run is its own trace again.
+    const h2 = handle();
+    await rt.startChat(h2, { text: "Is anything flagged?", recipe: "chat", pageContext: null });
+    await rt.settled(h2.runId);
+    const second = exporter.getFinishedSpans().filter((s) => s.name === "agent.run").find((s) => s.attributes["weft.run_id"] === h2.runId)!;
+    expect(second.parentSpanContext).toBeUndefined();
+  });
 });
 
 describe("retrieval and MCP spans", () => {

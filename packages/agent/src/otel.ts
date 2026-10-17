@@ -28,9 +28,11 @@ export function setTraceRedactor(r: TraceRedact): void { redact = r; learned.cle
 export function traceRedact<T>(value: T): T { return redact(value); }
 
 let tags: Partial<EvalTraceTags> | null = null;
+/** The context active when an eval trial set its tags (the experiment's task span), so the trial is one trace. */
+let evalParent: Context | null = null;
 /** Process-wide eval tags: the eval runner sets them before a trial and clears them after (trials run one at a time). */
 export const runTraceTags: RunTraceTags = {
-  set(next) { tags = next ? { ...next } : null; },
+  set(next) { tags = next ? { ...next } : null; evalParent = next?.eval_task_id ? context.active() : null; },
   current() { return tags ? { ...tags } : null; },
 };
 
@@ -563,8 +565,9 @@ export const NOOP_LOOP_TRACE: LoopTrace = makeLoopTrace(NOOP_SPAN);
 export async function traceRun(i: RunTraceInput, fn: (t: LoopTrace) => Promise<AgentRunRow>): Promise<AgentRunRow> {
   const meta = runMeta(i);
   // A child run (task agent) nests under the dispatching TOOL span; every other run is its own trace, even when an
-  // event from another run's tool call started it.
-  let ctx = i.run.parentRunId ? clearUser(clearSession(context.active())) : ROOT_CONTEXT;
+  // event from another run's tool call started it. During an eval trial the other runs nest under the context that
+  // was active when the trial set its tags (the experiment's task span), so one trial is one trace.
+  let ctx = i.run.parentRunId ? clearUser(clearSession(context.active())) : clearUser(clearSession(evalParent ?? ROOT_CONTEXT));
   const session = traceSessionId({ threadId: i.run.threadId, routineRunId: i.run.routineRunId }, meta.eval_task_id);
   if (session) ctx = setSession(ctx, { sessionId: text(session) });
   const user = runUserId(i);
