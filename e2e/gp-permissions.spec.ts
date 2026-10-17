@@ -5,6 +5,7 @@ import type { Page } from "@playwright/test";
 import { expect, openApp, test, WeftApi } from "./fixtures";
 import { W3_SHELL_TID as S } from "../packages/contracts/src/w3/testids-shell";
 import { W4_ADMIN_TID as T } from "../apps/web/src/components/app/reports/testids";
+import { W4_GALLERY_TID as G } from "../apps/web/src/components/app/routines/gallery/testids";
 
 type Prop = { id: string; status: string; command: string };
 
@@ -51,5 +52,45 @@ test("Permissions: the matrix per person and for the agent, and an override set 
     await expect(page.getByTestId(T.matrix)).toBeVisible();
     await expect(page.getByTestId(T.overrideSubmit)).toBeVisible();
     await noSideScroll(page, "390");
+  });
+});
+
+// Routine gallery (G10, G7, G8), here because this track owns two spec files: created by, enabled at, last and next
+// run and decision counts per routine on the Routines page, the same numbers beside the autonomy control on a
+// routine's page, and cards with no sideways scroll at 390.
+type GalleryRow = { routineId: string; enabled: boolean; nextRunAt: string | null; lastRunAt: string | null; approvals: number; overrides: number; schedule: string };
+
+test("Routine gallery: last and next run and decision counts per routine", async ({ page, request }) => {
+  const weft = new WeftApi(request);
+  const rows = await weft.get<GalleryRow[]>("/v1/routine-gallery");
+  const pre = rows.find((r) => r.routineId === "rt_pre_payroll")!;
+  expect(pre.enabled && pre.nextRunAt).toBeTruthy();
+  const off = rows.find((r) => !r.enabled && r.schedule.startsWith("cron"))!;
+  expect(off.nextRunAt).toBeNull();
+  await test.step("1440 docked: one row per routine with the API's next run", async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openApp(page, "/app/routines");
+    await expect(page.getByTestId(S.agentToggle)).toHaveAttribute("aria-pressed", "true");
+    const row = page.getByTestId(G.row("rt_pre_payroll"));
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute("data-next-run", pre.nextRunAt!);
+    await expect(page.getByTestId(G.row(off.routineId))).toHaveAttribute("data-next-run", "");
+    await expect(page.getByTestId(G.row(off.routineId))).toContainText("Off while disabled");
+    await expect(page.locator(`[data-testid^="routine-gallery-row-"]`)).toHaveCount(rows.length);
+    await noSideScroll(page, "gallery 1440");
+  });
+  await test.step("the routine page shows its history beside the autonomy control", async () => {
+    await openApp(page, "/app/routines/rt_pre_payroll");
+    const counts = page.getByTestId(G.counts("rt_pre_payroll"));
+    await expect(counts).toBeVisible();
+    await expect(counts.locator('[data-count="approvals"]')).toHaveText(String(pre.approvals));
+    await expect(counts.locator('[data-count="overrides"]')).toHaveText(String(pre.overrides));
+    await expect(counts).toContainText("Prebuilt");
+  });
+  await test.step("390: cards, no sideways page scroll", async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openApp(page, "/app/routines");
+    await expect(page.getByTestId(G.card("rt_pre_payroll"))).toBeVisible();
+    await noSideScroll(page, "gallery 390");
   });
 });
