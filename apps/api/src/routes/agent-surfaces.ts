@@ -7,10 +7,13 @@
 // run settles, because the employee persona reaches only /v1/portal/* and cannot follow /v1/agent/runs.
 // Mentions (Q6): an inbound simulated chat message that names MENTION_HANDLE is recorded (agent.record_mention, system),
 // and a run opens tainted from its first step with read tools only; code posts its final answer once in the thread.
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { z } from "zod";
 import { and, asc, eq, or } from "drizzle-orm";
-import { ChatChannel, Forbidden, PORTAL_TOOLS, PortalAskBody, Unauthorized, ValidationError, CHAT_TOOLS, type HumanSession, type ToolOutcome } from "@weft/contracts";
+import { ChatChannel, Forbidden, PORTAL_TOOLS, PortalAskBody, SimInboundEmail, Unauthorized, ValidationError, CHAT_TOOLS, type HumanSession, type ToolOutcome } from "@weft/contracts";
 import { principals } from "@weft/db";
 import type { WeftAgentRuntime } from "@weft/agent";
 import { executorInternals } from "@weft/executor";
@@ -20,6 +23,8 @@ import { classifyPortalTopic, handoffReply, isHumanOnlyTopic, selfWorkerOf } fro
 import { getMention, listMentions, mentionReply, updateMention } from "../../../../packages/core/src/agent-surfaces/mentions";
 import { mentionsAgent, stripMention } from "../../../../packages/sim/src/chat";
 import { PORTAL_PAGE_MARKER } from "../../../../packages/agent/src/prompts/portal";
+import { inboundMessageRef, receiptFixtureOf, receiptPdf } from "../../../../packages/sim/src/email-inbound";
+import { listIntake } from "../../../../packages/core/src/agent-surfaces/intake";
 
 /** The persona waits for its answer in the request; a live answer takes seconds, the bound keeps a stuck run from holding it. */
 export const PORTAL_ANSWER_WAIT_MS = Number(process.env.WEFT_PORTAL_WAIT_MS ?? 90_000);
@@ -144,7 +149,38 @@ export function agentSurfacesRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json({ messageRef, mentionId, runId: handle.runId }, 202);
   });
 
-  return stubRoutes(r, "agent-surfaces", ["POST /v1/portal/agent/runs", "GET /v1/agent/mentions", "POST /v1/sim/chat/inbound"]);
+  // Email intake (S5): the simulated mailbox. The route resolves the receipt fixture and writes the file (as the portal
+  // upload path does); expenses.intake_email (system) checks the sender, stores the upload and files the expense.
+  r.post("/v1/sim/email/inbound", async (c) => {
+    const s = need(c.var.session);
+    const body = SimInboundEmail.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) throw new ValidationError("Body must be { from, subject, body, attachment: { fileName, fixture } | null }", { issues: body.error.issues });
+    const m = body.data;
+    const fixture = receiptFixtureOf(m);
+    let receipt: Record<string, unknown> | undefined;
+    if (fixture) {
+      const bytes = receiptPdf(fixture);
+      const sha = createHash("sha256").update(bytes).digest("hex");
+      const rel = `uploads/${sha}.bin`;
+      mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
+      if (!existsSync(join(weft.dataDir, rel))) writeFileSync(join(weft.dataDir, rel), bytes, { mode: 0o600 });
+      const name = (m.attachment?.fileName || `${fixture.fixture}.pdf`).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+      receipt = { file_name: `${name.slice(0, 2)}***${/\.[A-Za-z0-9]{1,5}$/.exec(name)?.[0] ?? ".pdf"}`, fixture: fixture.fixture, bytes: bytes.length, sha256: sha, storage_path: rel,
+        merchant: fixture.merchant, category: fixture.category, amount_cents: fixture.amountCents, transaction_date: fixture.date };
+    }
+    const out = (await weft.executor.system.exec("svc_sim", "expenses.intake_email", {
+      message_ref: inboundMessageRef(m), from: m.from, subject: m.subject, body: m.body, ...(receipt ? { receipt } : {}),
+    }, { eventId: null, attended: true, requestedBy: s.principalId })) as ToolOutcome<{ intake_id: string; status: string; expense_id: string | null }>;
+    if (!out.ok || out.status !== "done") return c.json({ intakeId: null, status: "refused", refusal: out.ok ? null : out.refusal }, 422);
+    return c.json({ intakeId: out.data.intake_id, status: out.data.status, expenseId: out.data.expense_id }, 200);
+  });
+
+  r.get("/v1/expense-intake", async (c) => {
+    const s = need(c.var.session);
+    return c.json(await listIntake(weft.db, s.companyId, c.req.query("status") ?? null));
+  });
+
+  return stubRoutes(r, "agent-surfaces", ["POST /v1/portal/agent/runs", "GET /v1/agent/mentions", "POST /v1/sim/chat/inbound", "POST /v1/sim/email/inbound", "GET /v1/expense-intake"]);
 }
 
 /** Read tools from the chat set plus comms.post_update: a mention run can look things up, never change them. */
