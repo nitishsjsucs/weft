@@ -11,7 +11,7 @@ import { digestKey, planCoarsen } from "./coarsen";
 import { renderDossiers, type DigestSources } from "./dossiers";
 import { companyDay } from "./time";
 import { BACKLINKS_HEADING, backlinkIndex, bodyWithoutBacklinks, extractLinks, linkify, linkPath, withBacklinks, type LinkContext } from "./links";
-import { excerptOf, pickSubjects, recallTerms, renderRecall, CAPS, type AliasEntry, type RecallCandidate } from "./recall";
+import { excerptOf, noteKindOf, pickSubjects, recallTerms, renderRecall, CAPS, type AliasEntry, type RecallCandidate } from "./recall";
 import { stripLinks } from "./links";
 import { TIER_ORDER, folderRank, matchLine, queryWords, type MatchTier } from "./terms";
 import { RECALL_BUDGET } from "@weft/contracts";
@@ -366,16 +366,30 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
       const seenText = new Set<string>();
       for (const [ti, term] of terms.entries()) {
         const hits = await this.search({ query: term, folders: null, at: null, limit: 20 }).catch(() => [] as MemoryHit[]);
-        hits.forEach((h, hi) => {
+        for (const [hi, h] of hits.entries()) {
           // One hit per file, never frontmatter or a bare backlink bullet, and never the same event twice (the
           // hourly, daily and weekly summaries repeat important events).
-          if (included.has(h.path) || h.snippet.startsWith("---") || /^[a-z_]+: /.test(h.snippet) || /^- \[\[[^\]]+\]\]$/.test(h.snippet.trim())) return;
+          if (included.has(h.path) || h.snippet.startsWith("---") || /^[a-z_]+: /.test(h.snippet) || /^- \[\[[^\]]+\]\]$/.test(h.snippet.trim())) continue;
+          const score = (RECALL_BUDGET.maxSearches - ti) * 10 - hi;
+          // Wave 4 round 2 (R2): a procedure or decision note recalls as the note (its body excerpt, id and path),
+          // since the matched line is often its heading and the steps below it are what the run needs. The path keeps
+          // the cite of the matched line, as every hit does; a citation field takes the path without it.
+          const noteKind = noteKindOf(h.path);
+          const note = noteKind ? await this.read(h.path).catch(() => null) : null;
+          if (noteKind && note) {
+            const body = maskAmounts(stripLinks(opts.redactor.redact(excerptOf(note.body, CAPS.note)))).trim();
+            if (!body || seenText.has(body)) continue;
+            included.add(h.path);
+            seenText.add(body);
+            cands.push({ kind: noteKind, path: h.cite, title: titleOf(note.body) ?? h.path, excerpt: body, score, asOf: note.frontmatter.updated || h.date, taintedBy: untrusted(h.path, note.frontmatter.taintedBy ?? h.taintedBy), noteId: note.frontmatter.id || ids.get(h.path) || null });
+            continue;
+          }
           const excerpt = maskAmounts(stripLinks(h.snippet).replace(/ \(ref: [^)]+\)$/, "")).trim();
-          if (!excerpt || seenText.has(excerpt)) return;
+          if (!excerpt || seenText.has(excerpt)) continue;
           included.add(h.path);
           seenText.add(excerpt);
-          cands.push({ kind: "hit", path: h.cite, title: h.path, excerpt: excerpt.length > CAPS.hit * 4 ? `${excerpt.slice(0, CAPS.hit * 4 - 12)} [clipped]` : excerpt, score: (RECALL_BUDGET.maxSearches - ti) * 10 - hi, asOf: h.date, taintedBy: untrusted(h.path, h.taintedBy), noteId: ids.get(h.path) ?? null });
-        });
+          cands.push({ kind: "hit", path: h.cite, title: h.path, excerpt: excerpt.length > CAPS.hit * 4 ? `${excerpt.slice(0, CAPS.hit * 4 - 12)} [clipped]` : excerpt, score, asOf: h.date, taintedBy: untrusted(h.path, h.taintedBy), noteId: ids.get(h.path) ?? null });
+        }
       }
       const { block, kept } = renderRecall(input.trustedOnly ? cands.filter((c) => !c.taintedBy) : cands, RECALL_BUDGET.maxTokens);
       return { block, items: kept.map((c) => ({ path: c.path, kind: c.kind, taintedBy: c.taintedBy })), searches: terms };

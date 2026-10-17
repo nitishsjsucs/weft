@@ -186,6 +186,8 @@ Instrumentation per model step: `admission_ms`, `assemble_ms`, `time_to_llm_ms` 
 - **Verify.** In order: (1) command post-conditions inside each command (`verify: { ok, checked }`); (2) when the model ends a turn, the checklist; a failing checklist gets one corrective notice listing failing items (`NOT_DONE`), then `escalated`; (3) numeric grounding for prose a person reads (section 4.8).
 - **Report.** Routine runs end with a final message; the engine writes `routine_runs.summary` and `left_for_human_json` from the checklist and the proposals, never from the prose.
 
+Wave 4 round 2 amendment (FG2, `docs/evals/round1-analysis.md` R3): a routine summary cites a memory note only through a validated structured field, never through the model's prose. Today that field is `procedure_ref` on `notices.escalate`: the executor checks that it names an existing, untainted `knowledge/procedures/` note before the command runs (refusing with `UNKNOWN_REFERENCE` or `NOT_PERMITTED`), the escalation records it, and its result data and summary name it, so the summary built from result summaries carries the citation. When the run-start recall holds trusted procedures, the runtime lists their paths in the run's derived arguments (`recalled_procedures`) and adds the first one that speaks of escalating to the derived `notices.escalate` arguments; the stored precheck and the checklist scope are unchanged.
+
 ### 4.4 Budgets and stopping rules
 
 | Agent kind | Model steps | Tool calls per step | Wall (active) | USD per run | Effort |
@@ -521,6 +523,12 @@ ids or amounts. A recall that adds nothing is traced as a `memory.recall` RETRIE
 unchanged and the run still starts. A routine run that ends without an agent run (precheck skip, quiet hours, nothing
 new) exports a `routine.run` CHAIN span with its status and reason, and an LLM span that retries a failed provider
 call carries `weft.retry` and `weft.retry_of`. Every new attribute passes the trace redactor at the source.
+
+Wave 4 round 2 (FG2, R2): a search hit in `knowledge/procedures/` or `knowledge/decisions/` is recalled as the note,
+not as the matched line: its body excerpt (capped as a dossier is, redacted, amounts masked), its id and its cite,
+labeled `procedure` or `decision`, and ranked after the dossiers and before every other hit.
+A matched heading alone never said what a procedure asks. `trustedOnly` is unchanged: a routine run never sees a
+tainted note or a decision note.
 
 ---
 

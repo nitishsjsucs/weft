@@ -21,6 +21,8 @@ export const SPECIALIST = { principal: "sim_tax_specialist", name: "Tax speciali
 export interface Escalation {
   outcome: "escalated"; reason_code: EscalationReason; reason: string; specialist: string; specialist_principal: string;
   escalated_at: string; escalated_by: string; previous_status: string; evidence: { label: string; ref: string }[];
+  /** The knowledge/procedures/ note the escalation follows (wave 4 round 2), checked by the executor before the run. */
+  procedure_ref?: string;
 }
 
 export async function evidencePack(tx: DbTx, n: typeof notices.$inferSelect): Promise<{ label: string; ref: string }[]> {
@@ -36,6 +38,6 @@ export async function evidencePack(tx: DbTx, n: typeof notices.$inferSelect): Pr
 export function specialistEmail(n: typeof notices.$inferSelect, e: Escalation): { subject: string; body: string } {
   return {
     subject: `Escalated notice ${n.id}: ${n.formCode}`,
-    body: [`A Larkspur Robotics notice needs a specialist: ${e.reason}.`, "", `Notice ${n.id} (${n.agency}, form ${n.formCode}), received ${n.receivedAt.slice(0, 10)}${n.respondBy ? `, respond by ${n.respondBy}` : ""}.`, "", "Evidence pack:", ...e.evidence.map((x) => `- ${x.label}: ${x.ref}`), "", "(sent by the Weft agent; this specialist is simulated)"].join("\n"),
+    body: [`A Larkspur Robotics notice needs a specialist: ${e.reason}.`, "", `Notice ${n.id} (${n.agency}, form ${n.formCode}), received ${n.receivedAt.slice(0, 10)}${n.respondBy ? `, respond by ${n.respondBy}` : ""}.`, "", "Evidence pack:", ...e.evidence.map((x) => `- ${x.label}: ${x.ref}`), "", ...(e.procedure_ref ? [`Procedure followed: ${e.procedure_ref}`, ""] : []), "(sent by the Weft agent; this specialist is simulated)"].join("\n"),
   };
 }

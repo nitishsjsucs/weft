@@ -73,6 +73,49 @@ export function routineRecallQuery(name: string, findings: unknown): string {
   return out.join(" ");
 }
 
+/** One line of a <recall> block (packages/executor/src/memory/recall.ts renderRecall): path, kind, untrusted, text. */
+const RECALL_ITEM = /^- (.+?) \(([a-z-]+), as of [0-9-]+(, untrusted)?\): (.*)$/;
+const unescapeData = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/**
+ * Commands whose derived arguments may cite a recalled procedure (wave 4 round 2, R3), with what the procedure must be
+ * about: an escalation cites a procedure that speaks of escalating, never one about something else.
+ */
+export const PROCEDURE_CITATIONS: Readonly<Record<string, RegExp>> = { "notices.escalate": /\bescalat/i };
+
+/** The trusted knowledge/procedures/ notes in a run-start recall block, in recall order, with their recalled text. */
+export function recalledProcedures(block: string): { path: string; text: string }[] {
+  const out: { path: string; text: string }[] = [];
+  for (const line of block.split("\n")) {
+    const m = RECALL_ITEM.exec(line);
+    if (!m || m[3]) continue;
+    const path = unescapeData(m[1]!).replace(/#L\d+$/, "");
+    if (!path.startsWith("knowledge/procedures/") || !path.endsWith(".md") || out.some((p) => p.path === path)) continue;
+    out.push({ path, text: unescapeData(m[4]!) });
+  }
+  return out;
+}
+
+/**
+ * The derived arguments a routine run sees once its run-start recall is known (wave 4 round 2, R2 and R3): every
+ * recalled procedure path is listed under `recalled_procedures`, and a derived command that can cite one (a
+ * PROCEDURE_CITATIONS key) gets `procedure_ref`, the first recalled procedure about that command. The executor still
+ * checks the reference when the call runs, so this only saves the model from copying a path. Nothing changes when
+ * recall holds no trusted procedure. The routine run's stored precheck (and so its checklist scope) is unchanged.
+ */
+export function withRecalledProcedures(derived: Record<string, unknown> | null, block: string): Record<string, unknown> | null {
+  const procs = recalledProcedures(block);
+  if (procs.length === 0) return derived;
+  const out: Record<string, unknown> = { ...(derived ?? {}), recalled_procedures: procs.map((p) => p.path) };
+  for (const [command, about] of Object.entries(PROCEDURE_CITATIONS)) {
+    const args = out[command];
+    if (!args || typeof args !== "object" || Array.isArray(args) || "procedure_ref" in args) continue;
+    const p = procs.find((x) => about.test(x.text));
+    if (p) out[command] = { ...(args as Record<string, unknown>), procedure_ref: p.path };
+  }
+  return out;
+}
+
 /**
  * The scripted and template stand-ins cannot branch on a derived plan the way a model reads one, so a routine run
  * whose precheck derived `plan` plays <routine>.<plan>.json when that script exists (for example
@@ -340,12 +383,14 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       triggers.set(handle.runId, { routine: input.routine, trigger });
       await store.createRun(baseRow(handle, { trigger: `routine:${input.routineRun.id}`, attended: input.routineRun.attended, routineRunId: input.routineRun.id, routineId: input.routine.id, kind: "routine", budget: input.routine.budget }));
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
+      // Recall first (wave 4 round 2): a recalled procedure is listed in the derived arguments and cited by them.
+      const recall = await recallFor(handle.runId, { kind: "routine", query: routineRecallQuery(input.routine.name, input.precheck.findings), subjectRefs: input.precheck.subjectRefs ?? [] });
       const packed = routinePack({
         nonce, now: opts.clock.now(), actingFor: input.routine.ownerPrincipalId, limits: { ...BUDGETS.routine, ...input.routine.budget, toolCallsPerStep: BUDGETS.routine.toolCallsPerStep },
         routine: { id: input.routine.id, name: input.routine.name, instructions: input.routine.instructions }, trigger,
-        precheck: { severity: input.precheck.severity, findings: input.precheck.findings, derivedArgs: input.precheck.derivedArgs }, checklist: input.routine.checklist,
+        precheck: { severity: input.precheck.severity, findings: input.precheck.findings, derivedArgs: withRecalledProcedures(input.precheck.derivedArgs ?? null, recall) }, checklist: input.routine.checklist,
       });
-      const text = withRecall(packed, await recallFor(handle.runId, { kind: "routine", query: routineRecallQuery(input.routine.name, input.precheck.findings), subjectRefs: input.precheck.subjectRefs ?? [] }));
+      const text = withRecall(packed, recall);
       await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true, trigger, principal: input.routine.ownerPrincipalId ?? null });
       enqueue(handle.runId);
     },
