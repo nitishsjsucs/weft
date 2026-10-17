@@ -136,6 +136,10 @@ export interface RunTraceInput {
   input: string;
   /** The frozen prompt, hashed into metadata.prompt_version. */
   prompt: string;
+  /** The run-start recall (recallDocs of the pack) on the run's first segment; a RETRIEVER under the first assemble. */
+  recall?: RetrievedDoc[] | null;
+  /** A segment that is not a runLoop call (weft.segment), for example the runtime's zero-token wake. */
+  segment?: string;
 }
 
 /** chat_can_propose: the labeled eval variant, or a chat run offered any tool beyond the read-only chat list. */
@@ -313,6 +317,85 @@ export function llmResultAttrs(res: ModelStepResult, prices: Prices, costUsdMicr
   };
 }
 
+// ---------------------------------------------------------------------------------------------------- tools and retrieval
+
+const MEMORY_SEARCH = new Set(["memory__search", "memory.search"]);
+
+export interface RetrievedDoc { id: string; content: string; score?: number; metadata: Record<string, unknown> }
+
+/** A RETRIEVER span under ctx: the query in, OpenInference documents out (ids, redacted content, metadata). */
+function retriever(name: string, ctx: Context, query: string, docs: RetrievedDoc[], extra: Record<string, AttributeValue | null | undefined> = {}, startTime?: number): void {
+  const span = startSpan(name, "RETRIEVER", {}, { ctx, ...(startTime === undefined ? {} : { startTime }) });
+  if (span.isRecording()) {
+    const a: Attributes = { ...inputAttrs(query), ...clean({ "weft.documents": docs.length, ...extra }) };
+    docs.forEach((d, i) => {
+      const p = `${SC.RETRIEVAL_DOCUMENTS}.${i}.`;
+      a[p + SC.DOCUMENT_ID] = text(d.id);
+      a[p + SC.DOCUMENT_CONTENT] = text(d.content);
+      if (d.score !== undefined) a[p + SC.DOCUMENT_SCORE] = d.score;
+      a[p + SC.DOCUMENT_METADATA] = json(d.metadata);
+    });
+    span.setAttributes(a);
+    span.setStatus({ code: SpanStatusCode.OK });
+  }
+  span.end();
+}
+
+/** memory.search hits (MemoryHit) as documents, from the outcome the model or the MCP client saw. */
+function searchDocs(o: ToolOutcome): RetrievedDoc[] | null {
+  if (!o.ok || o.status !== "done") return null;
+  const hits = (o.data as { hits?: unknown } | null)?.hits;
+  if (!Array.isArray(hits)) return null;
+  return hits.filter((h): h is Record<string, unknown> => Boolean(h) && typeof h === "object").map((h) => ({
+    id: String(h.cite ?? h.path ?? ""), content: String(h.snippet ?? ""),
+    metadata: { path: h.path ?? null, line: h.line ?? null, commit: h.commit ?? null, date: h.date ?? null, tainted_by: h.taintedBy ?? null },
+  }));
+}
+
+/**
+ * The outcome on a TOOL span: parameters, input and output, weft.outcome and friends, and a child RETRIEVER for
+ * memory search hits. A refusal is the harness working, so its status stays UNSET; ERROR is for exceptions only.
+ */
+function settleTool(span: Span, parentCtx: Context, name: string, o: ToolOutcome, args: unknown, threw: boolean): void {
+  if (!span.isRecording()) return;
+  const code = threw ? "error" : toolOutcomeCode(o.ok ? (o.status === "pending_approval" ? { ok: true, proposalId: o.proposalId } : { ok: true, status: o.status }) : { ok: false, refusal: o.refusal });
+  span.setAttributes({
+    [SC.TOOL_PARAMETERS]: json(args ?? {}), ...inputAttrs(args ?? {}), ...outputAttrs(o),
+    ...clean({
+      [WEFT_ATTR.outcome]: code, [WEFT_ATTR.refusalCode]: o.ok ? null : o.refusal.code,
+      [WEFT_ATTR.proposalId]: o.ok && o.status === "pending_approval" ? o.proposalId : null, [WEFT_ATTR.tainted]: o.tainted,
+    }),
+  });
+  if (threw) span.setStatus({ code: SpanStatusCode.ERROR, message: o.ok ? "error" : text(o.refusal.message.slice(0, 300)) });
+  else if (o.ok) span.setStatus({ code: SpanStatusCode.OK });
+  const docs = MEMORY_SEARCH.has(name) && !threw ? searchDocs(o) : null;
+  if (docs) {
+    const q = (args as { query?: unknown } | null)?.query;
+    retriever(MEMORY_SEARCH_SPAN, trace.setSpan(parentCtx, span), typeof q === "string" ? q : "", docs, { "weft.tainted": o.tainted });
+  }
+}
+
+/** Child span name for memory search hits (phoenix.md 5.2: a RETRIEVER under the memory__search TOOL span). */
+export const MEMORY_SEARCH_SPAN = "memory.search";
+
+/** One line of a <recall> block (packages/executor/src/memory/recall.ts renderRecall). */
+const RECALL_LINE = /^- (.+?) \(([a-z-]+), as of ([0-9-]+)(, untrusted)?\): (.*)$/;
+
+/**
+ * The documents of the <recall> block in a context pack (the runtime appends it at run start), or null when the pack
+ * has none. Recall returns only the rendered block, so the span is a projection of what the model was given.
+ */
+export function recallDocs(packText: string): RetrievedDoc[] | null {
+  const m = /<recall[^>]*>\n([\s\S]*?)\n<\/recall>/.exec(packText);
+  if (!m) return null;
+  const docs: RetrievedDoc[] = [];
+  for (const line of m[1]!.split("\n")) {
+    const l = RECALL_LINE.exec(line);
+    if (l) docs.push({ id: l[1]!, content: l[5]!, metadata: { kind: l[2]!, as_of: l[3]!, untrusted: Boolean(l[4]) } });
+  }
+  return docs;
+}
+
 // ---------------------------------------------------------------------------------------------------- the loop's tracer
 
 /** A TOOL span: active while the executor runs (child runs nest under it), ended once its run_steps row exists. */
@@ -387,8 +470,9 @@ function handleOf(span: Span): StageHandle {
   };
 }
 
-function makeLoopTrace(agent: Span): LoopTrace {
+function makeLoopTrace(agent: Span, recall: { query: string; docs: RetrievedDoc[] } | null = null): LoopTrace {
   let lastLlm: Span = NOOP_SPAN;
+  let pendingRecall = recall;
   const recording = agent.isRecording();
   return {
     recording,
@@ -408,8 +492,13 @@ function makeLoopTrace(agent: Span): LoopTrace {
     row(row) {
       if (!recording) return;
       const name = row.stage === "post" ? SPAN_NAMES.post : row.stage === "admission" ? SPAN_NAMES.admission : row.stage === "assemble" ? SPAN_NAMES.assemble : row.stage;
-      const span = startSpan(name, "CHAIN", rowAttrs(row), { startTime: rowStart(rowMs(row)) });
+      const startTime = rowStart(rowMs(row));
+      const span = startSpan(name, "CHAIN", rowAttrs(row), { startTime });
       if (row.outcome === "error" || row.kind === "error") span.setStatus({ code: SpanStatusCode.ERROR });
+      if (row.stage === "assemble" && pendingRecall) {
+        retriever(SPAN_NAMES.recall, trace.setSpan(context.active(), span), pendingRecall.query, pendingRecall.docs, { "weft.source": "context_pack" }, startTime);
+        pendingRecall = null;
+      }
       span.end();
     },
     async llm(parent, req, providerId, fn) {
@@ -440,18 +529,7 @@ function makeLoopTrace(agent: Span): LoopTrace {
         run: (fn) => context.with(trace.setSpan(parent.ctx, span), fn),
         outcome(o, args, threw = false) {
           ended = Date.now();
-          if (!span.isRecording()) return;
-          const code = threw ? "error" : toolOutcomeCode(o.ok ? (o.status === "pending_approval" ? { ok: true, proposalId: o.proposalId } : { ok: true, status: o.status }) : { ok: false, refusal: o.refusal });
-          span.setAttributes({
-            [SC.TOOL_PARAMETERS]: json(args ?? {}), ...inputAttrs(args ?? {}), ...outputAttrs(o),
-            ...clean({
-              [WEFT_ATTR.outcome]: code, [WEFT_ATTR.refusalCode]: o.ok ? null : o.refusal.code,
-              [WEFT_ATTR.proposalId]: o.ok && o.status === "pending_approval" ? o.proposalId : null, [WEFT_ATTR.tainted]: o.tainted,
-            }),
-          });
-          // A refusal is the harness working: status stays UNSET. ERROR is for exceptions only.
-          if (threw) span.setStatus({ code: SpanStatusCode.ERROR, message: o.ok ? "error" : text(o.refusal.message.slice(0, 300)) });
-          else if (o.ok) span.setStatus({ code: SpanStatusCode.OK });
+          settleTool(span, parent.ctx, name, o, args, threw);
         },
         end(row) {
           if (row) span.setAttribute(WEFT_ATTR.stepN, row.n);
@@ -493,9 +571,10 @@ export async function traceRun(i: RunTraceInput, fn: (t: LoopTrace) => Promise<A
   if (user) ctx = setUser(ctx, { userId: text(user) });
   ctx = setTags(setMetadata(ctx, redact(meta) as unknown as Record<string, unknown>), runTags(meta).map(text));
   return context.with(ctx, async () => {
-    const span = startSpan(SPAN_NAMES.run, "AGENT", { [SC.AGENT_NAME]: AGENT_NAME, [WEFT_ATTR.runId]: i.run.id, ...inputAttrs(i.input) });
+    const span = startSpan(SPAN_NAMES.run, "AGENT", { [SC.AGENT_NAME]: AGENT_NAME, [WEFT_ATTR.runId]: i.run.id, ...inputAttrs(i.input), ...clean({ "weft.segment": i.segment ?? "loop" }) });
     try {
-      const row = await context.with(trace.setSpan(context.active(), span), () => fn(makeLoopTrace(span)));
+      const recall = i.recall?.length ? { query: i.input, docs: i.recall } : null;
+      const row = await context.with(trace.setSpan(context.active(), span), () => fn(makeLoopTrace(span, recall)));
       if (span.isRecording()) {
         span.setAttributes({
           ...outputAttrs(row.summary ?? ""),
@@ -516,6 +595,27 @@ export async function traceRun(i: RunTraceInput, fn: (t: LoopTrace) => Promise<A
       span.end();
     }
   });
+}
+
+// ---------------------------------------------------------------------------------------------------- MCP calls
+
+/** An executor call from the MCP surface (packages/executor/src/pipeline.ts ObservedCall, structurally). */
+export interface McpCallInfo { command: string; wireName: string | null; args: unknown; surface: string; caller: string; companyId: string; principalId: string }
+
+/**
+ * A root TOOL span for one MCP call. MCP clients call POST /v1/tools/:name, which runs in the executor and never enters
+ * the loop, so the executor's call observer (wired in compose.ts) opens this span and settles it with the outcome the
+ * client gets (already redacted by the executor). user.id is the key's principal; tags are ["mcp", <wire name>].
+ */
+export function traceMcpCall(c: McpCallInfo): (outcome: ToolOutcome, threw: boolean) => void {
+  const name = text((c.wireName ?? c.command).slice(0, 80));
+  let ctx = setUser(ROOT_CONTEXT, { userId: text(c.principalId) });
+  ctx = setTags(setMetadata(ctx, redact({ kind: "mcp", surface: c.surface, caller: c.caller, company_id: c.companyId, command: c.command.slice(0, 80) })), ["mcp", name]);
+  const span = startSpan(name, "TOOL", { [SC.TOOL_NAME]: name }, { ctx });
+  return (outcome, threw) => {
+    settleTool(span, ctx, name, outcome, c.args, threw);
+    span.end();
+  };
 }
 
 /** The request a run was given: the <request> of a chat pack, else the routine's name and trigger, else the pack. */

@@ -13,7 +13,7 @@ import { codeOfError, hintsOfError, refusal } from "./outcome";
 import { loadAutonomyFacts, policy, RISK_RANK, riskOf } from "./policy";
 import { agentNoteOf, genericPreview, insertProposal, proposeCall, type ProposalRow } from "./proposals";
 import { findUnknownReference } from "./references";
-import { tierFor } from "./registry";
+import { tierFor, wireName } from "./registry";
 import type { CallScope } from "./scope";
 import { GRANT_RANK, loadLimits } from "./store";
 import { nullToUndefined } from "./strict-schema";
@@ -74,8 +74,43 @@ export const UI_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "screening.review", "screening.engage", "screening.start_pre_adverse", "screening.send_final_adverse", "screening.cancel_adverse", "screening.proceed_to_criminal",
 ]);
 
+/** A call from the MCP surface as the telemetry observer sees it (wave 4, docs/telemetry.md). */
+export interface ObservedCall { command: string; wireName: string | null; args: unknown; surface: string; caller: string; companyId: string; principalId: string }
+/** Opens a span for a call and returns the function that settles it with the outcome this pipeline returns. */
+export type CallObserver = (call: ObservedCall) => (outcome: ToolOutcome, threw: boolean) => void;
+
+/**
+ * The telemetry observer, if the composition root set one (compose.ts assigns engine.observeCall from @weft/agent's
+ * traceMcpCall). The executor imports no OpenTelemetry; MCP calls never enter the agent loop, so this is their span.
+ */
+function observerOf(e: Engine, scope: CallScope): CallObserver | null {
+  if (scope.ctx.surface !== "mcp" || scope.run) return null;
+  const f = (e as Engine & { observeCall?: unknown }).observeCall;
+  return typeof f === "function" ? (f as CallObserver) : null;
+}
+
 /** Runs one call inside the caller's transaction. Never opens a transaction or takes the write lock itself. */
 export async function runInTx(e: Engine, tx: DbTx, scope: CallScope, command: string, rawArgs: unknown, opts: CallOptions = {}): Promise<{ outcome: ToolOutcome; def: WeftCommand | null }> {
+  const observe = observerOf(e, scope);
+  if (!observe) return runCall(e, tx, scope, command, rawArgs, opts);
+  // Telemetry never changes or breaks a call: observer failures are swallowed, the outcome is returned unchanged.
+  const quiet = (fn: () => void) => { try { fn(); } catch { /* telemetry only */ } };
+  let settle: (o: ToolOutcome, threw: boolean) => void = () => undefined;
+  const def = e.registry.def(command);
+  quiet(() => {
+    settle = observe({ command, wireName: def ? wireName(def.name) : null, args: rawArgs, surface: scope.ctx.surface, caller: scope.caller, companyId: scope.ctx.companyId, principalId: scope.ctx.principal.id });
+  });
+  try {
+    const r = await runCall(e, tx, scope, command, rawArgs, opts);
+    quiet(() => settle(r.outcome, false));
+    return r;
+  } catch (err) {
+    quiet(() => settle(refusal("INTERNAL", "The executor failed", scope.ctx.tainted), true));
+    throw err;
+  }
+}
+
+async function runCall(e: Engine, tx: DbTx, scope: CallScope, command: string, rawArgs: unknown, opts: CallOptions): Promise<{ outcome: ToolOutcome; def: WeftCommand | null }> {
   const ctx = scope.ctx;
   const t = () => ctx.tainted;
   const def = e.registry.def(command) ?? null;

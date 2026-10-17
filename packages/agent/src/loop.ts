@@ -10,7 +10,7 @@ import { check } from "@weft/grounding";
 import { canonicalJson } from "./canonical";
 import { addUsage, reserveUsd, RUN_CAP_SCALE, stepCostUsd, usdToMicros, type Prices } from "./cost";
 import { approxTokens } from "./context";
-import { NOOP_LOOP_TRACE, runInputOf, traceRun, type LoopTrace } from "./otel";
+import { NOOP_LOOP_TRACE, recallDocs, runInputOf, traceRun, type LoopTrace } from "./otel";
 import { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
 import type { NewStep, RunStore } from "./store";
 
@@ -140,12 +140,35 @@ interface Terminal { status: RunStatus; reason: TerminalReason; summary: string 
 export async function runLoop(deps: LoopDeps, handle: RunHandle): Promise<AgentRunRow> {
   // Telemetry (wave 4): one AGENT span per call, wrapping the loop below; a missing run or setup throws untraced.
   const r0 = await deps.store.getRun(handle.runId);
-  const s0 = r0 && ["queued", "running", "waiting"].includes(r0.status) ? setupOf(await deps.store.steps(r0.id)) : null;
+  const st0 = r0 && ["queued", "running", "waiting"].includes(r0.status) ? await deps.store.steps(r0.id) : [];
+  const s0 = r0 ? setupOf(st0) : null;
   if (!r0 || !s0) return driveLoop(deps, handle, NOOP_LOOP_TRACE);
   return traceRun({
     run: r0, promptKind: s0.promptKind, allowlist: s0.allowlist, routineId: s0.routineId, principal: s0.principal ?? null,
     input: runInputOf(s0.text), prompt: frozenPrompt(s0.promptKind),
+    // The run-start recall is shown once, on the segment that first assembles the pack (not again after a wake).
+    recall: st0.some((s) => s.kind === "model_call") ? null : recallDocs(s0.text),
   }, (lt) => driveLoop(deps, handle, lt));
+}
+
+/**
+ * Telemetry for the runtime's zero-token wake (runtime.ts wake), which finishes a waiting run in code without runLoop:
+ * a short AGENT segment with a terminal CHAIN, joined to the run's other segments by weft.run_id and session.id.
+ * Never throws: telemetry must not change how a wake ends.
+ */
+export async function traceWakeSegment(store: RunStore, runId: string, items: ChecklistState[] | null): Promise<void> {
+  try {
+    const run = await store.getRun(runId);
+    const s = run ? setupOf(await store.steps(runId)) : null;
+    if (!run || !s) return;
+    await traceRun({
+      run, promptKind: s.promptKind, allowlist: s.allowlist, routineId: s.routineId, principal: s.principal ?? null,
+      input: runInputOf(s.text), prompt: frozenPrompt(s.promptKind), segment: "zero_token_wake",
+    }, (lt) => lt.stage("terminal", {
+      "weft.status": run.status, "weft.terminal_reason": run.terminalReason, "weft.zero_token_wake": true,
+      "weft.checklist_passed": items ? items.filter((i) => i.passed).length : null, "weft.checklist_total": items ? items.length : null,
+    }, async () => run));
+  } catch { /* telemetry only */ }
 }
 
 async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Promise<AgentRunRow> {

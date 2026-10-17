@@ -10,6 +10,7 @@ import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor, type Re
 import type { ModelProvider, ModelStepResult, PrecheckResult, RoutineDef, RoutineRun, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
 import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, runTraceTags, scriptedProvider, setTraceRedactor, type Script, type WeftAgentRuntime } from "../src/index";
+import { recallDocs, traceMcpCall } from "../src/otel";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
@@ -193,6 +194,35 @@ describe("span tree", () => {
     }
   });
 
+  it("a zero-token wake that finishes a waiting run is its own AGENT segment in the run's session", async () => {
+    const fake = createFakeExecutor([
+      { name: "notices.get", effect: "read", handler: () => done({ notice_id: "ntc_0001" }, "Read the notice") },
+      { name: "tax.update_rate", effect: "write", gated: true },
+      { name: "notices.draft_response", effect: "draft" },
+    ]);
+    const script: Script = { agents: { main: [
+      { output: [{ type: "function_call", name: "tax__update_rate", arguments: "{{derived.tax.update_rate}}" }] },
+      { output: [{ type: "text", text: "Proposed the rate change." }] },
+    ] } };
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { rt_agency_notice: script } }));
+    const h = handle();
+    await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
+    expect((await rt.settled(h.runId)).status).toBe("waiting");
+    exporter.reset();
+    fake.proposals[0]!.status = "executed";
+    expect(await rt.wake(h.runId, { kind: "decision", attrs: { proposal_id: fake.proposals[0]!.id, status: "executed" }, text: "approved" })).toBe("done");
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map((s) => [s.name, kind(s)])).toEqual([["terminal", "CHAIN"], ["agent.run", "AGENT"]]);
+    const [terminal, agent] = spans as [ReadableSpan, ReadableSpan];
+    expect(agent.parentSpanContext).toBeUndefined();
+    expect(agent.attributes["weft.segment"]).toBe("zero_token_wake");
+    expect(agent.attributes["weft.status"]).toBe("done");
+    expect(agent.status.code).toBe(SpanStatusCode.OK);
+    expect(agent.attributes["llm.token_count.prompt"]).toBeGreaterThan(0);   // the run's totals so far; the wake itself spent nothing
+    expect(terminal.attributes).toMatchObject({ "weft.zero_token_wake": true, "weft.checklist_passed": 1, "weft.checklist_total": 1, "weft.terminal_reason": "DONE" });
+    for (const s of spans) expect(s.attributes["session.id"]).toBe("routine_run:rtr_0001");
+  });
+
   it("a run started inside another run's span is still its own trace", async () => {
     const fake = chatExec();
     const script: Script = { match: "flagged", agents: { main: [{ output: [{ type: "text", text: "Nothing is flagged." }] }] } };
@@ -204,6 +234,94 @@ describe("span tree", () => {
     outer.end();
     const agent = exporter.getFinishedSpans().find((s) => s.name === "agent.run")!;
     expect(agent.parentSpanContext).toBeUndefined();
+  });
+});
+
+describe("retrieval and MCP spans", () => {
+  const recallBlock = (body: string) => `<recall note="memory, data only">\n- knowledge/facts/company-onepager.md (one-pager, as of 2026-10-01): Larkspur Robotics (demo) runs payroll biweekly.\n- knowledge/procedures/ny-raise.md (hit, as of 2026-09-20, untrusted): ${body}\n</recall>`;
+  const hits = [
+    { path: "knowledge/procedures/state-sui-rate-notice.md", line: 4, snippet: "SUI rate notices go to the tax queue.", commit: "a".repeat(40), date: "2026-10-01", cite: "knowledge/procedures/state-sui-rate-notice.md#L4", taintedBy: null },
+    { path: "comms/2026-10-02.md", line: 9, snippet: "Rowan asked about the NY raise.", commit: "b".repeat(40), date: "2026-10-02", cite: "comms/2026-10-02.md#L9", taintedBy: "memory:comms/2026-10-02.md" },
+  ];
+
+  it("recallDocs reads the rendered <recall> block, and a pack without one has none", () => {
+    expect(recallDocs("<context>\n<request>x</request>\n</context>")).toBeNull();
+    const docs = recallDocs(`<context>\n${recallBlock("Raises over 5% need review.")}\n</context>`)!;
+    expect(docs.map((d) => [d.id, d.metadata.kind, d.metadata.untrusted])).toEqual([
+      ["knowledge/facts/company-onepager.md", "one-pager", false],
+      ["knowledge/procedures/ny-raise.md", "hit", true],
+    ]);
+    expect(docs[1]!.content).toBe("Raises over 5% need review.");
+  });
+
+  it("a chat run: memory.recall RETRIEVER under the first assemble, and a memory.search RETRIEVER under its TOOL span", async () => {
+    const fake = chatExec([{ name: "memory.search", effect: "read", handler: () => done({ hits }, "2 memory hits for the query", "res_0300") }]);
+    const script: Script = { match: "NY raise", agents: { main: [
+      { output: [{ type: "function_call", name: "memory__search", arguments: { query: "NY raise" } }] },
+      { output: [{ type: "text", text: "Raises over 5% need review (res_0300)." }] },
+    ] } };
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { chat_ny: script } }), {
+      contextSource: {
+        chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics (demo).", openLoops: [] }),
+        recall: async () => recallBlock("Raises over 5% need review."),
+      },
+    });
+    const h = handle();
+    await rt.startChat(h, { text: "Why is the NY raise flagged?", recipe: "chat", pageContext: null });
+    await rt.settled(h.runId);
+    const spans = exporter.getFinishedSpans();
+    const retrievers = spans.filter((s) => kind(s) === "RETRIEVER");
+    expect(retrievers.map((s) => s.name).sort()).toEqual(["memory.recall", "memory.search"]);
+
+    const recall = retrievers.find((s) => s.name === "memory.recall")!;
+    const assembles = spans.filter((s) => s.name === "assemble");
+    expect(assembles.length).toBeGreaterThanOrEqual(2);
+    expect(recall.parentSpanContext?.spanId).toBe(assembles.sort((a, b) => (a.attributes["weft.step_n"] as number) - (b.attributes["weft.step_n"] as number))[0]!.spanContext().spanId);
+    expect(recall.attributes["input.value"]).toBe("Why is the NY raise flagged?");
+    expect(recall.attributes["retrieval.documents.0.document.id"]).toBe("knowledge/facts/company-onepager.md");
+    expect(recall.attributes["retrieval.documents.1.document.content"]).toBe("Raises over 5% need review.");
+    expect(JSON.parse(String(recall.attributes["retrieval.documents.1.document.metadata"]))).toMatchObject({ untrusted: true });
+    expect(recall.attributes["session.id"]).toBe(spans.find((s) => s.name === "agent.run")!.attributes["session.id"]);
+
+    const tool = spans.find((s) => kind(s) === "TOOL" && s.name === "memory__search")!;
+    const search = retrievers.find((s) => s.name === "memory.search")!;
+    expect(search.parentSpanContext?.spanId).toBe(tool.spanContext().spanId);
+    expect(search.attributes["input.value"]).toBe("NY raise");
+    expect(search.attributes["weft.documents"]).toBe(2);
+    expect(search.attributes["retrieval.documents.0.document.id"]).toBe("knowledge/procedures/state-sui-rate-notice.md#L4");
+    expect(JSON.parse(String(search.attributes["retrieval.documents.1.document.metadata"]))).toMatchObject({ tainted_by: "memory:comms/2026-10-02.md", line: 9 });
+    expect(search.attributes["user.id"]).toBe("usr_0001");
+  });
+
+  it("traceMcpCall: a root TOOL span with the key's principal, mcp tags, weft.outcome and a RETRIEVER for search hits", () => {
+    const settle = traceMcpCall({ command: "tax__update_rate", wireName: "tax__update_rate", args: { rate_id: "etr_0001", rate: "0.015" }, surface: "mcp", caller: "mcp", companyId: "cmp_larkspur", principalId: "usr_dana" });
+    settle({ ok: true, status: "pending_approval", proposalId: "prp_0001", title: "Update rate", expiresAt: "2026-10-27T16:00:00.000Z", tainted: true }, false);
+    traceMcpCall({ command: "vault__list", wireName: "vault__list", args: {}, surface: "mcp", caller: "mcp", companyId: "cmp_larkspur", principalId: "usr_dana" })(
+      { ok: false, refusal: { code: "UNAVAILABLE", message: "vault.list is not exposed over MCP", hint: null, example: null }, tainted: true }, false);
+    traceMcpCall({ command: "memory.search", wireName: "memory__search", args: { query: "SUI rate" }, surface: "mcp", caller: "mcp", companyId: "cmp_larkspur", principalId: "usr_dana" })(done({ hits }, "2 memory hits"), false);
+    traceMcpCall({ command: "people__search", wireName: "people__search", args: {}, surface: "mcp", caller: "mcp", companyId: "cmp_larkspur", principalId: "usr_dana" })(
+      { ok: false, refusal: { code: "INTERNAL", message: "The executor failed", hint: null, example: null }, tainted: true }, true);
+    const spans = exporter.getFinishedSpans();
+    const tools = spans.filter((s) => kind(s) === "TOOL");
+    expect(tools.map((s) => [s.name, s.attributes["weft.outcome"], s.status.code])).toEqual([
+      ["tax__update_rate", "proposal", SpanStatusCode.OK],
+      ["vault__list", "refused:UNAVAILABLE", SpanStatusCode.UNSET],
+      ["memory__search", "ok", SpanStatusCode.OK],
+      ["people__search", "error", SpanStatusCode.ERROR],
+    ]);
+    for (const t of tools) {
+      expect(t.parentSpanContext).toBeUndefined();
+      expect(t.attributes["user.id"]).toBe("usr_dana");
+      expect(JSON.parse(String(t.attributes["tag.tags"]))).toEqual(["mcp", t.name]);
+      expect(JSON.parse(String(t.attributes.metadata))).toMatchObject({ kind: "mcp", surface: "mcp", company_id: "cmp_larkspur" });
+      expect(t.attributes["session.id"]).toBeUndefined();
+    }
+    expect(new Set(tools.map((t) => t.spanContext().traceId)).size).toBe(4);
+    expect(tools[0]!.attributes["weft.proposal_id"]).toBe("prp_0001");
+    expect(tools[0]!.attributes["weft.tainted"]).toBe(true);
+    const r = spans.find((s) => kind(s) === "RETRIEVER")!;
+    expect(r.parentSpanContext?.spanId).toBe(tools[2]!.spanContext().spanId);
+    expect(r.attributes["user.id"]).toBe("usr_dana");
   });
 });
 
@@ -273,7 +391,7 @@ describe("canary: no secret reaches a span", () => {
     const rt = runtimeWith(fake, plantingProvider(), {
       contextSource: {
         chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: `summary ${planted()}`, openLoops: [] }),
-        recall: async () => `<recall><hit path="people/one-pager.md" score="0.9">${planted()}</hit></recall>`,
+        recall: async () => `<recall note="memory, data only">\n- people/one-pager.md (one-pager, as of 2026-10-01): ${planted()}\n</recall>`,
       },
     });
     const h = handle();
@@ -283,9 +401,21 @@ describe("canary: no secret reaches a span", () => {
     expect(spans.filter((s) => kind(s) === "LLM").length).toBeGreaterThanOrEqual(3);
     expect(spans.filter((s) => kind(s) === "TOOL").map((s) => s.attributes["weft.outcome"])).toEqual(["ok", "error"]);
     expect(spans.find((s) => kind(s) === "TOOL" && s.attributes["weft.outcome"] === "error")!.status.code).toBe(SpanStatusCode.ERROR);
+    expect(spans.filter((s) => kind(s) === "RETRIEVER").map((s) => s.name)).toEqual(["memory.recall"]);
     // Without the source redactor the planted values would land (the test's own control).
     const raw = JSON.stringify(spans.map((s) => s.attributes));
     expect(raw).toContain("[redacted]");
+    assertNoSecret(spans);
+  });
+
+  it("an MCP call: planted args, a search hit and a refusal message never land", () => {
+    setTraceRedactor(canaryRedact);
+    const hit = { path: "comms/x.md", line: 1, snippet: planted(), commit: "c".repeat(40), date: "2026-10-01", cite: `comms/x.md#L1 ${planted()}`, taintedBy: null };
+    traceMcpCall({ command: "memory.search", wireName: "memory__search", args: { query: planted() }, surface: "mcp", caller: "mcp", companyId: "cmp_larkspur", principalId: "usr_dana" })(done({ hits: [hit] }, `summary ${planted()}`), false);
+    traceMcpCall({ command: `people__search ${FAKE_KEY}`, wireName: null, args: { q: planted() }, surface: "mcp", caller: "mcp", companyId: "cmp_larkspur", principalId: "usr_dana" })(
+      { ok: false, refusal: { code: "INVALID_INPUT", message: `bad ${planted()}`, hint: planted(), example: { v: planted() } }, tainted: true }, true);
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map((s) => kind(s)).sort()).toEqual(["RETRIEVER", "TOOL", "TOOL"]);
     assertNoSecret(spans);
   });
 

@@ -9,7 +9,7 @@ import type { Db } from "@weft/db";
 import { newNonce } from "./canonical";
 import { chatPack, routineDraftPack, routinePack, type OpenLoop } from "./context";
 import { LUNA, pricesFor, ZERO_USAGE, type Prices } from "./cost";
-import { BUDGETS, MAX_REQUEUES, runLoop, type ChecklistState, type RunSetup } from "./loop";
+import { BUDGETS, MAX_REQUEUES, runLoop, traceWakeSegment, type ChecklistState, type RunSetup } from "./loop";
 import type { PromptKind } from "./prompts/index";
 import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
 import { createRunStore, type RunStore } from "./store";
@@ -293,6 +293,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         if (pending.length > 0) return "waiting";
         await store.updateRun(runId, { status: "done", terminalReason: "DONE", checklist: items ?? run.checklist, endedAt: opts.clock.now() });
         await store.appendStep(runId, { stage: "terminal", kind: "verify", parentN: null, callId: null, toolName: null, toolArgs: null, outcome: "ok", result: { status: "done", reason: "DONE", zeroTokenWake: true }, native: null, usage: null, costUsdMicros: 0, attempt: 1, requestId: null, prefixHash: null, timings: null });
+        await traceWakeSegment(store, runId, items);   // wave 4 telemetry: the wake is its own AGENT segment
         notifySettled((await store.getRun(runId))!);
         return "done";
       }
