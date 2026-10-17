@@ -1,4 +1,4 @@
-// `pnpm demo` (SPEC 12, docs/wave2.md, docs/wave3.md): a narrated run of the golden paths GP1 to GP18 on one seeded world in
+// `pnpm demo` (SPEC 12, docs/wave2.md, docs/wave3.md, docs/wave4.md): a narrated run of the golden paths GP1 to GP24 on one seeded world in
 // .data-demo, with the scripted provider and a frozen sim clock (Mon 2026-10-26 08:30 PT). Every step goes through the
 // same HTTP routes the UI, the portal and MCP clients use, then prints what changed. The one exception is the GP10
 // fixture (a mid-period raise written straight into pay_rates, as the scenario test does). The world is kept, so it
@@ -361,6 +361,33 @@ const wd2 = (await post("/v1/integrations/workday/sync")) as { data: { detected:
 say(`   one Workday change: ${wd2.data.detected.length} worker, applied ${(wd2.data.applied.applied ?? []).map((a) => a.field).join(", ") || "nothing"}, ${(wd2.data.applied.sync_item_ids ?? []).length} human-only conflict`);
 const owner = (await get("/v1/integrations/workday")) as { ownership?: Record<string, string> };
 say(`   Workday now owns ${Object.entries(owner.ownership ?? {}).filter(([, v]) => v === "vendor").map(([k]) => k).join(", ")}`);
+
+// Wave 4 (docs/wave4.md): GP20 to GP24 on the same world, through the same routes the screens call. GP21 (life events
+// and the check-in form in the portal) runs in the browser spec and as a scenario test.
+head("GP20 compliance calendar and the Q3 Form 941");
+const cal = (await get("/v1/compliance/calendar")) as unknown as { kind: string; form?: string; period?: string; status: string; dueOn: string; subjectRef: string }[];
+say(`   calendar: ${cal.length} rows (${[...new Set(cal.map((r) => r.kind))].sort().join(", ")})`);
+const q3 = cal.find((r) => r.kind === "filing" && r.form === "941" && r.period === "2026-Q3");
+if (q3) {
+  const prep = (await post(`/v1/filings/${q3.subjectRef}/prepare`)) as { data?: { balance_due_cents?: number; runs?: string[] } };
+  say(`   941 for 2026-Q3 (due ${q3.dueOn}, ${q3.status}) prepared from ${prep.data?.runs?.length ?? 0} processed runs, balance due ${prep.data?.balance_due_cents ?? "?"} cents`);
+  const filed = (await post(`/v1/filings/${q3.subjectRef}/file`)) as { status?: string; proposalId?: string };
+  say(`   filing the return is R4: ${filed.status} as ${filed.proposalId} in the Inbox, nothing sent to the agency`);
+}
+
+head("GP22 a portal question from the new hire's own record");
+const ask = (await post("/v1/portal/agent/runs", { text: "What is the meal limit for a client lunch?" }, rowan.persona)) as { topic?: string; status?: string; answer?: string | null };
+say(`   ${ask.topic} question, run ${ask.status}: ${(ask.answer ?? "").slice(0, 140)}`);
+const leave = (await post("/v1/portal/agent/runs", { text: "I need to take medical leave next month, how does that work?" }, rowan.persona)) as { status?: string; handoffId?: string | null };
+say(`   medical leave goes to a person in code: ${leave.status} (${leave.handoffId}), no model run`);
+
+head("GP23 Reports");
+const catalog = (await get("/v1/reports")) as unknown as { metric: string; allowed: boolean }[];
+say(`   ${catalog.length} metrics in the catalog, ${catalog.filter((c) => c.allowed).length} visible to Dana`);
+
+head("GP24 permissions and the routine gallery");
+const gallery = (await get("/v1/routine-gallery")) as unknown as { routineId: string; enabled: boolean; nextRunAt: string | null }[];
+say(`   gallery: ${gallery.length} routines, ${gallery.filter((g) => g.enabled).length} enabled, ${gallery.filter((g) => g.nextRunAt).length} with a next run`);
 
 const chain = await weft.executor.verifyChain();
 head(`Audit chain ${chain.ok ? "verifies" : "FAILS"}; memory head ${await weft.executor.memory.head()}`);
