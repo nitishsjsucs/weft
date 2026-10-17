@@ -52,7 +52,7 @@ const post = (path: string, body?: unknown) => app.request(path, { method: "POST
 describe("/v1/routines routes", () => {
   it("lists the prebuilt routines (wave 1, wave 2 and wave 3) and reads one", async () => {
     const list = (await (await app.request("/v1/routines")).json()) as RoutineDef[];
-    expect(list.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_ats_hire", "rt_benefits_window_reminders", "rt_contractor_forms", "rt_exec_briefing", "rt_expense_review", "rt_life_event_window", "rt_memory_digest", "rt_milestones", "rt_monthly_exec_report", "rt_new_hire", "rt_new_hire_ready", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll", "rt_screening_follow_up", "rt_thirty_day_checkin", "rt_time_off_requests"]);
+    expect(list.map((r) => r.id)).toEqual(["rt_agency_notice", "rt_ats_hire", "rt_benefits_window_reminders", "rt_contractor_forms", "rt_exec_briefing", "rt_expense_review", "rt_first_day_message", "rt_life_event_window", "rt_memory_digest", "rt_milestones", "rt_monthly_exec_report", "rt_new_hire", "rt_new_hire_ready", "rt_onboarding_nudge", "rt_open_enrollment", "rt_people_digest", "rt_pre_payroll", "rt_screening_follow_up", "rt_thirty_day_checkin", "rt_time_off_requests"]);
     const one = (await (await app.request("/v1/routines/rt_pre_payroll")).json()) as RoutineDef;
     expect(one.trigger).toEqual({ type: "cron", cron: "0 9 * * 1-5", tz: "America/Los_Angeles" });
     expect((await app.request("/v1/routines/rt_nope")).status).toBe(404);
