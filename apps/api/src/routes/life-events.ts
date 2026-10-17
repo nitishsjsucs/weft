@@ -92,10 +92,10 @@ export function lifeEventsRoutes(weft: Weft): Hono<WeftEnv> {
     uiOnly(c);
     const w = await ownWorker(c);
     if (!w) return c.json({ workerId: null, balances: [], requests: [] });
+    // Before the offer is signed there is no employee record to read: the section stays hidden.
     const bal = await read(c, "time_off.get_balance", { worker_id: w });
-    if (bal instanceof Response) return bal;
-    const reqs = await read(c, "time_off.list_requests", { worker_id: w });
-    if (reqs instanceof Response) return reqs;
+    const reqs = bal instanceof Response ? bal : await read(c, "time_off.list_requests", { worker_id: w });
+    if (bal instanceof Response || reqs instanceof Response) return c.json({ workerId: null, balances: [], requests: [] });
     const s = need(c.var.session);
     const assigned = (bal.data.balances as { policyId: string; policyName: string; typeName: string; availableMinutes: number; available_display: string }[])
       .map((b) => ({ policyId: b.policyId, policyName: b.policyName, typeName: b.typeName, availableMinutes: b.availableMinutes as number | null, available: b.available_display as string | null }));
