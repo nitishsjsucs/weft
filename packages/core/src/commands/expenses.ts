@@ -62,7 +62,7 @@ type GetInput = z.infer<typeof GetInput>;
 const getCmd = readCommand({
   name: "expenses.get", domain: "payroll",
   summary: "Get one expense with its policy checks, allowed decisions and the engine's suggestion.",
-  description: "Get one expense: claim fields, receipt presence, policy checks, the decisions the approver may make, the engine's suggested decision with its note, and where it is paid. Concise leaves out employee-entered text; detailed adds merchant, purpose, attendees and the receipt extraction (untrusted). Example: {\"expense_id\": \"exp_0001\"}.",
+  description: "Get one expense: claim fields, receipt presence, policy checks, the decisions the approver may make, the engine's suggested decision with its note, and where it is paid. Concise leaves out employee-entered text; detailed adds merchant, purpose, attendees and the receipt extraction (untrusted). Example: {\"expense_id\": \"exp_0101\"}.",
   input: GetInput, untrustedFields: UNTRUSTED_ONE,
   async run(i: GetInput, ctx, deps) {
     const r = await getExpenseRow(deps.tx, ctx.companyId, i.expense_id);
@@ -85,7 +85,7 @@ const CheckInput = z.object({ expense_ids: z.array(ExpenseId).min(1).max(50) });
 type CheckInput = z.infer<typeof CheckInput>;
 const checkPolicyCmd = writeCommand({
   name: "expenses.check_policy", summary: "Run the expense policy engine on items awaiting review and save the checks.",
-  description: "Runs the deterministic policy engine on each listed expense that awaits review and saves its checks (idempotent). Returns per item the checks, the allowed decisions and the suggested decision. It decides nothing. Example: {\"expense_ids\": [\"exp_0001\", \"exp_0002\"]}.",
+  description: "Runs the deterministic policy engine on each listed expense that awaits review and saves its checks (idempotent). Returns per item the checks, the allowed decisions and the suggested decision. It decides nothing. Example: {\"expense_ids\": [\"exp_0101\", \"exp_0102\"]}.",
   input: CheckInput, domain: "payroll", needs: "edit", effect: "draft", risk: () => "R1", approval: "never", reversible: false, preview: null, mcp: "hidden",
   tiers: { main: "executable", task: "executable" },
   async run(i: CheckInput, ctx, deps) {
@@ -106,7 +106,7 @@ type ExplainInput = z.infer<typeof ExplainInput>;
 const ATTEMPTS = "expenses.explain_attempts";
 const explainCmd = writeCommand({
   name: "expenses.explain", summary: "Save one grounded explanation per expense.",
-  description: "Saves one plain explanation per expense. Numbers and dates must come from that item's claim, checks or policy limits; an ungrounded item is refused once (UNGROUNDED), then the template is saved (source template). Omit explanation to save the template. Never quote the merchant or purpose. Example: {\"items\": [{\"expense_id\": \"exp_0001\", \"explanation\": \"...\"}]}.",
+  description: "Saves one plain explanation per expense. Numbers and dates must come from that item's claim, checks or policy limits; an ungrounded item is refused once (UNGROUNDED), then the template is saved (source template). Omit explanation to save the template. Never quote the merchant or purpose. Example: {\"items\": [{\"expense_id\": \"exp_0101\", \"explanation\": \"...\"}]}.",
   input: ExplainInput, domain: "payroll", needs: "edit", effect: "draft", risk: () => "R1", approval: "never", reversible: false, preview: null, mcp: "hidden",
   tiers: { main: "executable", task: "executable" },
   errorHints: { UNGROUNDED: { hint: "Use only amounts and dates from the expense and its checks.", example: { items: [{ expense_id: "exp_0001", explanation: "$412.38 travel on 2026-10-12 with a matching receipt: within policy." }] } } },
@@ -186,7 +186,7 @@ async function decidable(i: DecideInput, ctx: ExecContext, deps: CommandDeps): P
 const decideCmd: WeftCommand<DecideInput> = {
   ...writeCommand({
     name: "expenses.decide", summary: "Propose one decision on one expense: approve, approve as taxable, return or decline.",
-    description: "Decides exactly one expense (one expense_id; there is no bulk form). approve pays it on the next open draft outside gross; approve_taxable (only past 60 days) pays it inside gross; return sends it back with a note; decline needs reason_code. An agent's call is always a proposal. Example: {\"expense_id\": \"exp_0001\", \"decision\": \"approve\"}.",
+    description: "Decides exactly one expense (one expense_id; there is no bulk form). approve pays it on the next open draft outside gross; approve_taxable (only past 60 days) pays it inside gross; return sends it back with a note; decline needs reason_code. An agent's call is always a proposal. Example: {\"expense_id\": \"exp_0101\", \"decision\": \"approve\"}.",
     input: DecideInput, domain: "payroll", needs: "edit", effect: "write", risk: () => "R2", approval: "always", reversible: { reverse: "expenses.reopen" },
     ceilingKey: W3_CEILINGS.expense, lease: (i) => `expenses:${i.expense_id}`, mcp: "propose", tiers: { main: "executable", task: "delegated" },
     amountCents: async (i, ctx, deps) => (await getExpenseRow(deps.tx, ctx.companyId, i.expense_id))?.amountCents ?? null,

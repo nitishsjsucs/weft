@@ -50,7 +50,7 @@ const FlagInput = z.object({ worker_ids: z.array(z.string().startsWith("wrk_")).
 type FlagInput = z.infer<typeof FlagInput>;
 const flagNotReady = writeCommand<FlagInput>({
   name: "onboarding.flag_not_ready", summary: "Add Inbox suggestions to unblock hires' first days",
-  description: "For each listed hire (default: every hire in the ready-check window) whose check is blocked, add or refresh one Inbox suggestion naming each blocking item and its owner. Items are recomputed here; ready hires are skipped. Example: {\"worker_ids\":[\"wrk_0049\"],\"as_of\":null}",
+  description: "For each listed hire (default: every hire in the ready-check window) whose check is blocked, add or refresh one Inbox suggestion naming each blocking item and its owner. Items are recomputed here; ready hires are skipped. Example: {\"worker_ids\":[\"wrk_0101\"],\"as_of\":null}",
   input: FlagInput, domain: "people", needs: "edit", effect: "draft", risk: riskOf("R1"), approval: "never", reversible: false,
   tiers: { main: "executable", task: "unavailable" }, mcp: "hidden", preview: null,
   async run(i, ctx, deps) {
@@ -200,7 +200,7 @@ async function formRequests(i: RequestFormsInput, ctx: { companyId: string; now:
 }
 const requestTaxForms = writeCommand<RequestFormsInput>({
   name: "contractors.request_tax_forms", summary: "Email contractors whose W-9 or W-8 is missing or lapsing",
-  description: "Email each listed contractor whose tax form is missing, expired or expiring soon, asking for a new one in the contractor portal, and mark the form on file as renewal requested. Contractors whose form is current are skipped. R3 like comms.send_message. Example: {\"worker_ids\":[\"wrk_0051\"],\"as_of\":null}",
+  description: "Email each listed contractor whose tax form is missing, expired or expiring soon, asking for a new one in the contractor portal, and mark the form on file as renewal requested. Contractors whose form is current are skipped. R3 like comms.send_message. Example: {\"worker_ids\":[\"wrk_0101\"],\"as_of\":null}",
   input: RequestFormsInput, domain: "payroll", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
   afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
   async preview(i, ctx, deps) {
@@ -248,7 +248,7 @@ async function checkinWork(i: SendCheckinsInput, ctx: { companyId: string; now: 
 }
 const sendCheckins = writeCommand<SendCheckinsInput>({
   name: "onboarding.send_checkins", summary: "Email first-month check-ins and one nudge three days later",
-  description: "Email each listed employee whose first-month check-in is due (send, worker ids) and nudge each listed check-in still open three days on (nudge, check-in ids), once. The list is rechecked here; anyone not due is skipped. R3 like comms.send_message. Example: {\"send\":[\"wrk_0049\"],\"nudge\":[],\"as_of\":null}",
+  description: "Email each listed employee whose first-month check-in is due (send, worker ids) and nudge each listed check-in still open three days on (nudge, check-in ids), once. The list is rechecked here; anyone not due is skipped. R3 like comms.send_message. Example: {\"send\":[\"wrk_0101\"],\"nudge\":[],\"as_of\":null}",
   input: SendCheckinsInput, domain: "people", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
   afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
   async preview(i, ctx, deps) {

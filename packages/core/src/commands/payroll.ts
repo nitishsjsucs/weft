@@ -86,7 +86,7 @@ const GetRunInput = z.object({ run_id: RunId, response_format: ResponseFormat, f
 type GetRunInput = z.infer<typeof GetRunInput>;
 export const getRunCommand: WeftCommand<GetRunInput> = {
   ...base, name: "payroll.get_run", summary: "Read one pay run",
-  description: "Reads a pay run: totals, counts by section, who approved it and when (approved_by, approved_at; null before submit) and every flagged paycheck with its flag evidence (before and after cents; for GROSS_CHANGE the pay rate id, action seq and result id). Filters: flagged_only, worker_id, state. Example: {\"run_id\": \"pay_2026_10_30\"}.",
+  description: "Reads a pay run: totals, counts by section, who approved it and when (approved_by, approved_at; null before submit) and every flagged paycheck with its flag evidence (before and after cents; for GROSS_CHANGE the pay rate id, action seq and result id). Filters: flagged_only, worker_id, state. Example: {\"run_id\": \"pay_2026_09_30\"}.",
   compactDescription: "Read a pay run: totals, counts and flagged paychecks with evidence.",
   input: GetRunInput, needs: "view", effect: "read", risk: () => "R0", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "read", sandbox: "read", errorHints: { UNKNOWN_REFERENCE: RUN_HINT },
@@ -104,7 +104,7 @@ const PreviewRunInput = z.object({ run_id: RunId });
 type PreviewRunInput = z.infer<typeof PreviewRunInput>;
 export const previewRunCommand: WeftCommand<PreviewRunInput> = {
   ...base, name: "payroll.preview_run", summary: "Recompute a draft pay run",
-  description: "Recomputes a draft from current HR, benefits and tax data (for example after a rate change) and reports which paychecks changed. Drafts only. Example: {\"run_id\": \"pay_2026_10_30\"}.",
+  description: "Recomputes a draft from current HR, benefits and tax data (for example after a rate change) and reports which paychecks changed. Drafts only. Example: {\"run_id\": \"pay_2026_09_30\"}.",
   compactDescription: "Recompute a draft pay run and report changed paychecks.",
   input: PreviewRunInput, needs: "edit", effect: "draft", risk: () => "R1", approval: "never", afterPending: "skip",
   tiers: { main: "executable", task: "executable" }, mcp: "read", errorHints: { UNKNOWN_REFERENCE: RUN_HINT },
@@ -159,7 +159,7 @@ const ExplainInput = z.object({
 type ExplainInput = z.infer<typeof ExplainInput>;
 export const explainFlagsCommand: WeftCommand<ExplainInput> = {
   ...base, name: "payroll.explain_flags", summary: "Save explanations for flagged paychecks",
-  description: "Saves one plain explanation per flagged paycheck in one call. Each is checked against that paycheck's flag evidence: numbers must come from it. Ungrounded items are refused per item (UNGROUNDED); after one repair the template is saved (source template). Omit explanation to save the template. Example: {\"run_id\": \"pay_2026_10_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
+  description: "Saves one plain explanation per flagged paycheck in one call. Each is checked against that paycheck's flag evidence: numbers must come from it. Ungrounded items are refused per item (UNGROUNDED); after one repair the template is saved (source template). Omit explanation to save the template. Example: {\"run_id\": \"pay_2026_09_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
   compactDescription: "Save grounded explanations for flagged paychecks (batch).",
   input: ExplainInput, needs: "edit", effect: "draft", risk: () => "R1", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "hidden",
@@ -228,7 +228,7 @@ async function submitAmount(i: SubmitInput, deps: CommandDeps): Promise<{ hash: 
 
 export const submitRunCommand: WeftCommand<SubmitInput> = {
   ...base, name: "payroll.submit_run", summary: "Submit a pay run for payment",
-  description: "Submits a draft for payment: one bank batch of net pay plus reimbursements, settling payday 06:00 PT. Always needs a human approval. Blocked paychecks refuse the call unless exclude_blocked is true. Example: {\"run_id\": \"pay_2026_10_30\", \"exclude_blocked\": true}.",
+  description: "Submits a draft for payment: one bank batch of net pay plus reimbursements, settling payday 06:00 PT. Always needs a human approval. Blocked paychecks refuse the call unless exclude_blocked is true. Example: {\"run_id\": \"pay_2026_09_30\", \"exclude_blocked\": true}.",
   compactDescription: "Submit a draft pay run for payment (needs approval).",
   input: SubmitInput, needs: "edit", effect: "external", risk: () => "R4", approval: "always",
   amountCents: async (i, _ctx, deps) => (await submitAmount(i, deps)).totals.totalCost,

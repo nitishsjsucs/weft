@@ -369,7 +369,7 @@ async function firstDayWork(i: FirstDayInput, ctx: { companyId: string; now: str
 }
 const sendFirstDayMessage = writeCommand<FirstDayInput>({
   name: "comms.send_first_day_message", summary: "Email the welcome to each hire whose first day is today, and tell their team",
-  description: "On a hire's start date, emails the hire a welcome (their manager's name, the portal) and emails the manager and up to eight teammates that the hire starts today. Names and dates only, written by Weft, not the model. Once per hire: anyone already welcomed or not starting today is skipped. R3 like the check-in emails. Example: {\"worker_ids\":[\"wrk_0049\"],\"as_of\":null}",
+  description: "On a hire's start date, emails the hire a welcome (their manager's name, the portal) and emails the manager and up to eight teammates that the hire starts today. Names and dates only, written by Weft, not the model. Once per hire: anyone already welcomed or not starting today is skipped. R3 like the check-in emails. Example: {\"worker_ids\":[\"wrk_0101\"],\"as_of\":null}",
   input: FirstDayInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
   afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
   async preview(i, ctx, deps) {
