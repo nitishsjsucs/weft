@@ -42,7 +42,8 @@ reminder, and never in a precheck's findings (tests pin it). The time-off reason
   sends with no proposal because it is untainted, and a second run that day skips), plus the two helpers.
 - `e2e/gp20-people-life-events.spec.ts` (provisional number): the portal report, election, check-in form and a day
   off through the Request time off form. Run with
-  `WEFT_E2E_WEB_PORT=4846 WEFT_E2E_API_PORT=4847 pnpm e2e gp20-people`.
+  `WEFT_E2E_WEB_PORT=4846 WEFT_E2E_API_PORT=4847 pnpm e2e gp20-people`. The round 2 run passed it together with
+  GP6, GP7, GP9, GP13 and GP14 (8 specs); the full `pnpm test` passed 923 tests with 1 skipped.
 
 ## Decisions and deviations
 
