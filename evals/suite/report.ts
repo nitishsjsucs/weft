@@ -103,8 +103,11 @@ function variantSection(r: SuiteResultFile, v: EvalVariant, testOnly: boolean): 
     "| Group | Success |", "|---|---|", ...m.byGroup.map((g) => `| ${g.group} | ${g.successes} of ${g.trials} |`), "",
   );
   if (testOnly) return lines;
+  // A run over both splits lists task rows for the dev split only; the held-out split keeps per-group counts above.
+  const heldOut = r.trials.filter((x) => x.variant === v && x.split === "test").length;
+  if (heldOut) lines.push(`The ${heldOut} held-out test trials count in the tables above; their task rows are not shown.`, "");
   lines.push("| Task | Trial | Result | Steps | Calls | Cost | First failure | Why |", "|---|---|---|---|---|---|---|---|");
-  for (const t of r.trials.filter((x) => x.variant === v)) {
+  for (const t of r.trials.filter((x) => x.variant === v && x.split !== "test")) {
     const why = t.success ? "" : [t.error, ...t.graders.filter((g) => g.applies && !g.pass).map((g) => `${g.grader}: ${g.reasons.join("; ")}`)].filter(Boolean).join(" / ").replace(/\|/g, "/").slice(0, 300);
     const link = t.phoenixUrl ? `[${t.taskId}](${t.phoenixUrl})` : t.taskId;
     lines.push(`| ${link} | ${t.trial} | ${t.success ? "pass" : "FAIL"} | ${t.steps} | ${t.toolCalls} | ${usd(t.costUsd)} | ${t.firstFailure ?? ""} | ${why} |`);
@@ -123,7 +126,7 @@ export function renderReport(r: SuiteResultFile, prev: SuiteResultFile | null): 
     "",
   ];
   for (const v of r.variants) lines.push(...variantSection(r, v, testOnly));
-  const flips = flipped(prev, r.trials);
+  const flips = flipped(prev, r.trials.filter((t) => t.split !== "test"));
   if (!testOnly) {
     lines.push("## Flipped against the last baseline", "");
     lines.push(prev ? (flips.length ? flips.map((f) => `- ${f.taskId} (${f.variant}): ${f.was ? "pass" : "fail"} to ${f.now ? "pass" : "fail"}`).join("\n") : `No task flipped against ${prev.startedAt.slice(0, 10)} at ${prev.harnessSha}.`) : "No earlier suite result on these tasks.", "");

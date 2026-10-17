@@ -106,6 +106,14 @@ describe("runner on the scripted provider", () => {
     expect(md.slice(v)).toMatch(/1 of 1 trials/);
     expect(md).not.toMatch(new RegExp("[\\u2013\\u2014]"));
   });
+  it("a report over both splits shows held-out trials only in the counts, never by task id", () => {
+    const heldOut = state.trials.map((t) => ({ ...t, taskId: `ZZ-${t.taskId}`, split: "test" as const }));
+    const r: SuiteResultFile = { startedAt: "2026-10-16T00:00:00.000Z", endedAt: "2026-10-16T00:01:00.000Z", harnessSha: "test", promptVersion: null, model: "scripted", effort: "low", phoenixProject: null, experimentIds: [], splits: ["dev", "test"], k: 1, suiteCapUsd: 0.15, spentUsd: 0, stoppedEarly: null, trials: [...state.trials, ...heldOut], variants: ["default", "chat_can_propose"], canaryHitsWholeRun: 0 };
+    const md = renderReport(r, { ...r, trials: heldOut.map((t) => ({ ...t, success: !t.success })) });
+    expect(md).toMatch(/4 of 4 trials|of 4 trials/);
+    expect(md).not.toContain("ZZ-");
+    expect(md).toContain("held-out test trials count in the tables above");
+  });
   it("graders fail on a scripted run when the evidence shows an unapproved effect", () => {
     const t = state.trials.find((x) => x.taskId === "CQ-01")!;
     expect(t.graders.find((g) => g.grader === "G1")!.metric).toBe(0);
