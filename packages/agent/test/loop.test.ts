@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ModelProvider, PrecheckResult, RoutineDef, RoutineRun, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
-import { check } from "@weft/grounding";
-import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, DEFAULT_SCRIPTS_DIR, frozenPrompt, scriptedProvider, summarize, type Script, type WeftAgentRuntime } from "../src/index";
+import { check, requestTrustOf, runEvidence } from "@weft/grounding";
+import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, DEFAULT_SCRIPTS_DIR, frozenPrompt, LUNA, runLoop, scriptedProvider, summarize, type Script, type WeftAgentRuntime } from "../src/index";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
@@ -379,6 +379,86 @@ describe("chat grounding repair and receipt (wave 4 FM3)", () => {
     const { rt, run, id } = await ask(exec(), [call("notices__get", { notice_id: "ntc_0001" }), say("The balance due is $4,321.00."), say("The notice states a balance; open ntc_0001 to read it.")], "What does the notice say?");
     expect(run.summary).toBe("The notice states a balance; open ntc_0001 to read it.");
     expect((await notices(rt, id)).find((n) => n.notice === "repair")!.text).toContain("$4,321.00");
+  });
+});
+
+describe("shared grounding evidence, month day ranges and request-only windows (round 2, FG4)", () => {
+  const EN_DASH = "\u2013";
+  const timeOff = () => done({ count: 1, requests: [{ id: "tor_0003", worker_id: "wrk_0010", status: "pending", start_date: "2026-11-23", end_date: "2026-11-27", conflict: { dates: ["2026-11-23", "2026-11-25"], out: 3, of: 9 } }] }, "Found 1 time-off request", "res_0003");
+  const exec = () => createFakeExecutor([
+    ...CHAT_TOOLS.map((name) => ({ name, effect: "read" as const })),
+    { name: "time_off.list_requests", effect: "read" as const, handler: timeOff },
+    { name: "people.search", effect: "read" as const, handler: () => done({ people: [], count: 0 }, "Found 0 workers", "res_0301") },
+  ]);
+  const call = (name: string, args: Record<string, unknown> = {}) => ({ output: [{ type: "function_call" as const, name, arguments: args }] });
+  const say = (text: string) => ({ output: [{ type: "text" as const, text }] });
+  const repairs = async (rt: WeftAgentRuntime, id: string) => (await rt.store.steps(id)).filter((s) => s.kind === "notice" && (s.result as { notice: string }).notice === "repair").map((s) => (s.result as { text: string }).text);
+
+  async function ask(fake: FakeExecutor, steps: Script["agents"]["main"], text: string, provider?: (p: ModelProvider) => ModelProvider) {
+    const scripted = scriptedProvider({ scriptsDir: dataDir, scripts: { chat_fg4: { match: ".", agents: { main: steps } } } });
+    const rt = runtimeWith(fake, provider ? provider(scripted) : scripted);
+    const h = handle();
+    await rt.startChat(h, { text, recipe: "chat", pageContext: null, allowlist: [...CHAT_TOOLS, "time_off.list_requests"] });
+    return { rt, run: await rt.settled(h.runId), id: h.runId, h };
+  }
+
+  it("R8, CP-04 shape: a draft with month day ranges is grounded first time, so it keeps its dates", async () => {
+    const draft = `I can't approve time-off requests. Ruth Okoro's pending request is tor_0003, for November 23${EN_DASH}27, 2026, with 3 of 9 out on November 23${EN_DASH}25.`;
+    const { rt, run, id } = await ask(exec(), [call("time_off__list_requests", { worker_id: "wrk_0010", status: "pending" }), say(draft), say("Open the request in the inbox.")], "Approve Ruth Okoro's time-off request.");
+    expect(run).toMatchObject({ status: "done", summary: draft, stepsUsed: 2 });
+    expect(await repairs(rt, id)).toEqual([]);
+  });
+
+  it("R1: the guard's verdict is the helper's verdict over the run's own rows (FG1's G5 reads the same rows)", async () => {
+    const draft = "Ruth Okoro is off November 23 to 28. I can't pay the $1,500.00 bonus.";
+    const { rt, run, id } = await ask(exec(), [call("time_off__list_requests", {}), say(draft), say("Ruth Okoro is off November 23 to 27. I can't pay the $1,500.00 bonus.")], "Pay Ruth a $1,500.00 bonus and tell me when she is off.");
+    const rows = await rt.store.steps(id);
+    const ev = runEvidence(rows);
+    expect(ev.opts.request).toBe("Pay Ruth a $1,500.00 bonus and tell me when she is off.");
+    expect(ev.opts.now).toBe(clock.now());
+    // The repair the guard sent names exactly what the helper's evidence refuses; the answer it accepted passes it.
+    expect(check(draft, ev.results, ev.opts)).toEqual({ ok: false, offending: ["November 23 to 28"] });
+    expect(await repairs(rt, id)).toEqual([expect.stringContaining(": November 23 to 28.")]);
+    expect(run).toMatchObject({ status: "done", summary: "Ruth Okoro is off November 23 to 27. I can't pay the $1,500.00 bonus." });
+    expect(check(run.summary!, ev.results, ev.opts)).toEqual({ ok: true, offending: [] });
+    // The pack row comes first and is an assemble row too; the decision is on the next one.
+    expect(rows[0]).toMatchObject({ stage: "assemble", kind: "context" });
+    expect(requestTrustOf(rows)).toBe(true);
+  });
+
+  it("RC1 decision: the answer's own relative phrase derives no window bound; the request's does", async () => {
+    const answer = "Nobody else is out next week, November 2 to 8.";
+    const own = await ask(exec(), [call("people__search", {}), say(answer), say("Nobody else is out.")], "Is anyone else out?");
+    expect(own.run).toMatchObject({ status: "done", summary: "Nobody else is out." });
+    expect(await repairs(own.rt, own.id)).toEqual([expect.stringContaining(": November 2 to 8.")]);
+    const asked = await ask(exec(), [call("people__search", {}), say(answer)], "Is anyone else out next week?");
+    expect(asked.run).toMatchObject({ status: "done", summary: answer, stepsUsed: 2 });
+  });
+
+  it("a resumed chat segment keeps the stored request trust (the pack row is not the decision)", async () => {
+    // Segment 1 runs the read, then its second model step throws; segment 2 resumes the same rows on the script.
+    let calls = 0;
+    const flaky = (p: ModelProvider): ModelProvider => ({ ...p, step: async (r) => { calls++; if (calls === 2) throw new Error("connection reset"); return p.step(r); } });
+    const answer = "I can't pay the $1,500.00 bonus myself; nobody starts between October 26 and November 9, 2026.";
+    const steps = [call("people__search", {}), say(answer), say("I can't pay the bonus myself.")];
+    const fake = exec();
+    const first = await ask(fake, steps, "Pay Jordan a $1,500.00 bonus, and who starts in the next two weeks?", flaky);
+    expect(first.run.status).not.toBe("done");
+    await first.rt.store.updateRun(first.id, { status: "queued", terminalReason: null, endedAt: null });
+    const resumed = await runLoop({
+      store: first.rt.store, executor: fake, provider: scriptedProvider({ scriptsDir: dataDir, scripts: { chat_fg4: { match: ".", agents: { main: steps } } } }),
+      ledger: createSpendLedger({ dir: join(dataDir, "spend2"), caps: { runUsd: 0.1, dayUsd: 2, liveUsd: 0.5 } }), clock, prices: LUNA,
+      checklist: async () => null, isCancelled: () => false, signalFor: () => undefined, modelTimeoutMs: 10_000,
+    }, first.h);
+    expect(resumed).toMatchObject({ status: "done", summary: answer });
+    expect(await repairs(first.rt, first.id)).toEqual([]);
+    // Every assemble row of both segments records the same decision (segment 2 once wrote false here).
+    const decisions = (await first.rt.store.steps(first.id)).flatMap((s) => {
+      const v = s.stage === "assemble" && s.kind === "context" ? (s.result as { requestTrusted?: unknown } | null)?.requestTrusted : undefined;
+      return v === undefined ? [] : [v];
+    });
+    expect(decisions.length).toBeGreaterThan(2);
+    expect(decisions.every((v) => v === true)).toBe(true);
   });
 });
 

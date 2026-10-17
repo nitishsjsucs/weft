@@ -6,7 +6,7 @@ import type {
   AgentExecutor, AgentRunRow, HistoryItem, ModelProvider, ModelStepRequest, ModelStepResult, RunHandle, RunStepRow, RunStatus,
   SimClock, SpendLedger, StepTimings, TerminalReason, ToolOutcome, ToolSpec,
 } from "@weft/contracts";
-import { check, type CheckOptions } from "@weft/grounding";
+import { check, requestTrustOf, runEvidence, type RunEvidence } from "@weft/grounding";
 import { canonicalJson } from "./canonical";
 import { addUsage, reserveUsd, RUN_CAP_SCALE, stepCostUsd, usdToMicros, type Prices } from "./cost";
 import { approxTokens } from "./context";
@@ -135,16 +135,6 @@ function outcomeCode(o: ToolOutcome): RunStepRow["outcome"] {
 
 interface Terminal { status: RunStatus; reason: TerminalReason; summary: string | null; fallback?: boolean }
 
-/** What a chat answer is checked against: this run's results and the extra evidence of CheckOptions. */
-interface Evidence { results: unknown[]; opts: CheckOptions }
-
-/** Every string inside a tool call's arguments (an answer cannot ground a numeral on its own input echoed back). */
-function stringsOf(v: unknown, out: Set<string>): void {
-  if (typeof v === "string") out.add(v);
-  else if (Array.isArray(v)) for (const x of v) stringsOf(x, out);
-  else if (v && typeof v === "object") for (const x of Object.values(v)) stringsOf(x, out);
-}
-
 function parseArgs(json: string): unknown {
   try { return json.trim() ? JSON.parse(json) : {}; } catch { return undefined; }
 }
@@ -152,11 +142,6 @@ function parseArgs(json: string): unknown {
 /** A read's identity: the wire name and the canonical arguments. Unparseable arguments have none and never match. */
 function readKey(name: string, args: unknown): string | null {
   return args === undefined ? null : `${name} ${canonicalJson(args ?? {})}`;
-}
-
-/** The pack escapes the request (context.ts escapeTagText); grounding reads the person's words as they wrote them. */
-function unescapeTagText(s: string): string {
-  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
 /**
@@ -238,17 +223,15 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   let answerAt = answerBy + (rereadRefunded ? 1 : 0);
   // Grounding evidence beyond the tool results: the person's own request and the run clock. The request counts only
   // when the run was untainted before its first model step (a tagged thread or a tainted suggestion carries other
-  // people's text into it); the decision is stored on the first assemble row so a resumed segment keeps it.
-  const firstAssemble = steps.find((s) => s.stage === "assemble" && s.kind === "context");
-  const storedTrust = (firstAssemble?.result as { requestTrusted?: unknown } | null)?.requestTrusted;
+  // people's text into it). The decision is stored on every chat assemble row; runEvidence reads the first one back, so
+  // a resumed segment keeps it and the eval suite's G5 sees the same decision. The pack row is also an assemble row
+  // but carries no decision, so it is skipped (before round 2 it was found first, and a resumed segment lost trust).
+  const storedTrust = requestTrustOf(steps);
   const requestTrusted = !chat ? false
-    : typeof storedTrust === "boolean" ? storedTrust
+    : storedTrust !== null ? storedTrust
     : steps.some((s) => s.kind === "model_call") ? false
     : !(await executor.runState(handle).catch(() => ({ tainted: true }))).tainted;
-  const groundingBase: CheckOptions = {
-    request: requestTrusted ? unescapeTagText(/<request>([\s\S]*?)<\/request>/.exec(setup.text)?.[1] ?? "") : null,
-    now: /^now: (\S+)$/m.exec(setup.text)?.[1] ?? deps.clock.now(),
-  };
+  const clockAtStart = deps.clock.now();
 
   await store.updateRun(run.id, { status: "running" });
   run = { ...run, status: "running" };
@@ -279,21 +262,10 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
     return (await store.getRun(run!.id))!;
   });
 
-  const evidence = async (): Promise<Evidence> => {
-    const rows = await store.steps(run!.id);
-    const results: unknown[] = [];
-    const echoes = new Set<string>();
-    for (const r of rows) {
-      if (r.kind !== "tool_call") continue;
-      // Model-authored text (run feed updates) is not evidence: the answer cannot ground itself on it.
-      if (r.toolName === "comms__post_update") continue;
-      stringsOf(r.toolArgs, echoes);
-      const o = (r.result as { outcome?: ToolOutcome } | null)?.outcome;
-      if (o && o.ok && o.status === "done") results.push({ resultId: o.resultId, data: o.data, summary: o.summary, actionSeq: o.actionSeq });
-      else if (o && o.ok) results.push({ proposalId: o.proposalId, title: o.title });
-    }
-    return { results, opts: { ...groundingBase, echoes } };
-  };
+  // What a chat answer is checked against, from this run's own rows (one helper shared with the eval suite's G5):
+  // its results and proposals, the trusted request, the clock, and its echoed arguments. Model-authored text (run
+  // feed updates) is never evidence: the answer cannot ground itself on it.
+  const evidence = async () => runEvidence(await store.steps(run!.id), { now: clockAtStart });
   const allToolResults = async (): Promise<unknown[]> => (await evidence()).results;
   // Reads this run already made, by tool and canonical arguments (served again after a repair instead of re-run).
   const reads = new Map<string, ToolOutcome>();
@@ -607,7 +579,7 @@ function sentences(text: string): string[] {
  * receipt passes the same checker; a line that does not is dropped, and if the joined text still fails, only the
  * results are shown.
  */
-async function groundedFallback(draft: string | null, ev: () => Promise<Evidence>): Promise<string> {
+async function groundedFallback(draft: string | null, ev: () => Promise<RunEvidence>): Promise<string> {
   const { results, opts } = await ev();
   const ok = (t: string) => check(t, results, opts).ok;
   const rs = results as { resultId?: string; summary?: string; proposalId?: string; title?: string }[];

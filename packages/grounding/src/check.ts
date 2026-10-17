@@ -8,9 +8,14 @@
 // - integers up to 10 are exempt (ordinary prose), and so are numbers inside identifiers the results contain;
 // - evidence is the tool results (numbers, and the numerals and dates of every untainted string), plus, when the
 //   caller passes them, the person's own request, the run clock with the bounds of the relative windows the request
-//   or answer names, and a stated count total that sums the counts the answer lists from one result.
+//   names, and a stated count total that sums the counts the answer lists from one result.
+// Window bounds come from the request only, never from the answer (decided in round 2, FG4; pinned in
+// test/windows.test.ts). Today is always known from the clock, but "next week" or "within 30 days" in the answer
+// derives nothing: a window the model chose is the model's claim, so its bounds must come from a record or from the
+// date-filtered read that asked for it (whose echoed window dates still count). Otherwise "respond within 30 days,
+// by November 25" would ground a deadline the clock computed from today, when the record counts from the notice date.
 import { PLACEHOLDER } from "./aliases";
-import { clockDates, DATE_IN_TEXT, dateGrounded, parseTextDate, type DateKey } from "./dates";
+import { clockDates, DATE_IN_TEXT, dateGrounded, readTextDates, type DateKey } from "./dates";
 import { collectLeaves, emptyLeaves, extractNumerals, mineString, TAINTED_LEAF, type Leaves, type Numeral } from "./numerals";
 
 export interface GroundingResult { ok: boolean; offending: string[] }
@@ -19,7 +24,7 @@ export interface GroundingResult { ok: boolean; offending: string[] }
 export interface CheckOptions {
   /** The person's own words (never text from other people): numerals and dates they wrote may be repeated. */
   request?: string | null;
-  /** The run clock (ISO instant): today and the bounds of relative windows in the request or answer are dates. */
+  /** The run clock (ISO instant): today, and the bounds of the relative windows the request names, are dates. */
   now?: string | null;
   /** Strings the run sent as tool arguments: a result string equal to one is an echo, not evidence for numerals. */
   echoes?: Iterable<string>;
@@ -114,13 +119,23 @@ export function check(text: string, toolResults: unknown[], opts: CheckOptions =
   const echoes = new Set(opts.echoes ?? []);
   const leaves = collectLeaves(toolResults, { echoes });
   const extra = emptyLeaves();
-  const request = (opts.request ?? "").trim();
-  if (request && !TAINTED_LEAF.test(request)) mineString(request, extra);
+  const raw = (opts.request ?? "").trim();
+  const request = raw && !TAINTED_LEAF.test(raw) ? raw : "";
+  if (request) {
+    mineString(request, extra);
+    // The second day of a range the person wrote ("Oct 1 to 15") is a date now, and stays a numeral they wrote, as it
+    // was before ranges were read: an answer may repeat "15" from their words.
+    for (const m of request.matchAll(DATE_IN_TEXT)) {
+      const r = readTextDates(m[0]);
+      if (r.dates.length === 2 && r.dates[1]!.d !== null) extra.values.push(r.dates[1]!.d);
+    }
+  }
   const evidence: Leaves = {
     values: [...leaves.values, ...extra.values], percents: [...leaves.percents, ...extra.percents],
     strings: leaves.strings, lengths: leaves.lengths, dates: [...leaves.dates, ...extra.dates],
   };
-  const known: DateKey[] = [...evidence.dates, ...(opts.now ? clockDates(opts.now, [request, text]) : [])];
+  // The request alone names windows (see the header): the answer's own relative phrases derive no bound.
+  const known: DateKey[] = [...evidence.dates, ...(opts.now ? clockDates(opts.now, [request]) : [])];
   const years = new Set(known.map((d) => d.y).filter((y) => y > 0));
   const offending: string[] = [];
 
@@ -129,11 +144,12 @@ export function check(text: string, toolResults: unknown[], opts: CheckOptions =
   // only as whole tokens, so "ax 5" never eats the middle of "tax 5000".
   const identifiers = [...leaves.strings].filter(isIdentifier).sort((a, b) => b.length - a.length);
   if (identifiers.length) stripped = stripped.replace(new RegExp(`(?<![A-Za-z0-9_])(?:${identifiers.map(escapeRe).join("|")})(?![A-Za-z0-9_])`, "g"), " ");
-  // Dates: each must be a known date, then it leaves the text so its parts are not read as numbers.
-  stripped = stripped.replace(DATE_IN_TEXT, (raw) => {
-    const k = parseTextDate(raw);
-    if (!k || k.m < 1 || !dateGrounded(k, known)) offending.push(raw.trim());
-    return " ";
+  // Dates: each must be a known date, then it leaves the text so its parts are not read as numbers. Both days of a
+  // month day range must be known; what a non-range leaves behind (its second number) stays in the text and is checked.
+  stripped = stripped.replace(DATE_IN_TEXT, (match) => {
+    const r = readTextDates(match);
+    if (!r.dates.length || !r.dates.every((k) => dateGrounded(k, known))) offending.push(r.raw);
+    return ` ${r.rest} `;
   });
   const numerals = extractNumerals(stripped);
   let perResult: Leaves[] | null = null;
