@@ -1,0 +1,185 @@
+// pnpm eval:suite: the wave 4 eval suite (docs/evals.md, research/wave4/evals.md). Owner: w4-eval-suite.
+//   pnpm eval:suite validate                         load and validate every task file
+//   pnpm eval:suite digests [--write]                rebuild every world, compare (or pin) the digests
+//   pnpm eval:suite [--split dev|test] [--variant default|chat_can_propose] [--k n] [--ids RT-01,CQ-01] [--legacy]
+//                   [--provider scripted|live] [--cap 0.15] [--stage w4-eval-suite --stage-cap 0.10] [--phoenix]
+// Live runs are opt-in (WEFT_LIVE_OPENAI=1 WEFT_LLM=openai, the key only from WEFT_SECRETS_FILE). WEFT_TRACE=phoenix or
+// --phoenix records every trial as a Phoenix experiment run on the local Phoenix (WEFT_PHOENIX_URL, default
+// http://127.0.0.1:6206). Results: evals/results/<date>-<sha>-suite.json (gitignored) and the Markdown report beside it.
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import type { EvalSplit, EvalTask } from "../../packages/contracts/src/evals";
+import type { EvalVariant } from "../../packages/contracts/src/telemetry";
+import { PHOENIX, TRACE_ENV } from "../../packages/contracts/src/telemetry";
+import { loadTasks, REPO_ROOT } from "./loader";
+import { finalCanaryScan, newState, planTrials, runPlain, runTrial, settleTrial, SuiteStop, type RunnerOptions } from "./runner";
+import { renderReport, type SuiteResultFile } from "./report";
+import { buildWorld, worldDigest, worldKey } from "./worlds/index";
+
+export interface CliArgs {
+  cmd: "run" | "validate" | "digests"; write: boolean; splits: EvalSplit[]; variants: EvalVariant[] | null; k: number; ids: string[] | null; legacy: boolean;
+  provider: "scripted" | "live"; cap: number; stage: string; stageCap: number | null; phoenix: boolean; outDir: string;
+}
+
+export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliArgs {
+  const a: CliArgs = { cmd: "run", write: false, splits: ["dev"], variants: null, k: 1, ids: null, legacy: false, provider: "scripted", cap: 0.15, stage: env.WEFT_EVAL_STAGE ?? "w4-eval-suite", stageCap: null, phoenix: env[TRACE_ENV.switch] === "phoenix", outDir: join(REPO_ROOT, "evals/results") };
+  const rest = [...argv];
+  if (rest[0] && !rest[0].startsWith("--")) { const c = rest.shift()!; if (c !== "run" && c !== "validate" && c !== "digests") throw new Error(`unknown command ${c}`); a.cmd = c; }
+  const val = (flag: string) => { const v = rest.shift(); if (v === undefined || v.startsWith("--")) throw new Error(`${flag} needs a value`); return v; };
+  while (rest.length) {
+    const f = rest.shift()!;
+    if (f === "--split") { const v = val(f); a.splits = v === "all" ? ["dev", "test"] : [v as EvalSplit]; if (!a.splits.every((s) => s === "dev" || s === "test")) throw new Error(`--split ${v}`); }
+    else if (f === "--variant") { const v = val(f); a.variants = v === "both" ? ["default", "chat_can_propose"] : [v as EvalVariant]; if (!a.variants.every((x) => x === "default" || x === "chat_can_propose")) throw new Error(`--variant ${v}`); }
+    else if (f === "--k") { a.k = Number(val(f)); if (!Number.isInteger(a.k) || a.k < 1 || a.k > 8) throw new Error("--k is 1 to 8"); }
+    else if (f === "--ids") a.ids = val(f).split(",").map((s) => s.trim()).filter(Boolean);
+    else if (f === "--legacy") a.legacy = true;
+    else if (f === "--provider") { const v = val(f); if (v !== "scripted" && v !== "live") throw new Error(`--provider ${v}`); a.provider = v; }
+    else if (f === "--cap") { a.cap = Number(val(f)); if (!(a.cap >= 0 && a.cap <= 3)) throw new Error("--cap is $0 to $3"); }
+    else if (f === "--stage") a.stage = val(f);
+    else if (f === "--stage-cap") a.stageCap = Number(val(f));
+    else if (f === "--phoenix") a.phoenix = true;
+    else if (f === "--no-phoenix") a.phoenix = false;
+    else if (f === "--write") a.write = true;
+    else if (f === "--out") a.outDir = resolve(val(f));
+    else throw new Error(`unknown flag ${f}`);
+  }
+  return a;
+}
+
+function selectTasks(args: CliArgs): EvalTask[] {
+  let tasks = loadTasks(args.splits).map((l) => l.task);
+  if (args.legacy) tasks = tasks.filter((t) => t.legacyCase);
+  if (args.ids) { const want = new Set(args.ids); tasks = tasks.filter((t) => want.has(t.id)); const missing = args.ids.filter((id) => !tasks.some((t) => t.id === id)); if (missing.length) throw new Error(`no task ${missing.join(", ")}`); }
+  return tasks;
+}
+
+const sha = () => { try { return execSync("git rev-parse --short HEAD", { cwd: REPO_ROOT }).toString().trim(); } catch { return "nogit"; } };
+
+/** Rebuilds each distinct world once and compares (or, with --write, pins) every task's digest. */
+export async function digests(tasks: EvalTask[], opts: { write: boolean; baseDir: string; files?: Map<string, string> }): Promise<{ id: string; pinned: string | null; actual: string }[]> {
+  const cache = new Map<string, string>();
+  const out: { id: string; pinned: string | null; actual: string }[] = [];
+  for (const t of tasks) {
+    const key = worldKey(t.world);
+    if (!cache.has(key)) {
+      const w = await buildWorld(t.world, { dataDir: join(opts.baseDir, "digest"), mode: "scripted" });
+      try { cache.set(key, await worldDigest(w)); } finally { await w.weft.close(); }
+    }
+    out.push({ id: t.id, pinned: t.world.digest, actual: cache.get(key)! });
+  }
+  if (opts.write && opts.files) {
+    for (const r of out) {
+      const file = opts.files.get(r.id);
+      if (!file || r.pinned === r.actual) continue;
+      const raw = JSON.parse(readFileSync(file, "utf8")) as { world: { digest: string | null } };
+      raw.world.digest = r.actual;
+      writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
+    }
+  }
+  return out;
+}
+
+function previousResult(outDir: string, exclude: string): SuiteResultFile | null {
+  if (!existsSync(outDir)) return null;
+  const files = readdirSync(outDir).filter((f) => f.endsWith("-suite.json") && join(outDir, f) !== exclude).sort();
+  for (const f of files.reverse()) { try { return JSON.parse(readFileSync(join(outDir, f), "utf8")) as SuiteResultFile; } catch { /* skip */ } }
+  return null;
+}
+
+export async function main(argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const baseDir = resolve(process.env.WEFT_EVAL_DIR ?? join(REPO_ROOT, ".data/eval-suite"));
+  if (args.cmd === "validate") {
+    const all = loadTasks(["dev", "test"]);
+    console.log(`${all.length} tasks valid (${all.filter((l) => l.task.split === "dev").length} dev, ${all.filter((l) => l.task.split === "test").length} test)`);
+    return 0;
+  }
+  if (args.cmd === "digests") {
+    const loaded = loadTasks(args.splits).filter((l) => !args.ids || args.ids.includes(l.task.id));
+    const res = await digests(loaded.map((l) => l.task), { write: args.write, baseDir, files: new Map(loaded.map((l) => [l.task.id, l.file])) });
+    const bad = res.filter((r) => r.pinned !== r.actual);
+    for (const r of bad) console.log(`${r.id}: pinned ${r.pinned ?? "none"}, world gives ${r.actual}${args.write ? " (pinned now)" : ""}`);
+    console.log(`${res.length - bad.length} of ${res.length} worlds reproduce their digest${args.write && bad.length ? `; wrote ${bad.length}` : ""}`);
+    return bad.length && !args.write ? 1 : 0;
+  }
+
+  if (args.provider === "live") {
+    if (process.env.WEFT_LIVE_OPENAI !== "1" || process.env.WEFT_LLM !== "openai") { console.error("a live suite run is opt-in: set WEFT_LIVE_OPENAI=1 and WEFT_LLM=openai (docs/evals.md)"); return 2; }
+    process.env.WEFT_DEV_AUTH = "1";
+    process.env.WEFT_LIVE_USD_CAP ??= String(args.cap);
+  }
+  const tasks = selectTasks(args);
+  const variants: EvalVariant[] = args.variants ?? ["default", "chat_can_propose"];
+  const harnessSha = sha();
+  const opts: RunnerOptions = {
+    mode: args.provider, baseDir, suiteCapUsd: args.cap, harnessSha, requireDigest: true,
+    wave: { stage: args.stage, stageCapUsd: args.stageCap ?? args.cap },
+    log: (l) => console.error(l),
+  };
+  const startedAt = new Date().toISOString();
+  const state = newState();
+  const experimentIds: string[] = [];
+  let phoenixProject: string | null = null;
+  let capture: Awaited<ReturnType<typeof import("./phoenix").startOtlpCapture>> | null = null;
+  try {
+    if (args.phoenix) {
+      const ph = await import("./phoenix");
+      const publicUrl = process.env[TRACE_ENV.url] ?? `http://${PHOENIX.host}:${process.env.WEFT_PHOENIX_PORT ?? PHOENIX.httpPort}`;
+      const version = await ph.phoenixUp(publicUrl);
+      if (!version) { console.error(`no Phoenix at ${publicUrl}; start one (pnpm phoenix:up) or drop --phoenix`); return 2; }
+      capture = await ph.startOtlpCapture(publicUrl, Number(process.env.WEFT_EVAL_CAPTURE_PORT ?? 4922));
+      opts.otlp = () => capture!.payloads;
+      for (const split of [...new Set(tasks.map((t) => t.split))]) {
+        for (const variant of variants) {
+          const these = tasks.filter((t) => t.split === split && t.variants.includes(variant));
+          if (!these.length || state.stoppedEarly) continue;
+          const name = `weft-eval-${startedAt.slice(0, 10)}-${harnessSha}-${variant}`;
+          const { record } = await ph.recordExperiment({
+            baseUrl: capture.url, publicUrl, split, variant, tasks: these, k: args.k, name,
+            metadata: { harness_sha: harnessSha, model: process.env.WEFT_MODEL || "gpt-5.6-luna", provider: args.provider, effort: "low", split, phoenix_version: version },
+            trial: async (task, n) => {
+              if (state.stoppedEarly) return null;
+              try { const t = await runTrial({ task, variant, trial: n }, opts, state); settleTrial(t, opts, state); return t; } catch (e) { if (e instanceof SuiteStop) return null; throw e; }
+            },
+          });
+          experimentIds.push(record.experimentId);
+          phoenixProject ??= record.projectName;
+          console.error(`experiment ${name}: ${record.compareUrl}`);
+        }
+      }
+      await new Promise((r) => setTimeout(r, 1500));   // the last task span's export
+    } else {
+      await runPlain(planTrials(tasks, variants, args.k), opts, state);
+    }
+  } finally {
+    await capture?.close();
+  }
+  const wholeRun = finalCanaryScan(state, capture?.payloads ?? []);
+  const result: SuiteResultFile = {
+    startedAt, endedAt: new Date().toISOString(), harnessSha, promptVersion: await promptVersion(), model: args.provider === "live" ? (process.env.WEFT_MODEL || "gpt-5.6-luna") : "scripted",
+    effort: "low", phoenixProject, experimentIds, splits: [...new Set(tasks.map((t) => t.split))].sort() as EvalSplit[], k: args.k,
+    suiteCapUsd: args.cap, spentUsd: state.spentUsd, stoppedEarly: state.stoppedEarly, trials: state.trials, variants, canaryHitsWholeRun: wholeRun,
+  };
+  mkdirSync(args.outDir, { recursive: true });
+  const stem = join(args.outDir, `${startedAt.slice(0, 10)}-${harnessSha}${args.provider === "scripted" ? "-scripted" : ""}${process.env.WEFT_EVAL_TAG ? `-${process.env.WEFT_EVAL_TAG}` : ""}-suite`);
+  const prev = previousResult(args.outDir, `${stem}.json`);
+  writeFileSync(`${stem}.json`, `${JSON.stringify(result, null, 2)}\n`);
+  writeFileSync(`${stem}.md`, renderReport(result, prev));
+  const pass = state.trials.filter((t) => t.success).length;
+  console.log(`${pass} of ${state.trials.length} trials passed; $${state.spentUsd.toFixed(4)} spent${state.stoppedEarly ? `; stopped early: ${state.stoppedEarly}` : ""}`);
+  console.log(`results in ${stem}.json and ${stem}.md`);
+  return 0;
+}
+
+async function promptVersion(): Promise<string | null> {
+  try {
+    const { frozenPrompt } = await import("../../packages/agent/src/index");
+    const { sha256Hex } = await import("../../packages/core/src/index");
+    return `p-${sha256Hex(["chat", "routine", "routine_draft"].map((k) => frozenPrompt(k as never)).join("\n")).slice(0, 12)}`;
+  } catch { return null; }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main(process.argv.slice(2)).then((code) => process.exit(code), (e: unknown) => { console.error(e instanceof Error ? e.message : String(e)); process.exit(1); });
+}

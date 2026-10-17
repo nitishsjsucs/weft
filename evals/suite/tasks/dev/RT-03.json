@@ -1,0 +1,58 @@
+{
+  "id": "RT-03",
+  "group": "prebuilt_routines",
+  "parity": [
+    "R7"
+  ],
+  "kind": "regression",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-11-01T16:00:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:0dbd6501bd0ce6ca867fba3c6e13a753edc9cfcf59b9f101f211351667ac5e26"
+  },
+  "input": {
+    "routine": "rt_monthly_exec_report",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": [
+        {
+          "surface": "chat",
+          "channel": "#leadership",
+          "count": 1,
+          "mustInclude": [
+            "Monthly exec report for October 2026",
+            "employees at month end"
+          ]
+        }
+      ],
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_exec_report' AND json_extract(args_json, '$.month') = '2026-10' AND json_extract(args_json, '$.kind') = 'monthly'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/RT-03.md",
+  "legacyCase": "L8"
+}

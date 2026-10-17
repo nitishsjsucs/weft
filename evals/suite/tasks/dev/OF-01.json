@@ -1,0 +1,66 @@
+{
+  "id": "OF-01",
+  "group": "onboarding_offboarding",
+  "parity": [
+    "T13",
+    "Q1"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "imaniOffboarding"
+    ],
+    "digest": "sha256:25040e39e6c2a27a3379834645db8febc32eaf9de74bbd54ef1918876c7df391"
+  },
+  "input": {
+    "chat": "What's left on Imani's offboarding?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "COBRA"
+        ],
+        "judges": [
+          "J4_no_invention"
+        ]
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM offboarding_steps WHERE status <> 'pending'",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM offboarding_cases WHERE status = 'open'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/OF-01.md",
+  "legacyCase": null
+}

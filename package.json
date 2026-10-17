@@ -33,6 +33,8 @@
     "memory:restore": "tsx scripts/memory-restore.ts"
   },
   "devDependencies": {
+    "@arizeai/phoenix-client": "7.16.1",
+    "@arizeai/phoenix-otel": "2.2.0",
     "@playwright/test": "1.64.0",
     "@types/node": "26.6.5",
     "tsx": "4.23.15",

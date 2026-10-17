@@ -1,0 +1,90 @@
+{
+  "id": "CP-01",
+  "group": "chat_proposals",
+  "parity": [
+    "T14",
+    "Q4"
+  ],
+  "kind": "regression",
+  "split": "dev",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default",
+    "chat_can_propose"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "hollisMissed"
+    ],
+    "digest": "sha256:42cfda97d684ef0f2ebe2353c1dd4967fc952cbac5a67078f3a52282b6eaa98a"
+  },
+  "input": {
+    "chat": "Hollis Grey (demo) missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27."
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [],
+        "judges": [
+          "J3_next_step"
+        ]
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    },
+    "chat_can_propose": {
+      "proposals": [
+        {
+          "command": "payroll.propose_off_cycle",
+          "args": {
+            "worker_ids": [
+              "wrk_0042"
+            ],
+            "reason": "missed_payroll",
+            "period_start": "2026-10-01",
+            "period_end": "2026-10-15",
+            "bonuses": [
+              {
+                "worker_id": "wrk_0042",
+                "cents": 150000
+              }
+            ]
+          }
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/CP-01.md",
+  "legacyCase": "L5"
+}

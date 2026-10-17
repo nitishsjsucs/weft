@@ -1,0 +1,68 @@
+{
+  "id": "MM-03",
+  "group": "memory_recall",
+  "parity": [
+    "G8",
+    "R12",
+    "harness 9"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "noticeEscalationProcedure"
+    ],
+    "digest": "sha256:50fac4e75cddae32d385e6295cce28ffa2dd647e9421a582623167ca42dff3da"
+  },
+  "input": {
+    "routine": "rt_agency_notice",
+    "event": {
+      "type": "notice.deliver",
+      "scenario": "ny_missing_filing"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": {
+        "allowPaths": [],
+        "forbidCommit": true
+      },
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "notice-escalation"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'tax.update_rate'",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT ((SELECT COUNT(*) FROM actions WHERE command = 'notices.escalate') + (SELECT COUNT(*) FROM proposals WHERE command = 'notices.escalate')) >= 1 AS ok",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 8,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/MM-03.md",
+  "legacyCase": null
+}

@@ -1,0 +1,62 @@
+{
+  "id": "ON-02",
+  "group": "onboarding_offboarding",
+  "parity": [
+    "T12",
+    "Q1"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "noorAccepted"
+    ],
+    "digest": "sha256:e6afe9f9e43985249f8d40150c3852d89ce9c663e2760ef10c9824827374314f"
+  },
+  "input": {
+    "chat": "Is Noor ready for Monday?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "I-9"
+        ],
+        "judges": [
+          "J4_no_invention"
+        ]
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM onboarding_tasks WHERE worker_id = 'wrk_0052' AND status = 'pending'",
+          "equals": 5
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/ON-02.md",
+  "legacyCase": null
+}
