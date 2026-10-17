@@ -119,12 +119,12 @@ export function agentSurfacesRoutes(weft: Weft): Hono<WeftEnv> {
     const b = body.data;
     const chat = weft.sims.chat as typeof weft.sims.chat & { postInbound?(m: { channel: z.infer<typeof ChatChannel>; author: string; text: string }): Promise<{ id: string }> };
     if (!chat.postInbound) throw new ValidationError("This chat simulator takes no inbound messages", { issues: [] });
-    const { id: messageRef } = await chat.postInbound({ channel: b.channel, author: b.from, text: b.text });
-    if (!mentionsAgent(b.text)) return c.json({ messageRef, mentionId: null }, 200);
-
-    // Who tagged the agent: a human of this company by principal id, email or display name. Anyone else is ignored.
+    // Who posted: a human of this company by principal id, email or display name. The post shows their display name,
+    // like every other post; anyone else keeps the name they gave, and a mention from them is ignored.
     const [who] = await weft.db.select().from(principals).where(and(eq(principals.companyId, s.companyId), eq(principals.kind, "human"),
       or(eq(principals.id, b.from), eq(principals.email, b.from), eq(principals.display, b.from)))).orderBy(asc(principals.id)).limit(1);
+    const { id: messageRef } = await chat.postInbound({ channel: b.channel, author: who?.display ?? b.from, text: b.text });
+    if (!mentionsAgent(b.text)) return c.json({ messageRef, mentionId: null }, 200);
     const rec = (await weft.executor.system.exec("svc_sim", "agent.record_mention", {
       channel: b.channel, message_ref: messageRef, ...(b.threadRef ? { thread_ref: b.threadRef } : {}), mentioned_by: who?.id ?? b.from.slice(0, 80),
       ...(who && who.role !== "employee" ? {} : { status: "ignored" }),
