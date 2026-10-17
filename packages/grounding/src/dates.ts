@@ -1,18 +1,29 @@
 // Dates for the grounding check (harness 4.8): the date shapes a person reads, the dates a source holds, and the
 // window bounds a relative phrase ("next week", "the next two weeks") names against the run clock. Only bounds are
 // derived from a phrase, never the days inside a window: a date the answer claims inside the asked-about window must
-// still come from a record, or a made-up start date in "the next two weeks" would pass.
+// still come from a record, or a made-up start date in "the next two weeks" would pass. A day range after a month name
+// ("November 23 to 27, 2026", "Nov 23-27", or the two days joined by an en dash) is two dates, so its second day is
+// never read as a bare number (round 1 analysis R8).
 
 export interface DateKey { y: number; m: number; d: number | null }
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 const MONTH_RE = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?";
 
-/** Date shapes a person might read: 2026-01-01, 1/1/2026, 01/01/26, January 1, 2026, Jan 1 2026, 1 January 2026, January 2026. */
+const ORDINAL = "(?:st|nd|rd|th)?";
+/** The words and marks that join the two days of a range: "to", "through", a hyphen or an en dash. */
+const RANGE_JOIN = "(?:\\s*[-\u2013]\\s*|\\s+(?:to|through)\\s+)";
+
+/**
+ * Date shapes a person might read: 2026-01-01, 1/1/2026, 01/01/26, January 1, 2026, Jan 1 2026, 1 January 2026,
+ * January 2026, and a day range after a month name (November 23 to 27, 2026; Nov 23-27; the two days joined by an en
+ * dash). The range comes before the single "Month D" shape, so the alternation takes the whole range.
+ */
 export const DATE_IN_TEXT = new RegExp(
   [
     "\\b\\d{4}-\\d{2}-\\d{2}(?:T[0-9:.]+Z?)?\\b",
     "\\b\\d{1,2}/\\d{1,2}/(?:\\d{4}|\\d{2})\\b",
+    `\\b${MONTH_RE}\\s+\\d{1,2}${ORDINAL}${RANGE_JOIN}\\d{1,2}${ORDINAL}(?:,?\\s+\\d{4})?\\b`,
     `\\b${MONTH_RE}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b`,
     `\\b\\d{1,2}\\s+${MONTH_RE}(?:,?\\s+\\d{4})?\\b`,
     `\\b${MONTH_RE}\\s+\\d{4}\\b`,
@@ -37,16 +48,40 @@ export function parseTextDate(raw: string): DateKey | null {
   return null;
 }
 
+const RANGE_PARTS = new RegExp(`^(${MONTH_RE}\\s+\\d{1,2}${ORDINAL})${RANGE_JOIN}(\\d{1,2})${ORDINAL}(?:,?\\s+(\\d{4}))?$`, "i");
+
+/**
+ * One DATE_IN_TEXT match read as dates. A day range after a month name gives both days, with the year (when written)
+ * on both. A range whose second day does not follow the first in the same month ("November 30 to 2", "May 3-45") is
+ * not one: only "Month D1" is a date (`raw` is that part), and the rest comes back in `rest` with the joining word cut,
+ * so the caller still reads its numbers. `dates` is empty when nothing reads as a calendar date.
+ */
+export function readTextDates(match: string): { dates: DateKey[]; raw: string; rest: string } {
+  const s = match.trim();
+  const r = RANGE_PARTS.exec(s);
+  if (!r) {
+    const k = parseTextDate(s);
+    return { dates: k && k.m >= 1 ? [k] : [], raw: s, rest: "" };
+  }
+  const head = r[1]!;
+  const first = parseTextDate(r[3] ? `${head}, ${r[3]}` : head);
+  const d2 = Number(r[2]);
+  if (first && first.m >= 1 && first.d !== null && d2 > first.d && d2 <= 31) return { dates: [first, { ...first, d: d2 }], raw: s, rest: "" };
+  const lone = parseTextDate(head);
+  return { dates: lone && lone.m >= 1 ? [lone] : [], raw: head, rest: s.slice(head.length).replace(new RegExp(`^${RANGE_JOIN}`, "i"), " ") };
+}
+
 /**
  * Every date a source string holds, wherever it sits: "2026-10-26 to 2026-11-09" gives both bounds, "Due October 30,
- * 2026" gives one. Returns the dates and the string with them cut out, so their parts are not read as numbers.
+ * 2026" gives one, "Nov 23-27" gives two. Returns the dates and the string with them cut out, so their parts are not
+ * read as numbers.
  */
 export function datesIn(s: string): { dates: DateKey[]; rest: string } {
   const dates: DateKey[] = [];
-  const rest = s.replace(DATE_IN_TEXT, (raw) => {
-    const k = parseTextDate(raw);
-    if (k && k.m >= 1) dates.push(k);
-    return " ";
+  const rest = s.replace(DATE_IN_TEXT, (match) => {
+    const r = readTextDates(match);
+    dates.push(...r.dates);
+    return ` ${r.rest} `;
   });
   return { dates, rest };
 }

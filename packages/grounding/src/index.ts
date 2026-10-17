@@ -3,5 +3,5 @@
 // argument adds the request, the run clock and the run's own echoed arguments.
 export { check, isIdentifier, type CheckOptions, type GroundingResult } from "./check";
 export { extractNumerals, collectLeaves, TAINTED_LEAF, type LeafOptions, type Numeral, type Leaves } from "./numerals";
-export { clockDates, datesIn, parseTextDate, type DateKey } from "./dates";
+export { clockDates, datesIn, parseTextDate, readTextDates, type DateKey } from "./dates";
 export { PLACEHOLDER, renderPlaceholders, resolvePath, usd, type AliasEntry, type AliasMap, type RenderResult } from "./aliases";

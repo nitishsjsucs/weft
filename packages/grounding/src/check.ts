@@ -10,7 +10,7 @@
 //   caller passes them, the person's own request, the run clock with the bounds of the relative windows the request
 //   or answer names, and a stated count total that sums the counts the answer lists from one result.
 import { PLACEHOLDER } from "./aliases";
-import { clockDates, DATE_IN_TEXT, dateGrounded, parseTextDate, type DateKey } from "./dates";
+import { clockDates, DATE_IN_TEXT, dateGrounded, readTextDates, type DateKey } from "./dates";
 import { collectLeaves, emptyLeaves, extractNumerals, mineString, TAINTED_LEAF, type Leaves, type Numeral } from "./numerals";
 
 export interface GroundingResult { ok: boolean; offending: string[] }
@@ -115,7 +115,15 @@ export function check(text: string, toolResults: unknown[], opts: CheckOptions =
   const leaves = collectLeaves(toolResults, { echoes });
   const extra = emptyLeaves();
   const request = (opts.request ?? "").trim();
-  if (request && !TAINTED_LEAF.test(request)) mineString(request, extra);
+  if (request && !TAINTED_LEAF.test(request)) {
+    mineString(request, extra);
+    // The second day of a range the person wrote ("Oct 1 to 15") is a date now, and stays a numeral they wrote, as it
+    // was before ranges were read: an answer may repeat "15" from their words.
+    for (const m of request.matchAll(DATE_IN_TEXT)) {
+      const r = readTextDates(m[0]);
+      if (r.dates.length === 2 && r.dates[1]!.d !== null) extra.values.push(r.dates[1]!.d);
+    }
+  }
   const evidence: Leaves = {
     values: [...leaves.values, ...extra.values], percents: [...leaves.percents, ...extra.percents],
     strings: leaves.strings, lengths: leaves.lengths, dates: [...leaves.dates, ...extra.dates],
@@ -129,11 +137,12 @@ export function check(text: string, toolResults: unknown[], opts: CheckOptions =
   // only as whole tokens, so "ax 5" never eats the middle of "tax 5000".
   const identifiers = [...leaves.strings].filter(isIdentifier).sort((a, b) => b.length - a.length);
   if (identifiers.length) stripped = stripped.replace(new RegExp(`(?<![A-Za-z0-9_])(?:${identifiers.map(escapeRe).join("|")})(?![A-Za-z0-9_])`, "g"), " ");
-  // Dates: each must be a known date, then it leaves the text so its parts are not read as numbers.
-  stripped = stripped.replace(DATE_IN_TEXT, (raw) => {
-    const k = parseTextDate(raw);
-    if (!k || k.m < 1 || !dateGrounded(k, known)) offending.push(raw.trim());
-    return " ";
+  // Dates: each must be a known date, then it leaves the text so its parts are not read as numbers. Both days of a
+  // month day range must be known; what a non-range leaves behind (its second number) stays in the text and is checked.
+  stripped = stripped.replace(DATE_IN_TEXT, (match) => {
+    const r = readTextDates(match);
+    if (!r.dates.length || !r.dates.every((k) => dateGrounded(k, known))) offending.push(r.raw);
+    return ` ${r.rest} `;
   });
   const numerals = extractNumerals(stripped);
   let perResult: Leaves[] | null = null;
