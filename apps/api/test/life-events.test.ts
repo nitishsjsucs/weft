@@ -159,9 +159,10 @@ describe("the 30-day check-in form", () => {
     const again = await call(HIRE, "POST", "/v1/portal/checkins/chk_9001/submit", { settled: 4, tools: true, clarity: true });
     expect([again.status, again.json.code]).toEqual([422, "DOMAIN_CHECKIN_CLOSED"]);
     const [mail] = await weft.db.select().from(simEmailMessages).where(eq(simEmailMessages.relatedRef, "chk_9001"));
-    expect(mail!.body).toContain("How settled they feel, from 1 to 5: 4.");
+    expect(mail!.body).toContain("How settled they feel: mostly settled.");
     expect(mail!.body).toContain("Every tool and account they need: no.");
     expect(mail!.body).not.toMatch(/CAD license|Loving the team/);
+    expect(mail!.body).not.toMatch(/\d/);
   });
 
   it("the manager sees direct reports only, with the hire's written answers; others see none", async () => {

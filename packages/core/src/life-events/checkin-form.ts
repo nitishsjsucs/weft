@@ -46,12 +46,14 @@ export async function directReports(tx: DbTx, companyId: string, managerWorkerId
 }
 
 const yn = (b: boolean) => (b ? "yes" : "no");
-/** The manager's email: the scale and the two yes or no answers, and whether anything was written; never the text. */
+/** The scale in words: like the wave 3 summary, the email quotes no numbers. */
+export const SETTLED_WORDS: Record<number, string> = { 1: "not settled yet", 2: "a little settled", 3: "somewhat settled", 4: "mostly settled", 5: "fully settled" };
+/** The manager's email: the scale in words and the two yes or no answers, and whether anything was written; never the text. */
 export function managerSummaryW4(name: string, a: CheckinAnswers): { subject: string; body: string } {
   const wrote = [a.blocker.trim(), a.manager_note.trim()].filter(Boolean).length;
   const open = wrote === 0 ? "They left the written questions blank." : `They also wrote ${wrote === 1 ? "one written answer" : "two written answers"} in their own words; read them on the check-in in Weft.`;
   return {
     subject: `First-month check-in from ${name}`,
-    body: `${name} finished the first-month check-in.\n\nHow settled they feel, from 1 to 5: ${a.settled}.\nEvery tool and account they need: ${yn(a.tools)}.\nClear on what is expected this quarter: ${yn(a.clarity)}.\n${open}\n\n(sent by the Weft agent)`,
+    body: `${name} finished the first-month check-in.\n\nHow settled they feel: ${SETTLED_WORDS[a.settled] ?? "not said"}.\nEvery tool and account they need: ${yn(a.tools)}.\nClear on what is expected this quarter: ${yn(a.clarity)}.\n${open}\n\n(sent by the Weft agent)`,
   };
 }
