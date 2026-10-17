@@ -1,0 +1,16 @@
+SIMULATED AGENCY NOTICE (scanned mail sample). Made for the Weft demo. Not a real government document.
+
+INTERNAL REVENUE SERVICE (SIMULATED)
+Notice of Penalty: Federal Tax Deposit Made Late
+
+Employer: Larkspur Robotics, Inc. (demo)
+EIN: 00-4817265
+Form: 941
+Period: 2026-Q2
+Penalty: $412.50
+
+Our records show one federal tax deposit for the period above arrived after its due date, so a
+failure-to-deposit penalty applies. Pay the penalty by the date below, or reply if you believe the
+deposit was on time or that the penalty should be removed.
+
+Respond By: 2026-11-20

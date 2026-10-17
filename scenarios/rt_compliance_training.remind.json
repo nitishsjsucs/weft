@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "training__send_reminders",
+            "arguments": "{{derived.training.send_reminders}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Proposed the training reminders for approval."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "handoffs__open",
+            "arguments": "{{derived.handoffs.open}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Handed the notice to the tax specialist with the evidence pack."
+          }
+        ]
+      }
+    ]
+  }
+}

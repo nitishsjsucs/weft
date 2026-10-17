@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "compliance__post_reminders",
+            "arguments": "{{derived.compliance.post_reminders}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Posted the compliance rows due soon to #payroll."
+          }
+        ]
+      }
+    ]
+  }
+}

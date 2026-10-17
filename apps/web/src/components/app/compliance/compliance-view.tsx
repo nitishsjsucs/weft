@@ -7,6 +7,8 @@ import { errorText, useGet } from "@/lib/api/hooks";
 import { AGENCY, fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { refHref } from "../refs";
+import { CalendarPanel, FilingsPanel, HandoffsPanel } from "./w4-calendar";
+import { NoticeUpload, TrainingPanel } from "./w4-upload-training";
 
 const STATUS_TONE: Record<TaxAccount["status"], "green" | "amber" | "gray" | "red"> = { active: "green", awaiting_state: "amber", needs_info: "red", not_registered: "gray" };
 const NOTICE_TONE: Record<Notice["status"], "gray" | "blue" | "amber" | "green" | "red"> = { new: "blue", in_review: "blue", proposed: "amber", resolved: "green", escalated: "red" };
@@ -88,21 +90,27 @@ export function ComplianceView() {
   const [open, setOpen] = useState<string | null>(null);
   const [tab, setTab] = useState("registrations");
   useEffect(() => {
-    const n = new URLSearchParams(window.location.search).get("notice");
+    const q = new URLSearchParams(window.location.search);
+    const n = q.get("notice");
     if (n) { setTab("notices"); setOpen(n); }
+    const t = q.get("tab");
+    if (!n && t && ["calendar", "filings", "handoffs", "training", "notices"].includes(t)) setTab(t);
   }, []);
   const rs = rates.data ?? [];
   const err = accounts.error ?? rates.error ?? notices.error;
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title="Taxes & Compliance" subtitle="State registrations, employer rates and agency notices. Every agency here is a simulator in this repo." />
+      <PageHeader title="Taxes & Compliance" subtitle="State registrations, employer rates, agency notices, the compliance calendar and filings. Every agency here is a simulator in this repo." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="registrations">Registrations</TabsTrigger>
           <TabsTrigger value="rates">Rates</TabsTrigger>
           <TabsTrigger value="notices">Notices {notices.data ? <Badge size="xs">{notices.data.count}</Badge> : null}</TabsTrigger>
-          <TabsTrigger value="filings">Filings <Badge size="xs">Coming soon</Badge></TabsTrigger>
+          <TabsTrigger value="calendar">Calendar</TabsTrigger>
+          <TabsTrigger value="filings">Filings</TabsTrigger>
+          <TabsTrigger value="handoffs">Hand-offs</TabsTrigger>
+          <TabsTrigger value="training">Training</TabsTrigger>
         </TabsList>
         <TabsContent value="registrations">
           <Card className="overflow-hidden">
@@ -148,6 +156,7 @@ export function ComplianceView() {
           </Card>
         </TabsContent>
         <TabsContent value="notices">
+          <div className="mb-3"><NoticeUpload /></div>
           <Card className="divide-y divide-[var(--app-border)]">
             {(notices.data?.data ?? []).map((n) => (
               <button type="button" key={n.id} data-testid={tid.noticeRow(n.id)} onClick={() => setOpen(n.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-2">
@@ -161,9 +170,10 @@ export function ComplianceView() {
             {notices.data && notices.data.data.length === 0 ? <div className="px-4 py-6 text-2 text-gray-10">No notices.</div> : null}
           </Card>
         </TabsContent>
-        <TabsContent value="filings">
-          <div className="rounded-xl border border-dashed border-[var(--app-border)] px-6 py-10 text-center text-2 text-gray-10">Quarterly and annual filings are coming soon. Responses to notices are filed from the Inbox today.</div>
-        </TabsContent>
+        <TabsContent value="calendar"><CalendarPanel /></TabsContent>
+        <TabsContent value="filings"><FilingsPanel /></TabsContent>
+        <TabsContent value="handoffs"><HandoffsPanel /></TabsContent>
+        <TabsContent value="training"><TrainingPanel /></TabsContent>
       </Tabs>
       <NoticeDetail id={open} onClose={() => setOpen(null)} />
     </div>

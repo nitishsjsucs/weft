@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "notices__acknowledge",
+            "arguments": "{{derived.notices.acknowledge}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Recorded the informational notice as acknowledged."
+          }
+        ]
+      }
+    ]
+  }
+}

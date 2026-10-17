@@ -1,0 +1,28 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "notices__draft_response",
+            "arguments": "{{derived.notices.draft_response}}"
+          },
+          {
+            "type": "function_call",
+            "name": "notices__send_response",
+            "arguments": "{{derived.notices.send_response}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Drafted a reply citing the return on file and proposed sending it."
+          }
+        ]
+      }
+    ]
+  }
+}

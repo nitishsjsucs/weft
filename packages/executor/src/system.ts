@@ -23,7 +23,9 @@ export const SYSTEM_ALLOWLISTS: Record<SystemPrincipal, readonly string[]> = {
   svc_events: ["tax.record_registration", "payroll.mark_processed", "payroll.mark_failed", "onboarding.complete_task", "it.record_delivery", "comms.post_update",
     // wave 3 (docs/wave3.md): reimbursements, accruals and final-pay payout, vendor records applied after a re-read
     "expenses.schedule", "expenses.mark_paid", "time_off.post_accruals", "time_off.record_payout",
-    "integrations.record_ats_hire", "integrations.apply_hris_change", "integrations.record_delivery", "screening.apply_vendor_event", "documents.apply_esign_event"],
+    "integrations.record_ats_hire", "integrations.apply_hris_change", "integrations.record_delivery", "screening.apply_vendor_event", "documents.apply_esign_event",
+    // wave 4 (w4-parity-compliance): the compliance calendar refresh and the uploaded-notice extraction, both R1 system records
+    "compliance.refresh_calendar", "notices.ingest_upload"],
   svc_sim: ["tax.record_registration"],
   svc_digest: ["comms.post_update"],
 };

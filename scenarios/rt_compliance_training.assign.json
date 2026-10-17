@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "training__assign",
+            "arguments": "{{derived.training.assign}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Proposed the required training assignments for approval."
+          }
+        ]
+      }
+    ]
+  }
+}
