@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { createWeft } from "./compose";
+import { startTracingFromEnv } from "./telemetry";
 
 const port = Number(process.env.WEFT_API_PORT ?? 4070);
 const host = "127.0.0.1";
@@ -20,6 +21,7 @@ if (!(await portFree(port))) {
   process.exit(1);
 }
 
+startTracingFromEnv();   // WEFT_TRACE=phoenix only (docs/telemetry.md); unset installs nothing
 const weft = await createWeft({ dataDir: resolve(process.env.WEFT_DATA_DIR ?? ".data"), testMode: false });
 if (weft.stubs.length) console.error(`weft: stubbed parts (NotImplemented): ${weft.stubs.join(", ")}`);
 weft.scheduler.start();

@@ -4,3 +4,10 @@ packages:
   - tests
 allowBuilds:
   esbuild: true
+# drizzle-orm lists @opentelemetry/api as an optional peer; once the agent depends on the OTel API (wave 4
+# telemetry) pnpm would build a second drizzle variant for it, and the two copies' types do not mix with @weft/db.
+# Making it a plain dependency keeps one drizzle instance for the whole workspace. drizzle never loads it at runtime.
+packageExtensions:
+  drizzle-orm@0.45.4:
+    dependencies:
+      "@opentelemetry/api": 1.9.1

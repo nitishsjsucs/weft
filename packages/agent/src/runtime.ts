@@ -9,7 +9,7 @@ import type { Db } from "@weft/db";
 import { newNonce } from "./canonical";
 import { chatPack, routineDraftPack, routinePack, type OpenLoop } from "./context";
 import { LUNA, pricesFor, ZERO_USAGE, type Prices } from "./cost";
-import { BUDGETS, MAX_REQUEUES, runLoop, type ChecklistState, type RunSetup } from "./loop";
+import { BUDGETS, MAX_REQUEUES, runLoop, traceWakeSegment, type ChecklistState, type RunSetup } from "./loop";
 import type { PromptKind } from "./prompts/index";
 import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
 import { createRunStore, type RunStore } from "./store";
@@ -30,10 +30,15 @@ export interface RoutinesView {
 
 /** Deterministic chat context from DB rows (apps/api provides it; the brain never reads domain tables). */
 export interface ChatContextSource {
-  chat(input: { companyId: string; runId: string }): Promise<{ actingFor: string; grants: Record<string, string>; companySummary: string; openLoops: OpenLoop[] }>;
+  chat(input: { companyId: string; runId: string }): Promise<{ actingFor: string; grants: Record<string, string>; companySummary: string; openLoops: OpenLoop[]; principalId?: string | null }>;
   channels?(companyId: string): Promise<string[]>;
   /** Wave 2 (w2-memory): a <recall> block for the run start, or "" for none. */
   recall?(input: { companyId: string; runId: string; kind: "chat" | "routine"; query: string; subjectRefs: string[] }): Promise<string>;
+}
+
+/** The acting principal for telemetry (user.id): the source's id, else the "(prn_...)" id inside actingFor. */
+export function principalOf(c: { actingFor: string; principalId?: string | null }): string | null {
+  return c.principalId ?? /\(([a-z]{2,5}_[A-Za-z0-9_]+)\)/.exec(c.actingFor)?.[1] ?? null;
 }
 
 /** Appends a non-empty recall block inside the context pack (wave 2, w2-memory); "" or undefined leaves it unchanged. */
@@ -228,15 +233,17 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       await store.createRun(baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind }));
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
       let text: string;
+      let principal: string | null = null;
       if (kind === "chat") {
         const c = (await opts.contextSource?.chat({ companyId, runId: handle.runId })) ?? { actingFor: "the person in this chat", grants: {}, companySummary: "No company summary is available.", openLoops: [] };
+        principal = principalOf(c);
         text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext });
         text = withRecall(text, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "chat", query: input.text, subjectRefs: [] }));
       } else {
         const channels = (await opts.contextSource?.channels?.(companyId)) ?? ["#people-ops", "#new-hires", "#payroll"];
         text = routineDraftPack({ nonce, now: opts.clock.now(), actingFor: "the person in this chat", request: input.text, channels, tools: [...CHAT_TOOLS, "comms.send_message"] });
       }
-      await writeContext(handle.runId, { promptKind: kind, allowlist: kind === "chat" ? [...(input.allowlist ?? CHAT_TOOLS)] : [...DRAFT_TOOLS], nonce, routineId: null, text, pack: true });
+      await writeContext(handle.runId, { promptKind: kind, allowlist: kind === "chat" ? [...(input.allowlist ?? CHAT_TOOLS)] : [...DRAFT_TOOLS], nonce, routineId: null, text, pack: true, principal });
       enqueue(handle.runId);
     },
     async startRoutineRun(handle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }) {
@@ -252,7 +259,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         precheck: { severity: input.precheck.severity, findings: input.precheck.findings, derivedArgs: input.precheck.derivedArgs }, checklist: input.routine.checklist,
       });
       const text = withRecall(packed, await opts.contextSource?.recall?.({ companyId, runId: handle.runId, kind: "routine", query: input.routine.name, subjectRefs: input.precheck.subjectRefs ?? [] }));
-      await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true, trigger });
+      await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true, trigger, principal: input.routine.ownerPrincipalId ?? null });
       enqueue(handle.runId);
     },
     async requeue(runId, notice) {
@@ -286,6 +293,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         if (pending.length > 0) return "waiting";
         await store.updateRun(runId, { status: "done", terminalReason: "DONE", checklist: items ?? run.checklist, endedAt: opts.clock.now() });
         await store.appendStep(runId, { stage: "terminal", kind: "verify", parentN: null, callId: null, toolName: null, toolArgs: null, outcome: "ok", result: { status: "done", reason: "DONE", zeroTokenWake: true }, native: null, usage: null, costUsdMicros: 0, attempt: 1, requestId: null, prefixHash: null, timings: null });
+        await traceWakeSegment(store, runId, items);   // wave 4 telemetry: the wake is its own AGENT segment
         notifySettled((await store.getRun(runId))!);
         return "done";
       }
