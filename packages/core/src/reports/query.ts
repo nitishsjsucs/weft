@@ -95,6 +95,13 @@ async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[
     FROM contractor_payments cp JOIN workers w ON w.id = cp.worker_id
     WHERE w.company_id = ${q.companyId} AND cp.status = 'paid' AND cp.scheduled_for BETWEEN ${q.from} AND ${q.to}
     GROUP BY m ORDER BY m`);
+  // The drivers beside the cost (round 1 R4): who was paid and who joined or left in the same period, so a question
+  // about a change in cost has its headcount evidence in the same result instead of a second metric call.
+  const paid = await tx.all<{ m: string; worker_id: string }>(sql`
+    SELECT DISTINCT substr(r.payday, 1, 7) AS m, pc.worker_id AS worker_id
+    FROM paychecks pc JOIN payroll_runs r ON r.id = pc.payroll_run_id
+    WHERE r.company_id = ${q.companyId} AND r.status IN ('processing', 'processed') AND pc.status <> 'excluded' AND r.payday BETWEEN ${q.from} AND ${q.to}`);
+  const moves = await hireDepartureMonths(tx, q);
   const R = byMonth(runs, "m"), C = byMonth(contractors, "m");
   const rows: ReportRow[] = [];
   for (const p of periodsOf(q.from, q.to, q.groupBy)) {
@@ -105,8 +112,10 @@ async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[
       if (c) contractor += n(c.usd);
     }
     if (count === 0 && contractor === 0) continue;   // no paid runs: a zero here would read as "payroll cost nothing"
+    const workersPaid = new Set(paid.filter((x) => p.months.includes(x.m)).map((x) => x.worker_id)).size;
     rows.push({
       period: p.key, period_label: p.label, period_start: p.start, period_end: p.end, runs: count,
+      workers_paid: workersPaid, hires: p.months.reduce((a, m) => a + n(moves.hires.get(m)?.c), 0), departures: p.months.reduce((a, m) => a + n(moves.leaves.get(m)?.c), 0),
       gross_cents: gross, gross_display: formatCents(gross), employer_taxes_cents: erTax, employer_taxes_display: formatCents(erTax),
       benefits_cents: benefits, benefits_display: formatCents(benefits), reimbursements_cents: reimb, reimbursements_display: formatCents(reimb),
       contractor_cents: contractor, contractor_display: formatCents(contractor), total_cents: total + contractor, total_display: formatCents(total + contractor),
@@ -141,14 +150,19 @@ async function headcountBy(tx: DbTx, q: ReportQuery, by: "state" | "department")
   return { rows: out, chart, summary: `${METRIC_TITLE[q.metric]} on ${q.to}: ${total} employees across ${out.length} ${by === "state" ? "states" : "departments"}` };
 }
 
-async function hiresDepartures(tx: DbTx, q: ReportQuery, turnover: boolean) {
+/** Employee hires (start dates) and departures (end dates) per calendar month in the range. */
+async function hireDepartureMonths(tx: DbTx, q: ReportQuery) {
   const hires = await tx.all<{ m: string; c: number }>(sql`
     SELECT substr(start_date, 1, 7) AS m, count(*) AS c FROM workers
     WHERE company_id = ${q.companyId} AND type = 'employee' AND status NOT IN ('draft') AND start_date BETWEEN ${q.from} AND ${q.to} GROUP BY m`);
   const leaves = await tx.all<{ m: string; c: number }>(sql`
     SELECT substr(end_date, 1, 7) AS m, count(*) AS c FROM workers
     WHERE company_id = ${q.companyId} AND type = 'employee' AND status NOT IN ('draft') AND end_date BETWEEN ${q.from} AND ${q.to} GROUP BY m`);
-  const H = byMonth(hires, "m"), L = byMonth(leaves, "m");
+  return { hires: byMonth(hires, "m"), leaves: byMonth(leaves, "m") };
+}
+
+async function hiresDepartures(tx: DbTx, q: ReportQuery, turnover: boolean) {
+  const { hires: H, leaves: L } = await hireDepartureMonths(tx, q);
   const rows: ReportRow[] = [];
   let hired = 0, left = 0;
   for (const p of periodsOf(q.from, q.to, q.groupBy)) {
