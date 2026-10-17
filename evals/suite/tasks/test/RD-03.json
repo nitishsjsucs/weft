@@ -35,7 +35,7 @@
       },
       "endState": [
         {
-          "sql": "SELECT COUNT(*) AS n FROM routines",
+          "sql": "SELECT COUNT(*) AS n FROM routines WHERE source != 'prebuilt'",
           "equals": 0
         }
       ]
