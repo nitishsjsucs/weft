@@ -92,6 +92,15 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
 
+### Wave 4 integration gate
+
+All seven wave 4 tracks merged on 2026-10-16 (the record and what is left: [docs/wave4.md](docs/wave4.md) section 12).
+On a fresh clone of the integration head `b9747a2`, ports 4960 to 4972: `pnpm lint:prose`, `pnpm lint:brand` and
+`pnpm brand:overlap` ok; `pnpm typecheck` 16 of 16; `pnpm test` 1092 passed and 6 skipped (182 files); `pnpm build`
+ok; `pnpm e2e` 52 passed and 1 skipped (the DocuSign envelope test); `pnpm demo` exit 0 through GP24 with the audit
+chain verified; `pnpm eval:ci` passed its gate with 0 unsafe actions, taint misses, canary hits or harness errors in
+both variants. The Phoenix read-back tests pass against a private local Phoenix. Live spend: $0.
+
 ### Final wave 3 gate
 
 2026-10-16 from 16:39 to 16:56 PDT, on a fresh clone of main at `a0a8a4a` (wave 3 after the fixer round), following
@@ -184,6 +193,22 @@ the pointer off the control it last clicked, so the images show the resting stat
   - `25-chat-chart` (payroll cost by month as a stacked bar chart with a Table toggle, "Ran 1 tool").
 
 ## What works
+
+Wave 4 golden paths (scripted provider; merged on 2026-10-16, see "Wave 4 integration gate" above and
+[docs/wave4.md](docs/wave4.md) section 12):
+
+| Golden path | Tests | Browser test (`pnpm e2e`) | In `pnpm demo` |
+|---|---|---|---|
+| GP20 compliance: filing rules with sources, the 941 and state wage reports prepared from processed runs, `tax.file_return` as an R4 proposal, the calendar with due-soon reminders, every notice kind handled, notice upload (untrusted, tainted run), hand-offs in the Inbox, required training in CA, NY and IL | `apps/api/test/compliance.test.ts`, `tests/scenarios/w4-*` | passes (2 tests) | yes (the 941) |
+| GP21 people: life-event windows with reminders, elections filed with the carrier simulator and a receipt, open enrollment with a real open and close, the check-in form, the out-this-week digest line, the first-day message, the portal Request time off form | `apps/api/test/people-week.test.ts`, `tests/scenarios/w4-first-day-message.test.ts` | passes | no (browser and scenario tests) |
+| GP22 agent surfaces: portal questions from the asker's own record only (human-only topics handed to a person in code), `@weft` mentions answered read only and tainted in the thread, emailed receipts filed as expenses, wait and resume in a routine | `apps/api/test/agent-surfaces.test.ts` | passes (2 tests) | yes (portal) |
+| GP23 Reports: 11 metrics with a chart and a table, date range and grouping, "Email this report" as a proposal, the weekly cost by state routine (disabled) | `apps/api/test/w4-admin-*.test.ts` | passes | yes (the catalog) |
+| GP24 permissions and the routine gallery: the View, Edit and Approve matrix, `deny` and `propose_only` overrides enforced in the executor and set only by an approved proposal, last and next run with decision counts | `apps/api/test/w4-admin-*.test.ts` | passes (2 tests) | yes (the gallery) |
+
+Every agent run can be traced into a local Arize Phoenix (`WEFT_TRACE=phoenix`, `pnpm phoenix:up`; secrets are
+redacted at the source and a canary test proves it, see [docs/telemetry.md](docs/telemetry.md)), and the eval suite
+(55 dev and 41 held-out tasks, graders G1 to G10, both variants) runs on the scripted provider in CI and live on
+demand ([docs/evals.md](docs/evals.md)).
 
 Wave 3 golden paths (scripted provider; merged on 2026-10-16, results in "Final wave 3 gate" above; the live column is
 one run each on `gpt-5.6-luna` at the final gate, see "Live wave 3 agent golden paths"):
@@ -292,6 +317,14 @@ A local Weft has no public URL, so polling on the scheduler tick is the baseline
 `POST /v1/integrations/:vendor/webhook` (HMAC over the raw bytes, constant time, ids only stored). More in
 [docs/wave3.md](docs/wave3.md) section 3 and the track notes `docs/tracks/w3-integrations-*.md`.
 
+## Wave 4: left
+
+- The improvement round (docs/wave4.md section 9) has not started: the live baseline into the persisted Phoenix, open
+  coding with Nitish, the failure taxonomy and the fixes by category.
+- Defects the evals found for that round, a Phoenix root span missing for runs that park for approval in experiment
+  mode, and each track's open items: [docs/wave4.md](docs/wave4.md) section 12, "Left after integration".
+- `agent.chat_can_propose` and auto autonomy stay off by default until Nitish decides.
+
 ## Wave 3: left
 
 - Auto autonomy end to end: `expenses.decide` declares `autoEligible` (`agent.expense_auto_cents`), but no limit row is
@@ -344,17 +377,21 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | Command | What it does |
 |---|---|
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
-| `pnpm demo` | Narrated GP1 to GP18 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
+| `pnpm demo` | Narrated GP1 to GP18 and GP20, GP22, GP23 and GP24 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
 | `pnpm demo:tests` | The golden path scenario tests (GP1 to GP18, S6 to S9) in process on fresh seeded worlds |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
-| `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP19 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
+| `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP24 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm screenshots` | Retakes `docs/screenshots/` (or `SHOTS_DIR`) through the e2e dev runner at 1440 by 900; same ports and world reset as `pnpm e2e`, never part of it |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |
 | `pnpm brand:overlap` | Fails on any run of 8 or more consecutive words shared between the visible text of the saved reference pages and the text in `apps/`, `packages/`, `docs/`, `research/`, `README.md` or `SPEC.md`, outside the (empty) allowlist `scripts/brand-overlap.allow.txt`; skips with a message when the gitignored reference folder is absent, as in CI |
 | `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world and print its digest (stable across runs) |
 | `pnpm eval:live` | Live Luna gate, opt-in (see docs/models.md); `L3x6` repeats a case |
+| `pnpm eval:suite` | The wave 4 eval suite (scripted by default; `--split all --variant both`, `--provider live` opt-in with the spend caps, `--phoenix` to record experiments), see [docs/evals.md](docs/evals.md) |
+| `pnpm eval:ci` | Both splits and both variants on the scripted provider, no network; exits 1 on any unsafe action, taint miss, canary hit or harness error (runs in CI) |
+| `pnpm phoenix:up`, `phoenix:down`, `phoenix:status` | The pinned local Phoenix 20.23.0 on 127.0.0.1:6206, data in `~/Developer/projects/weft-notes/phoenix` (outside the repo); `WEFT_TRACE=phoenix` sends traces to it |
+| `pnpm wave:ledger` | The shared wave 4 spend ledger (`~/Developer/projects/weft-notes/wave4-spend.json`, $3.00 cap) |
 | `pnpm memory:bundle`, `pnpm memory:restore` | Write a verified git bundle of the memory repo under `companies/<id>/bundles/`, or restore one (the old repo is kept) |
 
 ## Synthetic data only
@@ -369,6 +406,7 @@ Weft runs on one fictional company, Larkspur Robotics (demo), with 48 synthetic 
 - [docs/models.md](docs/models.md): providers, spend caps, the live gate, sandboxes
 - [docs/testing.md](docs/testing.md): unit, lint and E2E layers, reading a failed golden path, rehearsing a merge
 - [docs/status.md](docs/status.md): what works today and what is left
+- [docs/wave4.md](docs/wave4.md): the wave 4 plan and its integration record; [docs/telemetry.md](docs/telemetry.md): spans, redaction and Phoenix; [docs/evals.md](docs/evals.md): the eval suite
 - [docs/gates.md](docs/gates.md): earlier gate reports (wave 1 and the first wave 2 gate)
 - `SPEC.md`: the foundation spec; `AGENTS.md`: rules for anyone building here
 

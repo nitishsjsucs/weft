@@ -399,3 +399,114 @@ for every golden path, and turning on chat proposals or auto autonomy (Nitish's 
   should the long-lived Phoenix run in Docker with only `127.0.0.1:6206` published?
 - `user.id` for unattended routine runs is `routine:<id>`; say if you prefer the person who enabled the routine.
 - Phoenix 20.23.0 was one day old at pin time; the fallback is 20.22.0.
+
+## 12. Integration (2026-10-16)
+
+All seven tracks merged into main in the planned order, each as a merge commit: w4-telemetry, w4-eval-suite,
+w4-eval-heldout, w4-parity-admin, w4-parity-compliance, w4-parity-people, w4-parity-agent. The track branches are kept;
+their worktrees are removed.
+
+**Conflicts and contract commits.** `pnpm-lock.yaml` (telemetry and eval suite) was regenerated with `pnpm install`.
+`packages/executor/src/pipeline.ts` takes both the telemetry `wireName` import and the admin `narrowDecision` import.
+The prebuilt routine id lists in `apps/api/test/routines.test.ts` and `packages/routines/test/engine.test.ts` are the
+sorted union of every track's ids (26 routines). `apps/api/test/offers.test.ts` keeps both tracks' samples, and the
+`svc_sim` and `svc_events` allowlists in `packages/executor/src/system.ts` keep every track's additions. Every track's
+own `contract:` commit merged as written.
+
+**Contract requests folded in by the integrator.**
+
+| Request | Change |
+|---|---|
+| Compliance: script variants | `compose.ts` `scriptVariant` sends `rt_compliance_notices`, `rt_compliance_uploads` and `rt_compliance_training` to `complianceNoticeVariant` on the sim clock |
+| Compliance: planned rows | `tax.set_deposit_schedule` (R2, always), `notices.acknowledge` (R1), `compliance.post_reminders` (R3, always); `notices.upload` is R2 with approval `always` (harness 5.4) |
+| Compliance: mounts | The Inbox gains a Hand-offs tab (`HandoffsPanel`); the portal mounts `W4TrainingSection` |
+| People: routes | Four portal route rows (`/v1/portal/life-events`, `/v1/portal/enrollment-windows/:id/elections`, `/v1/portal/time-off`, `/v1/portal/time-off/requests`); 36 wave 4 rows |
+| People: planned rows | `benefits.elect_in_window` and `benefits.report_life_event` (R2, human only, always), `onboarding.submit_checkin_form` (R1, human only), `onboarding.list_first_days` (R0) |
+| People: digest line | The Monday people digest appends `outThisWeekLine` (names and days, never the leave kind) |
+| People: Ready Check | The three business days skip the company holiday calendar (`addWorkingDays` with `holidayMap`) |
+| Agent: portal recipe | `startChat` renders `portalPack` plus `ROLE_PORTAL` for a `PORTAL_PAGE_MARKER` page context: no company summary, no open-loops board, no recall block |
+| Agent: planned row | `portal.request_handoff` (R1, human only) |
+| Admin: R16 script | `scenarios/rt_weekly_cost_by_state.json`, so the scripted `pnpm dev` runs R16 |
+| Admin: planned rows | `reports.breakdown` (R0) and `comms.send_report` (R3, always) |
+| Admin: e2e numbers | The Reports and permissions specs are GP23 and GP24, so the playwright `testMatch` runs them |
+| Held-out: test mutators | `evals/suite/worlds/index.ts` applies `TEST_MUTATORS` (SQL steps plus memory files committed at the world clock) |
+| Held-out: digests | The 55 dev digests are re-pinned for the merged seed and the 41 test digests are pinned for the first time, with the manifest rewritten in the same commit |
+
+A new test, `apps/api/test/w4-planned-commands.test.ts`, checks every registered wave 4 command against its
+`W4_PLANNED_COMMANDS` row (risk, access, approval) and lists the three planned commands not built yet
+(`routines.open_wait`, `routines.resume_wait`, `routines.list_waits`).
+
+**Golden paths.** GP20 compliance calendar and the Q3 Form 941, GP21 life events, check-in and time off in the portal,
+GP22 portal questions and mentions, GP23 Reports, GP24 permissions and the routine gallery. `pnpm demo` walks GP20,
+GP22, GP23 and GP24 after GP18 through the same routes the screens call; GP21 runs in the browser spec.
+
+**Evals.** The suite now drives the portal and mention surfaces. `pnpm eval:ci` runs both splits and both variants on
+the scripted provider with no network and no Phoenix, and `--gate` fails on any unsafe action, taint miss, canary hit
+or harness error (task success is reported, not gated: the scripted model cannot branch). CI runs it after
+`pnpm test`. The live version stays on demand (`docs/evals.md`). A report over both splits now lists dev task rows
+only; held-out trials count only in the metric and group tables.
+
+**Tracing.** `WEFT_TRACE=phoenix` is the switch. `pnpm phoenix:up` runs the pinned Phoenix 20.23.0 with
+`PHOENIX_WORKING_DIR=~/Developer/projects/weft-notes/phoenix` (`PHOENIX.workingDir`, overridable with
+`WEFT_PHOENIX_DIR`). The integrator ran the gated Phoenix read-back tests against a private Phoenix on ports 4970 and
+4971 (all 4 pass, with the 22 in-memory span and canary tests) and a traced scripted eval run that recorded an
+experiment, then stopped it.
+
+### Gate results
+
+2026-10-16 from 22:33 to 22:48 PDT on a fresh clone of the integration head `b9747a2` (main fast-forwards to it; the
+docs commit after it changes only `README.md` and `docs/wave4.md`), ports 4960 to 4972 only:
+
+| Check | Result |
+|---|---|
+| `pnpm lint:prose` (files and commit messages), `pnpm lint:brand`, `pnpm brand:overlap` (reference folder of the main checkout) | ok (1188 files; 1227 files and 54 reference files hashed; 803 files against 4 reference pages) |
+| `pnpm typecheck` | 16 of 16 |
+| `pnpm test` | 182 files, 1092 passed, 6 skipped (the 4 Phoenix read-back tests, the opt-in cross-checkout anti-leak scan and one earlier skip), 0 failed, 180 s; the eval suite file was rerun at `b9747a2`, 14 of 14 |
+| `pnpm build` | ok |
+| `pnpm e2e` (ports 4960, 4961, 4962) | 52 passed, 1 skipped (the DocuSign envelope test, which needs `WEFT_ESIGN=docusign`), 2.0 min |
+| `pnpm demo` | exit 0: GP1 to GP18, then GP20, GP22, GP23 and GP24; the audit chain verifies |
+| `pnpm eval:ci` | gate passed: 0 G1, 0 taint misses, 0 canary hits, 0 harness errors in both variants; default 71 of 96 trials, `chat_can_propose` 8 of 19 (scripted, so success is not a quality number), $0 |
+| Phoenix | the 4 read-back tests pass against a private Phoenix 20.23.0 on 4970 and 4971, and a traced scripted eval run records an experiment; that Phoenix was stopped |
+
+Live spend for integration: $0 (scripted provider only); nothing was added to the wave ledger.
+
+### Left after integration
+
+Found at integration:
+
+- In Phoenix experiment mode (`pnpm eval:suite --phoenix`), the `agent.run` AGENT span of a run that parks in
+  `waiting` for an approval (dev task EX-01, expense review) never reaches Phoenix, while its 34 child spans do and
+  point at it as their parent. The same trial through the API's provider and an in-memory exporter has the root with
+  `weft.status=waiting`. Not diagnosed yet; repro: `WEFT_TRACE=phoenix pnpm eval:suite --ids EX-01 --variant default`.
+  Agent runs are also their own traces, not children of the experiment's task span.
+- `WAITING_ON_PARITY` in `evals/suite/tasks/test/oracles.ts` still lists the portal, mention and compliance test tasks;
+  the held-out author re-runs the oracles now that those surfaces are on main and rewrites the manifest.
+
+From the tracks (details in each `docs/tracks/w4-*.md` and `.scratch/<track>/left.md`):
+
+- Compliance: `AgencySim.fileReturn`; folding `rt_compliance_notices` into `rt_agency_notice`; a daily calendar
+  refresh in live mode; semiweekly deposit rows after a schedule change; holidays in due dates; a penalty payment
+  proposal; proposing `tax.update_rate` from an uploaded rate notice; checking the TX TWC, CO CDLE, CO DOR and training
+  statute URLs against the live pages.
+- People: the wave 2 open enrollment chase still reads the constants, not `openEnrollmentDates` (request 5); the
+  Benefits windows tab; the `w4_people` seed step; a follow-up for a rejected carrier answer; first-day messages for
+  contractors; Nitish's decision on stragglers at the open enrollment close (waived today).
+- Agent: the wait commands, `routine.wait_resumed`, `rt_portal_question_followup`, handlers for
+  `chat.agent_mentioned` and `email.expense_received`, the `w4_agent` seed step, an active-employee portal persona,
+  and scenario tests for email intake and the laptop routine.
+- Admin: work-state history for cost by state; learning thresholds from override counts; an e2e step for Reports
+  without payroll view.
+- Telemetry: chat `session.id` needs the thread id in `startChat`; `principalId` on the chat context source; the
+  gpt-5.6-luna cache write price; tracing the boot `PROCESS_RESTART` rows; a child-run nesting test.
+- Eval suite and held-out: 4 dev tasks (55 of 59); cassettes; judges and their validation on Nitish's labels; G5 on
+  harness-written receipt summaries; judges inside trials; the oracle run in `pnpm test`.
+- Harness and product defects the evals found, for round 2 (section 9): the agency notice precheck skips every notice
+  that is not a rate change; chat answers about a checklist or an offboarding case without reaching
+  `onboarding.get_checklist` or `offboarding.get_case`; a decision note recalled as untrusted is not cited; the people
+  digest's grounding facts count employees by state without a status filter, so the digest is refused after any
+  separation; the chat intent check misses phrasings like "set him up with"; a notice restating the rate on file
+  proposes a no-op rate change; grounding has no totals over a filtered list or time off in hours;
+  `payroll.list_runs` returns the period as one string; `people.search` has no workplace filter; `agent.read_artifact`
+  does not page; after an UNGROUNDED repair the model re-runs the same read.
+
+The two pending decisions, `agent.chat_can_propose` and auto autonomy, are unchanged and off by default.
