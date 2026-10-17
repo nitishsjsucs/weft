@@ -1,5 +1,6 @@
-// The frozen prompts after wave 4 FG4 (docs/evals/error-analysis.md FM1, FM2, FM4, FM5): the chat tools guide comes
-// from the frozen chat allowlists, the chat role has a clarifying rule and a memory rule for why and habit questions,
+// The frozen prompts after wave 4 FG4 (docs/evals/error-analysis.md FM1, FM2, FM4, FM5) and round 2 FG3
+// (docs/evals/round1-analysis.md R4, R5): the chat tools guide comes from the frozen chat allowlists, the chat role has
+// a clarifying rule, a memory rule for decisions, policies and habits, and a change rule for figures,
 // the routine role shows an escalation, and no dev task literal reaches a prompt (fixes are mechanisms, not answers).
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -60,7 +61,8 @@ describe("chat role rules (FM4, FM5)", () => {
     expect(chat).not.toContain("explain which routine or screen does it");
   });
 
-  it("sends why and habit questions to memory with distinctive words and asks for the note id or path", () => {
+  it("sends decision, policy and habit questions to memory with distinctive words and asks for the note id or path", () => {
+    expect(chat).toContain("Decisions, policies and habits use memory.");
     expect(chat).toContain("memory__search with one or two distinctive words from the question");
     expect(chat).toContain("never the whole sentence");
     expect(chat).toContain("Cite the note id or path the answer rests on.");
@@ -68,6 +70,24 @@ describe("chat role rules (FM4, FM5)", () => {
     expect(chat).toContain("never describe a habit or a reason that no result states");
     expect(chat).toContain("the history is the evidence");
     expect(chat).toContain("a job title is not evidence of a habit");
+  });
+
+  it("a change in a figure goes to the data, not memory: prior period and drivers in one batch, a plain no-change (R4)", () => {
+    // The round 1 rule opened "Why and habit questions use memory", and a "why did payroll rise" question went to
+    // memory__search instead of the drivers (docs/evals/round1-analysis.md R4). The memory rule is narrowed and a
+    // short change rule replaces text rather than adding to it.
+    expect(chat).not.toContain("Why and habit questions use memory");
+    const rule = /Why a figure changed is a data question[^\n]*/.exec(chat)?.[0] ?? "";
+    expect(rule).toContain("not a memory one");
+    expect(rule).toContain("in one batch the figure for that period and the prior one with its drivers");
+    for (const d of ["headcount", "hires", "departures", "pay changes"]) expect(rule).toContain(d);
+    expect(rule).toContain("if nothing changed, say so plainly with the figures");
+    // The cost report carries those drivers, and the guide says so, so one reports call can answer.
+    expect(guideOf(chat)).toContain("payroll cost (each period with workers paid, hires and departures)");
+  });
+
+  it("an empty list is not reported as none when the job that writes the rows never ran (R5)", () => {
+    expect(chat).toContain("An empty list is not none when the result says the job that writes the rows never ran; say that.");
   });
 });
 
@@ -86,10 +106,17 @@ describe("routine role (FM1)", () => {
 describe("prompt version and hygiene", () => {
   const version = `p-${createHash("sha256").update(KINDS.map((k) => frozenPrompt(k)).join("\n")).digest("hex").slice(0, 12)}`;
 
-  it("is bumped from the round 2 baseline and pinned with its revision", () => {
+  it("is bumped from the round 2 baseline and round 1, and pinned with its revision", () => {
     expect(version).not.toBe("p-0b43866f041b");
+    expect(version).not.toBe("p-598e27523eb9");
     // A wording change moves this hash: update it together with PROMPT_REVISION.
-    expect({ revision: PROMPT_REVISION, version }).toEqual({ revision: "w4.r1", version: "p-598e27523eb9" });
+    expect({ revision: PROMPT_REVISION, version }).toEqual({ revision: "w4.r2", version: "p-274e2ca31b6d" });
+  });
+
+  it("new rules replace text: no prompt is longer than its round 1 (w4.r1) length", () => {
+    // Round 1 grew the chat prompt by a fifth and uncached prompt tokens by 23% (round1-analysis.md, efficiency note).
+    const ROUND1 = { chat: 11_446, routine: 8_344, routine_draft: 6_934 };
+    for (const k of KINDS) expect(frozenPrompt(k).length, k).toBeLessThanOrEqual(ROUND1[k]);
   });
 
   it("stays frozen: byte-identical, no dates, no dashes, at least 1,024 tokens", () => {
