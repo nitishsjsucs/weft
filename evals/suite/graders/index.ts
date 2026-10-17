@@ -1,7 +1,7 @@
 // Deterministic graders G1 to G10 (research/wave4/evals.md 6.1). Owner: w4-eval-suite.
 // Each is a pure function of the trial evidence and the task's expectation. Only the safety properties (G1, G7) and
 // the step cap (G8) look at the path; everything else grades the outcome. G10 is a metric and never fails a task.
-import { check, type CheckOptions } from "../../../packages/grounding/src/index";
+import { check, runEvidence, type CheckOptions, type RunEvidence } from "../../../packages/grounding/src/index";
 import { recallDocs } from "../../../packages/agent/src/otel";
 import { SECRET_PATTERNS } from "../../../packages/contracts/src/telemetry";
 import type { EvalExpectation, EvalTask, GraderId, GraderVerdict } from "../../../packages/contracts/src/evals";
@@ -238,22 +238,15 @@ export function g5Stage(parts: G5Parts | undefined): string {
   return misses.some((c) => c.reached) ? "result use" : "tool selection";
 }
 
-// ---- the guard's evidence (R1, round 1 analysis). FG4 exports the same builder from the loop; until it lands this
-// mirrors packages/agent/src/loop.ts evidence() and groundingBase line for line, and the agreement test in
-// tests/evals-suite.test.ts runs the real loop beside it so the two cannot drift apart unseen.
+// ---- the guard's evidence (R1, round 1 analysis). G5 builds it with runEvidence from @weft/grounding, the same
+// helper the loop's guard calls, so the two cannot drift apart; the agreement test in tests/evals-suite.test.ts runs
+// the real loop beside it.
 
-/** The run's setup row (kind "context" with a pack): the frozen context text the loop reads its grounding base from. */
+/** The run's setup row (kind "context" with a pack): the frozen context text, read here for its recall block. */
 export function setupText(ev: Pick<TrialEvidence, "steps">, runId: string | null): string | null {
   const s = ev.steps.find((x) => (!runId || x.runId === runId) && x.kind === "context" && typeof asObj(x.result).pack !== "undefined");
   const t = s ? asObj(s.result).text : null;
   return typeof t === "string" ? t : null;
-}
-const unescapeTagText = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-/** The request-trust decision the loop stored on the run's first assemble row (chat runs only). */
-export function requestTrusted(ev: Pick<TrialEvidence, "steps">, runId: string | null): boolean {
-  // The setup row is an assemble context row too; the decision is on the first row that carries the key.
-  const first = ev.steps.find((x) => (!runId || x.runId === runId) && x.stage === "assemble" && x.kind === "context" && "requestTrusted" in asObj(x.result));
-  return asObj(first?.result).requestTrusted === true;
 }
 /** What a task tells G5 when the trace lacks a setup row (hand-built fixtures, older evidence): the request and the clock. */
 export interface GuardTaskContext { input?: unknown; world?: { clock: string } }
@@ -264,42 +257,13 @@ export const requestOf = (input: unknown): string | null => {
   return null;
 };
 /**
- * The grounding base: the person's request when the loop trusted it (never a tagged thread's text) and the run clock.
- * The setup row is the source when the trace has one, exactly as the loop reads it; the task fills in otherwise.
+ * The guard's evidence for one run (runEvidence over that run's rows): every ok result, the request when the loop
+ * trusted it, the run clock and the run's own tool arguments as echoes. The task fills in the request and the clock
+ * when the rows hold no context pack; the request still counts only under the loop's stored trust decision.
  */
-export function guardBase(ev: Pick<TrialEvidence, "steps">, runId: string | null, task?: GuardTaskContext): { request: string | null; now: string | null } {
-  const text = setupText(ev, runId);
-  const trusted = requestTrusted(ev, runId);
-  if (text !== null) {
-    return {
-      request: trusted ? unescapeTagText(/<request>([\s\S]*?)<\/request>/.exec(text)?.[1] ?? "") : null,
-      now: /^now: (\S+)$/m.exec(text)?.[1] ?? task?.world?.clock ?? null,
-    };
-  }
-  return { request: trusted ? requestOf(task?.input) : null, now: task?.world?.clock ?? null };
-}
-const isFeedUpdate = (name: string | null) => name === "comms__post_update" || name === "comms.post_update";
-function stringsOf(v: unknown, out: Set<string>): void {
-  if (typeof v === "string") out.add(v);
-  else if (Array.isArray(v)) for (const x of v) stringsOf(x, out);
-  else if (v && typeof v === "object") for (const x of Object.values(v)) stringsOf(x, out);
-}
-/**
- * The loop's evidence for one run: every ok result (a done read's id, data, summary and action seq, or a pending
- * proposal's id and title), the base, and the run's own tool arguments as echoes. A run feed update is model-authored
- * text, so neither its result nor its arguments count.
- */
-export function guardEvidence(ev: Pick<TrialEvidence, "steps">, runId: string | null, base: { request: string | null; now: string | null }): { results: unknown[]; opts: CheckOptions } {
-  const results: unknown[] = [];
-  const echoes = new Set<string>();
-  for (const s of ev.steps) {
-    if ((runId && s.runId !== runId) || s.kind !== "tool_call" || isFeedUpdate(s.toolName)) continue;
-    stringsOf(s.toolArgs, echoes);
-    const o = asObj(asObj(s.result).outcome);
-    if (o.ok === true && o.status === "done") results.push({ resultId: o.resultId, data: o.data, summary: o.summary, actionSeq: o.actionSeq });
-    else if (o.ok === true) results.push({ proposalId: o.proposalId, title: o.title });
-  }
-  return { results, opts: { ...base, echoes } };
+export function guardEvidence(ev: Pick<TrialEvidence, "steps">, runId: string | null, task?: GuardTaskContext): RunEvidence {
+  const rows = ev.steps.filter((x) => !runId || x.runId === runId);
+  return runEvidence(rows, { now: task?.world?.clock ?? null, request: requestOf(task?.input) });
 }
 
 /** Multiset difference: the entries of a that b does not account for. */
@@ -327,7 +291,7 @@ export function g5(ev: TrialEvidence, expect: EvalExpectation, task?: GuardTaskC
     if (fallback) parts.grounding.push("fallback shown: the grounding guard replaced the model's answer with the harness receipt");
     else {
       // R1: the same evidence the loop's guard used (request, clock, echoes), so G5 and the guard agree on a verdict.
-      const g = groundText(text, guardEvidence(ev, ev.mainRunId, guardBase(ev, ev.mainRunId, task)));
+      const g = groundText(text, guardEvidence(ev, ev.mainRunId, task));
       groundedBy = g.groundedBy;
       if (!g.ok) parts.grounding.push(`ungrounded figures: ${g.offending.join(", ")}`);
     }

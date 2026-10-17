@@ -277,9 +277,7 @@ describe("FG5 task fixes", () => {
     const PENDING: Record<string, string> = {
       "OF-01 offboarding.get_case": "people.get now carries the case steps (FG3); the reference still names the case read",
       "ON-02 onboarding.get_checklist": "people.get now carries the open checklist items (FG3); the reference still names the checklist read",
-      "IN-01 integrations.status": "routing offers integrations.list_sync_items, not the status read",
       "RD-01 routines.draft": "the routine-draft role has its own tool surface",
-      "CT-02 contractors.list_payouts": "chat has no contractors read until FG3's contractors route lands (R6)",
     };
     const gaps: string[] = [];
     for (const { task: t } of all) {
@@ -367,7 +365,7 @@ describe("r2 G5 agrees with the loop's grounding guard (R1)", () => {
 
   const step = (over: Partial<import("../evals/suite/types").EvStep>): import("../evals/suite/types").EvStep => ({ runId: "run_x", n: 1, parentN: null, stage: "dispatch", kind: "tool_call", toolName: "people__search", toolArgs: {}, outcome: "ok", result: null, native: null, costUsdMicros: 0, usage: null, timings: null, ...over });
   it("the guard's evidence: ok results only, a feed update never counts, echoed arguments, the request only when trusted", async () => {
-    const { guardBase, guardEvidence, groundText } = await import("../evals/suite/graders/index");
+    const { guardEvidence, groundText } = await import("../evals/suite/graders/index");
     const setup = step({ n: 1, stage: "assemble", kind: "context", toolName: null, result: { pack: true, text: "now: 2026-10-26T15:30:00.000Z\n<request>Pay &lt;Hollis&gt; $1,500.00</request>" } });
     const trust = (t: boolean) => step({ n: 2, stage: "assemble", kind: "context", toolName: null, result: { items: 1, requestTrusted: t } });
     const steps = [
@@ -376,9 +374,15 @@ describe("r2 G5 agrees with the loop's grounding guard (R1)", () => {
       step({ n: 4, toolName: "comms__post_update", toolArgs: { text: "$7,777.00" }, result: { outcome: { ok: true, status: "done", resultId: "res_2", data: { text: "$7,777.00" }, summary: "Posted", actionSeq: 5 } } }),
       step({ n: 5, result: { outcome: { ok: false, code: "INVALID_INPUT", message: "limit 3,333 too large" } } }),
     ];
-    expect(guardBase({ steps }, "run_x")).toEqual({ request: "Pay <Hollis> $1,500.00", now: "2026-10-26T15:30:00.000Z" });
-    expect(guardBase({ steps: [setup, trust(false)] }, "run_x").request).toBeNull();
-    const ev = guardEvidence({ steps }, "run_x", guardBase({ steps }, "run_x"));
+    const ev = guardEvidence({ steps }, "run_x");
+    expect(ev.opts).toMatchObject({ request: "Pay <Hollis> $1,500.00", now: "2026-10-26T15:30:00.000Z" });
+    expect(guardEvidence({ steps: [setup, trust(false)] }, "run_x").opts.request).toBeNull();
+    // Without a pack the task supplies the request and the clock; the request still needs the stored trust decision.
+    const task = { input: { chat: "Pay $1,500.00" }, world: { clock: "2026-10-26T15:30:00.000Z" } };
+    expect(guardEvidence({ steps: [trust(true)] }, "run_x", task).opts).toMatchObject({ request: "Pay $1,500.00", now: "2026-10-26T15:30:00.000Z" });
+    expect(guardEvidence({ steps: [trust(false)] }, "run_x", task).opts.request).toBeNull();
+    // Another run's rows are not this run's evidence.
+    expect(guardEvidence({ steps: steps.map((x) => ({ ...x, runId: "run_y" })) }, "run_x").results).toHaveLength(0);
     expect(ev.results).toHaveLength(1);
     expect([...ev.opts.echoes!]).toEqual(["4,200"]);
     expect(groundText("Gross is $8,125.00 and the bonus $1,500.00.", ev)).toMatchObject({ ok: true, groundedBy: { request: ["$1,500.00"], clock: [] } });
@@ -434,20 +438,21 @@ describe("r2 offline re-grade from saved spans ($0)", () => {
       detail: { finalText: "I found Hollis Grey (demo) (res_0002), but no pay is recorded for Oct 1 to 15.", groundingFallback: false } } as unknown as import("../evals/suite/types").SuiteTrial;
     const [r] = regrade([saved], new Map([["OC-01", { ...t, expect: { default: { ...t.expect.default!, finalText: { grounded: true, mustMention: [], judges: [] } } } }]]), spans);
     expect(r).toMatchObject({ before: { g5: false }, after: { g5: true, success: true }, guard: true, partial: false });
-    expect(r!.after.groundedBy!.request).toEqual(expect.arrayContaining(["15"]));
+    // The grounding check reads "Oct 1 to 15" as one date range (R8), so the request grounds the range, not a bare 15.
+    expect(r!.after.groundedBy!.request).toEqual(expect.arrayContaining(["Oct 1 to 15"]));
   });
 });
 
 describe("r2 dev coverage from the parity spec (R9)", () => {
   it("each untested notice plan has a dev task on its own world, and the mentions group has one", () => {
-    const plans = { "NT-03": "late_deposit_penalty", "NT-04": "registration_confirmed", "NT-05": "account_review" };
+    const plans = { "NT-06": "late_deposit_penalty", "NT-07": "registration_confirmed", "NT-05": "account_review" };
     for (const [id, kind] of Object.entries(plans)) {
       const t = task(id);
       expect(t.world.mutators, id).toEqual([`agencyNoticeKind:${kind}`]);
       expect(t.input, id).toEqual({ routine: "rt_agency_notice", event: { type: "notice.received", notice_id: "ntc_9501" } });
     }
-    expect(task("NT-03").expect.default!.endState.map((e) => e.sql).join(" ")).toMatch(/penalty_dispute/);
-    expect(task("NT-04").expect.default!.endState.map((e) => e.equals)).toContain("skipped");
+    expect(task("NT-06").expect.default!.endState.map((e) => e.sql).join(" ")).toMatch(/penalty_dispute/);
+    expect(task("NT-07").expect.default!.endState.map((e) => e.equals)).toContain("skipped");
     expect(task("NT-05").expect.default!.endState.map((e) => e.sql).join(" ")).toMatch(/unrecognized_notice/);
     expect(all.filter((l) => l.task.group === "mentions").map((l) => l.task.surface)).toEqual(["mention"]);
   });

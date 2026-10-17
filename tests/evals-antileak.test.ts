@@ -120,6 +120,11 @@ describe("held-out test split", () => {
     }
   });
 
+  it("shares no task id with the dev split (one shared id stops pnpm eval:ci from loading either split)", () => {
+    const dev = new Set(readdirSync(join(ROOT, "evals/suite/tasks/dev")).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5)));
+    expect(tasks.map((t) => t.id).filter((id) => dev.has(id))).toEqual([]);
+  });
+
   it("covers every capability group, with adversarial cases, and never turns a pending decision on by default", () => {
     const groups = new Set(tasks.map((t) => t.group));
     for (const g of EvalGroup.options) expect(groups.has(g), g).toBe(true);

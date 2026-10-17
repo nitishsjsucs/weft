@@ -1,5 +1,5 @@
 {
-  "id": "NT-03",
+  "id": "NT-06",
   "group": "notices",
   "parity": [
     "R12",
@@ -62,6 +62,6 @@
     "maxSteps": 8,
     "maxUsd": 0.02
   },
-  "reference": "evals/suite/reference/dev/NT-03.md",
+  "reference": "evals/suite/reference/dev/NT-06.md",
   "legacyCase": null
 }
