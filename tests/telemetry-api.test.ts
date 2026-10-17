@@ -157,7 +157,9 @@ describe("MCP calls through POST /v1/tools/:name", () => {
 const FAKE_KEY = "sk-proj-canary0000000000000000000000000000ZzYy";
 const VAULT_VALUE = "vault-canary-plaintext-Q7p2Lm";
 const forms = (v: string) => [v, Buffer.from(v).toString("base64"), Buffer.from(v).toString("base64url"), Buffer.from(v).toString("hex"), Buffer.from(v).toString("base64").replace(/=+$/, "")];
-const planted = () => `key ${FAKE_KEY} b64 ${Buffer.from(FAKE_KEY).toString("base64")} hex ${Buffer.from(VAULT_VALUE).toString("hex")} vault ${VAULT_VALUE} routing number 021000021 account number 123456789012 ssn 123-45-6789`;
+/** Provider keys nothing registers (pasted into chat, a second org key): only the redactor's key shapes catch them. */
+const LOOSE_KEYS = ["sk-proj-looseCanary0000000000000000000000PpOo", "sk-ant-api03-looseCanary000000000000000000QqRr", "sk-looseCanary00000000000000000000000000Ww"];
+const planted = () => `pasted ${LOOSE_KEYS.join(" and ")} key ${FAKE_KEY} b64 ${Buffer.from(FAKE_KEY).toString("base64")} hex ${Buffer.from(VAULT_VALUE).toString("hex")} vault ${VAULT_VALUE} routing number 021000021 account number 123456789012 ssn 123-45-6789`;
 
 /** Plants secrets in a provider error message, tool args (a read and a memory search) and the answer text. */
 function plantingProvider(): ModelProvider {
@@ -198,7 +200,7 @@ function assertClean(spans: Span[]) {
   expect(spans.filter((s) => kind(s) === "LLM").length).toBeGreaterThanOrEqual(3);
   const blob = JSON.stringify(spans.map((s) => [s.name, s.attributes, s.events, s.status]));
   for (const sec of [FAKE_KEY, VAULT_VALUE]) for (const f of forms(sec)) expect(blob.includes(f), `${f} leaked`).toBe(false);
-  for (const bare of ["021000021", "123456789012", "123-45-6789"]) expect(blob.includes(bare), `${bare} leaked`).toBe(false);
+  for (const bare of ["021000021", "123456789012", "123-45-6789", ...LOOSE_KEYS]) expect(blob.includes(bare), `${bare} leaked`).toBe(false);
   expect(blob).toContain("[redacted]");
 }
 
@@ -220,7 +222,7 @@ function assertMcpClean(spans: Span[]) {
   expect(spans.filter((s) => kind(s) === "TOOL").length).toBe(4);
   const blob = JSON.stringify(spans.map((s) => [s.name, s.attributes, s.events, s.status]));
   for (const sec of [FAKE_KEY, VAULT_VALUE]) for (const f of forms(sec)) expect(blob.includes(f), `${f} leaked`).toBe(false);
-  for (const bare of ["021000021", "123456789012", "123-45-6789"]) expect(blob.includes(bare), `${bare} leaked`).toBe(false);
+  for (const bare of ["021000021", "123456789012", "123-45-6789", ...LOOSE_KEYS]) expect(blob.includes(bare), `${bare} leaked`).toBe(false);
   expect(blob).toContain("[redacted]");
 }
 

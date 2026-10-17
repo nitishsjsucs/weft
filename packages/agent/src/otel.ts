@@ -46,11 +46,22 @@ export const AGENT_NAME = "weft-agent";
  * bare value without it: the grounding check lists unmatched numbers and the repair notice repeats them. So every
  * token the redactor removed is remembered (bounded) and removed wherever it shows up again in this process.
  */
-const LEARN_MAX = 2000;
+export const LEARN_MAX = 2000;
+/**
+ * Fails closed: when the memory is full the oldest token is evicted (least recently learned or seen again), never the
+ * new one, so a long-lived `WEFT_TRACE=phoenix pnpm dev` keeps scrubbing the values it removed most recently.
+ */
 function learn(before: string, after: string): void {
-  if (before === after || learned.size >= LEARN_MAX) return;
-  for (const tok of before.match(/[A-Za-z0-9+/=_-]{6,}/g) ?? []) if (!after.includes(tok) && learned.size < LEARN_MAX) learned.add(tok);
+  if (before === after) return;
+  for (const tok of before.match(/[A-Za-z0-9+/=_-]{6,}/g) ?? []) {
+    if (after.includes(tok)) continue;
+    learned.delete(tok);
+    learned.add(tok);
+    while (learned.size > LEARN_MAX) learned.delete(learned.values().next().value as string);
+  }
 }
+/** The redaction memory's size (tests). */
+export const learnedSize = (): number => learned.size;
 function forget(s: string): string {
   let out = s;
   for (const t of learned) if (out.includes(t)) out = out.split(t).join("[redacted]");
@@ -63,6 +74,8 @@ const text = (s: string): string => {
   learn(s, r);
   return forget(r);
 };
+/** The source layer's text redaction (redact, then learn and forget); exported for the memory tests. */
+export const traceRedactText = (s: string): string => text(s);
 const json = (v: unknown): string => {
   let raw: string;
   let red: string;

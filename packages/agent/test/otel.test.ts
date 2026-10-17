@@ -596,3 +596,16 @@ describe("chat_can_propose run metadata", () => {
     expect(runMeta(input(["tax.update_rate"], "routine"), null).chat_can_propose).toBe(false);
   });
 });
+
+describe("redaction memory", () => {
+  it("evicts the oldest token when full, so a newly learned value is still scrubbed when quoted bare", async () => {
+    const { traceRedactText, LEARN_MAX, learnedSize } = await import("../src/otel");
+    setTraceRedactor(<T,>(v: T): T => (typeof v === "string" ? (v.replace(/(routing number )(\d{9})/g, "$1[redacted]") as T) : v));
+    for (let i = 0; i < LEARN_MAX + 50; i++) traceRedactText(`routing number ${String(100000000 + i)}`);
+    expect(learnedSize()).toBe(LEARN_MAX);
+    const newest = String(100000000 + LEARN_MAX + 49);
+    expect(traceRedactText(`unmatched: ${newest}`)).toBe("unmatched: [redacted]");
+    expect(traceRedactText(`unmatched: ${String(100000000)}`)).toBe(`unmatched: ${String(100000000)}`);
+    setTraceRedactor(<T,>(v: T): T => v);
+  });
+});
