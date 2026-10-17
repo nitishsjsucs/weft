@@ -1,0 +1,63 @@
+{
+  "id": "NT-04",
+  "group": "notices",
+  "parity": [
+    "R12",
+    "T3",
+    "G11"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "agencyNoticeKind:registration_confirmed"
+    ],
+    "digest": "sha256:f4becb26a1634f9445e0e6352617c5d873e14b88bb64c3904557cb9f2c5df89c"
+  },
+  "input": {
+    "routine": "rt_agency_notice",
+    "event": {
+      "type": "notice.received",
+      "notice_id": "ntc_9501"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT status FROM routine_runs WHERE routine_id = 'rt_agency_notice' ORDER BY id DESC LIMIT 1",
+          "equals": "skipped"
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM agent_runs",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT status FROM notices WHERE id = 'ntc_9501'",
+          "equals": "new"
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 8,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/NT-04.md",
+  "legacyCase": null
+}

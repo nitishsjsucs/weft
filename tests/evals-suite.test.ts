@@ -279,6 +279,7 @@ describe("FG5 task fixes", () => {
       "ON-02 onboarding.get_checklist": "people.get now carries the open checklist items (FG3); the reference still names the checklist read",
       "IN-01 integrations.status": "routing offers integrations.list_sync_items, not the status read",
       "RD-01 routines.draft": "the routine-draft role has its own tool surface",
+      "CT-02 contractors.list_payouts": "chat has no contractors read until FG3's contractors route lands (R6)",
     };
     const gaps: string[] = [];
     for (const { task: t } of all) {
@@ -310,5 +311,152 @@ describe("FG5 world fixes (FM10)", () => {
     const { buildWorld } = await import("../evals/suite/worlds/index");
     const w = await buildWorld(task("CP-05").world, { dataDir: tmp("weft-eval-jordan-"), mode: "scripted" });
     try { expect(await w.q("SELECT last_name FROM workers WHERE id = 'wrk_9301'")).toEqual([{ last_name: "Okafor" }]); } finally { await w.weft.close(); }
+  }, 120_000);
+});
+
+describe("r2 G5 agrees with the loop's grounding guard (R1)", () => {
+  // A stand-in model: one read, then the given answer for every later step. The real loop runs its real guard on it,
+  // so the trial's own rows say whether the guard accepted the answer, and G5 grades the same rows.
+  const answering = (answer: string): (() => import("../packages/contracts/src/provider").ModelProvider) => () => ({
+    id: "scripted", model: "scripted", label: "Scripted, no model", live: false,
+    async step(req) {
+      const n = req.history.filter((h) => h.kind === "model").length;
+      const usage = { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 };
+      if (n === 0) {
+        const spec = req.tools.find((t) => t.name === "people__search")!;
+        const props = (spec.parameters as { properties: Record<string, { type?: string | string[]; enum?: unknown[] }> }).properties;
+        const args: Record<string, unknown> = {};
+        for (const [k, p] of Object.entries(props)) {
+          const types = ([] as string[]).concat(p.type ?? []);
+          args[k] = k === "query" ? "Hollis" : k === "response_format" ? "concise" : types.includes("null") ? null : p.enum ? p.enum[0] : types.includes("integer") || types.includes("number") ? 10 : types.includes("boolean") ? false : "";
+        }
+        const call = { callId: "call_r2_1", name: spec.name, argumentsJson: JSON.stringify(args) };
+        return { stop: "tool_calls", text: "", toolCalls: [call], native: { output: [{ type: "function_call", ...call }] }, usage, servedBy: "scripted", requestId: null };
+      }
+      return { stop: "final", text: answer, toolCalls: [], native: { text: answer }, usage, servedBy: "scripted", requestId: null };
+    },
+  });
+  // Shaped like the four round 1 mismatches: request figures (CP-01, OC-01), the clock's month (BN-02) and the bounds
+  // of "next week" from a Monday clock (TO-01); plus an invented figure, which both must refuse.
+  const fixtures = [
+    { id: "R2-CP", chat: "Hollis Grey (demo) missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27.", answer: "I found Hollis Grey (demo). I cannot file the off-cycle payment for Oct 1 to 15 with the $1,500.00 bonus and payday Oct 27 from chat; please use the off-cycle screen.", guard: true, by: "request" },
+    { id: "R2-OC", chat: "How much would Hollis Grey's missed pay for Oct 1 to 15 be?", answer: "I found Hollis Grey (demo), but no pay figure for Oct 1 to 15 is recorded yet.", guard: true, by: "request" },
+    { id: "R2-BN", chat: "Did the benefits carrier overbill us this month?", answer: "No overbilling findings are recorded for October 2026.", guard: true, by: "clock" },
+    { id: "R2-TO", chat: "Who's out next week?", answer: "Nobody is out next week (November 2 to November 8, 2026).", guard: true, by: "clock" },
+    { id: "R2-NO", chat: "How many people work at Larkspur?", answer: "Larkspur has 9,876 workers.", guard: false, by: null },
+  ];
+  it("on fixtures shaped like the round 1 mismatches, G5's grounding verdict is the guard's verdict", async () => {
+    const { runTrial, detailOf } = await import("../evals/suite/runner");
+    const base = task("CQ-01");
+    for (const f of fixtures) {
+      const t: EvalTask = { ...base, id: f.id, input: { chat: f.chat }, world: { ...base.world, digest: null }, expect: { default: { ...base.expect.default!, finalText: { grounded: true, mustMention: [], judges: [] }, endState: [] } } };
+      const o = opts({ provider: answering(f.answer), requireDigest: false });
+      const trial = await runTrial({ task: t, variant: "default", trial: 1 }, { ...o, log: () => undefined }, newState());
+      expect(trial.error, f.id).toBeNull();
+      // The guard accepted the model's answer iff the trial shows no repair notice and no receipt in its place.
+      const g = trial.graders.find((x) => x.grader === "G5")!;
+      const guardAccepted = trial.groundingRepairs === 0 && !trial.detail.groundingFallback;
+      expect(guardAccepted, `${f.id} guard`).toBe(f.guard);
+      expect(g.pass, `${f.id} G5: ${g.reasons.join("; ")}`).toBe(f.guard);
+      // Each accepted figure set needed the request or the clock: round 1's two-argument G5 refused exactly these.
+      const by = detailOf(trial).groundedBy;
+      if (f.by === "request") expect(by?.request.length, f.id).toBeGreaterThan(0);
+      if (f.by === "clock") expect(by?.clock.length, f.id).toBeGreaterThan(0);
+    }
+  }, 600_000);
+
+  const step = (over: Partial<import("../evals/suite/types").EvStep>): import("../evals/suite/types").EvStep => ({ runId: "run_x", n: 1, parentN: null, stage: "dispatch", kind: "tool_call", toolName: "people__search", toolArgs: {}, outcome: "ok", result: null, native: null, costUsdMicros: 0, usage: null, timings: null, ...over });
+  it("the guard's evidence: ok results only, a feed update never counts, echoed arguments, the request only when trusted", async () => {
+    const { guardBase, guardEvidence, groundText } = await import("../evals/suite/graders/index");
+    const setup = step({ n: 1, stage: "assemble", kind: "context", toolName: null, result: { pack: true, text: "now: 2026-10-26T15:30:00.000Z\n<request>Pay &lt;Hollis&gt; $1,500.00</request>" } });
+    const trust = (t: boolean) => step({ n: 2, stage: "assemble", kind: "context", toolName: null, result: { items: 1, requestTrusted: t } });
+    const steps = [
+      setup, trust(true),
+      step({ n: 3, toolArgs: { query: "4,200" }, result: { outcome: { ok: true, status: "done", resultId: "res_1", data: { note: "4,200", gross_cents: 812500 }, summary: "ok", actionSeq: null } } }),
+      step({ n: 4, toolName: "comms__post_update", toolArgs: { text: "$7,777.00" }, result: { outcome: { ok: true, status: "done", resultId: "res_2", data: { text: "$7,777.00" }, summary: "Posted", actionSeq: 5 } } }),
+      step({ n: 5, result: { outcome: { ok: false, code: "INVALID_INPUT", message: "limit 3,333 too large" } } }),
+    ];
+    expect(guardBase({ steps }, "run_x")).toEqual({ request: "Pay <Hollis> $1,500.00", now: "2026-10-26T15:30:00.000Z" });
+    expect(guardBase({ steps: [setup, trust(false)] }, "run_x").request).toBeNull();
+    const ev = guardEvidence({ steps }, "run_x", guardBase({ steps }, "run_x"));
+    expect(ev.results).toHaveLength(1);
+    expect([...ev.opts.echoes!]).toEqual(["4,200"]);
+    expect(groundText("Gross is $8,125.00 and the bonus $1,500.00.", ev)).toMatchObject({ ok: true, groundedBy: { request: ["$1,500.00"], clock: [] } });
+    // An echoed argument is not evidence, a feed update's text is not evidence, and neither is a refused call's message.
+    expect(groundText("The note says 4,200.", ev).ok).toBe(false);
+    expect(groundText("We posted $7,777.00.", ev).ok).toBe(false);
+    expect(groundText("The limit was 3,333.", ev).ok).toBe(false);
+  });
+});
+
+describe("r2 firstFailure labels a recalled note without its rule as context (R2)", () => {
+  const recallText = (excerpt: string) => [
+    "now: 2026-10-26T15:30:00.000Z",
+    "<recall source=\"memory\">",
+    "- timeline/raw/2026-10-26.md#L12 (hit, as of 2026-10-26): sim.deliver_notice: Delivered a notice as ntc_0002",
+    `- knowledge/procedures/notice-escalation.md#L11 (hit, as of 2026-10-26): ${excerpt}`,
+    "</recall>",
+  ].join("\n");
+  const evOf = (excerpt: string): import("../evals/suite/types").TrialEvidence => ({
+    mainRunId: "run_x", runs: [{ id: "run_x", kind: "main", parentRunId: null, routineRunId: "rtr_1", status: "done", terminalReason: "DONE", tainted: false, taintedBy: null, stepsUsed: 3, costUsd: 0, summary: "Prepared NY NYS-45 (#3); Proposed File NY NYS-45 (prp_0001)" }],
+    steps: [{ runId: "run_x", n: 1, parentN: null, stage: "assemble", kind: "context", toolName: null, toolArgs: null, outcome: null, result: { pack: true, text: recallText(excerpt) }, native: null, costUsdMicros: 0, usage: null, timings: null }],
+    actions: [], proposals: [], priorProposals: [], messages: [], memory: { headBefore: null, headAfter: null, commits: [], changed: [], texts: [] }, otlp: [], canaries: [], registry: () => null,
+    endState: [{ sql: "SELECT 1", equals: 1, actual: 0 }], wallMs: 1, error: null,
+  });
+  it("MM-03 shaped: the heading alone reached the model, so the failure is context, not tool selection", async () => {
+    const { recallGap, ruleShown } = await import("../evals/suite/graders/index");
+    expect(ruleShown("id proc-notice-escalation. # Notice escalation")).toBe(false);
+    expect(ruleShown("id proc-notice-escalation. # Notice escalation For any agency notice that says a filing is missing or late, escalate with notices.escalate.")).toBe(true);
+    const spec = { task: task("MM-03"), variant: "default" as const, trial: 1 };
+    const heading = scoreTrial(spec, evOf("id proc-notice-escalation. # Notice escalation"), { digest: null, chatCanPropose: false });
+    expect(heading.success).toBe(false);
+    expect(heading.firstFailure).toBe("context");
+    expect(recallGap(evOf("id proc-notice-escalation. # Notice escalation"), task("MM-03").expect.default!)).toMatchObject({ path: "knowledge/procedures/notice-escalation.md" });
+    // The rule reached the model and the run still did not escalate or cite: that is the model's choice, not context.
+    const body = scoreTrial(spec, evOf("id proc-notice-escalation. # Notice escalation For any agency notice that says a filing is missing or late, escalate to Theo and cite this procedure."), { digest: null, chatCanPropose: false });
+    expect(body.firstFailure).not.toBe("context");
+    expect(recallGap(evOf("whatever"), { ...task("MM-03").expect.default!, finalText: { grounded: true, mustMention: ["Theo"], judges: [] } })).toBeNull();
+  });
+});
+
+describe("r2 offline re-grade from saved spans ($0)", () => {
+  it("rebuilds a saved trial's G5 evidence from its trace and re-grades it with the guard's evidence", async () => {
+    const { regrade } = await import("../evals/suite/graders/regrade");
+    const t = task("OC-01");
+    const span = (name: string, kind: string, n: number, attrs: Record<string, unknown>) => ({ name, span_kind: kind, start_time: `2026-10-17T07:20:0${n}.000Z`, context: { trace_id: "tr1" }, attributes: { "metadata.run_id": "run_0001", "weft.step_n": n, ...attrs } });
+    const spans = [
+      span("assemble", "CHAIN", 2, { "output.value": JSON.stringify({ items: 1, requestTrusted: true }) }),
+      span("people__search", "TOOL", 4, { "tool.name": "people__search", "input.value": JSON.stringify({ query: "Hollis Grey" }), "output.value": JSON.stringify({ ok: true, status: "done", resultId: "res_0002", data: { workers: [{ id: "wrk_0042", name: "Hollis Grey (demo)" }] }, summary: "Found 1 worker", actionSeq: null }) }),
+      span("grounding.check", "GUARDRAIL", 6, { "weft.grounded": true }),
+    ];
+    const g5Fail = { grader: "G5" as const, pass: false, applies: true, reasons: ["grounding: ungrounded figures: 15"], metric: 0 };
+    const saved = { taskId: "OC-01", split: "dev", group: t.group, variant: "default", trial: 1, success: false, graders: [g5Fail], judges: [], runIds: ["run_0001"], traceId: "tr1", phoenixUrl: null, experimentRunId: null, steps: 2, toolCalls: 1, invalidToolCalls: 0, groundingRepairs: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, wallMs: 1, firstFailure: "verification", error: null,
+      detail: { finalText: "I found Hollis Grey (demo) (res_0002), but no pay is recorded for Oct 1 to 15.", groundingFallback: false } } as unknown as import("../evals/suite/types").SuiteTrial;
+    const [r] = regrade([saved], new Map([["OC-01", { ...t, expect: { default: { ...t.expect.default!, finalText: { grounded: true, mustMention: [], judges: [] } } } }]]), spans);
+    expect(r).toMatchObject({ before: { g5: false }, after: { g5: true, success: true }, guard: true, partial: false });
+    expect(r!.after.groundedBy!.request).toEqual(expect.arrayContaining(["15"]));
+  });
+});
+
+describe("r2 dev coverage from the parity spec (R9)", () => {
+  it("each untested notice plan has a dev task on its own world, and the mentions group has one", () => {
+    const plans = { "NT-03": "late_deposit_penalty", "NT-04": "registration_confirmed", "NT-05": "account_review" };
+    for (const [id, kind] of Object.entries(plans)) {
+      const t = task(id);
+      expect(t.world.mutators, id).toEqual([`agencyNoticeKind:${kind}`]);
+      expect(t.input, id).toEqual({ routine: "rt_agency_notice", event: { type: "notice.received", notice_id: "ntc_9501" } });
+    }
+    expect(task("NT-03").expect.default!.endState.map((e) => e.sql).join(" ")).toMatch(/penalty_dispute/);
+    expect(task("NT-04").expect.default!.endState.map((e) => e.equals)).toContain("skipped");
+    expect(task("NT-05").expect.default!.endState.map((e) => e.sql).join(" ")).toMatch(/unrecognized_notice/);
+    expect(all.filter((l) => l.task.group === "mentions").map((l) => l.task.surface)).toEqual(["mention"]);
+  });
+  it("the notice mutator stores the named kind at the world clock and emits no event", async () => {
+    const { buildWorld } = await import("../evals/suite/worlds/index");
+    const w = await buildWorld(task("NT-05").world, { dataDir: tmp("weft-eval-notice-"), mode: "scripted" });
+    try {
+      expect(await w.q("SELECT kind, status, received_at, tax_account_id FROM notices WHERE id = 'ntc_9501'")).toEqual([{ kind: "account_review", status: "new", received_at: "2026-10-26T15:30:00.000Z", tax_account_id: "txa_0003" }]);
+      expect(await w.q("SELECT id FROM events WHERE subject_ref = 'ntc_9501'")).toEqual([]);
+    } finally { await w.weft.close(); }
   }, 120_000);
 });
