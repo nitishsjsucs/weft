@@ -4,7 +4,10 @@
 //   { type: "notice.deliver", scenario } -> the agency notice simulator delivers that scenario
 //   { type: "offer.sign", ... }      -> a person drafts and sends an offer and the candidate signs it (GP18)
 //   any other { type, ...payload }   -> that domain event is emitted with the payload
-// portal and mention surfaces land with w4-parity-agent; until then their tasks end with SURFACE_UNAVAILABLE.
+//   { portal: text }                -> the asker's portal question (POST /v1/portal/agent/runs); a human-only topic is
+//                                      handed off in code and starts no run
+//   { mention: text, channel }      -> the task principal tags the agent in a chat channel (POST /v1/sim/chat/inbound);
+//                                      the trial waits for the tainted read-only run and its answer in the thread
 import type { EvalTask } from "../../packages/contracts/src/evals";
 import type { TrialWorld } from "./worlds/index";
 
@@ -110,8 +113,30 @@ export async function drive(w: TrialWorld, task: EvalTask): Promise<DriveResult>
       return null;
     });
   }
+  if ("portal" in input) {
+    const res = await post(w, "/v1/portal/agent/runs", { text: input.portal }, task.principal);
+    if (res.status !== 200 && res.status !== 202) return { mainRunId: null, routineRunId: null, chatMode: null, error: `START_REFUSED: portal ask answered ${res.status} ${(await res.text()).slice(0, 200)}` };
+    const out = (await res.json()) as { runId: string | null; status: string };
+    if (!out.runId) return { mainRunId: null, routineRunId: null, chatMode: "portal_handoff", error: null };
+    await settled(w, out.runId);
+    return { mainRunId: out.runId, routineRunId: null, chatMode: "portal", error: null };
+  }
+  if ("mention" in input) {
+    const res = await post(w, "/v1/sim/chat/inbound", { channel: input.channel, from: task.principal, text: input.mention }, task.principal);
+    if (res.status !== 200 && res.status !== 202) return { mainRunId: null, routineRunId: null, chatMode: null, error: `START_REFUSED: inbound chat answered ${res.status} ${(await res.text()).slice(0, 200)}` };
+    const { mentionId } = (await res.json()) as { mentionId: string | null };   // 202 with a runId when a run started
+    if (!mentionId) return { mainRunId: null, routineRunId: null, chatMode: "mention_ignored", error: null };
+    let runId: string | null = null;
+    for (let i = 0; i < 200; i++) {   // the answer posts in the thread after the run settles
+      const [m] = await w.q("SELECT status, run_id FROM agent_mentions WHERE id = ?", [mentionId]);
+      if (m?.run_id && !runId) { runId = String(m.run_id); await settled(w, runId); }
+      if (m && m.status !== "queued" && m.status !== "running") break;
+      await sleep(50);
+    }
+    return { mainRunId: runId, routineRunId: null, chatMode: "mention", error: null };
+  }
   const surface = Object.keys(input)[0];
-  return { mainRunId: null, routineRunId: null, chatMode: null, error: `SURFACE_UNAVAILABLE: the ${surface} surface lands with w4-parity-agent` };
+  return { mainRunId: null, routineRunId: null, chatMode: null, error: `SURFACE_UNAVAILABLE: no driver for the ${surface} surface` };
 }
 
 /** GP18's offer flow: a person drafts and sends an offer, the candidate persona signs it in the portal. */

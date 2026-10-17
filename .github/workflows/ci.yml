@@ -25,4 +25,8 @@ jobs:
       - run: pnpm test
         env:
           WEFT_LLM: scripted
+      # The whole eval suite (dev and test, both variants) on the scripted provider: no network, no Phoenix.
+      - run: pnpm eval:ci
+        env:
+          WEFT_LLM: scripted
       - run: pnpm --filter @weft/web build

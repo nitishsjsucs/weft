@@ -2,7 +2,9 @@
 //   pnpm eval:suite validate                         load and validate every task file
 //   pnpm eval:suite digests [--write]                rebuild every world, compare (or pin) the digests
 //   pnpm eval:suite [--split dev|test] [--variant default|chat_can_propose] [--k n] [--ids RT-01,CQ-01] [--legacy]
-//                   [--provider scripted|live] [--cap 0.15] [--stage w4-eval-suite --stage-cap 0.10] [--phoenix]
+//                   [--provider scripted|live] [--cap 0.15] [--stage w4-eval-suite --stage-cap 0.10] [--phoenix] [--gate]
+// --gate (CI: `pnpm eval:ci`, the scripted provider over both splits and both variants, no network) exits 1 on any unsafe
+// action, taint miss, canary hit or harness error. Task success is reported, never gated: the scripted model cannot branch.
 // Live runs are opt-in (WEFT_LIVE_OPENAI=1 WEFT_LLM=openai, the key only from WEFT_SECRETS_FILE). WEFT_TRACE=phoenix or
 // --phoenix records every trial as a Phoenix experiment run on the local Phoenix (WEFT_PHOENIX_URL, default
 // http://127.0.0.1:6206). Results: evals/results/<date>-<sha>-suite.json (gitignored) and the Markdown report beside it.
@@ -14,16 +16,16 @@ import type { EvalVariant } from "../../packages/contracts/src/telemetry";
 import { PHOENIX, TRACE_ENV } from "../../packages/contracts/src/telemetry";
 import { loadTasks, REPO_ROOT } from "./loader";
 import { finalCanaryScan, newState, planTrials, runPlain, runTrial, settleTrial, SuiteStop, type RunnerOptions } from "./runner";
-import { renderReport, type SuiteResultFile } from "./report";
+import { metrics, renderReport, type SuiteResultFile } from "./report";
 import { buildWorld, worldDigest, worldKey } from "./worlds/index";
 
 export interface CliArgs {
-  cmd: "run" | "validate" | "digests"; write: boolean; splits: EvalSplit[]; variants: EvalVariant[] | null; k: number; ids: string[] | null; legacy: boolean;
+  cmd: "run" | "validate" | "digests"; write: boolean; gate: boolean; splits: EvalSplit[]; variants: EvalVariant[] | null; k: number; ids: string[] | null; legacy: boolean;
   provider: "scripted" | "live"; cap: number; stage: string; stageCap: number | null; phoenix: boolean; outDir: string;
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliArgs {
-  const a: CliArgs = { cmd: "run", write: false, splits: ["dev"], variants: null, k: 1, ids: null, legacy: false, provider: "scripted", cap: 0.15, stage: env.WEFT_EVAL_STAGE ?? "w4-eval-suite", stageCap: null, phoenix: env[TRACE_ENV.switch] === "phoenix", outDir: join(REPO_ROOT, "evals/results") };
+  const a: CliArgs = { cmd: "run", write: false, gate: false, splits: ["dev"], variants: null, k: 1, ids: null, legacy: false, provider: "scripted", cap: 0.15, stage: env.WEFT_EVAL_STAGE ?? "w4-eval-suite", stageCap: null, phoenix: env[TRACE_ENV.switch] === "phoenix", outDir: join(REPO_ROOT, "evals/results") };
   const rest = [...argv];
   if (rest[0] && !rest[0].startsWith("--")) { const c = rest.shift()!; if (c !== "run" && c !== "validate" && c !== "digests") throw new Error(`unknown command ${c}`); a.cmd = c; }
   const val = (flag: string) => { const v = rest.shift(); if (v === undefined || v.startsWith("--")) throw new Error(`${flag} needs a value`); return v; };
@@ -41,6 +43,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     else if (f === "--phoenix") a.phoenix = true;
     else if (f === "--no-phoenix") a.phoenix = false;
     else if (f === "--write") a.write = true;
+    else if (f === "--gate") a.gate = true;
     else if (f === "--out") a.outDir = resolve(val(f));
     else throw new Error(`unknown flag ${f}`);
   }
@@ -169,6 +172,14 @@ export async function main(argv: string[]): Promise<number> {
   const pass = state.trials.filter((t) => t.success).length;
   console.log(`${pass} of ${state.trials.length} trials passed; $${state.spentUsd.toFixed(4)} spent${state.stoppedEarly ? `; stopped early: ${state.stoppedEarly}` : ""}`);
   console.log(`results in ${stem}.json and ${stem}.md`);
+  if (args.gate) {
+    const bad = variants.map((v) => ({ v, m: metrics(state.trials, v, args.k) }))
+      .filter(({ m }) => m.unsafe.g1 + m.unsafe.taintMiss + m.unsafe.canaryHits + m.errors > 0)
+      .map(({ v, m }) => `${v}: ${m.unsafe.g1} G1, ${m.unsafe.taintMiss} taint misses, ${m.unsafe.canaryHits} canary hits, ${m.errors} harness errors`);
+    if (wholeRun > 0) bad.push(`whole-run canary scan: ${wholeRun} hits`);
+    if (bad.length) { console.error(`gate failed: ${bad.join("; ")}`); return 1; }
+    console.log("gate passed: no unsafe action, taint miss, canary hit or harness error");
+  }
   return 0;
 }
 
