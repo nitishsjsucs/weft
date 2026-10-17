@@ -10,14 +10,15 @@ import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { CheckinAnswers, Forbidden, LifeEventReport, Unauthorized, ValidationError, type ExecutorBundle, type HumanSession, type ToolOutcome } from "@weft/contracts";
 import { lifeEvents as le, pageById, ptDateOf } from "@weft/core";
-import { benefitPlans, type Db } from "@weft/db";
+import { benefitPlans, carrierSubmissions, type Db } from "@weft/db";
+import { fileElections, type CarrierFiling } from "@weft/sim";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
 import { outcomeJson } from "./offers";
 
 const IMPLEMENTED = [
-  "GET /v1/life-events", "GET /v1/enrollment-windows", "POST /v1/portal/life-events", "GET /v1/portal/checkins", "POST /v1/portal/checkins/:id/submit", "GET /v1/checkins",
+  "GET /v1/life-events", "GET /v1/enrollment-windows", "GET /v1/carrier-submissions", "POST /v1/portal/life-events", "GET /v1/portal/checkins", "POST /v1/portal/checkins/:id/submit", "GET /v1/checkins",
 ] as const;
 
 /** The portal election body (extension; see docs/tracks/w4-parity-people.md). */
@@ -53,6 +54,11 @@ export function lifeEventsRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/enrollment-windows", async (c) => {
     const res = await read(c, "benefits.list_windows", { worker_id: q(c, "workerId"), kind: q(c, "kind"), status: q(c, "status") });
     return res instanceof Response ? res : c.json(res.data.windows);
+  });
+
+  r.get("/v1/carrier-submissions", async (c) => {
+    const res = await read(c, "benefits.list_carrier_submissions", { worker_id: q(c, "workerId"), status: q(c, "status"), window_id: q(c, "windowId") });
+    return res instanceof Response ? res : c.json(res.data.submissions);
   });
 
   r.post("/v1/portal/life-events", async (c) => {
@@ -100,12 +106,21 @@ export function lifeEventsRoutes(weft: Weft): Hono<WeftEnv> {
 }
 
 /**
- * The scheduler's window date sweep (wave 4): when a window is due to open or close, svc_scheduler runs
- * benefits.close_windows (R1, system only). A cheap count first, so an idle tick writes nothing.
+ * The scheduler's benefits sweep (wave 4), run by svc_scheduler only when something is due: windows due to open or
+ * close go to benefits.close_windows (R1, system only); filings the people team sent go to the simulated carrier or
+ * 401(k) provider, and its receipts are recorded with benefits.record_carrier_receipt (R1, system only).
  */
 export async function sweepEnrollmentWindows(o: { db: Db; executor: ExecutorBundle; now: string }): Promise<void> {
   const day = ptDateOf(o.now);
+  const src = { eventId: null, attended: false, requestedBy: null };
   const due = await o.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM enrollment_windows WHERE (status = 'open' AND closes_on < ${day}) OR (status = 'scheduled' AND opens_on <= ${day})`);
-  if (!due[0]?.n) return;
-  await o.executor.system.exec("svc_scheduler", "benefits.close_windows", { as_of: day }, { eventId: null, attended: false, requestedBy: null });
+  if (due[0]?.n) await o.executor.system.exec("svc_scheduler", "benefits.close_windows", { as_of: day }, src);
+  const sent = await o.db.select().from(carrierSubmissions).where(eq(carrierSubmissions.status, "sent"));
+  if (sent.length === 0) return;
+  const receipts = sent.slice(0, 50).map((r) => {
+    const e = JSON.parse(r.electionsJson) as { effective_on: string; lines: CarrierFiling["lines"] };
+    const a = fileElections({ submissionId: r.id, carrier: r.carrier, workerId: r.workerId, effectiveOn: e.effective_on, lines: e.lines.map((l) => ({ plan_id: l.plan_id, type: l.type, tier: l.tier, deferral_bps: l.deferral_bps })) });
+    return a.status === "confirmed" ? { submission_id: r.id, status: "confirmed" as const, receipt_ref: a.receiptRef } : { submission_id: r.id, status: "rejected" as const, reason: a.reason };
+  });
+  await o.executor.system.exec("svc_scheduler", "benefits.record_carrier_receipt", { receipts }, src);
 }

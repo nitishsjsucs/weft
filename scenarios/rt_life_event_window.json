@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "main": [
+      { "output": [{ "type": "function_call", "name": "benefits__submit_elections", "arguments": "{{derived.benefits.submit_elections}}" }] },
+      { "output": [{ "type": "text", "text": "Proposed filing the queued benefit elections with the carrier and the 401(k) provider." }] }
+    ]
+  }
+}

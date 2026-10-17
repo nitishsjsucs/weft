@@ -9,7 +9,7 @@
 // docs/tracks/w4-parity-people.md). benefits.report_life_event is R2 with approval "always" rather than the planned
 // "never": a human caller executes either way (policy.ts), and the t2 registry rule asks every R2 command for approval.
 // The employee's own submissions need people:view like time_off.submit, so any employee with a worker record can file.
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { LifeEventKind, Refused } from "@weft/contracts";
 import { benefitPlans, carrierSubmissions, checkins, enrollmentWindows, lifeEvents, workers } from "@weft/db";
@@ -17,7 +17,9 @@ import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { displayName } from "../people/names";
 import { lifeEventRule, windowFor } from "../life-events/rules";
-import { listLifeEvents, listWindows, reminderEmail, remindersDue, sweepPlan, workerOfPrincipal } from "../life-events/windows";
+import { listLifeEvents, listWindows, reminderEmail, remindersDue, submissionsFor, sweepPlan, workerOfPrincipal } from "../life-events/windows";
+import { canonicalJson } from "../shared/canonical-json";
+import { sha256Hex } from "../shared/hash";
 import { CheckinAnswers, managerSummaryW4 } from "../life-events/checkin-form";
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -197,6 +199,98 @@ const electInWindow = writeCommand<ElectInput>({
   },
 });
 
+// ---------------------------------------------------------------- carrier filings
+
+type SubRow = typeof carrierSubmissions.$inferSelect;
+interface FilingLine { plan_id: string; plan: string; type: string; carrier: string; tier: string | null; employee_cents: number | null; deferral_bps: number | null }
+const linesOf = (r: SubRow) => (JSON.parse(r.electionsJson) as { effective_on: string; lines: FilingLine[] });
+async function subView(deps: Parameters<WeftCommand["run"]>[2], rows: SubRow[]) {
+  const ids = [...new Set(rows.map((r) => r.workerId))];
+  const ppl = ids.length ? await deps.tx.select({ id: workers.id, first: workers.firstName, last: workers.lastName }).from(workers).where(inArray(workers.id, ids)) : [];
+  const nm = new Map(ppl.map((p) => [p.id, displayName(p.first, p.last)]));
+  return rows.map((r) => {
+    const e = linesOf(r);
+    return { id: r.id, worker_id: r.workerId, name: nm.get(r.workerId) ?? r.workerId, window_id: r.windowId, carrier: r.carrier, status: r.status, effective_on: e.effective_on,
+      lines: e.lines.map((l) => ({ plan: l.plan, type: l.type, tier: l.tier, deferral_bps: l.deferral_bps })), sent_at: r.sentAt, confirmed_at: r.confirmedAt, receipt_ref: r.receiptRef, proposal_id: r.proposalId };
+  });
+}
+
+const ListSubsInput = z.object({ worker_id: z.string().startsWith("wrk_").optional(), window_id: z.string().startsWith("ewn_").optional(), status: z.enum(["queued", "sent", "confirmed", "rejected"]).optional(), ...responseFormatField });
+type ListSubsInput = z.infer<typeof ListSubsInput>;
+const listCarrierSubmissions = readCommand({
+  name: "benefits.list_carrier_submissions", domain: "benefits",
+  summary: "Benefit election filings with carriers and the 401(k) provider, with status and receipt.",
+  description: "Election filings per carrier (queued, sent, confirmed, rejected) for a worker, a window or a status: the plans and tiers or deferral, when it was sent and confirmed, and the carrier's receipt reference. Example: {\"worker_id\":null,\"window_id\":null,\"status\":\"queued\"}",
+  input: ListSubsInput,
+  async run(i: ListSubsInput, ctx, deps) {
+    const people = await deps.tx.select({ id: workers.id }).from(workers).where(eq(workers.companyId, ctx.companyId));
+    const ids = i.worker_id ? [i.worker_id] : people.map((p) => p.id);
+    const rows = await submissionsFor(deps.tx, { workerIds: ids, status: i.status, windowId: i.window_id });
+    return { data: { count: rows.length, submissions: await subView(deps, rows) }, summary: `${rows.length} carrier filings${i.status ? ` ${i.status}` : ""}` };
+  },
+});
+
+const SubmitInput = z.object({ window_id: z.string().startsWith("ewn_").optional(), submission_ids: z.array(z.string().startsWith("csb_")).max(20).optional() });
+type SubmitInput = z.infer<typeof SubmitInput>;
+async function queuedFor(i: SubmitInput, ctx: { companyId: string }, deps: Parameters<WeftCommand["run"]>[2]): Promise<SubRow[]> {
+  if (!i.window_id && !i.submission_ids?.length) throw new DomainRefusal("DOMAIN_NO_FILINGS_NAMED", "Name a window or the filings to send", "Use benefits.list_carrier_submissions with status queued", { window_id: "ewn_0001", submission_ids: null });
+  const people = await deps.tx.select({ id: workers.id }).from(workers).where(eq(workers.companyId, ctx.companyId));
+  const rows = (await submissionsFor(deps.tx, { workerIds: people.map((p) => p.id), status: "queued", windowId: i.window_id })).filter((r) => !i.submission_ids || i.submission_ids.includes(r.id));
+  if (rows.length === 0) throw new DomainRefusal("DOMAIN_NOTHING_QUEUED", "No queued filings match", "Only queued filings can be sent; list them with benefits.list_carrier_submissions", null);
+  return rows;
+}
+const submitElections = writeCommand<SubmitInput>({
+  name: "benefits.submit_elections", summary: "File queued benefit elections with the carrier and the 401(k) provider",
+  description: "Sends each queued election filing for a window (or the named filings) to its carrier or the 401(k) provider; the receipt comes back on the next scheduler tick and is recorded on the filing. External and not reversible, so it is always a proposal. Example: {\"window_id\":\"ewn_0001\",\"submission_ids\":null}",
+  input: SubmitInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", afterPending: "propose", reversible: false,
+  tiers: { main: "executable", task: "delegated" },
+  async preview(i, ctx, deps) {
+    const rows = await queuedFor(i, ctx, deps);
+    const v = await subView(deps, rows);
+    const carriers = [...new Set(v.map((r) => r.carrier))];
+    return {
+      title: `File ${v.length} benefit election ${v.length === 1 ? "filing" : "filings"} with ${carriers.join(" and ")}`, diff: [],
+      content: v.map((r) => ({ label: `${r.carrier}, ${r.name}`, text: `${r.lines.map((l) => `${l.plan}${l.tier ? ` (${l.tier})` : ""}${l.deferral_bps !== null ? ` (${l.deferral_bps / 100}% of pay)` : ""}`).join(", ")}, effective ${r.effective_on}` })),
+      moneyCents: null, subjectRef: rows.map((r) => r.id).join(","),
+      subjectHash: sha256Hex(canonicalJson(rows.map((r) => [r.id, r.electionsJson]))), evidence: rows.map((r) => ({ label: "filing", ref: r.id })),
+    };
+  },
+  async run(i, ctx, deps) {
+    const rows = await queuedFor(i, ctx, deps);
+    for (const r of rows) await deps.tx.update(carrierSubmissions).set({ status: "sent", sentAt: ctx.now, proposalId: ctx.approvedProposalId }).where(eq(carrierSubmissions.id, r.id));
+    return { data: { sent: rows.map((r) => ({ submission_id: r.id, carrier: r.carrier })) }, summary: `Sent ${rows.length} benefit election filings to ${[...new Set(rows.map((r) => r.carrier))].join(" and ")}` };
+  },
+});
+
+const ReceiptInput = z.object({
+  receipts: z.array(z.object({ submission_id: z.string().startsWith("csb_"), status: z.enum(["confirmed", "rejected"]), receipt_ref: z.string().max(40).optional(), reason: z.string().max(200).optional() })).max(50).optional(),
+});
+type ReceiptInput = z.infer<typeof ReceiptInput>;
+const recordCarrierReceipt = writeCommand<ReceiptInput>({
+  name: "benefits.record_carrier_receipt", summary: "System: record carrier receipts for sent election filings",
+  description: "System command (svc_scheduler): records the carrier's or 401(k) provider's answer on each sent filing, confirmed with a receipt reference or rejected with a reason, and emits carrier.submission_confirmed for each confirmation. Filings that are not sent are skipped.",
+  input: ReceiptInput, domain: "benefits", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", access: "system_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const out: { submission_id: string; status: string; receipt_ref: string | null }[] = [];
+    const events: { type: string; subjectRef: string; payload: unknown }[] = [];
+    for (const r of i.receipts ?? []) {
+      const [row] = await deps.tx.select().from(carrierSubmissions).where(eq(carrierSubmissions.id, r.submission_id));
+      if (!row || row.status !== "sent") continue;
+      const [w] = await deps.tx.select({ c: workers.companyId }).from(workers).where(eq(workers.id, row.workerId));
+      if (w?.c !== ctx.companyId) continue;
+      if (r.status === "confirmed" && r.receipt_ref) {
+        await deps.tx.update(carrierSubmissions).set({ status: "confirmed", confirmedAt: ctx.now, receiptRef: r.receipt_ref }).where(eq(carrierSubmissions.id, row.id));
+        events.push({ type: "carrier.submission_confirmed", subjectRef: row.id, payload: { submission_id: row.id } });
+        out.push({ submission_id: row.id, status: "confirmed", receipt_ref: r.receipt_ref });
+      } else {
+        await deps.tx.update(carrierSubmissions).set({ status: "rejected", confirmedAt: null, receiptRef: null }).where(eq(carrierSubmissions.id, row.id));
+        out.push({ submission_id: row.id, status: "rejected", receipt_ref: null });
+      }
+    }
+    return { data: { recorded: out }, summary: `Recorded ${out.length} carrier answers`, events };
+  },
+});
+
 // ---------------------------------------------------------------- the 30-day check-in form
 
 const SubmitFormInput = z.object({ checkin_id: z.string().startsWith("chk_"), answers: CheckinAnswers });
@@ -224,6 +318,7 @@ const submitCheckinForm = writeCommand<SubmitFormInput>({
 });
 
 export const w4PeopleCommands: WeftCommand[] = [
-  reportLifeEvent, listLifeEventsCommand, listWindowsCommand, sendWindowReminders, closeWindows, electInWindow, submitCheckinForm,
+  reportLifeEvent, listLifeEventsCommand, listWindowsCommand, sendWindowReminders, closeWindows, electInWindow,
+  listCarrierSubmissions, submitElections, recordCarrierReceipt, submitCheckinForm,
 ];
 
