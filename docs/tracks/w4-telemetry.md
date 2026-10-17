@@ -4,8 +4,6 @@ Rounds 1 and 2, 2026-10-16. Branch `track/w4-telemetry`. How to use it: `docs/te
 
 ## Done in round 1
 
-## Done
-
 - `packages/agent/src/otel.ts`: the span builder. AGENT per `runLoop` call, CHAIN per stage (admission, assemble,
   model per attempt, dispatch per batch, post, terminal), LLM per provider call built from the loop's own request and
   `Usage` (cached, cache write and reasoning tokens, `llm.cost.*` from `cost.ts`, never the key, headers, cache key
