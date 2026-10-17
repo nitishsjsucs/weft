@@ -12,7 +12,7 @@ import { commands, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createVendorOverlay, readSecret } from "@weft/integrations";
 import { createExecutor, executorInternals } from "@weft/executor";
-import { createAgentRuntime, createProvider, createSpendLedger, loadSecret, setTraceRedactor } from "@weft/agent";
+import { createAgentRuntime, createProvider, createSpendLedger, loadSecret, setTraceRedactor, traceMcpCall } from "@weft/agent";
 import { createRoutines, type WeftRoutinesEngine } from "@weft/routines";
 import { createChatContextSource } from "./routes/agent";
 import { createRoutinesEventSource } from "./routes/routines";
@@ -145,6 +145,7 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
     }
   }
   setTraceRedactor(<T>(v: T): T => executorInternals(executor)?.engine.redactor.value(v) ?? v);   // wave 4: spans redact at the source
+  Object.assign(executorInternals(executor)?.engine ?? {}, { observeCall: traceMcpCall });   // wave 4: a root TOOL span per MCP call
   const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
   const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({
     env: process.env, ledger, testMode, scriptVariant: scriptVariant(db),

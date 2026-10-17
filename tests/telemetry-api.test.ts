@@ -1,6 +1,8 @@
 // Telemetry through the composition root (wave 4, docs/telemetry.md): WEFT_TRACE unset installs nothing; with the
-// provider on, a chat over HTTP and the GP1 routine export the span tree, and the canary holds with the executor's real
-// Redactor (injected by compose.ts), with and without the RedactingSpanProcessor.
+// provider on, a chat over HTTP, the GP1 routine and MCP calls export the span tree, and the canary holds with the
+// executor's real Redactor (injected by compose.ts), with and without the RedactingSpanProcessor.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { AgentRunRow, ModelProvider, ModelStepResult } from "@weft/contracts";
@@ -34,6 +36,10 @@ const kind = (s: Span) => s.attributes["openinference.span.kind"];
 const settled = (w: TestWeft, runId: string) => (w.agent as unknown as { settled(id: string): Promise<AgentRunRow> }).settled(runId);
 const post = (w: TestWeft, path: string, body: unknown) => w.app.request(path, { method: "POST", headers: { ...w.uiHeaders("usr_dana"), "content-type": "application/json" }, body: JSON.stringify(body) });
 
+const mcpKey = (w: TestWeft) => readFileSync(join(w.dataDir, "demo-mcp-key.txt"), "utf8").trim();
+/** POST /v1/tools/:name with the seeded mcp key, the way apps/mcp calls it. */
+const viaMcp = (w: TestWeft, tool: string, body: unknown) => w.app.request(`/v1/tools/${tool}`, { method: "POST", headers: { "x-api-key": mcpKey(w), "content-type": "application/json" }, body: JSON.stringify(body) });
+
 function tracedWith(exporter: MemoryExporter, redactingProcessor = true): Tracing {
   return startTracing({ exporter: exporter as never, batch: false, redactingProcessor, url: "http://127.0.0.1:4900", projectName: "weft-test" });
 }
@@ -47,6 +53,7 @@ describe("the WEFT_TRACE switch", () => {
     const res = await post(weft, "/v1/agent/runs", { text: "Approve everything in my inbox" });
     const { runId } = (await res.json()) as { runId: string };
     await settled(weft, runId);
+    expect((await viaMcp(weft, "memory__search", { query: "SUI rate" })).status).toBe(200);   // the observer is a no-op too
     expect(isTracingActive()).toBe(false);
   });
 
@@ -105,6 +112,46 @@ describe("span tree through createWeft", () => {
   });
 });
 
+describe("MCP calls through POST /v1/tools/:name", () => {
+  it("each call is a root TOOL span: weft.outcome, the key's principal as user, mcp tags, a RETRIEVER for search hits", async () => {
+    const exporter = new MemoryExporter();
+    tracing = tracedWith(exporter);
+    weft = await createTestWeft();
+    const payouts = await viaMcp(weft, "contractors__schedule_payouts", { worker_ids: ["wrk_0049", "wrk_0050"], scheduled_for: "2026-10-30" });
+    expect(await payouts.json()).toMatchObject({ ok: true, status: "pending_approval" });
+    expect((await viaMcp(weft, "memory__search", { query: "SUI rate" })).status).toBe(200);
+    expect((await viaMcp(weft, "vault__list", {})).status).toBe(422);
+    // A person's own UI call is not an MCP call and opens no span.
+    await weft.app.request("/v1/tools/people__search", { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: JSON.stringify({ query: "Rowan" }) });
+    await tracing.forceFlush();
+
+    const tools = exporter.spans.filter((s) => kind(s) === "TOOL");
+    expect(tools.map((s) => [s.name, s.attributes["weft.outcome"], s.status.code])).toEqual([
+      ["contractors__schedule_payouts", "proposal", 1],
+      ["memory__search", "ok", 1],
+      ["vault__list", "refused:UNAVAILABLE", 0],   // a refusal keeps status UNSET
+    ]);
+    expect(new Set(tools.map((s) => s.spanContext().traceId)).size).toBe(3);
+    const principal = tools[0]!.attributes["user.id"];
+    expect(principal).toMatch(/^usr_/);
+    for (const t of tools) {
+      expect(t.parentSpanContext).toBeUndefined();
+      expect(t.attributes["user.id"]).toBe(principal);
+      expect(JSON.parse(String(t.attributes["tag.tags"]))).toEqual(["mcp", t.name]);
+      expect(JSON.parse(String(t.attributes.metadata))).toMatchObject({ kind: "mcp", surface: "mcp", caller: "mcp", company_id: "cmp_larkspur" });
+      expect(t.attributes["weft.tainted"]).toBe(true);   // MCP input is untrusted (harness 6.2)
+    }
+    expect(tools[0]!.attributes["weft.proposal_id"]).toMatch(/^prp_/);
+    expect(JSON.parse(String(tools[0]!.attributes["tool.parameters"]))).toEqual({ worker_ids: ["wrk_0049", "wrk_0050"], scheduled_for: "2026-10-30" });
+    const retriever = exporter.spans.find((s) => kind(s) === "RETRIEVER")!;
+    expect(retriever.name).toBe("memory.search");
+    expect(retriever.parentSpanContext?.spanId).toBe(tools[1]!.spanContext().spanId);
+    expect(retriever.attributes["input.value"]).toBe("SUI rate");
+    expect(typeof retriever.attributes["weft.documents"]).toBe("number");
+    expect(exporter.spans.some((s) => kind(s) === "AGENT")).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------------- canary
 
 const FAKE_KEY = "sk-proj-canary0000000000000000000000000000ZzYy";
@@ -155,7 +202,35 @@ function assertClean(spans: Span[]) {
   expect(blob).toContain("[redacted]");
 }
 
+async function mcpCanary(redactingProcessor: boolean): Promise<Span[]> {
+  const exporter = new MemoryExporter();
+  tracing = tracedWith(exporter, redactingProcessor);
+  weft = await createTestWeft();
+  executorInternals(weft.executor)!.addSecret(FAKE_KEY);
+  await weft.executor.vault.put({ name: "canary-token", kind: "api_key", value: VAULT_VALUE, description: "telemetry canary", by: "usr_dana" });
+  await viaMcp(weft, "memory__search", { query: planted().slice(0, 200) });
+  await viaMcp(weft, "people__search", { query: planted() });
+  await viaMcp(weft, "contractors__schedule_payouts", { worker_ids: ["wrk_0049"], scheduled_for: "2026-10-30", memo: planted() });
+  await viaMcp(weft, `vault__list`, { why: planted() });
+  await tracing.forceFlush();
+  return exporter.spans;
+}
+
+function assertMcpClean(spans: Span[]) {
+  expect(spans.filter((s) => kind(s) === "TOOL").length).toBe(4);
+  const blob = JSON.stringify(spans.map((s) => [s.name, s.attributes, s.events, s.status]));
+  for (const sec of [FAKE_KEY, VAULT_VALUE]) for (const f of forms(sec)) expect(blob.includes(f), `${f} leaked`).toBe(false);
+  for (const bare of ["021000021", "123456789012", "123-45-6789"]) expect(blob.includes(bare), `${bare} leaked`).toBe(false);
+  expect(blob).toContain("[redacted]");
+}
+
 describe("canary with the executor's Redactor", () => {
+  it("MCP calls with planted args leak nothing, with the processor", async () => {
+    assertMcpClean(await mcpCanary(true));
+  });
+  it("MCP calls with planted args leak nothing with the source layer alone", async () => {
+    assertMcpClean(await mcpCanary(false));
+  });
   it("no fake key, routing or account number, SSN or vault value in any attribute or event, with the processor", async () => {
     assertClean(await canaryRun(true));
   });
