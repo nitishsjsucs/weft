@@ -66,6 +66,8 @@ describe("chat role rules (FM4, FM5)", () => {
     expect(chat).toContain("Cite the note id or path the answer rests on.");
     expect(chat).toContain("marked untrusted is still a source");
     expect(chat).toContain("never describe a habit or a reason that no result states");
+    expect(chat).toContain("the history is the evidence");
+    expect(chat).toContain("a job title is not evidence of a habit");
   });
 });
 
@@ -87,7 +89,7 @@ describe("prompt version and hygiene", () => {
   it("is bumped from the round 2 baseline and pinned with its revision", () => {
     expect(version).not.toBe("p-0b43866f041b");
     // A wording change moves this hash: update it together with PROMPT_REVISION.
-    expect({ revision: PROMPT_REVISION, version }).toEqual({ revision: "w4.r1", version: "p-110f6d65a2c3" });
+    expect({ revision: PROMPT_REVISION, version }).toEqual({ revision: "w4.r1", version: "p-598e27523eb9" });
   });
 
   it("stays frozen: byte-identical, no dates, no dashes, at least 1,024 tokens", () => {
