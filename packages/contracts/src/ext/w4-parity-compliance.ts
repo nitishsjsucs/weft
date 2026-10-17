@@ -29,6 +29,8 @@ export interface NoticePlanInput {
   taxAccountId: string | null;
   /** The filing the notice is about, when one is on record. */
   filing: { id: string; status: string } | null;
+  /** `upload` is a person's scan of a mailed notice (T4): its fields are untrusted, so no plan closes it without a person. */
+  source?: "simulated" | "upload";
 }
 
 /** Extractions below this confidence go to a person (uploaded notices only; the simulator's own text parses exactly). */
@@ -38,6 +40,9 @@ export function planNotice(i: NoticePlanInput): { plan: NoticePlan; handling: No
   const handling = NOTICE_HANDLING[i.kind] ?? null;
   if (!handling) return { plan: "escalate", handling: null, reason: "unknown_notice_kind" };
   if (!i.extract || (typeof i.extract.confidence === "number" && i.extract.confidence < MIN_EXTRACT_CONFIDENCE)) return { plan: "escalate", handling, reason: "low_confidence_extract" };
+  // An uploaded notice's kind and fields came from untrusted bytes: a plan that would change a rate or close the
+  // notice with no person in the loop goes to a tax specialist instead. Every other plan ends in a proposal.
+  if (i.source === "upload" && (handling === "update_rate" || handling === "acknowledge")) return { plan: "escalate", handling, reason: "judgment_needed" };
   if (handling === "update_rate") return { plan: "update_rate", handling, reason: null };
   if (handling === "attach_filing") {
     if (!i.filing) return { plan: "escalate", handling, reason: "judgment_needed" };
@@ -55,3 +60,9 @@ export function planNotice(i: NoticePlanInput): { plan: NoticePlan; handling: No
 /** The routine that handles every notice kind except rate changes, and its scripted variants (scenarios/<name>.json). */
 export const RT_COMPLIANCE_NOTICES = "rt_compliance_notices";
 export const noticeScriptName = (plan: NoticePlan) => `${RT_COMPLIANCE_NOTICES}.${plan}`;
+
+/** The routine for notices a person uploads (trigger notice.uploaded). It is marked tainted, so every run starts tainted. */
+export const RT_COMPLIANCE_UPLOADS = "rt_compliance_uploads";
+export const uploadScriptName = (plan: NoticePlan) => `${RT_COMPLIANCE_UPLOADS}.${plan}`;
+/** The provenance label every rt_compliance_uploads run starts with (routines.tainted_by). */
+export const UPLOAD_TAINT = "notice_upload";

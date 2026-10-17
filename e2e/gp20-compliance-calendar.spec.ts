@@ -26,3 +26,28 @@ test("compliance calendar and the Q3 Form 941 filed through the Inbox", async ({
     expect(p.risk).toBe("R4");
   });
 });
+
+test("an uploaded notice of an unknown kind goes to a tax specialist; required training is recorded", async ({ page }) => {
+  await test.step("upload the mailed designee notice: Weft reads it and hands it to a person", async () => {
+    await openApp(page, "/app/compliance?tab=notices");
+    const up = page.getByTestId("notice-upload");
+    await up.getByTestId("notice-upload-file").setInputFiles(new URL("../packages/sim/src/notices/mailed/irs_designee_change.txt", import.meta.url).pathname);
+    await up.getByTestId("notice-upload-submit").click();
+    await expect(up.getByTestId("notice-upload-result")).toContainText("Uploaded as notice ntc_");
+    await openApp(page, "/app/compliance?tab=handoffs");
+    await expect(page.getByTestId("handoffs-panel").getByText("unknown notice kind").first()).toBeVisible();
+  });
+
+  await test.step("the Training tab lists an overdue course with its statute; recording completion clears it", async () => {
+    await openApp(page, "/app/compliance?tab=training");
+    const panel = page.getByTestId("training-panel");
+    await panel.getByRole("button", { name: "Overdue" }).click();
+    const row = panel.locator('[data-status="overdue"]').first();
+    await expect(row).toBeVisible();
+    await expect(row.getByRole("link", { name: "Statute" })).toHaveAttribute("href", /^https:\/\//);
+    const id = await row.getAttribute("data-testid");
+    await row.getByRole("button", { name: "Record completion" }).click();
+    await panel.getByRole("button", { name: "Completed" }).click();
+    await expect(panel.getByTestId(id!)).toHaveAttribute("data-status", "completed");
+  });
+});

@@ -1,0 +1,28 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "training__assign",
+            "arguments": "{{derived.training.assign}}"
+          },
+          {
+            "type": "function_call",
+            "name": "training__send_reminders",
+            "arguments": "{{derived.training.send_reminders}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Proposed the required training assignments and the reminders for approval."
+          }
+        ]
+      }
+    ]
+  }
+}

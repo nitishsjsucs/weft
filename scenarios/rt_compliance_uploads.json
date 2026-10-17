@@ -1,0 +1,14 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Read the notice and its derived plan; the plan has its own steps."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -8,6 +8,7 @@ import { AGENCY, fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { refHref } from "../refs";
 import { CalendarPanel, FilingsPanel, HandoffsPanel } from "./w4-calendar";
+import { NoticeUpload, TrainingPanel } from "./w4-upload-training";
 
 const STATUS_TONE: Record<TaxAccount["status"], "green" | "amber" | "gray" | "red"> = { active: "green", awaiting_state: "amber", needs_info: "red", not_registered: "gray" };
 const NOTICE_TONE: Record<Notice["status"], "gray" | "blue" | "amber" | "green" | "red"> = { new: "blue", in_review: "blue", proposed: "amber", resolved: "green", escalated: "red" };
@@ -93,7 +94,7 @@ export function ComplianceView() {
     const n = q.get("notice");
     if (n) { setTab("notices"); setOpen(n); }
     const t = q.get("tab");
-    if (!n && t && ["calendar", "filings", "handoffs"].includes(t)) setTab(t);
+    if (!n && t && ["calendar", "filings", "handoffs", "training", "notices"].includes(t)) setTab(t);
   }, []);
   const rs = rates.data ?? [];
   const err = accounts.error ?? rates.error ?? notices.error;
@@ -109,6 +110,7 @@ export function ComplianceView() {
           <TabsTrigger value="calendar">Calendar</TabsTrigger>
           <TabsTrigger value="filings">Filings</TabsTrigger>
           <TabsTrigger value="handoffs">Hand-offs</TabsTrigger>
+          <TabsTrigger value="training">Training</TabsTrigger>
         </TabsList>
         <TabsContent value="registrations">
           <Card className="overflow-hidden">
@@ -154,6 +156,7 @@ export function ComplianceView() {
           </Card>
         </TabsContent>
         <TabsContent value="notices">
+          <div className="mb-3"><NoticeUpload /></div>
           <Card className="divide-y divide-[var(--app-border)]">
             {(notices.data?.data ?? []).map((n) => (
               <button type="button" key={n.id} data-testid={tid.noticeRow(n.id)} onClick={() => setOpen(n.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-2">
@@ -170,6 +173,7 @@ export function ComplianceView() {
         <TabsContent value="calendar"><CalendarPanel /></TabsContent>
         <TabsContent value="filings"><FilingsPanel /></TabsContent>
         <TabsContent value="handoffs"><HandoffsPanel /></TabsContent>
+        <TabsContent value="training"><TrainingPanel /></TabsContent>
       </Tabs>
       <NoticeDetail id={open} onClose={() => setOpen(null)} />
     </div>

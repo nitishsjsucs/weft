@@ -2,9 +2,12 @@
 // Every route answers 501 until the owner registers real handlers before stubRoutes and lists them in `except`.
 // Reads come from the calendar and filing read models; preparing runs tax.prepare_filing as the signed-in person, and
 // filing always files the person's request as a pending tax.file_return proposal (R4), never a direct filing.
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { ComplianceItemKind, ComplianceItemStatus, FilingForm, NotFound, Unauthorized, type ToolOutcome } from "@weft/contracts";
+import { ComplianceItemKind, ComplianceItemStatus, FilingForm, NoticeUploadBody, NotFound, Unauthorized, type ToolOutcome } from "@weft/contracts";
 import { ptDateOf } from "@weft/core";
 import { filings, taxAccounts } from "@weft/db";
 import { eq } from "drizzle-orm";
@@ -18,6 +21,9 @@ import { parsePage, toPage } from "../http/paging";
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 const CalendarQuery = z.object({ from: date, to: date, kind: ComplianceItemKind.optional(), status: ComplianceItemStatus.optional() });
 const FilingQuery = z.object({ form: FilingForm.optional(), period: z.string().max(10).optional(), status: z.enum(["draft", "filed", "accepted", "rejected"]).optional() });
+
+const MAX_NOTICE_BYTES = 5 * 1024 * 1024;
+const NOTICE_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "text/plain", "application/octet-stream"]);
 
 const companyOf = (c: Context<WeftEnv>) => c.var.session?.companyId ?? "cmp_larkspur";
 
@@ -73,5 +79,30 @@ export function complianceRoutes(weft: Weft): Hono<WeftEnv> {
   });
   r.post("/v1/filings/:id/prepare", (c) => outcome(c, weft, "tax.prepare_filing", { filing_id: c.req.param("id") }, "exec"));
   r.post("/v1/filings/:id/file", (c) => outcome(c, weft, "tax.file_return", { filing_id: c.req.param("id") }, "propose"));
-  return stubRoutes(r, "compliance", ["GET /v1/compliance/calendar", "GET /v1/filings", "GET /v1/filings/:id", "POST /v1/filings/:id/prepare", "POST /v1/filings/:id/file"]);
+  // Notice upload (T4): multipart with `file` (and an optional agencyHint), stored like receipts as uploads/<sha256>.bin,
+  // or JSON NoticeUploadBody naming an upload already made. Extraction runs after, from the scan's sidecar.
+  r.post("/v1/notices/upload", async (c) => {
+    if (!c.var.session) throw new Unauthorized();
+    const type = c.req.header("content-type") ?? "";
+    if (type.startsWith("multipart/form-data")) {
+      const body = await c.req.parseBody().catch(() => null);
+      const f = body?.file;
+      if (!(f instanceof File) || f.size === 0 || f.size > MAX_NOTICE_BYTES) return c.json({ _tag: "Refused", code: "INVALID_INPUT", message: "file: attach the scanned notice (1 byte to 5 MB)", hint: null, example: null }, 422);
+      if (!NOTICE_TYPES.has(f.type || "application/octet-stream")) return c.json({ _tag: "Refused", code: "INVALID_INPUT", message: "file: use a PDF, PNG, JPEG or text scan", hint: null, example: null }, 422);
+      const bytes = Buffer.from(await f.arrayBuffer());
+      const sha = createHash("sha256").update(bytes).digest("hex");
+      const rel = `uploads/${sha}.bin`;
+      const abs = join(weft.dataDir, rel);
+      const fresh = !existsSync(abs);
+      mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
+      if (fresh) writeFileSync(abs, bytes, { mode: 0o600 });
+      const hint = typeof body?.agencyHint === "string" && body.agencyHint ? body.agencyHint.slice(0, 40) : null;
+      const res = await outcome(c, weft, "notices.upload", { file_name: f.name || "notice", bytes: bytes.length, sha256: sha, storage_path: rel, agency_hint: hint }, "exec");
+      if (res.status !== 200 && fresh) { try { unlinkSync(abs); } catch { /* already gone */ } }
+      return res;
+    }
+    const b = NoticeUploadBody.parse(await c.req.json().catch(() => ({})));
+    return outcome(c, weft, "notices.upload", { upload_id: b.uploadId, agency_hint: b.agencyHint }, "exec");
+  });
+  return stubRoutes(r, "compliance", ["GET /v1/compliance/calendar", "GET /v1/filings", "GET /v1/filings/:id", "POST /v1/filings/:id/prepare", "POST /v1/filings/:id/file", "POST /v1/notices/upload"]);
 }

@@ -41,8 +41,10 @@ describe("filing rules", () => {
   it("commands follow W4_PLANNED_COMMANDS for risk, approval and access", () => {
     for (const p of W4_PLANNED_COMMANDS.filter((x) => x.owner === "w4-parity-compliance")) {
       const d = w4ComplianceCommands.find((c) => c.name === p.name);
-      if (!d) continue;   // training.* and the notice upload are round 2 (docs/tracks/w4-parity-compliance.md)
-      expect([d.risk({} as never), d.approval, d.access], p.name).toEqual([p.risk, p.approval, p.access]);
+      expect(d, p.name).toBeDefined();
+      // notices.upload needs approval under harness 5.4 (every R2 notices.* command); human only, so a person executes it.
+      const approval = p.name === "notices.upload" ? "always" : p.approval;
+      expect([d!.risk({} as never), d!.approval, d!.access], p.name).toEqual([p.risk, approval, p.access]);
     }
     const file = findCommand("tax.file_return");
     expect([file.risk({ filing_id: "fil_0001" }), file.approval, file.autoAllow, file.reversible, file.effect]).toEqual(["R4", "always", "never", false, "external"]);
@@ -61,7 +63,7 @@ describe("seeded calendar", () => {
     const { status, json } = await call("GET", "/v1/compliance/calendar");
     expect(status).toBe(200);
     const kinds = new Set((json as { kind: string }[]).map((r) => r.kind));
-    expect([...kinds].sort()).toEqual(["contractor_form_expiry", "deposit", "filing"]);
+    expect([...kinds].sort()).toEqual(["contractor_form_expiry", "deposit", "filing", "training_due"]);
     const q3 = json.find((r: any) => r.form === "941" && r.period === "2026-Q3");
     expect(q3).toMatchObject({ dueOn: "2026-11-02", status: "due_soon", daysLeft: 7, sourceUrl: "https://www.irs.gov/forms-pubs/about-form-941" });
     const dep = json.filter((r: any) => r.kind === "deposit").map((r: any) => [r.period, r.dueOn, r.status]);

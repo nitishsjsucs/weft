@@ -8,11 +8,11 @@
 // informational kinds NOTICE_HANDLING marks acknowledge).
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { ComplianceItemKind, ComplianceItemStatus, FilingForm, formatCents, HandoffKind, HandoffReason, NOTICE_HANDLING } from "@weft/contracts";
-import { filings, handoffCases, notices, proposals, simAgencyMail, taxAccounts, type DbTx } from "@weft/db";
+import { AgencyCode, AgencyNoticeKind, ComplianceItemKind, ComplianceItemStatus, FilingForm, formatCents, HandoffKind, HandoffReason, NOTICE_HANDLING, TrainingCourseCode } from "@weft/contracts";
+import { filings, handoffCases, notices, principals, proposals, simAgencyMail, taxAccounts, trainingAssignments, uploads, workers, type DbTx } from "@weft/db";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
-import type { WeftCommand } from "../shared/deps";
+import type { CommandDeps, WeftCommand } from "../shared/deps";
 import { DomainRefusal, isDetailed, notFound, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { AGENCY_LABELS } from "../tax/queries";
 import { parseExtract } from "../notices/queries";
@@ -20,6 +20,9 @@ import { listCalendar, refreshCalendar } from "../compliance/calendar";
 import { evidenceFor, getHandoff, HANDOFF_ASSIGNEE, handoffEmail, listHandoffs, openCaseFor, toHandoffDto } from "../compliance/handoffs";
 import { isPreparable, prepareFiling, type PreparedFiling } from "../compliance/prepare";
 import { periodBounds, RULE_BY_FORM } from "../compliance/rules";
+import { addDays, ensureCourses, getAssignment, listAssignments, missingAssignments, RULE_BY_CODE } from "../compliance/training";
+import { MIN_EXTRACT_CONFIDENCE, planNotice } from "../../../contracts/src/ext/w4-parity-compliance";
+import { extractUpload } from "../../../sim/src/notices/mailed";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 type FilingRow = typeof filings.$inferSelect;
@@ -244,34 +247,42 @@ export const openHandoffCmd = writeCommand<OpenInput>({
   input: OpenInput, domain: "tax", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", reversible: false, preview: null,
   tiers: { main: "executable", task: "delegated" }, lease: (i) => `handoff:${i.subject_ref ?? i.worker_id ?? "none"}`,
   async run(i, ctx, deps) {
-    const tx = deps.tx;
-    if (i.subject_ref) {
-      const dup = await openCaseFor(tx, ctx.companyId, i.subject_ref);
-      if (dup) return { data: { handoff_id: dup.id, status: dup.status, duplicate: true, kind: dup.kind }, summary: `Hand-off ${dup.id} is already open for ${i.subject_ref}` };
-    }
-    const { notice, evidence } = await evidenceFor(tx, ctx.companyId, i.subject_ref ?? null);
-    if (i.subject_ref?.startsWith("ntc_") && !notice) throw notFound("notice", i.subject_ref);
-    const id = await deps.newId("hnd_");
-    const summary = i.summary.replace(/[<>]/g, "").trim();
     const opener = ctx.principal.kind === "human" ? ctx.principal.id : ctx.onBehalfOf ?? ctx.principal.id;
-    const who = HANDOFF_ASSIGNEE[i.kind];
-    await tx.insert(handoffCases).values({
-      id, companyId: ctx.companyId, kind: i.kind, reason: i.reason, subjectRef: i.subject_ref ?? null, workerId: i.worker_id ?? null, summary, evidenceJson: JSON.stringify(evidence),
-      status: "open", assigneePrincipalId: who.principal, openedBy: opener, runId: ctx.run?.id ?? null, createdAt: ctx.now, resolvedAt: null, resolutionNote: null,
-    });
-    if (notice && notice.status !== "resolved" && notice.status !== "escalated") {
-      const resolution = { outcome: "escalated", reason_code: i.reason, reason: summary, specialist: who.name, specialist_principal: who.principal, escalated_at: ctx.now, escalated_by: opener, previous_status: notice.status, evidence, handoff_id: id };
-      await tx.update(notices).set({ status: "escalated", resolutionJson: JSON.stringify(resolution) }).where(eq(notices.id, notice.id));
-    }
-    const mail = handoffEmail({ id, kind: i.kind, reason: i.reason, summary, subjectRef: i.subject_ref ?? null, evidence });
-    const sent = await deps.sims.email.send({ to: who.email, from: "agent@larkspur.example", subject: mail.subject, body: mail.body, kind: "generic", relatedRef: id });
+    const r = await createHandoff(deps, ctx.companyId, ctx.now, { kind: i.kind, reason: i.reason, subjectRef: i.subject_ref ?? null, workerId: i.worker_id ?? null, summary: i.summary, openedBy: opener, runId: ctx.run?.id ?? null });
+    if (r.duplicate) return { data: { handoff_id: r.id, status: r.status, duplicate: true, kind: r.kind }, summary: `Hand-off ${r.id} is already open for ${i.subject_ref}` };
     return {
-      data: { handoff_id: id, kind: i.kind, reason: i.reason, status: "open", assignee: who.name, evidence, email_id: sent.id, notice_escalated: !!notice },
-      summary: `Handed ${i.subject_ref ?? "the case"} to the ${who.name.toLowerCase()} as ${id} with ${evidence.length} evidence items`,
-      events: [{ type: "handoff.opened", subjectRef: id, payload: { handoff_id: id } }],
+      data: { handoff_id: r.id, kind: i.kind, reason: i.reason, status: "open", assignee: r.assignee, evidence: r.evidence, email_id: r.emailId, notice_escalated: r.noticeEscalated },
+      summary: `Handed ${i.subject_ref ?? "the case"} to the ${r.assignee.toLowerCase()} as ${r.id} with ${r.evidence.length} evidence items`,
+      events: [{ type: "handoff.opened", subjectRef: r.id, payload: { handoff_id: r.id } }],
     };
   },
 });
+
+/** Opens a hand-off (one open case per subject); a notice subject gets the evidence pack and turns escalated. */
+async function createHandoff(deps: CommandDeps, companyId: string, now: string,
+  i: { kind: z.infer<typeof HandoffKind>; reason: z.infer<typeof HandoffReason>; subjectRef: string | null; workerId: string | null; summary: string; openedBy: string; runId: string | null }) {
+  const tx = deps.tx;
+  if (i.subjectRef) {
+    const dup = await openCaseFor(tx, companyId, i.subjectRef);
+    if (dup) return { duplicate: true as const, id: dup.id, status: dup.status, kind: dup.kind };
+  }
+  const { notice, evidence } = await evidenceFor(tx, companyId, i.subjectRef);
+  if (i.subjectRef?.startsWith("ntc_") && !notice) throw notFound("notice", i.subjectRef);
+  const id = await deps.newId("hnd_");
+  const summary = i.summary.replace(/[<>]/g, "").trim();
+  const who = HANDOFF_ASSIGNEE[i.kind];
+  await tx.insert(handoffCases).values({
+    id, companyId, kind: i.kind, reason: i.reason, subjectRef: i.subjectRef, workerId: i.workerId, summary, evidenceJson: JSON.stringify(evidence),
+    status: "open", assigneePrincipalId: who.principal, openedBy: i.openedBy, runId: i.runId, createdAt: now, resolvedAt: null, resolutionNote: null,
+  });
+  if (notice && notice.status !== "resolved" && notice.status !== "escalated") {
+    const resolution = { outcome: "escalated", reason_code: i.reason, reason: summary, specialist: who.name, specialist_principal: who.principal, escalated_at: now, escalated_by: i.openedBy, previous_status: notice.status, evidence, handoff_id: id };
+    await tx.update(notices).set({ status: "escalated", resolutionJson: JSON.stringify(resolution) }).where(eq(notices.id, notice.id));
+  }
+  const mail = handoffEmail({ id, kind: i.kind, reason: i.reason, summary, subjectRef: i.subjectRef, evidence });
+  const sent = await deps.sims.email.send({ to: who.email, from: "agent@larkspur.example", subject: mail.subject, body: mail.body, kind: "generic", relatedRef: id });
+  return { duplicate: false as const, id, status: "open", kind: i.kind, assignee: who.name, evidence, emailId: sent.id, noticeEscalated: !!notice };
+}
 
 const ResolveInput = z.object({ handoff_id: z.string().startsWith("hnd_"), note: z.string().max(400).optional(), status: z.enum(["acknowledged", "resolved", "cancelled"]).optional() });
 type ResolveInput = z.infer<typeof ResolveInput>;
@@ -348,6 +359,7 @@ export const acknowledgeNoticeCmd = writeCommand<z.infer<typeof AckInput>>({
   async run(i, ctx, deps) {
     const [n] = await deps.tx.select().from(notices).where(and(eq(notices.companyId, ctx.companyId), eq(notices.id, i.notice_id))).limit(1);
     if (!n) throw notFound("notice", i.notice_id);
+    if (n.source === "upload" && ctx.principal.kind !== "human") throw new DomainRefusal("DOMAIN_UPLOAD_NEEDS_PERSON", `${n.id} was uploaded by a person, so a person closes it`, "Hand it to a tax specialist with handoffs.open", null);
     if (NOTICE_HANDLING[n.kind] !== "acknowledge") throw new DomainRefusal("DOMAIN_NEEDS_ACTION", `A ${n.kind} notice needs a reply or a change, not an acknowledgment`, "Use the handling for its kind, or hand it to a person with handoffs.open", null);
     if (n.status === "resolved") return { data: { notice_id: n.id, status: "resolved", already: true }, summary: `${n.id} is already resolved` };
     await deps.tx.update(notices).set({ status: "resolved", resolutionJson: JSON.stringify({ outcome: "acknowledged", resolved_at: ctx.now }) }).where(eq(notices.id, n.id));
@@ -391,8 +403,245 @@ export const postRemindersCmd = writeCommand<RemindInput>({
   },
 });
 
+// ---------------------------------------------------------------- notice upload (T4)
+//
+// A person uploads a scan of a mailed notice. notices.upload stores the file and a placeholder notice (source upload);
+// the svc_events handler on notice.uploaded runs notices.ingest_upload, which reads the sidecar JSON for those bytes
+// (packages/sim/src/notices/mailed, no OCR and no model call). An unreadable file, a confidence under 0.9 or a kind
+// Weft does not handle opens a tax specialist hand-off in code. Everything else is left to rt_compliance_uploads,
+// whose runs start tainted, so nothing an upload says can drive a write without a person's approval.
+
+const safeName = (n: string) => n.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) || "notice";
+const UploadInput = z.object({
+  upload_id: z.string().startsWith("upl_").optional(),
+  file_name: z.string().min(1).max(200).optional(), bytes: z.number().int().positive().max(5 * 1024 * 1024).optional(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(), storage_path: z.string().max(200).optional(),
+  agency_hint: z.string().max(40).nullable().optional(),
+}).strict();
+type UploadInput = z.infer<typeof UploadInput>;
+
+export const uploadNoticeCmd = writeCommand<UploadInput>({
+  name: "notices.upload", summary: "A person uploads a mailed agency notice (human only).",
+  description: "Human only: store a scan of a mailed agency notice (a new file, or upload_id of an existing upload) as a notice with source upload. Its fields are read from the scan by notices.ingest_upload; the text is untrusted.",
+  // approval "always" (the planned table says never): harness 5.4 requires approval for every R2 notices.* command.
+  // Access is human_only and a human session executes directly, so the person's upload is never a proposal.
+  input: UploadInput, domain: "tax", needs: "edit", effect: "write", risk: riskOf("R2"), approval: "always", access: "human_only", reversible: false,
+  async preview(i) {
+    const name = safeName(i.file_name ?? i.upload_id ?? "notice");
+    return { title: `Store the uploaded notice ${name}`, diff: [], content: [], moneyCents: null, subjectRef: i.upload_id ?? i.sha256 ?? name, subjectHash: sha256Hex(canonicalJson(i)), evidence: [] };
+  },
+  async run(i, ctx, deps) {
+    const tx = deps.tx;
+    let up: typeof uploads.$inferSelect | undefined;
+    if (i.upload_id) {
+      [up] = await tx.select().from(uploads).where(eq(uploads.id, i.upload_id)).limit(1);
+      if (!up) throw notFound("upload", i.upload_id);
+    } else {
+      if (!i.file_name || !i.bytes || !i.sha256 || !i.storage_path) throw new DomainRefusal("DOMAIN_UPLOAD_INCOMPLETE", "Send upload_id, or file_name, bytes, sha256 and storage_path", null, null);
+      const [p] = await tx.select({ workerId: principals.workerId }).from(principals).where(eq(principals.id, ctx.principal.id)).limit(1);
+      const id = await deps.newId("upl_");
+      // uploads.worker_id is required; an admin with no worker record is stored by principal id.
+      up = { id, workerId: p?.workerId ?? ctx.principal.id, purpose: "agency_notice", fileName: safeName(i.file_name), storagePath: i.storage_path, bytes: i.bytes, sha256: i.sha256, createdAt: ctx.now };
+      await tx.insert(uploads).values(up);
+    }
+    const prior = (await tx.select().from(notices).where(and(eq(notices.companyId, ctx.companyId), eq(notices.source, "upload"))))
+      .find((n) => n.uploadId === up!.id);
+    if (prior) return { data: { notice_id: prior.id, upload_id: up.id, duplicate: true, status: prior.status }, summary: `${up.fileName} is already notice ${prior.id}` };
+    const hint = i.agency_hint && AgencyCode.safeParse(i.agency_hint).success ? i.agency_hint : "unknown";
+    const id = await deps.newId("ntc_");
+    await tx.insert(notices).values({
+      id, companyId: ctx.companyId, agency: hint, kind: "unclassified", formCode: "", title: "Uploaded notice (being read)", receivedAt: ctx.now, respondBy: null,
+      status: "new", taxAccountId: null, fileName: safeName(up.fileName), bodyText: "", extractedJson: null, draftsJson: "[]", resolutionJson: null, responseConfirmation: null,
+      source: "upload", uploadId: up.id,
+    });
+    return {
+      data: { notice_id: id, upload_id: up.id, status: "new", file_name: safeName(up.fileName) },
+      summary: `Uploaded ${safeName(up.fileName)} as notice ${id}`,
+      events: [{ type: "notice.uploaded", subjectRef: id, payload: { notice_id: id, upload_id: up.id } }],
+    };
+  },
+});
+
+/** The stored extract, including the confidence the shared NoticeExtract schema strips. */
+export function uploadConfidence(extractedJson: string | null): number | null {
+  if (!extractedJson) return null;
+  try { const v = JSON.parse(extractedJson) as { confidence?: unknown }; return typeof v.confidence === "number" ? v.confidence : null; } catch { return null; }
+}
+
+const norm = (s: string | null | undefined) => (s ?? "").replace(/[\s-]/g, "");
+
+export const ingestUploadCmd = writeCommand<{ notice_id: string }>({
+  name: "notices.ingest_upload", summary: "System: read an uploaded notice's fields from its scan sidecar.",
+  description: "System command (svc_events on notice.uploaded): reads the uploaded file's sidecar JSON (no OCR, no model call), stores the kind, form, dates, amounts and a confidence, matches the tax account, and hands an unreadable, uncertain or unknown notice to a tax specialist.",
+  input: z.object({ notice_id: z.string().startsWith("ntc_") }).strict(), domain: "tax", needs: "edit", effect: "write", risk: riskOf("R1"), approval: "never", access: "system_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const tx = deps.tx;
+    const [n] = await tx.select().from(notices).where(and(eq(notices.companyId, ctx.companyId), eq(notices.id, i.notice_id))).limit(1);
+    if (!n) throw notFound("notice", i.notice_id);
+    if (n.source !== "upload" || !n.uploadId) throw new DomainRefusal("DOMAIN_NOT_UPLOADED", `${n.id} was not uploaded`, null, null);
+    if (n.kind !== "unclassified") return { data: { notice_id: n.id, kind: n.kind, already: true }, summary: `${n.id} was already read` };
+    const [up] = await tx.select().from(uploads).where(eq(uploads.id, n.uploadId)).limit(1);
+    const found = up ? extractUpload(up.sha256) : null;
+    const ex = found?.extract ?? null;
+    let taxAccountId: string | null = null;
+    if (ex?.accountNumber) {
+      const accts = await tx.select().from(taxAccounts).where(eq(taxAccounts.companyId, ctx.companyId));
+      taxAccountId = accts.find((a) => a.agency === ex.agency && norm(a.accountNumber) === norm(ex.accountNumber))?.id ?? null;
+    }
+    const known = !!ex && AgencyNoticeKind.safeParse(ex.kind).success && AgencyCode.safeParse(ex.agency).success;
+    const extracted = ex ? { agency: ex.agency, formCode: ex.formCode, kind: ex.kind, accountNumber: ex.accountNumber, taxAccountId, taxYear: ex.taxYear, effectiveFrom: ex.effectiveFrom,
+      respondBy: ex.respondBy, rates: [], amountCents: ex.amountCents, period: ex.period, confidence: ex.confidence, sample: found!.sample } : null;
+    await tx.update(notices).set({
+      kind: ex?.kind ?? "unreadable", agency: ex?.agency ?? n.agency, formCode: ex?.formCode ?? "", title: ex?.title ?? "Uploaded notice (could not be read)",
+      respondBy: ex?.respondBy ?? null, taxAccountId, bodyText: found?.text ?? "", extractedJson: extracted ? JSON.stringify(extracted) : null,
+    }).where(eq(notices.id, n.id));
+    const { plan, reason } = planNotice({ kind: ex?.kind ?? "unreadable", extract: ex ? { formCode: ex.formCode, period: ex.period, effectiveFrom: ex.effectiveFrom, accountNumber: ex.accountNumber, confidence: ex.confidence } : null, taxAccountId, filing: null, source: "upload" });
+    const toPerson = plan === "escalate" && (reason === "unknown_notice_kind" || reason === "low_confidence_extract");
+    let handoffId: string | null = null;
+    if (toPerson || !known) {
+      const why = !ex ? "Weft could not read the uploaded file: it matches no scan on record." : reason === "low_confidence_extract" ? `The fields read from the scan are uncertain (confidence ${Math.round(ex.confidence * 100)} percent, under ${Math.round(MIN_EXTRACT_CONFIDENCE * 100)}).` : `The uploaded notice is a kind Weft does not handle (${ex.kind.replaceAll("_", " ")}, form ${ex.formCode || "unknown"}).`;
+      const r = await createHandoff(deps, ctx.companyId, ctx.now, { kind: "tax_specialist", reason: !ex || reason === "low_confidence_extract" ? "low_confidence_extract" : "unknown_notice_kind", subjectRef: n.id, workerId: null, summary: why, openedBy: ctx.principal.id, runId: null });
+      handoffId = r.id;
+    }
+    return {
+      data: { notice_id: n.id, read: !!ex, kind: ex?.kind ?? null, confidence: ex?.confidence ?? null, tax_account_id: taxAccountId, plan, handoff_id: handoffId },
+      summary: ex ? `Read uploaded notice ${n.id}: ${ex.kind}, confidence ${ex.confidence}${handoffId ? `, handed to a tax specialist as ${handoffId}` : ""}` : `Uploaded notice ${n.id} could not be read; handed to a tax specialist as ${handoffId}`,
+      events: handoffId ? [{ type: "handoff.opened", subjectRef: handoffId, payload: { handoff_id: handoffId } }] : [],
+    };
+  },
+});
+
+// ---------------------------------------------------------------- required training (T11)
+
+const ListTrainingInput = z.object({ worker_id: z.string().startsWith("wrk_").optional(), status: z.enum(["assigned", "reminded", "completed", "overdue", "waived"]).optional(), course_code: TrainingCourseCode.optional(), ...responseFormatField });
+type ListTrainingInput = z.infer<typeof ListTrainingInput>;
+const listTrainingCmd = readCommand({
+  name: "training.list_assignments", domain: "people",
+  summary: "Required training: assignments by person and course, and who still needs one.",
+  description: "List required training assignments (California, New York and Illinois harassment prevention) with worker, course, due date, days left and status (assigned, reminded, completed, overdue). Also lists who needs a new assignment (a new hire or a cycle coming due) with the derived due date. Filter by worker_id, status or course_code.",
+  input: ListTrainingInput,
+  async run(i: ListTrainingInput, ctx, deps) {
+    const today = ptDateOf(ctx.now);
+    const rows = await listAssignments(deps.tx, ctx.companyId, today, { workerId: i.worker_id, status: i.status, courseCode: i.course_code });
+    const missing = i.worker_id || i.status || i.course_code ? [] : await missingAssignments(deps.tx, ctx.companyId, today);
+    const items = rows.map((a) => ({ id: a.id, worker_id: a.workerId, worker: a.workerName, course_code: a.courseCode, due_on: a.dueOn, days_left: a.daysLeft, status: a.status,
+      ...(isDetailed(i) ? { course: a.courseTitle, minutes: a.minutes, reminded_at: a.remindedAt, completed_at: a.completedAt, certificate_upload_id: a.certificateUploadId, source_url: a.sourceUrl } : {}) }));
+    return { data: { as_of: today, count: items.length, assignments: items, needs_assignment: missing }, summary: `Listed ${items.length} training assignments; ${missing.length} people need one` };
+  },
+});
+
+const AssignInput = z.object({
+  assignments: z.array(z.object({ worker_id: z.string().startsWith("wrk_"), course_code: TrainingCourseCode, due_on: isoDate }).strict()).min(1).max(25),
+}).strict();
+type AssignInput = z.infer<typeof AssignInput>;
+
+async function checkAssign(i: AssignInput, ctx: { companyId: string; now: string }, tx: DbTx) {
+  const today = ptDateOf(ctx.now);
+  const rows: { worker_id: string; name: string; email: string; course_code: string; title: string; due_on: string }[] = [];
+  for (const a of i.assignments) {
+    const [w] = await tx.select().from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.id, a.worker_id))).limit(1);
+    if (!w) throw notFound("worker", a.worker_id);
+    const rule = RULE_BY_CODE[a.course_code];
+    if (!rule || rule.jurisdiction !== w.workState) throw new DomainRefusal("DOMAIN_NOT_REQUIRED", `${a.course_code} is not required for ${w.firstName} ${w.lastName} (works in ${w.workState ?? "no state"})`, "Use training.list_assignments needs_assignment", null);
+    if (a.due_on < today) throw new DomainRefusal("DOMAIN_DUE_IN_PAST", `The due date ${a.due_on} is before today ${today}`, null, null);
+    rows.push({ worker_id: w.id, name: `${w.firstName} ${w.lastName}`, email: w.workEmail, course_code: a.course_code, title: rule.title, due_on: a.due_on });
+  }
+  return rows;
+}
+
+export const assignTrainingCmd = writeCommand<AssignInput>({
+  name: "training.assign", summary: "Assign required training and email each person (R3, always approved).",
+  description: "Assign required harassment prevention training: assignments of worker_id, course_code and due_on (from training.list_assignments needs_assignment). Emails each person the course and due date. R3: always a proposal for the agent. Example: {\"assignments\":[{\"worker_id\":\"wrk_0003\",\"course_code\":\"ca_harassment_staff\",\"due_on\":\"2027-01-15\"}]}",
+  input: AssignInput, domain: "people", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", reversible: false, lease: () => "training:assign",
+  async preview(i, ctx, deps) {
+    const rows = await checkAssign(i, ctx, deps.tx);
+    return {
+      title: `Assign ${rows.length} required training course${rows.length === 1 ? "" : "s"}`,
+      diff: rows.map((r) => ({ label: `${r.name}: ${r.title}`, before: "not assigned", after: `due ${r.due_on}` })), content: [], moneyCents: null, subjectRef: "training",
+      subjectHash: sha256Hex(canonicalJson(rows.map((r) => [r.worker_id, r.course_code, r.due_on]))), evidence: rows.map((r) => ({ label: "Statute", ref: RULE_BY_CODE[r.course_code]!.sourceUrl })).slice(0, 4),
+    };
+  },
+  async run(i, ctx, deps) {
+    const rows = await checkAssign(i, ctx, deps.tx);
+    const courses = await ensureCourses(deps.tx, ctx.companyId, (p) => deps.newId(p as never));
+    const ids: string[] = [];
+    for (const r of rows) {
+      const c = courses.get(r.course_code)!;
+      const open = (await deps.tx.select().from(trainingAssignments).where(and(eq(trainingAssignments.workerId, r.worker_id), eq(trainingAssignments.courseId, c.id))))
+        .find((a) => a.status !== "completed" && a.status !== "waived");
+      if (open) { ids.push(open.id); continue; }
+      const id = await deps.newId("tra_");
+      await deps.tx.insert(trainingAssignments).values({ id, workerId: r.worker_id, courseId: c.id, dueOn: r.due_on, status: "assigned", assignedAt: ctx.now, remindedAt: null, completedAt: null, certificateUploadId: null, proposalId: ctx.approvedProposalId ?? null });
+      await deps.sims.email.send({ to: r.email, from: "people@larkspur.example", subject: `Required training: ${r.title}`, body: `Hi ${r.name.split(" ")[0]},\n\nPlease complete ${r.title} by ${r.due_on}. Open the Training section of your Weft portal to start and to record completion.\n\n(sent by Weft; demo)`, kind: "generic", relatedRef: id });
+      ids.push(id);
+    }
+    return {
+      data: { assignment_ids: ids, count: ids.length },
+      summary: `Assigned ${ids.length} required training course${ids.length === 1 ? "" : "s"}`,
+      events: ids.map((id, k) => ({ type: "training.assigned", subjectRef: id, payload: { assignment_id: id, worker_id: rows[k]!.worker_id } })),
+    };
+  },
+});
+
+async function reminderRows(tx: DbTx, companyId: string, today: string) {
+  return (await listAssignments(tx, companyId, today)).filter((a) => (a.status === "assigned" || a.status === "reminded" || a.status === "overdue") && a.daysLeft <= 14
+    && (!a.remindedAt || a.remindedAt.slice(0, 10) <= addDays(today, -7)));
+}
+
+export const sendTrainingRemindersCmd = writeCommand<Record<string, never>>({
+  name: "training.send_reminders", summary: "Email reminders for training due within 14 days or overdue (R3).",
+  description: "Email each person whose required training is due within 14 days or overdue, at most once a week per assignment. The email text is written in code. R3: always a proposal for the agent.",
+  input: z.object({}).strict() as unknown as z.ZodType<Record<string, never>>, domain: "people", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", reversible: false, lease: () => "training:remind",
+  async preview(_i, ctx, deps) {
+    const rows = await reminderRows(deps.tx, ctx.companyId, ptDateOf(ctx.now));
+    if (!rows.length) throw new DomainRefusal("DOMAIN_NOTHING_DUE", "No required training is due within 14 days", null, null);
+    return { title: `Email ${rows.length} training reminder${rows.length === 1 ? "" : "s"}`, diff: rows.map((a) => ({ label: `${a.workerName}: ${a.courseTitle}`, before: a.status, after: `reminded (due ${a.dueOn})` })),
+      content: [], moneyCents: null, subjectRef: "training", subjectHash: sha256Hex(canonicalJson(rows.map((a) => a.id))), evidence: rows.slice(0, 10).map((a) => ({ label: "Assignment", ref: a.id })) };
+  },
+  async run(_i, ctx, deps) {
+    const rows = await reminderRows(deps.tx, ctx.companyId, ptDateOf(ctx.now));
+    for (const a of rows) {
+      const [w] = await deps.tx.select({ email: workers.workEmail, first: workers.firstName }).from(workers).where(eq(workers.id, a.workerId)).limit(1);
+      if (w) await deps.sims.email.send({ to: w.email, from: "people@larkspur.example", subject: `Reminder: ${a.courseTitle} ${a.status === "overdue" ? "is overdue" : `is due ${a.dueOn}`}`, body: `Hi ${w.first},\n\n${a.courseTitle} ${a.status === "overdue" ? `was due on ${a.dueOn}` : `is due on ${a.dueOn}`}. Open the Training section of your Weft portal to finish it.\n\n(sent by Weft; demo)`, kind: "generic", relatedRef: a.id });
+      await deps.tx.update(trainingAssignments).set({ status: "reminded", remindedAt: ctx.now }).where(eq(trainingAssignments.id, a.id));
+    }
+    return { data: { reminded: rows.map((a) => a.id), count: rows.length }, summary: `Sent ${rows.length} training reminder${rows.length === 1 ? "" : "s"}` };
+  },
+});
+
+const CompleteInput = z.object({
+  assignment_id: z.string().startsWith("tra_"), certificate_upload_id: z.string().startsWith("upl_").optional(),
+  certificate: z.object({ file_name: z.string().min(1).max(200), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/), storage_path: z.string().max(200) }).strict().optional(),
+}).strict();
+type CompleteInput = z.infer<typeof CompleteInput>;
+export const completeTrainingCmd = writeCommand<CompleteInput>({
+  name: "training.complete", summary: "A person records finishing required training, with a certificate (human only).",
+  description: "Human only: the employee (or an admin) records an assignment as completed, with a certificate upload or the certificate Weft issues on completion.",
+  input: CompleteInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R2"), approval: "never", access: "human_only", reversible: false, preview: null,
+  async run(i, ctx, deps) {
+    const a = await getAssignment(deps.tx, i.assignment_id);
+    if (!a) throw notFound("training assignment", i.assignment_id);
+    const [p] = await deps.tx.select({ role: principals.role, workerId: principals.workerId }).from(principals).where(eq(principals.id, ctx.principal.id)).limit(1);
+    const admin = p?.role === "admin" || p?.role === "hr_manager";
+    if (!admin && p?.workerId !== a.workerId) throw new DomainRefusal("DOMAIN_NOT_ASSIGNEE", "Only the person assigned, or an admin, records completion", null, null);
+    if (a.status === "completed") return { data: { assignment_id: a.id, status: "completed", already: true, certificate_upload_id: a.certificateUploadId }, summary: `${a.id} is already completed` };
+    let cert = i.certificate_upload_id ?? null;
+    if (!cert && i.certificate) {
+      cert = await deps.newId("upl_");
+      await deps.tx.insert(uploads).values({ id: cert, workerId: a.workerId, purpose: "training_certificate", fileName: safeName(i.certificate.file_name), storagePath: i.certificate.storage_path, bytes: i.certificate.bytes, sha256: i.certificate.sha256, createdAt: ctx.now });
+    }
+    await deps.tx.update(trainingAssignments).set({ status: "completed", completedAt: ctx.now, certificateUploadId: cert }).where(eq(trainingAssignments.id, a.id));
+    return {
+      data: { assignment_id: a.id, status: "completed", completed_at: ctx.now, certificate_upload_id: cert },
+      summary: `Recorded training ${a.id} as completed`,
+      events: [{ type: "training.completed", subjectRef: a.id, payload: { assignment_id: a.id, worker_id: a.workerId } }],
+    };
+  },
+});
+
 export const w4ComplianceCommands: WeftCommand[] = [
   postRemindersCmd,
   calendarCmd, refreshCalendarCmd, listFilingsCmd, getFilingCmd, prepareFilingCmd, fileReturnCmd,
   listHandoffsCmd, openHandoffCmd, resolveHandoffCmd, setDepositScheduleCmd, acknowledgeNoticeCmd,
+  uploadNoticeCmd, ingestUploadCmd, listTrainingCmd, assignTrainingCmd, sendTrainingRemindersCmd, completeTrainingCmd,
 ];

@@ -23,6 +23,17 @@ export function crossesDate(evt: WeftEvent): boolean {
   return Number.isFinite(a) && Number.isFinite(b) && ptDate(p.to) > ptDate(p.from);
 }
 
+/** An uploaded notice is read from its scan sidecar before routines see the event (handlers run first in a tick). */
+const ingestUpload: EventHandler = {
+  event: "notice.uploaded", principal: "svc_events",
+  async handle(evt, sys) {
+    const id = (evt.payload as { notice_id?: unknown }).notice_id;
+    if (typeof id !== "string") return;
+    await sys.exec("svc_events", "notices.ingest_upload", { notice_id: id }, source(evt));
+  },
+};
+
 export const complianceHandlers: EventHandler[] = [
+  ingestUpload, refresh("notice.uploaded"), refresh("training.assigned"), refresh("training.completed"),
   refresh("payroll.processed"), refresh("filing.filed"), refresh("notice.resolved"), refresh("handoff.opened"), refresh("clock.advanced", crossesDate),
 ];

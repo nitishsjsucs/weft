@@ -1,0 +1,13 @@
+SIMULATED AGENCY NOTICE (scanned mail sample). Made for the Weft demo. Not a real government document.
+
+INTERNAL REVENUE SERVICE (SIMULATED)
+Notice: Third Party Designee Authorization Recorded
+
+Employer: Larkspur Robotics, Inc. (demo)
+EIN: 00-4817265
+Form: 8821
+
+A new third party designee authorization is on file for the employer above. Contact us if you did not
+make this authorization.
+
+Respond By: 2026-11-30
