@@ -183,16 +183,27 @@ export const W4_PLANNED_COMMANDS: readonly PlannedCommandW4[] = [
   ...pc("w4-parity-compliance", "R4", "all", "always", "tax.file_return"),
   ...pc("w4-parity-compliance", "R3", "all", "always", "training.assign", "training.send_reminders"),
   ...pc("w4-parity-compliance", "R1", "system_only", "never", "compliance.refresh_calendar", "notices.ingest_upload"),
-  ...pc("w4-parity-compliance", "R2", "human_only", "never", "notices.upload", "handoffs.resolve", "training.complete"),
+  ...pc("w4-parity-compliance", "R2", "human_only", "never", "handoffs.resolve", "training.complete"),
+  // integrator: harness 5.4 (the t2 registry rule) requires approval for every R2 notices.* and benefits enrollment
+  // command; a person's own submission still runs directly because human callers execute an "always" command.
+  ...pc("w4-parity-compliance", "R2", "human_only", "always", "notices.upload"),
+  ...pc("w4-parity-compliance", "R2", "all", "always", "tax.set_deposit_schedule"),
+  ...pc("w4-parity-compliance", "R1", "all", "never", "notices.acknowledge"),
+  ...pc("w4-parity-compliance", "R3", "all", "always", "compliance.post_reminders"),
   ...pc("w4-parity-people", "R0", "all", "never", "benefits.list_life_events", "benefits.list_windows", "benefits.list_carrier_submissions", "people.out_this_week"),
   ...pc("w4-parity-people", "R1", "all", "never", "benefits.open_window", "benefits.send_window_reminders"),
   ...pc("w4-parity-people", "R3", "all", "always", "benefits.submit_elections", "comms.send_first_day_message"),
-  ...pc("w4-parity-people", "R2", "human_only", "never", "benefits.report_life_event"),
+  ...pc("w4-parity-people", "R2", "human_only", "always", "benefits.report_life_event", "benefits.elect_in_window"),
+  ...pc("w4-parity-people", "R1", "human_only", "never", "onboarding.submit_checkin_form"),
+  ...pc("w4-parity-agent", "R1", "human_only", "never", "portal.request_handoff"),
+  ...pc("w4-parity-people", "R0", "all", "never", "onboarding.list_first_days"),
   ...pc("w4-parity-people", "R1", "system_only", "never", "benefits.close_windows", "benefits.record_carrier_receipt"),
   ...pc("w4-parity-agent", "R0", "all", "never", "portal.my_profile", "portal.my_paychecks", "portal.my_time_off", "portal.my_benefits", "portal.policy_search", "routines.list_waits"),
   ...pc("w4-parity-agent", "R1", "system_only", "never", "expenses.intake_email", "agent.record_mention", "routines.open_wait", "routines.resume_wait"),
   ...pc("w4-parity-admin", "R0", "all", "never", "routines.gallery", "settings.permission_matrix"),
   ...pc("w4-parity-admin", "R2", "all", "always", "settings.set_agent_action_override"),
+  ...pc("w4-parity-admin", "R0", "all", "never", "reports.breakdown"),
+  ...pc("w4-parity-admin", "R3", "all", "always", "comms.send_report"),
 ];
 
 // ---------- new event types (validated by Wave4EventBody; the frozen EventBody union is unchanged) ----------

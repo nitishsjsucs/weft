@@ -17,13 +17,13 @@ describe("wave 4 contracts", () => {
   });
   it("plans commands in namespaces the registry accepts, with honest approvals", () => {
     const ns = new Set(W4_PLANNED_COMMANDS.map((c) => c.name.split(".")[0]));
-    for (const n of ns) expect(["compliance", "tax", "handoffs", "training", "notices", "benefits", "people", "comms", "portal", "expenses", "agent", "routines", "settings"]).toContain(n);
+    for (const n of ns) expect(["compliance", "tax", "handoffs", "training", "notices", "benefits", "people", "comms", "portal", "expenses", "agent", "routines", "settings", "onboarding", "reports"]).toContain(n);
     for (const c of W4_PLANNED_COMMANDS) if (c.risk === "R3" || c.risk === "R4") expect(c.approval).toBe("always");
     expect(new Set(W4_PLANNED_COMMANDS.map((c) => c.name)).size).toBe(W4_PLANNED_COMMANDS.length);
   });
   it("routes every wave 4 row to a wave 4 owner", () => {
     const w4 = ROUTES.filter((r) => r.owner.startsWith("w4-"));
-    expect(w4.length).toBe(32);
+    expect(w4.length).toBe(36);
     expect(w4.filter((r) => r.path.startsWith("/v1/portal/")).every((r) => r.auth === "ui_only")).toBe(true);
   });
   it("telemetry names: outcome codes, session ids and the pinned Phoenix", () => {
