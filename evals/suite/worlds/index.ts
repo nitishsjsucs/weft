@@ -3,8 +3,8 @@
 // task's mutators in order. Its digest is the sha256 of the canonical database dump plus the memory HEAD; the runner
 // refuses a task whose world no longer reproduces its pinned digest (WORLD_DRIFT). Refreshing a digest is a reviewed
 // commit (`pnpm eval:suite digests --write`), never silent. Mutators only use synthetic data.
-import { mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { EvalWorld } from "../../../packages/contracts/src/evals";
 import type { MemoryFrontmatter } from "../../../packages/contracts/src/memory";
 import type { ModelProvider } from "../../../packages/contracts/src/provider";
@@ -14,6 +14,7 @@ import { dumpDb, seedWorld } from "../../../packages/seed/src/index";
 import { git } from "../../../packages/executor/src/memory/git";
 import { DEFAULT_COMPANY_ID } from "../../../packages/agent/src/index";
 import { createWeft, type Weft } from "../../../apps/api/src/index";
+import { TEST_MUTATORS } from "../tasks/test/worlds";
 
 /** The base every task names today: the main seed at wave 4. A seed change refreshes digests in a reviewed commit. */
 export const WORLD_BASE = "seed@v4";
@@ -164,7 +165,22 @@ export function parseMutator(spec: string): { name: string; arg: string | null }
   const i = spec.indexOf(":");
   return i < 0 ? { name: spec, arg: null } : { name: spec.slice(0, i), arg: spec.slice(i + 1) };
 }
-export const knownMutator = (spec: string) => parseMutator(spec).name in MUTATORS;
+export const knownMutator = (spec: string) => parseMutator(spec).name in MUTATORS || Object.prototype.hasOwnProperty.call(TEST_MUTATORS, spec);
+
+/** Contract request 1 (w4-eval-heldout): a test mutator is SQL steps on the trial database plus memory files committed
+ * into the trial memory repository at the world clock, so the digest is reproducible. */
+async function applyTestMutator(w: TrialWorld, name: string, clock: string): Promise<void> {
+  const m = TEST_MUTATORS[name]!;
+  const files: string[] = [];
+  for (const s of m.steps) {
+    if ("sql" in s) await w.q(s.sql, [...(s.args ?? [])]);
+    else { const abs = join(w.memoryRoot, s.memoryFile.path); mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs, s.memoryFile.content); files.push(s.memoryFile.path); }
+  }
+  if (files.length) {
+    await git(w.memoryRoot, ["add", "--", ...files]);
+    await git(w.memoryRoot, ["commit", "-q", "-m", `memory: eval world ${name}`], { date: clock });
+  }
+}
 
 /** The cache key of a world: tasks with the same base, clock, rate and mutators share one digest. */
 export const worldKey = (w: EvalWorld) => canonicalJson({ base: w.base, clock: w.clock, rate: w.rate, mutators: w.mutators });
@@ -210,6 +226,7 @@ export async function buildWorld(world: EvalWorld, opts: BuildOptions): Promise<
     sched.kick = async () => undefined;
     try {
       for (const spec of world.mutators) {
+        if (Object.prototype.hasOwnProperty.call(TEST_MUTATORS, spec)) { await applyTestMutator(w, spec, world.clock); continue; }
         const { name, arg } = parseMutator(spec);
         await MUTATORS[name]!.apply(w, arg);
       }

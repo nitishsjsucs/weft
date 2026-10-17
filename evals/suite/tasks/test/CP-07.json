@@ -20,7 +20,7 @@
     "mutators": [
       "hoSeparatedTech"
     ],
-    "digest": null
+    "digest": "sha256:39044528c7b67a135339c9233b64be03a2c5f1e2fc3ac71ad4a985de14440864"
   },
   "input": {
     "chat": "Please put Curtis Doyle on an off-cycle for his regular salary for November 1 to 15, paid on November 13."

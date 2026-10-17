@@ -19,7 +19,7 @@
     "mutators": [
       "noorAccepted"
     ],
-    "digest": "sha256:e6afe9f9e43985249f8d40150c3852d89ce9c663e2760ef10c9824827374314f"
+    "digest": "sha256:11a77f28352db1409080a0a7d542e854336bc0a0d85a880b1de293ba9a81bb07"
   },
   "input": {
     "chat": "Is Noor ready for Monday?"

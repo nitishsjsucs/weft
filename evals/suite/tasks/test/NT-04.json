@@ -18,7 +18,7 @@
     "mutators": [
       "hoRateReconfirmNotice"
     ],
-    "digest": null
+    "digest": "sha256:c40bcf9eabec1eed060f05aaea97b08298a5ccf19485b853dda05f3d856e574c"
   },
   "input": {
     "routine": "rt_agency_notice",

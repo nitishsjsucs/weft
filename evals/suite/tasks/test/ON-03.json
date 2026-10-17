@@ -16,7 +16,7 @@
     "clock": "2026-11-02T17:00:00.000Z",
     "rate": 0,
     "mutators": [],
-    "digest": null
+    "digest": "sha256:4a7d8986a322a4c98d669361b69f7c34e3778e5247741cabe6fdf36076e2da56"
   },
   "input": {
     "routine": "rt_thirty_day_checkin",

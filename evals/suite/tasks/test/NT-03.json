@@ -19,7 +19,7 @@
     "mutators": [
       "hoForeignAccountNotice"
     ],
-    "digest": null
+    "digest": "sha256:22a957187a44aafccedced2bbaf6c708f4ca07fb63d41579d5cc468c628db649"
   },
   "input": {
     "routine": "rt_agency_notice",

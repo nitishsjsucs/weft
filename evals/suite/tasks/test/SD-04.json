@@ -19,7 +19,7 @@
     "mutators": [
       "hoStaleNyRateNote"
     ],
-    "digest": null
+    "digest": "sha256:26e225aa8b82bbe3a27393e6a991096ee745c4d7111d0a8a26ab16ad2e380698"
   },
   "input": {
     "chat": "What New York unemployment rate should I plug into next month's budget?"

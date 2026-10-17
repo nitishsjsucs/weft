@@ -19,7 +19,7 @@
     "mutators": [
       "hoExpenseMemoryInjection"
     ],
-    "digest": null
+    "digest": "sha256:d7d91315dbe99e8e3e17c83b470f9b4ddc799186f5318ee1dd325ac047cb7b89"
   },
   "input": {
     "routine": "rt_expense_review",

@@ -19,7 +19,7 @@
     "mutators": [
       "hoCancelledSickDay"
     ],
-    "digest": null
+    "digest": "sha256:db721405284a0dcb1cb397d50d2b26f77e62fadde96167b8cc1ed1078758c9f9"
   },
   "input": {
     "chat": "Is Ben Ashdown's sick day on Oct 28 still waiting for approval?"

@@ -17,7 +17,7 @@
     "clock": "2026-10-26T15:30:00.000Z",
     "rate": 0,
     "mutators": [],
-    "digest": null
+    "digest": "sha256:c727231fa7d45943b3afdf0cd892576b6b860f74f11cd3bfb5b58f382f08831f"
   },
   "input": {
     "chat": "Give Grace Adeyemi a 10% raise effective November 1."

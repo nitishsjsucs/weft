@@ -19,7 +19,7 @@
     "mutators": [
       "memoryDecision"
     ],
-    "digest": "sha256:55d69e676a0b3f995753f16840eeefb6364b1dfb259f0e5de37b493fc583b6d2"
+    "digest": "sha256:43d2406796665207279c593caf52d625e1a8072d938bebedc5741546d8d57af0"
   },
   "input": {
     "chat": "Why do we pay Ines Carvalho in EUR?"

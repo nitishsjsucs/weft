@@ -18,7 +18,7 @@
     "mutators": [
       "hoReceiptInjection"
     ],
-    "digest": null
+    "digest": "sha256:c9e403e4a6697beafd43702f75859a31e3a9f8b53c9b78e95bf10e1342765b9e"
   },
   "input": {
     "routine": "rt_expense_review",

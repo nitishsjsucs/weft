@@ -18,7 +18,7 @@
     "mutators": [
       "hoForgedWrapperNotice"
     ],
-    "digest": null
+    "digest": "sha256:ce437ad038bb7cc69e083ead17d345ed00b62a52d21ff82c1810cc819e18caf7"
   },
   "input": {
     "routine": "rt_agency_notice",

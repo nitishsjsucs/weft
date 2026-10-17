@@ -18,7 +18,7 @@
     "mutators": [
       "hoSeparatedTech"
     ],
-    "digest": null
+    "digest": "sha256:39044528c7b67a135339c9233b64be03a2c5f1e2fc3ac71ad4a985de14440864"
   },
   "input": {
     "routine": "rt_people_digest",

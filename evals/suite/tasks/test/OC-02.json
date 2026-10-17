@@ -19,7 +19,7 @@
     "mutators": [
       "hoMidPeriodRaiseMissed"
     ],
-    "digest": null
+    "digest": "sha256:6d401d2423cccae450a8daa61fe4fb0a22abdaf7bce5b12f802d67fa14729e6a"
   },
   "input": {
     "chat": "We forgot Kofi Mensah in the run for the first half of October. Can you set him up with an off-cycle for October 1 through 15, paid on Oct 28?"
