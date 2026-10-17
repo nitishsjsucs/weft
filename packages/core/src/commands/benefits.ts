@@ -1,8 +1,8 @@
 // benefits.* commands. Owner: t2-world (wave 2 additions: w2-benefits-contractors). Append WeftCommand definitions to this array; commands/index.ts concatenates it.
 import { z } from "zod";
-import { eq, inArray } from "drizzle-orm";
-import { benefitReconFindings, workers } from "@weft/db";
-import { formatCents } from "@weft/contracts";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { actions, benefitReconFindings, workers } from "@weft/db";
+import { formatCents, hasCarrierPeek } from "@weft/contracts";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, notFound, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { getWorker } from "../people/queries";
@@ -10,7 +10,7 @@ import { nameRef } from "../people/names";
 import { listEnrollments, listPlans } from "../benefits/queries";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
-import { CARRIER_BILLING_EMAIL, computeFindings, disputeMessage, getFinding, hasStoredInvoice, listFindings, storeFindings, toFindingDto, type ReconInvoice } from "../benefits/recon";
+import { CARRIER_BILLING_EMAIL, computeFindings, disputeMessage, getFinding, hasStoredInvoice, listFindings, RECON_CARRIER, storeFindings, toFindingDto, type ReconInvoice } from "../benefits/recon";
 import { listOpenEnrollment, OPEN_ENROLLMENT_DEADLINE, OPEN_ENROLLMENT_PLAN_YEAR, openEnrollmentStragglers, recordNudges } from "../benefits/enrollment";
 import { emitBenefitsWave2Event } from "../contractors/events";
 
@@ -94,18 +94,54 @@ const reconcileCmd = writeCommand({
   },
 });
 
+/**
+ * When a month was last reconciled: the latest benefits.reconcile in the action log for that month (an omitted month
+ * argument meant the sim month at the time of the call), else the newest stored finding, else null.
+ */
+async function lastReconciledAt(deps: Parameters<WeftCommand["run"]>[2], companyId: string, month: string): Promise<string | null> {
+  const logged = await deps.tx.select({ ts: actions.ts, args: actions.argsJson }).from(actions).where(eq(actions.command, "benefits.reconcile")).orderBy(desc(actions.seq));
+  for (const a of logged) {
+    let m: unknown = null;
+    try { m = (JSON.parse(String(a.args)) as { month?: unknown }).month; } catch { m = null; }
+    if ((typeof m === "string" ? m : ptDateOf(a.ts).slice(0, 7)) === month) return a.ts;
+  }
+  const [row] = await deps.tx.select({ at: benefitReconFindings.createdAt }).from(benefitReconFindings)
+    .where(and(eq(benefitReconFindings.companyId, companyId), eq(benefitReconFindings.month, month))).orderBy(desc(benefitReconFindings.createdAt)).limit(1);
+  return row?.at ?? null;
+}
+
+const PREVIEW_LABEL = "preview: computed now from the carrier's current bill, not stored and not a reconciliation; a person runs the reconciliation from the Benefits screen";
+
 const FindingsInput = z.object({ month: Month.optional(), status: z.enum(["open", "disputed", "resolved", "dismissed"]).optional(), ...responseFormatField });
 type FindingsInput = z.infer<typeof FindingsInput>;
 const listFindingsCmd = readCommand({
   name: "benefits.list_findings", domain: "benefits",
-  summary: "List carrier reconciliation findings with billed, expected and deducted cents.",
-  description: "List benefit reconciliation findings, optionally for one month (YYYY-MM) or status (open, disputed, resolved, dismissed): kind, worker, plan, billed, expected and deducted amounts in cents with displays, and a template detail.",
+  summary: "List carrier reconciliation findings, and whether the month was reconciled at all.",
+  description: "List stored carrier reconciliation findings, for one month (YYYY-MM) or status if given: kind, worker, plan, billed, expected and deducted cents with displays. Rows exist only once a month is reconciled: reconciled and last_reconciled_at say if it was (default the current month). An empty list for a month never reconciled is not a clean bill; preview, if present, is computed now and not stored.",
   input: FindingsInput,
   async run(i: FindingsInput, ctx, deps) {
+    const month = i.month ?? ptDateOf(ctx.now).slice(0, 7);
     const rows = await listFindings(deps.tx, ctx.companyId, { month: i.month, status: i.status });
     const { names, plans } = await lookups(deps, ctx.companyId);
     const findings = rows.map((r) => findingView(toFindingDto(r), names, plans));
-    return { data: { count: findings.length, findings }, summary: `Listed ${findings.length} findings` };
+    const reconciled = await hasStoredInvoice(deps.tx, month);
+    const last = reconciled ? await lastReconciledAt(deps, ctx.companyId, month) : null;
+    // Never benefits.reconcile's path: carrier.invoice stores the invoice on its first call, and this is a read.
+    let preview: { label: string; month: string; count: number; findings: (Omit<ReturnType<typeof findingView>, "id"> & { id: null })[] } | null = null;
+    if (!reconciled && hasCarrierPeek(deps.sims.carrier)) {
+      const drafts = await computeFindings(deps.tx, ctx.companyId, (await deps.sims.carrier.peekInvoice(month)) as ReconInvoice);
+      // A preview row has no id: nothing is stored, so there is nothing to dispute or cite until the month is reconciled.
+      const views = drafts.map((d) => ({ ...findingView(toFindingDto({ ...d, id: "", companyId: ctx.companyId, month, carrier: RECON_CARRIER, status: "preview", createdAt: ctx.now }), names, plans), id: null }));
+      preview = { label: PREVIEW_LABEL, month, count: views.length, findings: views };
+    }
+    const scope = `${i.status ? `${i.status} ` : ""}findings ${i.month ? `for ${i.month}` : "across all months"}`;
+    const state = reconciled
+      ? `${month} was reconciled${last ? ` at ${last}` : ""}`
+      : `${month} has never been reconciled, so no findings are stored for it and an empty list is not a clean bill${preview ? `; preview (not stored): ${preview.count} possible findings from the carrier's current bill` : ""}`;
+    return {
+      data: { month: i.month ?? null, status_filter: i.status ?? null, count: findings.length, findings, reconciled_month: month, reconciled, last_reconciled_at: last, preview },
+      summary: `${findings.length === 0 ? "No" : findings.length} stored ${scope}; ${state}`,
+    };
   },
 });
 

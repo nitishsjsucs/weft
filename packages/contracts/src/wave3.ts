@@ -141,6 +141,18 @@ export const CHAT_DOMAIN_ROUTES = [
   { domain: "team_calendar", tool: "time_off.team_calendar" },
 ] as const;
 export type ChatDomainRoute = (typeof CHAT_DOMAIN_ROUTES)[number]["domain"];
+/**
+ * Round 2 FG3 (docs/evals/round1-analysis.md R5): an optional, non-storing carrier read. `invoice(month)` stores the
+ * invoice on its first call, so a read command never calls it. A carrier simulator that also offers `peekInvoice`
+ * (same lines, nothing written, no fault consumed) lets benefits.list_findings show a labeled preview for a month that
+ * was never reconciled; without it the read says only that the month was never reconciled.
+ */
+export interface CarrierInvoicePeek {
+  peekInvoice(month: string): Promise<{ id?: string; month: string; carrier: string; lines: { workerId: string; planId: string; amountCents: number; tier?: string; periods?: number }[]; totalCents: number }>;
+}
+export function hasCarrierPeek(carrier: unknown): carrier is CarrierInvoicePeek {
+  return typeof carrier === "object" && carrier !== null && typeof (carrier as { peekInvoice?: unknown }).peekInvoice === "function";
+}
 export const W3_SETTINGS = { chatCanPropose: "agent.chat_can_propose", allowAutoAutonomy: "agent.allow_auto_autonomy" } as const;
 /** New ceiling keys (limits rows seeded by the owning track's seed step; `${key}_day` is the daily aggregate). */
 export const W3_CEILINGS = { expense: "agent.expense_cents", expenseAuto: "agent.expense_auto_cents", screening: "agent.screening_cents" } as const;
