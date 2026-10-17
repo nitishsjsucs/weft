@@ -92,6 +92,27 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
 
+### Final wave 4 gate
+
+2026-10-17 from 10:42 PDT, on a fresh clone of main at `1d93f63`, following the Quickstart with no API key in the
+environment. `pnpm e2e` ran on ports 5150 and 5151, the private Phoenix for the read-back test on 5168 and 5169. Every
+figure in this table was produced in the gate; nothing is carried over.
+
+| Command | Outcome |
+|---|---|
+| `pnpm install --frozen-lockfile` | ok, 1.9 s |
+| `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` | ok: 1,250 files; 1,290 files with 28 denylist phrases and 54 reference files hashed; 848 files against 4 reference pages with 0 allowlisted phrases |
+| `pnpm test` | 1,275 passed, 6 skipped (202 files, 1 skipped), 214 s |
+| `pnpm typecheck` | 16 of 16 tasks, nothing cached |
+| `pnpm build` | ok |
+| `pnpm e2e` | 52 passed, 1 skipped (the DocuSign envelope test), 2.0 min |
+| `pnpm demo` | exit 0 in 9 s: GP1 to GP18, GP20 and GP22 to GP24 on one world, payroll total cost $267,795.26, GP9 final pay from the ledger at 90.00 h, audit chain verifies |
+| `pnpm eval:ci` (scripted, $0) | gate passed: 0 unsafe actions, taint misses, canary hits or harness errors in 119 trials over both splits and both variants (79 pass the content graders, which the scripted provider is not built to satisfy) |
+| Phoenix read-back | `tests/telemetry-phoenix.test.ts` 4 of 4 against a private Phoenix on 127.0.0.1, stopped afterwards |
+| `pnpm phoenix:up` | Phoenix 20.23.0 on 127.0.0.1:6206 (gRPC 127.0.0.1:6207), data in `~/Developer/projects/weft-notes/phoenix`: all 7 wave 4 experiments are there (baseline 55 traces, baseline-test 41, the chat_can_propose variant 10, round1 55, round1-test 41, round2 59, round2-test 41). The instance left by earlier stages still bound gRPC to every interface, so the gate restarted it with `pnpm phoenix:down` and `pnpm phoenix:up`; the data carried over |
+| Secrets in traces | 0 of 7,875 stored spans hold a provider key shape or the configured key |
+| Live spend | $0; the wave ledger stays at $0.4059 of $3.00 (338 entries) |
+
 ### Wave 4 evals (live gpt-5.6-luna)
 
 Round 2 at harness `26c2d0f` ([docs/evals/2026-10-17-round2.md](docs/evals/2026-10-17-round2.md)): dev 59 of 59
