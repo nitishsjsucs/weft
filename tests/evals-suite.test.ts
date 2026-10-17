@@ -436,3 +436,26 @@ describe("r2 offline re-grade from saved spans ($0)", () => {
     expect(r!.after.groundedBy!.request).toEqual(expect.arrayContaining(["15"]));
   });
 });
+
+describe("r2 dev coverage from the parity spec (R9)", () => {
+  it("each untested notice plan has a dev task on its own world, and the mentions group has one", () => {
+    const plans = { "NT-03": "late_deposit_penalty", "NT-04": "registration_confirmed", "NT-05": "account_review" };
+    for (const [id, kind] of Object.entries(plans)) {
+      const t = task(id);
+      expect(t.world.mutators, id).toEqual([`agencyNoticeKind:${kind}`]);
+      expect(t.input, id).toEqual({ routine: "rt_agency_notice", event: { type: "notice.received", notice_id: "ntc_9501" } });
+    }
+    expect(task("NT-03").expect.default!.endState.map((e) => e.sql).join(" ")).toMatch(/penalty_dispute/);
+    expect(task("NT-04").expect.default!.endState.map((e) => e.equals)).toContain("skipped");
+    expect(task("NT-05").expect.default!.endState.map((e) => e.sql).join(" ")).toMatch(/unrecognized_notice/);
+    expect(all.filter((l) => l.task.group === "mentions").map((l) => l.task.surface)).toEqual(["mention"]);
+  });
+  it("the notice mutator stores the named kind at the world clock and emits no event", async () => {
+    const { buildWorld } = await import("../evals/suite/worlds/index");
+    const w = await buildWorld(task("NT-05").world, { dataDir: tmp("weft-eval-notice-"), mode: "scripted" });
+    try {
+      expect(await w.q("SELECT kind, status, received_at, tax_account_id FROM notices WHERE id = 'ntc_9501'")).toEqual([{ kind: "account_review", status: "new", received_at: "2026-10-26T15:30:00.000Z", tax_account_id: "txa_0003" }]);
+      expect(await w.q("SELECT id FROM events WHERE subject_ref = 'ntc_9501'")).toEqual([]);
+    } finally { await w.weft.close(); }
+  }, 120_000);
+});
