@@ -2,7 +2,9 @@
 // Returns a <recall> block within RECALL_BUDGET, or "" to leave the context pack unchanged. The runtime appends a
 // non-empty block inside <context>; recalled text is memory content, so it is escaped and never carries instructions.
 // Code picks the subjects (trigger refs, then ids and aliases named in the request) and runs at most 4 searches.
-// The one-pager always leads; until the first digest writes it, recall stays "" so wave 1 packs are unchanged.
+// The one-pager leads once the first digest writes it; before that (wave 4, FM4) recall still returns the subject
+// dossiers and term hits, so a world that never ran the digest is not silently without memory. Worlds that must keep
+// wave 1 packs byte-identical switch recall off with recallEnabled.
 // Every non-empty recall is logged in memory_recalls; a tainted hit taints the run through the executor's path.
 import { eq } from "drizzle-orm";
 import { memoryRecalls, type Db } from "@weft/db";

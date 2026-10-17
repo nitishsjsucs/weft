@@ -1,6 +1,6 @@
-// Recall at run start (harness 9.5 and 18 item 4) through createMemoryRecall: within RECALL_BUDGET, always the
-// one-pager, logged in memory_recalls, once per run, and a tainted hit taints the run through the executor's
-// taint path. Owner: w2-memory.
+// Recall at run start (harness 9.5 and 18 item 4) through createMemoryRecall: within RECALL_BUDGET, the one-pager
+// first once the digest wrote it (and dossiers and hits before that, wave 4), logged in memory_recalls, once per
+// run, and a tainted hit taints the run through the executor's taint path. Owner: w2-memory.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { RECALL_BUDGET } from "@weft/contracts";
@@ -18,11 +18,19 @@ beforeAll(async () => { weft = await createTestWeft(); });
 afterAll(async () => { await weft?.close(); });
 
 describe("memory recall (w2-memory)", () => {
-  it("is empty until the digest has written the one-pager", async () => {
+  it("before any digest, recalls the subject dossier and term hits without a one-pager (wave 4, FM4)", async () => {
     const recall = createMemoryRecall(weft.db);
     const runId = await open();
-    expect(await recall({ companyId: "cmp_larkspur", runId, kind: "chat", query: "What about Lena Brooks?", subjectRefs: [] })).toBe("");
-    expect(await weft.db.select().from(memoryRecalls).where(eq(memoryRecalls.runId, runId))).toHaveLength(0);
+    const block = await recall({ companyId: "cmp_larkspur", runId, kind: "chat", query: "What about Lena Brooks?", subjectRefs: [] });
+    expect(block.startsWith("<recall")).toBe(true);
+    expect(block).not.toContain(RECALL_BUDGET.onePager);
+    expect(block.split("\n")[1]).toContain("entities/people/wrk_0026.md (dossier");
+    expect(approxTokens(block)).toBeLessThanOrEqual(RECALL_BUDGET.maxTokens);
+    const rows = await weft.db.select().from(memoryRecalls).where(eq(memoryRecalls.runId, runId));
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(String(rows[0]!.pathsJson))[0]).toBe("entities/people/wrk_0026.md");
+    // A request that names nothing in memory still recalls nothing.
+    expect(await recall({ companyId: "cmp_larkspur", runId: await open(), kind: "chat", query: "zzqx", subjectRefs: [] })).toBe("");
   });
 
   it("stays within budget with many subjects, leads with the one-pager, logs once per run", async () => {
@@ -51,6 +59,20 @@ describe("memory recall (w2-memory)", () => {
     expect(block).toContain("untrusted");
     expect(block).not.toContain("<request>");
     expect(await tainted(runId)).toMatchObject({ tainted: true, taintedBy: "memory:knowledge/facts/lena-brooks-note.md" });
+  });
+
+  it("a decision note recalled in chat is untrusted, keeps its path and id, and taints the run; a routine never sees it", async () => {
+    const m = weft.executor.memory as unknown as { seedFiles(f: { path: string; text: string }[], msg: string): Promise<unknown> };
+    await m.seedFiles([{ path: "knowledge/decisions/contractor-invoice-cadence.md", text: `---\nid: "DEC-9001"\ntype: "decision"\naliases: []\nlinks: []\nsources: ["meeting"]\nstatus: "accepted"\nupdated: "2026-01-05"\ntainted_by: null\n---\n# Contractor invoice cadence\n\nContractors invoice monthly because the payout rail batches once a month.\n` }], "test: a decision note");
+    const runId = await open();
+    const block = await createMemoryRecall(weft.db)({ companyId: "cmp_larkspur", runId, kind: "chat", query: "Why do contractors invoice monthly?", subjectRefs: [] });
+    const line = block.split("\n").find((l) => l.includes("knowledge/decisions/contractor-invoice-cadence.md#L"));
+    expect(line).toBeDefined();
+    expect(line).toContain("untrusted");
+    expect(line).toContain("id DEC-9001.");
+    expect(await tainted(runId)).toMatchObject({ tainted: true, taintedBy: "memory:knowledge/decisions/contractor-invoice-cadence.md" });
+    const routine = await createMemoryRecall(weft.db)({ companyId: "cmp_larkspur", runId: await open(), kind: "routine", query: "Why do contractors invoice monthly?", subjectRefs: [] });
+    expect(routine).not.toContain("knowledge/decisions/");
   });
 
   it("can be switched off per world (wave 1 transcripts stay byte-identical)", async () => {

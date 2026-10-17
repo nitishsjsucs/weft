@@ -37,10 +37,14 @@ async function chat(text: string) {
 }
 
 describe("GP12 memory recall and coarsening (w2-memory)", () => {
-  it("recall stays empty before the first digest (wave 1 packs unchanged)", async () => {
+  // Wave 4 (FG4, FM4): recall no longer waits for the one-pager. Before the first digest it carries the subject
+  // dossier and term hits, without a one-pager line; after the digest the one-pager leads (below).
+  it("before the first digest, recall carries the subject dossier and no one-pager", async () => {
     const { runId, text } = await chat("What changed for Lena Brooks?");
-    expect(text).not.toContain("<recall");
-    expect(await weft.db.select().from(memoryRecalls).where(eq(memoryRecalls.runId, runId))).toHaveLength(0);
+    expect(text).toContain("<recall");
+    expect(text).toContain("entities/people/wrk_0026.md (dossier");
+    expect(text).not.toContain("knowledge/company/one-pager.md");
+    expect(await weft.db.select().from(memoryRecalls).where(eq(memoryRecalls.runId, runId))).toHaveLength(1);
   });
 
   it("the digest coarsens the seeded week, refreshes the dossier and one-pager, and commits as the agent", async () => {
