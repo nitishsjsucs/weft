@@ -1,0 +1,24 @@
+{
+  "match": "status of the draft payroll",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "payroll__submit_run", "arguments": { "run_id": "pay_2026_10_30" } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "payroll__submit_run", "ok": false, "code": "UNAVAILABLE" }] },
+        "output": [
+          { "type": "function_call", "name": "payroll__list_runs", "arguments": { "status": "draft", "limit": null, "response_format": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "payroll__list_runs", "ok": true, "status": "done" }] },
+        "output": [
+          { "type": "text", "text": "The draft payroll {{last.payroll__list_runs.data.runs.0.run_id}} pays on {{last.payroll__list_runs.data.runs.0.payday}}. I can only read from a chat thread; submitting it is for a person in the Weft inbox." }
+        ]
+      }
+    ]
+  }
+}

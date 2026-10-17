@@ -1,7 +1,7 @@
 // Chat simulator: an in-app feed over the closed channel enum (SPEC 8). Cards are written only by the proposal
 // notifier; messages from people are inbound and untrusted.
 import { and, asc, eq, gt } from "drizzle-orm";
-import { ChatChannel as ChatChannelEnum, type ChatChannel, type ChatMessage, type ChatSim, type FaultInjector, type SimClock } from "@weft/contracts";
+import { ChatChannel as ChatChannelEnum, MENTION_HANDLE, type ChatChannel, type ChatMessage, type ChatSim, type FaultInjector, type SimClock } from "@weft/contracts";
 import { simChatMessages, type DbTx } from "@weft/db";
 import { firstFault, SimFaultError } from "./faults";
 import { mintId } from "./ids";
@@ -36,4 +36,13 @@ export function createChatSim(db: DbTx, clock: SimClock, faults: FaultInjector):
       return rows.map((r): ChatMessage => ({ id: r.id, channel: r.channel as ChatChannel, author: r.author, text: r.text, card: r.cardJson ? JSON.parse(r.cardJson) : null, ts: r.ts, inbound: r.inbound }));
     },
   };
+}
+
+// Wave 4 (w4-parity-agent, Q6): tagging the agent. The handle must stand alone ("@weft", "@weft,"), not prefix a word.
+const MENTION_RE = new RegExp(`(^|[^\\w@])${MENTION_HANDLE}(?![\\w-])`, "i");
+/** True when the message names the agent handle as a word. */
+export function mentionsAgent(text: string): boolean { return MENTION_RE.test(text); }
+/** The message with the handle removed, for the run's request line. */
+export function stripMention(text: string): string {
+  return text.replace(new RegExp(`(^|[^\\w@])${MENTION_HANDLE}(?![\\w-])[,:]?\\s*`, "gi"), "$1").replace(/\s{2,}/g, " ").trim() || text.trim();
 }
