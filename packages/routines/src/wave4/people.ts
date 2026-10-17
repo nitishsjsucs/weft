@@ -1,8 +1,8 @@
-// Wave 4 routines, prechecks and checklist predicates (docs/wave4.md). Owner: w4-parity-people. Planned: rt_life_event_window, rt_benefits_window_reminders, rt_first_day_message, rt_open_enrollment lifecycle.
+// Wave 4 routines, prechecks and checklist predicates (docs/wave4.md). Owner: w4-parity-people. Planned: rt_benefits_window_reminders, rt_benefits_window_reminders, rt_first_day_message, rt_open_enrollment lifecycle.
 // prebuilt.ts, prechecks.ts and checks.ts spread these in; add entries here only. New routines ship disabled unless their
 // golden path needs them enabled, keep their tools at 8 or fewer, and use new ids (rt_ prefix).
 //
-// - rt_life_event_window: weekday 09:00 PT. Every open life-event window whose next reminder date has come gets one
+// - rt_benefits_window_reminders: weekday 09:00 PT. Every open life-event window whose next reminder date has come gets one
 //   reminder email (benefits.send_window_reminders, R1, recomputed in the command); a window stops reminding when the
 //   employee elects or picks no change. Opening and closing windows on their dates is the scheduler's system sweep
 //   (benefits.close_windows), so this routine never closes anything. Disabled.
@@ -12,8 +12,8 @@ import type { Predicate } from "../checks";
 const TZ = "America/Los_Angeles";
 const OWNER = "usr_dana";
 
-export const RT_LIFE_EVENT_WINDOW: RoutineDef = {
-  id: "rt_life_event_window", name: "Life-event benefits windows",
+export const RT_BENEFITS_WINDOW_REMINDERS: RoutineDef = {
+  id: "rt_benefits_window_reminders", name: "Life-event benefits windows",
   description: "Weekday mornings, remind each employee with an open life-event benefits window, 14, 7 and 2 days before it closes, until they make their changes or choose no change.",
   ownerPrincipalId: OWNER, enabled: false, autonomy: "approve", trigger: { type: "cron", cron: "0 9 * * 1-5", tz: TZ }, filter: null,
   instructions: "Call benefits.send_window_reminders with the derived arguments; it writes each email itself and skips anyone who already chose. Then write a one-line final message.",
@@ -49,7 +49,7 @@ export const lifeEventWindow: Precheck = async (ctx, exec) => {
 
 const callsTo = (facts: Parameters<Predicate>[1], command: string) => facts.calls.filter((c) => c.command.replace("__", ".") === command);
 
-export const routines: RoutineDef[] = [RT_LIFE_EVENT_WINDOW];
+export const routines: RoutineDef[] = [RT_BENEFITS_WINDOW_REMINDERS];
 export const prechecks: Record<string, Precheck> = { life_event_window: lifeEventWindow };
 export const predicates: Record<string, Predicate> = {
   /** The reminders call ran and covered the due windows (a count of 0 passes without a call). */
