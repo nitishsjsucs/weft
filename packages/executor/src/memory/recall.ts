@@ -11,8 +11,13 @@ const DOSSIER_MAX_TOKENS = 220;
 const HIT_MAX_TOKENS = 90;
 
 export interface AliasEntry { path: string; id: string; aliases: string[] }
-/** `noteId` is the file's frontmatter id; it is shown when the path does not carry it, so the note can be cited. */
-export interface RecallCandidate extends RecallItem { taintedBy: string | null; kind: "one_pager" | "dossier" | "hit"; noteId?: string | null }
+/**
+ * `noteId` is the file's frontmatter id; it is shown when the path does not carry it, so the note can be cited.
+ * `procedure` and `decision` (wave 4 round 2, R2) are search hits in knowledge/procedures/ and knowledge/decisions/:
+ * they carry the note's body excerpt, not the matched line, because a heading alone never says what the note asks.
+ */
+export type RecallKind = "one_pager" | "dossier" | "procedure" | "decision" | "hit";
+export interface RecallCandidate extends RecallItem { taintedBy: string | null; kind: RecallKind; noteId?: string | null }
 
 const STOP = new Set(["about", "after", "again", "their", "there", "these", "those", "which", "where", "while", "would", "could", "should", "what", "when", "with", "from", "this", "that", "have", "has", "does", "show", "tell", "please", "today", "everything", "anything"]);
 const ENTITY_ID = /\b(wrk|ntc|txa|bpl|cmp)_[A-Za-z0-9_]+\b/g;
@@ -58,7 +63,14 @@ export function excerptOf(body: string, maxTokens: number): string {
   return text.length <= maxTokens * 4 ? text : `${text.slice(0, maxTokens * 4 - 12)} [clipped]`;
 }
 
-export const CAPS = { onePager: ONE_PAGER_MAX_TOKENS, dossier: DOSSIER_MAX_TOKENS, hit: HIT_MAX_TOKENS };
+export const CAPS = { onePager: ONE_PAGER_MAX_TOKENS, dossier: DOSSIER_MAX_TOKENS, note: DOSSIER_MAX_TOKENS, hit: HIT_MAX_TOKENS };
+
+/** Folders whose hits recall as a whole note (body excerpt, id and path) instead of one matched line. */
+export const NOTE_FOLDERS = { "knowledge/procedures/": "procedure", "knowledge/decisions/": "decision" } as const;
+export function noteKindOf(path: string): "procedure" | "decision" | null {
+  for (const [prefix, kind] of Object.entries(NOTE_FOLDERS) as [string, "procedure" | "decision"][]) if (path.startsWith(prefix)) return kind;
+  return null;
+}
 
 /** "id X. " when the note has an id that neither its path nor its excerpt shows; otherwise nothing. */
 function idLabel(c: RecallCandidate): string {
@@ -69,19 +81,20 @@ function idLabel(c: RecallCandidate): string {
 
 /**
  * The <recall> block within the token budget (the whole block, tags included). The one-pager is always kept
- * (clipped if needed); dossiers, then hits by score, fill the rest; anything that does not fit is dropped.
+ * (clipped if needed); dossiers, then procedure and decision notes, then the other hits by score, fill the rest;
+ * anything that does not fit is dropped.
  */
 export function renderRecall(candidates: RecallCandidate[], maxTokens: number = RECALL_BUDGET.maxTokens): { block: string; kept: RecallCandidate[] } {
   const open = `<recall note="${RECALL_NOTE}">`, close = "</recall>";
   // Untrusted items keep their path and note id: the label tells the model to read them as data, and the id and path
   // are what an answer cites (a decision note is untrusted by rule, and a "why" answer must still name it).
   const line = (c: RecallCandidate) => `- ${escapeData(c.path)} (${c.kind.replace("_", "-")}, as of ${c.asOf.slice(0, 10)}${c.taintedBy ? ", untrusted" : ""}): ${escapeData(`${idLabel(c)}${c.excerpt}`)}`;
-  const order = { one_pager: 0, dossier: 1, hit: 2 } as const;
+  const order = { one_pager: 0, dossier: 1, procedure: 2, decision: 2, hit: 3 } as const;
   const sorted = [...candidates].sort((a, b) => order[a.kind] - order[b.kind] || b.score - a.score || a.path.localeCompare(b.path));
   const kept: RecallCandidate[] = [];
   let used = approxTokens(`${open}\n${close}`);
   const seen = new Set<string>();
-  const cap = { one_pager: ONE_PAGER_MAX_TOKENS, dossier: DOSSIER_MAX_TOKENS, hit: HIT_MAX_TOKENS } as const;
+  const cap = { one_pager: ONE_PAGER_MAX_TOKENS, dossier: DOSSIER_MAX_TOKENS, procedure: DOSSIER_MAX_TOKENS, decision: DOSSIER_MAX_TOKENS, hit: HIT_MAX_TOKENS } as const;
   for (const c0 of sorted) {
     if (seen.has(c0.path)) continue;
     const limit = cap[c0.kind] * 4;
