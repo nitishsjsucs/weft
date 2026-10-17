@@ -355,7 +355,44 @@ export const acknowledgeNoticeCmd = writeCommand<z.infer<typeof AckInput>>({
   },
 });
 
+// ---------------------------------------------------------------- due-soon reminders
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const short = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
+
+/** The reminder text, written in code from calendar rows (so every number and date comes from the calendar). */
+export async function reminderText(tx: DbTx, companyId: string, today: string): Promise<{ text: string | null; ids: string[] }> {
+  const rows = (await listCalendar(tx, companyId, today)).filter((r) => r.status === "due_soon" || r.status === "overdue" || (r.status === "prepared" || r.status === "proposed") && r.daysLeft <= 14);
+  if (!rows.length) return { text: null, ids: [] };
+  const lines = rows.slice(0, 12).map((r) => `- ${r.title}: ${r.status === "overdue" ? `overdue since ${short(r.dueOn)}` : `due ${short(r.dueOn)}`}${r.status === "prepared" ? " (prepared)" : r.status === "proposed" ? " (waiting for approval)" : ""}`);
+  const more = rows.length > 12 ? `\n- and ${rows.length - 12} more on the compliance calendar` : "";
+  return { text: `Compliance due soon:\n${lines.join("\n")}${more}\nDetails are on the Taxes & Compliance calendar in Weft.`, ids: rows.map((r) => r.id) };
+}
+
+const RemindInput = z.object({ channel: z.enum(["#payroll", "#people-ops"]).optional() });
+type RemindInput = z.infer<typeof RemindInput>;
+export const postRemindersCmd = writeCommand<RemindInput>({
+  name: "compliance.post_reminders", summary: "Post the due-soon and overdue calendar rows to a chat channel (R3).",
+  description: "Post the compliance calendar rows that are due within 14 days or overdue to #payroll (or #people-ops). The text is written in code from the calendar, so every date is grounded; nothing to write yourself. R3 like comms.send_message: runs for an untainted main agent, otherwise a proposal. Example: {\"channel\":\"#payroll\"}",
+  input: RemindInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
+  afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
+  async preview(i, ctx, deps) {
+    const { text, ids } = await reminderText(deps.tx, ctx.companyId, ptDateOf(ctx.now));
+    if (!text) throw new DomainRefusal("DOMAIN_NOTHING_DUE", "Nothing on the compliance calendar is due within 14 days", null, null);
+    return { title: `Post ${ids.length} compliance reminders to ${i.channel ?? "#payroll"}`, diff: [], content: [{ label: "Message", text }], moneyCents: null, subjectRef: `calendar:${ptDateOf(ctx.now)}`,
+      subjectHash: sha256Hex(canonicalJson({ ids, text })), evidence: ids.slice(0, 10).map((id) => ({ label: "Calendar row", ref: id })) };
+  },
+  async run(i, ctx, deps) {
+    const { text, ids } = await reminderText(deps.tx, ctx.companyId, ptDateOf(ctx.now));
+    if (!text) throw new DomainRefusal("DOMAIN_NOTHING_DUE", "Nothing on the compliance calendar is due within 14 days", null, null);
+    const channel = i.channel ?? "#payroll";
+    const { id } = await deps.sims.chat.post({ channel, author: "Weft agent", text });
+    return { data: { channel, message_id: id, item_ids: ids, count: ids.length }, summary: `Posted ${ids.length} compliance reminders to ${channel}` };
+  },
+});
+
 export const w4ComplianceCommands: WeftCommand[] = [
+  postRemindersCmd,
   calendarCmd, refreshCalendarCmd, listFilingsCmd, getFilingCmd, prepareFilingCmd, fileReturnCmd,
   listHandoffsCmd, openHandoffCmd, resolveHandoffCmd, setDepositScheduleCmd, acknowledgeNoticeCmd,
 ];

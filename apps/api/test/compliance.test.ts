@@ -188,6 +188,25 @@ describe("a state wage report from processed runs", () => {
   });
 });
 
+describe("annual returns from the YTD ledger", () => {
+  it("W-3 totals equal the sum of the W-2s; 940 is 0.6% of FUTA wages; no US contractor reaches the 1099-NEC threshold", async () => {
+    const d = directExecutors(weft.db, weft.clock, weft.sims).human("usr_dana");
+    for (const form of ["w2_w3", "940", "1099_nec"]) expect((await d.exec("tax.prepare_filing", { filing_id: await filingId(form, "2026") })).ok, form).toBe(true);
+    const w2 = (await call("GET", `/v1/filings/${await filingId("w2_w3", "2026")}`)).json.preparedReturn;
+    const L = Object.fromEntries((w2.lines as { line: string; cents: number | null; count: number | null }[]).map((l) => [l.line, l.cents ?? l.count]));
+    expect(L["c"]).toBe(w2.employees.length);
+    expect(L["1"]).toBe(w2.employees.reduce((a: number, e: any) => a + e.box1_cents, 0));
+    expect(L["2"]).toBe(w2.employees.reduce((a: number, e: any) => a + e.box2_cents, 0));
+    const all = await weft.db.select().from(ytdLedger).where(eq(ytdLedger.code, "fit_wages"));
+    expect(L["1"]).toBe(all.reduce((a, r) => a + r.amountCents, 0));
+    const f940 = (await call("GET", `/v1/filings/${await filingId("940", "2026")}`)).json.preparedReturn;
+    const F: Record<string, number> = Object.fromEntries((f940.lines as { line: string; cents: number }[]).map((l) => [l.line, l.cents]));
+    expect(F["8"]).toBe(Math.round(F["7"]! * 0.006));
+    const nec = (await call("GET", `/v1/filings/${await filingId("1099_nec", "2026")}`)).json.preparedReturn;
+    expect(nec.employees).toEqual([]);   // the seeded contractors are abroad and file a W-8
+  });
+});
+
 describe("refresh on payroll.processed and the daily tick", () => {
   it("svc_events may run the refresh; a date-crossing clock move refreshes and emits due-soon events", async () => {
     const out = await weft.executor.system.exec("svc_events", "compliance.refresh_calendar", {}, { eventId: null, attended: false, requestedBy: null } as never);

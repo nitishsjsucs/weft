@@ -1,0 +1,38 @@
+{
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "tax__prepare_filing",
+            "arguments": "{{derived.tax.prepare_filing}}"
+          },
+          {
+            "type": "function_call",
+            "name": "notices__draft_response",
+            "arguments": "{{derived.notices.draft_response}}"
+          },
+          {
+            "type": "function_call",
+            "name": "tax__file_return",
+            "arguments": "{{derived.tax.file_return}}"
+          },
+          {
+            "type": "function_call",
+            "name": "notices__send_response",
+            "arguments": "{{derived.notices.send_response}}"
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Prepared the missing return from processed payroll, proposed filing it, and proposed the reply."
+          }
+        ]
+      }
+    ]
+  }
+}
