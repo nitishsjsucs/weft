@@ -137,3 +137,19 @@ export async function recordExperiment(input: {
   }
   return { record: { experimentId: ran.id, projectName: ran.projectName, datasetId, compareUrl }, trials };
 }
+
+/** Every span of one Phoenix project over the REST API (read only, paged), for offline re-grading at $0. */
+export async function exportProjectSpans(baseUrl: string, projectId: string): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 200; page++) {
+    const q = new URLSearchParams({ limit: "500", ...(cursor ? { cursor } : {}) });
+    const r = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(projectId)}/spans?${q}`, { signal: AbortSignal.timeout(30_000) });
+    if (!r.ok) throw new Error(`Phoenix spans answered ${r.status}`);
+    const d = (await r.json()) as { data: Record<string, unknown>[]; next_cursor?: string | null };
+    out.push(...d.data);
+    cursor = d.next_cursor ?? null;
+    if (!cursor) break;
+  }
+  return out;
+}

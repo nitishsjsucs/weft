@@ -417,3 +417,22 @@ describe("r2 firstFailure labels a recalled note without its rule as context (R2
     expect(recallGap(evOf("whatever"), { ...task("MM-03").expect.default!, finalText: { grounded: true, mustMention: ["Theo"], judges: [] } })).toBeNull();
   });
 });
+
+describe("r2 offline re-grade from saved spans ($0)", () => {
+  it("rebuilds a saved trial's G5 evidence from its trace and re-grades it with the guard's evidence", async () => {
+    const { regrade } = await import("../evals/suite/graders/regrade");
+    const t = task("OC-01");
+    const span = (name: string, kind: string, n: number, attrs: Record<string, unknown>) => ({ name, span_kind: kind, start_time: `2026-10-17T07:20:0${n}.000Z`, context: { trace_id: "tr1" }, attributes: { "metadata.run_id": "run_0001", "weft.step_n": n, ...attrs } });
+    const spans = [
+      span("assemble", "CHAIN", 2, { "output.value": JSON.stringify({ items: 1, requestTrusted: true }) }),
+      span("people__search", "TOOL", 4, { "tool.name": "people__search", "input.value": JSON.stringify({ query: "Hollis Grey" }), "output.value": JSON.stringify({ ok: true, status: "done", resultId: "res_0002", data: { workers: [{ id: "wrk_0042", name: "Hollis Grey (demo)" }] }, summary: "Found 1 worker", actionSeq: null }) }),
+      span("grounding.check", "GUARDRAIL", 6, { "weft.grounded": true }),
+    ];
+    const g5Fail = { grader: "G5" as const, pass: false, applies: true, reasons: ["grounding: ungrounded figures: 15"], metric: 0 };
+    const saved = { taskId: "OC-01", split: "dev", group: t.group, variant: "default", trial: 1, success: false, graders: [g5Fail], judges: [], runIds: ["run_0001"], traceId: "tr1", phoenixUrl: null, experimentRunId: null, steps: 2, toolCalls: 1, invalidToolCalls: 0, groundingRepairs: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, wallMs: 1, firstFailure: "verification", error: null,
+      detail: { finalText: "I found Hollis Grey (demo) (res_0002), but no pay is recorded for Oct 1 to 15.", groundingFallback: false } } as unknown as import("../evals/suite/types").SuiteTrial;
+    const [r] = regrade([saved], new Map([["OC-01", { ...t, expect: { default: { ...t.expect.default!, finalText: { grounded: true, mustMention: [], judges: [] } } } }]]), spans);
+    expect(r).toMatchObject({ before: { g5: false }, after: { g5: true, success: true }, guard: true, partial: false });
+    expect(r!.after.groundedBy!.request).toEqual(expect.arrayContaining(["15"]));
+  });
+});
