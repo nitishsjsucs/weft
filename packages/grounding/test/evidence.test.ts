@@ -56,6 +56,13 @@ describe("runEvidence", () => {
     expect(runEvidence([pack("x", null)], { now: "2030-01-01T00:00:00.000Z" }).opts.now).toBe("2030-01-01T00:00:00.000Z");
     expect(runEvidence([]).opts).toMatchObject({ request: null, now: null });
   });
+
+  it("takes the caller's request only when the rows hold no pack, and still only under a stored true decision", () => {
+    expect(runEvidence([assemble(true)], { request: "Pay $1,500.00" }).opts.request).toBe("Pay $1,500.00");
+    expect(runEvidence([assemble(false)], { request: "Pay $1,500.00" }).opts.request).toBeNull();
+    expect(runEvidence([], { request: "Pay $1,500.00" }).opts.request).toBeNull();
+    expect(runEvidence([pack("Pay $9.00"), assemble(true)], { request: "Pay $1,500.00" }).opts.request).toBe("Pay $9.00");
+  });
 });
 
 describe("R1 fixtures: the guard's evidence grounds what the two-argument check refused", () => {

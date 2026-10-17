@@ -33,6 +33,11 @@ export interface RunEvidence {
 export interface RunEvidenceOptions {
   /** The clock to use when the pack has no "now:" line (the loop's clock, or the trial world's). */
   now?: string | null;
+  /**
+   * The request to use when the rows hold no context pack (hand-built fixtures, evidence saved without it). It still
+   * counts only under a stored true decision; a pack's own request always wins.
+   */
+  request?: string | null;
 }
 
 /** Tools whose calls are model-authored text, not reads: never evidence and never echoes. Wire or dotted names. */
@@ -75,7 +80,7 @@ export function runEvidence(steps: Iterable<EvidenceStep>, o: RunEvidenceOptions
   const pack = rows.find((s) => s.kind === "context" && (s.result as { pack?: unknown } | null)?.pack === true);
   const text = typeof (pack?.result as { text?: unknown } | undefined)?.text === "string" ? (pack!.result as { text: string }).text : "";
   const trusted = requestTrustOf(rows) === true;
-  const request = trusted ? unescapeTagText(/<request>([\s\S]*?)<\/request>/.exec(text)?.[1] ?? "") : null;
+  const request = !trusted ? null : pack ? unescapeTagText(/<request>([\s\S]*?)<\/request>/.exec(text)?.[1] ?? "") : o.request ?? null;
   const now = /^now: (\S+)$/m.exec(text)?.[1] ?? o.now ?? null;
 
   const results: unknown[] = [];
