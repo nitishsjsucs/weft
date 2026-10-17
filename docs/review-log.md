@@ -1,5 +1,42 @@
 # Review log
 
+## Wave 4 fixer round after round 2 (2026-10-17)
+
+Three review lenses (correctness, security and tracing, product honesty) ran against main at e83fd89. Each finding was
+re-checked in the code or the committed results before it was fixed or set aside.
+
+### Fixed
+
+| Lens | Finding | Fix | Commit subject |
+|---|---|---|---|
+| Security | Phoenix's OTLP gRPC collector listened on every interface (Phoenix 20.23.0 hard-codes `[::]`) | Started through `scripts/phoenix-loopback.py`, which binds gRPC to 127.0.0.1; `up` checks with lsof and refuses a non-loopback bind; checked live on 5140 and 5141 | phoenix: gRPC collector bound to loopback, eval paths refuse a remote Phoenix |
+| Security | The redactor had no provider key shape, so an unregistered `sk-` key reached spans | Shapes derived from `SECRET_PATTERNS`, `hasSecret` flags them, canary plants three unregistered keys | redaction: provider key shapes from SECRET_PATTERNS, redaction memory evicts oldest |
+| Security | The redaction memory stopped learning at 2,000 tokens | Evicts the oldest token instead; test past the cap | same commit |
+| Security | The eval Task span output and harness error text were not redacted | `traceRedact` over the task callback's record and the harness error | phoenix: gRPC collector bound to loopback, eval paths refuse a remote Phoenix; evals: strict grounding beside G5, ... |
+| Security | `WEFT_PHOENIX_URL` and the OTLP capture target skipped the loopback check | Both go through `assertLocal` | phoenix: gRPC collector bound to loopback, eval paths refuse a remote Phoenix |
+| Correctness | G5 grounding cannot fail on its own: it uses the guard's evidence | A strict check against tool results only is recorded per trial and reported with the count G5 still passed; round 2 report labels the 4 grader-only flips and the 4 strict flags | evals: strict grounding beside G5, model-only headline, G4 refuse claim check |
+| Correctness | 8 of 59 dev trials called no model but fed the headline | Each trial records model, template or no run; steps, latency and cache hit count model trials only; the others get their own table; round 2 report and summary state the basis | same commit |
+| Correctness | G4 refuse passed any non-empty reply | A refuse reply that claims the action was done, or shows a key, fails G4; the four recorded refusals pass | same commit |
+| Correctness | The routine summary dropped proposals past 8 parts | Proposals first, "and N more" when cut, unit test | routines: run summary lists proposals first and says how many it cut |
+| Correctness | Tool description examples held dev task ids (CT-01's answer) | Examples use ids no task asks about; a test scans every command description and parameter schema | tools: no dev task ids in description examples, scan descriptions for literals |
+| Honesty | README and docs/wave4.md had no wave 4 eval results; the README said the round had not started | README Results subsection, wave4.md section 13, the section 12 defect list marked fixed or open | docs commit of this round |
+| Honesty | Stale dev task count, two p90 figures, a wrong `generated_from`, the demo GP list in status.md, the missing `agencyNoticeKind` mutator, the Phoenix project name, the mislabeled pre-`4c7eb1c` traces | Each corrected in place | docs commit of this round |
+| Product | An inbound simulator chat post showed the raw principal id | The post uses the person's display name | simulators: an inbound chat post shows the person's display name |
+
+### Set aside, with the reason
+
+| Lens | Finding | Why not now |
+|---|---|---|
+| Correctness | Option 1 for G5 (make the strict check the pass criterion) | Request and clock figures are legitimate grounding for the answers that use them; failing them would grade the person's own words as invention. The strict check is reported beside G5 instead (option 2), and the round 2 report no longer presents 0 G5 failures as independent |
+| Correctness | Template steps still record scripted usage in the run store | The report no longer counts them; zeroing usage in the loop for the template provider touches the cost and cache accounting other tests pin, so it waits for a round that reruns the live suite |
+| Correctness | EX-01 finalText mention of the proposal count | Changing a dev task's expectation changes its dataset hash; add it with the next live round |
+| Correctness | agent-parity.md per-row status pass | A status note now says the rows are from the scaffold, gives the wave 3 gate count and lists what is still open; the per-row pass over 57 rows needs each row's test and golden path checked and is left |
+| Correctness | Round 2 edited the frozen `packages/contracts/src/wave3.ts` (CHAT_ROUTE_SPARE, route slots, contractor_payouts, CarrierInvoicePeek) | Recorded here as the integrator's contract decision: the additions are additive, every caller is in-repo, and moving them to an ext file would only re-export them. Later additive needs go in `packages/contracts/src/ext/` per docs/wave4.md section 7 rule 2 |
+| Security | G9 canaries sit where no task reads them | A reachable canary changes the data a task's read returns after the world digest, so the live model sees a different world; plant it with the next re-pin of the worlds |
+| Security | Phoenix auth off and no Host check (DNS rebinding) | Accepted risk, written down in docs/telemetry.md: the data is synthetic and holds no secrets |
+| Security | Span annotations for the mislabeled pre-`4c7eb1c` traces | Documented in docs/telemetry.md and the baseline report; writing annotations would change Nitish's persisted Phoenix, which this round does not touch |
+| Product | The retired "Agency notice follow-up (folded)" routine shows in the gallery | Needs a retired flag on RoutineDef or a filter in the gallery and routine list queries, with its own e2e check; next product round |
+
 ## Wave 3 fixer round (2026-10-16, 16:20 to 17:10 PDT)
 
 Four review lenses (correctness, security, product design, honesty and brand) ran against main at 6241cde. Each

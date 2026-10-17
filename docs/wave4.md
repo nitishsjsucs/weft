@@ -500,13 +500,42 @@ From the tracks (details in each `docs/tracks/w4-*.md` and `.scratch/<track>/lef
   gpt-5.6-luna cache write price; tracing the boot `PROCESS_RESTART` rows; a child-run nesting test.
 - Eval suite and held-out: 4 dev tasks (55 of 59); cassettes; judges and their validation on Nitish's labels; G5 on
   harness-written receipt summaries; judges inside trials; the oracle run in `pnpm test`.
-- Harness and product defects the evals found, for round 2 (section 9): the agency notice precheck skips every notice
-  that is not a rate change; chat answers about a checklist or an offboarding case without reaching
-  `onboarding.get_checklist` or `offboarding.get_case`; a decision note recalled as untrusted is not cited; the people
-  digest's grounding facts count employees by state without a status filter, so the digest is refused after any
-  separation; the chat intent check misses phrasings like "set him up with"; a notice restating the rate on file
-  proposes a no-op rate change; grounding has no totals over a filtered list or time off in hours;
-  `payroll.list_runs` returns the period as one string; `people.search` has no workplace filter; `agent.read_artifact`
-  does not page; after an UNGROUNDED repair the model re-runs the same read.
+- Harness and product defects the evals found, for round 2 (section 9). Status after the improvement rounds (section
+  13; "fixed" names the round and fix group in docs/status.md, "open" means no merge record claims it):
+  - the agency notice precheck skips every notice that is not a rate change: fixed (round 1 FG1, every notice kind);
+  - chat answers about a checklist or an offboarding case without reaching `onboarding.get_checklist` or
+    `offboarding.get_case`: partly addressed by per-run domain routing (round 1 FG3, round 2 FG3); not re-measured on
+    its own;
+  - a decision note recalled as untrusted is not cited: fixed (round 2 FG2, procedure and decision hits recalled as
+    the note);
+  - the people digest's grounding facts count employees by state without a status filter: open;
+  - the chat intent check misses phrasings like "set him up with": open;
+  - a notice restating the rate on file proposes a no-op rate change: open (no merge record claims it);
+  - grounding has no totals over a filtered list or time off in hours: totals over a list fixed (round 1 FG2, count
+    totals); time off in hours open;
+  - `payroll.list_runs` returns the period as one string: open (round 2 FG4 reads month day ranges as two dates in
+    grounding, the read itself is unchanged);
+  - `people.search` has no workplace filter: open;
+  - `agent.read_artifact` does not page: addressed by round 1 FG3 ("artifact pages inline"), not re-verified;
+  - after an UNGROUNDED repair the model re-runs the same read: open.
 
 The two pending decisions, `agent.chat_can_propose` and auto autonomy, are unchanged and off by default.
+
+## 13. Improvement rounds
+
+Live `gpt-5.6-luna` runs, k = 1, default variant unless named. Numbers from `docs/evals/2026-10-17-*-summary.json`;
+the round reports are `docs/evals/2026-10-17-baseline.md`, `2026-10-17-round1.md` and `2026-10-17-round2.md`.
+
+| Run | Harness | Prompt | Dev success | Held-out success | Unsafe | Invalid args (dev) | Dev cost |
+|---|---|---|---|---|---|---|---|
+| Baseline | `6db1cfc` | `p-0b43866f041b` | 46 of 55 | 34 of 41 | 0 | 2 in 137 calls | $0.0597 |
+| Baseline, chat_can_propose variant | `6db1cfc` | same | 8 of 10 | not run | 0 | 0 in 20 calls | $0.0158 |
+| Round 1 | `a90de1f` | `p-598e27523eb9` | 49 of 55 (53 of 55 re-graded with round 2's G5) | 32 of 41 | 0 | 0 in 113 calls | $0.0694 |
+| Round 2 | `26c2d0f` | `p-274e2ca31b6d` | 59 of 59 | 35 of 41 | 0 | 0 in 125 calls | $0.0469 |
+
+How to read round 2 (review of e83fd89, details in `docs/evals/2026-10-17-round2.md`): 51 of the 59 dev trials called
+the model (5 ran on the deterministic templates, 3 started no agent run); 4 of the 6 round 2 flips came from grader
+changes alone; G5's grounding uses the guard's own evidence, and a strict check against tool results only flags 4
+answers G5 passed. The suite report now shows model-only steps, latency and cache hit, the strict grounding count and
+a G4 completion-claim check on refuse tasks. Open: the judges, k = 3, a rerun of the chat_can_propose variant, and a
+labeled `WEFT_BACKGROUND_LLM=1` variant to measure the model on the template routines.

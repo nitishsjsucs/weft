@@ -17,7 +17,7 @@ pnpm phoenix:down
 |---|---|
 | `WEFT_TRACE` | `phoenix` turns tracing on in `apps/api` (and the eval runner). Unset installs no provider: the OTel API stays a no-op and nothing is sent. Any other value logs one line and stays off. |
 | `WEFT_PHOENIX_URL` | Phoenix base URL. Default `http://127.0.0.1:<WEFT_PHOENIX_PORT or 6206>`. Only loopback hosts are accepted; a hosted Arize URL is refused. |
-| `WEFT_PHOENIX_PROJECT` | Phoenix project. Default `weft`; eval runs use `weft-eval-<date>-<sha>-<variant>`. |
+| `WEFT_PHOENIX_PROJECT` | Phoenix project. Default `weft`. An eval trial's spans live in its experiment's project, which `runExperiment` names `Experiment-<id>` (find it in the experiments list or through the compare URL in the suite report); `weft-eval-<date>-<sha>-<variant>` is the experiment name, not a project. |
 
 A builder who needs a Phoenix for a smoke test starts a private one on its own ports and stops it:
 
@@ -110,7 +110,34 @@ Ingestion is asynchronous: right after a flush a query can come back empty or sh
    carries the redacted message and no stack).
 3. **Processor**: `RedactingSpanProcessor.onEnding` in the API's provider re-runs the redactor over every string
    attribute, event attribute and status message. It does not exist inside Phoenix's `runExperiment` provider, which is
-   why layer 1 is the one that counts and why the tracer is looked up on every span.
+   why layer 1 is the one that counts and why the tracer is looked up on every span. The eval's Task span output (the
+   trial record with its error, first failure and grader reasons) is passed through the trace redactor in
+   `evals/suite/phoenix.ts` before `runExperiment` sees it.
+
+Layer 1 also redacts provider key shapes (`sk-`, `sk-proj-`, `sk-ant-`, derived from `SECRET_PATTERNS` in the
+telemetry contract) that nothing registered, such as a key pasted into chat, and the redaction memory evicts its
+oldest token when full instead of refusing new ones.
+
+### Phoenix on the network
+
+`pnpm phoenix:up` binds HTTP to 127.0.0.1 through `PHOENIX_HOST`. Phoenix 20.23.0 binds its OTLP gRPC collector to
+`[::]` whatever that says and cannot turn gRPC off, so the script starts the server through
+`scripts/phoenix-loopback.py`, which rewrites that bind to 127.0.0.1, and checks with lsof that every listening port is
+loopback; otherwise it stops the process group and refuses to report ready (`phoenix:status` warns too). An instance
+started before this change still listens on all interfaces for gRPC: restart it. The eval runner and its OTLP capture
+proxy refuse a Phoenix URL that is not loopback, like `startTracing` and the judge label store.
+
+Accepted risk: Phoenix runs with auth off and does not check the Host header, so a web page using DNS rebinding could
+read traces and datasets from 127.0.0.1. The data is synthetic and holds no secrets (redacted at the source and
+checked), and plain cross-origin reads are blocked because Phoenix sends no CORS header. If that changes, put Phoenix
+behind a loopback proxy that rejects other Host values or turn on `PHOENIX_ENABLE_AUTH` with `PHOENIX_SECRET` in the
+secrets file.
+
+### Labels on traces before `4c7eb1c`
+
+Before `4c7eb1c`, every default-variant chat run in the baseline and round 1 intermediate experiments was stamped
+`metadata.chat_can_propose = true`, though it was offered only read tools. For those experiments filter on
+`metadata.eval_variant`, not `metadata.chat_can_propose`. Round 1, round 2 and later are labeled correctly.
 
 Tests: `packages/agent/test/otel.test.ts` (span tree for chat and routine runs, both RETRIEVERs, MCP spans and the
 zero-token wake segment, a canary that plants a fake key and a vault value in raw, base64 and hex form plus routing and

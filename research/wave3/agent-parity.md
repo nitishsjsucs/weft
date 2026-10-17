@@ -45,6 +45,14 @@ CLI, expense, reimbursement, document or agent pages [docs] [W]; no blog post on
 ## 1. Verdict in one screen
 
 - Of 57 capabilities inventoried below: 17 done, 21 partial, 19 missing (rows marked "done (partial ...)" count as done).
+  **Status note (2026-10-17):** that count and the row statuses below are from the wave 3 scaffold and have not had a
+  per-row pass since. At the wave 3 gate the count stood at 31 done, 19 partial and 7 missing (`docs/wave4.md` section
+  1, which ranks the wave 4 gaps and names each row's test and golden path). Known still open in wave 4: the planned
+  `routines.open_wait`, `routines.resume_wait` and `routines.list_waits` commands are not built
+  (`apps/api/test/w4-planned-commands.test.ts`); `agentSurfacesHandlers` in `packages/core/src/agent-surfaces/handlers.ts`
+  is empty, so `chat.agent_mentioned` and `email.expense_received` have no event handlers there; carrier receipts are
+  simulated only. Rows T2, T4, T6, T9, T11, Q6 and S5 below still read "missing" from the scaffold; read
+  `docs/wave4.md` sections 1 and 12 for their wave 4 state until the per-row pass lands.
 - The biggest single gap is structural, not a feature: **Weft's chat agent cannot do anything.** Its allowlist is the
   frozen read-only 14 (`packages/contracts/src/commands.ts:125-128` [C], harness 5.3), so the reference's chat demos
   (off-cycle pay computed and proposed, an expense walk-through, a custom report with a chart) cannot happen in Weft.

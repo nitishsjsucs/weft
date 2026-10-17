@@ -92,6 +92,17 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
 
+### Wave 4 evals (live gpt-5.6-luna)
+
+Round 2 at harness `26c2d0f` ([docs/evals/2026-10-17-round2.md](docs/evals/2026-10-17-round2.md)): dev 59 of 59
+(round 1 49 of 55, baseline 46 of 55), held-out 35 of 41, 0 unsafe actions, 0 invalid arguments in 125 calls, mean
+steps 2.27, latency 5.1 s mean (p90 7.7 s), cache hit 80.7%, dev cost $0.0469; the wave ledger stood at $0.4059 of the
+$3.00 cap. Read with care: 8 of the 59 dev trials called no model (5 on the deterministic templates, 3 with no agent
+run; over the 51 that did, mean steps are 2.43 and cache hit 83.1%), 4 of round 2's 6 flips came from grader changes,
+and G5's grounding uses the guard's own evidence (a strict check flags 4 answers it passed). Open: the judges are
+pending, k = 1, and the chat_can_propose variant has not been rerun since the baseline. All rounds: [docs/wave4.md](docs/wave4.md)
+section 13.
+
 ### Wave 4 integration gate
 
 All seven wave 4 tracks merged on 2026-10-16 (the record and what is left: [docs/wave4.md](docs/wave4.md) section 12).
@@ -207,7 +218,7 @@ Wave 4 golden paths (scripted provider; merged on 2026-10-16, see "Wave 4 integr
 
 Every agent run can be traced into a local Arize Phoenix (`WEFT_TRACE=phoenix`, `pnpm phoenix:up`; secrets are
 redacted at the source and a canary test proves it, see [docs/telemetry.md](docs/telemetry.md)), and the eval suite
-(55 dev and 41 held-out tasks, graders G1 to G10, both variants) runs on the scripted provider in CI and live on
+(59 dev and 41 held-out tasks, graders G1 to G10, both variants) runs on the scripted provider in CI and live on
 demand ([docs/evals.md](docs/evals.md)).
 
 Wave 3 golden paths (scripted provider; merged on 2026-10-16, results in "Final wave 3 gate" above; the live column is
@@ -319,8 +330,11 @@ A local Weft has no public URL, so polling on the scheduler tick is the baseline
 
 ## Wave 4: left
 
-- The improvement round (docs/wave4.md section 9) has not started: the live baseline into the persisted Phoenix, open
-  coding with Nitish, the failure taxonomy and the fixes by category.
+- The baseline and improvement rounds 1 and 2 have run (docs/wave4.md section 13). Open from round 2
+  (docs/evals/2026-10-17-round2.md, O1 to O5): `rt_expense_review` explains one expense per call near the step cap;
+  chat cannot read a channel feed (AI-04); template routines are not measured on the model (a labeled
+  `WEFT_BACKGROUND_LLM=1` variant would); the judges are pending; k = 1; the chat_can_propose variant has not been
+  rerun since the baseline. O2, the routine summary that hid proposals, is fixed.
 - Defects the evals found for that round, a Phoenix root span missing for runs that park for approval in experiment
   mode, and each track's open items: [docs/wave4.md](docs/wave4.md) section 12, "Left after integration".
 - `agent.chat_can_propose` and auto autonomy stay off by default until Nitish decides.

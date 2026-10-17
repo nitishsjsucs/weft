@@ -1,6 +1,6 @@
 {
   "generated_from": {
-    "round2": "2026-10-17-26c2d0f-suite.json",
+    "round2": "2026-10-17-26c2d0f-round2-suite.json",
     "round1": "2026-10-17-a90de1f-round1-suite.json",
     "round1_regraded": "round1 dev re-graded at $0 with today's G5 (evals/suite/graders/regrade.ts against its Phoenix spans)",
     "round2-test": "kept outside the repo in ~/Developer/projects/weft-notes/evals-round2/"
@@ -37,7 +37,7 @@
       "harness_errors": 0,
       "mean_latency_s": 5.1,
       "latency_p50_s": 4.8,
-      "latency_p90_s": 7.6,
+      "latency_p90_s": 7.7,
       "cache_hit": 0.8068,
       "cost_usd": 0.046887,
       "by_group": {
@@ -111,7 +111,44 @@
         }
       },
       "first_failure": {},
-      "failing_graders": {}
+      "failing_graders": {},
+      "headline_basis": "all 59 dev trials, including 5 template and 3 no-run trials; percentiles are nearest rank",
+      "model_trials": {
+        "trials": 51,
+        "passed": 51,
+        "mean_steps": 2.431,
+        "cache_hit": 0.831,
+        "latency_p50_s": 5.2,
+        "latency_p90_s": 7.7,
+        "template_trials": [
+          "AI-05",
+          "NT-05",
+          "NT-06",
+          "RT-05",
+          "TO-02"
+        ],
+        "no_run_trials": [
+          "NT-07",
+          "ON-01",
+          "RT-06"
+        ]
+      },
+      "strict_grounding_flags": {
+        "trials": 4,
+        "task_ids": [
+          "BN-02",
+          "CP-01",
+          "CT-02",
+          "TO-01"
+        ],
+        "note": "tool results only, no request or clock allowance; G5 (guard-aligned) passed all four"
+      },
+      "grader_only_flips": [
+        "BN-02",
+        "CP-01",
+        "OC-01",
+        "TO-01"
+      ]
     },
     "round1": {
       "label": "round1",

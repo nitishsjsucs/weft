@@ -15,8 +15,8 @@ calls `runEvidence` and FG1's local copy is gone; FG1's dev NT-03 and NT-04 shar
 stopped `pnpm eval:ci` from loading, so they are NT-06 and NT-07 (worlds and digests unchanged) and a held-out test
 now refuses a shared id; the solvability lint drops the IN-01 and CT-02 gaps the new routes close. Chat proposals and
 auto autonomy stay off by default. Fresh clone (e2e on ports 5100 and 5101): `pnpm test` 1260 passed and 6 skipped,
-`pnpm typecheck` 16 of 16, `pnpm e2e` 52 passed and 1 skipped, `pnpm demo` exit 0 with GP1 to GP24 and the audit
-chain verifying, `pnpm eval:ci` gate passed (79 of 119 scripted trials, no world drift), and lint:prose, lint:brand and
+`pnpm typecheck` 16 of 16, `pnpm e2e` 52 passed and 1 skipped, `pnpm demo` exit 0 (GP1 to GP18, GP20 and GP22 to GP24; GP19 and
+GP21 are browser only) with the audit chain verifying, `pnpm eval:ci` gate passed (79 of 119 scripted trials, no world drift), and lint:prose, lint:brand and
 brand:overlap ok. Left: CT-02 needs a scheduled payout mutator, a content check and a re-pin; BN-02 and IN-01 content
 checks; `peekInvoice` on the carrier simulator; compliance and portal dev tasks; and the round 2 measurement run
 (scripted, then live k=1, beside round 1 graded and re-graded).
@@ -35,8 +35,8 @@ the world clock. Integration fixes: every dev and test world digest is re-pinned
 with it (only task hashes move); the prompt dev-literal scan reads the `a|b` and `!x` mustMention forms; trace
 metadata no longer tags every wave 3 or routed chat run `chat_can_propose`; the solvability lint counts routed reads.
 Chat proposals and auto autonomy stay off by default. Fresh clone (e2e on ports 5100 and 5101): `pnpm test` 1194
-passed and 6 skipped, `pnpm typecheck` 16 of 16, `pnpm e2e` 52 passed and 1 skipped, `pnpm demo` exit 0 with GP1 to
-GP24 and the audit chain verifying, `pnpm eval:ci` gate passed, and lint:prose, lint:brand and brand:overlap ok. Left:
+passed and 6 skipped, `pnpm typecheck` 16 of 16, `pnpm e2e` 52 passed and 1 skipped, `pnpm demo` exit 0 (GP1 to GP18, GP20 and GP22 to
+GP24; GP19 and GP21 are browser only) with the audit chain verifying, `pnpm eval:ci` gate passed, and lint:prose, lint:brand and brand:overlap ok. Left:
 mention runs still use the unrouted chat list, `time_off.team_calendar` needs a department, the BN-02 and IN-02 seed
 checks, running the declared judges, `finalText.mustNotMention` in the evals contract, and a live k=3 rebaseline.
 
