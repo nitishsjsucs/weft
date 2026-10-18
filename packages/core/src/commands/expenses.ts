@@ -5,7 +5,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { ExpenseBand, ExpenseCategory, ExpenseDecision, ExpenseDeclineReason, ExpenseStatus, formatCents, W3_CEILINGS, type ExecContext, type W3Check } from "@weft/contracts";
-import { expenses, principals, proposals, settings, uploads, workers, type DbTx } from "@weft/db";
+import { expenses, payrollRuns, principals, proposals, settings, uploads, workers, type DbTx } from "@weft/db";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
@@ -17,6 +17,7 @@ import {
   scheduleForRun, targetDraft, writeChecks, type ExpenseRow,
 } from "../expenses/store";
 import { groundExpenseExplanation, MAX_EXPENSE_EXPLANATION_CHARS, templateExpenseExplanation } from "../expenses/explain";
+import { EXPENSE_TOTALS_BY, expenseTotals } from "../expenses/totals";
 
 const ExpenseId = z.string().startsWith("exp_");
 const UNTRUSTED_LIST = ["expenses.*.merchant", "expenses.*.business_purpose", "expenses.*.attendees", "expenses.*.receipt_extract"];
@@ -25,10 +26,18 @@ const ID_HINT = { hint: "Use an expense id from expenses.list (one id per call).
 
 const conciseItem = (r: ExpenseRow, name: string | undefined) => ({
   expense_id: r.id, worker: name ?? r.workerId, worker_id: r.workerId, category: r.category, amount_cents: r.amountCents, amount_display: formatCents(r.amountCents),
-  transaction_date: r.transactionDate, submitted_date: ptDateOf(r.submittedAt), status: r.status, band: bandOf(r.status), has_receipt: r.receiptUploadId !== null,
-  checks: checksOf(r).map((c) => ({ rule: c.rule, severity: c.severity, message: c.message })), payroll_run_id: r.payrollRunId,
+  transaction_date: r.transactionDate, submitted_date: ptDateOf(r.submittedAt), decided_date: r.decidedAt ? ptDateOf(r.decidedAt) : null, status: r.status, band: bandOf(r.status),
+  has_receipt: r.receiptUploadId !== null, checks: checksOf(r).map((c) => ({ rule: c.rule, severity: c.severity, message: c.message })), payroll_run_id: r.payrollRunId,
 });
 const untrustedOf = (r: ExpenseRow) => ({ merchant: r.merchant, business_purpose: r.businessPurpose, attendees: r.attendees ?? "", receipt_extract: r.receiptExtractJson ?? "" });
+
+/** The payday of each pay run the rows ride, so a reimbursement's pay date is a field and not a second read. */
+async function paydays(tx: DbTx, rows: readonly ExpenseRow[]): Promise<(runId: string) => string | null> {
+  const ids = [...new Set(rows.map((r) => r.payrollRunId).filter((x): x is string => x !== null))];
+  const runs = ids.length ? await tx.select({ id: payrollRuns.id, payday: payrollRuns.payday }).from(payrollRuns).where(inArray(payrollRuns.id, ids)) : [];
+  const m = new Map(runs.map((r) => [r.id, r.payday]));
+  return (id) => m.get(id) ?? null;
+}
 
 async function names(tx: DbTx, ids: string[]) {
   const uniq = [...new Set(ids)];
@@ -40,20 +49,22 @@ async function names(tx: DbTx, ids: string[]) {
 // ---------------------------------------------------------------- reads
 
 const ListInput = z.object({
-  band: ExpenseBand.optional(), status: ExpenseStatus.optional(), worker_id: z.string().startsWith("wrk_").optional(), category: ExpenseCategory.optional(), ...responseFormatField,
+  band: ExpenseBand.optional(), status: ExpenseStatus.optional(), worker_id: z.string().startsWith("wrk_").optional(), category: ExpenseCategory.optional(),
+  totals_by: z.array(z.enum(EXPENSE_TOTALS_BY)).max(EXPENSE_TOTALS_BY.length).optional(), ...responseFormatField,
 });
 type ListInput = z.infer<typeof ListInput>;
 const listCmd = readCommand({
   name: "expenses.list", domain: "payroll",
-  summary: "List expenses by band, status, worker or category, with policy checks.",
-  description: "List expenses with worker, category, amount, transaction and submitted dates, status, band (needs_review, approved, paid_out, declined), whether a receipt is attached, the policy checks and the pay run it rides. Concise leaves out employee-entered text; detailed adds merchant, purpose and attendees (untrusted). Example: {\"band\": \"needs_review\"}.",
+  summary: "List expenses by band, status, worker or category, with policy checks and totals.",
+  description: "List expenses with worker, category, amount, transaction, submitted and decided dates (Pacific), status, band (needs_review, approved, paid_out, declined), receipt, policy checks, pay run and a total. totals_by adds sums per worker, category, band or payroll_run. Concise omits employee-entered text; detailed adds merchant, purpose and attendees (untrusted). Example: {\"band\": \"needs_review\"}.",
   input: ListInput, untrustedFields: UNTRUSTED_LIST,
   async run(i: ListInput, ctx, deps) {
     const rows = await listExpenseRows(deps.tx, ctx.companyId, { band: i.band, status: i.status, workerId: i.worker_id, category: i.category });
     const n = await names(deps.tx, rows.map((r) => r.workerId));
     const items = rows.map((r) => ({ ...conciseItem(r, n.ref(r.workerId)), ...(isDetailed(i) ? untrustedOf(r) : {}) }));
     const bands = Object.fromEntries(ExpenseBand.options.map((b) => [b, rows.filter((r) => bandOf(r.status) === b).length]));
-    return { data: { count: items.length, bands, expenses: items, note: "Decide one expense per call with expenses.decide; there is no bulk approval." }, summary: `Listed ${items.length} expenses` };
+    const sums = expenseTotals(rows, i.totals_by ?? [], { workerRef: n.ref, payday: await paydays(deps.tx, rows) });
+    return { data: { count: items.length, bands, ...sums, expenses: items, note: "Decide one expense per call with expenses.decide; there is no bulk approval." }, summary: `Listed ${items.length} expenses (${sums.totals.amount_display})` };
   },
 });
 
@@ -73,6 +84,7 @@ const getCmd = readCommand({
       ...conciseItem(r, n.ref(r.workerId)), miles: r.milesX10 !== null ? (r.milesX10 / 10).toFixed(1) : null, trip_ref: r.tripRef, policy_version: r.policyVersion,
       allowed_decisions: DECIDABLE.includes(r.status as never) ? res.allowed : [], suggestion: DECIDABLE.includes(r.status as never) ? res.suggestion : null,
       explanation: r.explanation, explanation_source: r.explanationSource, decided_by: r.decidedBy, decided_at: r.decidedAt, decision_reason_code: r.decisionReasonCode,
+      payday: r.payrollRunId ? (await paydays(deps.tx, [r]))(r.payrollRunId) : null,
       ...(isDetailed(i) ? untrustedOf(r) : {}),
     };
     return { data: { expense }, summary: `Expense ${r.id}: ${formatCents(r.amountCents)} ${r.category}, ${r.status}` };

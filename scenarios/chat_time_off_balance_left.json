@@ -1,0 +1,18 @@
+{
+  "match": "vacation days will .+ have left",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "time_off__list_requests", "arguments": { "request_id": null, "status": "pending", "worker_id": null, "department_id": null, "approver": null, "from": null, "to": null, "totals_by": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "time_off__list_requests", "ok": true, "status": "done" }] },
+        "output": [
+          { "type": "text", "text": "Counting her pending request tor_0003 (Nov 23 to 27, 2026), Ruth Okoro (demo) (wrk_0010) has 11.13 days (89 hours) of Larkspur Vacation left. The request itself takes 24 hours, which is 3 working days because Nov 26 and 27 are company holidays." }
+        ]
+      }
+    ]
+  }
+}

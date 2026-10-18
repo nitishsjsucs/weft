@@ -17,6 +17,7 @@ import {
   appendLedger, assignmentsOf, balanceFor, checksForRequest, displayName, employedOn, ensureAssignments, holidayMap, ledgerOf, loadPolicies, parseDays, periodAccrual,
   policyById, routeRequest, teamCoverage, workerOf, type PolicyRow, type RequestRow,
 } from "../time-off/store";
+import { balanceForms, REQUEST_TOTALS_BY, requestBalance, requestTotals, timeForms, workerRef } from "../time-off/forms";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const h = (m: number) => `${(m / 60).toFixed(2)} h`;
@@ -74,8 +75,8 @@ const BalanceInput = z.object({ worker_id: z.string().optional(), policy_id: z.s
 type BalanceInput = z.infer<typeof BalanceInput>;
 const getBalance = readCommand<BalanceInput, Record<string, unknown>>({
   name: "time_off.get_balance", domain: "people",
-  summary: "Read time-off balances in minutes: unlocked, locked, used, holds and available, per policy.",
-  description: "Read one worker's (or, without worker_id, every employee's) time-off balances as of a date (default today) for every assigned policy, or one policy_id. Each balance is derived from the append-only ledger: accrued unlocked, accrued locked (inside a waiting period), used, holds (pending and approved but not yet taken) and available, in minutes. include_ledger adds the ledger rows.",
+  summary: "Read time-off balances per policy: unlocked, locked, used, holds and available, in minutes, hours and days.",
+  description: "Read one worker's (or, without worker_id, every employee's) time-off balances as of a date (default today) for every assigned policy, or one policy_id, from the append-only ledger: accrued unlocked, accrued locked (waiting period), used, holds (pending and approved, not yet taken) and available, in minutes; available, used and holds also in hours and days. include_ledger adds the ledger rows.",
   input: BalanceInput,
   async run(i: BalanceInput, ctx, deps) {
     const asOf = i.as_of ?? ptDateOf(ctx.now);
@@ -97,7 +98,7 @@ const getBalance = readCommand<BalanceInput, Record<string, unknown>>({
       for (const p of pols.filter((x) => assigned.has(x.id) && (!i.policy_id || x.id === i.policy_id))) {
         const b = await balanceFor(deps.tx, w, p, asOf);
         const rows = i.include_ledger ? (await ledgerOf(deps.tx, w.id, p.id)).map((r) => ({ id: r.id, kind: r.kind, minutes: r.minutes, effective_date: r.effectiveDate, source_ref: r.sourceRef, note: r.note })) : undefined;
-        balances.push({ ...b, policyName: p.name, typeName: p.typeName, available_display: h(b.availableMinutes), ...(rows ? { ledger: rows } : {}) });
+        balances.push({ ...b, policyName: p.name, typeName: p.typeName, available_display: h(b.availableMinutes), ...balanceForms(b), ...(rows ? { ledger: rows } : {}) });
       }
       people.push({ worker_id: w.id, name: displayName(w), department_id: w.departmentId, work_state: w.workState, balances });
     }
@@ -111,7 +112,7 @@ const getBalance = readCommand<BalanceInput, Record<string, unknown>>({
 
 const ListRequestsInput = z.object({
   request_id: z.string().optional(), status: z.enum(["pending", "approved", "denied", "cancelled", "taken"]).optional(), worker_id: z.string().optional(), department_id: z.string().optional(),
-  approver: z.string().optional(), from: date.optional(), to: date.optional(),
+  approver: z.string().optional(), from: date.optional(), to: date.optional(), totals_by: z.array(z.enum(REQUEST_TOTALS_BY)).max(REQUEST_TOTALS_BY.length).optional(),
 });
 type ListRequestsInput = z.infer<typeof ListRequestsInput>;
 export async function listRequestRows(tx: DbTx, companyId: string, i: ListRequestsInput): Promise<RequestRow[]> {
@@ -130,15 +131,39 @@ export async function listRequestRows(tx: DbTx, companyId: string, i: ListReques
 }
 const listRequests = readCommand({
   name: "time_off.list_requests", domain: "people",
-  summary: "List time-off requests with status, minutes per day, checks and the routed approver.",
-  description: "List time-off requests filtered by status, worker_id, department_id, approver (principal id) and a date window (from, to). Each request has the computed minutes per day (holidays and weekends are 0), the deterministic checks (block, review, info), the routing chain and the decision. The employee's reason is untrusted text.",
+  summary: "List time-off requests with status, minutes, hours and days, checks, the routed approver and the balance before and after each.",
+  description: "List time-off requests by status, worker_id, department_id, approver (principal id) and dates (from, to). Each has minutes per day (holidays and weekends are 0), hours and days, submitted and decided dates (Pacific), checks, routing, the decision and the policy balance before and after it (after counts every open request). totals_by adds sums per worker or policy. The reason is untrusted text.",
   input: ListRequestsInput, untrustedFields: ["requests.*.reason"],
   async run(i: ListRequestsInput, ctx, deps) {
     const rows = await listRequestRows(deps.tx, ctx.companyId, i);
     const ws = new Map((await deps.tx.select().from(workers).where(eq(workers.companyId, ctx.companyId))).map((w) => [w.id, w]));
     const pols = new Map((await loadPolicies(deps.tx, ctx.companyId)).map((p) => [p.id, p]));
-    const requests = rows.map((r) => ({ ...requestDto(r), workerName: ws.get(r.workerId) ? displayName(ws.get(r.workerId)!) : r.workerId, departmentId: ws.get(r.workerId)?.departmentId ?? null, policyName: pols.get(r.policyId)?.name ?? r.policyId, typeKind: pols.get(r.policyId)?.typeKind ?? null, source: r.source, extRef: r.extRef }));
-    return { data: { count: requests.length, requests }, summary: `${requests.length} time-off requests` };
+    const today = ptDateOf(ctx.now);
+    // The worker's balance on the request's policy before and after this request. Available today already nets out
+    // every pending and approved request, so it is the balance after this one; adding back the minutes this request
+    // holds or used (its own ledger rows) gives the balance before it. The model never adds or subtracts minutes.
+    const ledgers = new Map<string, { available: number; rows: Awaited<ReturnType<typeof ledgerOf>> } | null>();
+    const balanceAround = async (r: RequestRow) => {
+      const key = `${r.workerId}:${r.policyId}`;
+      if (!ledgers.has(key)) {
+        const w = ws.get(r.workerId), p = pols.get(r.policyId);
+        ledgers.set(key, w && p ? { available: (await balanceFor(deps.tx, w, p, today)).availableMinutes, rows: await ledgerOf(deps.tx, w.id, p.id) } : null);
+      }
+      const l = ledgers.get(key);
+      if (!l) return { balance_before_request: null, balance_after_request: null };
+      const counted = -l.rows.filter((x) => x.sourceRef === r.id && (x.kind === "hold" || x.kind === "hold_release" || x.kind === "use")).reduce((sum, x) => sum + x.minutes, 0);
+      return requestBalance(l.available, counted);
+    };
+    const requests = [];
+    for (const r of rows) {
+      const w = ws.get(r.workerId);
+      requests.push({
+        ...requestDto(r), workerName: w ? displayName(w) : r.workerId, departmentId: w?.departmentId ?? null, policyName: pols.get(r.policyId)?.name ?? r.policyId, typeKind: pols.get(r.policyId)?.typeKind ?? null, source: r.source, extRef: r.extRef,
+        ...timeForms("requested", r.requestedMinutes), submitted_date: ptDateOf(r.createdAt), decided_date: r.decidedAt ? ptDateOf(r.decidedAt) : null, ...(await balanceAround(r)),
+      });
+    }
+    const totals = requestTotals(rows, i.totals_by ?? [], (id) => (ws.get(id) ? workerRef(ws.get(id)!) : id), (id) => pols.get(id)?.name ?? id);
+    return { data: { count: requests.length, ...totals, requests }, summary: `${requests.length} time-off requests` };
   },
 });
 
