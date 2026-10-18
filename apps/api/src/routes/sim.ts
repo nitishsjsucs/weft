@@ -10,10 +10,9 @@ import { ChatChannel, FaultKind, FaultMode, NoticeScenario, NotImplemented, Vali
 import { migrate, withWriteLock } from "@weft/db";
 import { emitEvent, SEED_TIME } from "@weft/core";
 import { serialGit } from "@weft/executor";
-import { seedWorld } from "@weft/seed";
+import { readSeedProfile, seedWorldProfile, type SeedProfile } from "@weft/seed/profile";
 import type { Weft, WeftEnv } from "../http/context";
-import { applyProfile, envProfile, storedProfile } from "../seed-profile";
-import { SimResetBody, type SeedProfile } from "../../../../packages/contracts/src/ext/tour";
+import { SimResetBody } from "../../../../packages/contracts/src/ext/tour";
 
 const AdvanceBody = z.union([
   z.object({ to: z.string() }).strict(),
@@ -78,20 +77,18 @@ const resetChains = new WeakMap<Weft, Promise<unknown>>();
  * (no git process is running then) before any table is dropped, and drop, migrate and seed hold the write lock
  * together, so no other request writes into a half-built world.
  */
-export function resetWorld(weft: Weft, profile?: SeedProfile): Promise<{ ms: number; profile: SeedProfile }> {
+export function resetWorld(weft: Weft, opts: { profile?: SeedProfile } = {}): Promise<{ ms: number; profile: SeedProfile }> {
   const prev = resetChains.get(weft) ?? Promise.resolve();
-  const run = prev.then(() => rebuild(weft, profile), () => rebuild(weft, profile));
+  const run = prev.then(() => rebuild(weft, opts.profile), () => rebuild(weft, opts.profile));
   resetChains.set(weft, run.catch(() => undefined));
   return run;
 }
 
-async function rebuild(weft: Weft, requested?: SeedProfile): Promise<{ ms: number; profile: SeedProfile }> {
+/** The world is rebuilt with the profile it was seeded with (a rich dev world stays rich) unless the caller names one. */
+async function rebuild(weft: Weft, want?: SeedProfile): Promise<{ ms: number; profile: SeedProfile }> {
   const t0 = Date.now();
-  // The tour's seed profile (owner: tour): an omitted profile keeps the world's own, read before tables are dropped.
-  // Tests never pick up WEFT_SEED_PROFILE from the shell: they get rich only by asking for it.
-  const want: SeedProfile = requested ?? (await storedProfile(weft.db)) ?? (weft.testMode ? "base" : envProfile());
-  let profile: SeedProfile = "base";
   const rate = weft.clock.rate();
+  const profile = want ?? (await readSeedProfile(weft.db));
   const scheduler = weft.scheduler as { exclusive?: <T>(fn: () => Promise<T>) => Promise<T> };
   const exclusive = <T>(fn: () => Promise<T>) => (scheduler.exclusive ? scheduler.exclusive(fn) : fn());
   await exclusive(async () => {
@@ -107,8 +104,7 @@ async function rebuild(weft: Weft, requested?: SeedProfile): Promise<{ ms: numbe
         for (const { name } of tables) await weft.db.run(sql.raw(`DROP TABLE IF EXISTS "${name.replace(/"/g, "")}"`));
       } finally { await weft.db.run(sql`PRAGMA foreign_keys=ON`); }
       await migrate(weft.db);
-      await seedWorld(weft);
-      profile = await applyProfile(weft, want);
+      await seedWorldProfile(weft, profile);
     });
     await weft.clock.set(SEED_TIME, rate);
     // The engine lives across the reset; without this, a clock move before the next tick would start counting cron
@@ -180,10 +176,12 @@ export function simRoutes(weft: Weft): Hono<WeftEnv> {
 
   r.post("/v1/sim/reset", async (c) => {
     if (!weft.testMode && process.env.WEFT_ALLOW_RESET === "0") throw new NotImplemented("reset disabled by WEFT_ALLOW_RESET=0");
-    const body = SimResetBody.parse(await c.req.json().catch(() => ({})));
     // No scheduler kick here: a reset world must digest exactly like a fresh `pnpm db:seed` (no tick has run).
-    const { ms, profile } = await resetWorld(weft, body.profile);
-    return c.json({ ok: true, ms, profile });
+    // Optional { profile: "base" | "rich" }; without it the world keeps the profile it was seeded with. Strict: an
+    // unknown profile or key is a 400 (packages/contracts/src/ext/tour.ts), and a missing body counts as {}.
+    const { profile } = SimResetBody.parse(await c.req.json().catch(() => ({})));
+    const { ms, profile: seeded } = await resetWorld(weft, { profile });
+    return c.json({ ok: true, ms, profile: seeded });
   });
 
   return r;

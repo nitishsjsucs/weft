@@ -14,8 +14,8 @@
 //   --api-port N     API port (default 4070, e2e 4170; env WEFT_API_PORT)
 //   --web-port N     web port (default 3070, e2e 3170; env WEFT_WEB_PORT)
 //   --api-only       start only the API
-//   --profile P      seed profile, base or rich (default rich, and base with --e2e). Passed as WEFT_SEED_PROFILE to the
-//                    seed step and the API, so a reset with no profile rebuilds the same kind of world (owner: tour).
+//   --profile P      seed profile for a fresh seed: rich (default, history on every screen) or base (the pinned test
+//                    world); env WEFT_SEED_PROFILE. --e2e always seeds base.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -25,8 +25,8 @@ const args = process.argv.slice(2);
 const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const e2e = args.includes("--e2e");
 const apiOnly = args.includes("--api-only");
-const profile = flag("--profile") ?? (e2e ? "base" : process.env.WEFT_SEED_PROFILE ?? "rich");
-if (profile !== "base" && profile !== "rich") { console.error(`dev: --profile must be base or rich, not ${profile}`); process.exit(2); }
+const profile = e2e ? "base" : (flag("--profile") ?? process.env.WEFT_SEED_PROFILE ?? "rich");
+if (profile !== "base" && profile !== "rich") { console.error(`dev: --profile must be base or rich, got ${profile}`); process.exit(2); }
 const apiPort = Number(flag("--api-port") ?? (e2e ? 4170 : process.env.WEFT_API_PORT ?? 4070));
 const webPort = Number(flag("--web-port") ?? (e2e ? 3170 : process.env.WEFT_WEB_PORT ?? 3070));
 const root = resolve(import.meta.dirname, "..");
@@ -99,7 +99,6 @@ const shared: NodeJS.ProcessEnv = {
   WEFT_API_PORT: String(apiPort),
   WEFT_WEB_PORT: String(webPort),
   WEFT_DEV_AUTH: "1",
-  WEFT_SEED_PROFILE: profile,
   NEXT_TELEMETRY_DISABLED: "1",
   ...(e2e ? { WEFT_LLM: "scripted", WEFT_CLOCK_RATE: "0", WEFT_E2E: "1" } : {}),
 };
@@ -121,14 +120,11 @@ if (e2e || args.includes("--fresh") || !existsSync(join(dataDir, "weft.db"))) {
   // Seeding never calls a model and gets no secrets, so it always composes with the scripted provider. Without this,
   // WEFT_LLM=openai reached the seed step and it failed with PROVIDER_CONFIG before the API ever started.
   const { WEFT_BACKGROUND_LLM: _background, ...seedBase } = shared;
-  const seedEnv: NodeJS.ProcessEnv = { ...seedBase, WEFT_LLM: "scripted" };
+  const seedEnv: NodeJS.ProcessEnv = { ...seedBase, WEFT_LLM: "scripted", WEFT_SEED_PROFILE: profile };
+  log(`seeding ${dataDir} with the ${profile} profile`);
   for (const cmd of ["reset", "seed"]) {
     const r = spawnSync(tsx, [...pre, "packages/seed/src/cli.ts", cmd], { cwd: root, env: seedEnv, stdio: "inherit" });
     if (r.status !== 0) { log(`db ${cmd} failed (${r.status ?? r.signal})`); process.exit(r.status ?? 1); }
-  }
-  if (profile !== "base") {
-    const r = spawnSync(tsx, [...pre, "scripts/seed-profile.ts"], { cwd: root, env: seedEnv, stdio: "inherit" });
-    if (r.status !== 0) { log(`seed profile ${profile} failed (${r.status ?? r.signal})`); process.exit(r.status ?? 1); }
   }
 }
 
@@ -213,6 +209,6 @@ async function waitFor(url: string, ms: number): Promise<boolean> {
 const apiUp = await waitFor(`http://127.0.0.1:${apiPort}/v1/health`, 60_000);
 const webUp = apiOnly || (await waitFor(`http://127.0.0.1:${webPort}/`, 120_000));
 if (!stopping) {
-  if (apiUp && webUp) log(`ready: api http://127.0.0.1:${apiPort}${apiOnly ? "" : `  web http://127.0.0.1:${webPort}`}  data ${dataDir}  profile ${profile}${e2e ? "  (e2e: scripted provider, clock rate 0)" : ""}. Ctrl+C stops both groups.`);
+  if (apiUp && webUp) log(`ready: api http://127.0.0.1:${apiPort}${apiOnly ? "" : `  web http://127.0.0.1:${webPort}`}  data ${dataDir}${e2e ? "  (e2e: scripted provider, clock rate 0)" : ""}. Ctrl+C stops both groups.`);
   else log(`still waiting: api ${apiUp ? "up" : "down"}, web ${webUp ? "up" : "down"}`);
 }

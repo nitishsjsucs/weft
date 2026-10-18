@@ -10,7 +10,7 @@ import { PageHeader } from "../page";
 
 export function PayrollList() {
   const router = useRouter();
-  const runs = useGet("/v1/payrolls", { query: { limit: 25 } });
+  const runs = useGet("/v1/payrolls", { query: { limit: 100 } });
   const latest = [...(runs.data?.data ?? [])].filter((r) => r.payScheduleId === "ps_us_semimonthly").sort((a, b) => b.periodEnd.localeCompare(a.periodEnd))[0];
   const draft = useMutation((periodEnd: string) => client.post("/v1/payrolls/drafts", { body: { payScheduleId: "ps_us_semimonthly", periodEnd } }));
   async function newDraft() {
@@ -28,10 +28,10 @@ export function PayrollList() {
       />
       {runs.error || draft.error ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(runs.error ?? draft.error)}</div> : null}
       <Card className="divide-y divide-[var(--app-border)]">
-        {(runs.data?.data ?? []).map((r) => (
+        {[...(runs.data?.data ?? [])].sort((a, b) => b.periodEnd.localeCompare(a.periodEnd) || b.id.localeCompare(a.id)).map((r) => (
           <Link key={r.id} href={`/app/payroll/${r.id}`} data-testid={`payroll-run-${r.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-2">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-2 font-medium">{period(r.periodStart, r.periodEnd)}{runKind(r.subtype).badge ? <Badge tone="outline" data-testid={`payroll-run-kind-${r.id}`}>{runKind(r.subtype).badge}</Badge> : null}</div>
+              <div className="flex items-center gap-2 text-2 font-medium">{period(r.periodStart, r.periodEnd)}{runKind(r.subtype).badge ? <Badge tone="outline" data-testid={`payroll-run-kind-${r.id}`}>{runKind(r.subtype).badge}</Badge> : null}{r.taxDataVersion === "imported" ? <Badge tone="outline">Imported</Badge> : null}</div>
               <div className="text-1 text-gray-10">US · {runKind(r.subtype).label} · payday {fmtDate(r.payday)} · {plural(r.paycheckCount, "paycheck")}</div>
             </div>
             {r.anomalySummary && r.status === "draft" ? <span className="hidden text-1 text-amber-11 tablet:inline">{r.anomalySummary.needsReview} need review</span> : null}

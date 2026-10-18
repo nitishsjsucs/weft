@@ -158,11 +158,13 @@ function PayTab({ d }: { d: Detail }) {
       <div className="grid gap-6 tablet:grid-cols-2 [&>*]:min-w-0">
         <Card className="p-4">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Direct deposit</h2>
-          {d.bankAccount ? <Facts rows={[["Bank", d.bankAccount.bankName], ["Account", `ending ${d.bankAccount.last4}`], ["Status", d.bankAccount.status]]} /> : <p className="text-[13px] text-amber-11">No bank account. Paychecks are blocked until direct deposit is set up.</p>}
+          {d.bankAccount ? <Facts rows={[["Bank", d.bankAccount.bankName], ["Account", `ending ${d.bankAccount.last4}`], ["Status", d.bankAccount.status]]} />
+            : d.worker.type === "contractor" ? <p className="text-[13px] text-gray-10">Paid monthly in {d.worker.currency} on the contractor payment rail, converted at the fixed FX table. See Contractors for payouts.</p>
+            : <p className="text-[13px] text-amber-11">No bank account. Paychecks are blocked until direct deposit is set up.</p>}
         </Card>
         <Card className="p-4">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Tax setup</h2>
-          {d.taxProfile ? <Facts rows={[["W-4", d.taxProfile.w4Version], ["Federal filing", human(d.taxProfile.filingStatus)], ["State filing", d.taxProfile.stateFilingStatus ? human(d.taxProfile.stateFilingStatus) : "-"], ["State allowances", d.taxProfile.stateAllowances === null ? "-" : String(d.taxProfile.stateAllowances)], ["Work state", d.worker.workState ?? "-"]]} /> : <p className="text-[13px] text-gray-10">No tax profile yet.</p>}
+          {d.taxProfile ? <Facts rows={[["W-4", d.taxProfile.w4Version], ["Federal filing", human(d.taxProfile.filingStatus)], ["State filing", d.taxProfile.stateFilingStatus ? human(d.taxProfile.stateFilingStatus) : "-"], ["State allowances", d.taxProfile.stateAllowances === null ? "-" : String(d.taxProfile.stateAllowances)], ["Work state", d.worker.workState ?? "-"]]} /> : <p className="text-[13px] text-gray-10">{d.worker.type === "contractor" ? "No US withholding: a global contractor files a W-8BEN instead of a W-4." : "No tax profile yet."}</p>}
         </Card>
       </div>
     </div>

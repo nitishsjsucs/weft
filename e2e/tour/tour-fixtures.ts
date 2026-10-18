@@ -20,7 +20,7 @@ export const test = base.extend<{ weft: WeftApi; world: TourWorld; consoleErrors
     expect(clock.now, "clock at the seed time after reset").toBe(SEED_NOW);
     expect(clock.rate).toBe(0);
     const profile = health.seedProfile ?? "base";
-    // Until the rich layer lands (packages/seed/src/rich.ts), the world stays base and the tour runs on its fallbacks.
+    // A world that cannot be made rich (WEFT_ALLOW_RESET=0, or a reset that falls back) runs the tour on its fallbacks.
     info.annotations.push({ type: "seed-profile", description: profile });
     await use({ rich: profile === "rich", profile });
   },

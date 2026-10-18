@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { Health } from "@weft/contracts";
 import type { Weft, WeftEnv } from "../http/context";
 import type { HealthSeedProfile } from "../../../../packages/contracts/src/ext/tour";
-import { storedProfile } from "../seed-profile";
+import { readSeedProfile } from "@weft/seed/profile";
 
 export const API_VERSION = "0.0.0";
 
@@ -17,7 +17,7 @@ export function healthRoutes(weft: Weft): Hono<WeftEnv> {
       clock: { now: weft.clock.now(), rate: weft.clock.rate() },
       testMode: weft.testMode, stubs: [...weft.stubs],
       // Additive (tour): which seed profile this world was built with.
-      seedProfile: (await storedProfile(weft.db)) ?? "base",
+      seedProfile: await readSeedProfile(weft.db),
     };
     return c.json(body);
   });
