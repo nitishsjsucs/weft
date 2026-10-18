@@ -5,7 +5,7 @@
 // Same rules as the rest of the rich layer: add rows only, fixed instants, (demo) names, no model calls.
 import { and, eq } from "drizzle-orm";
 import {
-  bankAccounts, documents, expenses, itAccounts, offers, onboardingTasks, payRates, principals, screeningOrders, simEmailMessages, taxProfiles, trainingAssignments,
+  bankAccounts, devices, documents, expenses, itAccounts, offers, onboardingTasks, payRates, principals, screeningOrders, simEmailMessages, taxProfiles, trainingAssignments,
   trainingCourses, workers, type DbTx,
 } from "@weft/db";
 import { newId, payroll, sha256Hex } from "@weft/core";
@@ -96,6 +96,10 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
         }
       }
     }
+    // Hardware before day one: Odette's laptop has arrived, Tobias's workstation is on order.
+    const [model, status, price] = h.dept === "dpt_hardware" ? ["Engineering workstation (sim)", "ordered", 324_900] as const : ["Larkspur standard laptop (sim)", "delivered", 189_900] as const;
+    await tx.insert(devices).values({ id: await newId(tx, "dev_"), workerId, model, status, orderRef: null, priceCents: price });
+    L.bump("devices");
     L.action({ ts: h.created, actorKind: "human", actorId: "usr_sam", command: "offers.create", args: { offer_id: offerId }, summary: `Drafted offer ${offerId} for ${who}, ${h.title}`, reversible: "no" });
     L.action({ ts: h.accepted, actorKind: "human", actorId: "usr_sam", command: "people.create_worker", args: { worker_id: workerId }, summary: `Added ${who} (${workerId}) as ${h.title}, starting ${h.start}`, reversible: "no" });
   }

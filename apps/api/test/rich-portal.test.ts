@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { ensureTestPrincipals } from "@weft/core";
 import { seedWorldProfile } from "@weft/seed/profile";
+import { createWeft } from "../src/compose";
 import { createTestWeft, type TestWeft } from "../src/testing";
 
 let weft: TestWeft;
@@ -36,20 +37,16 @@ describe("rich profile portal personas", () => {
     expect(stages["Marisol Quint (demo)"]).toBe(0);
   });
 
-  it("shows the policies and holidays that will apply, read-only, for the persona's own work state", async () => {
-    const ny = await get<{ startDate: string; policies: { id: string; usableFrom: string; accrual: string }[]; holidays: { date: string }[] }>("/v1/portal/time-off", persona("Odette").id);
+  it("offers the policies the persona's state calls for in the portal's Request time off section", async () => {
+    type Mine = { workerId: string | null; balances: { policyId: string }[] };
+    const ny = await get<Mine>("/v1/portal/time-off", persona("Odette").id);
     expect(ny.status).toBe(200);
-    expect(ny.json.startDate).toBe("2026-11-02");
-    const ids = ny.json.policies.map((p) => p.id);
+    expect(ny.json.workerId).toBe(persona("Odette").worker_id);
+    const ids = ny.json.balances.map((b) => b.policyId);
     expect(ids).toContain("top_vac_us");
-    expect(ids).toContain("top_sick_ny");
     expect(ids).not.toContain("top_sick_ca");
-    expect(ny.json.policies.every((p) => p.usableFrom >= "2026-11-02" && p.accrual.length > 0)).toBe(true);
-    expect(ny.json.holidays.length).toBeGreaterThan(0);
-    expect(ny.json.holidays.every((h) => h.date >= "2026-11-02")).toBe(true);
-    const ca = await get<{ policies: { id: string }[] }>("/v1/portal/time-off", persona("Tobias").id);
-    expect(ca.json.policies.map((p) => p.id)).toContain("top_sick_ca");
-    expect((await get("/v1/portal/time-off", "usr_dana")).status).toBe(403);
+    const ca = await get<Mine>("/v1/portal/time-off", persona("Tobias").id);
+    expect(ca.json.balances.map((b) => b.policyId)).toContain("top_sick_ca");
   });
 
   it("lists the persona's own claim and training, not Dana's", async () => {
@@ -60,4 +57,17 @@ describe("rich profile portal personas", () => {
     expect(tr.json.map((t) => t.courseCode)).toEqual(["ny_harassment"]);
     expect(tr.json.every((t) => t.workerId === persona("Odette").worker_id)).toBe(true);
   });
+});
+
+describe("a rich world after an API restart", () => {
+  it("keeps the chain valid once memory is read (the git head is read with the lazily found repo)", async () => {
+    const again = await createWeft({ dataDir: weft.dataDir, testMode: true });
+    try {
+      expect((await again.executor.verifyChain()).ok).toBe(true);
+      await again.executor.memory.tree("timeline/");
+      const v = await again.executor.verifyChain();
+      expect(v.head!.seq).toBeGreaterThan(100);
+      expect(v).toMatchObject({ ok: true, gitLag: 0 });
+    } finally { await again.close(); }
+  }, 60_000);
 });

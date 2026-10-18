@@ -87,7 +87,6 @@ export const ROUTES = [
   r("POST", "/v1/offers/:id/send", "offers", "w2-onboarding", "ToolOutcome", { auth: "not_mcp" }),
   r("POST", "/v1/offers/:id/void", "offers", "w2-onboarding", "ToolOutcome", { auth: "not_mcp" }),
   r("GET", "/v1/portal/me", "portal", "w2-onboarding", "PortalView", { auth: "ui_only" }),
-  r("GET", "/v1/portal/time-off", "portal", "w3-timeoff", "PortalTimeOff", { auth: "ui_only" }),
   r("POST", "/v1/portal/offer/view", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only" }),
   r("POST", "/v1/portal/documents/:id/sign", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "{ typedName, documentSha256 }" }),
   r("POST", "/v1/portal/w4", "portal", "w2-onboarding", "ToolOutcome", { auth: "ui_only", body: "W4Submission" }),

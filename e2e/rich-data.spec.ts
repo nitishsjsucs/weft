@@ -27,6 +27,7 @@ const ROUTES: Check[] = [
   { path: "/app/routines", need: [/Last run done/] },
   { path: "/app/routines/rt_people_digest", empty: ["No runs yet."] },
   { path: "/app/routines/rt_pre_payroll", empty: ["No runs yet."] },
+  { path: "/app/reports", empty: ["Zero in this range, so not drawn"] },
   { path: "/app/audit", need: ["offers.create", /Chain valid through #\d{3}/] },
   { path: "/app/memory", empty: ["No file links here yet."] },
   { path: "/app/integrations", empty: ["No hires imported yet.", "Nothing to decide."] },
@@ -84,4 +85,38 @@ test("the rich profile fills every audited screen", async ({ page, request }) =>
   }
   for (const g of KNOWN_GAPS) if (!gapsSeen.has(g)) failures.push(`known gap is filled now, drop it from KNOWN_GAPS: ${g}`);
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("the rich profile's history adds up in Reports, and the audit table fits", async ({ page, request }) => {
+  const h = { "x-weft-principal": "usr_dana" };
+  const moves = await (await request.get("/api/v1/reports/hires_and_departures_by_month?from=2026-01-01&to=2026-10-31", { headers: h })).json() as { rows: { hires: number; departures: number }[] };
+  expect(moves.rows.filter((r) => r.hires > 0).length, "months with hires").toBeGreaterThanOrEqual(4);
+  expect(moves.rows.filter((r) => r.departures > 0).length, "months with departures").toBeGreaterThanOrEqual(3);
+  const cost = await (await request.get("/api/v1/reports/payroll_cost_by_month?from=2026-01-01&to=2026-10-31", { headers: h })).json() as { rows: { reimbursements_cents: number; contractor_cents: number }[] };
+  expect(cost.rows.length, "months with paid runs").toBeGreaterThanOrEqual(10);
+  expect(cost.rows.filter((r) => r.reimbursements_cents > 0).length, "months with reimbursements").toBeGreaterThanOrEqual(4);
+  expect(cost.rows.filter((r) => r.contractor_cents > 0).length, "months with contractor payouts").toBeGreaterThanOrEqual(6);
+  await page.goto("/app/audit");
+  await expect(page.getByText(/Chain valid through #\d{3}/)).toBeVisible();
+  const overflow = await page.locator("table").first().evaluate((t) => { const box = t.parentElement!; return box.scrollWidth - box.clientWidth; });
+  expect(overflow, "audit table scrolls sideways at 1440 px").toBeLessThanOrEqual(1);
+});
+
+test("a manager's Home shows the team, and each portal persona sees its own record", async ({ page, request }) => {
+  await page.addInitScript(() => { try { window.localStorage.setItem("weft.viewingAs", "usr_imani"); } catch { /* storage blocked */ } });
+  await page.goto("/app");
+  const team = page.getByTestId("home-widget-team");
+  await expect(team).toBeVisible();
+  await expect(page.getByTestId("home-team-decisions")).toBeVisible();
+  await expect(team).toContainText("Joining");
+
+  const offers = await (await request.get("/api/v1/offers?limit=100", { headers: { "x-weft-principal": "usr_dana" } })).json() as { data?: { candidateFirst: string; status: string; personaPrincipalId: string | null }[] };
+  expect((offers.data ?? []).filter((o) => o.status === "accepted").length, "accepted offers").toBeGreaterThanOrEqual(3);
+  const odette = (offers.data ?? []).find((o) => o.candidateFirst === "Odette" && o.personaPrincipalId);
+  expect(odette, "a payroll-ready new hire with a portal persona").toBeTruthy();
+  await page.goto(`/portal?as=${odette!.personaPrincipalId}`);
+  await expect(page.getByTestId("portal-time-off")).toBeVisible();
+  await expect(page.getByTestId("portal-training")).toContainText("New York");
+  await expect(page.getByTestId("portal-training")).not.toContainText("California harassment prevention for supervisors");
+  await expect(page.locator("body")).not.toContainText("No expenses yet.");
 });

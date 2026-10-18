@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { DirectDepositSubmission, Forbidden, Unauthorized, type HumanSession } from "@weft/contracts";
-import { loadPersona, portalTimeOff, portalView } from "@weft/core";
+import { loadPersona, portalView } from "@weft/core";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { outcomeJson } from "./offers";
@@ -36,14 +36,6 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json(view);
   });
 
-  // What the new hire will accrue once they start (read-only; requests open after day one).
-  r.get("/v1/portal/time-off", async (c) => {
-    const s = need(c.var.session);
-    const p = await persona(s);
-    const view = await portalTimeOff(weft.db, s.companyId, p.workerId);
-    if (!view) throw new Forbidden("Only the new hire persona has a portal", { code: "NOT_NEW_HIRE" });
-    return c.json(view);
-  });
   r.post("/v1/portal/offer/view", async (c) => outcomeJson(c, await weft.executor.human.exec(need(c.var.session), "documents.view_offer", {})));
 
   r.post("/v1/portal/documents/:id/sign", async (c) => {
@@ -112,5 +104,5 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     return outcomeJson(c, out);
   });
 
-  return stubRoutes(r, "portal", ["GET /v1/portal/me", "GET /v1/portal/time-off", "POST /v1/portal/offer/view", "POST /v1/portal/documents/:id/sign", "POST /v1/portal/w4", "POST /v1/portal/state-withholding", "POST /v1/portal/direct-deposit", "POST /v1/portal/i9", "POST /v1/portal/benefits"]);
+  return stubRoutes(r, "portal", ["GET /v1/portal/me", "POST /v1/portal/offer/view", "POST /v1/portal/documents/:id/sign", "POST /v1/portal/w4", "POST /v1/portal/state-withholding", "POST /v1/portal/direct-deposit", "POST /v1/portal/i9", "POST /v1/portal/benefits"]);
 }
