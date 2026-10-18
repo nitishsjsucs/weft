@@ -3,8 +3,8 @@
 // golden path needs them enabled, keep their tools at 8 or fewer, and use new ids (rt_ prefix).
 //
 // rt_time_off_requests (GP14, research/wave3/expenses-timeoff.md 6.6): when a request is created, the zero-token
-// precheck reads the request (its checks and routing were computed at submit), the balance before and after and the
-// team calendar, and derives one time_off.decide proposal (approve when nothing blocks, else deny naming the rule)
+// precheck reads the request (its checks and routing were computed at submit), with the policy balance now and the
+// balance without this request, and the team calendar, and derives one time_off.decide proposal (approve when nothing blocks, else deny naming the rule)
 // with a grounded note, plus a #people-ops post without digits (comms.send_message grounding). The model files the
 // proposal and the post; the routed approver decides. Ships disabled; a manual run picks the oldest pending request.
 import { CHAT_ACT_TOOLS, W3_PLANNED_COMMANDS, type Precheck, type RoutineDef } from "@weft/contracts";
@@ -37,12 +37,21 @@ export const RT_TIME_OFF_REQUESTS: RoutineDef = {
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
-interface ReqView { id: string; workerId: string; workerName: string; departmentId: string | null; policyId: string; policyName: string; typeKind: string | null; status: string; startAt: string; endAt: string; requestedMinutes: number; approverPrincipalId: string | null; days: { date: string; minutes: number; holiday: boolean }[]; checks: { rule: string; severity: string; message: string }[] }
+type Bal = { minutes: number } | null;
+interface ReqView {
+  id: string; workerId: string; workerName: string; departmentId: string | null; policyId: string; policyName: string; typeKind: string | null; status: string; startAt: string; endAt: string;
+  requestedMinutes: number; approverPrincipalId: string | null; days: { date: string; minutes: number; holiday: boolean }[]; checks: { rule: string; severity: string; message: string }[];
+  balance_now?: Bal; balance_without_this_request?: Bal;
+}
 
-/** The proposal note: balance before and after, the review checks and the holidays inside the range. */
-export function decisionNote(r: ReqView, availableBefore: number | null): string {
+/**
+ * The proposal note: the policy balance now (every open request counted) and without this request, the review checks
+ * and the holidays inside the range. Not "before and after": with another open request on the policy, the balance
+ * without this one is not the balance before it (review fix group expense-and-timeoff).
+ */
+export function decisionNote(r: ReqView): string {
   const parts: string[] = [];
-  if (availableBefore !== null) parts.push(`${r.policyName} available ${h(availableBefore + r.requestedMinutes)} before this request, ${h(availableBefore)} after`);
+  if (r.balance_now && r.balance_without_this_request) parts.push(`${r.policyName} available ${h(r.balance_now.minutes)} now with every open request counted, ${h(r.balance_without_this_request.minutes)} without this request`);
   for (const c of r.checks.filter((x) => x.severity !== "info")) parts.push(`${c.rule}: ${c.message}`);
   const hol = r.days.filter((d) => d.holiday).map((d) => d.date);
   if (hol.length) parts.push(`company holidays ${hol.join(", ")} are charged 0 h`);
@@ -57,11 +66,9 @@ export const timeOffRequestsPrecheck: Precheck = async (ctx, exec) => {
   const list = ((obj(out.data).requests as ReqView[] | undefined) ?? []).filter((r) => r.status === "pending");
   const r = list.sort((a, b) => (a.id < b.id ? -1 : 1))[0];
   if (!r) return { action: "skip", reason: wanted ? `${wanted} is no longer pending.` : "No pending time-off requests." };
-  const bal = await exec.exec(ctx.companyId, "time_off.get_balance", { worker_id: r.workerId, policy_id: r.policyId });
-  const b = bal.ok && bal.status === "done" ? ((obj(bal.data).balances as { availableMinutes: number }[] | undefined) ?? [])[0] : undefined;
   const blocking = r.checks.filter((c) => c.severity === "block").map((c) => c.rule);
   const decision = blocking.length ? "deny" : "approve";
-  const note = blocking.length ? `Blocked by ${blocking.join(", ")}. ${decisionNote(r, b?.availableMinutes ?? null)}`.slice(0, 400) : decisionNote(r, b?.availableMinutes ?? null);
+  const note = blocking.length ? `Blocked by ${blocking.join(", ")}. ${decisionNote(r)}`.slice(0, 400) : decisionNote(r);
   const review = r.checks.filter((c) => c.severity === "review").map((c) => c.rule.toLowerCase().replace(/_/g, " "));
   const text = `A time-off request from ${r.workerName} is ready for a decision in Time Off. Weft is proposing to ${decision} it${review.length ? `; please look at the ${review.join(" and ")} first` : ""}.`;
   return {

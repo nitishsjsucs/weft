@@ -17,6 +17,8 @@ export interface TimeOffRequestRow {
   checks: { rule: string; severity: "info" | "review" | "block"; message: string; evidence: { label: string; ref: string }[] }[];
   decidedBy: string | null; decidedAt: string | null; decisionNote: string | null;
   source?: string; extRef?: string | null;
+  /** Today's policy balance with every open request counted, and that balance with only this request added back. */
+  balance_now?: { minutes: number } | null; balance_without_this_request?: { minutes: number } | null;
 }
 export interface TimeOffBalanceRow {
   workerId: string; policyId: string; policyName: string; typeName: string; typeKind: string;
@@ -80,6 +82,9 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
       </div>
       <CheckChips checks={r.checks} />
       {r.checks.filter((c) => c.severity !== "info").map((c) => <p key={c.rule} className="text-1 text-gray-11">{c.message}</p>)}
+      {r.status === "pending" && r.balance_now && r.balance_without_this_request ? (
+        <p className="text-1 tabular-nums text-gray-10">{r.policyName} balance <span className="text-gray-12">{hrs(r.balance_now.minutes)}</span> now, every open request counted; {hrs(r.balance_without_this_request.minutes)} without this request</p>
+      ) : null}
       <p className="text-1 text-gray-10">
         {r.status === "pending" ? <>Routed to <span className="text-gray-12">{principalName(r.approverPrincipalId)}</span>{r.routing.length > 1 ? `: ${r.routing.filter((s) => !s.principalId).map((s) => s.why).join("; ")}` : ""}</>
           : r.decidedBy ? <>Decided by {principalName(r.decidedBy)}{r.decisionNote ? `: ${r.decisionNote}` : ""}</> : null}

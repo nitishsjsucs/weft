@@ -1,7 +1,7 @@
 // Scenario GP14 (docs/wave3.md 5). Owner: w3-timeoff. Time off with a coverage conflict, end to end over HTTP on the
 // scripted provider: Ruth's pending vacation shows COVERAGE_CONFLICT for Nov 23 to 25 (3 of 9 out) and
-// INCLUDES_HOLIDAY for Nov 26 and 27, routed to Imani; rt_time_off_requests proposes a decision with the balance before
-// and after; viewing as Imani she approves, the hold becomes use rows and the calendar marks the days. The TX request
+// INCLUDES_HOLIDAY for Nov 26 and 27, routed to Imani; rt_time_off_requests proposes a decision with the balance now
+// and without the request; viewing as Imani she approves, the hold becomes use rows and the calendar marks the days. The TX request
 // shows a pto line in the open draft with gross unchanged, and an accrual posts when that run processes.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
@@ -53,7 +53,7 @@ describe("GP14 time off with a coverage conflict", () => {
     expect(p.headline).toMatch(/^Approve Ruth Okoro \(demo\)'s vacation 2026-11-23 to 2026-11-27 \(24\.00 h\)/);
     const args = JSON.parse(props[0]!.args_json) as { decision: string; note: string };
     expect(args.decision).toBe("approve");
-    expect(args.note).toMatch(/Larkspur Vacation available [\d.]+ h before this request, [\d.]+ h after/);
+    expect(args.note).toMatch(/Larkspur Vacation available 89\.00 h now with every open request counted, 113\.00 h without this request/);
     expect(args.note).toContain("COVERAGE_CONFLICT");
     expect(args.note).toContain("2026-11-26, 2026-11-27 are charged 0 h");
     const posts = await weft.sims.chat.list("#people-ops");

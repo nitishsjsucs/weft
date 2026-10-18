@@ -289,7 +289,7 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
     if (props.length !== 1) reasons.push(`${props.length} time_off.decide proposals`);
     const a = props[0] ? (asObj(props[0].argsJson) as { request_id?: string; decision?: string; note?: string }) : null;
     if (a && a.request_id !== "tor_0003") reasons.push(`proposal for ${a.request_id}`);
-    if (a && !/available [\d.]+ h before this request/.test(a.note ?? "")) reasons.push("the note has no balance line");
+    if (a && !/available [\d.]+ h now with every open request counted, [\d.]+ h without this request/.test(a.note ?? "")) reasons.push("the note has no balance line");
     if (props[0] && props[0].status !== "pending") reasons.push(`proposal ${props[0].status}`);
     const decided = (await w.db.select().from(db.actions)).filter((x) => x.command === "time_off.decide");
     if (decided.length) reasons.push(`${decided.length} time_off.decide actions executed without approval`);

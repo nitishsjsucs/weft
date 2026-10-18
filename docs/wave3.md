@@ -165,7 +165,7 @@ the run marks them Paid out.
 
 **GP14. Time off with a coverage conflict (w3-timeoff, e2e `gp14-time-off.spec.ts`).** Ruth's pending vacation shows
 `COVERAGE_CONFLICT` for Nov 23 to 25 (3 of 9 out) and `INCLUDES_HOLIDAY` for Nov 26 and 27, routed to Imani.
-`rt_time_off_requests` summarizes balance before and after and proposes a decision. Viewing as Imani, she approves; the
+`rt_time_off_requests` states the balance now and without the request and proposes a decision. Viewing as Imani, she approves; the
 holds become use rows, the balance drops, and the calendar marks the days. The TX request shows a `pto` line in the open
 draft with gross unchanged, and an accrual posts when that run processes. GP9 still pays 90.00 h.
 

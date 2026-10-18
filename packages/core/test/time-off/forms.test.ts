@@ -18,9 +18,20 @@ describe("time-off forms", () => {
     });
   });
 
-  it("gives a request's policy balance before and after it from today's available and what the request holds", () => {
-    expect(requestBalance(5_340, 1_440)).toEqual({ balance_before_request: { minutes: 6_780, hours: 113, days: 14.13 }, balance_after_request: { minutes: 5_340, hours: 89, days: 11.13 } });
-    expect(requestBalance(960, 0)).toEqual({ balance_before_request: { minutes: 960, hours: 16, days: 2 }, balance_after_request: { minutes: 960, hours: 16, days: 2 } });
+  it("gives a request's policy balance now and without that request, from today's available and what it holds", () => {
+    expect(requestBalance(5_340, 1_440)).toEqual({ balance_now: { minutes: 5_340, hours: 89, days: 11.13 }, balance_without_this_request: { minutes: 6_780, hours: 113, days: 14.13 } });
+    expect(requestBalance(960, 0)).toEqual({ balance_now: { minutes: 960, hours: 16, days: 2 }, balance_without_this_request: { minutes: 960, hours: 16, days: 2 } });
+    // No ledger for the worker and policy: null, never a zero balance.
+    expect(requestBalance(null, 480)).toEqual({ balance_now: null, balance_without_this_request: null });
+  });
+
+  it("two pending requests on one policy share the balance now; each adds back only its own minutes", () => {
+    // 8,220 available today after holds of 1,440 (A) and 960 (B): A's figure without it is 9,660 and B's is 9,180.
+    // Neither is a running balance: 9,660 is not "before A and B" (that is 10,620).
+    const a = requestBalance(8_220, 1_440), b = requestBalance(8_220, 960);
+    expect([a.balance_now, b.balance_now]).toEqual([{ minutes: 8_220, hours: 137, days: 17.13 }, { minutes: 8_220, hours: 137, days: 17.13 }]);
+    expect([a.balance_without_this_request, b.balance_without_this_request]).toEqual([{ minutes: 9_660, hours: 161, days: 20.13 }, { minutes: 9_180, hours: 153, days: 19.13 }]);
+    expect(Object.keys(a)).toEqual(["balance_now", "balance_without_this_request"]);
   });
 
   it("totals requests overall, and per worker and policy only when asked, largest first", () => {

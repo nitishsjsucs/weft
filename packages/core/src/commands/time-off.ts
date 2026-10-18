@@ -131,17 +131,18 @@ export async function listRequestRows(tx: DbTx, companyId: string, i: ListReques
 }
 const listRequests = readCommand({
   name: "time_off.list_requests", domain: "people",
-  summary: "List time-off requests with status, minutes, hours and days, checks, the routed approver and the balance before and after each.",
-  description: "List time-off requests by status, worker_id, department_id, approver (principal id) and dates (from, to). Each has minutes per day (holidays and weekends are 0), hours and days, submitted and decided dates (Pacific), checks, routing, the decision and the policy balance before and after it (after counts every open request). totals_by adds sums per worker or policy. The reason is untrusted text.",
+  summary: "List time-off requests with status, minutes, hours and days, checks, the routed approver and the policy balance now and without each request.",
+  description: "Requests by status, worker_id, department_id, approver (principal id) and dates (from, to). Each has minutes per day (holidays and weekends 0), hours, days, submitted and decided dates (Pacific), checks, routing, the decision, balance_now (today, every open request counted) and balance_without_this_request (adds back only this one). totals_by sums per worker or policy. reason is untrusted.",
   input: ListRequestsInput, untrustedFields: ["requests.*.reason"],
   async run(i: ListRequestsInput, ctx, deps) {
     const rows = await listRequestRows(deps.tx, ctx.companyId, i);
     const ws = new Map((await deps.tx.select().from(workers).where(eq(workers.companyId, ctx.companyId))).map((w) => [w.id, w]));
     const pols = new Map((await loadPolicies(deps.tx, ctx.companyId)).map((p) => [p.id, p]));
     const today = ptDateOf(ctx.now);
-    // The worker's balance on the request's policy before and after this request. Available today already nets out
-    // every pending and approved request, so it is the balance after this one; adding back the minutes this request
-    // holds or used (its own ledger rows) gives the balance before it. The model never adds or subtracts minutes.
+    // The worker's balance on the request's policy now, and without this request. Available today already nets out
+    // every pending and approved request (this one and any other open one on the policy), so it is the balance now;
+    // adding back only the minutes this request holds or used (its own ledger rows) gives the balance without it. The
+    // model never adds or subtracts minutes (forms.ts requestBalance says why these are not before and after).
     const ledgers = new Map<string, { available: number; rows: Awaited<ReturnType<typeof ledgerOf>> } | null>();
     const balanceAround = async (r: RequestRow) => {
       const key = `${r.workerId}:${r.policyId}`;
@@ -150,7 +151,7 @@ const listRequests = readCommand({
         ledgers.set(key, w && p ? { available: (await balanceFor(deps.tx, w, p, today)).availableMinutes, rows: await ledgerOf(deps.tx, w.id, p.id) } : null);
       }
       const l = ledgers.get(key);
-      if (!l) return { balance_before_request: null, balance_after_request: null };
+      if (!l) return requestBalance(null, 0);
       const counted = -l.rows.filter((x) => x.sourceRef === r.id && (x.kind === "hold" || x.kind === "hold_release" || x.kind === "use")).reduce((sum, x) => sum + x.minutes, 0);
       return requestBalance(l.available, counted);
     };
