@@ -46,3 +46,14 @@ runs on its fallbacks (the reset offer, a skipped portal stop, unanchored cards 
 - `pnpm test` covers `apps/web/test/tour-steps.test.ts`, `apps/web/test/tour-engine.test.ts` and
   `apps/api/test/tour-profile.test.ts`.
 - `pnpm e2e:tour` runs `e2e/tour/` on its own ports (5640 and 5641) and data dir (`.data-e2e-tour`), scripted.
+
+## Measured (round 1, base world)
+
+| Run | Total | Notes |
+|---|---|---|
+| tour-complete, scripted, reading each card for its seconds | 128 s | every target found; the portal stop skipped (no persona on base) |
+| tour-autoplay, scripted | 132 s | 20 steps |
+| tour-autoplay, live gpt-5.6-luna | 142 s | notice run 8.2 s (soft 12 s), chart step 7.4 s; $0.0038 |
+
+The live pass is opt-in: `WEFT_TOUR_LIVE=1 pnpm e2e:tour tour-autoplay` starts the same server on live Luna with
+`WEFT_LIVE_USD_CAP=0.05`, its own data dir (`.data-e2e-tour-live`) and tracing off.

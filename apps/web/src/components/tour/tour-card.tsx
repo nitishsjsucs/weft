@@ -4,7 +4,7 @@
 // app's bg-black/20 scrim; a missing target or a phone gets a fixed sheet. Styling follows PopoverContent and
 // research/design.md: bg-card, rounded-xl, --shadow-modal, 13 px text, the madder accent for progress.
 import { Dialog, Popover } from "radix-ui";
-import { useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { Pause, Play, X } from "lucide-react";
 import { Button, Kbd, ShimmerText } from "@weft/ui/components";
@@ -43,6 +43,8 @@ export interface CardHandlers {
   titleId: string;
   autoplay: boolean;
   desktop: boolean;
+  /** Move focus to the title when the step is ready (off on steps that open an app popover). */
+  focusTitle: boolean;
 }
 
 const TOTAL = TOUR_STEPS.length;
@@ -72,6 +74,16 @@ const cardClass = "weft-tour-card flex flex-col gap-3 rounded-xl bg-card p-4 tex
 
 function Inner({ v, h }: { v: CardView; h: CardHandlers }) {
   const pct = Math.round(((v.index + 1) / TOTAL) * 100);
+  // Focus the title when a step is ready, and again when the card remounts in another shape (sheet to popover) while
+  // focus was in the card; never pull focus back from the page the person tabbed into.
+  useEffect(() => {
+    if (!v.ready || !h.focusTitle) return;
+    const raf = requestAnimationFrame(() => {
+      const ae = document.activeElement;
+      if (!ae || ae === document.body || ae.closest("[data-tour-card]")) h.titleRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [v.ready, v.step.id, h.focusTitle, h.titleRef]);
   const centered = v.step.target === null;
   return (
     <>

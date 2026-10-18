@@ -330,9 +330,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
       const body = step.id === "rate-live" && !memo().approved ? TOUR_COPY.rateNotApproved : null;
       setUi({ ready: true, target: hit?.el ?? null, found: !!hit || step.target === null, secondary, note: missing ? TOUR_COPY.missing : null, body, nextEnabled: true, mode: step.action === "finish" ? "finish" : "next" });
       setAnnounce(`Step ${index + 1} of ${TOUR_STEPS.length}: ${step.title}`);
-      // Focus goes to the card title, except on steps that open an app popover or drawer: moving focus out of the
-      // flag popover would close it (Radix dismisses on focus outside), and the live region still announces the step.
-      if (step.dock !== "side") requestAnimationFrame(() => titleRef.current?.focus({ preventScroll: true }));
+      // The card focuses its title (tour-card.tsx), except on steps that open an app popover or drawer: moving focus
+      // out of the flag popover would close it (Radix dismisses on focus outside); the live region still announces.
 
       // 5. The step's action.
       if (step.action === "finish") {
@@ -621,7 +620,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
           {ui.ready && !ui.offPage && step.target !== null ? <TourRing target={ui.target} found={ui.found} secondary={ui.secondary} /> : null}
           <TourCard
             v={view}
-            h={{ onBack: () => dispatch({ type: "back" }), onExit: exit, onToggleAutoplay: () => dispatch({ type: "autoplay", on: !s.autoplay }), onHover: (kind, v) => { hover.current = { ...hover.current, [kind]: v }; }, titleRef, bodyId, titleId, autoplay: s.autoplay, desktop: desktopKeys }}
+            h={{ onBack: () => dispatch({ type: "back" }), onExit: exit, onToggleAutoplay: () => dispatch({ type: "autoplay", on: !s.autoplay }), onHover: (kind, v) => { hover.current = { ...hover.current, [kind]: v }; }, titleRef, bodyId, titleId, autoplay: s.autoplay, desktop: desktopKeys, focusTitle: step.dock !== "side" }}
           />
         </>
       ) : null}
