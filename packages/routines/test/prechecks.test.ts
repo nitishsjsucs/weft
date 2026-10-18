@@ -56,6 +56,37 @@ describe("prechecks on the t1 and t2 read shapes", () => {
     expect(await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), copy({ id: "ntc_0001", status: "new", open_proposals: 0 }))).toMatchObject({ action: "run" });
   });
 
+  // Review fix group notices-and-proposals: a rate notice that confirms the rate in effect is acknowledge-only.
+  const impactFor = (inEffect: Record<string, string>) => (a: Record<string, unknown>) => {
+    const old = inEffect[String(a.code)]!;
+    return { old_rate: old, new_rate: a.new_rate, rate_delta: old === a.new_rate ? "0" : "0.019" };
+  };
+  it("agency_notice acknowledges a rate notice whose rate is already in effect: skipped with the reason, nothing proposed", async () => {
+    const ex = exec({ "notices.get": rateNotice({ form_code: "DE 2088", proposals: [], duplicate_of: null }), "tax.rate_change_impact": impactFor({ sui: "0.015" }) });
+    const r = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), ex);
+    expect(r).toEqual({ action: "skip", reason: "Acknowledge only: notice ntc_0002 (DE 2088) confirms the rate already in effect, CA SUI 1.5% effective 2026-01-01. Nothing to change or reply to, so no rate change or reply is proposed. A person can record it as read with notices.acknowledge." });
+    // The delta is against the rate in effect, not the notice's own "previously" figure (here 3.4%).
+    expect(ex.seen.find((s) => s.command === "tax.rate_change_impact")?.args).toMatchObject({ jurisdiction: "CA", code: "sui", new_rate: "0.015", effective_from: "2026-01-01" });
+    expect(JSON.stringify(r)).not.toContain("tax.update_rate\"");
+  });
+
+  it("agency_notice treats an equal rate written differently (0.0340 against 0.034) as no change", async () => {
+    const notice = { notice: { id: "ntc_0003", kind: "rate_change", status: "new", tax_account_id: "txa_0002", agency: "ca_edd", form_code: "DE 2088", proposals: [], extracted: { agency: "ca_edd", kind: "rate_change", effectiveFrom: "2026-01-01", rates: [{ code: "sui", oldRate: "0.034", newRate: "0.0340" }] } } };
+    const r = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0003" }), exec({ "notices.get": notice, "tax.rate_change_impact": { old_rate: "0.034", new_rate: "0.0340", rate_delta: "0.0000" } }));
+    expect(r.action === "skip" && r.reason).toContain("confirms the rate already in effect, CA SUI 3.4% effective 2026-01-01");
+  });
+
+  it("agency_notice proposes the rate that changes when another stated rate is already in effect", async () => {
+    const notice = rateNotice({ proposals: [], extracted: { agency: "ca_edd", kind: "rate_change", taxAccountId: "txa_0003", effectiveFrom: "2026-01-01", rates: [{ code: "sui", oldRate: "0.034", newRate: "0.034" }, { code: "ett", oldRate: "0.002", newRate: "0.001" }] } });
+    const r = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), exec({ "notices.get": notice, "tax.rate_change_impact": impactFor({ sui: "0.034", ett: "0.002" }) }));
+    expect(r).toMatchObject({ action: "run", derivedArgs: { plan: "update_rate", "tax.update_rate": { code: "ett", rate: "0.001" } } });
+  });
+
+  it("agency_notice keeps the update_rate plan when the rate in effect cannot be read", async () => {
+    const ex: ReadOnlyExecutor = { async exec(_c, command) { return command === "notices.get" ? done(rateNotice({ proposals: [] })) : { ok: false, refusal: { code: "DOMAIN_NO_CURRENT_RATE", message: "none", hint: null, example: null }, tainted: false } as ToolOutcome; } };
+    expect(await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), ex)).toMatchObject({ action: "run", derivedArgs: { plan: "update_rate", "tax.update_rate": { rate: "0.015" } } });
+  });
+
   it("new_hire derives accounts, the welcome, registrations for unregistered accounts and the laptop", async () => {
     const r = await PRECHECKS.new_hire!(ctx({ worker_id: "wrk_0049", offer_id: "offr_0001" }), exec({
       "people.get": { worker: { id: "wrk_0049", name: "Noor Castellanos (demo) (wrk_0049)", work_state: "CO" } },
