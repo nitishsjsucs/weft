@@ -330,7 +330,9 @@ export function TourProvider({ children }: { children: ReactNode }) {
       const body = step.id === "rate-live" && !memo().approved ? TOUR_COPY.rateNotApproved : null;
       setUi({ ready: true, target: hit?.el ?? null, found: !!hit || step.target === null, secondary, note: missing ? TOUR_COPY.missing : null, body, nextEnabled: true, mode: step.action === "finish" ? "finish" : "next" });
       setAnnounce(`Step ${index + 1} of ${TOUR_STEPS.length}: ${step.title}`);
-      requestAnimationFrame(() => titleRef.current?.focus({ preventScroll: true }));
+      // Focus goes to the card title, except on steps that open an app popover or drawer: moving focus out of the
+      // flag popover would close it (Radix dismisses on focus outside), and the live region still announces the step.
+      if (step.dock !== "side") requestAnimationFrame(() => titleRef.current?.focus({ preventScroll: true }));
 
       // 5. The step's action.
       if (step.action === "finish") {
