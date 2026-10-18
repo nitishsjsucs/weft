@@ -15,6 +15,8 @@ import {
 } from "@weft/db";
 import { canonicalJson, newId, payroll, sha256Hex } from "@weft/core";
 import type { SeedContext } from "../context";
+import { seedRichMotion, type MotionApi } from "./motion";
+import { seedImportedPayHistory } from "./pay-history";
 
 const CO = "cmp_larkspur";
 const GENESIS = "0".repeat(64);
@@ -242,7 +244,7 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
   // Chat runs a viewer can open from the agent panel and the run view.
   const chats: RunSpec[] = [
     { at: pt("2026-10-23", 10, 12), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { chart: { kind: "stacked_bar" } } }],
-      final: "Payroll cost by month, from the runs Weft has paid: September and October so far. The chart splits each month into gross pay, employer taxes and benefits." },
+      final: "Payroll cost by month for 2026: January to August from the imported history of the previous provider, September and October from the runs Weft paid. The chart splits each month into gross pay, employer taxes and benefits." },
     { at: pt("2026-10-23", 10, 20), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "payroll__get_paycheck", args: { run_id: "pay_2026_10_30", worker: "Lena Brooks (demo)" }, data: { flags: ["GROSS_CHANGE"] } }, { name: "actions__list", args: { command: "people.set_pay_rate" }, data: { seq: 1 } }],
       final: "Lena Brooks (demo) is flagged GROSS_CHANGE: her gross changed against the last processed run because the raise in action #1 took effect on Oct 16." },
     { at: pt("2026-10-22", 15, 4), trigger: "chat", onBehalfOf: "usr_theo", tools: [], status: "refused",
@@ -384,8 +386,14 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
   const { tx } = L;
   const kinds = ["sign_offer", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts"] as const;
   const owner = (k: string) => (k === "i9_sim" ? "hr" : k === "it_accounts" ? "agent" : "employee");
+  for (const w of ws.filter((x) => x.type === "contractor")) {
+    for (const k of ["sign_offer", "direct_deposit", "it_accounts"] as const) {
+      await tx.insert(onboardingTasks).values({ id: await newId(tx, "obt_"), workerId: w.id, kind: k, status: "done", owner: k === "it_accounts" ? "agent" : "employee", dueOn: w.startDate, doneAt: pt(addDays(w.startDate, -3), 11) });
+      L.bump("onboarding_tasks");
+    }
+  }
   for (const w of ws) {
-    if (w.type !== "employee" || w.startDate < "2026-01-01") continue;
+    if (w.type !== "employee") continue;
     const mira = w.id === "wrk_0022";
     for (const k of kinds) {
       const done = !mira || ["sign_offer", "federal_w4", "state_withholding", "it_accounts"].includes(k);
@@ -491,22 +499,22 @@ async function seedMoneyAndCompliance(L: Layer, ws: W[]): Promise<void> {
   const acct = new Map((await tx.select().from(taxAccounts)).map((a) => [`${a.agency}:${a.accountType}`, a.id]));
   const filed: [string, string, string, string][] = [
     ["irs:federal", "941", "2026-Q1", "2026-04-28"], ["irs:federal", "941", "2026-Q2", "2026-07-29"], ["irs:federal", "940", "2025", "2026-01-27"], ["irs:federal", "w2_w3", "2025", "2026-01-27"],
-    ["ca_edd:combined", "de9", "2026-Q1", "2026-04-29"], ["ca_edd:combined", "de9c", "2026-Q1", "2026-04-29"], ["ca_edd:combined", "de9", "2026-Q2", "2026-07-30"], ["ca_edd:combined", "de9c", "2026-Q2", "2026-07-30"],
-    ["ny_dol:unemployment", "nys45", "2026-Q1", "2026-04-29"], ["ny_dol:unemployment", "nys45", "2026-Q2", "2026-07-30"], ["tx_twc:unemployment", "c3", "2026-Q1", "2026-04-28"], ["tx_twc:unemployment", "c3", "2026-Q2", "2026-07-29"],
+    ["ca_edd:combined", "ca_de9", "2026-Q1", "2026-04-29"], ["ca_edd:combined", "ca_de9c", "2026-Q1", "2026-04-29"], ["ca_edd:combined", "ca_de9", "2026-Q2", "2026-07-30"], ["ca_edd:combined", "ca_de9c", "2026-Q2", "2026-07-30"],
+    ["ny_dtf:withholding", "ny_nys45", "2026-Q1", "2026-04-29"], ["ny_dtf:withholding", "ny_nys45", "2026-Q2", "2026-07-30"], ["tx_twc:unemployment", "tx_c3", "2026-Q1", "2026-04-28"], ["tx_twc:unemployment", "tx_c3", "2026-Q2", "2026-07-29"],
   ];
   let k = 0;
   for (const [a, form, period, day] of filed) {
     const taxAccountId = acct.get(a);
     if (!taxAccountId) continue;
     k += 1;
-    await tx.insert(filings).values({ id: await newId(tx, "fil_"), taxAccountId, form, period, status: "accepted", filedAt: pt(day, 11), confirmation: `SIM-${form.toUpperCase()}-${period.replace("-", "")}-${String(4100 + k)}`, dueOn: null });
-    L.action({ ts: pt(day, 11), actorKind: "human", actorId: "usr_theo", command: "tax.file_return", args: { form, period }, summary: `Filed ${form.toUpperCase()} for ${period} with ${a.split(":")[0]} (sim); accepted`, reversible: "no" });
+    await tx.insert(filings).values({ id: await newId(tx, "fil_"), taxAccountId, form, period, status: "accepted", filedAt: pt(day, 11), confirmation: `SIM-${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()}-${period.replace("-", "")}-${String(4100 + k)}`, dueOn: null });
+    L.action({ ts: pt(day, 11), actorKind: "human", actorId: "usr_theo", command: "tax.file_return", args: { form, period }, summary: `Filed ${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()} for ${period} with ${a.split(":")[0]} (sim); accepted`, reversible: "no" });
     L.bump("filings");
   }
   // More agency notices across states and statuses, with their mail.
   const ntc: { agency: string; kind: string; form: string; title: string; at: string; status: string; body: string; resolution?: string; confirmation?: string }[] = [
     { agency: "tx_twc", kind: "rate_change", form: "C-1", title: "TWC 2026 tax rate notice", at: "2026-01-12T16:00:00.000Z", status: "resolved", body: "SIMULATED NOTICE (demo). The 2026 Texas unemployment tax rate for Larkspur Robotics (demo) is unchanged.", resolution: "Rate confirmed unchanged; no update needed." },
-    { agency: "irs", kind: "deposit_schedule_change", form: "CP 136", title: "IRS deposit schedule notice", at: "2025-11-17T16:00:00.000Z", status: "resolved", body: "SIMULATED NOTICE (demo). Based on the lookback period your deposit schedule for 2026 is semiweekly.", resolution: "Deposit schedule set to semiweekly; acknowledgement sent.", confirmation: "SIM-IRS-ACK-20251119" },
+    { agency: "irs", kind: "deposit_schedule_change", form: "CP 136", title: "IRS deposit schedule notice", at: "2025-11-17T16:00:00.000Z", status: "resolved", body: "SIMULATED NOTICE (demo). Based on the lookback period your deposit schedule for 2026 is monthly.", resolution: "Deposit schedule confirmed as monthly; acknowledgement sent.", confirmation: "SIM-IRS-ACK-20251119" },
     { agency: "ca_edd", kind: "benefit_charge", form: "DE 428T", title: "EDD statement of benefit charges", at: "2026-09-21T16:00:00.000Z", status: "in_review", body: "SIMULATED NOTICE (demo). A former employee's claim was charged to the reserve account. Review the charge within 60 days." },
   ];
   for (const n of ntc) {
@@ -575,6 +583,12 @@ export async function seedRichProfile(ctx: SeedContext): Promise<RichSummary> {
     await seedTimeOffHistory(L, ws);
     await seedPeopleRecords(L, ws);
     await seedMoneyAndCompliance(L, ws);
+    const api: MotionApi = {
+      tx, bump: (t, n) => L.bump(t, n), chat: (c, a, t, ts) => L.chat(c, a, t, ts),
+      proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), run: (r) => L.run(r as unknown as RunSpec), action: (a) => L.action(a as unknown as PendingAction),
+    };
+    await seedRichMotion(api, ws);
+    await seedImportedPayHistory(tx, (t, n) => L.bump(t, n));
     tail = await L.flushActions();
   }));
   const commits = await seedMemory(ctx, tail);

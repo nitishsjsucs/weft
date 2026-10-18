@@ -32,7 +32,9 @@ export function HomeView() {
   const accounts = useGet("/v1/tax/accounts");
   const workers = useGet("/v1/workers", { query: { type: "employee", limit: 100 } });
   const upcoming = (runs.data?.data ?? []).filter((r) => r.status !== "processed").slice(0, 3);
-  const timeOff = useGet("/v1/time-off/requests", { query: { limit: 100 }, refreshMs: 10_000 });
+  // Only requests that end today or later: a company with a year of history has more than one page of past ones.
+  const todayPt = now ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(now)) : undefined;
+  const timeOff = useGet("/v1/time-off/requests", { query: { limit: 100, ...(todayPt ? { from: todayPt } : {}) }, refreshMs: 10_000 });
   const approvals = (props.data?.data ?? []).filter((p) => p.kind !== "suggestion");
   // Headcount (gate report item 5): active employees, with onboarding counted apart; together with offboarding they
   // make GET /v1/stats `employees`. Contractors are not headcount.
