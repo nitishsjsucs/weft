@@ -116,7 +116,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
   return hireId;
 }
 
-/** Paid claims from January to September, reimbursed on the previous provider's payroll (imported). */
+/** Paid claims from January to August, reimbursed on the previous provider's payroll (the imported runs carry them). */
 async function seedExpenseHistory(L: MotionApi, ws: W[]): Promise<void> {
   const emp = ws.filter((w) => w.type === "employee" && w.status === "active" && w.startDate < "2026-01-01");
   const claims: [string, string, number, string, string, number | null][] = [
@@ -127,7 +127,7 @@ async function seedExpenseHistory(L: MotionApi, ws: W[]): Promise<void> {
     ["software", "Fleetlog Cloud (demo)", 4_900, "2026-05-27", "Fleet log analysis seat", null], ["travel", "Bayline Air (demo)", 41_250, "2026-06-10", "Field trial in Austin", null],
     ["meals", "Harbor Noodle Bar (demo)", 7_120, "2026-06-24", "Onboarding lunch", null], ["lodging", "Pinecrest Inn (demo)", 17_800, "2026-07-15", "Night before the site install", null],
     ["mileage", "Mileage", 5_740, "2026-08-05", "Drives between Oakland and the warehouse", 820], ["software", "Sketchwell (demo)", 4_800, "2026-08-12", "Design tool seat", null],
-    ["travel", "Cedar Rail (demo)", 9_800, "2026-09-02", "Train to the customer review", null], ["meals", "Lantern Diner (demo)", 6_900, "2026-09-16", "Dinner with the integration partner", null],
+    ["travel", "Cedar Rail (demo)", 9_800, "2026-08-18", "Train to the customer review", null], ["meals", "Lantern Diner (demo)", 6_900, "2026-07-28", "Dinner with the integration partner", null],
     ["travel", "Bayline Air (demo)", 29_300, "2026-04-02", "Conference travel, submitted after 60 days", null], ["meals", "Harbor Noodle Bar (demo)", 4_100, "2026-07-01", "Working lunch", null],
   ];
   for (const [i, [category, merchant, cents, date, purpose, miles]] of claims.entries()) {

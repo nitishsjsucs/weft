@@ -11,12 +11,13 @@ import { asc, eq } from "drizzle-orm";
 import {
   actions, agentRuns, approvalAudit, contractorPayments, documents, filings, handoffCases, notices, offboardingCases, offboardingSteps,
   onboardingTasks, payRates, payrollRuns, proposals, routineRuns, runSteps, simAgencyMail, simChatMessages, simRailTransfers, simRegistrations,
-  taxAccounts, timeOffAssignments, timeOffLedger, timeOffRequests, workers, withWriteLock, type DbTx,
+  taxAccounts, taxProfiles, timeOffAssignments, timeOffLedger, timeOffRequests, workers, withWriteLock, type DbTx,
 } from "@weft/db";
 import { canonicalJson, newId, payroll, sha256Hex } from "@weft/core";
 import type { SeedContext } from "../context";
 import { seedRichMotion, type MotionApi } from "./motion";
 import { seedImportedPayHistory } from "./pay-history";
+import { seedTurnover } from "./turnover";
 
 const CO = "cmp_larkspur";
 const GENESIS = "0".repeat(64);
@@ -442,6 +443,7 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
     workEmail: "rafael.ostrander@larkspur.example", title: "Field Service Technician", departmentId: "dpt_operations", managerId: null, workplaceId: "wkp_oakland", workState: "CA",
     timezone: "America/Los_Angeles", startDate: "2024-02-12", endDate: lastDay, payScheduleId: "ps_us_semimonthly", createdAt: "2024-02-01T17:00:00.000Z", updatedAt: pt(lastDay, 17) });
   await tx.insert(payRates).values({ id: await newId(tx, "prt_"), workerId: leaverId, kind: "salary", amountCents: 7_800_000, effectiveFrom: "2024-02-12", effectiveTo: lastDay });
+  await tx.insert(taxProfiles).values({ workerId: leaverId, w4Version: "2020", filingStatus: "mfj", source: "seed" });
   L.bump("workers");
   const done = await newId(tx, "ofb_");
   await tx.insert(offboardingCases).values({ id: done, companyId: CO, workerId: leaverId, kind: "voluntary", lastDay, reasonNote: "Relocating to be closer to family", status: "complete", createdAt: pt("2026-07-01", 10), closedAt: pt("2026-07-20", 12) });
@@ -604,6 +606,7 @@ export async function seedRichProfile(ctx: SeedContext): Promise<RichSummary> {
       proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), run: (r) => L.run(r as unknown as RunSpec), action: (a) => L.action(a as unknown as PendingAction),
     };
     await seedRichMotion(api, ws);
+    await seedTurnover({ tx, bump: (t, n) => L.bump(t, n), action: (a) => L.action(a as unknown as PendingAction) });
     await seedImportedPayHistory(tx, (t, n) => L.bump(t, n));
     tail = await L.flushActions();
   }));
