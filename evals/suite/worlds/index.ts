@@ -59,6 +59,15 @@ export const MUTATORS: Record<string, MutatorDef> = {
       await w.q("INSERT INTO pay_rates (id, worker_id, kind, amount_cents, currency, effective_from, effective_to, created_action_seq) VALUES ('prt_9201', ?, 'salary', 8200000, 'USD', '2026-10-06', NULL, NULL)", [worker]);
     },
   },
+  departedEmployee: {
+    describe: "a finished departure: the employee the argument names left on 2026-10-16 and their offboarding is complete, so they are inactive with that end date (what offboarding cases.ts leaves on a worker), and current headcounts no longer count them",
+    async apply(w, arg) {
+      if (!arg || !/^wrk_[0-9]{4}$/.test(arg)) throw new Error("departedEmployee needs a worker id");
+      const n = await w.q("SELECT id FROM workers WHERE id = ? AND type = 'employee' AND status = 'active'", [arg]);
+      if (!n.length) throw new Error(`departedEmployee: no active employee ${arg}`);
+      await w.q("UPDATE workers SET status = 'inactive', end_date = '2026-10-16' WHERE id = ?", [arg]);
+    },
+  },
   enableRoutine: {
     describe: "turns one prebuilt routine on (argument: the routine id); routines ship disabled unless their golden path needs them",
     async apply(w, arg) {

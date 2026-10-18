@@ -1,10 +1,10 @@
 // comms.send_message (harness 5.4, 5.6): R3, auto-allowed for an untainted main agent, delegated for task agents,
 // afterPending "propose". Recipients only from the closed channel enum; plain text only (no card markup);
-// numbers in the text must be grounded in company facts.
+// numbers in the text must be grounded in company facts or, in a routine run, in the figures its precheck computed.
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { ChatChannel, Refused } from "@weft/contracts";
-import { check } from "@weft/grounding";
+import { check, computedFigures } from "@weft/grounding";
 import type { DbTx } from "@weft/db";
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
@@ -34,6 +34,27 @@ export async function groundingFacts(tx: DbTx, companyId: string, now: string) {
   };
 }
 
+/**
+ * The figures a routine run computed in code (after the wave 4 model comparison): its precheck's findings and derived
+ * arguments, stored on routine_runs before the agent run started, as one evidence item, or null. A prebuilt routine's
+ * derived text quotes counts, totals and dates its precheck computed (the people digest's per-state counts after a
+ * departure, a hire's start date), which no company fact holds, so the message was refused until the step cap.
+ * computedFigures keeps only structured figures, never the derived text or any other prose, so a figure with no source
+ * is still refused. The routine run comes from the executor's own context (never from the model's arguments) and must
+ * belong to this company. A routine whose definition is tainted (a person's upload) contributes nothing: its precheck
+ * read untrusted input.
+ */
+export async function routineFigures(tx: DbTx, companyId: string, routineRunId: string | null): Promise<unknown | null> {
+  if (!routineRunId) return null;
+  const [row] = await tx.all<{ p: string | null; t: string | null }>(sql`SELECT rr.precheck_json AS p, r.tainted_by AS t FROM routine_runs rr JOIN routines r ON r.id = rr.routine_id WHERE rr.id = ${routineRunId} AND r.company_id = ${companyId} LIMIT 1`);
+  if (!row?.p || row.t) return null;
+  let pre: { action?: unknown; findings?: unknown; derivedArgs?: unknown };
+  try { pre = JSON.parse(row.p) as typeof pre; } catch { return null; }
+  if (!pre || pre.action !== "run") return null;
+  const figures = computedFigures({ findings: pre.findings ?? null, derived: pre.derivedArgs ?? null });
+  return figures === null ? null : { routine_precheck: figures };
+}
+
 function validate(i: SendInput): ChatChannel {
   if (!i.channel || i.worker_id) {
     throw new DomainRefusal("DOMAIN_RECIPIENT", i.worker_id ? "Direct messages are not available in the chat simulator yet; post to a channel" : "channel is required", "Pick one channel from the enum", { channel: "#new-hires", text: i.text.slice(0, 80) });
@@ -44,7 +65,7 @@ function validate(i: SendInput): ChatChannel {
 
 export const sendMessage = writeCommand({
   name: "comms.send_message", summary: "Post a plain-text message to a company chat channel.",
-  description: "Post a plain-text message (text, up to 1500 characters) to one company channel: #people-ops, #payroll, #new-hires or #general. No markup or cards. Numbers must come from tool results or company facts. R3: runs without approval for an untainted main agent; otherwise it becomes a proposal with the text shown in full.",
+  description: "Post a plain-text message (text, up to 1500 characters) to one company channel: #people-ops, #payroll, #new-hires or #general. No markup or cards. Numbers must match company facts or, in a routine run, its findings and derived arguments; post a derived text as is. R3: runs without approval for an untainted main agent; otherwise it becomes a proposal with the text shown in full.",
   input: SendInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
   afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
   async preview(i, ctx) {
@@ -53,8 +74,14 @@ export const sendMessage = writeCommand({
   },
   async run(i, ctx, deps) {
     const channel = validate(i);
-    const g = check(i.text, [await groundingFacts(deps.tx, ctx.companyId, ctx.now)]);
-    if (!g.ok) throw new Refused("UNGROUNDED", `Ungrounded numbers in the message: ${g.offending.join(", ")}`, { hint: "Use only numbers from tool results", example: null });
+    const computed = await routineFigures(deps.tx, ctx.companyId, ctx.routineRunId);
+    const g = check(i.text, [await groundingFacts(deps.tx, ctx.companyId, ctx.now), ...(computed ? [computed] : [])]);
+    if (!g.ok) {
+      const hint = computed
+        ? "Use only numbers from company facts or from this routine's findings and derived arguments; post the derived text as is"
+        : "Use only numbers from company facts (headcounts, pending approvals, onboarding dates), or leave the numbers out";
+      throw new Refused("UNGROUNDED", `Ungrounded numbers in the message: ${g.offending.join(", ")}`, { hint, example: null });
+    }
     const { id } = await deps.sims.chat.post({ channel, author: "Weft agent", text: i.text });
     return { data: { message_id: id, channel, chars: i.text.length }, summary: `Posted to ${channel} (${id})` };
   },
