@@ -45,9 +45,11 @@ export function HomeView() {
   // Time Off: out today, pending decisions and approved time off starting in the next 30 days.
   const today = now ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(now)) : null;
   const in30Days = today ? new Date(Date.parse(`${today}T12:00:00Z`) + 30 * 86_400_000).toISOString().slice(0, 10) : null;
-  const tor = ((timeOff.data as { data?: { id: string; workerName: string; status: string; startAt: string; endAt: string; days: { date: string; minutes: number }[] }[] } | undefined)?.data ?? []);
+  const tor = ((timeOff.data as { data?: { id: string; workerName: string; status: string; startAt: string; endAt: string; approverPrincipalId: string | null; days: { date: string; minutes: number }[] }[] } | undefined)?.data ?? []);
   const outToday = today ? tor.filter((r) => r.status === "approved" && r.days.some((d) => d.date === today && d.minutes > 0)) : [];
   const pendingTor = tor.filter((r) => r.status === "pending");
+  // Time-off requests routed to the viewer are decisions too; they live on the Time off page, not in the Inbox.
+  const myTor = pendingTor.filter((r) => r.approverPrincipalId === who);
   const soon = today && in30Days ? tor.filter((r) => r.status === "approved" && r.startAt > today && r.startAt <= in30Days).sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) : [];
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
@@ -63,7 +65,7 @@ export function HomeView() {
           ))}
         </Widget>
         <Widget testid="home-widget-approvals" icon={<Inbox />} title="Approvals waiting" href="/app/inbox">
-          <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{props.data ? approvals.length : "-"}</span><span className="text-1 text-gray-10">waiting</span></div>
+          <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{props.data ? approvals.length : "-"}</span><span className="text-1 text-gray-10">waiting</span>{myTor.length ? <Link data-testid="home-approvals-time-off" href="/app/time-off" className="ml-auto text-1 text-blue-11 hover:underline">+ {myTor.length} time-off {myTor.length === 1 ? "decision" : "decisions"} for you</Link> : null}</div>
           <ul className="px-2 pt-2 pb-2">
             {approvals.slice(0, 3).map((p) => <li key={p.id}><Link href="/app/inbox" className="block truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2">{p.risk ? <Badge size="xs" className="mr-1.5">{p.risk}</Badge> : null}{p.headline}</Link></li>)}
           </ul>
