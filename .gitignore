@@ -16,4 +16,5 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 .data-e2e/
+.data-rich/
 .data-demo/
