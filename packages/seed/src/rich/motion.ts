@@ -4,8 +4,8 @@
 import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import {
-  benefitReconFindings, contractorTaxForms, devices, documents, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
-  payrollRuns, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, workers, type DbTx,
+  benefitReconFindings, contractorTaxForms, devices, documents, enrollmentWindows, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
+  payrollRuns, principals, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, workers, type DbTx,
 } from "@weft/db";
 import { newId, payroll, sha256Hex } from "@weft/core";
 
@@ -51,11 +51,19 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       await tx.insert(taxProfiles).values({ workerId, w4Version: "2020", filingStatus: "single", source: "seed" });
       L.bump("workers");
     }
+    // A sent offer reserves the hire's worker id and creates the portal persona (as the offer send does); the worker
+    // row exists only once the letter is signed.
+    const reserved = workerId ?? (o.status === "viewed" ? await newId(tx, "wrk_") : null);
+    if (reserved) {
+      await tx.insert(principals).values({ id: await newId(tx, "usr_"), companyId: CO, kind: "human", workerId: reserved, display: `${o.first} ${o.last} (demo)`, email: mail, role: "employee",
+        grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
+      L.bump("principals");
+    }
     let documentId: string | null = null;
     if (o.status !== "draft") {
       const body = `${DEMO_DOC}\n\nOffer letter: ${o.title}\nLarkspur Robotics (demo)\n${o.first} ${o.last} (demo)\nStart date ${o.start}.`;
       documentId = await newId(tx, "doc_");
-      await tx.insert(documents).values({ id: documentId, companyId: CO, workerId, offerId: id, kind: "offer_letter", title: `Offer letter: ${o.title}`, status: o.status === "accepted" ? "signed" : o.status === "voided" ? "voided" : "sent",
+      await tx.insert(documents).values({ id: documentId, companyId: CO, workerId: reserved, offerId: id, kind: "offer_letter", title: `Offer letter: ${o.title}`, status: o.status === "accepted" ? "signed" : o.status === "voided" ? "voided" : "sent",
         bodyText: body, sha256: sha256Hex(body), createdAt: o.created, sentAt: o.sent ?? null, signedAt: o.accepted ?? null });
       L.bump("documents");
     }
@@ -184,10 +192,48 @@ async function seedItAndContractors(L: MotionApi, ws: W[], hireId: string | null
       sha256: sha256Hex(body), createdAt: pt(w.startDate, 9), sentAt: pt(w.startDate, 9), signedAt: pt(w.startDate, 15) });
     L.bump("documents"); L.bump("devices");
   }
-  void contractorTaxForms; void hireId;
+  // The accepted hire's accounts are being provisioned ahead of the start date.
+  if (hireId) {
+    const hire = (await tx.select().from(workers).where(eq(workers.id, hireId)))[0];
+    if (hire) {
+      const handle = `${hire.firstName.toLowerCase()}.${hire.lastName.toLowerCase()}`;
+      for (const [system, status] of [["google_ws", "active"], ["chat", "active"], ["github", "provisioning"]] as const) {
+        await tx.insert(itAccounts).values({ id: await newId(tx, "ita_"), workerId: hireId, system, handle: system === "github" ? `lrk-${handle.replace(".", "-")}` : handle, groupsJson: JSON.stringify(system === "chat" ? ["#new-hires", "#hardware"] : []), status }).onConflictDoNothing();
+        L.bump("it_accounts");
+      }
+    }
+  }
+  // New-hire benefits election windows: Mira's is open now, Elias's opens on his first day.
+  for (const [wid, opens, closes, status] of [["wrk_0022", "2026-10-19", "2026-11-18", "open"], [hireId, "2026-11-09", "2026-12-09", "scheduled"]] as const) {
+    if (!wid) continue;
+    await tx.insert(enrollmentWindows).values({ id: await newId(tx, "ewn_"), companyId: CO, workerId: wid, kind: "new_hire", lifeEventId: null, opensOn: opens, closesOn: closes, status, remindersSent: status === "open" ? 1 : 0, createdAt: pt(opens, 8) });
+    L.bump("enrollment_windows");
+  }
+  void contractorTaxForms;
+}
+
+/** The October expense decisions already on the planted claims, as the proposals Dana approved from a chat review. */
+async function seedExpenseDecisions(L: MotionApi, ws: W[]): Promise<void> {
+  const decided = (await L.tx.select().from(expenses).orderBy(asc(expenses.id))).filter((e) => (e.status === "approved" || e.status === "declined") && e.decidedAt && e.id <= "exp_0014");
+  if (!decided.length) return;
+  const first = decided.map((e) => e.decidedAt!).sort()[0]!;
+  const at = new Date(Date.parse(first) - 20 * 60_000).toISOString();
+  const r = await L.run({ at, trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "expenses__list", args: { status: "submitted" }, data: { count: decided.length } }],
+    final: `Reviewed ${decided.length} submitted claims against the policy and proposed a decision for each; approvals stay with you.` });
+  for (const e of decided) {
+    const w = ws.find((x) => x.id === e.workerId);
+    const who = w ? `${w.firstName} ${w.lastName} (demo) (${w.id})` : e.workerId;
+    const approve = e.status === "approved";
+    await L.proposal({ at, command: "expenses.decide", args: { expense_id: e.id, decision: approve ? "approve" : "decline" }, subjectRef: `expense:${e.id}`, risk: "R2", domain: "payroll",
+      moneyCents: approve ? e.amountCents : 0, status: "executed", decidedBy: e.decidedBy ?? "usr_dana", decidedAt: e.decidedAt!, runId: r.runId, reversible: true,
+      headline: `${approve ? "Approve" : "Decline"} expense ${e.id} for ${who}: $${(e.amountCents / 100).toFixed(2)} ${e.category} on ${e.transactionDate}`,
+      diff: [{ label: "Status", before: "needs_review", after: e.status }], evidence: [{ label: "Expense", ref: e.id }],
+      exec: { ts: e.decidedAt!, actorKind: "human", actorId: e.decidedBy ?? "usr_dana", summary: `${approve ? "Approved" : "Declined"} expense ${e.id} for ${who}`, reversible: "no" } });
+  }
 }
 
 export async function seedRichMotion(L: MotionApi, ws: W[]): Promise<void> {
+  await seedExpenseDecisions(L, ws);
   const hireId = await seedHiring(L, ws);
   await seedExpenseHistory(L, ws);
   await seedIntegrations(L);

@@ -291,6 +291,22 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
       createdAt: h.createdAt, resolvedAt: h.resolvedAt ?? null, resolutionNote: h.note ?? null });
     L.bump("handoff_cases");
   }
+  // Routines that ran in a September trial and are paused now, plus the October chases.
+  const trial: [string, string, string, string, string | null][] = [
+    ["rt_expense_review", pt("2026-09-14", 10), "Checked 6 claims against the policy: 5 within limits, 1 missing a receipt. Drafted the decisions for review.", "expenses__list", null],
+    ["rt_expense_review", pt("2026-09-28", 10), "Checked 4 claims against the policy: all within limits. Drafted the approvals for review.", "expenses__list", null],
+    ["rt_milestones", pt("2026-09-21", 9), "Posted 2 work anniversaries in #general.", "comms__send_message", "#general"],
+    ["rt_milestones", pt("2026-10-05", 9), "Posted 1 work anniversary in #general.", "comms__send_message", "#general"],
+    ["rt_open_enrollment", pt("2026-10-05", 10), "Sent the first open enrollment reminder to the employees who have not opened the 2027 window.", "comms__send_email", null],
+    ["rt_onboarding_nudge", pt("2026-10-21", 9), "Reminded Mira Delgado (demo) to add a bank account; payroll is blocked until it is on file.", "comms__send_email", null],
+  ];
+  for (const [routineId, at, final, tool, channel] of trial) {
+    const r = await L.run({ at, trigger: "routine", routineId, onBehalfOf: "usr_dana", final, tools: [{ name: tool, args: channel ? { channel } : {}, data: { ok: true } }] });
+    if (channel) {
+      const msg = await L.chat(channel, "Weft agent", final.replace(/^Posted /, "Celebrating today: ").replace(" in #general.", " (demo)."), at);
+      L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel, text: final }, summary: `Posted to ${channel} (${msg})`, reversible: "no" });
+    }
+  }
   // People ops chat spread over days.
   for (const [ch, author, text, at] of [
     ["#new-hires", "Weft agent", "Welcome Ana Sousa (demo) and Ben Ashdown (demo), who start today in Oakland. Accounts are ready.", pt("2026-10-01", 9)],
@@ -541,8 +557,8 @@ const MEMORY_DOCS: { path: string; day: string; id: string; type: string; links:
     body: "# Q4 open enrollment (demo)\n\nOwner [[entities/people/wrk_0025|Sam Okafor]]. The 2027 window is open; stragglers get a nudge once the carrier rates are final.\n" },
   { path: "workstreams/co-expansion.md", day: "2026-10-20", id: "ws-co-expansion", type: "workstream", links: ["entities/people/wrk_0004", "entities/people/wrk_0001"], message: "workstream: Colorado expansion",
     body: "# Colorado expansion (demo)\n\nFirst Colorado hire starts Nov 2 under [[entities/people/wrk_0004|Imani Ferreira]]. Withholding and unemployment registrations are still to do. Sponsor [[entities/people/wrk_0001|Dana Whitfield]].\n" },
-  { path: "workstreams/october-payroll.md", day: "2026-10-23", id: "ws-october-payroll", type: "workstream", links: ["entities/people/wrk_0002"], message: "workstream: October payroll",
-    body: "# October payroll (demo)\n\nOct 15 settled. The Oct 30 draft has four flagged paychecks; [[entities/people/wrk_0002|Theo Marsh]] approves by the Wednesday deadline.\n" },
+  { path: "workstreams/october-payroll.md", day: "2026-10-23", id: "ws-october-payroll", type: "workstream", links: ["entities/people/wrk_0002", "knowledge/preferences/agent/autonomy.md"], message: "workstream: October payroll",
+    body: "# October payroll (demo)\n\nOct 15 settled. The Oct 30 draft has four flagged paychecks; [[entities/people/wrk_0002|Theo Marsh]] approves by the Wednesday deadline. The agent proposes the submit and waits, as [[knowledge/preferences/agent/autonomy|the autonomy preference]] asks.\n" },
   { path: "comms/2026-10-weekly-digests.md", day: "2026-10-19", id: "comms-2026-10-digests", type: "thread", links: ["workstreams/october-payroll.md"], message: "comms: October digests",
     body: "# October digests (demo)\n\nThe weekly people digest posted every Monday in #people-ops. See [[workstreams/october-payroll]] for the payroll thread.\n" },
   { path: "timeline/monthly/2026-08.md", day: "2026-09-01", id: "timeline-2026-08", type: "timeline_monthly", links: [], message: "digest: monthly 2026-08", body: "# August 2026 (demo)\n\n- Weekly digests posted each Monday.\n- Two semi-monthly payrolls ran on the previous provider.\n" },

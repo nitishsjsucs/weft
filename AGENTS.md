@@ -26,9 +26,10 @@ Weft is an open-source, self-hostable, AI-native payroll and HR platform that ru
 | `pnpm lint:prose` | No em or en dashes in tracked text |
 | `pnpm lint:brand` | No reference-site names, domains or denylisted phrases outside `research/`, `NOTICE` and `SPEC.md` |
 | `pnpm brand:overlap` | No run of 8+ consecutive words shared with the saved reference pages anywhere in `apps/`, `packages/`, `docs/`, `research/`, `README.md`, `SPEC.md` (skips without the reference folder) |
-| `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world in `.data/` and print its digest |
+| `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world in `.data/` and print its digest (base profile; `WEFT_SEED_PROFILE=rich` adds the rich layer that `pnpm dev` seeds by default) |
 | `pnpm dev` | API on 127.0.0.1:4070 and web on 127.0.0.1:3070 in separate process groups (check ports first) |
-| `pnpm e2e` | Playwright golden paths on ports 3170 and 4170 |
+| `pnpm e2e` | Playwright golden paths on ports 3170 and 4170 (always the base seed) |
+| `pnpm e2e:rich` | The rich-profile empty-state crawl on ports 3270 and 4270 |
 | `pnpm eval:live` | Live Luna gate, opt-in: `WEFT_LIVE_OPENAI=1 WEFT_LLM=openai` |
 
 ## Where things go
