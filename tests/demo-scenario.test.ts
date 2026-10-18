@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestWeft, type TestWeft } from "./scenarios/helpers";
-import { DEMO_SCENARIOS, SEED_CLOCK, describeScenario, findScenario, prepareScenario, type ApiCall } from "../scripts/demo-scenario";
+import { DEMO_PHOENIX_PROJECT, DEMO_SCENARIOS, SEED_CLOCK, START_COMMAND, describeScenario, findScenario, prepareScenario, runCli, type ApiCall, type CliIo } from "../scripts/demo-scenario";
+
+const ROOT = resolve(import.meta.dirname, "..");
 
 describe("demo:scenario registry", () => {
   it("has unique names, a start path, steps and dash-free text for every scenario", () => {
@@ -18,6 +22,23 @@ describe("demo:scenario registry", () => {
   it("names the scenarios when an unknown one is asked for", () => {
     expect(() => findScenario("nope")).toThrow(/unknown scenario "nope"; use one of: notice, payroll/);
   });
+  it("the start command traces into the Phoenix project the trace step names, and the header and the doc agree", () => {
+    const assignments = START_COMMAND.split(" ").filter((w) => /^WEFT_[A-Z_]+=/.test(w));
+    expect(assignments).toEqual(expect.arrayContaining(["WEFT_TRACE=phoenix", `WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT}`, "WEFT_CLOCK_RATE=0", "WEFT_LLM=openai"]));
+    const trace = findScenario("trace-mcp").steps.join(" ");
+    expect(trace).toContain(`WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT}`);
+    expect(trace).toContain(`project ${DEMO_PHOENIX_PROJECT}`);
+    // The script's header comment and docs/demo-scenarios.md show the same command (line breaks aside).
+    const header = readFileSync(join(ROOT, "scripts/demo-scenario.ts"), "utf8").split("\nimport ")[0]!.replace(/\\\n\/\/\s*/g, "");
+    const doc = readFileSync(join(ROOT, "docs/demo-scenarios.md"), "utf8").replace(/\\\n/g, "");
+    for (const a of assignments) {
+      expect(header, `script header: ${a}`).toContain(a);
+      expect(doc, `docs/demo-scenarios.md: ${a}`).toContain(a);
+    }
+    expect(header).toContain("pnpm dev --fresh");
+    expect(doc).toContain(`project ${DEMO_PHOENIX_PROJECT}`);
+  });
+
   it("prints the start URL on the given web port, the steps and the prompts", () => {
     const text = describeScenario(findScenario("time-off"), 5461);
     expect(text).toContain("Open http://127.0.0.1:5461/app/time-off");
@@ -61,5 +82,96 @@ describe("demo:scenario against a world", () => {
     };
     const p = await prepareScenario("chart-memory", running);
     expect(p.warnings.join(" ")).toMatch(/WEFT_CLOCK_RATE=0/);
+  });
+});
+
+describe("demo:scenario CLI: target and confirmation before the reset", () => {
+  let weft: TestWeft;
+  let calls: string[] = [];
+  let api: ApiCall;
+  beforeAll(async () => {
+    weft = await createTestWeft();
+    api = async (method, path, body) => {
+      calls.push(`${method} ${path}`);
+      const res = await weft.app.request(path, { method, headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      return { status: res.status, json: await res.json().catch(() => null) };
+    };
+  });
+  afterAll(async () => { await weft?.close(); });
+
+  const io = (over: Partial<CliIo> & { answer?: string } = {}) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const asked: string[] = [];
+    const targets: { apiPort: number; dataDir: string }[] = [];
+    const x: CliIo = {
+      env: { WEFT_DATA_DIR: "/tmp/weft-demo-target" }, isTTY: false, root: ROOT,
+      ask: async (q) => { asked.push(q); return over.answer ?? ""; },
+      log: (l) => out.push(l), error: (l) => err.push(l),
+      api: (t) => { targets.push(t); return api; },
+      ...over,
+    };
+    return { x, out, err, asked, targets };
+  };
+  const clockMoved = async () => {
+    await api("POST", "/v1/sim/clock/advance", { by: "P1D" });
+    expect(((await api("GET", "/v1/sim/clock")).json as { now: string }).now).not.toBe(SEED_CLOCK);
+  };
+  const clock = async () => ((await api("GET", "/v1/sim/clock")).json as { now: string }).now;
+
+  it("without a terminal and without --yes it prints the target and refuses before any API call", async () => {
+    await clockMoved();
+    calls = [];
+    const t = io();
+    expect(await runCli(["notice", "--api-port", "5862"], t.x)).toBe(2);
+    expect(t.out[0]).toBe("demo:scenario notice: target API http://127.0.0.1:5862, data dir /tmp/weft-demo-target");
+    expect(t.err.join(" ")).toMatch(/not resetting http:\/\/127\.0\.0\.1:5862 without a confirmation; pass --yes/);
+    expect(t.targets).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(t.asked).toEqual([]);
+    expect(await clock()).not.toBe(SEED_CLOCK);
+  });
+
+  it("on a terminal it asks, naming the target; anything but y or yes leaves the world alone", async () => {
+    calls = [];
+    for (const answer of ["", "n", "no", "maybe"]) {
+      const t = io({ isTTY: true, answer });
+      expect(await runCli(["notice"], t.x)).toBe(1);
+      expect(t.asked).toHaveLength(1);
+      expect(t.asked[0]).toContain("Reset the world behind http://127.0.0.1:4070 (data dir /tmp/weft-demo-target) to the seed?");
+      expect(t.asked[0]).toMatch(/\[y\/N\] $/);
+    }
+    expect(calls).toEqual([]);
+    expect(await clock()).not.toBe(SEED_CLOCK);
+  });
+
+  it("a yes on the terminal, or --yes from a script, resets the target and prints the click path", async () => {
+    calls = [];
+    const t = io({ isTTY: true, answer: "Y" });
+    expect(await runCli(["time-off", "--web-port", "5863"], t.x)).toBe(0);
+    expect(t.targets).toEqual([{ apiPort: 4070, webPort: 5863, dataDir: "/tmp/weft-demo-target" }]);
+    expect(calls[0]).toBe("POST /v1/sim/reset");
+    expect(await clock()).toBe(SEED_CLOCK);
+    expect(t.out[0]).toMatch(/^demo:scenario time-off: target API http:\/\/127\.0\.0\.1:4070, data dir \/tmp\/weft-demo-target$/);
+    expect(t.out.join("\n")).toContain("Open http://127.0.0.1:5863/app/time-off");
+
+    await clockMoved();
+    calls = [];
+    const s = io();
+    expect(await runCli(["--yes", "notice"], s.x)).toBe(0);
+    expect(s.asked).toEqual([]);
+    expect(calls[0]).toBe("POST /v1/sim/reset");
+    expect(await clock()).toBe(SEED_CLOCK);
+  });
+
+  it("an unknown scenario fails before the target is touched; list prints the start command", async () => {
+    calls = [];
+    const t = io({ isTTY: true, answer: "y" });
+    expect(await runCli(["nope", "--yes"], t.x)).toBe(2);
+    expect(t.err.join(" ")).toMatch(/unknown scenario "nope"/);
+    expect(calls).toEqual([]);
+    const l = io();
+    expect(await runCli(["list"], l.x)).toBe(0);
+    expect(l.out.at(-1)).toBe(`Start the world with: ${START_COMMAND}`);
   });
 });

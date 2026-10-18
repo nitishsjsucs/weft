@@ -5,10 +5,24 @@
 // prints the names.
 //
 // It talks to the API at 127.0.0.1:<--api-port, WEFT_API_PORT or 4070> with the proxy secret from
-// <WEFT_DATA_DIR or .data>/run/proxy.secret, the same headers the web app's /api rewrite adds. Start the world with
-//   WEFT_LLM=openai WEFT_CLOCK_RATE=0 WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev
+// <WEFT_DATA_DIR or .data>/run/proxy.secret, the same headers the web app's /api rewrite adds. A reset wipes that
+// world, so it first prints the target API and data dir and asks (y/N) on a terminal; without a terminal it needs
+// --yes. Start the world with START_COMMAND (tracing on, into the Phoenix project the trace step names):
+//   WEFT_LLM=openai WEFT_BACKGROUND_LLM=1 WEFT_CLOCK_RATE=0 WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=weft-demo \
+//   WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev --fresh
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
+
+/** The Phoenix project the demo's traces land in (WEFT_PHOENIX_PROJECT in START_COMMAND). */
+export const DEMO_PHOENIX_PROJECT = "weft-demo";
+
+/** How to start the world for a live demo: a live model, a frozen clock and tracing into DEMO_PHOENIX_PROJECT. */
+export const START_COMMAND = [
+  "WEFT_LLM=openai WEFT_BACKGROUND_LLM=1 WEFT_CLOCK_RATE=0",
+  `WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT}`,
+  "WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev --fresh",
+].join(" ");
 
 export const SEED_CLOCK = "2026-10-26T15:30:00.000Z";
 
@@ -94,7 +108,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   {
     name: "trace-mcp", title: "Phoenix trace of what the agent did, and an external MCP client", minutes: 3, start: "/app/inbox",
     steps: [
-      "Run any scenario above first (with WEFT_TRACE=phoenix). Phoenix on 127.0.0.1:6206, project weft-demo: open the latest agent.run.",
+      `Run any scenario above first, on a world started with WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT} (the start command \`pnpm demo:scenario list\` prints). Phoenix on 127.0.0.1:6206, project ${DEMO_PHOENIX_PROJECT}: open the latest agent.run.`,
       "The tree shows admission, model (llm.responses with tokens), assemble (memory.recall) and dispatch with one span per tool call and its outcome.",
       "MCP: give any MCP client the stdio server `WEFT_API_URL=http://127.0.0.1:4070 WEFT_API_KEY=$(cat .data/demo-mcp-key.txt) pnpm --filter @weft/mcp start`, list the tools and call tax__update_rate: it comes back pending_approval and lands in the Inbox.",
     ],
@@ -151,24 +165,78 @@ export function describeScenario(s: DemoScenario, webPort: number): string {
   return lines.join("\n");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const args = process.argv.slice(2);
+/** What the CLI reads from its surroundings; tests pass their own. */
+export interface CliIo {
+  env: Record<string, string | undefined>;
+  /** Whether stdin and stdout are a terminal a person can answer on. */
+  isTTY: boolean;
+  /** Asks one question on the terminal and returns the answer. */
+  ask(question: string): Promise<string>;
+  log(line: string): void;
+  error(line: string): void;
+  /** The API client for the target (default localApi, which reads the proxy secret from the data dir). */
+  api?(target: { apiPort: number; dataDir: string }): ApiCall;
+  /** The repo root that a relative WEFT_DATA_DIR resolves against. */
+  root: string;
+}
+
+/** The target a reset would wipe: the API port and the data dir whose proxy secret authenticates the call. */
+export function resolveTarget(args: string[], env: Record<string, string | undefined>, root: string): { apiPort: number; webPort: number; dataDir: string } {
   const flag = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-  const name = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.startsWith("--"));
+  return {
+    apiPort: Number(flag("--api-port") ?? env.WEFT_API_PORT ?? 4070),
+    webPort: Number(flag("--web-port") ?? env.WEFT_WEB_PORT ?? 3070),
+    dataDir: resolve(root, env.WEFT_DATA_DIR ?? ".data"),
+  };
+}
+
+/** `pnpm demo:scenario <name> [--yes] [--api-port n] [--web-port n]`; returns the exit code. */
+export async function runCli(args: string[], io: CliIo): Promise<number> {
+  const name = args.find((a, i) => !a.startsWith("--") && !(args[i - 1]?.startsWith("--") && args[i - 1] !== "--yes"));
   if (!name || name === "list") {
-    for (const s of DEMO_SCENARIOS) console.log(`${s.name.padEnd(13)} ${s.minutes} min  ${s.title}`);
-    process.exit(name ? 0 : 2);
+    for (const s of DEMO_SCENARIOS) io.log(`${s.name.padEnd(13)} ${s.minutes} min  ${s.title}`);
+    io.log("");
+    io.log(`Start the world with: ${START_COMMAND}`);
+    return name ? 0 : 2;
   }
-  const apiPort = Number(flag("--api-port") ?? process.env.WEFT_API_PORT ?? 4070);
-  const webPort = Number(flag("--web-port") ?? process.env.WEFT_WEB_PORT ?? 3070);
-  const dataDir = resolve(import.meta.dirname, "..", process.env.WEFT_DATA_DIR ?? ".data");
+  try { findScenario(name); } catch (e) { io.error(`demo:scenario: ${(e as Error).message}`); return 2; }
+  const target = resolveTarget(args, io.env, io.root);
+  const url = `http://127.0.0.1:${target.apiPort}`;
+  io.log(`demo:scenario ${name}: target API ${url}, data dir ${target.dataDir}`);
+  if (!args.includes("--yes")) {
+    if (!io.isTTY) {
+      io.error(`demo:scenario: not resetting ${url} without a confirmation; pass --yes to reset it from a script`);
+      return 2;
+    }
+    const answer = (await io.ask(`Reset the world behind ${url} (data dir ${target.dataDir}) to the seed? Everything done in it since the last reset is lost. [y/N] `)).trim().toLowerCase();
+    if (answer !== "y" && answer !== "yes") {
+      io.log("demo:scenario: not reset");
+      return 1;
+    }
+  }
   try {
-    const p = await prepareScenario(name, localApi({ apiPort, dataDir }));
-    console.log(`demo:scenario ${name}: world reset to the seed (clock ${p.clock}, rate ${p.rate}x, ${p.pending} pending proposals)`);
-    for (const w of p.warnings) console.log(`warning: ${w}`);
-    console.log(describeScenario(p.scenario, webPort));
+    const api = (io.api ?? ((t) => localApi(t)))(target);
+    const p = await prepareScenario(name, api);
+    io.log(`demo:scenario ${name}: world reset to the seed (clock ${p.clock}, rate ${p.rate}x, ${p.pending} pending proposals)`);
+    for (const w of p.warnings) io.log(`warning: ${w}`);
+    io.log(describeScenario(p.scenario, target.webPort));
+    return 0;
   } catch (e) {
-    console.error(`demo:scenario: ${e instanceof Error ? e.message : String(e)}`);
-    process.exit(1);
+    io.error(`demo:scenario: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
   }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const code = await runCli(process.argv.slice(2), {
+    env: process.env, isTTY, root: resolve(import.meta.dirname, ".."),
+    async ask(question) {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try { return await rl.question(question); } finally { rl.close(); }
+    },
+    log: (line) => console.log(line),
+    error: (line) => console.error(line),
+  });
+  process.exit(code);
 }
