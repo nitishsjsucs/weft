@@ -1,5 +1,19 @@
 # Review log
 
+## Review fix group notices-and-proposals (2026-10-18)
+
+An independent review of the five-failure fix round found that the shared notices failure was misread, and that the equivalent-proposal check outlived a rollback. Branch rf/notices-and-proposals, from 5babb58.
+
+| Finding | Fix | Test |
+|---|---|---|
+| A CA DE 2088 that states the rate already in effect produced "Update CA SUI rate 3.4% to 3.4%". This, not a duplicate, is the shared notices failure; it still failed on retired-r1 after the fixes (40 of 41) | The `rt_agency_notice` precheck compares each stated rate with the rate in effect on the effective date (through `tax.rate_change_impact`); when none differs the plan is acknowledge-only, so the run is skipped with the acknowledgment as its reason and nothing is proposed. `tax.update_rate` refuses `DOMAIN_NO_CHANGE` in preview and run, and `notices.acknowledge` accepts a rate notice that only confirms the rates in effect | Precheck unit tests; API tests in `apps/api/test/tax.test.ts`; dev task NT-10 (mutator `employerRateInEffect`), which fails on 5babb58 with two proposals and passes now |
+| `findEquivalentProposal` refused an approved or executed match for 24 hours regardless of subject state, so after a person rolled back an approved change the agent was told "It is already done" | An executed match whose action has a reversing row (`reverses_seq`) is skipped. The subject hash alone cannot tell this: the execution changes the subject, and a rollback can restore it exactly (the executor fixture does) | Propose, approve, rollback, propose again, on the fixture command and on the real `tax.update_rate` through the routes |
+| docs/evals/model-comparison.md and report.md said the notices class was duplicate proposals and the held-out check was pending | Both now state the five shared failures accurately (four fixed and confirmed on retired-r1; the notices one is the no-op rate change, fixed here on dev) and record the round 2 held-out confirmation: heldout2-t1 36 of 41, heldout2-t2 34 of 41, retired-after-fix5 40 of 41, fix5-dev 63 of 65 | |
+
+Verification in the worktree: `pnpm test` 1374 passed and 6 skipped (216 files); typecheck 16 of 16; lint:prose and lint:brand ok; 148 tasks valid and 66 of 66 dev digests reproduce; brand:overlap ok; the anti-leak test passes. Scripted replay of the notice tasks (NT-01, NT-02, NT-05 to NT-10, RT-01, AI-31): all pass; MM-03 fails on the scripted provider before and after the change (the scripted model cannot follow a recalled procedure). Live on gpt-5.6-luna at default effort with `WEFT_BACKGROUND_LLM=1` (no Phoenix): NT-10, RT-01, NT-08, NT-09 and AI-31 pass 5 of 5 for $0.0048; NT-10 makes no model call.
+
+Not changed: the precheck still skips a later copy of a letter whose first copy is already proposed or resolved, even after the first copy's rate change was rolled back. Making the copy check follow rollbacks is a follow-up. The allowlist stays at 8 tools, so the routine records the acknowledgment as its skip reason instead of calling `notices.acknowledge` itself.
+
 ## Fix groups merged: the five shared failures and the G8 price scale (2026-10-18)
 
 Four fix branches (fix/routine-grounding, fix/duplicate-proposal, fix/read-figures, fix/injection-and-g8) merged into main from 4f26ff3, in that order. The one conflict was `evals/suite/worlds/index.ts`, where two branches added a notice mutator at the same place; both are kept (`agencyNoticeScenario` for NT-08 and NT-09, `noticeSendInjection` for AI-31; each task uses one, so the shared notice id ntc_9502 never meets itself). `packages/contracts/src/ext/fx-duplicate-proposal.ts` stays where it is, as docs/wave4.md section 7 rule 2 asks for additive contracts. The dev split now has 65 tasks (RT-21, NT-08, NT-09, EX-11, TO-11 and AI-31 are new); the held-out split is unchanged.
