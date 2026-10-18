@@ -8,12 +8,14 @@ import { TID } from "@weft/contracts";
 import { ALL_NAV } from "../nav";
 import { useGet } from "@/lib/api/hooks";
 import { period } from "../format";
+import { useTour } from "../../tour/tour-provider";
 
-interface Entry { id: string; label: string; hint: string; href: string }
+interface Entry { id: string; label: string; hint: string; href: string; run?: () => void }
 
 /** Cmd+K: navigation plus record search over people and payroll runs (P0 scope, SPEC 11.3). */
 export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const router = useRouter();
+  const tour = useTour();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const workers = useGet("/v1/workers", { query: { limit: 100 }, enabled: open });
@@ -32,12 +34,13 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
     const nav: Entry[] = ALL_NAV.map((n) => ({ id: `nav-${n.slug}`, label: n.label, hint: "Go to", href: n.href }));
     const ppl: Entry[] = (workers.data?.data ?? []).map((w) => ({ id: w.id, label: w.displayName, hint: `${w.title}, ${w.workState ?? w.country}`, href: `/app/people/${w.id}` }));
     const pay: Entry[] = (runs.data?.data ?? []).map((r) => ({ id: r.id, label: `Payroll ${period(r.periodStart, r.periodEnd)}`, hint: r.status, href: `/app/payroll/${r.id}` }));
+    const demo: Entry[] = [{ id: "tour-start", label: "Take the tour", hint: "3 minute walkthrough", href: "/app", run: () => tour.start() }];
     const needle = q.trim().toLowerCase();
-    const all = needle ? [...nav, ...pay, ...ppl] : nav;
+    const all = needle ? [...demo, ...nav, ...pay, ...ppl] : [...demo, ...nav];
     return all.filter((e) => !needle || e.label.toLowerCase().includes(needle) || e.id.toLowerCase().includes(needle)).slice(0, 12);
-  }, [q, workers.data, runs.data]);
+  }, [q, workers.data, runs.data, tour]);
 
-  const go = (e: Entry | undefined) => { if (!e) return; onOpenChange(false); router.push(e.href); };
+  const go = (e: Entry | undefined) => { if (!e) return; onOpenChange(false); if (e.run) e.run(); else router.push(e.href); };
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>

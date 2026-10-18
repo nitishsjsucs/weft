@@ -1,0 +1,17 @@
+/* Guided tour (owner: tour). tokens.css is frozen, so the tour's own keyframes live here; the card reuses weft-pop. */
+@keyframes weft-tour-pulse {
+  0% { box-shadow: 0 0 0 2px var(--accent-9), 0 0 0 6px var(--accent-4); }
+  50% { box-shadow: 0 0 0 2px var(--accent-9), 0 0 0 10px color-mix(in oklab, var(--accent-4) 40%, transparent); }
+  100% { box-shadow: 0 0 0 2px var(--accent-9), 0 0 0 6px var(--accent-4); }
+}
+.weft-tour-ring {
+  box-shadow: 0 0 0 2px var(--accent-9), 0 0 0 6px var(--accent-4);
+  animation: weft-tour-pulse 1.2s ease-in-out 2;
+  transition: top .2s var(--ease-standard, ease-out), left .2s var(--ease-standard, ease-out), width .2s var(--ease-standard, ease-out), height .2s var(--ease-standard, ease-out);
+}
+.weft-tour-mark { outline: 1.5px dashed var(--accent-8); outline-offset: 0; }
+.weft-tour-card { animation: weft-pop .25s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .weft-tour-ring { animation: none; transition: none; }
+  .weft-tour-card { animation: none; }
+}

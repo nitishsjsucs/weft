@@ -105,9 +105,9 @@ export function ComplianceView() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="registrations">Registrations</TabsTrigger>
-          <TabsTrigger value="rates">Rates</TabsTrigger>
+          <TabsTrigger value="rates" data-tour="compliance-tab" data-tab="rates">Rates</TabsTrigger>
           <TabsTrigger value="notices">Notices {notices.data ? <Badge size="xs">{notices.data.count}</Badge> : null}</TabsTrigger>
-          <TabsTrigger value="calendar">Calendar</TabsTrigger>
+          <TabsTrigger value="calendar" data-tour="compliance-tab" data-tab="calendar">Calendar</TabsTrigger>
           <TabsTrigger value="filings">Filings</TabsTrigger>
           <TabsTrigger value="handoffs">Hand-offs</TabsTrigger>
           <TabsTrigger value="training">Training</TabsTrigger>
@@ -141,7 +141,7 @@ export function ComplianceView() {
                 {[...rs].sort((a, b) => a.jurisdiction.localeCompare(b.jurisdiction) || a.code.localeCompare(b.code) || b.effectiveFrom.localeCompare(a.effectiveFrom)).map((r) => {
                   const href = r.source.startsWith("notice:") ? `/app/compliance?notice=${r.source.slice(7)}` : null;
                   return (
-                    <TR key={r.id} data-testid={tid.rateRow(r.jurisdiction, r.code)} data-rate={r.rate} className={r.supersededActionSeq !== null ? "text-gray-9 line-through" : undefined}>
+                    <TR key={r.id} data-testid={tid.rateRow(r.jurisdiction, r.code)} data-tour="rate-row" data-jurisdiction={r.jurisdiction} data-code={r.code} data-source={r.source} data-current={r.supersededActionSeq === null && r.id === currentRate(rs, r.jurisdiction, r.code)?.id ? "true" : "false"} data-rate={r.rate} className={r.supersededActionSeq !== null ? "text-gray-9 line-through" : undefined}>
                       <TD className="font-medium">{r.jurisdiction}</TD>
                       <TD className="uppercase">{r.code}</TD>
                       <TD numeric>{ratePct(r.rate)}</TD>

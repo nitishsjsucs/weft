@@ -85,7 +85,7 @@ export function ExpensesView() {
                     <TD colSpan={6} className="h-8 text-1 font-medium tracking-wide text-gray-10 uppercase">{BAND_LABEL[b]} <span className="ml-1 tabular text-gray-9">{page?.bands[b] ?? inBand.length}</span></TD>
                   </TR>,
                   ...(inBand.length ? inBand.map((r) => (
-                    <TR key={r.id} data-testid={TID.row(r.id)} data-status={r.status} className="cursor-pointer" onClick={() => setOpenId(r.id)}
+                    <TR key={r.id} data-testid={TID.row(r.id)} data-tour="expense-row" data-band={r.band} data-checks={r.checks.some((c) => c.severity === "block") ? "red" : r.checks.some((c) => c.severity === "review") ? "amber" : "none"} data-status={r.status} className="cursor-pointer" onClick={() => setOpenId(r.id)}
                       tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(r.id); } }}>
                       <TD className="h-12 max-w-[200px]">
                         <div className="truncate font-medium" title={r.workerName}>{r.workerName}</div>

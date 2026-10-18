@@ -9,6 +9,7 @@ import { BreadcrumbProvider } from "./crumbs";
 import { AGENT_PANEL_ID, Header, SIDEBAR_ID } from "./header";
 import { Sidebar } from "./sidebar";
 import { mocksEnabled } from "@/lib/api/mocks";
+import { TourShellBridge } from "../../tour/shell-bridge";
 
 function useMedia(q: string): boolean {
   const [m, setM] = useState(false);
@@ -61,6 +62,7 @@ function Frame({ children }: { children: ReactNode }) {
         </div>
       ) : null}
       <CommandMenu open={search} onOpenChange={setSearch} />
+      <TourShellBridge setMobileNav={setMobileNav} laptop={laptop} desktop={desktop} />
     </div>
   );
 }

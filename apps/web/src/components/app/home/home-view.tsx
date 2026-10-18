@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
-import { Banknote, CalendarDays, ChevronRight, Inbox, Landmark, Users } from "lucide-react";
-import { Badge, Card, CardHeading } from "@weft/ui/components";
+import { Banknote, CalendarDays, ChevronRight, Compass, Inbox, Landmark, Users } from "lucide-react";
+import { Badge, Button, Card, CardHeading } from "@weft/ui/components";
+import { useTour } from "../../tour/tour-provider";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
 import { AGENCY, fmtDate, period, relative, runKind } from "../format";
 
@@ -23,6 +24,7 @@ function Widget({ icon, title, href, children, footer, testid }: { icon: React.R
 
 /** Home: the four SPEC 11.3 widgets plus Time Off (wave 3, w3-timeoff). */
 export function HomeView() {
+  const tour = useTour();
   const who = usePrincipal();
   const clock = useSimClock();
   const now = clock.data?.now;
@@ -49,7 +51,16 @@ export function HomeView() {
   const soon = today && in30Days ? tor.filter((r) => r.status === "approved" && r.startAt > today && r.startAt <= in30Days).sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) : [];
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
-      <h1 className="mb-8 text-7 font-semibold tracking-tight">{greeting(now)}, {first}</h1>
+      <div className="mb-8 flex flex-wrap items-center gap-x-4 gap-y-3">
+        <h1 className="flex-1 text-7 font-semibold tracking-tight">{greeting(now)}, {first}</h1>
+        <span className="inline-flex items-center gap-2">
+          <Button data-tour="home-take-tour" size="sm" onClick={() => tour.start()} className="relative">
+            <Compass strokeWidth={1.5} /> Take the tour
+            {!tour.seen ? <span aria-hidden data-tour-dot="" className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-[var(--accent-9)]" /> : null}
+          </Button>
+          <span className="text-1 text-gray-10">3 min</span>
+        </span>
+      </div>
       <div className="grid items-start gap-6 tablet:grid-cols-2">
         <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Paid by simulated ACH debit</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
           {upcoming.length === 0 ? <div className="p-4 text-2 text-gray-10">{runs.error ? "Payroll is not available yet." : "No upcoming payrolls."}</div> : null}

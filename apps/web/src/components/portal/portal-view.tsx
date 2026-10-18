@@ -84,6 +84,7 @@ export function PortalView() {
           <p className="mt-2 text-3 text-gray-11">{view.worker.title} · starts {fmtDate(view.worker.startDate, { month: "short", day: "numeric", year: "numeric" })}{view.worker.workState ? ` · ${view.worker.workState}` : ""}. A few things to finish before your first day.</p>
         </div>
         {closed ? <Card className="p-4"><p role="alert" className="text-2 text-amber-11">This offer is {view.offer!.status === "voided" ? "no longer active" : "past its expiry date"}. Reach out to the hiring team with any questions.</p></Card> : null}
+        <div data-tour="portal-checklist" data-count={view.total} className="flex flex-col gap-6">
         <Card className="p-4">
           <div className="flex items-center gap-3">
             <span data-testid={T.portalCounter} data-done={view.done} data-total={view.total} className="text-3 font-semibold">{view.done} of {view.total} done</span>
@@ -105,6 +106,7 @@ export function PortalView() {
             </li>
           ))}
         </ol>
+        </div>
         <PortalW3Sections workerId={view.worker.id} principal={as} />
         <PortalAskBox principal={as} />
         <p className="text-1 text-gray-10">Everything here is simulated: a fictional company, fictional people and no real tax, bank or identity data.</p>

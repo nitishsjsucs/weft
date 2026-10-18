@@ -1,0 +1,95 @@
+// DOM helpers for the tour (owner: tour): find a target with a MutationObserver plus rAF, click a control the way
+// a pointer would (Radix tabs activate on mousedown, popovers on click), close app layers, and fill a React input.
+
+export const reducedMotion = (): boolean => {
+  try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+};
+
+/** The first element matching any selector, skipping ones with no box (hidden tiers of the same control). */
+export function findFirst(selectors: string[]): { el: HTMLElement; selector: string } | null {
+  for (const sel of selectors) {
+    let nodes: NodeListOf<HTMLElement>;
+    try { nodes = document.querySelectorAll<HTMLElement>(sel); } catch { continue; }
+    for (const el of nodes) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 || r.height > 0) return { el, selector: sel };
+    }
+  }
+  return null;
+}
+
+/** Waits up to `ms` for any of the selectors; resolves null on timeout or abort. */
+export function waitForAny(selectors: string[], ms: number, signal: AbortSignal): Promise<{ el: HTMLElement; selector: string } | null> {
+  return new Promise((resolve) => {
+    if (!selectors.length) return resolve(null);
+    const hit = findFirst(selectors);
+    if (hit) return resolve(hit);
+    let done = false;
+    let raf = 0;
+    const finish = (v: { el: HTMLElement; selector: string } | null) => {
+      if (done) return;
+      done = true;
+      obs.disconnect();
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolve(v);
+    };
+    const check = () => { raf = 0; const h = findFirst(selectors); if (h) finish(h); };
+    const obs = new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(check); });
+    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-tour", "data-status", "data-state", "data-count", "data-source", "data-current", "style", "class"] });
+    const timer = setTimeout(() => finish(findFirst(selectors)), ms);
+    const onAbort = () => finish(null);
+    signal.addEventListener("abort", onAbort);
+    // Layout changes without mutations (a scroll container settling) still resolve within a frame or two.
+    const poll = () => { if (!done) { check(); if (!done) setTimeout(poll, 150); } };
+    setTimeout(poll, 150);
+  });
+}
+
+/** Clicks like a pointer: mousedown (Radix tabs) then click (buttons, popover triggers, rows). */
+export function activate(el: HTMLElement): void {
+  const opts = { bubbles: true, cancelable: true, button: 0, view: window } as MouseEventInit;
+  try { el.dispatchEvent(new PointerEvent("pointerdown", { ...opts, pointerType: "mouse" })); } catch { /* old engine */ }
+  el.dispatchEvent(new MouseEvent("mousedown", opts));
+  el.dispatchEvent(new MouseEvent("mouseup", opts));
+  el.click();
+}
+
+/** Closes app popovers and drawers through Radix's outside interaction (the tour card ignores outside clicks). */
+export function closeAppLayers(): void {
+  try { document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, pointerType: "mouse" })); } catch { /* old engine */ }
+}
+
+/** Sets a controlled React textarea or input value and fires the input event React listens for. */
+export function setReactValue(el: HTMLTextAreaElement | HTMLInputElement, value: string): void {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, value);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** Types `text` into a React field one character at a time, or at once under reduced motion. */
+export async function typeInto(el: HTMLTextAreaElement | HTMLInputElement, text: string, signal: AbortSignal): Promise<void> {
+  if (reducedMotion()) { setReactValue(el, text); return; }
+  for (let i = 1; i <= text.length; i++) {
+    if (signal.aborted) return;
+    setReactValue(el, text.slice(0, i));
+    await sleep(18, signal);
+  }
+}
+
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const t = setTimeout(done, Math.max(0, ms));
+    function done() { signal?.removeEventListener("abort", done); clearTimeout(t); resolve(); }
+    signal?.addEventListener("abort", done);
+  });
+}
+
+/** True when keys belong to a field the person is typing in. */
+export function isTypingTarget(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement).isContentEditable;
+}

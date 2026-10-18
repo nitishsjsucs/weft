@@ -89,7 +89,7 @@ function Tree({ paths, current, onOpen }: { paths: string[]; current: string | n
               <ul className="ml-4 max-h-[340px] overflow-y-auto">
                 {files.map((p) => (
                   <li key={p}>
-                    <button type="button" data-testid="memory-tree-file" data-path={p} onClick={() => onOpen(p)}
+                    <button type="button" data-testid="memory-tree-file" data-tour="memory-tree-file" data-path={p} onClick={() => onOpen(p)}
                       className={cn("w-full truncate rounded px-1 py-0.5 text-left font-mono text-[12px] hover:bg-gray-3", current === p && "bg-blue-3 text-blue-11")} title={p}>
                       {p.slice(f.length + 1)}
                     </button>
@@ -108,7 +108,7 @@ function History({ path }: { path: string }) {
   const h = useJson<HistoryEntry[]>(`/v1/memory/history?path=${encodeURIComponent(path)}&limit=20`);
   const [openSha, setOpenSha] = useState<string | null>(null);
   return (
-    <Card className="p-4" data-testid="memory-history">
+    <Card className="p-4" data-testid="memory-history" data-tour="memory-history">
       <h3 className="mb-2 flex items-center gap-1.5 text-2 font-semibold"><GitCommitHorizontal className="size-4" aria-hidden /> History</h3>
       {h.error ? <div className="text-1 text-red-11">{h.error}</div> : null}
       <ul className="divide-y divide-gray-4">
@@ -155,7 +155,7 @@ export function MemoryView() {
       <div className="grid gap-4 laptop:grid-cols-[300px_minmax(0,1fr)]">
         <Tree paths={tree.data ?? []} current={current} onOpen={open} />
         <div className="flex min-w-0 flex-col gap-4">
-          <Card className="p-4" data-testid="memory-file" data-path={current ?? ""}>
+          <Card className="p-4" data-testid="memory-file" data-tour="memory-file" data-path={current ?? ""}>
             {file.error ? <div className="text-1 text-red-11">{file.error}</div> : null}
             {!f && !file.error ? <div className="text-1 text-gray-10">{file.loading ? "Loading..." : "Pick a file."}</div> : null}
             {f ? (
@@ -172,7 +172,7 @@ export function MemoryView() {
             ) : null}
           </Card>
           {f ? (
-            <Card className="p-4" data-testid="memory-backlinks">
+            <Card className="p-4" data-testid="memory-backlinks" data-tour="memory-backlinks" data-count={(f.links?.backlinks ?? []).length}>
               <h3 className="mb-2 flex items-center gap-1.5 text-2 font-semibold"><Link2 className="size-4" aria-hidden /> Backlinks</h3>
               {(f.links?.backlinks ?? []).length === 0 ? <div className="text-1 text-gray-10">No file links here yet.</div> : (
                 <ul className="flex flex-wrap gap-1.5">

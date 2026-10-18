@@ -12,6 +12,7 @@ import { TID, type W2OnboardingOfferDetail } from "@weft/contracts";
 import { PRINCIPALS, setPrincipal, useGet, usePrincipal } from "@/lib/api/hooks";
 import { firstName, groupPersonas, initials, roleLabel } from "./env";
 import { segmentClass } from "./segment";
+import { useTour } from "../../tour/tour-provider";
 
 /** New-hire personas from sent, viewed or accepted offers. They sign in to the portal only (PORTAL_ONLY elsewhere). */
 function usePortalPersonas(): { id: string; name: string }[] {
@@ -32,6 +33,7 @@ export function PersonaAvatar({ name, className }: { name: string; className?: s
 }
 
 export function PersonaMenu() {
+  const tour = useTour();
   const who = usePrincipal();
   const portal = usePortalPersonas();
   const current = PRINCIPALS.find((p) => p.id === who) ?? PRINCIPALS[0];
@@ -99,6 +101,12 @@ export function PersonaMenu() {
           <p className="px-2 pt-1 pb-1.5 text-1 text-gray-11">
             Switches the signed-in human. Dev auth only, and self-approval checks treat each persona as a different person on purpose.
           </p>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup aria-label="Demo">
+            <DropdownMenuLabel>Demo</DropdownMenuLabel>
+            <DropdownMenuItem data-tour="tour-menu-start" onSelect={() => tour.start()}>Take the tour</DropdownMenuItem>
+            <DropdownMenuItem data-tour="tour-menu-reset" onSelect={() => tour.openReset()}>Reset demo data...</DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
       <span className="sr-only" aria-live="polite">{said}</span>

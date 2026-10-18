@@ -41,7 +41,7 @@ export function AuditView() {
         title="Audit log"
         subtitle="Every state change by a person, the agent, a routine or the system, hash-chained. Undo appends a reversing row; the original stays."
         meta={
-          <Badge data-testid={TID.auditChainStatus} data-ok={c ? String(c.ok) : ""} tone={!c ? "gray" : c.ok ? "green" : "red"} size="md">
+          <Badge data-testid={TID.auditChainStatus} data-tour="audit-chain" data-ok={c ? String(c.ok) : ""} tone={!c ? "gray" : c.ok ? "green" : "red"} size="md">
             {!c ? "Checking chain..." : c.ok ? <><ShieldCheck /> Chain valid{c.head ? ` through #${c.head.seq}` : ""}</> : <><ShieldX /> Chain broken{c.badSeq !== null ? ` at #${c.badSeq}` : ""}{c.gaps.length ? `, gaps ${c.gaps.join(", ")}` : ""}</>}
           </Badge>
         }
@@ -54,7 +54,7 @@ export function AuditView() {
           <THead><TR><TH>Seq</TH><TH>Time</TH><TH>Actor</TH><TH>Command</TH><TH className="min-w-[320px]">Summary</TH><TH>Run</TH><TH /></TR></THead>
           <TBody>
             {(actions.data?.data ?? []).map((a) => (
-              <TR key={a.seq} id={`audit-${a.seq}`} data-testid={tid.auditRow(a.seq)} data-reversible={a.reversible} className={cn(a.reversedBySeq !== null && "bg-gray-2")}>
+              <TR key={a.seq} id={`audit-${a.seq}`} data-testid={tid.auditRow(a.seq)} data-tour="audit-row" data-seq={a.seq} data-reverses={a.reversesSeq ?? ""} data-reversible={a.reversible} className={cn(a.reversedBySeq !== null && "bg-gray-2")}>
                 <TD className="h-11 tabular text-gray-10">#{a.seq}</TD>
                 <TD className="h-11 whitespace-nowrap">{fmtDateTime(a.ts)}</TD>
                 <TD className="h-11 whitespace-nowrap">
@@ -74,7 +74,7 @@ export function AuditView() {
                 <TD className="h-11">{a.agentRunId ? <Link href={`/app/runs/${a.agentRunId}`} className="font-mono text-0 text-blue-11 hover:underline">{a.agentRunId}</Link> : "-"}</TD>
                 <TD className="h-11 text-right">
                   {a.reversible === "yes" && a.reversedBySeq === null ? (
-                    <Button data-testid={tid.auditUndo(a.seq)} size="xs" disabled={undo.pending} onClick={async () => setResult((await undo.run(a.seq)) ?? null)}><Undo2 /> Undo</Button>
+                    <Button data-testid={tid.auditUndo(a.seq)} data-tour="audit-undo" data-seq={a.seq} size="xs" disabled={undo.pending} onClick={async () => setResult((await undo.run(a.seq)) ?? null)}><Undo2 /> Undo</Button>
                   ) : null}
                 </TD>
               </TR>

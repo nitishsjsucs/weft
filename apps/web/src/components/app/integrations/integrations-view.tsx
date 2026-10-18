@@ -158,7 +158,7 @@ export function IntegrationsView() {
         <p>Weft reads the secret names below from the file named in WEFT_SECRETS_FILE, and real mode also needs WEFT_INTEGRATIONS_REAL=1. DocuSign also needs WEFT_ESIGN=docusign and WEFT_LIVE_DOCUSIGN=1; Checkr production also needs WEFT_LIVE_CHECKR=1. Values never reach the database or this page.</p>
       </div>
       {cards.error ? <p role="alert" className="mb-4 text-[13px] text-red-11">{errorText(cards.error)}</p> : null}
-      <div data-testid={T.list} className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))] gap-4 [&>*]:min-w-0">
+      <div data-testid={T.list} data-tour="integrations-list" data-count={list.length} className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))] gap-4 [&>*]:min-w-0">
         {list.length === 0 && !cards.error ? <p className="text-[13px] text-gray-10">Loading...</p> : list.map((c) => <VendorCard key={c.status.vendor} card={c} />)}
       </div>
       <div className="mt-6 grid gap-6 laptop:grid-cols-[1.4fr_1fr] [&>*]:min-w-0">
