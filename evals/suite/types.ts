@@ -40,7 +40,12 @@ export interface EvProposal {
   id: string; kind: string; command: string | null; args: unknown; status: string; risk: string | null; decidedBy: string | null;
   proposerRunId: string | null; routineRunId: string | null; headline: string; agentNote: string | null;
 }
-export interface EvMessage { id: string; surface: "chat" | "email"; channel: string | null; to: string | null; from: string | null; text: string; inbound: boolean }
+export interface EvMessage {
+  id: string; surface: "chat" | "email"; channel: string | null; to: string | null; from: string | null; text: string; inbound: boolean;
+  /** The proposal an approval card names (sim_chat_messages.card_json.proposalId); null for a plain message. Only the
+   * executor's proposal notifier writes cards (harness 6.9), so G3 can tell its notices from the agent's sends. */
+  cardProposalId?: string | null;
+}
 export interface EvMemory {
   headBefore: string | null; headAfter: string | null;
   commits: { sha: string; subject: string; author: string }[];
