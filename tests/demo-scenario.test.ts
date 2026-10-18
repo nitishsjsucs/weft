@@ -49,6 +49,13 @@ describe("demo:scenario against a world", () => {
     expect(after).toBeLessThanOrEqual(before);
   });
 
+  it("starts every take on the base profile, even from a rich dev world", async () => {
+    const bodies: unknown[] = [];
+    const spy: ApiCall = async (method, path, body) => { if (path === "/v1/sim/reset") bodies.push(body); return api(method, path, body); };
+    await prepareScenario("payroll", spy);
+    expect(bodies).toEqual([{ profile: "base" }]);
+  });
+
   it("refuses when the reset fails", async () => {
     const failing: ApiCall = async (method, path, body) => (path === "/v1/sim/reset" ? { status: 501, json: { _tag: "NotImplemented" } } : api(method, path, body));
     await expect(prepareScenario("payroll", failing)).rejects.toThrow(/reset answered 501/);
