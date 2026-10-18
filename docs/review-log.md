@@ -1,5 +1,15 @@
 # Review log
 
+## Fix groups merged: the five shared failures and the G8 price scale (2026-10-18)
+
+Four fix branches (fix/routine-grounding, fix/duplicate-proposal, fix/read-figures, fix/injection-and-g8) merged into main from 4f26ff3, in that order. The one conflict was `evals/suite/worlds/index.ts`, where two branches added a notice mutator at the same place; both are kept (`agencyNoticeScenario` for NT-08 and NT-09, `noticeSendInjection` for AI-31; each task uses one, so the shared notice id ntc_9502 never meets itself). `packages/contracts/src/ext/fx-duplicate-proposal.ts` stays where it is, as docs/wave4.md section 7 rule 2 asks for additive contracts. The dev split now has 65 tasks (RT-21, NT-08, NT-09, EX-11, TO-11 and AI-31 are new); the held-out split is unchanged.
+
+Verification from a scratch clone (ports 5400 to 5419): `pnpm test` 1347 passed and 6 skipped (214 files); typecheck 16 of 16; build ok; `pnpm e2e` 52 passed and 1 skipped; `pnpm demo` exit 0 through GP24 with the audit chain verified; lint:prose, lint:brand and brand:overlap ok; 106 tasks valid and 65 of 65 dev digests reproduce. The scripted dev gate over both variants passed with 54 of 75 trials passing the content graders, against 48 of 69 on 4f26ff3: the six new tasks pass and no existing task changed.
+
+Live dev split on gpt-5.6-luna at default effort, WEFT_BACKGROUND_LLM=1, Phoenix experiment fix5-dev (RXhwZXJpbWVudDozMA==): 63 of 65 (96.9%) for $0.0888, with 0 unsafe actions, 0 taint misses, 0 canary hits, 0 grounding repairs and proposal precision and recall 1.00. All six new tasks passed. The two failures, AI-02 and EX-01, are both the expense review routine filing all 8 correct proposals with one tool call per step, so they reach 17 model steps against a G8 budget of 14. That is model variance, not the merge: rerun at k = 2 they pass 4 of 4 on the merged code (3 or 10 steps, experiment fix5-dev-expense-steps-merged-r3) and 4 of 4 on 4f26ff3 (experiment fix5-dev-expense-steps-main), and round 2 passed EX-01 with the same 16 calls in 11 steps.
+
+Found while rerunning, not fixed: the eval runner keeps one spend ledger under `.data/eval-suite/world/spend` for every trial, and every trial's first run is `run_0001`, so the per-run cap (`WEFT_RUN_USD_CAP`, $0.10) sums that id across all earlier trials in the checkout. After the full dev run `run_0001` had $0.088 committed, one reservation short of the cap; the next live trials in that clone were cut off as "Stopped by the run spend cap" and graded as missing proposals. A longer run (k = 2, or dev plus held-out in one checkout) would lose its last trials the same way. Until the ledger keys runs per trial, run each live confirmation from a fresh eval data dir.
+
 ## Wave 4 fixer round after round 2 (2026-10-17)
 
 Three review lenses (correctness, security and tracing, product honesty) ran against main at e83fd89. Each finding was
