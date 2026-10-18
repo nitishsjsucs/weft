@@ -36,7 +36,8 @@ export interface CardHandlers {
   onBack: () => void;
   onExit: () => void;
   onToggleAutoplay: () => void;
-  onHover: (inside: boolean) => void;
+  /** Autoplay pauses while the pointer, or focus the person moved (not the title the tour focuses), is in the card. */
+  onHover: (kind: "pointer" | "focus", inside: boolean) => void;
   titleRef: RefObject<HTMLHeadingElement | null>;
   bodyId: string;
   titleId: string;
@@ -122,7 +123,13 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
   // Re-measured on scroll and resize, so the side follows the target.
   const box = useTrackedBox(v.found && !v.sheet ? v.target : null, 0);
   const place = box && typeof window !== "undefined" ? pickSide(box, document.documentElement.clientWidth, window.innerHeight, v.step.dock) : null;
-  const common = { onPointerEnter: () => h.onHover(true), onPointerLeave: () => h.onHover(false), onFocusCapture: () => h.onHover(true), onBlurCapture: () => h.onHover(false) };
+  const common = {
+    onPointerEnter: () => h.onHover("pointer", true),
+    onPointerLeave: () => h.onHover("pointer", false),
+    // Keyboard focus only: a mouse click on Play must not pause autoplay straight away.
+    onFocusCapture: (e: React.FocusEvent) => h.onHover("focus", e.target !== h.titleRef.current && (e.target as HTMLElement).matches?.(":focus-visible") === true),
+    onBlurCapture: () => h.onHover("focus", false),
+  };
 
   if (v.step.target === null && !v.offPage) {
     return (
@@ -188,7 +195,7 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
   );
 }
 
-function FixedSheet({ v, h, common, top, children }: { v: CardView; h: CardHandlers; common: Record<string, () => void>; top: boolean; children: ReactNode }) {
+function FixedSheet({ v, h, common, top, children }: { v: CardView; h: CardHandlers; common: Record<string, (e: React.FocusEvent) => void>; top: boolean; children: ReactNode }) {
   const pos = top
     ? "top-[calc(var(--app-header-h,48px)+8px+env(safe-area-inset-top))]"
     : "bottom-[calc(16px+env(safe-area-inset-bottom))]";

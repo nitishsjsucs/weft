@@ -103,7 +103,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const titleId = useId();
   const bodyId = useId();
-  const hover = useRef(false);
+  const hover = useRef({ pointer: false, focus: false });
   const expected = useRef<string | null>(null);
   const primaryRef = useRef<(() => void) | null>(null);
   const autoplayRef = useRef(s.autoplay);
@@ -115,7 +115,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "memo", patch });
   }, []);
   const elapsed = () => Date.now() - (sRef.current.startedAt || Date.now());
-  const paused = () => hover.current || (typeof document !== "undefined" && document.hidden);
+  const paused = () => hover.current.pointer || hover.current.focus || (typeof document !== "undefined" && document.hidden);
 
   // ---- persistence, resume and deep links ---------------------------------------------------------------------
   const booted = useRef(false);
@@ -261,6 +261,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
     let described: { el: HTMLElement; prev: string | null } | null = null;
     setUiState(freshUi(step.id));
     primaryRef.current = null;
+    hover.current = { pointer: false, focus: false };
 
     const ring = (el: HTMLElement | null) => {
       if (!el) return;
@@ -618,7 +619,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
           {ui.ready && !ui.offPage && step.target !== null ? <TourRing target={ui.target} found={ui.found} secondary={ui.secondary} /> : null}
           <TourCard
             v={view}
-            h={{ onBack: () => dispatch({ type: "back" }), onExit: exit, onToggleAutoplay: () => dispatch({ type: "autoplay", on: !s.autoplay }), onHover: (v) => { hover.current = v; }, titleRef, bodyId, titleId, autoplay: s.autoplay, desktop: desktopKeys }}
+            h={{ onBack: () => dispatch({ type: "back" }), onExit: exit, onToggleAutoplay: () => dispatch({ type: "autoplay", on: !s.autoplay }), onHover: (kind, v) => { hover.current = { ...hover.current, [kind]: v }; }, titleRef, bodyId, titleId, autoplay: s.autoplay, desktop: desktopKeys }}
           />
         </>
       ) : null}

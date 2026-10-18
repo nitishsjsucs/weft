@@ -1,5 +1,5 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": { "types": ["node"] },
-  "include": ["./**/*.ts", "../playwright.config.ts", "../scripts/dev.ts", "../scripts/check-prose.ts", "../scripts/check-brand.ts", "../scripts/files.ts"]
+  "include": ["./**/*.ts", "../playwright.config.ts", "../playwright.tour.config.ts", "../scripts/dev.ts", "../scripts/check-prose.ts", "../scripts/check-brand.ts", "../scripts/files.ts"]
 }
