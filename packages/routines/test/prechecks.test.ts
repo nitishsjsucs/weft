@@ -32,6 +32,30 @@ describe("prechecks on the t1 and t2 read shapes", () => {
     expect(JSON.stringify(r)).not.toContain("handoffs.open");
   });
 
+  // Fix group duplicate-proposal: idempotent per notice, and per letter when the same letter arrives twice.
+  const rateNotice = (extra: Record<string, unknown>) => ({ notice: { id: "ntc_0002", kind: "rate_change", status: "in_review", tax_account_id: "txa_0003", agency: "ca_edd", extracted: { agency: "ca_edd", kind: "rate_change", taxAccountId: "txa_0003", effectiveFrom: "2026-01-01", rates: [{ code: "sui", oldRate: "0.034", newRate: "0.015" }] }, ...extra } });
+  it("agency_notice skips a notice whose proposals are still open, naming them, and reads nothing else", async () => {
+    const ex = exec({ "notices.get": rateNotice({ proposals: [{ id: "prp_0002", command: "notices.send_response", status: "pending" }, { id: "prp_0001", command: "tax.update_rate", status: "pending" }], duplicate_of: null }) });
+    const r = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), ex);
+    expect(r).toMatchObject({ action: "skip" });
+    expect(r.action === "skip" && r.reason).toBe("Notice ntc_0002 is already being handled: notices.send_response prp_0002 (pending), tax.update_rate prp_0001 (pending). Nothing new to propose until a person decides.");
+    expect(ex.seen.map((s) => s.command)).toEqual(["notices.get"]);
+  });
+
+  it("agency_notice runs again when every earlier proposal was denied or expired", async () => {
+    const r = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), exec({ "notices.get": rateNotice({ proposals: [{ id: "prp_0001", command: "tax.update_rate", status: "expired" }, { id: "prp_0002", command: "notices.send_response", status: "denied" }] }) }));
+    expect(r).toMatchObject({ action: "run", derivedArgs: { plan: "update_rate" } });
+  });
+
+  it("agency_notice skips a later copy of a letter that is being handled or resolved, and handles one whose first copy never was", async () => {
+    const copy = (duplicate_of: unknown) => exec({ "notices.get": rateNotice({ status: "new", proposals: [], duplicate_of }) });
+    const handled = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), copy({ id: "ntc_0001", status: "in_review", open_proposals: 2 }));
+    expect(handled.action === "skip" && handled.reason).toContain("Notice ntc_0002 repeats ntc_0001 (same agency, form, account, parsed fields and text), which is already in_review with 2 open proposals.");
+    const resolved = await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), copy({ id: "ntc_0001", status: "resolved", open_proposals: 0 }));
+    expect(resolved.action === "skip" && resolved.reason).toContain("which is already resolved.");
+    expect(await PRECHECKS.agency_notice!(ctx({ notice_id: "ntc_0002" }), copy({ id: "ntc_0001", status: "new", open_proposals: 0 }))).toMatchObject({ action: "run" });
+  });
+
   it("new_hire derives accounts, the welcome, registrations for unregistered accounts and the laptop", async () => {
     const r = await PRECHECKS.new_hire!(ctx({ worker_id: "wrk_0049", offer_id: "offr_0001" }), exec({
       "people.get": { worker: { id: "wrk_0049", name: "Noor Castellanos (demo) (wrk_0049)", work_state: "CO" } },

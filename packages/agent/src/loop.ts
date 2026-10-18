@@ -561,9 +561,12 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
 // eight saved notes never hides its proposals (review of e83fd89, round 2 O2).
 export const ROUTINE_SUMMARY_PARTS = 8;
 export async function routineSummary(results: () => Promise<unknown[]>): Promise<string> {
-  const rs = (await results()) as { resultId?: string; summary?: string; proposalId?: string; title?: string; actionSeq?: number | null }[];
+  const rs = (await results()) as { resultId?: string; summary?: string; proposalId?: string; title?: string; actionSeq?: number | null; existing?: boolean }[];
+  // A call that matched an open proposal filed nothing (fix group duplicate-proposal): the summary says it was already there.
+  const seen = new Set<string>();
+  const proposed = rs.filter((r) => r.proposalId && !seen.has(r.proposalId) && seen.add(r.proposalId));
   const parts = [
-    ...rs.filter((r) => r.proposalId).map((r) => `Proposed ${r.title ?? "a change"} (${r.proposalId})`),
+    ...proposed.map((r) => `${r.existing ? "Already waiting for approval:" : "Proposed"} ${r.title ?? "a change"} (${r.proposalId})`),
     ...rs.filter((r) => r.resultId && r.actionSeq !== null && r.actionSeq !== undefined).map((r) => `${r.summary ?? "Done"} (#${r.actionSeq})`),
   ];
   if (!parts.length) return "Checked; nothing needed a change.";

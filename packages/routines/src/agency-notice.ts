@@ -96,6 +96,30 @@ async function ratePath(ctx: Parameters<Precheck>[0], exec: ReadOnlyExecutor, no
   };
 }
 
+/** Proposal statuses that mean a notice's work is waiting on a person or under way. */
+const OPEN_PROPOSAL = new Set(["pending", "approved"]);
+
+/**
+ * Idempotency per notice (fix group duplicate-proposal): a second run on a notice whose proposals are still open, or on
+ * a later copy of a letter that is already being handled, proposes nothing new. notices.get lists the proposals filed
+ * about the notice and the earlier copy of the same letter (duplicate_of). Returns the skip reason, or null to run.
+ */
+export function alreadyHandled(noticeId: string, notice: Obj): string | null {
+  const open = arr(pick(notice, "proposals")).filter((p) => OPEN_PROPOSAL.has(str(p.status) ?? ""));
+  if (open.length) {
+    const list = open.map((p) => `${str(p.command) ?? "a change"} ${str(p.id)} (${str(p.status)})`).join(", ");
+    return `Notice ${noticeId} is already being handled: ${list}. Nothing new to propose until a person decides.`;
+  }
+  const copy = obj(pick(notice, "duplicate_of"));
+  const copyId = str(copy.id);
+  if (!copyId) return null;
+  const copyStatus = str(copy.status) ?? "new";
+  const copyOpen = Number(copy.open_proposals ?? 0);
+  if (copyStatus === "new" && !(copyOpen > 0)) return null;   // the earlier copy was never handled: handle this one
+  const state = copyOpen > 0 ? `${copyStatus} with ${copyOpen} open proposal${copyOpen === 1 ? "" : "s"}` : copyStatus.replaceAll("_", " ");
+  return `Notice ${noticeId} repeats ${copyId} (same agency, form, account, parsed fields and text), which is already ${state}. Nothing new to do; a person can mark ${noticeId} read in Compliance.`;
+}
+
 /** notices.get (t2-world): data.notice.{kind, status, tax_account_id, form_code, extracted: {...}}. */
 export const agencyNotice: Precheck = async (ctx, exec) => {
   const noticeId = str(obj(ctx.payload).notice_id);
@@ -105,6 +129,8 @@ export const agencyNotice: Precheck = async (ctx, exec) => {
   const notice = obj(pick(data, "notice") ?? data);
   const status = str(notice.status) ?? "new";
   if (status === "resolved" || status === "escalated") return { action: "skip", reason: `Notice ${noticeId} is already ${status}.` };
+  const handled = alreadyHandled(noticeId, notice);
+  if (handled) return { action: "skip", reason: handled };
   const kind = str(pick(notice, "kind")) ?? str(pick(obj(notice.extracted), "kind")) ?? "unknown";
   if (kind === "rate_change") {
     const r = await ratePath(ctx, exec, noticeId, notice);

@@ -148,7 +148,7 @@ export const fixtureCommands: WeftCommand[] = [
 
 export const fakeSims = (() => ({})) as unknown as (o: unknown) => Simulators;
 
-export interface World { db: Db; dir: string; executor: ExecutorBundle; ui(principalId: string): HumanSession; close(): Promise<void> }
+export interface World { db: Db; dir: string; executor: ExecutorBundle; ui(principalId: string): HumanSession; close(): Promise<void>; clock: { set(to: string, rate?: number): Promise<void>; now(): string } }
 
 /** The domain rows the fixture commands read (company, 4 workers, the injection notice, the CA SUI rate, the open draft). */
 export async function seedFixtureRows(db: Db): Promise<void> {
@@ -173,7 +173,7 @@ export async function makeWorld(opts: { commands?: WeftCommand[] } = {}): Promis
   const executor = await createExecutor({ db, clock, dataDir: dir, commands: opts.commands ?? fixtureCommands, simulators: fakeSims as never, testMode: true });
   await seedGovernance({ db, clock, executor, sims: {} as Simulators, dataDir: dir, companyId: CMP, faker: null as never });
   return {
-    db, dir, executor,
+    db, dir, executor, clock,
     ui: (principalId) => ({ principalId, companyId: CMP, via: "ui", keyScope: null }),
     async close() { await closeDb(db); rmSync(dir, { recursive: true, force: true }); },
   };

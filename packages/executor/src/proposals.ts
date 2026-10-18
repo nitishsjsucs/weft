@@ -1,6 +1,6 @@
 // Proposals, not effects (harness 5.5). A gated call stores the parsed args, the canonical preview and the
 // provenance; the card headline comes from structured fields only, free text goes to "Content to be sent".
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { ApprovalCardW3, PolicyDecision, Preview, Proposal, ProposalKind, ProposalStatus, RiskClass, ToolOutcome } from "@weft/contracts";
 import { emitEvent, newId, payroll, type WeftCommand } from "@weft/core";
 import { payrollRuns, principals, proposals, routineRuns, routines, type Db, type DbTx } from "@weft/db";
@@ -9,6 +9,7 @@ import type { Engine } from "./engine";
 import { appendAudit } from "./chain";
 import type { CallScope } from "./scope";
 import { idShapedValues } from "./references";
+import { DUPLICATE_PROPOSAL_CODE, type ExistingProposalOutcome } from "../../contracts/src/ext/fx-duplicate-proposal";
 
 export type ProposalRow = typeof proposals.$inferSelect;
 export const PROPOSAL_TTL_MS = 72 * 3600_000;
@@ -63,6 +64,60 @@ export interface NewProposal {
   reason: string; domain: string; reversible: boolean; agentNote: string | null; taintedBy: string | null;
   proposerRunId: string | null; routineRunId: string | null; onBehalfOf: string | null; companyId: string;
   stamp: { attended: boolean; requestedBy: string | null };
+}
+
+/** How long a decided proposal still stops an equivalent one from being filed (sim clock, from decided_at). */
+export const EQUIVALENT_DECIDED_WINDOW_MS = 24 * 3600_000;
+/** Decisions a repeat must not reopen: the change happened (or is happening), or a person turned it down. */
+const DECIDED_EQUIVALENT = new Set(["approved", "executed", "denied", "dismissed"]);
+
+/**
+ * The equivalent-proposal check (fix group duplicate-proposal). A gated call matches an existing proposal of the same
+ * company, kind, command and subject_ref with the same canonical arguments (args_hash over the parsed input):
+ * - still pending, unexpired and on the same subject state (subject_hash): the caller gets that proposal back;
+ * - approved, executed, denied or dismissed within EQUIVALENT_DECIDED_WINDOW_MS: the caller is told it was decided.
+ * A pending match on a changed subject is not a duplicate: the new call supersedes it as before (harness 5.4). A
+ * denial or dismissal on a changed subject is not one either. An untainted call never takes over a tainted proposal,
+ * so a clean run can still replace a proposal an injected run filed. Expired, failed and superseded rows never match.
+ */
+export async function findEquivalentProposal(tx: DbTx, p: { companyId: string; kind: ProposalKind; command: string; input: unknown; preview: Preview; tainted: boolean; now: string }): Promise<ProposalRow | null> {
+  const argsHash = digestOf(p.input);
+  const since = new Date(Date.parse(p.now) - EQUIVALENT_DECIDED_WINDOW_MS).toISOString();
+  const rows = await tx.select().from(proposals).where(and(eq(proposals.companyId, p.companyId), eq(proposals.kind, p.kind), eq(proposals.command, p.command),
+    eq(proposals.subjectRef, p.preview.subjectRef), eq(proposals.argsHash, argsHash))).orderBy(desc(proposals.createdAt), desc(proposals.id));
+  for (const r of rows) {
+    if (r.taintedBy && !p.tainted) continue;
+    if (r.status === "pending") {
+      if (r.expiresAt > p.now && r.subjectHash === p.preview.subjectHash) return r;
+      continue;
+    }
+    if (!DECIDED_EQUIVALENT.has(r.status) || !r.decidedAt || r.decidedAt < since) continue;
+    if ((r.status === "denied" || r.status === "dismissed") && r.subjectHash !== p.preview.subjectHash) continue;
+    return r;
+  }
+  return null;
+}
+
+/** What the caller reads when its call matched `row`: the open proposal itself, or a refusal naming the decision. */
+export function equivalentOutcome(row: ProposalRow, tainted: boolean): ToolOutcome {
+  if (row.status === "pending") {
+    const out: ExistingProposalOutcome = {
+      ok: true, status: "pending_approval", proposalId: row.id, title: row.headline, expiresAt: row.expiresAt, tainted, existing: true,
+      note: `${row.id} already proposes this (same command, subject and arguments) and is waiting for approval; no new proposal was filed. Do not propose it again.`,
+    };
+    return out;
+  }
+  const what = row.status === "executed" || row.status === "approved" ? "approved and carried out" : row.status === "denied" ? "denied by a person" : "dismissed by a person";
+  const hint = row.status === "executed" || row.status === "approved"
+    ? `It is already done: report ${row.id} instead of proposing it again.`
+    : `A person turned it down: say so instead of proposing it again, or propose different arguments if something has changed.`;
+  return {
+    ok: false, tainted,
+    refusal: {
+      code: DUPLICATE_PROPOSAL_CODE, message: `An equivalent ${row.command ?? "proposal"} (${row.id}, same subject and arguments) was ${what} at ${row.decidedAt}; nothing new was filed.`,
+      hint, example: { proposal_id: row.id, status: row.status, decided_at: row.decidedAt, executed_action_seq: row.executedActionSeq },
+    },
+  };
 }
 
 export async function insertProposal(e: Engine, tx: DbTx, p: NewProposal): Promise<ProposalRow> {

@@ -511,6 +511,10 @@ From the tracks (details in each `docs/tracks/w4-*.md` and `.scratch/<track>/lef
   - the people digest's grounding facts count employees by state without a status filter: open;
   - the chat intent check misses phrasings like "set him up with": open;
   - a notice restating the rate on file proposes a no-op rate change: open (no merge record claims it);
+  - a second run on the same notice, or a second copy of the same letter, files duplicate proposals: fixed (fix group
+    duplicate-proposal: the executor's equivalent-proposal check, `notices.get` listing the proposals filed about a
+    notice and its earlier copy, and `rt_agency_notice` skipping a notice that is already being handled; dev NT-08 and
+    NT-09);
   - grounding has no totals over a filtered list or time off in hours: totals over a list fixed (round 1 FG2, count
     totals); time off in hours open;
   - `payroll.list_runs` returns the period as one string: open (round 2 FG4 reads month day ranges as two dates in
