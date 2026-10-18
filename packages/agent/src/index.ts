@@ -1,6 +1,6 @@
 // The brain (SPEC 9.1, 9.5 to 9.10, harness 4, 7, 10, 11). Owner: t4-agent.
 // Imports only @weft/contracts, @weft/grounding, its own run store tables and its providers (tests/boundaries.test.ts).
-export { createSpendLedger, capsFromEnv, SpendLockTimeout, type SpendLedgerOptions, type SpendCaps, type WeftSpendLedger } from "./spend";
+export { createSpendLedger, capsFromEnv, SpendLockTimeout, type LedgerEntry, type SpendLedgerOptions, type SpendCaps, type WeftSpendLedger } from "./spend";
 export type { SpendLedgerOptions as CreateSpendLedgerOptions } from "./spend";
 export { createProvider, isTestEnv, ProviderError, DEFAULT_MODEL, DEFAULT_SCRIPTS_DIR, EFFORT_OVERRIDES, effortOverrideFromEnv, openaiSettingsFromEnv, type CreateProviderOptions } from "./providers/factory";
 export { openaiProvider, createOpenAIClient, buildResponsesRequest, handleResponse, historyToInput, mapUsage, renderNotice, OPENAI_FIXED, OPENAI_ERRORS, type OpenAIProviderOptions } from "./providers/openai";

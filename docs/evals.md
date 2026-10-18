@@ -25,7 +25,10 @@ Flags: `--split dev|test|retired-r1|all` (`all` is dev and the active test split
 because the scripted model cannot branch), `--experiment <name>` (the Phoenix experiment name; with more than one split
 or variant in the run, `-<split>-<variant>` is appended to it). Two runs at once need separate `WEFT_EVAL_DIR` folders.
 Trial worlds live in `.data/eval-suite/world` (override `WEFT_EVAL_DIR`); only its `spend` folder survives between
-trials, so the live caps (`WEFT_LIVE_USD_CAP`, which defaults to the suite cap) stay cumulative.
+trials, so the live caps (`WEFT_LIVE_USD_CAP`, which defaults to the suite cap) stay cumulative. The per-run cap
+(`WEFT_RUN_USD_CAP`) keys a run by its trial world and its id: every trial world gets a new world id
+(`companies/.world-id`, removed with the rest of the trial dir), so each trial's `run_0001` has its own run cap and a
+k = 2 run, or dev plus held-out in one checkout, no longer loses its later trials to "Stopped by the run spend cap".
 
 ## Tasks
 

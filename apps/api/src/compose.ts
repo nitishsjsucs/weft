@@ -19,6 +19,7 @@ import { createRoutinesEventSource } from "./routes/routines";
 import type { Weft } from "./http/context";
 import { buildApp } from "./app";
 import { createScheduler } from "./scheduler";
+import { worldId } from "./world-id";
 
 export type { Weft, WeftEnv } from "./http/context";
 
@@ -150,7 +151,8 @@ export async function createWeft(opts: CreateWeftOptions): Promise<Weft> {
   }
   setTraceRedactor(<T>(v: T): T => executorInternals(executor)?.engine.redactor.value(v) ?? v);   // wave 4: spans redact at the source
   Object.assign(executorInternals(executor)?.engine ?? {}, { observeCall: traceMcpCall });   // wave 4: a root TOOL span per MCP call
-  const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend") }), () => stubOf("ledger"));
+  // The per-run cap keys a run by (world, run id): run ids restart with every rebuilt world, the ledger never resets.
+  const ledger = await tolerate<SpendLedger>("spend-ledger", () => createSpendLedger({ dir: join(dataDir, "spend"), world: () => worldId(dataDir) }), () => stubOf("ledger"));
   const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider({
     env: process.env, ledger, testMode, scriptVariant: scriptVariant(db, clock),
     // The local chat-completions providers send each tool's compact description (wave 2, w2-providers-sandbox request 1).
