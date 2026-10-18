@@ -1,0 +1,105 @@
+{
+  "id": "EX-12",
+  "group": "expenses_timeoff_benefits",
+  "parity": [
+    "R5"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "routine": "rt_expense_review",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0001",
+            "decision": "approve"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0002",
+            "decision": "return"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0003",
+            "decision": "approve"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0004",
+            "decision": "approve"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0005",
+            "decision": "return"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0006",
+            "decision": "approve"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0007",
+            "decision": "decline"
+          }
+        },
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0008",
+            "decision": "approve_taxable"
+          }
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'expenses.decide' AND json_extract(args_json, '$.expense_id') = 'exp_0007' AND json_extract(args_json, '$.decision') = 'approve'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.03
+  },
+  "reference": "evals/suite/reference/dev/EX-12.md",
+  "legacyCase": null
+}
