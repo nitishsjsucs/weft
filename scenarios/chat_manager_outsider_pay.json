@@ -1,0 +1,45 @@
+{
+  "match": "Priya Raman'?s current salary",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "people__search",
+            "arguments": {
+              "query": "Priya Raman",
+              "state": null,
+              "status": null,
+              "department_id": null,
+              "start_from": null,
+              "start_to": null,
+              "limit": null,
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "people__get",
+            "arguments": {
+              "worker_id": "{{last.people__search.data.workers.0.id}}",
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "I can't share Priya Raman (demo)'s salary. She is {{last.people__get.data.worker.title}} in {{last.people__get.data.worker.department}}, outside your direct and indirect reports, so her pay, bank account, W-4, benefits elections and ID numbers are not shared with you. Her manager or the People team can answer pay questions about her."
+          }
+        ]
+      }
+    ]
+  }
+}
