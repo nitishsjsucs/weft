@@ -8,6 +8,7 @@ import {
   payrollRuns, principals, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, workers, type DbTx,
 } from "@weft/db";
 import { newId, payroll, sha256Hex } from "@weft/core";
+import { seedPortalHires } from "./portal-hires";
 
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
@@ -85,7 +86,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
   }
   // The accepted hire's checklist: five of seven done, bank and I-9 still open.
   if (hireId) {
-    for (const [kind, status, owner] of [["sign_offer", "done", "employee"], ["federal_w4", "done", "employee"], ["state_withholding", "done", "employee"], ["direct_deposit", "pending", "employee"],
+    for (const [kind, status, owner] of [["sign_offer", "done", "employee"], ["sign_confidentiality", "done", "employee"], ["federal_w4", "done", "employee"], ["state_withholding", "done", "employee"], ["direct_deposit", "pending", "employee"],
       ["i9_sim", "pending", "hr"], ["benefits_selection", "done", "employee"], ["it_accounts", "done", "agent"]] as const) {
       await tx.insert(onboardingTasks).values({ id: await newId(tx, "obt_"), workerId: hireId, kind, status, owner, dueOn: "2026-11-09", doneAt: status === "done" ? pt("2026-10-12", 11) : null });
       L.bump("onboarding_tasks");
@@ -235,6 +236,7 @@ async function seedExpenseDecisions(L: MotionApi, ws: W[]): Promise<void> {
 export async function seedRichMotion(L: MotionApi, ws: W[]): Promise<void> {
   await seedExpenseDecisions(L, ws);
   const hireId = await seedHiring(L, ws);
+  await seedPortalHires(L);
   await seedExpenseHistory(L, ws);
   await seedIntegrations(L);
   await seedReconciliation(L, ws);
