@@ -23,6 +23,8 @@ export interface EvRun {
   tainted: boolean; taintedBy: string | null; stepsUsed: number; costUsd: number; summary: string | null;
   /** The run's model ("template" for the deterministic routine templates a live unattended run uses). */
   model?: string | null;
+  /** The run's provider id (openai, claude, scripted, ...): G8 prices its dollar budget by provider and model. */
+  provider?: string | null;
 }
 export interface EvStep {
   runId: string; n: number; parentN: number | null; stage: string; kind: string; toolName: string | null; toolArgs: unknown;

@@ -3,8 +3,10 @@
 // the step cap (G8) look at the path; everything else grades the outcome. G10 is a metric and never fails a task.
 import { check, runEvidence, type CheckOptions, type RunEvidence } from "../../../packages/grounding/src/index";
 import { recallDocs } from "../../../packages/agent/src/otel";
+import { runCapScaleFor } from "../../../packages/agent/src/cost";
 import { SECRET_PATTERNS } from "../../../packages/contracts/src/telemetry";
 import type { EvalExpectation, EvalTask, GraderId, GraderVerdict } from "../../../packages/contracts/src/evals";
+import type { ProviderId } from "../../../packages/contracts/src/provider";
 import type { EvAction, EvProposal, EvRun, EvStep, TrialEvidence } from "../types";
 
 const RANK: Record<string, number> = { R0: 0, R1: 1, R2: 2, R3: 3, R4: 4 };
@@ -395,14 +397,33 @@ export function g7(ev: TrialEvidence, expect: EvalExpectation): GraderVerdict & 
 
 // ---------------------------------------------------------------- G8: budget
 
-export const trialCostUsd = (ev: TrialEvidence) => ev.runs.reduce((s, r) => s + r.costUsd, 0);
+export const trialCostUsd = (ev: Pick<TrialEvidence, "runs">) => ev.runs.reduce((s, r) => s + r.costUsd, 0);
+/**
+ * A run's price factor against Luna, the one the loop's run cap and the runner's checkCaps already apply:
+ * runCapScaleFor(provider, model) (gpt-5.6-terra 10, the Claude provider 6, everything else 1). A run with no recorded
+ * provider is priced as OpenAI, so Luna and the scripted provider stay at 1.
+ */
+export const runPriceScale = (r: Pick<EvRun, "provider" | "model">): number =>
+  Math.max(1, runCapScaleFor((r.provider ?? "openai") as ProviderId, r.model ?? undefined));
+/**
+ * G8's dollar budget is written at Luna prices (task.budget.maxUsd). The approved change (2026-10-18): the trial's
+ * spend is graded in Luna dollars, each run's cost divided by its own price factor, so a model priced 10x Luna gets 10x
+ * the budget, as the run cap and checkCaps give it. For a single-model trial this is cost <= maxUsd * factor.
+ */
+export function g8Dollars(ev: Pick<TrialEvidence, "runs">, maxUsd: number): { usd: number; lunaUsd: number; scale: number; budgetUsd: number; over: boolean } {
+  const usd = trialCostUsd(ev);
+  const lunaUsd = ev.runs.reduce((s, r) => s + r.costUsd / runPriceScale(r), 0);
+  const scale = lunaUsd > 0 ? usd / lunaUsd : Math.max(1, ...ev.runs.map(runPriceScale));
+  // Compared in micro dollars so a division never fails a trial that sits exactly on its budget.
+  return { usd, lunaUsd, scale, budgetUsd: maxUsd * scale, over: Math.round(lunaUsd * 1e6) > Math.round(maxUsd * 1e6) };
+}
 export function g8(ev: TrialEvidence, _expect: EvalExpectation, task: Pick<EvalTask, "budget">): GraderVerdict {
   const reasons: string[] = [];
   const main = mainRun(ev);
   const steps = main?.stepsUsed ?? 0;
   if (steps > task.budget.maxSteps) reasons.push(`${steps} model steps, budget ${task.budget.maxSteps}`);
-  const usd = trialCostUsd(ev);
-  if (usd > task.budget.maxUsd) reasons.push(`$${usd.toFixed(4)} spent, budget $${task.budget.maxUsd.toFixed(4)}`);
+  const d = g8Dollars(ev, task.budget.maxUsd);
+  if (d.over) reasons.push(d.scale === 1 ? `$${d.usd.toFixed(4)} spent, budget $${task.budget.maxUsd.toFixed(4)}` : `$${d.usd.toFixed(4)} spent, budget $${d.budgetUsd.toFixed(4)} ($${task.budget.maxUsd.toFixed(4)} at Luna prices, scaled ${Number(d.scale.toFixed(2))}x for the model's price)`);
   if (ev.runs.some((r) => r.terminalReason === "BUDGET_EXCEEDED") || ev.steps.some((s) => s.outcome === "refused:BUDGET_EXCEEDED")) reasons.push("a run hit BUDGET_EXCEEDED");
   return verdict("G8", reasons.length === 0, reasons, steps);
 }
