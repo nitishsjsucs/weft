@@ -11,7 +11,7 @@ import { digestOf } from "./digest";
 import type { Engine } from "./engine";
 import { codeOfError, hintsOfError, refusal } from "./outcome";
 import { loadAutonomyFacts, policy, RISK_RANK, riskOf } from "./policy";
-import { agentNoteOf, genericPreview, insertProposal, proposeCall, type ProposalRow } from "./proposals";
+import { agentNoteOf, equivalentOutcome, findEquivalentProposal, genericPreview, insertProposal, proposeCall, type ProposalRow } from "./proposals";
 import { findUnknownReference } from "./references";
 import { tierFor, wireName } from "./registry";
 import { actionOverrideOf, narrowDecision, type CallScope } from "./scope";
@@ -221,6 +221,12 @@ async function runCall(e: Engine, tx: DbTx, scope: CallScope, command: string, r
     if (l) return refuse("LEASE_HELD", `${leaseKey} is held by another run until ${l.expiresAt}`);
   }
 
+  if (decision.decision === "propose") {
+    // Fix group duplicate-proposal: a repeat of an open or recently decided proposal files nothing new.
+    const kind = decision.suggest ? "suggestion" : def.name === "vault.request" ? "secret_request" : "action";
+    const same = await findEquivalentProposal(tx, { companyId: ctx.companyId, kind, command: def.name, input, preview: preview ?? genericPreview(def, input, amount), tainted: ctx.tainted, now: ctx.now });
+    if (same) return done(equivalentOutcome(same, ctx.tainted));
+  }
   if (decision.decision === "propose" && decision.suggest) {
     // Recommend autonomy: an Inbox suggestion a person starts or dismisses; it never executes.
     const row = await insertProposal(e, tx, {

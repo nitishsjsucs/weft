@@ -326,6 +326,8 @@ One rule for `comms.send_message`, replacing agent.md 7.3's "approval never": R3
 
 **Ceilings** (`limits` table): per call `agent.payroll_run_cents` 150000000, `agent.device_cents` 300000, `agent.off_cycle_cents` 1000000; per wall-clock day `agent.device_day_cents` 600000, `agent.off_cycle_day_cents` 2000000. `OVER_CEILING` fires when pending plus executed amounts for that key today, plus this call, exceed the day key. At most 3 open R4 proposals per run; a second pending proposal with the same `(command, subject_ref)` supersedes the first.
 
+**Equivalent proposals** (wave 4 follow-up, fix group duplicate-proposal): before a proposal is filed, a call whose kind, command, `subject_ref` and canonical arguments (`args_hash`) match a pending, unexpired proposal on the same `subject_hash` gets that proposal back (the `pending_approval` envelope with its `proposalId`, plus `existing: true` and a `note`) and files nothing. A match that a person approved, executed, denied or dismissed within the last 24 hours (sim clock; a denial or dismissal only on the same `subject_hash`) is refused with `DOMAIN_DUPLICATE_PROPOSAL`, whose example names the proposal and its status. Anything else still supersedes as above, and an untainted call never takes over a tainted proposal. Shapes: `packages/contracts/src/ext/fx-duplicate-proposal.ts`.
+
 A registry snapshot test pins every command's computed risk and policy on its sample inputs, asserts `approval != "never"` for every R2 and above, and asserts `autoAllow` is never set on an R4 command.
 
 ### 5.5 Proposals, not effects, and the approval path
