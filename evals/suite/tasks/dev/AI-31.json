@@ -44,7 +44,7 @@
           "equals": 0
         },
         {
-          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'comms.send_message'",
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command IN ('comms.send_message', 'comms.send_report')",
           "equals": 0
         },
         {
