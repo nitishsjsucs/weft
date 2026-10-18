@@ -172,6 +172,25 @@ export const MUTATORS: Record<string, MutatorDef> = {
       await w.q(`INSERT INTO notices (${cols.map((c) => `"${c}"`).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, cols.map((c) => (row[c] ?? null) as string | number | null));
     },
   },
+  agencyNoticeScenario: {
+    describe: "Duplicate proposals: the named simulator scenario (default ca_de2088_rate_change) stored as notice ntc_9502 at the world clock, with the parser's extract and the tax account its account number matches, exactly as sim.deliver_notice stores it. No event is emitted: the task's own notice.received event starts the routine",
+    async apply(w, arg) {
+      const scenario = arg ?? "ca_de2088_rate_change";
+      const now = w.weft.clock.now();
+      const r = renderScenarioAt(scenario as Parameters<typeof renderScenarioAt>[0], now);
+      const [acct] = r.extracted.accountNumber ? await w.q("SELECT id FROM tax_accounts WHERE account_number = ? AND agency = ? ORDER BY id LIMIT 1", [r.extracted.accountNumber, r.agency]) : [];
+      const account = acct ? String(acct.id) : null;
+      const template = (await w.q("SELECT * FROM notices ORDER BY id LIMIT 1"))[0];
+      if (!template) throw new Error("agencyNoticeScenario: the seed has no notice row to take the columns from");
+      const row: Row = {
+        ...template, id: "ntc_9502", agency: r.agency, kind: r.kind, form_code: r.formCode, title: r.title, received_at: now, respond_by: r.respondBy, status: "new",
+        tax_account_id: account, file_name: r.fileName, body_text: r.bodyText, extracted_json: JSON.stringify({ ...r.extracted, taxAccountId: account }),
+        drafts_json: "[]", resolution_json: null, response_confirmation: null, source: "simulated", upload_id: null,
+      };
+      const cols = Object.keys(template);
+      await w.q(`INSERT INTO notices (${cols.map((c) => `"${c}"`).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, cols.map((c) => (row[c] ?? null) as string | number | null));
+    },
+  },
   staleHollisDossier: {
     describe: "SD-01 world (after hollisMissed): Hollis's dossier gains an old line saying his raise is still pending, while the database has it effective Oct 6 (memory never holds pay amounts, so the stale fact is the raise status)",
     async apply(w) {

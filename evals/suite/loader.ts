@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { EvalTask, type EvalSplit } from "../../packages/contracts/src/evals";
-import { KNOWN_EVENT_DRIVERS } from "./drivers";
+import { eventTimes, KNOWN_EVENT_DRIVERS, MAX_EVENT_TIMES } from "./drivers";
 import { knownMutator, WORLD_BASE } from "./worlds/index";
 
 export const REPO_ROOT = resolve(import.meta.dirname, "../..");
@@ -40,6 +40,8 @@ export function validateTask(raw: unknown, file: string, opts: { root?: string }
   if ("routine" in t.input && t.input.event) {
     const type = t.input.event.type;
     if (!type) at("a routine event needs a type");
+    if (eventTimes(t.input.event) === null) at(`event times must be 1 to ${MAX_EVENT_TIMES}`);
+    if (t.input.event.times !== undefined && type === "offer.sign") at("offer.sign does not repeat");
   }
   if ("chat" in t.input && t.surface !== "chat") at(`surface ${t.surface} with a chat input`);
   if ("routine" in t.input && t.surface !== "routine") at(`surface ${t.surface} with a routine input`);

@@ -4,6 +4,9 @@
 //   { type: "notice.deliver", scenario } -> the agency notice simulator delivers that scenario
 //   { type: "offer.sign", ... }      -> a person drafts and sends an offer and the candidate signs it (GP18)
 //   any other { type, ...payload }   -> that domain event is emitted with the payload
+//   times: "2" on a routine event    -> the start repeats, each after the previous routine run settles: a second
+//                                      notice.deliver is a second copy of the same letter, a second domain event is
+//                                      a redelivery of the same payload (fix group duplicate-proposal); 1 to 3
 //   { portal: text }                -> the asker's portal question (POST /v1/portal/agent/runs); a human-only topic is
 //                                      handed off in code and starts no run
 //   { mention: text, channel }      -> the task principal tags the agent in a chat channel (POST /v1/sim/chat/inbound);
@@ -14,6 +17,26 @@ import type { TrialWorld } from "./worlds/index";
 export interface DriveResult { mainRunId: string | null; routineRunId: string | null; chatMode: string | null; error: string | null }
 
 export const KNOWN_EVENT_DRIVERS = new Set(["notice.deliver", "offer.sign"]);
+/** The driver key on a routine event that repeats its start (never part of the emitted payload). */
+export const EVENT_TIMES_KEY = "times";
+export const MAX_EVENT_TIMES = 3;
+export function eventTimes(event: Record<string, string> | null): number | null {
+  const v = event?.[EVENT_TIMES_KEY];
+  if (v === undefined) return 1;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= MAX_EVENT_TIMES ? n : null;
+}
+
+/** Repeats a routine start; the trial's main run is the first one that started an agent run. */
+async function repeated(times: number, once: () => Promise<DriveResult>): Promise<DriveResult> {
+  const all: DriveResult[] = [];
+  for (let i = 0; i < times; i++) {
+    const r = await once();
+    if (r.error) return r;
+    all.push(r);
+  }
+  return all.find((r) => r.mainRunId) ?? all.at(-1)!;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Settled = { id: string; status: string; stepsUsed: number; summary: string | null; tainted: boolean };
@@ -95,23 +118,25 @@ export async function drive(w: TrialWorld, task: EvalTask): Promise<DriveResult>
       await settled(w, runId);
       return { mainRunId: runId, routineRunId, chatMode: null, error: null };
     }
-    const { type: rawType, ...payload } = event;
+    const { type: rawType, [EVENT_TIMES_KEY]: _times, ...payload } = event;
     const type = String(rawType ?? "");
+    const times = eventTimes(event);
+    if (times === null) return { mainRunId: null, routineRunId: null, chatMode: null, error: `START_REFUSED: times must be 1 to ${MAX_EVENT_TIMES}` };
     if (type === "notice.deliver") {
-      return routineByEvent(w, routineId, async () => {
+      return repeated(times, () => routineByEvent(w, routineId, async () => {
         const res = await post(w, "/v1/sim/notices/deliver", { scenario: payload.scenario }, task.principal);
         return res.status === 200 ? null : `START_REFUSED: deliver answered ${res.status}`;
-      });
+      }));
     }
     if (type === "offer.sign") return routineByEvent(w, routineId, () => signOffer(w, task.principal, payload));
-    return routineByEvent(w, routineId, async () => {
+    return repeated(times, () => routineByEvent(w, routineId, async () => {
       const { emitEvent } = await import("../../packages/core/src/shared/events");
       const { withWriteLock } = await import("../../packages/db/src/index");
       await withWriteLock(() => w.weft.db.transaction(async (tx) => {
         await emitEvent(tx as never, w.weft.clock as never, { body: { type, payload } as never, subjectRef: payload.subject_ref ?? Object.values(payload)[0] ?? type, attended: false, requestedBy: null });
       }));
       return null;
-    });
+    }));
   }
   if ("portal" in input) {
     const res = await post(w, "/v1/portal/agent/runs", { text: input.portal }, task.principal);
