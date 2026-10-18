@@ -12,6 +12,8 @@ import { emitEvent, SEED_TIME } from "@weft/core";
 import { serialGit } from "@weft/executor";
 import { seedWorld } from "@weft/seed";
 import type { Weft, WeftEnv } from "../http/context";
+import { applyProfile, envProfile, storedProfile } from "../seed-profile";
+import { SimResetBody, type SeedProfile } from "../../../../packages/contracts/src/ext/tour";
 
 const AdvanceBody = z.union([
   z.object({ to: z.string() }).strict(),
@@ -76,15 +78,19 @@ const resetChains = new WeakMap<Weft, Promise<unknown>>();
  * (no git process is running then) before any table is dropped, and drop, migrate and seed hold the write lock
  * together, so no other request writes into a half-built world.
  */
-export function resetWorld(weft: Weft): Promise<{ ms: number }> {
+export function resetWorld(weft: Weft, profile?: SeedProfile): Promise<{ ms: number; profile: SeedProfile }> {
   const prev = resetChains.get(weft) ?? Promise.resolve();
-  const run = prev.then(() => rebuild(weft), () => rebuild(weft));
+  const run = prev.then(() => rebuild(weft, profile), () => rebuild(weft, profile));
   resetChains.set(weft, run.catch(() => undefined));
   return run;
 }
 
-async function rebuild(weft: Weft): Promise<{ ms: number }> {
+async function rebuild(weft: Weft, requested?: SeedProfile): Promise<{ ms: number; profile: SeedProfile }> {
   const t0 = Date.now();
+  // The tour's seed profile (owner: tour): an omitted profile keeps the world's own, read before tables are dropped.
+  // Tests never pick up WEFT_SEED_PROFILE from the shell: they get rich only by asking for it.
+  const want: SeedProfile = requested ?? (await storedProfile(weft.db)) ?? (weft.testMode ? "base" : envProfile());
+  let profile: SeedProfile = "base";
   const rate = weft.clock.rate();
   const scheduler = weft.scheduler as { exclusive?: <T>(fn: () => Promise<T>) => Promise<T> };
   const exclusive = <T>(fn: () => Promise<T>) => (scheduler.exclusive ? scheduler.exclusive(fn) : fn());
@@ -102,13 +108,14 @@ async function rebuild(weft: Weft): Promise<{ ms: number }> {
       } finally { await weft.db.run(sql`PRAGMA foreign_keys=ON`); }
       await migrate(weft.db);
       await seedWorld(weft);
+      profile = await applyProfile(weft, want);
     });
     await weft.clock.set(SEED_TIME, rate);
     // The engine lives across the reset; without this, a clock move before the next tick would start counting cron
     // slots from the old (later) cursor and skip the seed morning's 09:00 digest.
     (weft.routines as { resetCursor?: (at: string) => void }).resetCursor?.(SEED_TIME);
   });
-  return { ms: Date.now() - t0 };
+  return { ms: Date.now() - t0, profile };
 }
 
 export function simRoutes(weft: Weft): Hono<WeftEnv> {
@@ -173,9 +180,10 @@ export function simRoutes(weft: Weft): Hono<WeftEnv> {
 
   r.post("/v1/sim/reset", async (c) => {
     if (!weft.testMode && process.env.WEFT_ALLOW_RESET === "0") throw new NotImplemented("reset disabled by WEFT_ALLOW_RESET=0");
+    const body = SimResetBody.parse(await c.req.json().catch(() => ({})));
     // No scheduler kick here: a reset world must digest exactly like a fresh `pnpm db:seed` (no tick has run).
-    const { ms } = await resetWorld(weft);
-    return c.json({ ok: true, ms });
+    const { ms, profile } = await resetWorld(weft, body.profile);
+    return c.json({ ok: true, ms, profile });
   });
 
   return r;
