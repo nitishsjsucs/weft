@@ -13,6 +13,7 @@ import {
 import { DomainRefusal, isDetailed, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { EXPENSE_POLICY_V1 } from "../expenses/policy";
 import { assignmentsOf, balanceFor, policyById, workerOf } from "../time-off/store";
+import { timeForms } from "../time-off/forms";
 import type { WeftCommand } from "../shared/deps";
 
 // ---------- the caller's own worker ----------
@@ -92,7 +93,7 @@ export const myPaychecks = readCommand<SelfInput, Record<string, unknown>>({
 
 export const myTimeOff = readCommand<SelfInput, Record<string, unknown>>({
   name: "portal.my_time_off", summary: "Read the asker's own time off balances",
-  description: "Portal only. The signed-in person's own time off balances today (available hours per policy) and the policy names. Takes no worker id. Example: { \"response_format\": null }",
+  description: "Portal only. The signed-in person's own time off balances today (available hours and days per policy) and the policy names. Takes no worker id. Example: { \"response_format\": null }",
   input: SelfInput, domain: "people",
   async run(_i, ctx, deps) {
     const self = await requireSelf(deps.tx, ctx);
@@ -104,7 +105,7 @@ export const myTimeOff = readCommand<SelfInput, Record<string, unknown>>({
       const p = await policyById(deps.tx, ctx.companyId, a.policyId);
       if (!p) continue;
       const b = await balanceFor(deps.tx, w, p, today);
-      balances.push({ policy: p.name, available_minutes: b.availableMinutes, available_display: hours(b.availableMinutes) });
+      balances.push({ policy: p.name, available_minutes: b.availableMinutes, ...timeForms("available", b.availableMinutes), available_display: hours(b.availableMinutes) });
     }
     balances.sort((a, b) => String(a.policy).localeCompare(String(b.policy)));
     return { data: { as_of: today, balances }, summary: `${balances.length} own time off balances` };

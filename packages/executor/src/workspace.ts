@@ -22,16 +22,41 @@ export function runDir(dataDir: string, companyId: string, runId: string): strin
   return join(dataDir, "companies", companyId, "runs", runId);
 }
 
-/** The rows of an offloaded result: the value itself when it is an array, else its longest array field (the first
- * array field can be an empty list such as flags, which paged as "rows 1 to 0 of 0"), else the value as one row. */
+/**
+ * Aggregate fields a read returns beside its rows: `totals` and `by_<key>` groupings (expenses per worker, time off
+ * per policy). They are sums the model must quote rather than compute, so they are never taken for the rows and they
+ * stay inline when the rows go to an artifact (fix group read-figures).
+ */
+export const AGGREGATE_KEY = /^(totals|by_[a-z_]+)$/;
+/** At most this many characters of aggregates stay inline in an offloaded result; larger groupings stay in the artifact. */
+export const AGGREGATE_BUDGET = 3000;
+
+/** The rows of an offloaded result: the value itself when it is an array, else its longest array field that is not
+ * an aggregate (the first array field can be an empty list such as flags, which paged as "rows 1 to 0 of 0"), else
+ * the value as one row. */
 export function rowsOf(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
   if (data && typeof data === "object") {
     let best: unknown[] | null = null;
-    for (const v of Object.values(data as Record<string, unknown>)) if (Array.isArray(v) && (!best || v.length > best.length)) best = v;
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) if (Array.isArray(v) && !AGGREGATE_KEY.test(k) && (!best || v.length > best.length)) best = v;
     if (best) return best;
   }
   return [data];
+}
+
+/** The aggregate fields of a result that fit the inline budget, smallest first (totals before long groupings). */
+export function aggregatesOf(data: unknown): Record<string, unknown> {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  const found = Object.entries(data as Record<string, unknown>).filter(([k, v]) => AGGREGATE_KEY.test(k) && v !== null && typeof v === "object")
+    .map(([k, v]) => ({ k, v, n: JSON.stringify(v).length })).sort((a, b) => a.n - b.n);
+  const out: Record<string, unknown> = {};
+  let used = 0;
+  for (const a of found) {
+    if (used + a.n > AGGREGATE_BUDGET) continue;
+    out[a.k] = a.v;
+    used += a.n;
+  }
+  return out;
 }
 
 /** The total a result reports (its own numeric `total`), else the number of rows it holds. */
@@ -99,7 +124,7 @@ export async function offloadIfLarge(e: Engine, tx: DbTx, scope: CallScope, def:
     summary, domain: def.domain, needs: def.needs, taintedBy: scope.ctx.tainted ? (scope.taintedBy ?? "external") : null,
   });
   const total = totalOf(data, rows);
-  return { ref: id, data: { ...scalarsOf(data), summary, total, row_count: rows.length, ...totalNote(total, rows.length), preview: rows.slice(0, PREVIEW_ROWS), artifact_ref: id } };
+  return { ref: id, data: { ...scalarsOf(data), ...aggregatesOf(data), summary, total, row_count: rows.length, ...totalNote(total, rows.length), preview: rows.slice(0, PREVIEW_ROWS), artifact_ref: id } };
 }
 
 /** agent.read_artifact: resolved only within the run family (this run, its parent, its children). */

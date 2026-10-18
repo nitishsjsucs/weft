@@ -265,6 +265,7 @@ The registry (`packages/executor/src/registry.ts`, T3) is the single source for 
 - `toStrictJsonSchema(zod)`: zod 4 `z.toJSONSchema`, then `additionalProperties: false` on every object, every property in `required`, optional fields as `["T","null"]` unions, no numeric or length bounds, enums for closed sets, keys sorted. A test validates every schema.
 - Never ask the model for what code knows: company, acting-for principal, run and clock come from the executor's run row.
 - Read tools take `response_format: "concise" | "detailed"` (concise is the default) and return readable names with short ids (`Rowan Achebe (demo) (wrk_0014)`), money as `*_cents` plus `*_display`.
+- Figures in the forms people ask for (wave 4 fix group read-figures). A sum an answer may state is a field, never the model's arithmetic: list reads return `totals` over their filtered rows, and `totals_by` adds `by_<key>` groupings (expenses per worker, category, band or payroll run with the run's payday; time-off requests per worker or policy). Time-off amounts come in minutes plus `*_hours` and `*_days` (480 minutes a day), a request carries the balance left on its policy, and instants carry a `*_date` in the company time zone (Pacific). The executor never takes a `totals` or `by_<key>` field for the rows of an offloaded result and keeps them inline beside the preview, up to 3,000 characters.
 - Descriptions: when to call it, what it returns, one example; at most 400 characters.
 - **Tool-count test.** A registry test fails if any agent kind or routine exposes more than 16 tools.
 
