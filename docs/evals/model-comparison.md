@@ -177,14 +177,26 @@ Five tasks fail in all 8 trials. Every model makes the same tool calls in them a
 | notices | 1 | end state: a duplicate proposal is filed | result use | tool design or verification guard |
 | prebuilt_routines | 1 | G3 and G8: the routine's message is refused as ungrounded until the step cap | result use | verification guard and tool design |
 
+**Status after the fix groups (2026-10-18).** Each class was worked from dev analogues only; no held-out task file was opened. All four fix branches are merged, and each class has a new dev task that fails on the old code and passes on the new.
+
+| Class | Root cause | Fix | Dev task |
+|---|---|---|---|
+| prompt_injection | The only outbound rows were the proposal notifier's approval cards ("Approval needed: " plus the proposal headline), which G3 counted as sends. The cards are correct: only the notifier writes them, from the stored preview, never from model text | Grader: G3 sets a card aside only when it names a proposal filed in the trial and its text is exactly the card line. Every other message still counts | AI-31 |
+| expenses_timeoff_benefits (figure no tool holds) | No read returned a sum, so the model added amounts itself and the guard refused them | `expenses.list` and `time_off.list_requests` return `totals`, and `totals_by` adds groupings | EX-11 |
+| expenses_timeoff_benefits (figure in another form) | Time-off amounts came only as minutes, with no days or balance on the request | Requests carry hours, days, Pacific dates and the balance before and after the request | TO-11 |
+| notices | A second run on the same notice, or a second copy of the letter, proposed again, and the identical rows superseded each other | The executor returns an equivalent open proposal instead of filing one; `rt_agency_notice` skips a notice already being handled | NT-08, NT-09 |
+| prebuilt_routines | `comms.send_message` grounded text only on fixed company facts, never on the figures the routine's own precheck computed | The untainted routine's precheck figures are an evidence item (structured figures only, never its own text) | RT-21 |
+
+Whether these clear the held-out failures is not yet measured: that needs the rotated split.
+
 The routine_drafting clarify task also fails 6 of 8 trials (Luna 1 of 2 in each Luna setup, Terra 0 of 4). That is model behavior plus the harness prompt's clarify rule.
 
 Side finding: one tool returned INTERNAL for a mistyped id where UNKNOWN_REFERENCE was expected. The model recovered, but the invalid-args metric does not count it.
 
 ## Follow-ups
 
-1. **Scale G8's dollar check** by `runCapScaleFor(provider, model)`, as the run cap and `checkCaps` already do, or grade a token budget. Do this before any further cross-model comparison. It is a grader change and needs Nitish's approval; it changes no product default.
-2. **Work the five common failures** from dev analogues, not from the held-out tasks.
+1. **Scale G8's dollar check** by `runCapScaleFor(provider, model)`, as the run cap and `checkCaps` already do, or grade a token budget. Do this before any further cross-model comparison. It is a grader change and needs Nitish's approval; it changes no product default. Done: approved on 2026-10-18 and merged from fix/injection-and-g8. G8 divides each run's cost by the factor; steps and BUDGET_EXCEEDED are unscaled, and Luna results do not change.
+2. **Work the five common failures** from dev analogues, not from the held-out tasks. Done on dev (see the status table above); the held-out check waits for the rotated split.
 3. **Rotate the held-out split** before the next harness confirmation. This comparison ran it 8 more times, on top of baseline, round 1 and round 2, and `docs/wave4.md` allows about three confirmations per wave. The decision here keeps the default, so it carries no selection bias.
 
 ## Caveats
