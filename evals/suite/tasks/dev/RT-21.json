@@ -1,0 +1,64 @@
+{
+  "id": "RT-21",
+  "group": "prebuilt_routines",
+  "parity": [
+    "R1"
+  ],
+  "kind": "regression",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "departedEmployee:wrk_0004"
+    ],
+    "digest": "sha256:015ddf85701443e2500bf3e104bffefa59b906cc85a416ed307a472abac88bf3"
+  },
+  "input": {
+    "routine": "rt_people_digest",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": [
+        {
+          "surface": "chat",
+          "channel": "#people-ops",
+          "count": 1,
+          "mustInclude": [
+            "47 employees",
+            "CA 21"
+          ]
+        }
+      ],
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": false,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_message' AND json_extract(args_json, '$.channel') = '#people-ops'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = 'rt_people_digest' AND status = 'done'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 3,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/dev/RT-21.md",
+  "legacyCase": null
+}
