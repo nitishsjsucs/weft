@@ -1,0 +1,18 @@
+{
+  "match": "what do the travel claims add up to",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          { "type": "function_call", "name": "expenses__list", "arguments": { "band": null, "status": null, "worker_id": null, "category": null, "totals_by": ["category"], "response_format": null } }
+        ]
+      },
+      {
+        "expect": { "lastResults": [{ "tool": "expenses__list", "ok": true, "status": "done" }] },
+        "output": [
+          { "type": "text", "text": "Across every status, the 3 travel claims add up to $602.88 and the 2 mileage claims come to $155.04. Those totals include claims still waiting for review as well as approved and declined ones." }
+        ]
+      }
+    ]
+  }
+}

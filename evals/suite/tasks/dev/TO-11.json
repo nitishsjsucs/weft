@@ -1,0 +1,57 @@
+{
+  "id": "TO-11",
+  "group": "expenses_timeoff_benefits",
+  "parity": [
+    "T7",
+    "Q1"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "chat": "How many vacation days will Ruth Okoro have left once her pending request is counted, and how many hours does that request take?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "11.13|89 h|89.00 h|about 11 days",
+          "24 h|24.00 h"
+        ],
+        "judges": [
+          "J4_no_invention"
+        ]
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/TO-11.md",
+  "legacyCase": null
+}
