@@ -352,7 +352,8 @@ A local Weft has no public URL, so polling on the scheduler tick is the baseline
 ## Wave 4: left
 
 - The baseline and improvement rounds 1 and 2 have run (docs/wave4.md section 13). Open from round 2
-  (docs/evals/2026-10-17-round2.md, O1 to O5): `rt_expense_review` explains one expense per call near the step cap;
+  (docs/evals/2026-10-17-round2.md, O1 to O5): `rt_expense_review` explained one expense per call near the step cap
+  (its precheck now derives a three-step batch plan, dev task EX-12; the stored instructions still read per item);
   chat cannot read a channel feed (AI-04); template routines are not measured on the model (a labeled
   `WEFT_BACKGROUND_LLM=1` variant would); the judges are pending; k = 1; the chat_can_propose variant has not been
   rerun since the baseline. O2, the routine summary that hid proposals, is fixed.

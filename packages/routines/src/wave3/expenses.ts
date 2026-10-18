@@ -5,12 +5,28 @@
 // a deterministic precheck lists the items awaiting a decision with the policy engine's checks and suggestion; the
 // model explains each one and proposes exactly one decision per item (expenses.decide takes one id; there is no bulk
 // approval). Every decision is a proposal a person approves in the Inbox. Its scripted run is scenarios/rt_expense_review.json.
+// The derived batch_plan spells out the three-step trajectory (review fix group expense-and-timeoff): one explain call
+// that carries every item, one turn with one decision call per item (EXPENSE_REVIEW_MAX_ITEMS fits the loop's tool calls
+// per step), then the summary. Live runs used to explain one item per call and decide one per step, 17 steps for 8
+// items. The plan lives in the precheck's output, not in the stored routine row: the row is part of every eval world,
+// so a wording change there re-pins every world digest and renames the held-out Phoenix datasets.
 import type { Precheck, ReadOnlyExecutor, RoutineDef } from "@weft/contracts";
 import type { Predicate, RunCall, RunFacts } from "../checks";
 
 const TZ = "America/Los_Angeles";
 /** Items one run reviews at most (oldest first); the rest wait for the next run. */
 export const EXPENSE_REVIEW_MAX_ITEMS = 8;
+/** The one-item decision tool, a registry command name; the executor turns every agent call to it into a proposal. */
+const DECISION_TOOL = "expenses.decide";
+
+/** The derived three-step plan for `n` items: every explanation in one call, every decision in one turn. */
+export function reviewBatchPlan(n: number): string {
+  return [
+    `Step 1: one expenses.explain call with the derived expenses.explain items, all ${n} expenses in that one call, each with its own explanation (never one call per expense).`,
+    `Step 2: one ${DECISION_TOOL} call per entry of the derived decisions, all ${n} calls in the same turn (one expense_id per call, so each is its own proposal; there is no bulk decision).`,
+    "Step 3: the one-line summary.",
+  ].join(" ");
+}
 
 export const RT_EXPENSE_REVIEW: RoutineDef = {
   id: "rt_expense_review", name: "Expense review",
@@ -70,6 +86,7 @@ export const expenseReview: Precheck = async (ctx, exec) => {
       })),
     },
     derivedArgs: {
+      batch_plan: reviewBatchPlan(items.length),
       expense_ids: items.map(({ item }) => item.expense_id).join(","),
       "expenses.explain": { items: items.map(({ item }) => ({ expense_id: item.expense_id })) },
       decisions,

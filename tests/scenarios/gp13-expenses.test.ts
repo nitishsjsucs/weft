@@ -6,7 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { PayrollRun, type AgentRunRow, type RoutineRun } from "@weft/contracts";
 import { actions, expenses, paychecks, proposals } from "@weft/db";
-import { RT_EXPENSE_REVIEW } from "../../packages/routines/src/wave3/expenses";
+import { BUDGETS } from "../../packages/agent/src/loop";
+import { EXPENSE_REVIEW_MAX_ITEMS, RT_EXPENSE_REVIEW, reviewBatchPlan } from "../../packages/routines/src/wave3/expenses";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 let weft: TestWeft;
@@ -36,6 +37,8 @@ describe("GP13 expense review to reimbursement", () => {
     expect((await call("GET", "/v1/expenses")).json.bands).toEqual({ needs_review: 8, approved: 4, paid_out: 0, declined: 2 });
     expect(RT_EXPENSE_REVIEW.tools).toHaveLength(8);
     expect(RT_EXPENSE_REVIEW.enabled).toBe(false);
+    // One run's decisions fit in one model turn, so the recipe's second turn never runs into CALL_BUDGET.
+    expect(EXPENSE_REVIEW_MAX_ITEMS).toBeLessThanOrEqual(BUDGETS.routine.toolCallsPerStep);
   });
 
   it("rt_expense_review explains each item and proposes exactly one decision per item; nothing executes", async () => {
@@ -61,6 +64,20 @@ describe("GP13 expense review to reimbursement", () => {
     const rows = await weft.db.select().from(expenses);
     expect(rows.filter((e) => e.id <= "exp_0008").every((e) => e.status === "needs_review" && e.explanation && e.explanationSource === "template")).toBe(true);
     expect(["waiting_approval", "done"]).toContain(rr.status);
+    // The batched recipe: one expenses.explain call that carries all 8 items, then one turn with one expenses.decide
+    // per item, then the summary. Three model steps, never one step per item.
+    expect(agentRun.stepsUsed).toBe(3);
+    const steps = await weft.db.all<{ parent_n: number | null; tool_name: string | null; tool_args_json: string | null }>(sql`SELECT parent_n, tool_name, tool_args_json FROM run_steps WHERE run_id = ${agentRun.id} AND kind = 'tool_call' ORDER BY n`);
+    const explains = steps.filter((s) => s.tool_name === "expenses__explain");
+    expect(explains).toHaveLength(1);
+    expect((JSON.parse(explains[0]!.tool_args_json!) as { items: { expense_id: string }[] }).items.map((x) => x.expense_id)).toEqual(Object.keys(byItem).sort());
+    const decides = steps.filter((s) => s.tool_name === "expenses__decide");
+    expect(decides).toHaveLength(8);
+    expect(new Set(decides.map((s) => s.parent_n)).size).toBe(1);
+    expect(decides.every((s) => typeof (JSON.parse(s.tool_args_json!) as { expense_id: unknown }).expense_id === "string")).toBe(true);
+    // The live model reads that trajectory from the derived batch_plan in its context pack.
+    const pack = await weft.db.all<{ result_json: string }>(sql`SELECT result_json FROM run_steps WHERE run_id = ${agentRun.id} AND kind = 'context' AND result_json LIKE '%"pack"%'`);
+    expect(pack[0]?.result_json).toContain(JSON.stringify(reviewBatchPlan(8)).slice(1, -1));
   });
 
   it("Dana approves two proposals; the draft carries them outside gross; processing marks them paid", async () => {
