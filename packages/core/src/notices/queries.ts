@@ -1,7 +1,8 @@
 // Notice reads shared by notices.* commands and the /v1/notices routes.
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, like, ne, or } from "drizzle-orm";
 import { NoticeExtract, type Notice } from "@weft/contracts";
-import { notices, type DbTx } from "@weft/db";
+import { notices, proposals, type DbTx } from "@weft/db";
+import { canonicalJson } from "../shared/canonical-json";
 
 export type NoticeRow = typeof notices.$inferSelect;
 
@@ -32,4 +33,43 @@ export async function getNotice(tx: DbTx, companyId: string, id: string): Promis
 export interface NoticeDraft { n: number; created_at: string; body: string; note: string; tainted_by: string | null }
 export function parseDrafts(json: string): NoticeDraft[] {
   try { const v = JSON.parse(json); return Array.isArray(v) ? (v as NoticeDraft[]) : []; } catch { return []; }
+}
+
+/** Proposal statuses that mean the work on a notice is waiting on a person or under way. */
+export const OPEN_PROPOSAL_STATUSES = ["pending", "approved"] as const;
+export const NOTICE_PROPOSALS_MAX = 10;
+
+export interface NoticeProposalRef { id: string; command: string | null; status: string; created_at: string }
+
+/**
+ * The proposals filed about a notice, newest first: its subject is the notice, or an argument names the notice id
+ * (tax.update_rate's source_notice_id, notices.send_response's notice_id). Ids, commands and statuses only.
+ */
+export async function noticeProposals(tx: DbTx, companyId: string, noticeId: string, limit = NOTICE_PROPOSALS_MAX): Promise<NoticeProposalRef[]> {
+  const rows = await tx.select({ id: proposals.id, command: proposals.command, status: proposals.status, createdAt: proposals.createdAt }).from(proposals)
+    .where(and(eq(proposals.companyId, companyId), or(eq(proposals.subjectRef, noticeId), like(proposals.argsJson, `%${JSON.stringify(noticeId)}%`))))
+    .orderBy(desc(proposals.createdAt), desc(proposals.id)).limit(limit);
+  return rows.map((r) => ({ id: r.id, command: r.command, status: r.status, created_at: r.createdAt }));
+}
+
+/** A letter's identity: everything the parser read plus the exact body. Two rows with the same identity are one letter. */
+function letterKey(n: NoticeRow): string {
+  let extracted: unknown = null;
+  try { extracted = n.extractedJson ? JSON.parse(n.extractedJson) : null; } catch { extracted = n.extractedJson; }
+  const parts = { agency: n.agency, kind: n.kind, form: n.formCode, account: n.taxAccountId, extracted, body: n.bodyText };
+  try { return canonicalJson(parts); } catch { return JSON.stringify(parts); }
+}
+
+/**
+ * The earlier copy of the same letter, if one was stored before this notice (a mailing delivered twice, or a mailed
+ * notice also uploaded): same agency, kind, form, matched account, parsed fields and body text. The earliest copy wins.
+ */
+export async function earlierCopyOf(tx: DbTx, companyId: string, n: NoticeRow): Promise<{ id: string; status: string; open_proposals: number } | null> {
+  const same = await tx.select().from(notices).where(and(eq(notices.companyId, companyId), ne(notices.id, n.id), eq(notices.agency, n.agency), eq(notices.kind, n.kind), eq(notices.formCode, n.formCode)))
+    .orderBy(asc(notices.receivedAt), asc(notices.id));
+  const key = letterKey(n);
+  const first = same.find((o) => (o.receivedAt < n.receivedAt || (o.receivedAt === n.receivedAt && o.id < n.id)) && o.taxAccountId === n.taxAccountId && letterKey(o) === key);
+  if (!first) return null;
+  const open = (await noticeProposals(tx, companyId, first.id, 50)).filter((p) => (OPEN_PROPOSAL_STATUSES as readonly string[]).includes(p.status)).length;
+  return { id: first.id, status: first.status, open_proposals: open };
 }

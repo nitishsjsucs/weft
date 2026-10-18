@@ -39,13 +39,16 @@ afterAll(async () => {
 const post = (path: string, body: unknown) => weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: JSON.stringify(body) });
 
 let seq = 0;
-/** A benefit charge notice (the escalate plan), stored with structured fields, then (unless told not to) notice.received. */
+/**
+ * A benefit charge notice (the escalate plan), stored with structured fields, then (unless told not to) notice.received.
+ * Each one is its own letter (its id is in the text): an exact second copy of a letter is skipped as a duplicate.
+ */
 async function benefitChargeNotice(emit = true): Promise<string> {
   const id = `ntc_${String(950 + ++seq).padStart(4, "0")}`;
   const now = weft.clock.now();
   await weft.db.insert(notices).values({
     id, companyId: "cmp_larkspur", agency: "ca_edd", kind: "benefit_charge", formCode: "DE 428T", title: "Simulated benefit_charge notice (demo)", receivedAt: now, respondBy: "2026-11-25",
-    status: "new", taxAccountId: "txa_0002", fileName: "BENEFIT_CHARGE.txt", bodyText: "SIMULATED AGENCY NOTICE (demo). Kind benefit_charge.",
+    status: "new", taxAccountId: "txa_0002", fileName: "BENEFIT_CHARGE.txt", bodyText: `SIMULATED AGENCY NOTICE (demo) ${id}. Kind benefit_charge.`,
     extractedJson: JSON.stringify({ agency: "ca_edd", formCode: "DE 428T", kind: "benefit_charge", accountNumber: null, taxAccountId: "txa_0002", taxYear: 2026, effectiveFrom: null, respondBy: "2026-11-25", rates: [], amountCents: null, period: null }),
     draftsJson: "[]", resolutionJson: null, responseConfirmation: null,
   });
