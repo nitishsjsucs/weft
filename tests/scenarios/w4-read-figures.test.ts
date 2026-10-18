@@ -18,7 +18,8 @@ async function read<T = Record<string, unknown>>(command: string, args: Record<s
   if (!(o.ok && o.status === "done")) throw new Error(`${command}: ${JSON.stringify(o).slice(0, 400)}`);
   return o.data as T;
 }
-type Req = { id: string; requested_hours: number; requested_days: number; submitted_date: string; decided_date: string | null; balance_left: { available_minutes: number; available_hours: number; available_days: number } };
+type Bal = { minutes: number; hours: number; days: number };
+type Req = { id: string; status: string; requested_hours: number; requested_days: number; submitted_date: string; decided_date: string | null; balance_before_request: Bal | null; balance_after_request: Bal | null };
 type Sum = { count: number; amount_cents: number; amount_display: string };
 
 describe("expense reads carry the sums people ask for", () => {
@@ -49,11 +50,12 @@ describe("expense reads carry the sums people ask for", () => {
 });
 
 describe("time-off reads carry hours, days and the balance left", () => {
-  it("a pending request has its hours and days and the worker's balance left on that policy", async () => {
+  it("a pending request has its hours and days and the policy balance before and after it", async () => {
     const d = await read<{ requests: Req[]; totals: Record<string, number> }>("time_off.list_requests", { worker_id: "wrk_0010" });
     const r = d.requests.find((x) => x.id === "tor_0003")!;
     expect(r).toMatchObject({ requested_hours: 24, requested_days: 3, submitted_date: "2026-10-26", decided_date: null });
-    expect(r.balance_left).toEqual({ available_minutes: 5_340, available_hours: 89, available_days: 11.13 });
+    expect(r.balance_before_request).toEqual({ minutes: 6_780, hours: 113, days: 14.13 });
+    expect(r.balance_after_request).toEqual({ minutes: 5_340, hours: 89, days: 11.13 });
     expect(d.totals).toEqual({ count: 1, requested_minutes: 1_440, requested_hours: 24, requested_days: 3 });
   });
 
@@ -112,5 +114,8 @@ describe("dates in the company time zone", () => {
     expect(out.ok && out.status === "done", JSON.stringify(out).slice(0, 300)).toBe(true);
     const r = (await read<{ requests: Req[] }>("time_off.list_requests", { request_id: "tor_0005" })).requests[0]!;
     expect(r.decided_date).toBe("2026-10-26");
+    // A denied request holds nothing, so the balance is the same before and after it.
+    expect(r.status).toBe("denied");
+    expect(r.balance_before_request).toEqual(r.balance_after_request);
   });
 });

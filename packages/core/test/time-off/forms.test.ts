@@ -1,7 +1,7 @@
 // Time-off amounts in the forms people ask for (fix group read-figures): minutes, hours and 8-hour days, rounded to
 // two places, and request totals per worker and policy.
 import { describe, expect, it } from "vitest";
-import { balanceForms, daysOf, hoursOf, REQUEST_TOTALS_BY, requestTotals, timeForms, workerRef } from "../../src/time-off/forms";
+import { balanceForms, daysOf, hoursOf, REQUEST_TOTALS_BY, requestBalance, requestTotals, timeForms, workerRef } from "../../src/time-off/forms";
 
 describe("time-off forms", () => {
   it("converts minutes to hours and days of 480 minutes, two decimals", () => {
@@ -16,6 +16,11 @@ describe("time-off forms", () => {
     expect(balanceForms({ availableMinutes: 5_340, usedMinutes: 480, holdsMinutes: 1_440 })).toEqual({
       available_hours: 89, available_days: 11.13, used_hours: 8, used_days: 1, holds_hours: 24, holds_days: 3,
     });
+  });
+
+  it("gives a request's policy balance before and after it from today's available and what the request holds", () => {
+    expect(requestBalance(5_340, 1_440)).toEqual({ balance_before_request: { minutes: 6_780, hours: 113, days: 14.13 }, balance_after_request: { minutes: 5_340, hours: 89, days: 11.13 } });
+    expect(requestBalance(960, 0)).toEqual({ balance_before_request: { minutes: 960, hours: 16, days: 2 }, balance_after_request: { minutes: 960, hours: 16, days: 2 } });
   });
 
   it("totals requests overall, and per worker and policy only when asked, largest first", () => {

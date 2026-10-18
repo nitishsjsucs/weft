@@ -22,6 +22,18 @@ export function balanceForms(b: { availableMinutes: number; usedMinutes: number;
   return { ...timeForms("available", b.availableMinutes), ...timeForms("used", b.usedMinutes), ...timeForms("holds", b.holdsMinutes) };
 }
 
+/** A balance in minutes, hours and days. */
+const balanceOfMinutes = (minutes: number) => ({ minutes, hours: hoursOf(minutes), days: daysOf(minutes) });
+
+/**
+ * A request's policy balance before and after it. `available` is today's available balance, which already nets out
+ * every pending and approved request; `counted` is what this request holds or used (0 when denied or cancelled), so
+ * the balance before it is available plus counted.
+ */
+export function requestBalance(available: number, counted: number) {
+  return { balance_before_request: balanceOfMinutes(available + counted), balance_after_request: balanceOfMinutes(available) };
+}
+
 /** A minute total in every form: minutes, hours and days. */
 export const minuteTotal = (minutes: number) => ({ requested_minutes: minutes, ...timeForms("requested", minutes) });
 
