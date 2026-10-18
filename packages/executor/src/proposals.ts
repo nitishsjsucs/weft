@@ -3,7 +3,7 @@
 import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { ApprovalCardW3, PolicyDecision, Preview, Proposal, ProposalKind, ProposalStatus, RiskClass, ToolOutcome } from "@weft/contracts";
 import { emitEvent, newId, payroll, type WeftCommand } from "@weft/core";
-import { payrollRuns, principals, proposals, routineRuns, routines, type Db, type DbTx } from "@weft/db";
+import { actions, payrollRuns, principals, proposals, routineRuns, routines, type Db, type DbTx } from "@weft/db";
 import { digestOf } from "./digest";
 import type { Engine } from "./engine";
 import { appendAudit } from "./chain";
@@ -77,8 +77,12 @@ const DECIDED_EQUIVALENT = new Set(["approved", "executed", "denied", "dismissed
  * - still pending, unexpired and on the same subject state (subject_hash): the caller gets that proposal back;
  * - approved, executed, denied or dismissed within EQUIVALENT_DECIDED_WINDOW_MS: the caller is told it was decided.
  * A pending match on a changed subject is not a duplicate: the new call supersedes it as before (harness 5.4). A
- * denial or dismissal on a changed subject is not one either. An untainted call never takes over a tainted proposal,
- * so a clean run can still replace a proposal an injected run filed. Expired, failed and superseded rows never match.
+ * denial or dismissal on a changed subject is not one either. An executed match whose action a person has since rolled
+ * back (an action row with reverses_seq pointing at it) is not one: the change is no longer in effect, so the same
+ * proposal may be filed again (review fix group notices-and-proposals). The subject hash alone cannot tell this: the
+ * execution itself changes the subject, and a rollback can restore it exactly. An untainted call never takes over a
+ * tainted proposal, so a clean run can still replace a proposal an injected run filed. Expired, failed and superseded
+ * rows never match.
  */
 export async function findEquivalentProposal(tx: DbTx, p: { companyId: string; kind: ProposalKind; command: string; input: unknown; preview: Preview; tainted: boolean; now: string }): Promise<ProposalRow | null> {
   const argsHash = digestOf(p.input);
@@ -93,9 +97,16 @@ export async function findEquivalentProposal(tx: DbTx, p: { companyId: string; k
     }
     if (!DECIDED_EQUIVALENT.has(r.status) || !r.decidedAt || r.decidedAt < since) continue;
     if ((r.status === "denied" || r.status === "dismissed") && r.subjectHash !== p.preview.subjectHash) continue;
+    if (r.executedActionSeq !== null && await reversed(tx, r.executedActionSeq)) continue;
     return r;
   }
   return null;
+}
+
+/** True when a later action reverses action `seq` (a person's rollback, harness 5.5). */
+async function reversed(tx: DbTx, seq: number): Promise<boolean> {
+  const [row] = await tx.select({ seq: actions.seq }).from(actions).where(eq(actions.reversesSeq, seq)).limit(1);
+  return Boolean(row);
 }
 
 /** What the caller reads when its call matched `row`: the open proposal itself, or a refusal naming the decision. */

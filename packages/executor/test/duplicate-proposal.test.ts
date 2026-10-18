@@ -64,6 +64,35 @@ describe("equivalent proposals", () => {
     expect(pendingId(await exec(h3, "c"))).not.toBe(first);
   });
 
+  it("after a person rolls back an approved change, the same change can be proposed again (propose, approve, rollback, propose)", async () => {
+    const first = pendingId(await exec(h1, "a"));
+    const approved = await decide(first, "approve");
+    expect(approved.ok).toBe(true);
+    const seq = approved.ok ? approved.proposal.executedActionSeq : null;
+    expect(seq).toEqual(expect.any(Number));
+    // Rolled back, the rate is 0.034 again: exactly the subject state the first proposal was filed on.
+    const undo = await w.executor.human.rollback(w.ui("usr_dana"), { seq: seq!, reason: "applied too early" });
+    expect(undo.ok).toBe(true);
+    const again = await exec(h2, "b");
+    const second = pendingId(again);
+    expect(second).not.toBe(first);
+    expect(isExistingProposalOutcome(again)).toBe(false);
+    expect(await count(w.db, "proposals")).toBe(2);
+    expect(await count(w.db, "proposals", `id = '${first}' AND status = 'executed'`)).toBe(1);
+    // The new proposal is the open one now: a further repeat gets it back instead of filing a third.
+    const h3 = await w.executor.runs.openChatRun(w.ui("usr_dana"), { threadId: null, surface: "human_ui" });
+    expect(pendingId(await exec(h3, "c"))).toBe(second);
+    expect(await count(w.db, "proposals")).toBe(2);
+  });
+
+  it("an executed equivalent that was not rolled back is still refused as done", async () => {
+    const first = pendingId(await exec(h1, "a"));
+    expect((await decide(first, "approve")).ok).toBe(true);
+    const again = await exec(h2, "b");
+    expect(!again.ok && again.refusal.code).toBe(DUPLICATE_PROPOSAL_CODE);
+    expect(!again.ok && again.refusal.hint).toContain("It is already done");
+  });
+
   it("a denied equivalent is refused while its subject is unchanged", async () => {
     const first = pendingId(await exec(h1, "a"));
     expect((await decide(first, "deny")).ok).toBe(true);
