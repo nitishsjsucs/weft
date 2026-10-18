@@ -81,11 +81,11 @@ function Inner({ v, h }: { v: CardView; h: CardHandlers }) {
           <div className="h-full rounded-full bg-[var(--accent-9)] transition-[width] motion-reduce:transition-none" style={{ width: `${pct}%` }} />
         </div>
         {centered ? null : (
-          <Button variant="ghost" size="icon-sm" aria-pressed={h.autoplay} aria-label={h.autoplay ? "Pause autoplay" : "Play autoplay"} data-tour-autoplay="" onClick={h.onToggleAutoplay}>
+          <Button variant="ghost" size={v.sheet ? "icon" : "icon-sm"} className={cn(v.sheet && "size-10")} aria-pressed={h.autoplay} aria-label={h.autoplay ? "Pause autoplay" : "Play autoplay"} data-tour-autoplay="" onClick={h.onToggleAutoplay}>
             {h.autoplay ? <Pause strokeWidth={1.5} /> : <Play strokeWidth={1.5} />}
           </Button>
         )}
-        <Button variant="ghost" size="icon-sm" aria-label="Exit tour" data-tour-exit="" onClick={h.onExit}><X strokeWidth={1.5} /></Button>
+        <Button variant="ghost" size={v.sheet ? "icon" : "icon-sm"} className={cn(v.sheet && "size-10")} aria-label="Exit tour" data-tour-exit="" onClick={h.onExit}><X strokeWidth={1.5} /></Button>
       </div>
       <div className="flex flex-col gap-1">
         <h2 ref={h.titleRef} id={h.titleId} tabIndex={-1} className="text-[14px] leading-5 font-semibold text-gray-12 outline-none">{v.offPage ? "You left the tour's page" : v.step.title}</h2>
