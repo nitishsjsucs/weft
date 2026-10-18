@@ -11,6 +11,7 @@
     "dev": "tsx scripts/dev.ts",
     "demo": "tsx apps/api/src/demo.ts",
     "demo:tests": "vitest run --project @weft/tests --reporter verbose tests/scenarios",
+    "demo:scenario": "tsx scripts/demo-scenario.ts",
     "build": "turbo run build",
     "test": "vitest run",
     "typecheck": "turbo run typecheck",

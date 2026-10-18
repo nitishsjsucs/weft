@@ -414,6 +414,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
 | `pnpm demo` | Narrated GP1 to GP18 and GP20, GP22, GP23 and GP24 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
 | `pnpm demo:tests` | The golden path scenario tests (GP1 to GP18, S6 to S9) in process on fresh seeded worlds |
+| `pnpm demo:scenario <name>` | Resets the running dev world to the seed for one live demo scenario (`list` names them), checks it is clean and prints the click path and what to type; it calls no model. `--api-port` and `--web-port` follow `pnpm dev`, and the world should run with `WEFT_CLOCK_RATE=0` |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
 | `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP24 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
