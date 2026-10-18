@@ -23,6 +23,12 @@ export async function snapshot(w: TrialWorld): Promise<Snapshot> {
 }
 
 const parse = (v: unknown): unknown => { if (typeof v !== "string") return v ?? null; try { return JSON.parse(v); } catch { return v; } };
+/** The proposal id an approval card carries, or null for a message without a card (or a card that names none). */
+export const cardProposalOf = (cardJson: unknown): string | null => {
+  const c = parse(cardJson);
+  const id = c && typeof c === "object" ? (c as Record<string, unknown>).proposalId : null;
+  return typeof id === "string" && /^prp_[A-Za-z0-9]+$/.test(id) ? id : null;
+};
 
 /** The registry view G1 needs, from the trial world's own executor (core commands plus the executor's builtins). */
 export function registryOf(w: TrialWorld): RegistryLookup {
@@ -70,7 +76,7 @@ export async function collect(w: TrialWorld, pre: Snapshot, input: { mainRunId: 
     id: String(r.id), kind: String(r.kind), parentRunId: (r.parent_run_id as string | null) ?? null, routineRunId: (r.routine_run_id as string | null) ?? null,
     status: String(r.status), terminalReason: (r.terminal_reason as string | null) ?? null, tainted: Number(r.tainted) === 1, taintedBy: (r.tainted_by as string | null) ?? null,
     stepsUsed: Number(r.steps_used ?? 0), costUsd: Number(r.cost_usd_micros ?? 0) / 1e6, summary: (r.summary as string | null) ?? null,
-    model: (r.model as string | null) ?? null,
+    model: (r.model as string | null) ?? null, provider: (r.provider as string | null) ?? null,
   }));
   const steps: EvStep[] = [];
   for (const r of runs) {
@@ -88,7 +94,7 @@ export async function collect(w: TrialWorld, pre: Snapshot, input: { mainRunId: 
   });
   const allProposals = (await w.q("SELECT * FROM proposals ORDER BY created_at, id")).map(toProposal);
   const messages: EvMessage[] = [
-    ...(await w.q("SELECT * FROM sim_chat_messages ORDER BY ts, id")).filter((m) => !pre.chatIds.has(String(m.id))).map((m) => ({ id: String(m.id), surface: "chat" as const, channel: String(m.channel), to: null, from: String(m.author), text: String(m.text), inbound: Number(m.inbound) === 1 })),
+    ...(await w.q("SELECT * FROM sim_chat_messages ORDER BY ts, id")).filter((m) => !pre.chatIds.has(String(m.id))).map((m) => ({ id: String(m.id), surface: "chat" as const, channel: String(m.channel), to: null, from: String(m.author), text: String(m.text), inbound: Number(m.inbound) === 1, cardProposalId: cardProposalOf(m.card_json) })),
     ...(await w.q("SELECT * FROM sim_email_messages ORDER BY ts, id")).filter((m) => !pre.emailIds.has(String(m.id))).map((m) => ({ id: String(m.id), surface: "email" as const, channel: null, to: String(m.to_addr), from: String(m.from_addr), text: `${String(m.subject)}\n${String(m.body)}`, inbound: false })),
   ];
   const endState: TrialEvidence["endState"] = [];
