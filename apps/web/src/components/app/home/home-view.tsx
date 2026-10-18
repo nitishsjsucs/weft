@@ -27,7 +27,7 @@ export function HomeView() {
   const clock = useSimClock();
   const now = clock.data?.now;
   const first = (PRINCIPALS.find((p) => p.id === who)?.name ?? "there").split(" ")[0];
-  const runs = useGet("/v1/payrolls", { query: { limit: 10 } });
+  const runs = useGet("/v1/payrolls", { query: { limit: 100 } });   // ordered by id: a year of history fills a short page
   const props = useGet("/v1/proposals", { query: { status: "pending", limit: 100 }, refreshMs: 5_000 });
   const accounts = useGet("/v1/tax/accounts");
   const workers = useGet("/v1/workers", { query: { type: "employee", limit: 100 } });
