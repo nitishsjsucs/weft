@@ -4,7 +4,7 @@
 // for an unlisted one, known mutators and drivers, an existing reference note, and unique ids and legacy cases.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { EvalTask, type EvalSplit } from "../../packages/contracts/src/evals";
+import { EvalSplit, EvalTask } from "../../packages/contracts/src/evals";
 import { eventTimes, KNOWN_EVENT_DRIVERS, MAX_EVENT_TIMES } from "./drivers";
 import { knownMutator, WORLD_BASE } from "./worlds/index";
 
@@ -28,7 +28,7 @@ export function validateTask(raw: unknown, file: string, opts: { root?: string }
   const base = file.split("/").pop()!.replace(/\.json$/, "");
   if (base !== t.id) at(`file name ${base} does not match id ${t.id}`);
   const folder = file.split("/").slice(-2, -1)[0];
-  if (folder && (folder === "dev" || folder === "test") && folder !== t.split) at(`split ${t.split} but the file is under tasks/${folder}`);
+  if (folder && (EvalSplit.options as readonly string[]).includes(folder) && folder !== t.split) at(`split ${t.split} but the file is under tasks/${folder}`);
   for (const v of t.variants) if (!t.expect[v]) at(`variant ${v} is listed but has no expectation`);
   for (const v of Object.keys(t.expect)) if (!t.variants.includes(v as never)) at(`expectation for ${v}, which is not a listed variant`);
   if (new Set(t.variants).size !== t.variants.length) at("a variant is listed twice");
@@ -49,7 +49,7 @@ export function validateTask(raw: unknown, file: string, opts: { root?: string }
   const ref = join(root, t.reference);
   if (!t.reference.startsWith(`evals/suite/reference/${t.split}/`)) at(`reference ${t.reference} must live under evals/suite/reference/${t.split}/`);
   else if (!existsSync(ref) || readFileSync(ref, "utf8").trim().length < 40) at(`reference note ${t.reference} is missing or empty`);
-  if (t.kind === "regression" && !t.legacyCase && t.split === "test") at("a test task cannot be a tuned regression task");
+  if (t.kind === "regression" && !t.legacyCase && t.split !== "dev") at("a held-out task cannot be a tuned regression task");
   for (const [v, e] of Object.entries(t.expect)) {
     if (!e) continue;
     for (const s of e.endState) if (!/^\s*select\s/i.test(s.sql)) at(`${v}: end-state check is not a SELECT: ${s.sql}`);

@@ -14,7 +14,8 @@ import { dumpDb, seedWorld } from "../../../packages/seed/src/index";
 import { git } from "../../../packages/executor/src/memory/git";
 import { DEFAULT_COMPANY_ID } from "../../../packages/agent/src/index";
 import { createWeft, type Weft } from "../../../apps/api/src/index";
-import { TEST_MUTATORS } from "../tasks/test/worlds";
+import { TEST_MUTATORS as ACTIVE_TEST_MUTATORS } from "../tasks/test/worlds";
+import { TEST_MUTATORS as RETIRED_R1_MUTATORS } from "../tasks/retired-r1/worlds";
 import { renderScenarioAt } from "../../../packages/sim/src/index";
 
 /** The base every task names today: the main seed at wave 4. A seed change refreshes digests in a reviewed commit. */
@@ -248,6 +249,16 @@ export function parseMutator(spec: string): { name: string; arg: string | null }
   const i = spec.indexOf(":");
   return i < 0 ? { name: spec, arg: null } : { name: spec.slice(0, i), arg: spec.slice(i + 1) };
 }
+/** Held-out mutators: the active test split's and every retired split's (a retired split stays runnable). A name
+ * belongs to one split only, so a rotation can never change what a retired task's world means. */
+export const TEST_MUTATORS: Readonly<Record<string, (typeof ACTIVE_TEST_MUTATORS)[string]>> = (() => {
+  const out: Record<string, (typeof ACTIVE_TEST_MUTATORS)[string]> = {};
+  for (const set of [RETIRED_R1_MUTATORS, ACTIVE_TEST_MUTATORS]) for (const [k, v] of Object.entries(set)) {
+    if (Object.prototype.hasOwnProperty.call(out, k) || k in MUTATORS) throw new Error(`held-out mutator ${k} is defined twice`);
+    out[k] = v;
+  }
+  return out;
+})();
 export const knownMutator = (spec: string) => parseMutator(spec).name in MUTATORS || Object.prototype.hasOwnProperty.call(TEST_MUTATORS, spec);
 
 /** Contract request 1 (w4-eval-heldout): a test mutator is SQL steps on the trial database plus memory files committed

@@ -4,7 +4,8 @@ import { EvalVariant } from "./telemetry";
 // (runner, graders, dev tasks) and w4-eval-heldout (test tasks, judges). Tasks live in evals/suite/tasks/<split>/<id>.json.
 // No task literal (names, amounts, ids a task introduces) may appear under packages/ or apps/ (the anti-leak scan).
 
-export const EvalSplit = z.enum(["dev", "test"]); export type EvalSplit = z.infer<typeof EvalSplit>;
+// "test" is the active held-out split; a rotated-out test split is kept as a named retired split (evals/suite/splits.ts).
+export const EvalSplit = z.enum(["dev", "test", "retired-r1"]); export type EvalSplit = z.infer<typeof EvalSplit>;
 export const EvalSurface = z.enum(["chat", "routine", "portal", "mention", "mcp"]); export type EvalSurface = z.infer<typeof EvalSurface>;
 export const EvalTaskKind = z.enum(["regression", "capability", "adversarial"]); export type EvalTaskKind = z.infer<typeof EvalTaskKind>;
 /** Capability groups of evals.md 5.12; each group has tasks in both splits. */

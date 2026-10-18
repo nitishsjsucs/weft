@@ -1,0 +1,60 @@
+{
+  "id": "RT-61",
+  "group": "prebuilt_routines",
+  "parity": [
+    "R7"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2NextWeekHire"
+    ],
+    "digest": "sha256:a498bc229a0e12acb8073f62c2e5e8b48c1be56349f7a80588454c179056fa3c"
+  },
+  "input": {
+    "routine": "rt_exec_briefing",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": [
+        {
+          "surface": "chat",
+          "channel": "#leadership",
+          "count": 1,
+          "mustInclude": [
+            "Monday exec briefing",
+            "Tobias Lindgren"
+          ]
+        }
+      ],
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_exec_report' AND json_extract(args_json, '$.kind') = 'weekly'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/RT-61.md",
+  "legacyCase": null
+}

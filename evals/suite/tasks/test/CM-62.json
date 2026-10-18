@@ -1,0 +1,54 @@
+{
+  "id": "CM-62",
+  "group": "compliance",
+  "parity": [
+    "T11"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2NyHireNoTraining"
+    ],
+    "digest": "sha256:0eb4d50ae279ca1d08f41b453d8726dd44d4cceed3292e3ac653f98714cefa43"
+  },
+  "input": {
+    "routine": "rt_compliance_training",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'training.assign' AND args_json LIKE '%wrk_0865%'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command IN ('training.assign', 'training.send_reminders')",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/CM-62.md",
+  "legacyCase": null
+}

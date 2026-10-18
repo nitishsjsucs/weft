@@ -1,0 +1,64 @@
+{
+  "id": "MN-61",
+  "group": "mentions",
+  "parity": [
+    "Q6"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "mention",
+  "principal": "usr_theo",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "mention": "@weft what's the approval deadline for the Oct 30 payroll run?",
+    "channel": "#payroll"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": [
+        {
+          "surface": "chat",
+          "channel": "#payroll",
+          "count": 1,
+          "mustInclude": []
+        }
+      ],
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": true,
+      "memory": {
+        "allowPaths": [],
+        "forbidCommit": true
+      },
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "Oct 29|October 29|2026-10-29"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL AND command NOT IN ('comms.post_update', 'comms.reply_in_thread')",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 5,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/MN-61.md",
+  "legacyCase": null
+}

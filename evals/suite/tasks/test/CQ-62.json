@@ -1,0 +1,56 @@
+{
+  "id": "CQ-62",
+  "group": "chat_questions",
+  "parity": [
+    "Q1"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "chat",
+  "principal": "usr_theo",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2TexasRateMidyear"
+    ],
+    "digest": "sha256:d62385ba7ca2b7f9fdbd2f2d00abc605d63032a78e48d25f8c58bc90c088b953"
+  },
+  "input": {
+    "chat": "Which Texas unemployment rate are we paying at the moment, and since what date has it applied?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "3.1%|0.031",
+          "Jul 1|July 1|2026-07-01|7/1"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/CQ-62.md",
+  "legacyCase": null
+}

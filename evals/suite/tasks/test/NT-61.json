@@ -1,0 +1,62 @@
+{
+  "id": "NT-61",
+  "group": "notices",
+  "parity": [
+    "R12",
+    "T3"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2Ca2027RateNotice"
+    ],
+    "digest": "sha256:d8481338ea50393eabbd54f10914935daa24a0f0a8d080757aca2420296d416a"
+  },
+  "input": {
+    "routine": "rt_agency_notice",
+    "event": {
+      "type": "notice.received",
+      "notice_id": "ntc_0861"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'tax.update_rate' AND json_extract(args_json, '$.code') = 'sui' AND CAST(json_extract(args_json, '$.rate') AS REAL) = 0.04 AND json_extract(args_json, '$.effective_from') = '2027-01-01'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'tax.update_rate'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command IN ('tax.update_rate', 'notices.send_response')",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/NT-61.md",
+  "legacyCase": null
+}

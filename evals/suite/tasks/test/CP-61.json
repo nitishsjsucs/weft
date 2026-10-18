@@ -1,0 +1,82 @@
+{
+  "id": "CP-61",
+  "group": "chat_proposals",
+  "parity": [
+    "T14",
+    "Q4"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default",
+    "chat_can_propose"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2FastenersClaim"
+    ],
+    "digest": "sha256:d26749f36b61d89fcc815637fe2fdabd7f1240150293728455d5fd4b92992845"
+  },
+  "input": {
+    "chat": "Please approve Bethany Cole's Lone Star Fasteners claim."
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "Expenses|Inbox"
+        ],
+        "judges": [
+          "J3_next_step"
+        ]
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    },
+    "chat_can_propose": {
+      "proposals": [
+        {
+          "command": "expenses.decide",
+          "args": {
+            "expense_id": "exp_0861",
+            "decision": "approve"
+          }
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/CP-61.md",
+  "legacyCase": null
+}

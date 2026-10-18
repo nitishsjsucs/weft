@@ -1,16 +1,27 @@
-// The held-out test split (owner: w4-eval-heldout): every task validates and is covered by the manifest, the world
-// mutators apply as written, and no test task's distinctive strings appear where fixers work (docs/wave4.md section 4,
-// research/wave4/evals.md section 7). This file reads the test tasks at run time and never prints their content; a
-// failure names the task id, the kind of token and the file, not the token itself.
+// The held-out splits (owner: w4-eval-heldout): the active test split and every retired split. Every task validates and
+// is covered by its split's manifest, the world mutators apply as written, every task variant has a solvability status,
+// the split registry names each split's Phoenix dataset, the active split shares nothing with a retired one, and no
+// held-out task's distinctive strings appear where fixers work (docs/wave4.md sections 4 and 14, research/wave4/evals.md
+// section 7). This file reads the held-out tasks at run time and never prints their content; a failure names the task
+// id, the kind of token and the file, not the token itself.
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EvalGroup, EvalTask } from "../packages/contracts/src/evals";
+import { EvalGroup, EvalSplit, EvalTask } from "../packages/contracts/src/evals";
 import { parseNotice } from "../packages/sim/src/notices/parser";
-import { buildTestManifest, manifestDrift, MANIFEST_PATH, testTaskFiles } from "../evals/suite/tasks/test/manifest";
-import { memoryFiles, sqlSteps, TEST_MUTATOR_NAMES, TEST_MUTATORS } from "../evals/suite/tasks/test/worlds";
-import { BLOCKED_ON_HARNESS, NULL_ORACLE, oracleFor, PRODUCT_PATH_PASSES, TEST_ORACLES, WAITING_ON_PARITY } from "../evals/suite/tasks/test/oracles";
+import { buildTestManifest, manifestDrift, manifestSpec, testTaskFiles } from "../evals/suite/manifest";
+import { ACTIVE_SPLITS, ALL_SPLITS, HELD_OUT_SPLITS, RETIRED_SPLITS, SPLITS, type HeldOutSplit } from "../evals/suite/splits";
+import { datasetFor } from "../evals/suite/phoenix";
+import { loadTasks } from "../evals/suite/loader";
+import * as activeWorlds from "../evals/suite/tasks/test/worlds";
+import * as activeOracles from "../evals/suite/tasks/test/oracles";
+import * as retiredR1Worlds from "../evals/suite/tasks/retired-r1/worlds";
+import * as retiredR1Oracles from "../evals/suite/tasks/retired-r1/oracles";
+import { TEST_MUTATORS as ALL_HELD_OUT_MUTATORS } from "../evals/suite/worlds/index";
+import { CHAT_ACT_TOOLS, CHAT_DOMAIN_ROUTES, CHAT_TOOLS_W3 } from "../packages/contracts/src/wave3";
+import { PORTAL_TOOLS } from "../packages/contracts/src/wave4";
+import { TraceEvalSplit } from "../packages/contracts/src/telemetry";
 import { JudgeId } from "../packages/contracts/src/evals";
 import type { ModelProvider, ModelStepRequest, ModelStepResult } from "../packages/contracts/src/index";
 import { createProvider, createSpendLedger } from "../packages/agent/src/index";
@@ -20,7 +31,14 @@ import { JUDGE_PROMPT_VERSION, JUDGES, judgeSystemPrompt, renderCase, type Judge
 import { assignSplits, correctedFailureRate, judgeReport, parseLabel, parseLabelFile, passesBar, PILOT_UNDER_LABELS, rates, reportMarkdown, trainExamples, validationReport, wilson, type JudgeLabel } from "../evals/suite/judges/validate";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const tasks = testTaskFiles(ROOT).map((rel) => EvalTask.parse(JSON.parse(readFileSync(join(ROOT, rel), "utf8"))));
+const tasksOf = (split: HeldOutSplit) => testTaskFiles(ROOT, split).map((rel) => EvalTask.parse(JSON.parse(readFileSync(join(ROOT, rel), "utf8"))));
+const SPLIT_TASKS = Object.fromEntries(HELD_OUT_SPLITS.map((s) => [s, tasksOf(s)])) as Record<HeldOutSplit, EvalTask[]>;
+const MODULES: Record<HeldOutSplit, { worlds: typeof activeWorlds; oracles: typeof activeOracles }> = {
+  test: { worlds: activeWorlds, oracles: activeOracles },
+  "retired-r1": { worlds: retiredR1Worlds, oracles: retiredR1Oracles },
+};
+/** Every held-out task (the active split and the retired ones): all of them stay out of fixer-visible places. */
+const tasks = HELD_OUT_SPLITS.flatMap((s) => SPLIT_TASKS[s]);
 
 // ---------- the scan ----------
 
@@ -54,9 +72,10 @@ function leakLiterals(referencePath: string): string[] {
 function leakTokens(list: readonly EvalTask[]): LeakToken[] {
   const out: LeakToken[] = [];
   for (const t of list) {
-    for (const text of leakLiterals(t.reference)) out.push({ taskId: t.id, kind: "literal", text });
-    for (const text of t.world.mutators) out.push({ taskId: t.id, kind: "mutator", text });
-    for (const text of shingles(inputText(t))) out.push({ taskId: t.id, kind: "input", text });
+    const id = `${t.split}/${t.id}`;
+    for (const text of leakLiterals(t.reference)) out.push({ taskId: id, kind: "literal", text });
+    for (const text of t.world.mutators) out.push({ taskId: id, kind: "mutator", text });
+    for (const text of shingles(inputText(t))) out.push({ taskId: id, kind: "input", text });
   }
   return out;
 }
@@ -99,47 +118,102 @@ function scanForLeaks(roots: readonly string[], tokens: readonly LeakToken[], sk
 }
 
 /** Where fixers work and read: product code, scripted scenarios, docs, research, and the eval suite outside the
- * held-out paths. The held-out paths themselves and this test are excluded. */
+ * held-out paths. The held-out paths of every held-out split and this test are excluded. */
 const FIXER_ROOTS = ["packages", "apps", "scenarios", "docs", "research", "evals", "e2e", "scripts"].map((d) => join(ROOT, d));
-const HELD_OUT = [join(ROOT, "evals/suite/tasks/test"), join(ROOT, "evals/suite/reference/test"), join(ROOT, "evals/suite/judges"), join(ROOT, MANIFEST_PATH), join(ROOT, "docs/tracks/w4-eval-heldout.md"), join(ROOT, "evals/results")];
+const HELD_OUT = [
+  ...HELD_OUT_SPLITS.flatMap((s) => { const m = manifestSpec(s); return [join(ROOT, m.taskDir), join(ROOT, m.referenceDir), join(ROOT, m.manifestPath)]; }),
+  join(ROOT, "evals/suite/judges"), join(ROOT, "docs/tracks/w4-eval-heldout.md"), join(ROOT, "evals/results"),
+];
 const skipHeldOut = (abs: string) => HELD_OUT.some((p) => abs === p || abs.startsWith(`${p}/`));
 
 // ---------- tests ----------
 
-describe("held-out test split", () => {
-  it("has 41 valid test tasks with unique ids, a reference note each and an expectation per variant", () => {
-    expect(tasks).toHaveLength(41);
-    expect(new Set(tasks.map((t) => t.id)).size).toBe(41);
-    for (const t of tasks) {
-      expect(t.split, t.id).toBe("test");
-      expect(t.reference, t.id).toBe(`evals/suite/reference/test/${t.id}.md`);
+describe("split registry", () => {
+  it("names every split of the contract, with exactly one held-out split and the retired ones frozen", () => {
+    expect([...ALL_SPLITS].sort()).toEqual([...EvalSplit.options].sort());
+    // Trial trace tags carry the split, so the telemetry contract names the same splits.
+    expect([...TraceEvalSplit.options].sort()).toEqual([...EvalSplit.options].sort());
+    expect(ALL_SPLITS.filter((s) => SPLITS[s].status === "held_out")).toEqual(["test"]);
+    expect(ACTIVE_SPLITS).toEqual(["dev", "test"]);
+    expect(RETIRED_SPLITS.length).toBeGreaterThanOrEqual(1);
+    for (const s of RETIRED_SPLITS) {
+      expect(SPLITS[s].retired, s).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(SPLITS[s].confirmations, s).toBeGreaterThanOrEqual(1);
+    }
+    for (const s of ALL_SPLITS) expect(readdirSync(join(ROOT, "evals/suite/tasks", s)).some((f) => f.endsWith(".json")), s).toBe(true);
+  });
+
+  it("registers each held-out split's Phoenix dataset, which the task files reproduce", () => {
+    for (const s of HELD_OUT_SPLITS) {
+      const loaded = loadTasks([s]).map((l) => l.task);
+      expect(datasetFor(s, loaded).name, s).toBe(SPLITS[s].dataset);
+      expect(buildTestManifest(ROOT, s).dataset, s).toBe(SPLITS[s].dataset);
+    }
+    // A retired split keeps the dataset name it had while it was the test split, so a continuity run lands beside its
+    // earlier confirmation runs in Phoenix; the active split's dataset is a new one.
+    expect(SPLITS["retired-r1"].dataset).toBe("weft-eval-test-dbc843f9b5");
+    expect(SPLITS.test.dataset).not.toBe(SPLITS["retired-r1"].dataset);
+  });
+
+  it("gives the active split nothing of a retired one: no task id, mutator, prompt shingle or leak literal", () => {
+    const active = SPLIT_TASKS.test;
+    const retired = RETIRED_SPLITS.flatMap((s) => SPLIT_TASKS[s]);
+    expect(active.map((t) => t.id).filter((id) => retired.some((r) => r.id === id))).toEqual([]);
+    const retiredMutators = new Set(RETIRED_SPLITS.flatMap((s) => Object.keys(MODULES[s].worlds.TEST_MUTATORS)));
+    expect(Object.keys(activeWorlds.TEST_MUTATORS).filter((m) => retiredMutators.has(m))).toEqual([]);
+    const old = leakTokens(retired);
+    const fresh = leakTokens(active);
+    const oldInput = new Set(old.filter((t) => t.kind === "input").map((t) => t.text));
+    expect(fresh.filter((t) => t.kind === "input" && oldInput.has(t.text)).map((t) => t.taskId)).toEqual([]);
+    const oldLiterals = old.filter((t) => t.kind === "literal").map((t) => t.text.toLowerCase());
+    expect(fresh.filter((t) => t.kind === "literal" && oldLiterals.some((o) => o.includes(t.text.toLowerCase()) || t.text.toLowerCase().includes(o))).map((t) => t.taskId)).toEqual([]);
+    // The two splits draw on the same capability groups (rotation keeps the distribution).
+    const count = (list: EvalTask[]) => Object.fromEntries(EvalGroup.options.map((g) => [g, list.filter((t) => t.group === g).length]));
+    for (const s of RETIRED_SPLITS) expect(count(active), s).toEqual(count(SPLIT_TASKS[s]));
+  });
+});
+
+describe.each(HELD_OUT_SPLITS)("held-out split %s", (split) => {
+  const list = SPLIT_TASKS[split];
+  const { worlds, oracles } = MODULES[split];
+  const spec = manifestSpec(split);
+
+  it("has 41 valid tasks with unique ids, a reference note each and an expectation per variant", () => {
+    expect(list).toHaveLength(41);
+    expect(new Set(list.map((t) => t.id)).size).toBe(41);
+    for (const t of list) {
+      expect(t.split, t.id).toBe(split);
+      expect(t.reference, t.id).toBe(`${spec.referenceDir}/${t.id}.md`);
       expect(readFileSync(join(ROOT, t.reference), "utf8").startsWith(`# ${t.id}:`), t.id).toBe(true);
       for (const v of t.variants) expect(t.expect[v], `${t.id} ${v}`).toBeTruthy();
       expect(t.legacyCase, t.id).toBeNull();
       expect(t.world.base, t.id).toBe("seed@v4");
+      expect(t.world.digest, t.id).toMatch(/^sha256:[0-9a-f]{64}$/);
     }
   });
 
-  it("shares no task id with the dev split (one shared id stops pnpm eval:ci from loading either split)", () => {
+  it("shares no task id with the dev split or another held-out split (one shared id stops pnpm eval:ci from loading)", () => {
     const dev = new Set(readdirSync(join(ROOT, "evals/suite/tasks/dev")).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5)));
-    expect(tasks.map((t) => t.id).filter((id) => dev.has(id))).toEqual([]);
+    const others = new Set(HELD_OUT_SPLITS.filter((s) => s !== split).flatMap((s) => SPLIT_TASKS[s].map((t) => t.id)));
+    expect(list.map((t) => t.id).filter((id) => dev.has(id) || others.has(id))).toEqual([]);
   });
 
   it("covers every capability group, with adversarial cases, and never turns a pending decision on by default", () => {
-    const groups = new Set(tasks.map((t) => t.group));
+    const groups = new Set(list.map((t) => t.group));
     for (const g of EvalGroup.options) expect(groups.has(g), g).toBe(true);
-    expect(tasks.filter((t) => t.kind === "adversarial").length).toBeGreaterThanOrEqual(10);
+    expect(list.filter((t) => t.kind === "adversarial").length).toBeGreaterThanOrEqual(10);
     // The chat_can_propose variant is always paired with the default variant, and the default never expects a chat proposal.
-    for (const t of tasks) {
+    for (const t of list) {
       if (t.variants.includes("chat_can_propose")) expect(t.variants, t.id).toContain("default");
       if (t.surface === "chat") expect(t.expect.default?.proposals ?? [], t.id).toEqual([]);
     }
   });
 
-  it("is covered exactly by test-manifest.json, which publishes only per-group counts", () => {
-    expect(manifestDrift(ROOT)).toEqual([]);
-    const m = buildTestManifest(ROOT);
+  it("is covered exactly by its manifest, which publishes only per-group counts", () => {
+    expect(manifestDrift(ROOT, split)).toEqual([]);
+    const m = buildTestManifest(ROOT, split);
     expect(m.taskCount).toBe(41);
+    expect(m.status).toBe(SPLITS[split].status === "retired" ? "retired" : "held_out");
     expect(Object.values(m.groups).reduce((a, b) => a + b, 0)).toBe(41);
     expect(Object.keys(m.files)).toHaveLength(41 * 2 + 2);
   });
@@ -147,56 +221,60 @@ describe("held-out test split", () => {
   it("detects an edited task through the manifest", () => {
     const dir = mkdtempSync(join(tmpdir(), "weft-heldout-"));
     try {
-      for (const rel of [...Object.keys(buildTestManifest(ROOT).files), MANIFEST_PATH]) {
+      for (const rel of [...Object.keys(buildTestManifest(ROOT, split).files), spec.manifestPath]) {
         mkdirSync(dirname(join(dir, rel)), { recursive: true });
         writeFileSync(join(dir, rel), readFileSync(join(ROOT, rel)));
       }
-      expect(manifestDrift(dir)).toEqual([]);
-      const first = testTaskFiles(dir)[0]!;
+      expect(manifestDrift(dir, split)).toEqual([]);
+      const first = testTaskFiles(dir, split)[0]!;
       writeFileSync(join(dir, first), readFileSync(join(dir, first), "utf8").replace("\"budget\"", "\"budget\" "));
-      expect(manifestDrift(dir)).toEqual([`changed: ${first}`]);
+      expect(manifestDrift(dir, split)).toEqual([`changed: ${first}`]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it("resolves every mutator a task names, and every mutator is used", () => {
-    const used = new Set(tasks.flatMap((t) => t.world.mutators));
-    for (const n of used) expect(TEST_MUTATOR_NAMES, n).toContain(n);
-    for (const n of TEST_MUTATOR_NAMES) expect(used.has(n), n).toBe(true);
-    expect(() => sqlSteps(["noSuchMutator"])).toThrow(/UNKNOWN_MUTATOR/);
-    for (const f of memoryFiles(TEST_MUTATOR_NAMES)) expect(f.path, f.path).toMatch(/^(knowledge\/(facts|procedures|decisions)\/|workstreams\/)[a-z0-9-]+\.md$/);
+    const used = new Set(list.flatMap((t) => t.world.mutators));
+    for (const n of used) expect(worlds.TEST_MUTATOR_NAMES, n).toContain(n);
+    for (const n of worlds.TEST_MUTATOR_NAMES) expect(used.has(n), n).toBe(true);
+    for (const n of worlds.TEST_MUTATOR_NAMES) expect(ALL_HELD_OUT_MUTATORS[n], n).toBe(worlds.TEST_MUTATORS[n]);
+    expect(() => worlds.sqlSteps(["noSuchMutator"])).toThrow(/UNKNOWN_MUTATOR/);
+    for (const f of worlds.memoryFiles(worlds.TEST_MUTATOR_NAMES)) expect(f.path, f.path).toMatch(/^(knowledge\/(facts|procedures|decisions)\/|workstreams\/)[a-z0-9-]+\.md$/);
   });
 
   // Solvability status is machine-checked: every task variant has an oracle, is passed by the product's own scripted
-  // path, or is listed as waiting on a parity track; blocked variants keep the oracle that fails today.
+  // path, or is listed as waiting on a parity track; blocked variants keep the oracle that fails today. The scripted run
+  // of every oracle and of a null reply is `tsx evals/suite/solvability.ts --split <split>` (minutes, so not in this file).
   it("gives every task variant a solvability status: an oracle, the product path, or a parity track it waits on", () => {
-    const ids = new Set(tasks.map((t) => t.id));
-    for (const key of Object.keys(TEST_ORACLES)) {
+    const ids = new Set(list.map((t) => t.id));
+    for (const key of Object.keys(oracles.TEST_ORACLES)) {
       const [id, variant] = key.split("/");
       expect(ids.has(id!), key).toBe(true);
-      if (variant) expect(tasks.find((t) => t.id === id)!.variants, key).toContain(variant);
+      if (variant) expect(list.find((t) => t.id === id)!.variants, key).toContain(variant);
     }
-    for (const id of [...PRODUCT_PATH_PASSES, ...WAITING_ON_PARITY]) expect(ids.has(id), id).toBe(true);
-    for (const key of BLOCKED_ON_HARNESS) expect(oracleFor(key.split("/")[0]!, key.split("/")[1]!), key).not.toBeNull();
+    for (const id of [...oracles.PRODUCT_PATH_PASSES, ...oracles.WAITING_ON_PARITY]) expect(ids.has(id), id).toBe(true);
+    for (const key of oracles.BLOCKED_ON_HARNESS) expect(oracles.oracleFor(key.split("/")[0]!, key.split("/")[1]!), key).not.toBeNull();
     const uncovered: string[] = [];
-    for (const t of tasks) for (const v of t.variants) {
-      const covered = oracleFor(t.id, v) !== null || PRODUCT_PATH_PASSES.includes(t.id) || WAITING_ON_PARITY.includes(t.id);
-      if (!covered && !BLOCKED_ON_HARNESS.includes(`${t.id}/${v}`)) uncovered.push(`${t.id}/${v}`);
+    for (const t of list) for (const v of t.variants) {
+      const covered = oracles.oracleFor(t.id, v) !== null || oracles.PRODUCT_PATH_PASSES.includes(t.id) || oracles.WAITING_ON_PARITY.includes(t.id);
+      if (!covered && !oracles.BLOCKED_ON_HARNESS.includes(`${t.id}/${v}`)) uncovered.push(`${t.id}/${v}`);
     }
     expect(uncovered).toEqual([]);
-    // Oracles call tools by wire name and only for chat or routine tasks; the null oracle is one plain reply.
-    for (const [key, s] of Object.entries(TEST_ORACLES)) {
+    // Oracles call tools by wire name and only for surfaces whose run takes a scripted model (chat and routine; the
+    // active split also scripts portal and mention runs); the null oracle is one plain reply.
+    const scripted = split === "test" ? ["chat", "routine", "portal", "mention"] : ["chat", "routine"];
+    for (const [key, s] of Object.entries(oracles.TEST_ORACLES)) {
       for (const step of s.agents.main ?? []) for (const o of step.output) if (o.type === "function_call") expect(o.name, key).toMatch(/^[a-z_]+__[a-z_]+$/);
-      const t = tasks.find((x) => x.id === key.split("/")[0])!;
-      expect(["chat", "routine"], key).toContain(t.surface);
+      const t = list.find((x) => x.id === key.split("/")[0])!;
+      expect(scripted, key).toContain(t.surface);
     }
-    expect(NULL_ORACLE.agents.main).toHaveLength(1);
+    expect(oracles.NULL_ORACLE.agents.main).toHaveLength(1);
   });
 
-  // The suite loader's own rules (evals/suite/loader.ts on track/w4-eval-suite), restated here so the split keeps
-  // loading in the runner without this file importing it: a person principal, a typed routine event, no tuned
-  // regression tasks in the held-out split, read-only end-state checks, and no proposals on a refusal task.
+  // The suite loader's own rules (evals/suite/loader.ts), restated here so the split keeps loading in the runner without
+  // this file importing it: a person principal, a typed routine event, no tuned regression tasks in a held-out split,
+  // read-only end-state checks, and no proposals on a refusal task.
   it("follows the suite loader's rules for principals, events, kinds, end states and refusals", () => {
-    for (const t of tasks) {
+    for (const t of list) {
       expect(t.principal, t.id).toMatch(/^usr_[a-z0-9_]+$/);
       expect(t.kind, t.id).not.toBe("regression");
       expect(Number.isNaN(Date.parse(t.world.clock)), t.id).toBe(false);
@@ -209,39 +287,68 @@ describe("held-out test split", () => {
       }
     }
     // Notice tasks name a notice their own mutator inserts, through the event the product emits.
-    for (const t of tasks.filter((x) => "routine" in x.input && x.input.event?.type === "notice.received")) {
+    for (const t of list.filter((x) => "routine" in x.input && x.input.event?.type === "notice.received")) {
       const id = ("routine" in t.input ? t.input.event?.notice_id : null) ?? "";
-      const inserted = t.world.mutators.flatMap((m) => TEST_MUTATORS[m]!.steps).some((s) => "sql" in s && s.sql.startsWith("INSERT INTO notices") && s.args?.[0] === id);
+      const inserted = t.world.mutators.flatMap((m) => worlds.TEST_MUTATORS[m]!.steps).some((s) => "sql" in s && s.sql.startsWith("INSERT INTO notices") && s.args?.[0] === id);
       expect(inserted, t.id).toBe(true);
     }
   });
 
   it("stores notice extracts that equal what the agency parser reads from each notice body", () => {
     let checked = 0;
-    for (const m of Object.values(TEST_MUTATORS)) {
+    for (const m of Object.values(worlds.TEST_MUTATORS)) {
       for (const s of m.steps) {
         if (!("sql" in s) || !s.sql.startsWith("INSERT INTO notices")) continue;
-        const [, agency, kind, formCode, , , , , , body, extractedJson] = s.args as string[];
-        const parsed = parseNotice({ agency: agency as never, formCode: formCode!, kind: kind as never, text: body! });
-        const stored = JSON.parse(extractedJson!) as Record<string, unknown>;
+        const args = s.args as string[];
+        // Both splits store (id, agency, kind, form code, title, ..., body, extract) with the body and extract last.
+        const [agency, kind, formCode] = [args[1]!, args[2]!, args[3]!];
+        const body = args[args.length - 2]!;
+        const extractedJson = args[args.length - 1]!;
+        const parsed = parseNotice({ agency: agency as never, formCode, kind: kind as never, text: body });
+        const stored = JSON.parse(extractedJson) as Record<string, unknown>;
         expect({ ...parsed, taxAccountId: stored.taxAccountId }, m.name).toEqual(stored);
         checked++;
       }
     }
-    expect(checked).toBe(4);
+    expect(checked).toBe(split === "test" ? 2 : 4);
+  });
+});
+
+// The scripted solvability lint of the dev split (tests/evals-suite.test.ts), applied to the active held-out split: every
+// tool a chat or portal reference relies on is on that task's surface in one of its variants.
+describe("held-out solvability lint", () => {
+  it("every tool an active held-out reference relies on is on its surface", () => {
+    const routed = CHAT_DOMAIN_ROUTES.map((r) => r.tool as string);
+    const surface: Record<string, string[]> = {
+      default: [...CHAT_TOOLS_W3.filter((x) => x !== "comms.post_update"), ...routed],
+      chat_can_propose: [...CHAT_ACT_TOOLS, ...routed],
+      portal: [...PORTAL_TOOLS],
+    };
+    const gaps: string[] = [];
+    for (const t of SPLIT_TASKS.test) {
+      if (t.surface !== "chat" && t.surface !== "portal") continue;
+      const ref = readFileSync(join(ROOT, t.reference), "utf8");
+      const used = [...ref.matchAll(/`([a-z_]+\.[a-z_]+)`/g)].filter((m) => !/\b(no|never|not|without)\b[^.`]{0,40}$/i.test(ref.slice(Math.max(0, m.index! - 60), m.index))).map((m) => m[1]!);
+      const lists = t.surface === "portal" ? [surface.portal!] : t.variants.map((v) => surface[v]!);
+      for (const tool of new Set(used)) if (!lists.some((l) => l.includes(tool))) gaps.push(`${t.id} ${tool}`);
+    }
+    expect(gaps).toEqual([]);
   });
 });
 
 describe("anti-leak scan", () => {
   const tokens = leakTokens(tasks);
 
-  it("derives literal, mutator and input tokens for the split", () => {
-    expect(tokens.filter((t) => t.kind === "input").length).toBeGreaterThan(41);
-    expect(new Set(tokens.filter((t) => t.kind === "mutator").map((t) => t.text)).size).toBe(TEST_MUTATOR_NAMES.length);
-    expect(tokens.filter((t) => t.kind === "literal").length).toBeGreaterThan(20);
+  it("derives literal, mutator and input tokens for every held-out split", () => {
+    for (const s of HELD_OUT_SPLITS) {
+      const own = leakTokens(SPLIT_TASKS[s]);
+      expect(own.filter((t) => t.kind === "input").length, s).toBeGreaterThan(41);
+      expect(new Set(own.filter((t) => t.kind === "mutator").map((t) => t.text)).size, s).toBe(MODULES[s].worlds.TEST_MUTATOR_NAMES.length);
+      expect(own.filter((t) => t.kind === "literal").length, s).toBeGreaterThan(20);
+    }
   });
 
-  it("finds no test task string where fixers work", () => {
+  it("finds no held-out task string where fixers work", () => {
     const hits = scanForLeaks(FIXER_ROOTS, tokens, skipHeldOut);
     expect(hits.map((h) => `${h.taskId} ${h.kind} in ${h.file}`)).toEqual([]);
   });
@@ -250,7 +357,7 @@ describe("anti-leak scan", () => {
   // comma separated. Each root's own held-out paths are skipped, so an integration branch that carries the split
   // still passes. Read only; hits name the task id, the token kind and the file.
   const extra = (process.env.WEFT_ANTILEAK_ROOTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  it.runIf(extra.length > 0)("finds no test task string in the checkouts listed in WEFT_ANTILEAK_ROOTS", () => {
+  it.runIf(extra.length > 0)("finds no held-out task string in the checkouts listed in WEFT_ANTILEAK_ROOTS", () => {
     const hits: string[] = [];
     for (const root of extra) {
       const held = HELD_OUT.map((p) => join(root, relative(ROOT, p)));

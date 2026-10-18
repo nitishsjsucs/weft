@@ -15,6 +15,7 @@ import type { SuiteTrial } from "./types";
 import type { SuiteTrialDetail } from "./runner";
 import { traceRedact } from "../../packages/agent/src/otel";
 import { assertLocal } from "./judges/phoenix";
+import { SPLITS } from "./splits";
 
 export interface OtlpCapture { url: string; payloads: string[]; close(): Promise<void> }
 
@@ -48,11 +49,18 @@ export async function phoenixUp(url: string): Promise<string | null> {
 
 const GRADERS: GraderId[] = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"];
 
-/** The dataset of a split's tasks; its name carries a hash of the tasks so an edited suite gets a new dataset. */
+/** The hash in a split's dataset name: an edited task set gets a new dataset. */
+export const datasetHash = (tasks: EvalTask[]) => sha256Hex(JSON.stringify(tasks.map((t) => [t.id, t.input, t.expect, t.world.digest]))).slice(0, 10);
+
+/**
+ * The dataset of a split's tasks, `weft-eval-<stem>-<hash>`. The stem is the split name, except that a retired split
+ * keeps the stem it had while held out (splits.ts), so with its tasks unchanged it records into the same Phoenix
+ * dataset as its earlier confirmation runs.
+ */
 export function datasetFor(split: string, tasks: EvalTask[]) {
-  const hash = sha256Hex(JSON.stringify(tasks.map((t) => [t.id, t.input, t.expect, t.world.digest]))).slice(0, 10);
+  const stem = (SPLITS as Record<string, { datasetStem: string } | undefined>)[split]?.datasetStem ?? split;
   return {
-    name: `weft-eval-${split}-${hash}`,
+    name: `weft-eval-${stem}-${datasetHash(tasks)}`,
     examples: tasks.map((t) => ({
       input: { task_id: t.id, surface: t.surface, principal: t.principal, request: t.input },
       output: { expect: t.expect },

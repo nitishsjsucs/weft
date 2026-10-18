@@ -1,0 +1,64 @@
+{
+  "id": "CM-61",
+  "group": "compliance",
+  "parity": [
+    "T2",
+    "T11"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2KofiTrainingDone"
+    ],
+    "digest": "sha256:6dbfc560e76bd714e0dec6ed019ffb04b9595467c1323f433956fb535b959124"
+  },
+  "input": {
+    "routine": "rt_compliance_reminders",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "messages": [
+        {
+          "surface": "chat",
+          "channel": "#payroll",
+          "count": 1,
+          "mustInclude": [
+            "Imani Ferreira"
+          ]
+        }
+      ],
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'compliance.post_reminders'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM sim_chat_messages WHERE author = 'Weft agent' AND text LIKE '%Kofi Mensah%'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/CM-61.md",
+  "legacyCase": null
+}

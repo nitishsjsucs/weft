@@ -1,0 +1,55 @@
+{
+  "id": "RT-62",
+  "group": "prebuilt_routines",
+  "parity": [
+    "R16"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "routine": "rt_weekly_cost_by_state",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [
+        {
+          "command": "comms.send_report",
+          "args": {
+            "metric": "payroll_cost_by_state"
+          }
+        }
+      ],
+      "messages": [],
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_report'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/RT-62.md",
+  "legacyCase": null
+}

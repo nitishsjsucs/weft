@@ -1,0 +1,52 @@
+{
+  "id": "NT-04",
+  "group": "notices",
+  "parity": [
+    "R12"
+  ],
+  "kind": "capability",
+  "split": "retired-r1",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "hoRateReconfirmNotice"
+    ],
+    "digest": "sha256:cca7c1231a5243cce2b3db39c0f5ceea17d53137cba7ced3f474c1ece028224c"
+  },
+  "input": {
+    "routine": "rt_agency_notice",
+    "event": {
+      "type": "notice.received",
+      "notice_id": "ntc_0952"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": null,
+      "noConsequentialEffects": true,
+      "finalText": {
+        "grounded": true,
+        "mustMention": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'tax.update_rate'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/retired-r1/NT-04.md",
+  "legacyCase": null
+}

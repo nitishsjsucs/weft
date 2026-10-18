@@ -1,0 +1,43 @@
+{
+  "id": "EX-03",
+  "group": "expenses_timeoff_benefits",
+  "parity": [
+    "R5",
+    "Q1"
+  ],
+  "kind": "capability",
+  "split": "retired-r1",
+  "surface": "chat",
+  "principal": "usr_theo",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "chat": "How much are we waiting to reimburse across the claims that still need review?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "2,298.82"
+        ]
+      }
+    }
+  },
+  "budget": {
+    "maxSteps": 5,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/retired-r1/EX-03.md",
+  "legacyCase": null
+}

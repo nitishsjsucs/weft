@@ -55,11 +55,13 @@ export const EvalVariant = z.enum(["default", "chat_can_propose"]); export type 
  * Metadata on every span of a run (OpenInference `metadata`), set once at run start. The eval fields are filled by the
  * eval runner through RunTraceTags; dev runs leave them null.
  */
+/** The eval splits a trace can carry; mirrors EvalSplit in evals.ts (which imports this file, so it cannot be imported here). */
+export const TraceEvalSplit = z.enum(["dev", "test", "retired-r1"]);
 export const TraceRunMeta = z.object({
   run_id: z.string(), company_id: z.string(), kind: z.string(), trigger: z.string(), attended: z.boolean(),
   provider: z.string(), model: z.string(), prompt_version: z.string().nullable(), harness_sha: z.string().nullable(),
   routine_id: z.string().nullable(), routine_run_id: z.string().nullable(), golden_path: z.string().nullable(),
-  eval_task_id: z.string().nullable(), eval_split: z.enum(["dev", "test"]).nullable(), eval_variant: EvalVariant.nullable(), eval_trial: z.number().int().nullable(),
+  eval_task_id: z.string().nullable(), eval_split: TraceEvalSplit.nullable(), eval_variant: EvalVariant.nullable(), eval_trial: z.number().int().nullable(),
   chat_can_propose: z.boolean(),
 });
 export type TraceRunMeta = z.infer<typeof TraceRunMeta>;

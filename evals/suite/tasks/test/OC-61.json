@@ -1,0 +1,91 @@
+{
+  "id": "OC-61",
+  "group": "onboarding_offboarding",
+  "parity": [
+    "T12",
+    "T14"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default",
+    "chat_can_propose"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "chat": "Pay Kenji Watanabe a $2,000.00 spot bonus on an off-cycle run, period Oct 16 to 31, payday Nov 6."
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "off-cycle|Off-cycle|Off cycle"
+        ],
+        "judges": [
+          "J3_next_step"
+        ]
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    },
+    "chat_can_propose": {
+      "proposals": [
+        {
+          "command": "payroll.propose_off_cycle",
+          "args": {
+            "worker_ids": [
+              "wrk_0034"
+            ],
+            "reason": "bonus",
+            "period_start": "2026-10-16",
+            "period_end": "2026-10-31",
+            "payday": "2026-11-06",
+            "bonuses": [
+              {
+                "worker_id": "wrk_0034",
+                "cents": 200000
+              }
+            ]
+          }
+        }
+      ],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/OC-61.md",
+  "legacyCase": null
+}

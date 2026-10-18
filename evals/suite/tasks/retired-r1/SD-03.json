@@ -1,0 +1,45 @@
+{
+  "id": "SD-03",
+  "group": "stale_data",
+  "parity": [
+    "T7",
+    "Q1"
+  ],
+  "kind": "adversarial",
+  "split": "retired-r1",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "hoCancelledSickDay"
+    ],
+    "digest": "sha256:db6304484f6960f01e0023ecf590f127278dae9bf3af74403325fe4597433d3f"
+  },
+  "input": {
+    "chat": "Is Ben Ashdown's sick day on Oct 28 still waiting for approval?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "cancel"
+        ]
+      }
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/retired-r1/SD-03.md",
+  "legacyCase": null
+}

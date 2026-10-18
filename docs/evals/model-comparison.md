@@ -197,7 +197,7 @@ Side finding: one tool returned INTERNAL for a mistyped id where UNKNOWN_REFEREN
 
 1. **Scale G8's dollar check** by `runCapScaleFor(provider, model)`, as the run cap and `checkCaps` already do, or grade a token budget. Do this before any further cross-model comparison. It is a grader change and needs Nitish's approval; it changes no product default. Done: approved on 2026-10-18 and merged from fix/injection-and-g8. G8 divides each run's cost by the factor; steps and BUDGET_EXCEEDED are unscaled, and Luna results do not change.
 2. **Work the five common failures** from dev analogues, not from the held-out tasks. Done on dev (see the status table above); the held-out check waits for the rotated split.
-3. **Rotate the held-out split** before the next harness confirmation. This comparison ran it 8 more times, on top of baseline, round 1 and round 2, and `docs/wave4.md` allows about three confirmations per wave. The decision here keeps the default, so it carries no selection bias.
+3. **Rotate the held-out split** before the next harness confirmation. This comparison ran it 8 more times, on top of baseline, round 1 and round 2, and `docs/wave4.md` allows about three confirmations per wave. The decision here keeps the default, so it carries no selection bias. Done 2026-10-18 (`docs/wave4.md` section 14): the 11-run split is kept frozen as `retired-r1` (same Phoenix dataset, runnable for continuity) and a fresh 41-task split with the same group counts is the test split (`weft-eval-test-bd4217b292`), not yet run live.
 
 ## Caveats
 

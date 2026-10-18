@@ -1,0 +1,46 @@
+{
+  "id": "PT-51",
+  "group": "portal",
+  "parity": [
+    "T9"
+  ],
+  "kind": "capability",
+  "split": "retired-r1",
+  "surface": "portal",
+  "principal": "usr_theo",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "portal": "I'm having surgery next month and will need some time away. How does medical leave work for me, and who do I talk to?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM handoff_cases WHERE reason = 'medical_leave' AND status = 'open'",
+          "equals": 1
+        }
+      ],
+      "finalText": {
+        "grounded": true,
+        "mustMention": []
+      }
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/retired-r1/PT-51.md",
+  "legacyCase": null
+}

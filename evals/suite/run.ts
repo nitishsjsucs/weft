@@ -1,7 +1,7 @@
 // pnpm eval:suite: the wave 4 eval suite (docs/evals.md, research/wave4/evals.md). Owner: w4-eval-suite.
 //   pnpm eval:suite validate                         load and validate every task file
 //   pnpm eval:suite digests [--write]                rebuild every world, compare (or pin) the digests
-//   pnpm eval:suite [--split dev|test] [--variant default|chat_can_propose] [--k n] [--ids RT-01,CQ-01] [--legacy]
+//   pnpm eval:suite [--split dev|test|retired-r1|all] [--variant default|chat_can_propose] [--k n] [--ids RT-01,CQ-01] [--legacy]
 //                   [--provider scripted|live] [--cap 0.15] [--stage w4-eval-suite --stage-cap 0.10] [--phoenix] [--gate]
 //                   [--experiment baseline]   the Phoenix experiment name (one split and variant; else -<split>-<variant> is added)
 // --gate (CI: `pnpm eval:ci`, the scripted provider over both splits and both variants, no network) exits 1 on any unsafe
@@ -16,6 +16,7 @@ import type { EvalSplit, EvalTask } from "../../packages/contracts/src/evals";
 import type { EvalVariant } from "../../packages/contracts/src/telemetry";
 import { PHOENIX, TRACE_ENV } from "../../packages/contracts/src/telemetry";
 import { loadTasks, REPO_ROOT } from "./loader";
+import { ACTIVE_SPLITS, ALL_SPLITS } from "./splits";
 import { finalCanaryScan, newState, planTrials, runPlain, runTrial, settleTrial, SuiteStop, type RunnerOptions } from "./runner";
 import { metrics, renderReport, type SuiteResultFile } from "./report";
 import { buildWorld, worldDigest, worldKey } from "./worlds/index";
@@ -34,7 +35,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   const val = (flag: string) => { const v = rest.shift(); if (v === undefined || v.startsWith("--")) throw new Error(`${flag} needs a value`); return v; };
   while (rest.length) {
     const f = rest.shift()!;
-    if (f === "--split") { const v = val(f); a.splits = v === "all" ? ["dev", "test"] : [v as EvalSplit]; if (!a.splits.every((s) => s === "dev" || s === "test")) throw new Error(`--split ${v}`); }
+    if (f === "--split") { const v = val(f); a.splits = v === "all" ? [...ACTIVE_SPLITS] : [v as EvalSplit]; if (!a.splits.every((s) => ALL_SPLITS.includes(s))) throw new Error(`--split ${v}`); }
     else if (f === "--variant") { const v = val(f); a.variants = v === "both" ? ["default", "chat_can_propose"] : [v as EvalVariant]; if (!a.variants.every((x) => x === "default" || x === "chat_can_propose")) throw new Error(`--variant ${v}`); }
     else if (f === "--k") { a.k = Number(val(f)); if (!Number.isInteger(a.k) || a.k < 1 || a.k > 8) throw new Error("--k is 1 to 8"); }
     else if (f === "--ids") a.ids = val(f).split(",").map((s) => s.trim()).filter(Boolean);
@@ -112,8 +113,8 @@ export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const baseDir = resolve(process.env.WEFT_EVAL_DIR ?? join(REPO_ROOT, ".data/eval-suite"));
   if (args.cmd === "validate") {
-    const all = loadTasks(["dev", "test"]);
-    console.log(`${all.length} tasks valid (${all.filter((l) => l.task.split === "dev").length} dev, ${all.filter((l) => l.task.split === "test").length} test)`);
+    const all = loadTasks(ALL_SPLITS);
+    console.log(`${all.length} tasks valid (${ALL_SPLITS.map((s) => `${all.filter((l) => l.task.split === s).length} ${s}`).join(", ")})`);
     return 0;
   }
   if (args.cmd === "digests") {

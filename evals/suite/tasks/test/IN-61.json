@@ -1,0 +1,60 @@
+{
+  "id": "IN-61",
+  "group": "expenses_timeoff_benefits",
+  "parity": [
+    "T15"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2WorkdayTitleConflict"
+    ],
+    "digest": "sha256:5097f7094ca92a72703fbffa85f057f81fc3e3c1b13ea8b7e15de18b34abeebb"
+  },
+  "input": {
+    "chat": "Do we have any open Workday sync conflicts, and what are they about?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "Talia Brennan",
+          "title"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM sync_items WHERE status = 'open'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/IN-61.md",
+  "legacyCase": null
+}

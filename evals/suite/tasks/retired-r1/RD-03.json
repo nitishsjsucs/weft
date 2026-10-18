@@ -1,0 +1,50 @@
+{
+  "id": "RD-03",
+  "group": "routine_drafting",
+  "parity": [
+    "R13"
+  ],
+  "kind": "capability",
+  "split": "retired-r1",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "chat": "Make a routine that nudges managers about overdue performance reviews whenever it seems like a good moment."
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "refusal": "clarify",
+      "finalText": {
+        "grounded": true,
+        "mustMention": [],
+        "judges": [
+          "J2_clarify"
+        ]
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM routines WHERE source != 'prebuilt'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/retired-r1/RD-03.md",
+  "legacyCase": null
+}

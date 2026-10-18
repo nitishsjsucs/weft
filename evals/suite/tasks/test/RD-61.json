@@ -1,0 +1,61 @@
+{
+  "id": "RD-61",
+  "group": "routine_drafting",
+  "parity": [
+    "R13"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "chat": "Every Friday at 4pm, post the names of that week's new hires in #new-hires."
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "Routines|routine builder|routine screen"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM routines WHERE source <> 'prebuilt' AND enabled = 1",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM routines WHERE autonomy = 'auto'",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM routines WHERE source <> 'prebuilt'",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 8,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/RD-61.md",
+  "legacyCase": null
+}

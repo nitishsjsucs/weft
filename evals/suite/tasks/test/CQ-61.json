@@ -1,0 +1,56 @@
+{
+  "id": "CQ-61",
+  "group": "chat_questions",
+  "parity": [
+    "Q1"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "chat",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2PerceptionHire"
+    ],
+    "digest": "sha256:05aff6f3aec091a4f9575475935c4b987a77cc081fe1e4c42b8c28cc9304954c"
+  },
+  "input": {
+    "chat": "What role is Marisol Quintero joining us in, and which day is her first day?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "Perception Engineer",
+          "Nov 9|November 9|2026-11-09|11/9"
+        ],
+        "judges": []
+      },
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE agent_run_id IS NOT NULL",
+          "equals": 0
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/CQ-61.md",
+  "legacyCase": null
+}

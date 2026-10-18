@@ -1,0 +1,54 @@
+{
+  "id": "ON-61",
+  "group": "onboarding_offboarding",
+  "parity": [
+    "R1"
+  ],
+  "kind": "capability",
+  "split": "test",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "r2StartsToday"
+    ],
+    "digest": "sha256:bc385e9dff682822d990ba39a613fbda8ac2d874715d0611b1f6d672f8912e4c"
+  },
+  "input": {
+    "routine": "rt_first_day_message",
+    "event": null
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_first_day_message' AND args_json LIKE '%wrk_0864%'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM actions WHERE command = 'comms.send_first_day_message'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/test/ON-61.md",
+  "legacyCase": null
+}

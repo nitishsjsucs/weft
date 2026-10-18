@@ -5,6 +5,7 @@ import type { EvalSuiteResult } from "../../packages/contracts/src/evals";
 import type { EvalVariant } from "../../packages/contracts/src/telemetry";
 import type { SuiteTrial } from "./types";
 import type { SuiteTrialDetail } from "./runner";
+import { isHeldOut } from "./splits";
 
 const detailOf = (t: SuiteTrial): Partial<SuiteTrialDetail> => t.detail as Partial<SuiteTrialDetail>;
 
@@ -95,7 +96,7 @@ export function metrics(all: SuiteTrial[], variant: EvalVariant, k: number): Var
     providers: {
       model: live.length, template: ts.filter((t) => kindOf(t) === "template").length, noRun: ts.filter((t) => kindOf(t) === "no_run").length,
       modelSuccesses: live.filter((t) => t.success).length,
-      offModel: ts.filter((t) => kindOf(t) !== "model").map((t) => ({ taskId: t.split === "test" ? "held-out" : t.taskId, trial: t.trial, kind: kindOf(t), success: t.success })),
+      offModel: ts.filter((t) => kindOf(t) !== "model").map((t) => ({ taskId: isHeldOut(t.split) ? "held-out" : t.taskId, trial: t.trial, kind: kindOf(t), success: t.success })),
     },
     strictGrounding: ts.reduce((a, t) => {
       const sg = detailOf(t).groundingStrict;
@@ -148,10 +149,10 @@ function variantSection(r: SuiteResultFile, v: EvalVariant, testOnly: boolean): 
   }
   if (testOnly) return lines;
   // A run over both splits lists task rows for the dev split only; the held-out split keeps per-group counts above.
-  const heldOut = r.trials.filter((x) => x.variant === v && x.split === "test").length;
+  const heldOut = r.trials.filter((x) => x.variant === v && isHeldOut(x.split)).length;
   if (heldOut) lines.push(`The ${heldOut} held-out test trials count in the tables above; their task rows are not shown.`, "");
   lines.push("| Task | Trial | Result | Steps | Calls | Cost | First failure | Why |", "|---|---|---|---|---|---|---|---|");
-  for (const t of r.trials.filter((x) => x.variant === v && x.split !== "test")) {
+  for (const t of r.trials.filter((x) => x.variant === v && !isHeldOut(x.split))) {
     const rr = detailOf(t).routine ?? null;
     const routineWhy = rr && !rr.agentRunId ? `routine run ${rr.status}${rr.reason ? ` (${rr.reason})` : ""}, no agent run` : null;
     const why = t.success ? "" : [routineWhy, t.error, ...t.graders.filter((g) => g.applies && !g.pass).map((g) => `${g.grader}: ${g.reasons.join("; ")}`)].filter(Boolean).join(" / ").replace(/\|/g, "/").slice(0, 300);
@@ -165,7 +166,7 @@ function variantSection(r: SuiteResultFile, v: EvalVariant, testOnly: boolean): 
 /** Declared judges are not run by the suite yet; the report lists them as pending so a task never looks judged. */
 export function judgesSection(r: SuiteResultFile, testOnly: boolean): string[] {
   const pending = new Map<string, Set<string>>();
-  for (const t of r.trials) for (const j of detailOf(t).judgesPending ?? []) pending.set(j, (pending.get(j) ?? new Set()).add(testOnly || t.split === "test" ? "held-out" : t.taskId));
+  for (const t of r.trials) for (const j of detailOf(t).judgesPending ?? []) pending.set(j, (pending.get(j) ?? new Set()).add(testOnly || isHeldOut(t.split) ? "held-out" : t.taskId));
   const lines = ["## Judges", ""];
   if (!pending.size) return [...lines, "No trial in this run declares a judge. Success counts only the deterministic graders.", ""];
   lines.push("Declared judges are pending: the suite does not run them yet, so they never count toward success (success counts only the deterministic graders).", "");
@@ -180,7 +181,7 @@ export function judgesSection(r: SuiteResultFile, testOnly: boolean): string[] {
 }
 
 export function renderReport(r: SuiteResultFile, prev: SuiteResultFile | null): string {
-  const testOnly = r.splits.length === 1 && r.splits[0] === "test";
+  const testOnly = r.splits.length > 0 && r.splits.every((s) => isHeldOut(s));
   const lines = [
     `# Eval suite ${r.startedAt.slice(0, 10)} at ${r.harnessSha}`, "",
     `Model ${r.model} (effort ${r.effort}${r.backgroundLlm ? ", WEFT_BACKGROUND_LLM=1: unattended routine runs call the model" : ""}), prompt ${r.promptVersion ?? "n/a"}, splits ${r.splits.join(" and ")}, k = ${r.k}. Spent ${usd(r.spentUsd)} of the ${usd(r.suiteCapUsd)} suite cap.${r.stoppedEarly ? ` Stopped early: ${r.stoppedEarly}.` : ""}`,
@@ -189,7 +190,7 @@ export function renderReport(r: SuiteResultFile, prev: SuiteResultFile | null): 
     "",
   ];
   for (const v of r.variants) lines.push(...variantSection(r, v, testOnly));
-  const flips = flipped(prev, r.trials.filter((t) => t.split !== "test"));
+  const flips = flipped(prev, r.trials.filter((t) => !isHeldOut(t.split)));
   if (!testOnly) {
     lines.push("## Flipped against the last baseline", "");
     lines.push(prev ? (flips.length ? flips.map((f) => `- ${f.taskId} (${f.variant}): ${f.was ? "pass" : "fail"} to ${f.now ? "pass" : "fail"}`).join("\n") : `No task flipped against ${prev.startedAt.slice(0, 10)} at ${prev.harnessSha}.`) : "No earlier suite result on these tasks.", "");

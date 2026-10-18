@@ -187,3 +187,15 @@ behaves (the probe exercised all three), so they are dropped.
 - Pin the test world digests with the suite (contract request 2).
 - Re-run the oracles when a blocked task's harness change lands, and when the portal, mention and compliance surfaces
   reach main.
+
+## Round 2 (2026-10-18): rotation
+
+The round 1 split moved to `evals/suite/tasks/retired-r1/` (status retired, frozen, runnable with `--split retired-r1`,
+same Phoenix dataset `weft-eval-test-dbc843f9b5`). Round 2 is the new `evals/suite/tasks/test/`: 41 tasks, the same
+counts per group as round 1, 17 new mutators in the 08xx id range, 33 oracles and 8 product-path routine tasks, dataset
+`weft-eval-test-bd4217b292`. The author read only round 1's per-group counts. Scripted solvability
+(`tsx evals/suite/solvability.ts --split test`): 49 of 49 variants solved, a null reply passes none (round 1: 47 of 50,
+a null reply passes 25). Two product behaviors shaped tasks: chat has no routine drafting tool (drafting is the Routines
+screen's route), and the act-mode intent check needs one of its verbs, so the off-cycle request says "Pay". Observed
+while probing, not checked further: the tools route answers `people.get` for a manager's non-report with the pay
+included; the round 2 manager-scope tasks grade the reply, not the read. Details are in `docs/wave4.md` section 14.

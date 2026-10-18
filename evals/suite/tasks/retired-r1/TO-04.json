@@ -1,0 +1,42 @@
+{
+  "id": "TO-04",
+  "group": "expenses_timeoff_benefits",
+  "parity": [
+    "T7"
+  ],
+  "kind": "capability",
+  "split": "retired-r1",
+  "surface": "chat",
+  "principal": "usr_imani",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [],
+    "digest": "sha256:456c7d667332af813ca5c5fcd965754e29da81a07c8ff5ad68efacb9a6b8cca8"
+  },
+  "input": {
+    "chat": "How many hours of vacation will Ruth's Thanksgiving week request actually use?"
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "noConsequentialEffects": true,
+      "finalText": {
+        "grounded": true,
+        "mustMention": [
+          "24"
+        ]
+      }
+    }
+  },
+  "budget": {
+    "maxSteps": 4,
+    "maxUsd": 0.01
+  },
+  "reference": "evals/suite/reference/retired-r1/TO-04.md",
+  "legacyCase": null
+}

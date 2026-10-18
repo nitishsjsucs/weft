@@ -543,3 +543,64 @@ changes alone; G5's grounding uses the guard's own evidence, and a strict check 
 answers G5 passed. The suite report now shows model-only steps, latency and cache hit, the strict grounding count and
 a G4 completion-claim check on refuse tasks. Open: the judges, k = 3, a rerun of the chat_can_propose variant, and a
 labeled `WEFT_BACKGROUND_LLM=1` variant to measure the model on the template routines.
+
+## 14. Held-out rotation (2026-10-18)
+
+The held-out test split had been run 11 times by 2026-10-18 (the baseline, two rounds, the model comparison and the
+fix group checks), well past the "about three confirmations per wave" of section 4, so Nitish approved a rotation
+before the next confirmation. Follow-up 3 of `docs/evals/model-comparison.md`. Live spend for the rotation: $0 (the
+scripted provider only; no task of the new split has met a live model).
+
+**Splits now.** `evals/suite/splits.ts` is the registry; `EvalSplit` in `packages/contracts/src/evals.ts` and the
+trace tag enum in `telemetry.ts` name the same three splits.
+
+| Split | Status | Tasks | Phoenix dataset | Manifest | Runs while held out |
+|---|---|---|---|---|---|
+| `dev` | dev | 65 | `weft-eval-dev-<hash>` (changes as fixers edit it) | none | |
+| `test` | held out, round 2, written 2026-10-18 | 41 | `weft-eval-test-bd4217b292` | `evals/suite/test-manifest.json` | 0 |
+| `retired-r1` | retired 2026-10-18, round 1, written 2026-10-16 | 41 | `weft-eval-test-dbc843f9b5` | `evals/suite/retired-r1-manifest.json` | 11 |
+
+**The retired split.** The round 1 tasks, reference notes, world mutators and oracles moved unchanged (except the
+`split` and `reference` fields) to `evals/suite/tasks/retired-r1/` and `evals/suite/reference/retired-r1/`. Its 41 world
+digests still reproduce and its task hash is unchanged, so `datasetFor` gives the same dataset as before: a retired split
+keeps the dataset stem it had while held out (`datasetStem` in the registry), and a continuity run
+(`pnpm eval:suite --split retired-r1`) records into the dataset the 11 earlier runs used, so Phoenix compares them side
+by side. It stays frozen: its own manifest pins every file, the anti-leak scan still covers its strings, the report
+still shows it as per-group counts only, and its mutator names can never be reused (the world builder throws on a name
+defined twice). `--split all` and `pnpm eval:ci` run dev and the active test split; a retired split runs on request.
+Whether to fold it into dev later (research/wave4/evals.md 7) is Nitish's call; until then it keeps its continuity value
+only while nobody tunes on it.
+
+**The new test split (round 2).** 41 tasks written by the held-out author without reading the round 1 prompts, worlds,
+expectations or oracles; only round 1's per-group counts were read, to match them. Every capability group has the same
+number of tasks as round 1 (a test asserts it), with 19 adversarial and 22 capability tasks as before, 8 tasks in both
+variants, and the chat, routine, portal and mention surfaces. Task ids are new (the 61 to 63 range in each prefix) and
+share nothing with dev or round 1 (ids, mutator names, prompt shingles, leak literals; a test asserts it). 17 tasks build
+their own world through 17 new mutators (SQL steps and memory notes with ids in the 08xx range, so they collide with
+neither the seed, a run's own ids, the dev mutators nor round 1); the other 24 run on the frozen seed world. Graders are
+deterministic first: proposals with key arguments, messages, refusal or clarification, required and forbidden mentions,
+taint, memory and `SELECT` end-state checks; the declared judges stay pending as before.
+
+**How it was validated** (all scripted, $0):
+
+| Check | Round 2 test split | Round 1, now retired-r1 |
+|---|---|---|
+| `pnpm eval:suite validate` | 41 valid (147 in all: 65 dev, 41 test, 41 retired-r1) | 41 valid |
+| World digests (`pnpm eval:suite digests --split <split>`) | 41 of 41 pinned and reproduce | 41 of 41 reproduce, unchanged |
+| Solvability (`tsx evals/suite/solvability.ts --split <split>`): oracle or product path | 49 of 49 task variants solved (41 tasks; 33 oracles, 8 product paths) | 47 of 50 (the 3 left are the variants it lists as blocked or waiting on parity) |
+| Solvability: a null reply ("Done.") | passes 0 of 49 | passes 25 of 50 |
+| Solvability lint (every tool a chat or portal reference relies on is on that surface) | no gaps | (dev lint only) |
+| Anti-leak scan over packages, apps, scenarios, docs, research, evals, e2e and scripts | no hit | no hit |
+
+The null-reply row is the main quality change: half of round 1's variants could be passed by saying "Done.", so they
+measured little. Every round 2 variant needs the right content, proposal, refusal or end state, and rejects an empty
+answer. `evals/suite/solvability.ts` is new: it runs every task variant of a held-out split through the suite runner on
+its pinned world twice, with its oracle (or the product's own scripted path) and with the null oracle, and prints task
+ids and failing grader ids only (`--verbose` adds reasons, which can quote task figures).
+
+**Before the next confirmation.** Run the held-out confirmation on the new split from a fresh eval data dir
+(`WEFT_EVAL_DIR`; the run_0001 spend ledger collision in `docs/review-log.md` would otherwise stop late trials at the run
+cap), with the price-scaled G8. Its results start the new dataset's history, so they are not comparable task for task
+with the 11 round 1 runs; for continuity on the five shared failures, also run `--split retired-r1` (41 trials, about
+$0.06 at the fix5-dev cost per trial). Rotate again after about three confirmations on round 2, the same way: retire it
+as `retired-r2` with its dataset stem kept, and write fresh tasks.
