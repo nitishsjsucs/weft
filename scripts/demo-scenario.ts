@@ -123,7 +123,9 @@ export function findScenario(name: string): DemoScenario {
 /** Resets the world to the seed and checks it is clean. Throws when the reset fails or the world is not clean. */
 export async function prepareScenario(name: string, api: ApiCall): Promise<Prepared> {
   const scenario = findScenario(name);
-  const reset = await api("POST", "/v1/sim/reset", {});
+  // The live scenarios were checked on the base world, so the take always starts there: a rich dev world (the pnpm dev
+  // default) has history and waiting approvals that would crowd the Inbox. `pnpm dev --fresh` brings the rich one back.
+  const reset = await api("POST", "/v1/sim/reset", { profile: "base" });
   if (reset.status !== 200 || (reset.json as { ok?: boolean } | null)?.ok !== true) throw new Error(`reset answered ${reset.status}: ${JSON.stringify(reset.json).slice(0, 200)}`);
   const clock = (await api("GET", "/v1/sim/clock")).json as { now: string; rate: number };
   if (clock.now !== SEED_CLOCK) throw new Error(`the clock reads ${clock.now} after the reset, not the seed time ${SEED_CLOCK}`);

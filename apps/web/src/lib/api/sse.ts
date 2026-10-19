@@ -10,7 +10,7 @@ export const isTerminal = (s: RunStatus | undefined) => !!s && TERMINAL.includes
 /** Paused runs (waiting for an approval, or held) wake later, so they are re-checked slowly. */
 export const isPaused = (s: RunStatus | undefined) => s === "waiting" || s === "held";
 
-export interface RunWatch { run: AgentRunRow | null; steps: RunStepRow[]; trace: RunTrace | null; mode: "sse" | "polling" | "idle" }
+export interface RunWatch { run: AgentRunRow | null; steps: RunStepRow[]; trace: RunTrace | null; mode: "sse" | "polling" | "idle"; missing?: boolean }
 
 /** Parses an SSE byte stream into (event, data) pairs. Exported for tests. */
 export function createSseParser(onEvent: (event: string, data: string) => void) {
@@ -75,6 +75,8 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
     if (stopped) return true;
     try {
       const res = await rawFetch(`/api/v1/agent/runs/${encodeURIComponent(runId)}/trace`, { headers: headers(), signal: ctrl.signal });
+      // A run id that does not exist (a stale link, or a world reset since): stop watching and say so.
+      if (res.status === 404 && !state.run) { emit({ missing: true }); return true; }
       if (!res.ok) return false;
       const trace = (await res.json()) as RunTrace;
       emit({ trace, run: trace.run, steps: mergeSteps(state.steps, trace.steps) });

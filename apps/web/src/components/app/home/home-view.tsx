@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Banknote, CalendarDays, ChevronRight, Inbox, Landmark, Users } from "lucide-react";
+import { Banknote, CalendarDays, ChevronRight, Inbox, Landmark, UserRoundCheck, Users } from "lucide-react";
 import { Badge, Card, CardHeading } from "@weft/ui/components";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
 import { AGENCY, fmtDate, period, relative, runKind } from "../format";
@@ -27,12 +27,14 @@ export function HomeView() {
   const clock = useSimClock();
   const now = clock.data?.now;
   const first = (PRINCIPALS.find((p) => p.id === who)?.name ?? "there").split(" ")[0];
-  const runs = useGet("/v1/payrolls", { query: { limit: 10 } });
+  const runs = useGet("/v1/payrolls", { query: { limit: 100 } });   // ordered by id: a year of history fills a short page
   const props = useGet("/v1/proposals", { query: { status: "pending", limit: 100 }, refreshMs: 5_000 });
   const accounts = useGet("/v1/tax/accounts");
   const workers = useGet("/v1/workers", { query: { type: "employee", limit: 100 } });
   const upcoming = (runs.data?.data ?? []).filter((r) => r.status !== "processed").slice(0, 3);
-  const timeOff = useGet("/v1/time-off/requests", { query: { limit: 100 }, refreshMs: 10_000 });
+  // Only requests that end today or later: a company with a year of history has more than one page of past ones.
+  const todayPt = now ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(now)) : undefined;
+  const timeOff = useGet("/v1/time-off/requests", { query: { limit: 100, ...(todayPt ? { from: todayPt } : {}) }, refreshMs: 10_000 });
   const approvals = (props.data?.data ?? []).filter((p) => p.kind !== "suggestion");
   // Headcount (gate report item 5): active employees, with onboarding counted apart; together with offboarding they
   // make GET /v1/stats `employees`. Contractors are not headcount.
@@ -43,10 +45,22 @@ export function HomeView() {
   // Time Off: out today, pending decisions and approved time off starting in the next 30 days.
   const today = now ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(now)) : null;
   const in30Days = today ? new Date(Date.parse(`${today}T12:00:00Z`) + 30 * 86_400_000).toISOString().slice(0, 10) : null;
-  const tor = ((timeOff.data as { data?: { id: string; workerName: string; status: string; startAt: string; endAt: string; days: { date: string; minutes: number }[] }[] } | undefined)?.data ?? []);
+  const tor = ((timeOff.data as { data?: { id: string; workerName: string; status: string; startAt: string; endAt: string; approverPrincipalId: string | null; days: { date: string; minutes: number }[] }[] } | undefined)?.data ?? []);
   const outToday = today ? tor.filter((r) => r.status === "approved" && r.days.some((d) => d.date === today && d.minutes > 0)) : [];
   const pendingTor = tor.filter((r) => r.status === "pending");
+  // Time-off requests routed to the viewer are decisions too; they live on the Time off page, not in the Inbox.
+  const myTor = pendingTor.filter((r) => r.approverPrincipalId === who);
   const soon = today && in30Days ? tor.filter((r) => r.status === "approved" && r.startAt > today && r.startAt <= in30Days).sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) : [];
+  // A manager's team: the viewer's direct reports (matched by name to the viewer's own worker record), who is out
+  // today or soon, and the hires joining the team. Shown only to a viewer with reports, so Home differs per persona.
+  const bare = (n: string) => n.replace(/ \(demo\)$/, "");
+  const viewerName = bare(PRINCIPALS.find((p) => p.id === who)?.name ?? "");
+  const me = viewerName ? ws.find((w) => bare(w.displayName) === viewerName || `${w.firstName} ${w.lastName}` === viewerName) : undefined;
+  const reports = me ? ws.filter((w) => w.managerId === me.id && (w.status === "active" || w.status === "onboarding")) : [];
+  const reportNames = new Set(reports.filter((w) => w.status === "active").map((w) => bare(w.displayName)));
+  const teamOut = outToday.filter((r) => reportNames.has(bare(r.workerName)));
+  const teamSoon = soon.filter((r) => reportNames.has(bare(r.workerName)));
+  const joining = reports.filter((w) => w.status === "onboarding").sort((a, b) => (a.startDate < b.startDate ? -1 : 1));
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
       <h1 className="mb-8 text-7 font-semibold tracking-tight">{greeting(now)}, {first}</h1>
@@ -61,7 +75,7 @@ export function HomeView() {
           ))}
         </Widget>
         <Widget testid="home-widget-approvals" icon={<Inbox />} title="Approvals waiting" href="/app/inbox">
-          <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{props.data ? approvals.length : "-"}</span><span className="text-1 text-gray-10">waiting</span></div>
+          <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{props.data ? approvals.length : "-"}</span><span className="text-1 text-gray-10">waiting</span>{myTor.length ? <Link data-testid="home-approvals-time-off" href="/app/time-off" className="ml-auto text-1 text-blue-11 hover:underline">+ {myTor.length} time-off {myTor.length === 1 ? "decision" : "decisions"} for you</Link> : null}</div>
           <ul className="px-2 pt-2 pb-2">
             {approvals.slice(0, 3).map((p) => <li key={p.id}><Link href="/app/inbox" className="block truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2">{p.risk ? <Badge size="xs" className="mr-1.5">{p.risk}</Badge> : null}{p.headline}</Link></li>)}
           </ul>
@@ -86,6 +100,21 @@ export function HomeView() {
             {soon.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
           </ul>
         </Widget>
+        {reports.length ? (
+          <Widget testid="home-widget-team" icon={<UserRoundCheck />} title="Your team" href="/app/time-off" footer={<><span>{joining.length ? `${joining.length} joining soon` : "Your direct reports"}</span><Link href="/app/people" className="hover:text-foreground">People</Link></>}>
+            <div className="grid grid-cols-2 gap-2 px-4 pt-4 pb-3">
+              <div><div data-testid="home-team-size" className="text-7 font-semibold tabular">{reports.filter((w) => w.status === "active").length}</div><div className="text-1 text-gray-10">direct reports</div></div>
+              {myTor.length ? <div><div data-testid="home-team-decisions" className="text-7 font-semibold tabular">{myTor.length}</div><div className="text-1 text-gray-10">time-off {myTor.length === 1 ? "decision" : "decisions"} for you</div></div>
+                : teamSoon.length ? <div><div className="text-7 font-semibold tabular">{teamSoon.length}</div><div className="text-1 text-gray-10">off in the next 30 days</div></div> : null}
+            </div>
+            <ul className="px-2 pb-2">
+              {teamOut.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span></Link></li>)}
+              {myTor.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="amber">Decide</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
+              {teamSoon.slice(0, 2).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="green">Approved</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}</span></Link></li>)}
+              {joining.slice(0, 2).map((w) => <li key={w.id}><Link href={`/app/people/${w.id}`} className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="blue">Joining</Badge><span className="min-w-0 flex-1 truncate">{w.displayName}</span><span className="text-1 text-gray-10 tabular">starts {fmtDate(w.startDate)}</span></Link></li>)}
+            </ul>
+          </Widget>
+        ) : null}
         <Widget testid="home-widget-headcount" icon={<Users />} title="Headcount" href="/app/people">
           <div className="flex items-baseline gap-2 px-4 pt-4"><span data-testid="home-headcount-active" className="text-7 font-semibold tabular">{workers.data ? active.length : "-"}</span>{in30 ? <span className="text-2 font-medium text-green-11">+{in30}</span> : null}<span className="text-1 text-gray-10">30d</span></div>
           <div className="flex flex-wrap items-baseline gap-x-3 px-4 pt-1 pb-4 text-1 text-gray-10">

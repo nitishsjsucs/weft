@@ -148,6 +148,9 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
     const cmp = await opts.defaultCompanyId();
     const r = cmp ? join(opts.dataDir, "companies", cmp, "memory") : null;
     if (!r || !existsSync(join(r, ".git"))) throw new MemoryError("NOT_PERMITTED", "the memory repo is not initialised");
+    // A process that did not seed (the API after a restart) finds the repo here: read its chain head too, or
+    // verifyChain would report a git lag of the whole log once anything touches memory.
+    headSeq = await readHeadSeq(r);
     root = r;
     return r;
   };

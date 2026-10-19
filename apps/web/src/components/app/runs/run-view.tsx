@@ -67,6 +67,15 @@ export function RunView({ id }: { id: string }) {
   const [w, setW] = useState<RunWatch>({ run: null, steps: [], trace: null, mode: "idle" });
   useEffect(() => watchRun(id, setW), [id]);
   const run = w.run;
+  if (!run && w.missing) {
+    return (
+      <div className="p-8 text-2 text-gray-10" data-testid="run-not-found">
+        <p className="text-foreground">No run {id}.</p>
+        <p className="mt-1">The link may be from before the demo world was reset. Recent runs are listed in the agent panel and linked from the audit log.</p>
+        <Link href="/app/audit" className="mt-3 inline-block text-blue-11 hover:underline">Open the audit log</Link>
+      </div>
+    );
+  }
   if (!run) return <div className="p-8 text-2 text-gray-10">{w.mode === "idle" ? "Loading run..." : "Waiting for the run..."}</div>;
   const modelMs = w.steps.reduce((a, s) => a + (s.timings?.modelMs ?? 0), 0);
   const working = run.status === "running" || run.status === "queued";

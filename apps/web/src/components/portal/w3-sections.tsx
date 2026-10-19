@@ -12,7 +12,7 @@ export function PortalW3Sections({ workerId, principal }: { workerId: string; pr
       <TimeOffPortalSection workerId={workerId} principal={principal} />
       <ExpensesPortalSection workerId={workerId} principal={principal} />
       <PortalW4People workerId={workerId} principal={principal} />
-      <W4TrainingSection />
+      <W4TrainingSection principal={principal} />
     </>
   );
 }
