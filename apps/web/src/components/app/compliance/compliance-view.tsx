@@ -120,19 +120,19 @@ export function ComplianceView() {
           <TabsTrigger value="training">Training</TabsTrigger>
         </TabsList>
         <TabsContent value="registrations">
-          <Card className="overflow-hidden">
-            <Table className="min-w-[640px]">
-              <THead><TR><TH>State</TH><TH>Agency</TH><TH>Account</TH><TH numeric>SUI rate</TH><TH>Status</TH></TR></THead>
+          <Card className={cn("overflow-hidden", STACK.box)}>
+            <Table className={cn("min-w-[640px] @max-[40rem]:min-w-0", STACK.table)}>
+              <THead className={STACK.head}><TR><TH>State</TH><TH>Agency</TH><TH>Account</TH><TH numeric>SUI rate</TH><TH>Status</TH></TR></THead>
               <TBody>
                 {(accounts.data ?? []).map((a) => {
                   const sui = a.accountType === "unemployment" || a.accountType === "combined" ? currentRate(rs, a.jurisdiction, "sui") : undefined;
                   return (
-                    <TR key={a.id} data-testid={tid.registrationRow(a.jurisdiction)} data-status={a.status}>
-                      <TD className="font-medium">{a.jurisdiction}</TD>
-                      <TD className="h-auto py-2"><div className="whitespace-nowrap">{AGENCY[a.agency]}</div><div className="text-1 text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? human(a.accountType)}</div></TD>
-                      <TD className="font-mono text-1">{a.accountNumber ?? <span className="font-sans text-gray-9">{a.status === "awaiting_state" || a.status === "needs_info" ? "Pending" : "None yet"}</span>}</TD>
-                      <TD numeric>{sui ? ratePct(sui.rate) : "-"}</TD>
-                      <TD><Badge tone={STATUS_TONE[a.status]}>{a.status === "awaiting_state" ? "Awaiting state" : a.status === "needs_info" ? "Needs info" : a.status === "not_registered" ? "Not registered" : "Active"}</Badge></TD>
+                    <TR key={a.id} data-testid={tid.registrationRow(a.jurisdiction)} data-status={a.status} className={STACK.row}>
+                      <TD className={cn("font-medium", STACK.leadShared, "@max-[40rem]:order-first")}>{a.jurisdiction} <span className="hidden font-normal text-gray-11 @max-[40rem]:inline">{AGENCY[a.agency]}</span></TD>
+                      <TD className={cn("h-auto py-2", STACK.lead, "@max-[40rem]:hidden")}><div className="whitespace-nowrap">{AGENCY[a.agency]}</div><div className="text-1 text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? human(a.accountType)}</div></TD>
+                      <TD data-label="Account" className={cn("font-mono text-1", STACK.cell, "@max-[40rem]:before:font-sans")}>{a.accountNumber ?? <span className="font-sans text-gray-9">{a.status === "awaiting_state" || a.status === "needs_info" ? "Pending" : "None yet"}</span>}</TD>
+                      <TD numeric data-label="SUI rate" className={STACK.cell}>{sui ? ratePct(sui.rate) : "-"}</TD>
+                      <TD className={cn(STACK.bare, "@max-[40rem]:order-first")}><Badge tone={STATUS_TONE[a.status]}>{a.status === "awaiting_state" ? "Awaiting state" : a.status === "needs_info" ? "Needs info" : a.status === "not_registered" ? "Not registered" : "Active"}</Badge></TD>
                     </TR>
                   );
                 })}

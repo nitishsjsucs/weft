@@ -16,10 +16,11 @@ export const STACK = {
   row: "@max-[40rem]:flex @max-[40rem]:flex-wrap @max-[40rem]:items-baseline @max-[40rem]:gap-x-4 @max-[40rem]:gap-y-1 @max-[40rem]:px-3 @max-[40rem]:py-2.5",
   /** On the row's lead cell (the name): a line of its own. */
   lead: "@max-[40rem]:block @max-[40rem]:h-auto @max-[40rem]:basis-full @max-[40rem]:p-0",
-  /** On the lead cell when a short second cell (a status, a rate) shares its line: grows, so that cell sits at the end. */
-  leadShared: "@max-[40rem]:block @max-[40rem]:h-auto @max-[40rem]:flex-1 @max-[40rem]:p-0",
+  /** On the lead cell when a short second cell (a status, a rate; STACK.bare) shares its line: it takes all but 8rem
+   * of the line, so only that cell fits beside it and the labelled cells start the next line. */
+  leadShared: "@max-[40rem]:block @max-[40rem]:h-auto @max-[40rem]:min-w-0 @max-[40rem]:flex-1 @max-[40rem]:basis-[calc(100%-8rem)] @max-[40rem]:p-0",
   /** On every other cell: "Label value", with the label from data-label. */
   cell: "@max-[40rem]:block @max-[40rem]:h-auto @max-[40rem]:p-0 @max-[40rem]:text-left @max-[40rem]:before:mr-1.5 @max-[40rem]:before:text-gray-10 @max-[40rem]:before:content-[attr(data-label)]",
   /** On a cell whose value names itself (a badge, a status): no label before it. */
-  bare: "@max-[40rem]:block @max-[40rem]:h-auto @max-[40rem]:p-0 @max-[40rem]:text-left",
+  bare: "@max-[40rem]:block @max-[40rem]:h-auto @max-[40rem]:p-0 @max-[40rem]:text-right",
 } as const;

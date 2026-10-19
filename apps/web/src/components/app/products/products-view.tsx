@@ -14,6 +14,8 @@ import { PayoutsSection } from "../contractors/payouts-section";
 import { client, errorText, useGet, useVersion } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 import { fmtDate } from "../format";
+import { cn } from "@weft/ui";
+import { STACK } from "../stack";
 
 type PagedPath = "/v1/benefits/enrollments" | "/v1/it/accounts" | "/v1/it/devices" | "/v1/workers";
 
@@ -70,18 +72,18 @@ export function BenefitsView() {
         </TabsList>
         <TabsContent value="plans">
           <CardHeading icon={<HeartPulse />}>Plans</CardHeading>
-          <Card className="overflow-hidden">
+          <Card className={cn("overflow-hidden", STACK.box)}>
             {list.length === 0 ? <Empty text={plans.data ? "No plans." : "Loading..."} /> : (
-              <Table className="text-[13px]">
-                <THead><TR><TH>Plan</TH><TH>Type</TH><TH numeric>Employee only</TH><TH numeric>Employer</TH><TH numeric>Enrolled</TH></TR></THead>
+              <Table className={cn("text-[13px]", STACK.table)}>
+                <THead className={STACK.head}><TR><TH>Plan</TH><TH>Type</TH><TH numeric>Employee only</TH><TH numeric>Employer</TH><TH numeric>Enrolled</TH></TR></THead>
                 <TBody>
                   {list.map((p) => (
-                    <TR key={p.id} data-testid={`benefit-plan-${p.id}`}>
-                      <TD className="h-12 py-1.5"><div className="font-medium">{p.name}</div><div className="text-1 text-gray-10">{p.carrier} · <code className="font-mono text-0">{p.pretaxCode}</code></div></TD>
-                      <TD className="h-12">{PLAN_TYPE[p.type] ?? human(p.type)}</TD>
-                      <TD numeric className="h-12">{p.prices.ee !== undefined ? dollars(p.prices.ee) : p.match ? <span className="text-gray-11">Employer match</span> : "-"}</TD>
-                      <TD numeric className="h-12">{dollars(p.prices.employer)}</TD>
-                      <TD numeric className="h-12">{enr.rows ? count(p.id) : "..."}</TD>
+                    <TR key={p.id} data-testid={`benefit-plan-${p.id}`} className={STACK.row}>
+                      <TD className={cn("h-12 py-1.5", STACK.lead)}><div className="font-medium">{p.name}</div><div className="text-1 text-gray-10">{p.carrier} · <code className="font-mono text-0">{p.pretaxCode}</code></div></TD>
+                      <TD data-label="Type" className={cn("h-12", STACK.cell)}>{PLAN_TYPE[p.type] ?? human(p.type)}</TD>
+                      <TD numeric data-label="Employee only" className={cn("h-12", STACK.cell)}>{p.prices.ee !== undefined ? dollars(p.prices.ee) : p.match ? <span className="text-gray-11">Employer match</span> : "-"}</TD>
+                      <TD numeric data-label="Employer" className={cn("h-12", STACK.cell)}>{dollars(p.prices.employer)}</TD>
+                      <TD numeric data-label="Enrolled" className={cn("h-12", STACK.cell)}>{enr.rows ? count(p.id) : "..."}</TD>
                     </TR>
                   ))}
                 </TBody>
@@ -124,18 +126,18 @@ export function ItView() {
         </section>
         <section>
           <CardHeading icon={<Laptop />}>Devices</CardHeading>
-          <Card className="overflow-hidden">
+          <Card className={cn("overflow-hidden", STACK.box)}>
             {!dev.rows ? <Empty text="Loading..." /> : dev.rows.length === 0 ? <Empty text="No devices." /> : (
               <div className="max-h-[420px] overflow-y-auto">
-                <Table className="text-[13px]">
-                  <THead><TR><TH>Person</TH><TH>Model</TH><TH>Status</TH><TH numeric>Price</TH></TR></THead>
+                <Table className={cn("text-[13px]", STACK.table)}>
+                  <THead className={STACK.head}><TR><TH>Person</TH><TH>Model</TH><TH>Status</TH><TH numeric>Price</TH></TR></THead>
                   <TBody>
                     {dev.rows.map((d) => (
-                      <TR key={d.id} data-testid={`device-${d.id}`}>
-                        <TD className="h-9 whitespace-nowrap"><Link href={`/app/people/${d.workerId}`} className="hover:underline">{name.get(d.workerId) ?? d.workerId}</Link></TD>
-                        <TD className="h-9 text-gray-11">{d.model}</TD>
-                        <TD className="h-9 whitespace-nowrap"><Badge tone={d.status === "assigned" ? "green" : "gray"}>{human(d.status)}</Badge></TD>
-                        <TD numeric className="h-9 whitespace-nowrap">{d.price.display}</TD>
+                      <TR key={d.id} data-testid={`device-${d.id}`} className={STACK.row}>
+                        <TD className={cn("h-9 whitespace-nowrap", STACK.leadShared, "@max-[40rem]:font-medium")}><Link href={`/app/people/${d.workerId}`} className="hover:underline">{name.get(d.workerId) ?? d.workerId}</Link></TD>
+                        <TD data-label="Model" className={cn("h-9 text-gray-11", STACK.cell, "@max-[40rem]:order-last @max-[40rem]:basis-full")}>{d.model}</TD>
+                        <TD className={cn("h-9 whitespace-nowrap", STACK.bare)}><Badge tone={d.status === "assigned" ? "green" : "gray"}>{human(d.status)}</Badge></TD>
+                        <TD numeric data-label="Price" className={cn("h-9 whitespace-nowrap", STACK.cell)}>{d.price.display}</TD>
                       </TR>
                     ))}
                   </TBody>
@@ -157,19 +159,19 @@ export function ContractorsView() {
       <PageHeader title={<span className="flex items-center gap-2">Contractors <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Global contractors on the monthly schedule, paid through the fixed FX table and the payment rail simulator." />
       {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(q.error)}</div> : null}
       <CardHeading icon={<Globe />}>Contractors</CardHeading>
-      <Card className="overflow-hidden">
+      <Card className={cn("overflow-hidden", STACK.box)}>
         {rows.length === 0 ? <Empty text={q.data ? "No contractors." : "Loading..."} /> : (
-          <Table className="text-[13px]">
-            <THead><TR><TH>Name</TH><TH>Role</TH><TH>Country</TH><TH>Currency</TH><TH>Since</TH><TH>Status</TH></TR></THead>
+          <Table className={cn("text-[13px]", STACK.table)}>
+            <THead className={STACK.head}><TR><TH>Name</TH><TH>Role</TH><TH>Country</TH><TH>Currency</TH><TH>Since</TH><TH>Status</TH></TR></THead>
             <TBody>
               {rows.map((w) => (
-                <TR key={w.id} data-testid={`contractor-${w.id}`}>
-                  <TD className="h-10 whitespace-nowrap"><Link href={`/app/people/${w.id}`} className="font-medium hover:underline">{w.displayName}</Link></TD>
-                  <TD className="h-10">{w.title}</TD>
-                  <TD className="h-10">{w.country}</TD>
-                  <TD className="h-10 font-mono text-1">{w.currency}</TD>
-                  <TD className="h-10 whitespace-nowrap">{w.startDate ? longDate(w.startDate) : "Not set"}</TD>
-                  <TD className="h-10 capitalize">{w.status}</TD>
+                <TR key={w.id} data-testid={`contractor-${w.id}`} className={STACK.row}>
+                  <TD className={cn("h-10 whitespace-nowrap", STACK.leadShared, "@max-[40rem]:order-first")}><Link href={`/app/people/${w.id}`} className="font-medium hover:underline">{w.displayName}</Link></TD>
+                  <TD data-label="Role" className={cn("h-10", STACK.cell, "@max-[40rem]:order-last @max-[40rem]:basis-full")}>{w.title}</TD>
+                  <TD data-label="Country" className={cn("h-10", STACK.cell)}>{w.country}</TD>
+                  <TD data-label="Currency" className={cn("h-10 font-mono text-1", STACK.cell, "@max-[40rem]:before:font-sans")}>{w.currency}</TD>
+                  <TD data-label="Since" className={cn("h-10 whitespace-nowrap", STACK.cell)}>{w.startDate ? longDate(w.startDate) : "Not set"}</TD>
+                  <TD className={cn("h-10 capitalize", STACK.bare, "@max-[40rem]:order-first")}>{w.status}</TD>
                 </TR>
               ))}
             </TBody>
