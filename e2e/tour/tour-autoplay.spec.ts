@@ -20,7 +20,18 @@ test("autoplay finishes the tour by itself within 180 s", async ({ page, weft, w
   const t0 = Date.now();
   const seen: string[] = [];
   const at: Record<string, number> = {};
-  const poll = setInterval(() => { void readyCard(page).getAttribute("data-step", { timeout: 200 }).then((s) => { if (s && seen[seen.length - 1] !== s) { seen.push(s); at[s] = Date.now() - t0; } }, () => undefined); }, 250);
+  // Notes (a missing target, a slow run's fallback copy) and status lines ("Still working" past a soft timeout) per step.
+  const notes: Record<string, string[]> = {};
+  const poll = setInterval(() => {
+    void readyCard(page).evaluate((el) => ({
+      step: el.getAttribute("data-step"),
+      lines: [...el.querySelectorAll("[data-tour-note], [data-tour-status]")].map((n) => `${n.hasAttribute("data-tour-note") ? "note" : `status:${n.getAttribute("data-tour-status")}`} ${(n.textContent ?? "").trim()}`),
+    }), undefined, { timeout: 200 }).then(({ step: s, lines }) => {
+      if (!s) return;
+      if (seen[seen.length - 1] !== s) { seen.push(s); at[s] = Date.now() - t0; }
+      for (const l of lines) if (!(notes[s] ??= []).includes(l)) notes[s]!.push(l);
+    }, () => undefined);
+  }, 250);
   try {
     await expect(card(page)).toHaveCount(0, { timeout: 185_000 });
   } finally { clearInterval(poll); }
@@ -28,8 +39,9 @@ test("autoplay finishes the tour by itself within 180 s", async ({ page, weft, w
   const after = await costs();
   const usd = Math.max(0, after.liveSpentUsd - before.liveSpentUsd);
   console.log(`autoplay step starts (ms): ${JSON.stringify(at)}`);
+  console.log(`autoplay notes and status lines: ${JSON.stringify(notes)}`);
   console.log(`autoplay total ${total} ms over ${seen.length} steps on the ${world.profile} world, ${after.provider.model} live=${after.provider.live}, live spend $${usd.toFixed(4)}`);
-  await info.attach("autoplay.json", { body: JSON.stringify({ total, seen, at, usd, model: after.provider.model }, null, 2), contentType: "application/json" });
+  await info.attach("autoplay.json", { body: JSON.stringify({ total, seen, at, notes, usd, model: after.provider.model }, null, 2), contentType: "application/json" });
   expect(total).toBeLessThanOrEqual(180_000);
   expect(seen[seen.length - 1]).toBe("finish");
   const executed = (await weft.proposals("executed")).filter((p) => !executedBefore.has(p.id));
