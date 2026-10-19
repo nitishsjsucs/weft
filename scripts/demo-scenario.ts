@@ -8,15 +8,18 @@
 // It talks to the API at 127.0.0.1:<--api-port, WEFT_API_PORT or 4070> with the proxy secret from
 // <WEFT_DATA_DIR or .data>/run/proxy.secret, the same headers the web app's /api rewrite adds. A reset wipes that
 // world, so it first prints the target API and data dir and asks (y/N) on a terminal; without a terminal it needs
-// --yes. Start the world with START_COMMAND (tracing on, into the Phoenix project the trace step names):
+// --yes. For trace-mcp it also prints links into the Phoenix project (scripts/phoenix-links.ts): the cost link opens
+// the Spans tab filtered to LLM spans, since Phoenix's default root-span view reads Total Cost $0 for Weft runs.
+// Start the world with START_COMMAND (tracing on, into the Phoenix project the trace step names):
 //   WEFT_LLM=openai WEFT_BACKGROUND_LLM=1 WEFT_CLOCK_RATE=0 WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=weft-demo \
 //   WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev --fresh
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { DEMO_PHOENIX_PROJECT, LLM_SPAN_FILTER, phoenixBaseUrl, phoenixLinksLines } from "./phoenix-links";
 
 /** The Phoenix project the demo's traces land in (WEFT_PHOENIX_PROJECT in START_COMMAND). */
-export const DEMO_PHOENIX_PROJECT = "weft-demo";
+export { DEMO_PHOENIX_PROJECT };
 
 /** How to start the world for a live demo: a live model, a frozen clock and tracing into DEMO_PHOENIX_PROJECT. */
 export const START_COMMAND = [
@@ -109,9 +112,9 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   {
     name: "trace-mcp", title: "Phoenix trace of what the agent did, and an external MCP client", minutes: 3, start: "/app/inbox",
     steps: [
-      `Run scenario 1 up to its two Approval needed cards, on a world started with WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT} (the start command \`pnpm demo:scenario list\` prints). Phoenix on 127.0.0.1:6206, project ${DEMO_PHOENIX_PROJECT}, Traces tab: open the latest agent.run.`,
+      `Run scenario 1 up to its two Approval needed cards, on a world started with WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT} (the start command \`pnpm demo:scenario list\` prints). Phoenix on 127.0.0.1:6206, project ${DEMO_PHOENIX_PROJECT}: open the traces link printed below and the latest agent.run.`,
       "The tree shows admission, model (llm.responses with tokens and cost), assemble (memory.recall) and dispatch with one span per tool call and its outcome.",
-      "Cost: Spans tab, filter span_kind == 'LLM'; the Stats panel's Total Cost is the project's model spend (the default root-span filter reads $0: an agent.run root carries no tokens). The Metrics tab charts it.",
+      `Cost: open the cost link printed below, the Spans tab already filtered to ${LLM_SPAN_FILTER}; the Stats panel's Total Cost is the project's model spend. Phoenix's own project view filters to root spans and reads $0 (an agent.run root carries no tokens). The metrics link charts cost per day.`,
       "MCP: `pnpm mcp:config` prints the client config; paste it into Claude Desktop or the MCP Inspector. Call notices__list (status in_review) for the DE 2088 id, notices__get for its fields, then tax__update_rate with them: pending_approval with existing true, the card the routine already filed. contractors__schedule_payouts (wrk_0049, wrk_0050, wrk_0051 on 2026-10-30) files a new card. docs/demo-scenarios.md has the exact arguments.",
     ],
     prompts: [],
@@ -192,6 +195,11 @@ export interface CliIo {
   api?(target: { apiPort: number; dataDir: string }): ApiCall;
   /** The repo root that a relative WEFT_DATA_DIR resolves against. */
   root: string;
+  /**
+   * How to reach Phoenix for the trace-mcp links (the CLI passes the global fetch). Absent, no Phoenix call is made
+   * and the links are not printed, so a test never touches the Phoenix on 6206.
+   */
+  phoenixFetch?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 /** The target a reset would wipe: the API port and the data dir whose proxy secret authenticates the call. */
@@ -237,6 +245,12 @@ export async function runCli(args: string[], io: CliIo): Promise<number> {
     io.log(`demo:scenario ${name}: world reset to the ${p.profile} seed (clock ${p.clock}, rate ${p.rate}x, ${p.pending} pending ${p.pending === 1 ? "proposal" : "proposals"} from the seed)`);
     for (const w of p.warnings) io.log(`warning: ${w}`);
     io.log(describeScenario(p.scenario, target.webPort));
+    if (p.scenario.name === "trace-mcp" && io.phoenixFetch) {
+      let lines: string[];
+      try { lines = await phoenixLinksLines(phoenixBaseUrl(io.env), io.env.WEFT_PHOENIX_PROJECT ?? DEMO_PHOENIX_PROJECT, { fetch: io.phoenixFetch }); }
+      catch (e) { lines = [`WARNING no Phoenix links (${(e as Error).message})`]; }
+      for (const line of lines) io.log(line);
+    }
     return 0;
   } catch (e) {
     io.error(`demo:scenario: ${e instanceof Error ? e.message : String(e)}`);
@@ -254,6 +268,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     },
     log: (line) => console.log(line),
     error: (line) => console.error(line),
+    phoenixFetch: (url, init) => fetch(url, init),
   });
   process.exit(code);
 }

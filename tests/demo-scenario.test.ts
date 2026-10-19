@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestWeft, type TestWeft } from "./scenarios/helpers";
 import { clientConfig } from "../apps/mcp/src/main";
+import { phoenixProjectLinks } from "../scripts/phoenix-links";
 import { DEMO_PHOENIX_PROJECT, DEMO_SCENARIOS, SEED_CLOCK, START_COMMAND, describeScenario, findScenario, prepareScenario, runCli, type ApiCall, type CliIo } from "../scripts/demo-scenario";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -202,6 +203,28 @@ describe("demo:scenario CLI: target and confirmation before the reset", () => {
     expect(calls.slice(0, 2)).toEqual(["GET /v1/health", "POST /v1/sim/reset"]);
     expect(await runCli(["--yes", "notice", "--profile", "medium"], io().x)).toBe(2);
     expect(await clock()).toBe(SEED_CLOCK);
+  });
+
+  it("trace-mcp prints the Phoenix links, the cost one on LLM spans; without a Phoenix client it calls none", async () => {
+    const phx: string[] = [];
+    const t = io({
+      phoenixFetch: async (url, init) => {
+        phx.push(`${init?.method ?? "GET"} ${url}`);
+        return new Response(JSON.stringify({ data: { name: DEMO_PHOENIX_PROJECT, id: "UHJvamVjdDo5" } }), { status: 200 });
+      },
+    });
+    expect(await runCli(["--yes", "trace-mcp"], t.x)).toBe(0);
+    expect(phx).toEqual([`GET http://127.0.0.1:6206/v1/projects/${DEMO_PHOENIX_PROJECT}`]);
+    const text = t.out.join("\n");
+    expect(text).toContain("open the cost link printed below, the Spans tab already filtered to span_kind == 'LLM'");
+    expect(text).toContain(`Phoenix project ${DEMO_PHOENIX_PROJECT}, last 7 days:`);
+    const links = phoenixProjectLinks("http://127.0.0.1:6206", "UHJvamVjdDo5");
+    expect(text).toContain(`  cost     ${links.cost}`);
+    expect(text).toContain(`  traces   ${links.traces}`);
+    expect(text).toContain(`  metrics  ${links.metrics}`);
+    const quiet = io();
+    expect(await runCli(["--yes", "trace-mcp"], quiet.x)).toBe(0);
+    expect(quiet.out.join("\n")).not.toContain("Phoenix project");
   });
 
   it("an unknown scenario fails before the target is touched; list prints the start command", async () => {

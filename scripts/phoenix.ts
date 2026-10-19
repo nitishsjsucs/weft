@@ -7,12 +7,16 @@
 // scripts/phoenix-loopback.py (which rewrites that bind to 127.0.0.1), and `up` verifies with lsof that every port
 // the process group listens on is loopback only: otherwise it stops the group and refuses to report ready.
 // Once Phoenix answers, `up` upserts Weft's model prices into it (scripts/phoenix-pricing.ts), so Phoenix prices every
-// new LLM span exactly as cost.ts does.
+// new LLM span exactly as cost.ts does. `up` then prints links into the demo project (WEFT_PHOENIX_PROJECT, else
+// weft-demo; scripts/phoenix-links.ts), creating it empty when no run has reached it yet, and `status` prints them
+// when it exists. The cost link opens the Spans tab filtered to LLM spans, because Phoenix's default root-span view
+// reads Total Cost $0 for Weft runs.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { PHOENIX } from "../packages/contracts/src/telemetry";
+import { DEMO_PHOENIX_PROJECT, phoenixLinksLines } from "./phoenix-links";
 import { isLoopbackAddress, listenAddresses } from "./phoenix-net";
 import { syncModelPricingLine } from "./phoenix-pricing";
 
@@ -24,6 +28,8 @@ const pgidFile = join(stateDir, `phoenix-${httpPort}.pgid`);
 const logFile = join(stateDir, `phoenix-${httpPort}.log`);
 const url = `http://${PHOENIX.host}:${httpPort}`;
 const FORBIDDEN = [3070, 4070, 3170, 4170];
+const linkProject = process.env.WEFT_PHOENIX_PROJECT ?? DEMO_PHOENIX_PROJECT;
+const printLinks = async (create: boolean) => { for (const line of await phoenixLinksLines(url, linkProject, { create })) console.log(line); };
 
 function listening(port: number): boolean {
   return spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { encoding: "utf8" }).stdout.trim().length > 0;
@@ -52,6 +58,7 @@ async function up(): Promise<void> {
     if (open.length) throw new Error(`Phoenix ${running} at ${url} listens beyond loopback (${open.join(", ")}); restart it with pnpm phoenix:down and pnpm phoenix:up`);
     console.log(`Phoenix ${running} already running at ${url} (data ${workDir})`);
     console.log(await syncModelPricingLine(url));
+    await printLinks(true);
     return;
   }
   for (const p of [httpPort, grpcPort]) if (listening(p)) throw new Error(`port ${p} is in use by another process; set WEFT_PHOENIX_PORT and WEFT_PHOENIX_GRPC_PORT`);
@@ -82,6 +89,7 @@ async function up(): Promise<void> {
       }
       console.log(`Phoenix ${v} up at ${url}, gRPC on 127.0.0.1:${grpcPort} (data ${workDir}, log ${logFile}, pgid ${child.pid})`);
       console.log(await syncModelPricingLine(url));
+      await printLinks(true);
       return;
     }
     if (child.exitCode !== null) break;
@@ -107,6 +115,7 @@ async function status(): Promise<void> {
   const v = await version();
   const open = v ? exposed() : [];
   console.log(v ? `Phoenix ${v} at ${url} (data ${workDir}, pgid ${readPgid() ?? "not started here"})${open.length ? `; WARNING listens beyond loopback: ${open.join(", ")}` : ""}` : `Phoenix is not running on ${url}`);
+  if (v && !open.length) await printLinks(false);
 }
 
 const cmd = process.argv[2];

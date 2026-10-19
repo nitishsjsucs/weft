@@ -8,9 +8,11 @@ Phoenix can show what the agent read, called and answered, and where it went wro
 
 ```bash
 pnpm phoenix:up                          # Phoenix 20.23.0 on 127.0.0.1:6206, data in ~/Developer/projects/weft-notes/phoenix,
-                                         # then Weft's model prices into it (see "Cost: Weft and Phoenix")
+                                         # then Weft's model prices into it (see "Cost: Weft and Phoenix"), then the cost,
+                                         # traces and metrics links of project WEFT_PHOENIX_PROJECT (default weft-demo)
 WEFT_TRACE=phoenix pnpm dev              # the API registers the provider and exports OTLP over HTTP
 open http://127.0.0.1:6206               # browse projects, traces, sessions
+pnpm phoenix:status                      # running or not, and the same links when the project exists
 pnpm phoenix:down
 ```
 
@@ -24,7 +26,7 @@ A builder who needs a Phoenix for a smoke test starts a private one on its own p
 
 ```bash
 WEFT_PHOENIX_PORT=4900 WEFT_PHOENIX_GRPC_PORT=4901 WEFT_PHOENIX_DIR=$PWD/.scratch/<track>/phoenix npx tsx scripts/phoenix.ts up
-WEFT_PHOENIX_SMOKE_URL=http://127.0.0.1:4900 npx vitest run --project @weft/tests tests/telemetry-phoenix.test.ts tests/phoenix-pricing.test.ts
+WEFT_PHOENIX_SMOKE_URL=http://127.0.0.1:4900 npx vitest run --project @weft/tests tests/telemetry-phoenix.test.ts tests/phoenix-pricing.test.ts tests/phoenix-links.test.ts
 WEFT_PHOENIX_PORT=4900 WEFT_PHOENIX_GRPC_PORT=4901 WEFT_PHOENIX_DIR=$PWD/.scratch/<track>/phoenix npx tsx scripts/phoenix.ts down
 ```
 
@@ -173,9 +175,33 @@ Phoenix and 1,154 micros in the ledger, which rounds each step up to the micro.
 the spans its filter selects, and the tab opens with the filter `parent_id is None`: root spans only. A Weft root is
 `agent.run`, which carries no token counts (OpenInference puts tokens and cost on the LLM span; pricing the root too
 would count every run twice), so with that default filter Total Cost reads $0 however many runs the project holds.
-To read the project's cost:
+Phoenix has no setting for a project's default filter, so the scripts print links that open the right views instead
+(`scripts/phoenix-links.ts`):
 
-- Spans tab, filter `span_kind == 'LLM'`: Total Cost is then the sum over every model call in the time range.
-- Metrics tab: the Cost chart (prompt and completion per day) and Top models by cost.
+```
+Phoenix project weft-demo, last 7 days:
+  cost     http://127.0.0.1:6206/projects/<id>/spans?spanFilterCondition=span_kind+%3D%3D+%27LLM%27&timeRangeKey=7d
+           the Spans tab filtered to span_kind == 'LLM'; Stats, Total Cost is the model spend (the tab's own root-span filter reads $0)
+  traces   http://127.0.0.1:6206/projects/<id>/traces?timeRangeKey=7d
+  metrics  http://127.0.0.1:6206/projects/<id>/metrics?timeRangeKey=7d
+```
+
+`pnpm phoenix:up` prints them for `WEFT_PHOENIX_PROJECT` (default `weft-demo`, the demo's project), creating the project
+empty through `POST /v1/projects` when no run has reached it yet, so the id in the link exists before the first trace
+(spans exported later under that name land in it). `pnpm phoenix:status` prints them when the project exists and
+`pnpm demo:scenario trace-mcp` prints them after the click path. Phoenix reads the Spans filter from the
+`spanFilterCondition` query parameter and the range from `timeRangeKey`, which the links pin to Phoenix's own default
+(7 days) so a range picked earlier in the browser does not hide the runs. To read the project's cost:
+
+- The cost link (Spans tab, filter `span_kind == 'LLM'`): Total Cost is the sum over every model call in the time
+  range.
+- The metrics link (Metrics tab): the Cost chart (prompt and completion per day) and Top models by cost.
 - One run: the trace header's Total Cost adds up every span in the trace; the exact figure for each call is on its
   `llm.responses` span. Phoenix prints any amount under a cent as `<$0.01`.
+
+Checked on 2026-10-19 on a private Phoenix 20.23.0 with a live DE 2088 routine run traced into project `weft-demo`
+(three Luna steps, 14,654 tokens, 1,190 micros in the ledger): Phoenix's cost summary was $0 under `parent_id is None`
+and $0.00118888 under `span_kind == 'LLM'` and with no filter; the cost link opened the Spans tab with that filter in
+the box and Stats, Total Cost `<$0.01`, and the Metrics Cost chart peaked at $1.2e-3. `tests/phoenix-links.test.ts`
+repeats the check against a private Phoenix (`WEFT_PHOENIX_SMOKE_URL`): an agent.run root with one priced
+llm.responses child reads $0 under the root filter and the priced amount under the link's filter.
