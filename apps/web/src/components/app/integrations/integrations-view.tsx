@@ -4,7 +4,7 @@
 // needs with present or missing (never a value), the free path, a connection test and, for Greenhouse, the simulator
 // and Workday simulator demo controls. Below: the sync items people decide (keep the Weft value or take the vendor
 // value), the hires imported as draft offers, the time off imported from Workday and the open roles. Vendor names say what Weft connects to; no logos.
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { W3_INTEGRATIONS_HR_TID as H, W3_INTEGRATIONS_TID as T, type ConnectorStatus, type IntegrationCard, type SyncItem } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
@@ -82,7 +82,7 @@ function VendorCard({ card }: { card: IntegrationCard }) {
           <ul className="flex flex-col gap-1">
             {[...required, ...optional].map((s) => (
               <li key={s.name} data-testid={H.secret(v, s.name)} data-present={s.present ? "yes" : "no"} className="flex items-start justify-between gap-2 text-1">
-                <code className="min-w-0 break-all font-mono text-[12px] text-gray-12">{s.name}{s.optional ? " (optional)" : ""}</code>
+                <span className="min-w-0"><code className="font-mono text-[12px] text-gray-12">{s.name.split("_").map((part, i, all) => <Fragment key={i}>{part}{i < all.length - 1 ? <>_<wbr /></> : null}</Fragment>)}</code>{s.optional ? <span className="ml-1 whitespace-nowrap text-gray-10">(optional)</span> : null}</span>
                 <span className={`shrink-0 ${s.present ? "text-green-11" : "text-gray-10"}`}>{s.present ? "Present" : "Missing"}</span>
               </li>
             ))}

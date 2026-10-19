@@ -42,20 +42,22 @@ function ReportTable({ data }: { data: ReportData }) {
   const label = (r: Row) => String(r[`${data.chart.x.key}_label`] ?? r[data.chart.x.key] ?? "");
   const totals = data.range_totals ?? {};
   const hasTotals = cols.some((c) => c.unit === "cents" && typeof totals[c.key] === "number");
+  // One scroller (the Table's own, which fades the edge it runs past); headers wrap to two lines so the figures, not
+  // the labels, set each column's width.
   return (
-    <div className="overflow-x-auto">
+    <div className="min-w-0">
       <Table data-testid={T.table} data-rows={data.rows.length} className="min-w-full tabular-nums">
         <THead>
           <TR>
-            <TH scope="col">{data.chart.x.label}</TH>
-            {cols.map((c) => <TH key={c.key} scope="col" className="text-right">{c.label}</TH>)}
+            <TH scope="col" className="align-bottom">{data.chart.x.label}</TH>
+            {cols.map((c) => <TH key={c.key} scope="col" className="h-auto max-w-[7.5rem] py-2 text-right align-bottom leading-tight whitespace-normal">{c.label}</TH>)}
           </TR>
         </THead>
         <TBody>
           {data.rows.map((r, i) => (
             <TR key={i}>
-              <TD className="whitespace-nowrap font-medium">{label(r)}</TD>
-              {cols.map((c) => <TD key={c.key} className="whitespace-nowrap text-right">{c.unit ? formatValue(r[c.key], c.unit) : String(r[c.key] ?? "")}</TD>)}
+              <TD className="whitespace-nowrap px-2.5 font-medium">{label(r)}</TD>
+              {cols.map((c) => <TD key={c.key} className="whitespace-nowrap px-2.5 text-right">{c.unit ? formatValue(r[c.key], c.unit) : String(r[c.key] ?? "")}</TD>)}
             </TR>
           ))}
           {hasTotals ? (
@@ -188,7 +190,7 @@ export function ReportsView() {
           {asResult ? (
             <div data-testid={T.chart} data-metric={asResult.metric} data-rows={asResult.rows.length}><ReportChart report={asResult} /></div>
           ) : metric?.allowed && !report.error ? <Card className="flex h-44 items-center justify-center gap-2 text-[13px] text-gray-10"><ChartColumn className="size-4" /> Loading the report</Card> : null}
-          {report.data ? <Card className="p-1"><ReportTable data={report.data} /></Card> : null}
+          {report.data ? <Card className="min-w-0 p-1"><ReportTable data={report.data} /></Card> : null}
           {metric && from && to ? <div className="flex flex-wrap items-center gap-2"><EmailReport metric={metric} from={from} to={to} groupBy={groupBy} /></div> : null}
         </div>
       </div></div>

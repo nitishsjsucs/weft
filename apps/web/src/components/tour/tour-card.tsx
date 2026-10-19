@@ -10,8 +10,9 @@ import { Pause, Play, X } from "lucide-react";
 import { Button, Kbd, ShimmerText } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TOUR_STEPS, type TourStep } from "./steps";
-import { overlapArea, placeCard, sameRect, sheetEdge, type Rect, type Side } from "./geometry";
-import { appLayerRects, closeAppPopover, contentBounds, occluded, useFrameValue, visibleRect } from "./layout";
+import { overlapArea, panelSpot, placeCard, sameRect, sheetEdge, type Rect, type Side } from "./geometry";
+import { appLayerRects, closeAppPopover, contentBounds, dockedPanelRect, occluded, useFrameValue, visibleRect } from "./layout";
+import { appMain } from "../app/shell/main-pane";
 
 export type StatusTone = "working" | "waiting" | "done" | "error" | "muted";
 
@@ -166,9 +167,16 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
   const prevSide = useRef<Side | "free" | null>(null);
   // The natural width (360 px), not the measured one, so a card narrowed to fit beside one target widens again.
   const natural = typeof window !== "undefined" ? Math.min(360, document.documentElement.clientWidth - 24) : 360;
-  const place = scene && scene.target ? placeCard({ target: scene.target, card: { width: natural, height: size.height }, bounds: scene.bounds, obstacles: scene.obstacles, avoid: scene.avoid, order: sideOrder(v.step.dock, scene.inAgent), prev: prevSide.current, minWidth: 260 }) : null;
-  prevSide.current = place?.side ?? null;
-  const under = !!place && !!scene && scene.obstacles.some((o) => overlapArea({ left: place.left, top: place.top, right: place.left + (place.width ?? natural), bottom: place.top + size.height }, o) > 1);
+  // A step that opens popovers in main (the payroll flags) docks the card in the agent panel's column while the panel
+  // is docked: a lower flag's popover that opens upward can then never cover the card's Back and Next.
+  const panel = useFrameValue(() => (anchored && v.step.dockPanel && typeof window !== "undefined" ? dockedPanelRect() : null), sameRect, [anchored, v.step.dockPanel]);
+  const mainRect = panel ? appMain()?.getBoundingClientRect() ?? null : null;
+  const spot = panel ? panelSpot(panel, mainRect ? { left: mainRect.left, top: mainRect.top, right: mainRect.right, bottom: mainRect.bottom } : null, { width: natural, height: size.height }) : null;
+  const place: (Omit<NonNullable<ReturnType<typeof placeCard>>, "side"> & { side: Side | "free" | "panel" }) | null = spot
+    ? { left: spot.left, top: spot.top, side: "panel", cost: 0, width: spot.width }
+    : scene && scene.target ? placeCard({ target: scene.target, card: { width: natural, height: size.height }, bounds: scene.bounds, obstacles: scene.obstacles, avoid: scene.avoid, order: sideOrder(v.step.dock, scene.inAgent), prev: prevSide.current, minWidth: 260 }) : null;
+  prevSide.current = place && place.side !== "panel" ? place.side : null;
+  const under = !!place && place.side !== "panel" && !!scene && scene.obstacles.some((o) => overlapArea({ left: place.left, top: place.top, right: place.left + (place.width ?? natural), bottom: place.top + size.height }, o) > 1);
   const placeRef = useRef(place);
   placeRef.current = place;
   // A point anchor at the card's computed top-left: the card sits exactly where placeCard put it, and floating-ui
@@ -201,6 +209,14 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+    );
+  }
+
+  if (anchored && v.step.dockBottomUnder && typeof window !== "undefined" && window.innerWidth < v.step.dockBottomUnder && !v.sheet) {
+    return (
+      <FixedSheet v={v} h={h} common={common} top={false} under={false} bounds={contentBounds(null)} cardRef={setCardEl}>
+        <Inner v={v} h={h} />
+      </FixedSheet>
     );
   }
 

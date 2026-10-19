@@ -62,7 +62,7 @@ export function CheckChips({ checks }: { checks: TimeOffRequestRow["checks"] }) 
   );
 }
 
-function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: string; onDone: (text: string) => void }) {
+function RequestCard({ r, viewer, onDone, today }: { r: TimeOffRequestRow; viewer: string; onDone: (text: string) => void; today?: string }) {
   const [note, setNote] = useState("");
   const decide = useMutation(async (decision: "approve" | "deny") => (await client.post("/v1/time-off/requests/:id/decide", { params: { id: r.id }, body: { decision, note } })) as ToolOutcome);
   const external = r.source && r.source !== "weft" ? SOURCE_NAMES[r.source] ?? r.source : null;
@@ -78,7 +78,11 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
         <span className="text-1 tabular-nums text-gray-11">{hrs(r.requestedMinutes)}</span>
         <span className="ml-auto flex items-center gap-1.5">
           {external ? <Badge tone="outline" data-testid={TID.source(r.id)} title="Read-only in Weft: change it where it lives and the next sync updates it">Managed in {external}{r.source === "workday" ? " (simulated)" : ""}</Badge> : null}
-          <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{STATUS_LABEL[r.status] ?? r.status}</Badge>
+          {/* An approved day that has passed reads "Taken" like the rest of the history; the payroll that processes
+              its period records it (the stored status changes then). */}
+          {r.status === "approved" && today && r.endAt < today
+            ? <Badge tone={STATUS_TONE.taken ?? "gray"} title="Approved; recorded as taken when its payroll is processed">Taken</Badge>
+            : <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{STATUS_LABEL[r.status] ?? r.status}</Badge>}
         </span>
       </div>
       <CheckChips checks={r.checks} />
@@ -106,19 +110,29 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
 }
 
 export function RequestsTab({ workerId }: { workerId?: string } = {}) {
-  const q = useGet("/v1/time-off/requests", { query: { limit: 100, ...(workerId ? { workerId } : {}) }, refreshMs: 10_000 });
   const clock = useGet("/v1/sim/clock");
+  const day = today(clock.data?.now);
+  // Two reads, so neither is cut by the page limit: everything that ends today or later (waiting, out today,
+  // upcoming), and the last 120 days of history. A single first page of 100 ran oldest first and dropped today's.
+  const since = day ? new Date(Date.parse(`${day}T12:00:00Z`) - 120 * 86_400_000).toISOString().slice(0, 10) : "";
+  const current = useGet("/v1/time-off/requests", { query: { limit: 100, from: day || undefined, ...(workerId ? { workerId } : {}) }, refreshMs: 10_000, enabled: !!day });
+  const history = useGet("/v1/time-off/requests", { query: { limit: 100, from: since || undefined, to: day || undefined, ...(workerId ? { workerId } : {}) }, refreshMs: 30_000, enabled: !!day });
+  const q = { data: current.data && history.data ? current.data : undefined, error: current.error ?? history.error };
   const viewer = usePrincipal();
   const [notice, setNotice] = useState<string | null>(null);
-  const rows = ((q.data as { data?: TimeOffRequestRow[] } | undefined)?.data ?? []);
-  const day = today(clock.data?.now);
+  const rows = useMemo(() => {
+    const seen = new Map<string, TimeOffRequestRow>();
+    for (const r of [...(((history.data as { data?: TimeOffRequestRow[] } | undefined)?.data) ?? []), ...(((current.data as { data?: TimeOffRequestRow[] } | undefined)?.data) ?? [])]) seen.set(r.id, r);
+    return [...seen.values()];
+  }, [current.data, history.data]);
   const pending = rows.filter((r) => r.status === "pending").sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
-  const upcoming = rows.filter((r) => r.status === "approved" && r.endAt >= day).sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
-  const past = rows.filter((r) => !pending.includes(r) && !upcoming.includes(r)).sort((a, b) => (a.startAt < b.startAt ? 1 : -1));
+  const outToday = rows.filter((r) => (r.status === "approved" || r.status === "taken") && r.startAt <= day && r.endAt >= day).sort((a, b) => a.workerName.localeCompare(b.workerName));
+  const upcoming = rows.filter((r) => r.status === "approved" && r.startAt > day).sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
+  const past = rows.filter((r) => !pending.includes(r) && !upcoming.includes(r) && !outToday.includes(r)).sort((a, b) => (a.startAt < b.startAt ? 1 : -1));
   const section = (title: string, list: TimeOffRequestRow[], empty: string) => (
     <section className="flex flex-col gap-2">
       <h2 className="text-2 font-medium text-gray-11">{title} <span className="text-gray-10">{list.length}</span></h2>
-      <Card className="overflow-hidden">{list.length === 0 ? <Empty text={q.data ? empty : "Loading..."} /> : <ul className="divide-y divide-gray-4">{list.map((r) => <RequestCard key={r.id} r={r} viewer={viewer} onDone={setNotice} />)}</ul>}</Card>
+      <Card className="overflow-hidden">{list.length === 0 ? <Empty text={q.data ? empty : "Loading..."} /> : <ul className="divide-y divide-gray-4">{list.map((r) => <RequestCard key={r.id} r={r} viewer={viewer} onDone={setNotice} today={day} />)}</ul>}</Card>
     </section>
   );
   return (
@@ -126,6 +140,7 @@ export function RequestsTab({ workerId }: { workerId?: string } = {}) {
       {q.error ? <div role="alert" className="rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(q.error)}</div> : null}
       {notice ? <div role="status" className="rounded-lg bg-gray-3 px-3 py-2 text-1 text-gray-12">{notice}</div> : null}
       {section("Waiting for a decision", pending, "Nothing is waiting.")}
+      {outToday.length ? section("Out today", outToday, "") : null}
       {section("Upcoming", upcoming, "No approved time off ahead.")}
       {section("Past and closed", past, "No history yet.")}
     </div>

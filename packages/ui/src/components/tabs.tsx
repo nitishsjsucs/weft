@@ -2,10 +2,22 @@
 import { Tabs as T } from "radix-ui";
 import type { ComponentProps } from "react";
 import { cn } from "../cn";
+import { useEdgeFade } from "./edge-fade";
 
 export const Tabs = T.Root;
+// A strip wider than its column scrolls sideways (no scrollbar) and fades the edge it runs past; the active tab is
+// scrolled into view.
 export function TabsList({ className, ...props }: ComponentProps<typeof T.List>) {
-  return <T.List className={cn("flex items-center gap-1 overflow-x-auto border-b border-[var(--app-border)]", className)} {...props} />;
+  const ref = useEdgeFade<HTMLDivElement>();
+  return (
+    <T.List
+      ref={ref}
+      data-edge-fade=""
+      className={cn("flex min-w-0 max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-[var(--app-border)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
+      onFocusCapture={(e) => { (e.target as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" }); }}
+      {...props}
+    />
+  );
 }
 export function TabsTrigger({ className, ...props }: ComponentProps<typeof T.Trigger>) {
   return (

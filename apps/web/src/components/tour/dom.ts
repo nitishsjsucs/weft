@@ -109,7 +109,10 @@ export function scrollToView(el: HTMLElement, block: ScrollLogicalPosition, beha
     const t = b.top + (doc ? 0 : box.clientTop), l = b.left + (doc ? 0 : box.clientLeft);
     const h = doc ? window.innerHeight : box.clientHeight, w = doc ? document.documentElement.clientWidth : box.clientWidth;
     const y = Math.max(0, Math.min(box.scrollHeight - h, box.scrollTop + (box.scrollHeight > h + 1 ? axisDelta(top, bottom, t, t + h, block, margin) : 0)));
-    const x = Math.max(0, Math.min(box.scrollWidth - w, box.scrollLeft + (box.scrollWidth > w + 1 ? axisDelta(left, right, l, l + w, inline, 16) : 0)));
+    // A target wider than its box (a table row in a table that scrolls sideways) shows from its start, so the tour
+    // never scrolls a table's first columns (the state, the name) out of view to reach the row's far end.
+    const wide = right - left > w;
+    const x = wide ? 0 : Math.max(0, Math.min(box.scrollWidth - w, box.scrollLeft + (box.scrollWidth > w + 1 ? axisDelta(left, right, l, l + w, inline, 16) : 0)));
     const dy = y - box.scrollTop, dx = x - box.scrollLeft;
     if (Math.abs(dy) < 1 && Math.abs(dx) < 1) continue;
     box.scrollTo({ top: y, left: x, behavior });

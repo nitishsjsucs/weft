@@ -5,11 +5,13 @@ import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-tab
 import { CircleCheck, CircleDashed, CircleSlash } from "lucide-react";
 import { Badge, Button, Card, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { tid, W3_TIMEOFF_TID, type BenefitPlan, type Enrollment, type ItAccount, type Money, type Offer, type ToolOutcome, type Worker } from "@weft/contracts";
+import { useAgent } from "../agent-context";
+import { newAgentRunOf, routineRunIds } from "../agent/follow-run";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, initials } from "../format";
 import { PageHeader } from "../page";
 import { DocumentLibrary } from "../documents/document-library";
-import { auditLabel } from "../copy";
+import { auditLabel, humanLine } from "../copy";
 import { PersonActions } from "../offboarding/person-actions";
 import { BalancesTab, RequestsTab } from "../time-off/time-off-view";
 
@@ -63,7 +65,14 @@ function PeopleTable({ data }: { data: Worker[] }) {
 
 function OfferCard({ o }: { o: Offer }) {
   const [out, setOut] = useState<ToolOutcome | null>(null);
-  const accept = useMutation(() => client.post("/v1/offers/:id/accept", { params: { id: o.id } }));
+  const agent = useAgent();
+  // Accepting starts the New hire readiness routine (offer.accepted); the panel follows its agent run.
+  const accept = useMutation(async () => {
+    const before = await routineRunIds("rt_new_hire");
+    const res = (await client.post("/v1/offers/:id/accept", { params: { id: o.id } })) as ToolOutcome;
+    if (res.ok) void newAgentRunOf("rt_new_hire", before).then((runId) => { if (runId) agent.watch(runId, `New hire readiness: ${o.candidateFirst} ${o.candidateLast} (demo)`); });
+    return res;
+  });
   return (
     <Card className="flex flex-col gap-3 p-4 tablet:flex-row tablet:items-center">
       <div className="min-w-0 flex-1">
@@ -148,8 +157,8 @@ function PayTab({ d }: { d: Detail }) {
                 <TR key={r.id} data-testid={`pay-rate-${r.id}`}>
                   <TD className="h-10 capitalize">{r.kind}</TD>
                   <TD numeric className="h-10">{r.amount.display}{r.kind === "salary" ? " a year" : r.kind === "hourly" ? " an hour" : ""}</TD>
-                  <TD className="h-10 whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? ` to ${fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}` : " onward"}</TD>
-                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>{auditLabel(r.createdActionSeq)}</Link> : <span className="text-gray-10">seed</span>}</TD>
+                  <TD className="h-auto py-2"><div className="whitespace-nowrap">{longDate(r.effectiveFrom)}{r.effectiveTo ? "" : " onward"}</div>{r.effectiveTo ? <div className="whitespace-nowrap text-1 text-gray-10">to {longDate(r.effectiveTo)}</div> : null}</TD>
+                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>{auditLabel(r.createdActionSeq)}</Link> : <span className="text-gray-10">Initial record</span>}</TD>
                 </TR>
               ))}
             </TBody>
@@ -159,13 +168,13 @@ function PayTab({ d }: { d: Detail }) {
       <div className="grid gap-6 tablet:grid-cols-2 [&>*]:min-w-0">
         <Card className="p-4">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Direct deposit</h2>
-          {d.bankAccount ? <Facts rows={[["Bank", d.bankAccount.bankName], ["Account", `ending ${d.bankAccount.last4}`], ["Status", d.bankAccount.status]]} />
+          {d.bankAccount ? <Facts rows={[["Bank", d.bankAccount.bankName], ["Account", `ending ${d.bankAccount.last4}`], ["Status", label(d.bankAccount.status)]]} />
             : d.worker.type === "contractor" ? <p className="text-[13px] text-gray-10">Paid monthly in {d.worker.currency} on the contractor payment rail, converted at the fixed FX table. See Contractors for payouts.</p>
             : <p className="text-[13px] text-amber-11">No bank account. Paychecks are blocked until direct deposit is set up.</p>}
         </Card>
         <Card className="p-4">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Tax setup</h2>
-          {d.taxProfile ? <Facts rows={[["W-4", d.taxProfile.w4Version], ["Federal filing", human(d.taxProfile.filingStatus)], ["State filing", d.taxProfile.stateFilingStatus ? human(d.taxProfile.stateFilingStatus) : "-"], ["State allowances", d.taxProfile.stateAllowances === null ? "-" : String(d.taxProfile.stateAllowances)], ["Work state", d.worker.workState ?? "-"]]} /> : <p className="text-[13px] text-gray-10">{d.worker.type === "contractor" ? "No US withholding: a global contractor files a W-8BEN instead of a W-4." : "No tax profile yet."}</p>}
+          {d.taxProfile ? <Facts rows={[["W-4", d.taxProfile.w4Version], ["Federal filing", label(d.taxProfile.filingStatus)], ["State filing", label(d.taxProfile.stateFilingStatus)], ["State allowances", d.taxProfile.stateAllowances === null ? "-" : String(d.taxProfile.stateAllowances)], ["Work state", d.worker.workState ?? "-"]]} /> : <p className="text-[13px] text-gray-10">{d.worker.type === "contractor" ? "No US withholding: a global contractor files a W-8BEN instead of a W-4." : "No tax profile yet."}</p>}
         </Card>
       </div>
     </div>
@@ -229,6 +238,9 @@ function ItTab({ id }: { id: string }) {
 
 const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace (sim)", chat: "Chat (sim)", github: "Code host (sim)" };
 const human = (s: string) => s.replace(/_/g, " ");
+/** An engine value as a label: "single" is "Single", "head_of_household" is "Head of household". */
+const label = (s: string | null | undefined) => (s ? human(s).replace(/^./, (c) => c.toUpperCase()) : "-");
+const longDate = (d: string | null | undefined) => (d ? fmtDate(d, { month: "short", day: "numeric", year: "numeric" }) : "-");
 
 export function PersonView({ id }: { id: string }) {
   const w = useGet("/v1/workers/:id", { params: { id }, refreshMs: 5_000 });
@@ -276,7 +288,7 @@ export function PersonView({ id }: { id: string }) {
           <div className="grid gap-6 laptop:grid-cols-[1fr_1fr] [&>*]:min-w-0">
             <Card className="p-4">
               <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Profile</h2>
-              <Facts rows={[["Employee number", p.employeeNumber ?? "-"], ["Work email", p.workEmail], ["Manager", d.manager ?? "-"], ["Work state", p.workState ?? "-"], ["Country", p.country], ["Type", p.workerType], ["Start date", p.startDate], ["End date", p.endDate ?? "-"], ["SSN", p.ssnMasked ?? "Not on file"], ["Pay schedule", p.payScheduleId ?? "-"], ["Time zone", p.timezone]]} />
+              <Facts rows={[["Employee number", p.employeeNumber ?? "-"], ["Work email", p.workEmail], ["Manager", d.manager ? humanLine(d.manager) : "-"], ["Work state", p.workState ?? "-"], ["Country", p.country], ["Type", label(p.workerType)], ["Start date", longDate(p.startDate)], ["End date", longDate(p.endDate)], ["SSN", p.ssnMasked ?? "Not on file"], ["Pay schedule", p.payScheduleId ? label(p.payScheduleId.replace(/^ps_/, "")) : "-"], ["Time zone", p.timezone]]} />
             </Card>
             {onboarding}
           </div>

@@ -62,6 +62,9 @@ export function HomeView() {
   const reportNames = new Set(reports.filter((w) => w.status === "active").map((w) => bare(w.displayName)));
   const teamOut = outToday.filter((r) => reportNames.has(bare(r.workerName)));
   const teamSoon = soon.filter((r) => reportNames.has(bare(r.workerName)));
+  // The team card counts only the viewer's own reports' requests; a request routed to the viewer because another
+  // manager has no login stays in the Approvals card's "+ n time-off decisions for you".
+  const teamDecide = myTor.filter((r) => reportNames.has(bare(r.workerName)));
   const joining = reports.filter((w) => w.status === "onboarding").sort((a, b) => (a.startDate < b.startDate ? -1 : 1));
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
@@ -107,20 +110,31 @@ export function HomeView() {
             <div><div data-testid="home-time-off-out" className="text-7 font-semibold tabular">{timeOff.data ? outToday.length : "-"}</div><div className="text-1 text-gray-10">out today</div></div>
             <div><div data-testid="home-time-off-pending" className="text-7 font-semibold tabular">{timeOff.data ? pendingTor.length : "-"}</div><div className="text-1 text-gray-10">waiting for a decision</div></div>
           </div>
-          <ul className="px-2 pb-2">
-            {soon.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
-          </ul>
+          {/* Who is out today sits under its count; the approved-ahead list has its own label. */}
+          {outToday.length ? (
+            <ul data-testid="home-time-off-out-list" aria-label="Out today" className="px-2 pb-1">
+              {outToday.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{r.endAt !== r.startAt ? `to ${fmtDate(r.endAt)}` : "today"}</span></Link></li>)}
+            </ul>
+          ) : null}
+          {soon.length ? (
+            <>
+              <div className="px-4 pt-1 text-1 font-medium text-gray-10">Approved ahead</div>
+              <ul aria-label="Approved ahead" className="px-2 pb-2">
+                {soon.slice(0, outToday.length ? 2 : 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
+              </ul>
+            </>
+          ) : null}
         </Widget>
         {reports.length ? (
           <Widget testid="home-widget-team" icon={<UserRoundCheck />} title="Your team" href="/app/time-off" footer={<><span>{joining.length ? `${joining.length} joining soon` : "Your direct reports"}</span><Link href="/app/people" className="hover:text-foreground">People</Link></>}>
             <div className="grid grid-cols-2 gap-2 px-4 pt-4 pb-3">
               <div><div data-testid="home-team-size" className="text-7 font-semibold tabular">{reports.filter((w) => w.status === "active").length}</div><div className="text-1 text-gray-10">direct reports</div></div>
-              {myTor.length ? <div><div data-testid="home-team-decisions" className="text-7 font-semibold tabular">{myTor.length}</div><div className="text-1 text-gray-10">time-off {myTor.length === 1 ? "decision" : "decisions"} for you</div></div>
+              {teamDecide.length ? <div><div data-testid="home-team-decisions" className="text-7 font-semibold tabular">{teamDecide.length}</div><div className="text-1 text-gray-10">time-off {teamDecide.length === 1 ? "decision" : "decisions"} for you</div></div>
                 : teamSoon.length ? <div><div className="text-7 font-semibold tabular">{teamSoon.length}</div><div className="text-1 text-gray-10">off in the next 30 days</div></div> : null}
             </div>
             <ul className="px-2 pb-2">
               {teamOut.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span></Link></li>)}
-              {myTor.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="amber">Decide</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
+              {teamDecide.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="amber">Decide</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
               {teamSoon.slice(0, 2).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="green">Approved</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}</span></Link></li>)}
               {joining.slice(0, 2).map((w) => <li key={w.id}><Link href={`/app/people/${w.id}`} className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="blue">Joining</Badge><span className="min-w-0 flex-1 truncate">{w.displayName}</span><span className="text-1 text-gray-10 tabular">starts {fmtDate(w.startDate)}</span></Link></li>)}
             </ul>

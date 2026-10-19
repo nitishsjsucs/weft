@@ -165,3 +165,17 @@ export function sheetEdge(pref: "top" | "bottom", target: Rect | null, layers: R
   const flip = cost(mine) > 1 && cost(other) <= 1;
   return { top: flip ? pref !== "top" : pref === "top", under: layerCost(flip ? other : mine) > 1 };
 }
+
+/**
+ * The card's spot in the docked agent panel's column (steps with `dockPanel`): bottom-aligned inside the panel with
+ * a 12 px pad, as wide as the card or the panel allows. Null when the panel is not docked to the right of the main
+ * column or is too narrow for a 260 px card. Popovers in main never reach it, so its buttons are never covered.
+ */
+export function panelSpot(panel: Rect | null, main: Rect | null, card: { width: number; height: number }, pad = 12): { left: number; top: number; width: number } | null {
+  if (!panel || !main) return null;
+  if (panel.left < main.right - 1) return null;
+  const width = Math.min(card.width, widthOf(panel) - 2 * pad);
+  if (width < 260) return null;
+  const top = Math.max(panel.top + pad, panel.bottom - pad - card.height);
+  return { left: Math.round(panel.left + (widthOf(panel) - width) / 2), top: Math.round(top), width: Math.floor(width) };
+}

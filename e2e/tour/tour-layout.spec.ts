@@ -64,7 +64,24 @@ function expectCardClear(s: Scene, label: string): void {
   // Clear of every open layer, or (no clean spot left on a short screen) painted under it.
   for (const l of s.layers) if (overlap(s.card, l.rect) > 1) expect(s.cardZ, `${label}: card over an open layer`).toBeLessThan(l.z);
   expect(overlap(s.card, s.sidebar), `${label}: card over the sidebar`).toBeLessThanOrEqual(1);
-  expect(overlap(s.card, s.agent), `${label}: card over the docked agent panel`).toBeLessThanOrEqual(1);
+  // A step that docks its card in the panel's column (the payroll flags) is the one exception, and then the card stays inside it.
+  if (s.place === "panel") expect(overlap(s.card, s.agent), `${label}: card inside the docked agent panel`).toBeGreaterThanOrEqual((s.card!.r - s.card!.l) * (s.card!.b - s.card!.t) - 1);
+  else expect(overlap(s.card, s.agent), `${label}: card over the docked agent panel`).toBeLessThanOrEqual(1);
+}
+
+/** What a click at the centre of the card's Back and primary buttons lands on: the button itself, or the layer over it. */
+async function buttonsCovered(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const out: string[] = [];
+    for (const sel of ["[data-tour-card] [data-tour-back]", "[data-tour-card] [data-tour-primary]"]) {
+      const b = document.querySelector<HTMLElement>(sel);
+      if (!b) continue;
+      const r = b.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!hit || !b.contains(hit)) out.push(`${sel} covered by ${(hit?.textContent ?? "").trim().slice(0, 60)}`);
+    }
+    return out;
+  });
 }
 
 /** The ring paints under any app layer: with the ring made hit-testable for a moment, a point on its edge inside the layer hits the layer. */
@@ -266,6 +283,8 @@ for (const [width, height] of [[1280, 800], [1366, 768]] as const) {
         const pop = s.layers.find((l) => l.z === 50);
         expect(pop, `flag ${i}: its popover is open`).toBeTruthy();
         await expect(readyCard(page, "payroll-flags")).toBeVisible();
+        // Back and Next stay reachable while any flag's popover is open (the card docks in the panel's column).
+        expect(await buttonsCovered(page), `flag ${i}: the card's buttons are covered`).toEqual([]);
         if (overlap(s.card, pop!.rect) > 1) {
           overlapped++;
           expect(s.cardZ, `flag ${i}: the card over the popover`).toBeLessThan(pop!.z);
@@ -276,3 +295,18 @@ for (const [width, height] of [[1280, 800], [1366, 768]] as const) {
     });
   });
 }
+
+// On a phone the agent panel is a full-screen sheet. Step 4's target (Deliver) is on the page, so the sheet stays
+// closed there: the real button is visible and tappable, and the Deliver click opens the sheet with its run (step 5).
+test.describe("390x844, deliver notice", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test("step 4: the agent sheet is closed and the real Deliver button can be tapped", async ({ page }) => {
+    await openStep(page, "deliver-notice");
+    const target = page.locator('[data-tour~="sim-deliver"][data-scenario="ca_de2088_rate_change"]');
+    await expect(target).toBeVisible();
+    await expect(page.locator('aside[aria-label="Agent"]')).toHaveCount(0);
+    const hit = await target.evaluate((el) => { const r = el.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && el.contains(h); });
+    expect(hit, "a tap on Deliver reaches the button").toBe(true);
+    await expect(page.locator("[data-tour-card]")).toHaveAttribute("data-target-found", "true");
+  });
+});
