@@ -51,18 +51,18 @@ export function AuditView() {
       {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{humanTimes(result.summary)}</div> : null}
       <Card className="overflow-hidden">
         <Table className="text-[13px]">
-          <THead><TR><TH>Seq</TH><TH>Time</TH><TH>Actor</TH><TH>Command</TH><TH className="w-full min-w-[240px]">Summary</TH><TH>Run</TH><TH /></TR></THead>
+          <THead><TR><TH>Seq</TH><TH>Time</TH><TH>Actor</TH><TH>Command</TH><TH className="w-full min-w-[200px]">Summary</TH><TH>Run</TH><TH /></TR></THead>
           <TBody>
             {(actions.data?.data ?? []).map((a) => (
               <TR key={a.seq} id={`audit-${a.seq}`} data-testid={tid.auditRow(a.seq)} data-reversible={a.reversible} className={cn(a.reversedBySeq !== null && "bg-gray-2")}>
                 <TD className="h-11 tabular text-gray-10">#{a.seq}</TD>
                 <TD className="h-11 whitespace-nowrap">{fmtDateTime(a.ts)}</TD>
-                <TD className="h-11 whitespace-nowrap">
+                <TD className="h-11 max-w-[10rem]">
                   <div>{actor(a)}</div>
                   {a.onBehalfOf ? <div className="text-1 text-gray-10">for {principalName(a.onBehalfOf)}</div> : null}
                 </TD>
                 <TD className="h-11 max-w-[11rem]"><code className="break-all font-mono text-[12px]">{a.command}</code></TD>
-                <TD className="h-11 min-w-[240px] whitespace-normal break-words">
+                <TD className="h-11 min-w-[200px] whitespace-normal break-words">
                   <div>{humanTimes(a.summary)}</div>
                   <div className="text-1 text-gray-10">
                     {a.reversesSeq !== null ? <>Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></> : null}
