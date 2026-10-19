@@ -201,3 +201,39 @@ describe("routine finalization after a world reset", () => {
     }
   });
 });
+
+// The engine also remembered proposal decisions by id. After a reset the new world's prp_0001 inherited the old
+// prp_0001's denial, so a demo that denied a card, reset and delivered the DE 2088 notice saw the notice run escalate
+// NOT_DONE on its pending rate change (caught by e2e GP1 after GP15, demo check round 1).
+describe("proposal decisions after a world reset", () => {
+  it("a denial before the reset never decides the new world's proposal with the same id", async () => {
+    const weft = await createTestWeft();
+    try {
+      const headers = { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" };
+      const engine = weft.routines as unknown as { runs(id: string, limit?: number): Promise<{ id: string }[]>; settled(id: string): Promise<{ status: string; agentRunId: string | null }> };
+      const deliver = async () => {
+        const res = await weft.app.request("/v1/sim/notices/deliver", { method: "POST", headers, body: JSON.stringify({ scenario: "ca_de2088_rate_change" }) });
+        expect(res.status, await res.clone().text()).toBe(200);
+        let rr: { id: string } | undefined;
+        for (let i = 0; i < 50 && !rr; i++) { await weft.scheduler.kick(); rr = (await engine.runs("rt_agency_notice", 1))[0]; if (!rr) await new Promise((r) => setTimeout(r, 50)); }
+        expect(rr, "the notice starts the routine").toBeTruthy();
+        const settled = await engine.settled(rr!.id);
+        const run = await (await weft.app.request(`/v1/agent/runs/${settled.agentRunId}`, { headers })).json() as { status: string };
+        const pending = (await (await weft.app.request("/v1/proposals?status=pending&limit=100", { headers })).json() as { data: { id: string; command: string }[] }).data;
+        return { run, rate: pending.find((p) => p.command === "tax.update_rate") };
+      };
+      const first = await deliver();
+      expect(first.run.status).toBe("waiting");
+      expect(first.rate).toBeTruthy();
+      const deny = await weft.app.request(`/v1/proposals/${first.rate!.id}/deny`, { method: "POST", headers, body: JSON.stringify({ reasonCode: "not_needed", note: null }) });
+      expect(deny.status, await deny.clone().text()).toBe(200);
+      const reset = await weft.app.request("/v1/sim/reset", { method: "POST", headers, body: "{}" });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      const second = await deliver();
+      expect(second.rate?.id).toBe(first.rate!.id);   // ids restart, which is what made the old denial stick
+      expect(second.run.status).toBe("waiting");
+    } finally {
+      await weft.close();
+    }
+  });
+});

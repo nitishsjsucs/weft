@@ -10,7 +10,7 @@
       {
         "expect": { "lastResults": [{ "tool": "reports__query", "ok": true, "status": "done" }] },
         "output": [
-          { "type": "text", "text": "Payroll cost by month, from the runs Weft has paid: {{last.reports__query.data.rows.0.period_label}} {{last.reports__query.data.rows.0.total_display}} and {{last.reports__query.data.rows.1.period_label}} {{last.reports__query.data.rows.1.total_display}}. The chart splits each month into gross pay, employer taxes, employer benefits, reimbursements and contractor payouts; the table has every value." }
+          { "type": "text", "text": "Payroll cost by month, {{last.reports__query.data.source_phrase}}. The latest two months: {{last.reports__query.data.rows.-2.period_label}} {{last.reports__query.data.rows.-2.total_display}} and {{last.reports__query.data.rows.-1.period_label}} {{last.reports__query.data.rows.-1.total_display}} so far. The chart splits each month into gross pay, employer taxes, employer benefits, reimbursements and contractor payouts; the table has every value." }
         ]
       }
     ]

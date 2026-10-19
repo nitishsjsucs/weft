@@ -11,8 +11,12 @@ const MONTHS = ["january", "february", "march", "april", "may", "june", "july", 
 const MONTH_RE = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?";
 
 const ORDINAL = "(?:st|nd|rd|th)?";
-/** The words and marks that join the two days of a range: "to", "through", a hyphen or an en dash. */
-const RANGE_JOIN = "(?:\\s*[-\u2013]\\s*|\\s+(?:to|through)\\s+)";
+/**
+ * The words and marks that join two days after one month name: a range ("to", "through", a hyphen or an en dash) or
+ * a pair ("and": "November 26 and 27", demo check round 1, where the live answer's "27" was refused although
+ * 2026-11-27 was in the result). Either way both days are dates and both must come from a record.
+ */
+const RANGE_JOIN = "(?:\\s*[-\u2013]\\s*|\\s+(?:to|through|and)\\s+)";
 
 /**
  * Date shapes a person might read: 2026-01-01, 1/1/2026, 01/01/26, January 1, 2026, Jan 1 2026, 1 January 2026,

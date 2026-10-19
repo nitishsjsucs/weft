@@ -12,6 +12,8 @@ import { PageHeader } from "../page";
 import { DocumentLibrary } from "../documents/document-library";
 import { auditLabel, humanLine } from "../copy";
 import { PersonActions } from "../offboarding/person-actions";
+import { useAgent } from "../agent-context";
+import { agentRunIdsNow, newRoutineAgentRun } from "../agent/follow";
 import { BalancesTab, RequestsTab } from "../time-off/time-off-view";
 
 const DEPT: Record<string, string> = { dpt_engineering: "Engineering", dpt_hardware: "Hardware", dpt_operations: "Operations", dpt_people: "People", dpt_finance: "Finance", dpt_gtm: "Go-to-market" };
@@ -63,11 +65,21 @@ function PeopleTable({ data }: { data: Worker[] }) {
 }
 
 function OfferCard({ o }: { o: Offer }) {
+  const agent = useAgent();
   const [out, setOut] = useState<ToolOutcome | null>(null);
   const accept = useMutation(() => client.post("/v1/offers/:id/accept", { params: { id: o.id } }));
   const can = useCan();
   // A manager reads an offer's pay only when she or one of her reports is the hiring manager (the API sends null).
   const base = (o.base as Offer["base"] | null)?.display;
+  // The acceptance starts the new hire routine through an event, so its agent run is the new routine run in the list.
+  const onAccept = async () => {
+    const before = await agentRunIdsNow();
+    const r = (await accept.run()) ?? null;
+    setOut(r);
+    if (!r || !r.ok) return;
+    const runId = await newRoutineAgentRun(before);
+    if (runId) agent.watch(runId, `New hire readiness: ${o.candidateFirst} ${o.candidateLast} (demo)`);
+  };
   return (
     <Card className="flex flex-col gap-3 p-4 tablet:flex-row tablet:items-center">
       <div className="min-w-0 flex-1">
@@ -79,7 +91,7 @@ function OfferCard({ o }: { o: Offer }) {
       </div>
       <Badge tone={o.status === "accepted" ? "green" : o.status === "sent" ? "blue" : "gray"} size="md" data-status={o.status}>{o.status.charAt(0).toUpperCase() + o.status.slice(1)}</Badge>
       {o.status === "sent" && can("people", "edit") ? (
-        <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={async () => setOut((await accept.run()) ?? null)} title="Demo action: records the candidate's acceptance">Mark accepted</Button>
+        <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={() => void onAccept()} title="Demo action: records the candidate's acceptance">Mark accepted</Button>
       ) : null}
     </Card>
   );

@@ -14,7 +14,8 @@ import { cn } from "@weft/ui";
 import { errorText, useMutation } from "@/lib/api/hooks";
 import { decideProposal } from "../inbox/decide";
 import { RiskChip } from "../risk";
-import { cardField, humanLine, taintSource } from "../copy";
+import { cardField, enumWords, humanLine } from "../copy";
+import { taintText } from "./untrusted";
 
 const OUTCOME: Partial<Record<ProposalStatus, { text: string; tone: string }>> = {
   executed: { text: "Approved and done", tone: "text-green-11" },
@@ -54,7 +55,7 @@ export function ApprovalCard({ card, status, taintedBy = null, known = true, com
       {taintedBy ? (
         <div data-testid={W3_CHAT_TID.cardTainted(card.proposalId)} role="alert" className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11">
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
-          <span className="min-w-0 break-words" title={taintedBy}>This run read untrusted content: {taintSource(taintedBy)}.{pending ? " Review it in the Inbox before approving." : ""}</span>
+          <span className="min-w-0 break-words" title={taintedBy}>This run read untrusted content: {taintText(taintedBy)}.{pending ? " Review it in the Inbox before approving." : ""}</span>
         </div>
       ) : null}
       <p className="text-[13px] leading-5 font-medium break-words text-gray-12">{humanLine(card.headline)}</p>

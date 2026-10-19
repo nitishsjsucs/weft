@@ -72,7 +72,7 @@ function validate(i: SendInput): ChatChannel {
 
 export const sendMessage = writeCommand({
   name: "comms.send_message", summary: "Post a plain-text message to a company chat channel.",
-  description: "Post a plain-text message (text, up to 1500 characters) to one company channel: #people-ops, #payroll, #new-hires or #general. No markup or cards. Numbers must match company facts or, in a routine run, its findings and derived arguments; post a derived text as is. R3: runs without approval for an untainted main agent; otherwise it becomes a proposal with the text shown in full.",
+  description: "Post a plain-text message (text, up to 1500 characters) to one company channel: #people-ops, #payroll, #new-hires or #general; no worker_id (no direct messages), markup or cards. Numbers must match company facts or, in a routine run, its findings and derived arguments; post a derived text as is. R3: runs unapproved for an untainted main agent, else it becomes a proposal showing the full text.",
   input: SendInput, domain: "comms", needs: "edit", effect: "external", risk: riskOf("R3"), approval: "always", autoAllow: "untainted",
   afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
   async preview(i, ctx) {

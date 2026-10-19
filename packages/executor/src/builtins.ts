@@ -41,7 +41,7 @@ export function builtinCommands(e: Engine): WeftCommand[] {
 
   const listActions: WeftCommand<{ limit?: number; before_seq?: number; agent_run_id?: string; command?: string; response_format?: "concise" | "detailed" }> = {
     ...base, name: "actions.list", namespace: "actions", summary: "List recent actions from the audit log",
-    description: "List recent actions from the hash-chained audit log, newest first: seq, time, actor, command, summary, proposal id. limit is 1 to 50 (default 20). Filter by agent_run_id (an agent run, run_...; never a pay run) or an exact command name. Use it to answer how something changed. Example: { \"limit\": 10, \"command\": \"tax.update_rate\" }",
+    description: "List recent actions from the hash-chained audit log, newest first: seq, time, actor, command, summary, proposal id. limit is 1 to 50 (default 20). Filter by agent_run_id (an agent run, run_...; never a pay run) or an exact dotted command name from your tools (leave it out when unsure). Use it to answer how something changed. Example: { \"limit\": 10, \"command\": \"tax.update_rate\" }",
     compactDescription: "List recent audit log actions.",
     input: z.object({ limit: z.number().int().optional(), before_seq: z.number().int().optional(), agent_run_id: z.string().optional(), command: z.string().optional(), response_format: fmt }),
     domain: "company", needs: "view", effect: "read", risk: () => "R0", approval: "never", autoAllow: "never", tiers: { main: "executable", task: "executable" }, mcp: "read",

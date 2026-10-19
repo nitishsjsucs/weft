@@ -7,7 +7,9 @@ import { cn } from "@weft/ui";
 import { TID, type ProposalStatus, type RunStepRow } from "@weft/contracts";
 import { watchRun, type RunWatch } from "@/lib/api/sse";
 import { fmtDateTime, statusLabel, usd } from "../format";
-import { answerText, auditLabel, codeWords, humanLine, routineSummaryText, sentenceCase, taintSource } from "../copy";
+import { auditLabel, codeWords, humanLine, routineSummaryText, sentenceCase } from "../copy";
+import { answerPlain } from "../agent/answer";
+import { taintText } from "../agent/untrusted";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { stepState, stepSummary, toolLabel } from "../agent/run-steps";
@@ -86,7 +88,7 @@ export function RunView({ id }: { id: string }) {
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
         title={<span className="font-mono text-5">{run.id}</span>}
-        subtitle={run.summary ? (run.routineRunId ? routineSummaryText(run.summary) : answerText(run.summary).text) : undefined}
+        subtitle={run.summary ? (run.routineRunId ? routineSummaryText(run.summary) : answerPlain(run.summary)) : undefined}
         meta={
           <>
             <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{statusLabel(run.status)}</ShimmerText> : run.status === "waiting" ? "Waiting for approval" : statusLabel(run.status)}</Badge>
@@ -101,7 +103,7 @@ export function RunView({ id }: { id: string }) {
       />
       {run.tainted ? (
         <div data-testid="run-tainted-banner" role="alert" className="mb-4 flex items-start gap-2 rounded-xl bg-amber-3 px-4 py-2.5 text-[13px] text-amber-11">
-          <ShieldAlert className="mt-0.5 size-4 shrink-0" /><span title={run.taintedBy ?? undefined}>This run read untrusted content: {taintSource(run.taintedBy)}. Every write it asked for became a proposal.</span>
+          <ShieldAlert className="mt-0.5 size-4 shrink-0" /><span title={run.taintedBy ?? undefined}>This run read untrusted content: {taintText(run.taintedBy)}. Every write it asked for became a proposal.</span>
         </div>
       ) : null}
       <Card className="@container mb-6">

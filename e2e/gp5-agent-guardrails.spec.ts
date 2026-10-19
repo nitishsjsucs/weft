@@ -13,17 +13,23 @@ test("GP5: a grounded answer, a refused approve-all, and an injected notice that
     await openApp(page, `/app/payroll/${SEED.draftRun}`);
     await viewAs(page, "dana");
     const answer = await askAgent(page, "Why is the NY raise flagged in the Oct 30 payroll?");
-    await expect(answer).toContainText(/raise|GROSS_CHANGE|18%/i);
+    await expect(answer).toContainText(/raise|gross change|18%/i);
+    // The scripted answer writes Markdown bold and a backticked id, as a live model does: neither mark reaches the screen.
+    await expect(answer).not.toContainText("**");
+    await expect(answer).not.toContainText("`");
+    await expect(answer).not.toContainText(/\b(?:res|wrk|prt)_\d/);
+    await expect(answer.locator("strong")).toHaveCount(1);
     const steps = page.getByTestId(TID.agentStep);
     await expect(steps.filter({ hasText: /payroll[._]get_run|payroll run/i }).first()).toBeVisible();
     await expect(steps.filter({ hasText: /people[._]get|person/i }).first()).toBeVisible();
-    // The citation names the raise action's result id from the GROSS_CHANGE evidence.
+    // The citation is the raise action's result id from the GROSS_CHANGE evidence.
     const raise = (await weft.paychecks(SEED.draftRun)).flatMap((p) => p.flags).find((f) => f.rule === "GROSS_CHANGE" && JSON.stringify(f.evidence).includes("prt_"));
     expect(raise, "the seeded GROSS_CHANGE flag").toBeTruthy();
     const resultId = (raise!.evidence as Record<string, unknown>).resultId ?? (raise!.evidence as Record<string, unknown>).result_id;
-    // The panel shows the cited result as a Sources chip (its title is the id); the stored answer keeps the id.
+    // The panel shows a cited result as a numbered source chip, not as its raw id; the chip carries the id it cites,
+    // and the stored answer keeps the id.
     if (typeof resultId === "string") {
-      await expect(page.getByTestId("agent-answer-sources").last().locator(`[title="${resultId}"]`)).toBeVisible();
+      await expect(page.getByTestId(TID.agentAnswer).last().locator(`[data-cite="${resultId}"]`).first()).toBeVisible();
       await expect(page.getByTestId(TID.agentAnswer).last()).not.toContainText(resultId);
     }
   });

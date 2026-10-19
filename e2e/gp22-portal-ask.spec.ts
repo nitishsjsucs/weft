@@ -60,7 +60,9 @@ test("GP22: a chat mention gets one read-only answer and an emailed receipt file
     await chat.getByTestId("sim-inbound-chat-send").click();
     await expect(page.getByText(/mention mnt_\w+ started a read-only run/)).toBeVisible();
     const reply = await eventually(() => weft.chat("#payroll"), (ms) => ms.find((m) => m.author === "Weft agent"), "the agent's reply in #payroll");
-    expect(reply.text).toMatch(/pay_2026_10_30 pays on \d{4}-\d{2}-\d{2}/);
+    // The thread reads the run and its payday as days, never as the row id or the ISO date.
+    expect(reply.text).toMatch(/payroll for Oct 30 pays on Oct 30/);
+    expect(reply.text).not.toMatch(/pay_\d|\d{4}-\d{2}-\d{2}/);
     expect(reply.inbound).toBe(false);
     await expect(chat.getByTestId("sim-mentions")).toContainText("answered");
     expect((await weft.chat("#payroll")).filter((m) => m.author === "Weft agent").length).toBe(1);

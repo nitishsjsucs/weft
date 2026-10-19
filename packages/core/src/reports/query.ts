@@ -137,6 +137,24 @@ async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[
   return { rows, chart, summary, from };
 }
 
+/**
+ * Imported pay history in a payroll cost range: runs the previous provider paid, which Weft keeps as processed runs
+ * with tax_data_version "imported" (the rich world's January to August). Null when the range has none, so the base
+ * world, whose paid runs are all Weft's own, reads as before.
+ */
+export async function importedHistory(tx: DbTx, q: Pick<ReportQuery, "companyId" | "from" | "to">): Promise<{ runs: number; first: string; last: string } | null> {
+  const [r] = await tx.all<{ n: number; first: string | null; last: string | null }>(sql`
+    SELECT count(*) AS n, min(substr(payday, 1, 7)) AS first, max(substr(payday, 1, 7)) AS last
+    FROM payroll_runs
+    WHERE company_id = ${q.companyId} AND status IN ('processing', 'processed') AND tax_data_version = 'imported' AND payday BETWEEN ${q.from} AND ${q.to}`);
+  const runs = n(r?.n);
+  if (!r || runs === 0 || !r.first || !r.last) return null;
+  return { runs, first: r.first, last: r.last };
+}
+
+/** "2026-01" as "Jan 2026". */
+export function monthLabel(key: string): string { return `${MONTHS[Number(key.slice(5, 7)) - 1] ?? key.slice(5, 7)} ${key.slice(0, 4)}`; }
+
 /** Employees counted on a date: started on or before it, not yet past their last day, not a draft record. */
 const onRoll = (d: string) => sql`w.type = 'employee' AND w.status NOT IN ('draft') AND w.start_date <= ${d} AND (w.end_date IS NULL OR w.end_date >= ${d})`;
 

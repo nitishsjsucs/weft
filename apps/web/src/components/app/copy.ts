@@ -2,7 +2,7 @@
 // and proposal diffs are stored as the engine wrote them (base world digests and evals pin them), and they carry row
 // ids, enum codes and ISO dates that mean nothing to a person. These helpers turn them into words; the stored text
 // never changes.
-import { fmtDate, humanDates, humanTimes, statusLabel } from "./format";
+import { fmtDate, humanDates, humanTimes, statusLabel, textYear } from "./format";
 
 const ID = "[a-z]{2,5}_[A-Za-z0-9_]*\\d[A-Za-z0-9_]*";
 /** Words for the engine's codes that can appear in flag text. */
@@ -14,11 +14,10 @@ const dayOf = (iso: string): number => Date.UTC(Number(iso.slice(0, 4)), Number(
 
 /**
  * A comma list of plain dates reads as a run or a list: "2026-11-23, 2026-11-24, 2026-11-25" is "Nov 23 to Nov 25",
- * "2026-11-23, 2026-11-25" is "Nov 23 and Nov 25". Dates in the text's latest year read without one.
+ * "2026-11-23, 2026-11-25" is "Nov 23 and Nov 25". Dates read without a year only when the text has one year.
  */
 export function humanDateLists(text: string, year?: number): string {
-  const years = [...text.matchAll(/(?<![\w-])(\d{4})-\d{2}-\d{2}/g)].map((m) => Number(m[1]));
-  const ref = year ?? (years.length ? Math.max(...years) : undefined);
+  const ref = year ?? textYear(text);
   return text.replace(DATE_LIST, (m) => {
     const ds = m.split(/,\s*/);
     const one = (d: string) => humanDates(d, ref);
@@ -191,25 +190,6 @@ export function noticeName(formCode: string | null | undefined): string {
 /** The one label for a row of the audit log, wherever a page links to it. */
 export const auditLabel = (seq: number): string => `audit #${seq}`;
 
-/**
- * Where a tainted run's untrusted text came from, in words ("notice:ntc_0005" is "an agency notice's text"); `names`
- * can name the person or the notice when the caller has read them. The raw ref belongs in a title.
- */
-export function taintSource(ref: string | null | undefined, names: { worker?: string | null; notice?: string | null; channel?: string | null } = {}): string {
-  if (!ref) return "an unknown source";
-  const kinds = ref.split(/,\s*/).map((r) => {
-    const [kind] = r.split(":");
-    if (kind === "notice") return names.notice ? `the ${names.notice} text` : "an agency notice's text";
-    if (kind === "worker") return names.worker ? `an employee note on ${names.worker}'s record` : "an employee note on a person's record";
-    if (kind === "chat") return `a chat message${names.channel ? ` in ${names.channel}` : ""}`;
-    if (kind === "upload" || kind === "document") return "an uploaded document";
-    if (kind === "webhook" || kind === "ats") return "an inbound webhook";
-    if (kind === "run") return "an earlier run that read untrusted content";
-    return "content from outside Weft";
-  });
-  return [...new Set(kinds)].join(" and ");
-}
-
 /** Stored status values as people read them in a before and after row. */
 const STATUS_WORDS: Record<string, string> = {
   draft: "Draft", processing: "Submitted for processing", in_review: "In review", resolved: "Resolved", new: "New", none: "None",
@@ -242,13 +222,6 @@ export function splitChecks<R extends { label: string; before: string; after: st
     checks.push({ rule: m[1]!, severity: sev === "block" || sev === "review" || sev === "info" ? sev : null, message: humanCopy(r.after) });
   }
   return { rows, checks };
-}
-
-/** A line of untrusted text that addresses an AI system rather than the employer ("Ignore prior instructions ..."). */
-const INSTRUCTION = /\b(?:ignore|disregard)\b[^.\n]*\binstructions?\b|\bsystem override\b|\bnote to the (?:payroll )?(?:assistant|agent|ai)\b|\b(?:ai|payroll) assistant\b/i;
-/** The lines of a notice's text the notice drawer shows as quarantined. */
-export function quarantinedLines(body: string | null | undefined): string[] {
-  return (body ?? "").split(/\n/).map((l) => l.trim()).filter((l) => l && INSTRUCTION.test(l));
 }
 
 /**

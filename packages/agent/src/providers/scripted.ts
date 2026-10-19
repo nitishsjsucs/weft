@@ -62,7 +62,8 @@ export function lookup(root: unknown, path: string[]): unknown {
   for (let i = path.length; i >= 1; i--) {
     const key = path.slice(0, i).join(".");
     const obj = root as Record<string, unknown>;
-    if (Array.isArray(root) && /^\d+$/.test(key)) return lookup((root as unknown[])[Number(key)], path.slice(i));
+    // An array index counts from the end when negative: rows.-1 is the last row.
+    if (Array.isArray(root) && /^-?\d+$/.test(key)) { const k = Number(key); return lookup((root as unknown[])[k < 0 ? root.length + k : k], path.slice(i)); }
     if (Object.prototype.hasOwnProperty.call(obj, key)) return lookup(obj[key], path.slice(i));
   }
   return undefined;

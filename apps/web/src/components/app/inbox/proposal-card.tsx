@@ -7,12 +7,13 @@ import { cn } from "@weft/ui";
 import { TID, tid, type DecisionResult, type Proposal } from "@weft/contracts";
 import { errorText, useMutation, useSimClock } from "@/lib/api/hooks";
 import { cents, fmtDateTime, humanTimes, relative, statusLabel } from "../format";
-import { auditLabel, codeWords, humanCopy, humanLine, splitChecks, taintSource, valueText, type Severity } from "../copy";
+import { auditLabel, codeWords, humanCopy, humanLine, splitChecks, valueText, type Severity } from "../copy";
 import { RULE_LABEL, SEVERITY_TONE } from "../expenses/labels";
 import { principalName, refHref } from "../refs";
 import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
 import { decideProposal, type Decision } from "./decide";
+import { taintText } from "../agent/untrusted";
 
 const SEVERITY_WORD: Record<Severity, string> = { block: "Blocks", review: "Review", info: "Note" };
 const APPROVE_REASONS = [{ code: "looks_right", label: "Looks right" }, { code: "verified_source", label: "Verified against the source" }] as const;
@@ -82,7 +83,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
       {p.taintedBy ? (
         <div data-testid={TID.inboxTaintedBanner} role="alert" className="flex items-start gap-2 border-b border-amber-9/30 bg-amber-3 px-4 py-2 text-[13px] text-amber-11">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 break-words" title={p.taintedBy}>This run read untrusted content: {taintSource(p.taintedBy)}. Read the content below before you approve.</span>
+          <span className="min-w-0 break-words" title={p.taintedBy}>This run read untrusted content: {taintText(p.taintedBy)}. Read the content below before you approve.</span>
         </div>
       ) : null}
       <div className="flex flex-col gap-3 px-4 py-4">

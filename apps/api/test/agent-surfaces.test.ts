@@ -157,11 +157,20 @@ describe("plain answers for the portal and chat threads", () => {
     expect(plainAnswer("The client lunch limit is **$75.00 per person**. Source: Expense policy v1, result `res_0006`.")).toBe("The client lunch limit is $75.00 per person. Source: Expense policy v1.");
     expect(plainAnswer("Your first paycheck will appear after your first payday. (Result `res_0007`)")).toBe("Your first paycheck will appear after your first payday.");
     expect(plainAnswer("It has 48 paychecks, 44 ready. The deadline is October 29, 2026. (res_0014)")).toBe("It has 48 paychecks, 44 ready. The deadline is October 29, 2026.");
-    expect(plainAnswer("Gross rose by $12.00 (see res_0003 and res_0004) because the rate changed (effective 2026-10-01).")).toBe("Gross rose by $12.00 because the rate changed (effective 2026-10-01).");
+    expect(plainAnswer("Gross rose by $12.00 (see res_0003 and res_0004) because the rate changed (effective 2026-10-01).")).toBe("Gross rose by $12.00 because the rate changed (effective Oct 1).");
     expect(plainAnswer("No balances yet (result `res_0008`).\n\nAsk the people team.")).toBe("No balances yet.\n\nAsk the people team.");
     // An id that is part of the sentence stays, and so do ids that are not result ids.
     expect(plainAnswer("res_0001 and res_0002 show it.")).toBe("res_0001 and res_0002 show it.");
-    expect(plainAnswer("The run pay_2026_10_30 pays on 2026-10-30... soon.")).toBe("The run pay_2026_10_30 pays on 2026-10-30... soon.");
+    expect(plainAnswer("The run pay_2026_10_30 pays on 2026-10-30... soon.")).toBe("The run for Oct 30 pays on Oct 30... soon.");
+    expect(plainAnswer("Submitting pay_2026_10_30 is for a person.")).toBe("Submitting the Oct 30 run is for a person.");
+  });
+  it("a thread reply never ends on a stripped id's punctuation, and names carry no row ids", () => {
+    // Live replies in the demo check (docs/demo-scenarios.md, scenario 4 and 6).
+    expect(plainAnswer("Nothing was approved for Mira Delgado (wrk_0022). Source: res_0230.")).toBe("Nothing was approved for Mira Delgado.");
+    expect(plainAnswer("The payday `2026-10-30` is not approved (`res_0230`).")).toBe("The payday Oct 30 is not approved.");
+    expect(plainAnswer("Ruth Okoro (demo) (wrk_0010) has 89 hours left [res_0230].")).toBe("Ruth Okoro (demo) has 89 hours left.");
+    expect(plainAnswer("Lena Brooks (wrk_0026) is on pay rate `prt_0052` from Oct 16.")).toBe("Lena Brooks is on pay rate from Oct 16.");
+    expect(plainAnswer("History from 2025-12-19 to 2026-10-26.")).toBe("History from Dec 19, 2025 to Oct 26, 2026.");
   });
 });
 
@@ -211,7 +220,9 @@ describe("mentions", () => {
     expect(replies.length).toBe(1);
     const notices = await weft.db.select().from(runSteps).where(and(eq(runSteps.runId, r.json.runId), eq(runSteps.kind, "notice")));
     expect(notices.filter((n) => (n.resultJson ?? "").includes("UNGROUNDED"))).toEqual([]);
-    expect(replies[0]!.text).toMatch(/pays on \d{4}-\d{2}-\d{2}/);
+    // The thread reads the payday as a day, not as the stored ISO date.
+    expect(replies[0]!.text).toMatch(/pays on [A-Z][a-z]{2} \d{1,2}\b/);
+    expect(replies[0]!.text).not.toMatch(/\d{4}-\d{2}-\d{2}|pay_\d/);
     expect(replies[0]!.text).not.toMatch(/\bres_\w+/);
     expect(replies[0]!.inbound).toBe(false);
     const listed = await call("usr_dana", "GET", "/v1/agent/mentions?status=answered");

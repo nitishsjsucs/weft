@@ -11,6 +11,7 @@ import { PageHeader } from "../page";
 import { humanLine } from "../copy";
 import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
+import { agentRunOf } from "../agent/follow";
 import { PaycheckDrawer } from "./paycheck-drawer";
 import { PaycheckTable } from "./paycheck-table";
 import { TotalsStrip } from "./totals";
@@ -23,18 +24,6 @@ function OutcomeLine({ o }: { o: ToolOutcome | null }) {
   if (!o.ok) return <span role="alert" title={o.refusal.code} className="text-1 text-red-11">{o.refusal.message}{o.refusal.hint ? ` (${o.refusal.hint})` : ""}</span>;
   if (o.status === "pending_approval") return <span className="text-1 text-amber-11">Sent to the Inbox for approval: {o.title}</span>;
   return <span className="text-1 text-green-11">{o.summary}</span>;
-}
-
-async function findAgentRun(routineRunId: string, hinted: string | undefined): Promise<string | null> {
-  if (hinted) return hinted;
-  for (let i = 0; i < 10; i++) {
-    try {
-      const rr = (await client.get("/v1/routine-runs/:id", { params: { id: routineRunId } })) as { agentRunId?: string | null };
-      if (rr?.agentRunId) return rr.agentRunId;
-    } catch { /* not yet */ }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return null;
 }
 
 export function PayrollReview({ id }: { id: string }) {
@@ -52,7 +41,7 @@ export function PayrollReview({ id }: { id: string }) {
   const submit = useMutation((ex: boolean) => client.post("/v1/payrolls/:id/submit", { params: { id }, body: { excludeBlocked: ex } }));
   const review = useMutation(async () => {
     const r = (await client.post("/v1/routines/:id/trigger", { params: { id: "rt_pre_payroll" }, body: { runId: id } })) as { routineRunId: string; agentRunId?: string };
-    const agentRunId = await findAgentRun(r.routineRunId, r.agentRunId);
+    const agentRunId = await agentRunOf(r.routineRunId, r.agentRunId);
     if (agentRunId) agent.watch(agentRunId, "Pre-payroll review");
     return r;
   });

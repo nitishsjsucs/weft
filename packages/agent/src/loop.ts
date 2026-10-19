@@ -565,13 +565,21 @@ export async function routineSummary(results: () => Promise<unknown[]>): Promise
   // A call that matched an open proposal filed nothing (fix group duplicate-proposal): the summary says it was already there.
   const seen = new Set<string>();
   const proposed = rs.filter((r) => r.proposalId && !seen.has(r.proposalId) && seen.add(r.proposalId));
-  const parts = [
-    ...proposed.map((r) => `${r.existing ? "Already waiting for approval:" : "Proposed"} ${r.title ?? "a change"} (${r.proposalId})`),
-    ...rs.filter((r) => r.resultId && r.actionSeq !== null && r.actionSeq !== undefined).map((r) => `${r.summary ?? "Done"} (#${r.actionSeq})`),
-  ];
+  const proposals = proposed.map((r) => `${r.existing ? "Already waiting for approval:" : "Proposed"} ${r.title ?? "a change"} (${r.proposalId})`);
+  const actions = rs.filter((r) => r.resultId && r.actionSeq !== null && r.actionSeq !== undefined).map((r) => `${r.summary ?? "Done"} (#${r.actionSeq})`);
+  const parts = [...proposals, ...actions];
   if (!parts.length) return "Checked; nothing needed a change.";
-  const shown = parts.slice(0, ROUTINE_SUMMARY_PARTS).join("; ");
-  return parts.length > ROUTINE_SUMMARY_PARTS ? `${shown}; and ${parts.length - ROUTINE_SUMMARY_PARTS} more` : shown;
+  // One part over the cap is shown rather than counted; past that, the cut list names what it left out by kind, so a
+  // run with eight proposals and one write never reads as nine proposals ("and 1 more").
+  if (parts.length <= ROUTINE_SUMMARY_PARTS + 1) return parts.join("; ");
+  const shown = parts.slice(0, ROUTINE_SUMMARY_PARTS);
+  const moreProposals = Math.max(0, proposals.length - ROUTINE_SUMMARY_PARTS);
+  const moreActions = parts.length - ROUTINE_SUMMARY_PARTS - moreProposals;
+  const left = [
+    moreProposals ? `${moreProposals} more ${moreProposals === 1 ? "proposal" : "proposals"}` : null,
+    moreActions ? `${moreActions} ${moreProposals ? "" : "more "}${moreActions === 1 ? "change" : "changes"} that ran` : null,
+  ].filter(Boolean).join(" and ");
+  return `${shown.join("; ")}; and ${left}`;
 }
 
 const MAX_RECEIPT_LINES = 8;

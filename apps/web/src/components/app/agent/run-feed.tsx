@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Check, CircleAlert, CircleSlash, Clock, ExternalLink, ShieldAlert } from "lucide-react";
+import { Check, CircleAlert, CircleSlash, Clock, ExternalLink, ShieldAlert, ShieldCheck } from "lucide-react";
 import { ShimmerText } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TID, W3_CHAT_TID, type ApprovalCardW3, type Proposal, type ProposalStatus } from "@weft/contracts";
@@ -10,10 +10,15 @@ import { invalidate } from "@/lib/api/hooks";
 import { isChipStep, ranToolsLine, reportOf, stepState, stepSummary, toolLabel, type ReportRef } from "./run-steps";
 import { StepReport } from "./chart";
 import { ApprovalCard } from "./approval-card";
-import { answerText, routineSummaryText, taintSource } from "../copy";
+import { AnswerView } from "./answer-view";
+import { routineIdOf } from "./follow";
+import { taintText } from "./untrusted";
+import { routineSummaryText } from "../copy";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
-export function RunFeed({ runId, label, latest = true }: { runId: string; label?: string; latest?: boolean }) {
+/** `background`: a routine run the panel followed on its own; its answer keeps a separate test id so a scripted check
+ * that waits for "the next answer" after a question never takes a routine summary for it. */
+export function RunFeed({ runId, label, latest = true, background = false }: { runId: string; label?: string; latest?: boolean; background?: boolean }) {
   const [w, setW] = useState<RunWatch>({ run: null, steps: [], trace: null, mode: "idle" });
   // Decisions made on this feed's own cards, so the step line changes at once (the trace re-read follows).
   const [decided, setDecided] = useState<Record<string, ProposalStatus>>({});
@@ -36,9 +41,9 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
   const ran = working ? null : ranToolsLine(w.steps);
   return (
     <div className="flex flex-col gap-1.5" data-tour="agent-run" data-run-id={runId} data-status={status ?? "starting"} data-stream-mode={w.mode}>
-      {label ? <div className="text-1 text-gray-10">{label}</div> : null}
+      {label ? <div className="text-1 text-gray-10">{label}{background ? <span className="text-gray-9"> (started on its own)</span> : null}</div> : null}
       {w.run?.tainted ? (
-        <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" /><span title={w.run.taintedBy ?? undefined}>This run read untrusted content: {taintSource(w.run.taintedBy)}. Every write it asked for became a proposal.</span></div>
+        <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" /><span title={w.run.taintedBy ?? undefined}>This run read untrusted content: {taintText(w.run.taintedBy)}. Every write it asked for became a proposal.</span></div>
       ) : null}
       <ul className="flex flex-col gap-1" data-tour="agent-tool-lines">
         {chips.map((s) => {
@@ -51,6 +56,11 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
           );
         })}
       </ul>
+      {/* An agency notice's text is untrusted; a run that stayed untainted never read it, which is worth saying when
+          the notice carried an injected line (scenario 4), and true for every notice run. */}
+      {w.run && !working && !w.run.tainted && routineIdOf(w.run) === "rt_agency_notice" ? (
+        <div data-testid="agent-notice-untrusted" className="flex items-start gap-1.5 text-[13px] leading-5 text-gray-11"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-green-11" />Worked from the notice&apos;s parsed fields; its text is untrusted and was never shown to the agent.</div>
+      ) : null}
       {reports.map((r) => <StepReport key={r.stepN} runId={runId} item={r} />)}
       {cards.map((c) => <ApprovalCard key={c.proposalId} card={c} status={proposalOf(c.proposalId)?.status} taintedBy={proposalOf(c.proposalId)?.taintedBy ?? null} onDecided={(r) => { if (r.ok) setDecided((d) => ({ ...d, [c.proposalId]: r.proposal.status })); invalidate(); }} />)}
       {ran ? <div data-testid={W3_CHAT_TID.ranTools} className="text-1 text-gray-10">{ran}</div> : null}
@@ -60,25 +70,15 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
           : status === "done" ? <span className="text-gray-10">Done</span>
           : <span className="text-red-11">{status}{w.run?.terminalReason ? `: ${w.run.terminalReason}` : ""}</span>}
       </div>
-      {/* A routine's summary is its tool outcomes joined (ids and action numbers); a chat answer is the model's own
-          words and keeps the result ids it cites in storage. Both read as copy here, and the cited ids sit in Sources. */}
-      {w.run?.summary && !working ? <RunAnswer runId={runId} summary={w.run.summary} routine={!!w.run.routineRunId} /> : null}
+      {/* A routine's summary is its tool outcomes joined (ids and action numbers) and reads as a short list in run
+          order; a chat answer is the model's own words, shown as a safe Markdown subset with its cited results as
+          source chips. The stored text keeps the ids for the graders. */}
+      {w.run?.summary && !working ? (
+        w.run.routineRunId
+          ? <p data-testid={background ? "agent-background-answer" : TID.agentAnswer} title={w.run.summary} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{routineSummaryText(w.run.summary)}</p>
+          : <AnswerView testId={TID.agentAnswer} text={w.run.summary} runId={runId} />
+      ) : null}
       <Link href={`/app/runs/${runId}`} className={cn("inline-flex w-fit items-center gap-1 text-1 text-gray-10 hover:text-foreground")}>Open run <ExternalLink className="size-3" /></Link>
     </div>
-  );
-}
-
-function RunAnswer({ runId, summary, routine }: { runId: string; summary: string; routine: boolean }) {
-  const a = routine ? { text: routineSummaryText(summary), sources: [] as string[] } : answerText(summary);
-  return (
-    <>
-      <p data-testid={TID.agentAnswer} title={summary} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{a.text}</p>
-      {a.sources.length ? (
-        <div className="flex flex-wrap items-center gap-1 text-0 text-gray-10" data-testid="agent-answer-sources">
-          <span>Sources</span>
-          {a.sources.map((id, i) => <Link key={id} href={`/app/runs/${runId}#${id}`} title={id} className="rounded-full bg-gray-3 px-1.5 py-px hover:bg-gray-4 hover:text-foreground">Result {i + 1}</Link>)}
-        </div>
-      ) : null}
-    </>
   );
 }
