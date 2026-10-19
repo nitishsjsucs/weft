@@ -9,6 +9,8 @@ import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } fro
 import { W2_BENEFITS_TID as TID, type ContractorPayout, type ToolOutcome, type Worker } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, fmtDateTime, longDate } from "../format";
+import { STACK } from "../stack";
+import { cn } from "@weft/ui";
 
 const TONE: Record<string, "amber" | "blue" | "green" | "red"> = { pending: "amber", sent: "blue", delivered: "green", returned: "red" };
 const usd = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -48,28 +50,27 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
             {already ? `Scheduled for ${fmtDate(payday)}` : `Pay ${active.length} contractor${active.length === 1 ? "" : "s"} on ${fmtDate(payday)}`}
           </Button>
         </div>
-        <Card className="overflow-hidden">
+        {/* In a column under 40rem (the docked panel at 1280, a phone) each payout stacks (STACK), with every figure. */}
+        <Card className={cn("overflow-hidden", STACK.box)}>
           {rows.length === 0 ? <p className="px-4 py-4 text-[13px] text-gray-10">{q.data ? "No payouts yet." : "Loading..."}</p> : (
-            <div className="overflow-x-auto">
-              <Table data-testid={TID.payoutsTable} className="text-[13px]">
-                <THead><TR><TH>Contractor</TH><TH className="hidden tablet:table-cell">Payday</TH><TH numeric className="hidden tablet:table-cell">Amount</TH><TH numeric className="hidden tablet:table-cell">FX</TH><TH numeric>USD</TH><TH>Rail</TH></TR></THead>
-                <TBody>
-                  {rows.map((p) => (
-                    <TR key={p.id} data-testid={TID.payoutRow(p.id)} data-rail={p.railStatus}>
-                      <TD className="h-10 whitespace-nowrap">{names.get(p.workerId) ?? p.workerId}</TD>
-                      <TD className="hidden h-10 whitespace-nowrap tablet:table-cell">{fmtDate(p.scheduledFor)}</TD>
-                      <TD numeric className="hidden h-10 whitespace-nowrap tablet:table-cell">{minor(p.amountMinor, p.currency)}</TD>
-                      <TD numeric className="hidden h-10 font-mono text-1 tablet:table-cell">{p.fxRate}</TD>
-                      <TD numeric className="h-10 whitespace-nowrap">{usd(p.usdCents)}</TD>
-                      <TD className="h-10 whitespace-nowrap">
-                        <Badge tone={TONE[p.railStatus] ?? "gray"}>{p.railStatus}</Badge>
-                        <span className="ml-2 hidden text-1 text-gray-10 tablet:inline" title={`Sent ${when(p.sentAt)}, delivered ${when(p.deliveredAt)}`}>{p.deliveredAt ? when(p.deliveredAt) : p.sentAt ? when(p.sentAt) : ""}</span>
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </div>
+            <Table data-testid={TID.payoutsTable} className={cn("text-[13px]", STACK.table)}>
+              <THead className={STACK.head}><TR><TH>Contractor</TH><TH>Payday</TH><TH numeric>Amount</TH><TH numeric>FX</TH><TH numeric>USD</TH><TH>Rail</TH></TR></THead>
+              <TBody>
+                {rows.map((p) => (
+                  <TR key={p.id} data-testid={TID.payoutRow(p.id)} data-rail={p.railStatus} className={STACK.row}>
+                    <TD className={cn("h-10 whitespace-nowrap", STACK.leadShared, "@max-[40rem]:order-first @max-[40rem]:font-medium")}>{names.get(p.workerId) ?? p.workerId}</TD>
+                    <TD data-label="Payday" className={cn("h-10 whitespace-nowrap", STACK.cell)}>{fmtDate(p.scheduledFor)}</TD>
+                    <TD numeric data-label="Amount" className={cn("h-10 whitespace-nowrap", STACK.cell)}>{minor(p.amountMinor, p.currency)}</TD>
+                    <TD numeric data-label="FX" className={cn("h-10 font-mono text-1", STACK.cell, "@max-[40rem]:before:font-sans")}>{p.fxRate}</TD>
+                    <TD numeric data-label="USD" className={cn("h-10 whitespace-nowrap", STACK.cell)}>{usd(p.usdCents)}</TD>
+                    <TD className={cn("h-10 whitespace-nowrap", STACK.bare, "@max-[40rem]:order-first")}>
+                      <Badge tone={TONE[p.railStatus] ?? "gray"}>{p.railStatus}</Badge>
+                      <span className="ml-2 hidden text-1 text-gray-10 laptop:inline @max-[40rem]:hidden" title={`Sent ${when(p.sentAt)}, delivered ${when(p.deliveredAt)}`}>{p.deliveredAt ? when(p.deliveredAt) : p.sentAt ? when(p.sentAt) : ""}</span>
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
           )}
         </Card>
         <p className="mt-2 text-1 text-gray-10">The payment rail simulator marks a transfer sent on its next tick and delivered two business days after booking, on the sim clock.</p>

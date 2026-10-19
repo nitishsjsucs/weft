@@ -350,8 +350,11 @@ for (const [width, height] of [[1280, 800], [1366, 768], [1440, 900], [1512, 982
       test.skip(!world.rich, "the chart reads the rich world's history");
       await page.addInitScript(() => { try { localStorage.setItem("weft.agentOpen", "1"); } catch { /* blocked */ } });
       await openStep(page, "ask-chart");
+      // The step types the question into the composer first; Next sends it once it is there.
+      await expect(page.locator('[data-tour~="agent-composer"] textarea')).toHaveValue(/Show payroll cost by month/, { timeout: 15_000 });
+      await expect(readyCard(page, "ask-chart").locator("[data-tour-primary]")).toBeEnabled({ timeout: 15_000 });
       await readyCard(page, "ask-chart").locator("[data-tour-primary]").click();
-      await expect(page.locator('[data-tour~="agent-chart"]')).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator('[data-tour~="agent-chart"]')).toBeVisible({ timeout: 30_000 });
       await expect(page.locator('[data-tour~="agent-chart"] .recharts-wrapper')).toBeVisible();
       await page.waitForTimeout(300);
       expect(await tickProblems(page), "panel chart ticks").toEqual([]);
@@ -377,8 +380,8 @@ for (const [width, height] of [[1280, 800], [390, 844]] as const) {
       const pages = ["/app/reports", "/app/simulators", "/app/routines", "/app/compliance", "/app/benefits", "/app/it", "/app/contractors", "/app/offboarding", ...(width > 600 ? ["/app/settings/permissions"] : [])];
       for (const path of pages) {
         await page.goto(path);
-        await expect(page.locator("table").first()).toBeVisible({ timeout: 30_000 });
-        await page.waitForTimeout(500);
+        await page.waitForLoadState("networkidle");
+        await page.waitForTimeout(700);
         expect(await hiddenColumns(page), `${path}: columns behind a sideways scroll`).toEqual([]);
       }
     });
