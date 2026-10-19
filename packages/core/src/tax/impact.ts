@@ -32,7 +32,10 @@ export async function rateChangeImpact(tx: DbTx, i: ImpactInput) {
     }
   }
 
-  const perWorker = emps.map((w) => {
+  // The people a rate change reaches: employees with wages for this code in the year, or on the open draft. A hire who
+  // has not started yet has neither, and a leaver paid earlier in the year still counts (their wages carry the credit).
+  const paid = emps.filter((w) => (ytd.get(w.id) ?? 0) > 0 || (nextTaxable.get(w.id) ?? 0) > 0);
+  const perWorker = paid.map((w) => {
     const wages = Math.min(ytd.get(w.id) ?? 0, i.wageBaseCents);
     const before = mulRateCents(wages, i.oldRate), after = mulRateCents(wages, i.newRate);
     const next = nextTaxable.get(w.id) ?? 0;
@@ -51,12 +54,12 @@ export async function rateChangeImpact(tx: DbTx, i: ImpactInput) {
   const delta = rateSub(i.oldRate, i.newRate);
   return {
     jurisdiction: i.jurisdiction, code: i.code, old_rate: i.oldRate, new_rate: i.newRate, rate_delta: delta, rate_delta_display: rateDisplay(delta.replace(/^-/, "")),
-    employees_in_state: emps.length, affected_count: affected.length, unaffected_count: emps.length - affected.length,
+    employees_in_state: paid.length, affected_count: affected.length, unaffected_count: paid.length - affected.length,
     ytd_before_cents: sum(perWorker.map((p) => p.before_cents)), ytd_before_display: formatCents(sum(perWorker.map((p) => p.before_cents))),
     ytd_after_cents: sum(perWorker.map((p) => p.after_cents)), ytd_after_display: formatCents(sum(perWorker.map((p) => p.after_cents))),
     credit_total_cents: sum(affected.map((p) => p.credit_cents)), credit_total_display: formatCents(sum(affected.map((p) => p.credit_cents))),
     under_wage_base_count: perWorker.filter((p) => p.under_wage_base).length,
-    next_run: draft ? { run_id: draft.id, payday: draft.payday, before_cents: sum(nextAffected.map((p) => p.next_run_before_cents)), before_display: formatCents(sum(nextAffected.map((p) => p.next_run_before_cents))), after_cents: sum(nextAffected.map((p) => p.next_run_after_cents)), after_display: formatCents(sum(nextAffected.map((p) => p.next_run_after_cents))), affected_count: nextAffected.length, unaffected_count: emps.length - nextAffected.length, change_cents: sum(nextAffected.map((p) => p.next_run_change_cents)), change_display: formatCents(sum(nextAffected.map((p) => p.next_run_change_cents))) } : null,
+    next_run: draft ? { run_id: draft.id, payday: draft.payday, before_cents: sum(nextAffected.map((p) => p.next_run_before_cents)), before_display: formatCents(sum(nextAffected.map((p) => p.next_run_before_cents))), after_cents: sum(nextAffected.map((p) => p.next_run_after_cents)), after_display: formatCents(sum(nextAffected.map((p) => p.next_run_after_cents))), affected_count: nextAffected.length, unaffected_count: paid.length - nextAffected.length, change_cents: sum(nextAffected.map((p) => p.next_run_change_cents)), change_display: formatCents(sum(nextAffected.map((p) => p.next_run_change_cents))) } : null,
     workers: perWorker,
   };
 }

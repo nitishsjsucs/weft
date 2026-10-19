@@ -9,6 +9,7 @@ import {
   trainingCourses, workers, type DbTx,
 } from "@weft/db";
 import { newId, payroll, sha256Hex } from "@weft/core";
+import { receiptUpload } from "./motion";
 
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
@@ -17,7 +18,7 @@ const DEMO_DOC = "DEMO DOCUMENT. Fictional company, fictional person, simulated 
 const KINDS = ["sign_offer", "sign_confidentiality", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts"] as const;
 const OWNER: Record<string, string> = { i9_sim: "hr", it_accounts: "agent" };
 
-export interface PortalHiresApi { tx: DbTx; bump: (table: string, n?: number) => void; action: (a: Record<string, unknown>) => void }
+export interface PortalHiresApi { dataDir?: string; tx: DbTx; bump: (table: string, n?: number) => void; action: (a: Record<string, unknown>) => void }
 
 type Hire = {
   first: string; last: string; title: string; dept: string; wkp: string; state: string; tz: string; base: number; start: string; manager: string | null;
@@ -107,9 +108,13 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
   // New York course a new NY hire must finish within 30 days of starting.
   const odette = made[0]!;
   const exp = await newId(tx, "exp_");
+  // Her receipt is on file (equipment over $75 needs one). The claim predates her start date, which the policy engine
+  // flags as outside employment, so no checks are stored for it here (see docs/tracks/rich-seed.md, known gaps).
+  const extract = { merchant: "Deskline Supply (demo)", date: "2026-10-20", total_cents: 18_640, source: "simulated extractor (sidecar)" };
+  const receiptUploadId = await receiptUpload(L, odette, exp, 900, pt("2026-10-21", 18), JSON.stringify(extract));
   await tx.insert(expenses).values({ id: exp, companyId: CO, workerId: odette, category: "equipment", merchant: "Deskline Supply (demo)", amountCents: 18_640, transactionDate: "2026-10-20",
     submittedAt: pt("2026-10-21", 18), businessPurpose: "Monitor arm and keyboard for the home office, under the remote work policy",
-    receiptExtractJson: JSON.stringify({ merchant: "Deskline Supply (demo)", date: "2026-10-20", total_cents: 18_640, source: "simulated extractor (sidecar)" }), status: "approved", checksJson: "[]",
+    receiptUploadId, receiptExtractJson: JSON.stringify(extract), status: "approved", checksJson: "[]",
     approverPrincipalId: "usr_dana", decidedBy: "usr_dana", decidedAt: pt("2026-10-22", 10), decisionNote: "Approved. It pays with the first regular paycheck after the start date.", policyVersion: 1, source: "portal" });
   L.bump("expenses");
   L.action({ ts: pt("2026-10-22", 10), actorKind: "human", actorId: "usr_dana", command: "expenses.decide", args: { expense_id: exp, decision: "approve" }, summary: `Approved expense ${exp} for Odette Marsh (demo)`, reversible: "no" });

@@ -16,6 +16,10 @@ is empty, I want data everywhere", without moving a test, an e2e run, an eval wo
 
 ## Rules the layer keeps
 
+- Planted proposals take their risk class from the command, and the submit and laptop cards come from the command's
+  own preview (`Layer.preview`), so a seeded card reads like the live one for the same call. People posts (weekly
+  digest, monthly exec report) run after the turnover and quote `reports.query`.
+
 - It only adds rows. Planted rows are byte-identical to base: the four Weft pay runs and their paychecks, every
   current worker's YTD ledger, the base expenses, time-off requests and ledger, Noor's offer, the NY DOL notice, the
   draft filings and calendar items, action #1, workers `wrk_0001` to `wrk_0051` and the open October reconciliation.
@@ -42,7 +46,8 @@ Larkspur ran payroll on a previous provider until Aug 31, so Weft never ran them
 ## Story beats left for the tour
 
 DE 2088 is not delivered, the October reconciliation is not run, the 8 expenses are still in review, Noor's offer is
-still Sent, Colorado is not registered, and the pay_2026_10_30 submit waits for Theo (its proposal has
+still Sent, Colorado is not registered (no registration is planted: accepting Noor's offer files both, per tax account),
+and the pay_2026_10_30 submit waits for Theo (its proposal has
 `subjectHash: null`, so approving it runs the submit fresh). `pnpm demo:scenario` resets to base, so its checks see no
 pending proposals; `pnpm dev --fresh` brings the rich world back.
 
@@ -91,8 +96,11 @@ Run it on other ports with `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_
 - The device status enum has no repair or returned state, so a leaver's returned laptop is told in the offboarding
   step, not on IT. The base laptops are all one model; the rich layer adds a workstation, field tablets and a
   delivered laptop for the new hires.
-- 21 routines stay disabled ("Last run never"): enabling them in a dev world would spend on live runs. Four carry
-  paused trial history.
+- Most routines stay disabled: enabling them in a dev world would spend on live runs. Every routine the gallery shows
+  has at least one scripted past run, and the folded `rt_compliance_notices` is left out of `GET /v1/routines`
+  (`?include=retired` returns it).
+- Odette's pre-start home office claim has its receipt but no stored checks: the policy engine flags an expense dated
+  before the start date as outside employment, and the story still needs a decision on how she bought it.
 - August reconciliation has no row type for "clean"; September shows a resolved finding, October stays un-run.
 - Base chat messages keep the seed time; the rich ones are spread over days.
 - Workday stays unsynced on purpose: a sync hands People, Compensation and Time off to Workday.

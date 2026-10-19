@@ -8,7 +8,7 @@ import { actions, paychecks, principals, proposals, type DbTx } from "@weft/db";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import {
   concisePayrollRun, createDraft, getRun, groundExplanation, listRuns, markFailed, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
-  readAttempts, runSubjectHash, submitRun, templateExplanation, totalsFromDto, workerNames, writeAttempts, writeRunSummary, type TotalsCents,
+  readAttempts, runSubjectHash, submitPreviewText, submitRun, templateExplanation, totalsFromDto, workerNames, writeAttempts, writeRunSummary, type TotalsCents,
 } from "../payroll/index";
 import { DEMO_SUFFIX } from "../people/names";
 import { createSpecialRun, offCycleLines, OffCycleRefusal, planSpecialRun, specialSettleAt, type OffCycleInput as OffCycleSpecInput } from "../payroll/offcycle";
@@ -239,13 +239,10 @@ export const submitRunCommand: WeftCommand<SubmitInput> = {
     const run = await getRun(deps.tx, i.run_id);
     const s = await submitAmount(i, deps);
     const names = await workerNames(deps.tx, s.excluded);
+    const { title, diff } = submitPreviewText({ run, included: s.included, totalCostCents: s.totals.totalCost, bankCents: s.totals.netPay + s.totals.reimbursements,
+      excludedNames: s.excluded.map((w) => names.get(w)?.name ?? w) });
     return {
-      title: `Submit payroll ${run.id} (${run.periodStart} to ${run.periodEnd}, payday ${run.payday}): ${s.included} paychecks, total cost ${formatCents(s.totals.totalCost)}`,
-      diff: [
-        { label: "Status", before: "draft", after: "processing" },
-        { label: "Net pay to bank", before: "$0.00", after: formatCents(s.totals.netPay + s.totals.reimbursements) },
-        { label: "Excluded (blocked)", before: "none", after: s.excluded.length ? s.excluded.map((w) => `${names.get(w)?.name ?? w} (${w})`).join(", ") : "none" },
-      ],
+      title, diff,
       content: [], moneyCents: s.totals.totalCost, subjectRef: run.id, subjectHash: s.hash,
       evidence: [{ label: "Pay run", ref: run.id }, ...s.excluded.map((w) => ({ label: "Excluded worker", ref: w }))],
     };
