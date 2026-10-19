@@ -91,3 +91,37 @@ Round 2 ran one opt-in live autoplay pass on the rich world (gpt-5.6-luna, `WEFT
 $0.0037, the notice run in 9.0 s and the chart step in 5.5 s, both inside their soft timeouts, so no fallback copy
 showed. With round 1's pass (base world, 142 s, $0.0038) that is two of two passes inside the soft timeouts, $0.0075
 of the $0.40 cap (`weft-notes/tour-spend.json`). A third pass was not run.
+
+## Engine fixes (tp/engine, 2026-10-18)
+
+Nitish's step 10 report and the QA pass behind it (ring over the flag popover, a stale ring, a popover over the
+sidebar, the card over the docked agent panel) came from three engine gaps. Fixed at the root:
+
+- Layering. The ring and the secondary marks were a fixed `z-[70]`, above every app layer. They now paint one above
+  the target's own layer, never below 45 and never at the card's 70 (`ringZFor` in `layout.ts`): 45 for page content,
+  so every z-50 popover, menu and drawer the step or the person opens paints over the ring; 51 inside the expense
+  drawer. The ring is a 2 px border plus a 2 px inset halo inside its 4 px pad (`tour.css`), so it never paints over
+  the text next to the target.
+- Measurement. `useFrameValue` reads the target once per animation frame while a step shows, so a move with no resize
+  and no DOM insertion (a text or style change above the table, a CSS transition) is followed within a frame. The
+  ring is cut to where the target is visible (the viewport and every overflow-clipping ancestor: the main pane under
+  the header, a table that scrolls sideways, the agent thread), and a side where the target runs on fades out
+  instead of drawing an edge (`data-clip`). A target hidden under another sheet (the phone's agent sheet, the
+  tablet's overlay panel) gets no ring and an unanchored card. `scrollToView` leaves a 16 px margin so a
+  `block: "start"` target is not flush against the header or the window top.
+- Card placement. `placeCard` (`geometry.ts`, pure, unit-tested) works inside the content column (right of the
+  sidebar, left of the agent panel, docked or overlaid) and scores every side and free spot against the target, the
+  open app layers (popovers, menus, drawers, read every frame) and the step's secondary marks and new `avoid`
+  selectors. It narrows to 260 px beside a tall target or a tall menu before covering anything; with no clean spot
+  left it drops under the app's layers (z 49) rather than over the menu the person opened. The card sits on a point
+  anchor at the computed spot (`updatePositionStrategy: "always"`). Targets in the agent panel put the card left of
+  it, in the main column. The unanchored card centres on the content column, not the window.
+- Steps: payroll flags scrolls the group low enough for the card to fit above it (`cardAbove`), since its popover
+  drops below; audit avoids the newest two rows and the rate change row; permissions avoids the matrix; the portal
+  avoids the checklist items.
+- The flag popover (`flag-chip.tsx`) aligns to the chip's start, uses the app's main pane as its collision boundary
+  (`appMain()`, `data-app-main` on the shell's `<main>`) and scrolls inside the available height.
+- Tests: `apps/web/test/tour-geometry.test.ts`, and `e2e/tour/tour-layout.spec.ts` at 1280x800 and 1440x900 with the
+  panel docked (ring encloses the visible target and hugs it within 6 px on 16 steps; no card over the target, an
+  open layer, the sidebar or the panel; the flag popover paints over the ring, checked by hit-testing the ring's edge,
+  and stays inside main; the ring follows a style-only move; the env pill's three popovers and menu).
