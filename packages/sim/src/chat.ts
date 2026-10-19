@@ -33,6 +33,9 @@ export function createChatSim(db: DbTx, clock: SimClock, faults: FaultInjector):
       const rows = await db.select().from(simChatMessages)
         .where(afterId ? and(eq(simChatMessages.channel, channel), gt(simChatMessages.id, afterId)) : eq(simChatMessages.channel, channel))
         .orderBy(asc(simChatMessages.id));
+      // A channel reads in time order (imported history can carry later ids than the messages it predates); an
+      // incremental read after a cursor stays in id order, so the cursor still moves forward.
+      if (!afterId) rows.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.id < b.id ? -1 : 1));
       return rows.map((r): ChatMessage => ({ id: r.id, channel: r.channel as ChatChannel, author: r.author, text: r.text, card: r.cardJson ? JSON.parse(r.cardJson) : null, ts: r.ts, inbound: r.inbound }));
     },
   };

@@ -12,6 +12,11 @@ import { parseRoutineDraft } from "../../../../packages/core/src/routines/draft-
 import type { EventSource, WeftRoutinesEngine } from "@weft/routines";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
+import { RT_COMPLIANCE_NOTICES } from "../../../../packages/contracts/src/ext/w4-parity-compliance";
+
+/** Routines kept only for the record (folded into another one; they never run). The gallery and the list leave them
+ * out; `?include=retired` and GET /v1/routines/:id still return them. */
+export const RETIRED_ROUTINES: ReadonlySet<string> = new Set([RT_COMPLIANCE_NOTICES]);
 
 /** Marker the routines engine appends to events.consumed_json once it has matched an event against the routines. */
 export const ROUTINES_CONSUMER = "routines";
@@ -58,7 +63,7 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
 
   // Wave 3 (w3-parity-routines): each row also carries lastRun and nextRunAt for the gallery and the list.
   r.get("/v1/routines", async (c) => {
-    const defs = await engine.list();
+    const defs = (await engine.list()).filter((d) => c.req.query("include") === "retired" || !RETIRED_ROUTINES.has(d.id));
     const ov = typeof engine.overview === "function" ? new Map((await engine.overview()).map((o) => [o.routineId, o])) : new Map();
     return c.json(defs.map((d) => ({ ...d, lastRun: ov.get(d.id)?.lastRun ?? null, nextRunAt: ov.get(d.id)?.nextRunAt ?? null })));
   });

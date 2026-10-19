@@ -10,10 +10,12 @@ import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import {
   actions, agentRuns, approvalAudit, contractorPayments, documents, employerTaxRates, filings, handoffCases, notices, offboardingCases, offboardingSteps,
-  onboardingTasks, payRates, payrollRuns, proposals, routineRuns, runSteps, simAgencyMail, simChatMessages, simRailTransfers, simRegistrations,
+  onboardingTasks, paychecks, payRates, payrollRuns, proposals, routineRuns, runSteps, simAgencyMail, simChatMessages, simRailTransfers, simRegistrations,
   taxAccounts, taxProfiles, timeOffAssignments, timeOffLedger, timeOffRequests, workers, withWriteLock, type DbTx,
 } from "@weft/db";
-import { canonicalJson, newId, payroll, sha256Hex } from "@weft/core";
+import { canonicalJson, commands, newId, payroll, sha256Hex } from "@weft/core";
+import type { ExecContext, Preview, SimClock, Simulators } from "@weft/contracts";
+import { createSimulators } from "@weft/sim";
 import type { SeedContext } from "../context";
 import { seedRichMotion, type MotionApi } from "./motion";
 import { seedImportedPayHistory } from "./pay-history";
@@ -59,8 +61,38 @@ interface PendingAction {
 class Layer {
   readonly counts: RichSummary = {};
   readonly pending: PendingAction[] = [];
-  constructor(readonly tx: DbTx) {}
+  constructor(readonly tx: DbTx, private readonly sims: Simulators | null = null, private readonly clock: SimClock | null = null) {}
   bump(t: string, n = 1) { this.counts[t] = (this.counts[t] ?? 0) + n; }
+
+  /** The command's own preview and risk class, so a planted proposal reads exactly like a live one for the same call. */
+  async preview(command: string, args: Record<string, unknown>): Promise<Preview & { risk: string }> {
+    const cmd = commands.find((c) => c.name === command);
+    if (!cmd?.preview || !this.sims || !this.clock) throw new Error(`rich seed: no preview for ${command}`);
+    const input = cmd.input.parse(args);
+    const ctx: ExecContext = { companyId: CO, principal: { id: "usr_dana", kind: "human", role: "owner" }, onBehalfOf: null, surface: "human_ui", agentKind: null,
+      run: null, tainted: false, routineRunId: null, approvedProposalId: null, now: this.clock.now() };
+    const deps = { tx: this.tx, sims: this.sims, clock: this.clock, newId: (prefix: string) => newId(this.tx, prefix as Parameters<typeof newId>[1]),
+      resolveCredential: async () => { throw new Error("rich seed: previews never read the vault"); } };
+    return { ...(await cmd.preview(input, ctx, deps as never)), risk: cmd.risk(input) };
+  }
+
+  /** The command's own risk class for these arguments. */
+  risk(command: string, args: Record<string, unknown>): string {
+    const cmd = commands.find((c) => c.name === command);
+    if (!cmd) throw new Error(`rich seed: no command ${command}`);
+    return cmd.risk(cmd.input.parse(args));
+  }
+
+  /** Runs a read command (R0) as Dana would, so a planted post quotes the figures the live tool returns. */
+  async read<T>(command: string, args: Record<string, unknown>): Promise<T> {
+    const cmd = commands.find((c) => c.name === command);
+    if (!cmd || cmd.effect !== "read" || !this.sims || !this.clock) throw new Error(`rich seed: ${command} is not a read`);
+    const ctx: ExecContext = { companyId: CO, principal: { id: "usr_dana", kind: "human", role: "owner" }, onBehalfOf: null, surface: "human_ui", agentKind: null,
+      run: null, tainted: false, routineRunId: null, approvedProposalId: null, now: this.clock.now() };
+    const deps = { tx: this.tx, sims: this.sims, clock: this.clock, newId: (prefix: string) => newId(this.tx, prefix as Parameters<typeof newId>[1]),
+      resolveCredential: async () => { throw new Error("rich seed: reads never touch the vault"); } };
+    return (await cmd.run(cmd.input.parse(args), ctx, deps as never)).data as T;
+  }
 
   async run(spec: RunSpec): Promise<{ runId: string; routineRunId: string | null }> {
     const { tx } = this;
@@ -119,9 +151,11 @@ class Layer {
   }): Promise<string> {
     const id = await newId(this.tx, "prp_");
     const argsHash = sha256Hex(canonicalJson(p.args));
+    // The risk class is always the command's own for these arguments, never a hand-written one.
+    const risk = commands.some((c) => c.name === p.command) ? this.risk(p.command, p.args) : p.risk;
     await this.tx.insert(proposals).values({
       id, companyId: CO, kind: p.kind ?? "action", command: p.command, argsJson: JSON.stringify(p.args), argsHash, subjectRef: p.subjectRef,
-      subjectHash: null, risk: p.risk, headline: p.headline, diffJson: JSON.stringify(p.diff ?? []), contentJson: "[]", evidenceJson: JSON.stringify(p.evidence ?? []),
+      subjectHash: null, risk, headline: p.headline, diffJson: JSON.stringify(p.diff ?? []), contentJson: "[]", evidenceJson: JSON.stringify(p.evidence ?? []),
       agentNote: p.agentNote ?? null, proposerRunId: p.runId ?? null, routineRunId: p.routineRunId ?? null, onBehalfOf: p.onBehalfOf ?? "usr_dana", domain: p.domain,
       moneyCents: p.moneyCents ?? null, reversible: p.reversible ?? false, createdAt: p.at,
       expiresAt: p.expiresAt ?? new Date(Date.parse(p.at) + 3 * 86_400_000).toISOString(), status: p.status,
@@ -203,31 +237,25 @@ function mondays(from: string, to: string): string[] {
 
 async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
   const emp = ws.filter((w) => w.type === "employee");
-  // Weekly people digest every Monday since August, posted to #people-ops by the Weft agent.
-  for (const day of mondays("2026-08-03", "2026-10-19")) {
-    const at = pt(day, 9);
-    const active = emp.filter((w) => w.startDate <= day && (!w.endDate || w.endDate >= day)).length;
-    const text = `Weekly people digest (demo): ${active} employees. New this week: ${emp.filter((w) => w.startDate > addDays(day, -7) && w.startDate <= day).length}. Open onboarding items and time-off requests are listed in Weft.`;
-    const r = await L.run({ at, trigger: "routine", routineId: "rt_people_digest", onBehalfOf: "usr_dana", final: `Posted the weekly digest to #people-ops for the week of ${day}.`,
-      tools: [{ name: "people__search", args: { status: "active" }, data: { count: active } }, { name: "comms__send_message", args: { channel: "#people-ops" }, data: { posted: true } }],
-      checklist: [{ id: "posted", label: "post the digest in #people-ops", passed: true }] });
-    const msg = await L.chat("#people-ops", "Weft agent", text, at);
-    L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#people-ops", text }, summary: `Posted to #people-ops (${msg})`, reversible: "no" });
-  }
   // Pre-payroll review on each approval-deadline day, with the submit proposal Theo approved.
   const runs = await L.tx.select().from(payrollRuns).where(eq(payrollRuns.status, "processed")).orderBy(asc(payrollRuns.periodEnd));
   for (const run of runs) {
-    const t = JSON.parse(run.totalsJson ?? "{}") as { employerCostCents?: number; totalCostCents?: number; netCents?: number; count?: number };
-    const cost = t.totalCostCents ?? t.employerCostCents ?? 0;
+    // The run's stored totals (contracts TOTALS_FIELDS: { totalCost: { amount } }), worded by the live preview's formatter.
+    const t = JSON.parse(run.totalsJson ?? "{}") as Record<string, { amount?: number } | undefined>;
+    const cost = t.totalCost?.amount ?? 0;
+    const bank = (t.netPay?.amount ?? 0) + (t.reimbursements?.amount ?? 0);
+    const checks = await L.tx.select({ workerId: paychecks.workerId, status: paychecks.status }).from(paychecks).where(eq(paychecks.payrollRunId, run.id));
+    const excludedNames = checks.filter((c) => c.status === "excluded").map((c) => { const w = ws.find((x) => x.id === c.workerId); return w ? name(w) : c.workerId; });
+    const included = checks.length - excludedNames.length;
+    const { title: headline, diff } = payroll.submitPreviewText({ run, included, totalCostCents: cost, bankCents: bank, excludedNames });
     const at = new Date(Date.parse(run.approvalDeadline) - 8 * 3_600_000).toISOString();
-    const headline = `Submit payroll ${run.id} (${run.periodStart} to ${run.periodEnd}, payday ${run.payday})${cost ? `: total cost ${money(cost)}` : ""}`;
-    const r = await L.run({ at, trigger: "routine", routineId: "rt_pre_payroll", onBehalfOf: "usr_theo", final: `Proposed ${headline}. Explanations attached to the flagged paychecks.`,
+    const r = await L.run({ at, trigger: "routine", routineId: "rt_pre_payroll", onBehalfOf: "usr_theo", final: `Proposed: ${headline}. Explanations attached to the flagged paychecks.`,
       tools: [{ name: "payroll__get_run", args: { run_id: run.id }, data: { id: run.id, status: "draft" } }, { name: "payroll__submit_run", args: { run_id: run.id }, data: { proposed: true } }],
       checklist: [{ id: "explain", label: "explain flagged paychecks", passed: true }, { id: "submit", label: "propose payroll.submit_run", passed: true }] });
     const decidedAt = run.approvedAt ?? new Date(Date.parse(at) + 2 * 3_600_000).toISOString();
-    await L.proposal({ at, command: "payroll.submit_run", args: { run_id: run.id }, subjectRef: run.id, risk: "R4", headline, domain: "payroll", moneyCents: cost || undefined,
+    await L.proposal({ at, command: "payroll.submit_run", args: { run_id: run.id }, subjectRef: run.id, risk: "R4", headline, diff, domain: "payroll", moneyCents: cost,
       evidence: [{ label: "Pay run", ref: run.id }], runId: r.runId, routineRunId: r.routineRunId, status: "executed", decidedBy: "usr_theo", decidedAt, onBehalfOf: "usr_theo",
-      exec: { ts: decidedAt, actorKind: "human", actorId: "usr_theo", summary: `Submitted ${run.id} for funding (approved by Theo Marsh (demo))`, reversible: "no" } });
+      exec: { ts: decidedAt, actorKind: "human", actorId: "usr_theo", summary: `Submitted ${run.id}: ${included} paychecks, ${money(bank)} to the bank`, reversible: "no" } });
     L.action({ ts: run.processedAt ?? pt(run.payday, 6), actorKind: "system", actorId: "svc_events", command: "payroll.mark_processed", args: { run_id: run.id }, summary: `Processed ${run.id}: paychecks settled`, reversible: "no" });
   }
   // The NY DOL 2026 rate notice handled on Feb 14 (the notice row is planted and already resolved).
@@ -262,30 +290,6 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
       final: "From the company expense policy: business meals have a per person limit, lodging always needs a receipt, and mileage is paid at the IRS rate." },
   ];
   for (const c of chats) await L.run(c);
-  // Decided history in the Inbox, and the pending items for this week.
-  const theo = "usr_theo";
-  const decided: Parameters<Layer["proposal"]>[0][] = [
-    { at: pt("2026-03-03", 9), command: "people.update_profile", args: { worker_id: "wrk_0031", preferred_name: "Tom" }, subjectRef: "wrk_0031", risk: "R1", headline: "Set the preferred name for Tomasz Nowak (demo) to Tom", domain: "people", status: "executed", decidedBy: "usr_sam", decidedAt: pt("2026-03-03", 11), reversible: true,
-      exec: { ts: pt("2026-03-03", 11), actorKind: "human", actorId: "usr_sam", summary: "Set the preferred name of wrk_0031 to Tom", reversible: "yes", reverse: { command: "people.update_profile", args: { worker_id: "wrk_0031", preferred_name: null } } } },
-    { at: pt("2026-05-11", 10), command: "it.order_device", args: { worker_id: "wrk_0018", sku: "standard_laptop" }, subjectRef: "wrk_0018", risk: "R2", headline: "Order a replacement laptop for Kofi Mensah (demo)", domain: "it", status: "denied", decidedBy: "usr_dana", decidedAt: pt("2026-05-11", 14), decisionCode: "not_needed", decisionNote: "Repair first; the screen is under warranty." },
-    { at: pt("2026-07-30", 9), command: "comms.send_message", args: { channel: "#general", text: "Summer hours start Monday (demo)." }, subjectRef: "#general", risk: "R1", headline: "Post the summer hours note in #general", kind: "suggestion", domain: "comms", status: "dismissed", decidedBy: "usr_dana", decidedAt: pt("2026-07-30", 12) },
-    { at: pt("2026-09-14", 9), command: "time_off.decide", args: { worker_id: "wrk_0014", decision: "approve" }, subjectRef: "wrk_0014", risk: "R1", headline: "Approve 2 days of vacation for Caleb Whitaker (demo)", domain: "people", status: "executed", decidedBy: theo, decidedAt: pt("2026-09-14", 13),
-      exec: { ts: pt("2026-09-14", 13), actorKind: "human", actorId: theo, summary: "Approved vacation for wrk_0014", reversible: "no" } },
-    { at: pt("2026-10-05", 9), command: "benefits.nudge_open_enrollment", args: { plan_year: 2027 }, subjectRef: "open_enrollment:2027", risk: "R1", headline: "Remind the employees who have not opened the 2027 enrollment", kind: "suggestion", domain: "benefits", status: "dismissed", decidedBy: "usr_sam", decidedAt: pt("2026-10-05", 10), decisionNote: "Waiting until the carrier rates are final." },
-  ];
-  const decidedIds: string[] = [];
-  for (const d of decided) decidedIds.push(await L.proposal(d));
-  // The rolled-back profile edit: the reversing row points at the edit above (its action key is the proposal id).
-  L.action({ ts: pt("2026-03-03", 15), actorKind: "human", actorId: "usr_sam", command: "people.update_profile", args: { worker_id: "wrk_0031", preferred_name: null }, summary: "Rolled back the preferred name edit on wrk_0031 (entered on the wrong person)", reversible: "no", reverses: decidedIds[0] });
-  // Pending suggestions in the Inbox for this week.
-  const sug: Parameters<Layer["proposal"]>[0][] = [
-    { at: pt("2026-10-26", 8, 5), command: "routines.enable", args: { routine_id: "rt_expense_review" }, subjectRef: "rt_expense_review", risk: "R1", headline: "Turn on the Expense review routine: 8 claims are waiting for a decision", kind: "suggestion", domain: "company", status: "pending", expiresAt: "2026-11-09T16:00:00.000Z",
-      agentNote: "The routine checks each claim against the policy and drafts the decision for a person to approve." },
-    { at: pt("2026-10-26", 8, 6), command: "benefits.nudge_open_enrollment", args: { plan_year: 2027 }, subjectRef: "open_enrollment:2027", risk: "R1", headline: "Nudge the open enrollment stragglers before the window closes", kind: "suggestion", domain: "benefits", status: "pending", expiresAt: "2026-11-09T16:00:00.000Z" },
-    { at: pt("2026-10-26", 8, 7), command: "tax.register_state_account", args: { state: "CO" }, subjectRef: "CO", risk: "R2", headline: "Register Colorado withholding and unemployment accounts before Noor Castellanos (demo) starts on Nov 2", kind: "suggestion", domain: "tax", status: "pending", expiresAt: "2026-11-02T16:00:00.000Z",
-      evidence: [{ label: "Offer", ref: "offr_0001" }] },
-  ];
-  for (const s of sug) await L.proposal(s);
   // Open hand-offs to a tax specialist, and one already resolved.
   const hand = [
     { kind: "tax_specialist", reason: "deposit_schedule_question", summary: "The IRS letter asks whether Larkspur (demo) moves to a semiweekly deposit schedule next year; a tax specialist should confirm the lookback period.", status: "open", createdAt: pt("2026-10-22", 10), subjectRef: "txa_0001" },
@@ -298,52 +302,29 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
       createdAt: h.createdAt, resolvedAt: h.resolvedAt ?? null, resolutionNote: h.note ?? null });
     L.bump("handoff_cases");
   }
-  // Routines that ran in a September trial and are paused now, plus the October chases.
+  // Routines that ran in a September trial and are paused now, plus the October chases. The milestone posts name the
+  // people whose start date comes round in the week up to the post.
+  function anniversaries(d: string): string {
+    const year = Number(d.slice(0, 4));
+    const hits = emp.filter((w) => w.status === "active" && w.startDate.slice(0, 4) < d.slice(0, 4) && !w.endDate)
+      .filter((w) => { const on = `${d.slice(0, 4)}${w.startDate.slice(4)}`; return on > addDays(d, -7) && on <= d; })
+      .map((w) => { const n = year - Number(w.startDate.slice(0, 4)); return `${name(w)}, ${n} ${n === 1 ? "year" : "years"}`; });
+    return hits.length ? `Celebrating work anniversaries this week: ${hits.join("; ")}.` : "No work anniversaries this week, so nothing was posted.";
+  }
   const trial: [string, string, string, string, string | null][] = [
     ["rt_expense_review", pt("2026-09-14", 10), "Checked 6 claims against the policy: 5 within limits, 1 missing a receipt. Drafted the decisions for review.", "expenses__list", null],
     ["rt_expense_review", pt("2026-09-28", 10), "Checked 4 claims against the policy: all within limits. Drafted the approvals for review.", "expenses__list", null],
-    ["rt_milestones", pt("2026-09-21", 9), "Posted 2 work anniversaries in #general.", "comms__send_message", "#general"],
-    ["rt_milestones", pt("2026-10-05", 9), "Posted 1 work anniversary in #general.", "comms__send_message", "#general"],
+    ["rt_milestones", pt("2026-09-21", 9), anniversaries("2026-09-21"), "comms__send_message", "#general"],
+    ["rt_milestones", pt("2026-10-05", 9), anniversaries("2026-10-05"), "comms__send_message", "#general"],
     ["rt_open_enrollment", pt("2026-10-05", 10), "Sent the first open enrollment reminder to the employees who have not opened the 2027 window.", "comms__send_email", null],
     ["rt_onboarding_nudge", pt("2026-10-21", 9), "Reminded Mira Delgado (demo) to add a bank account; payroll is blocked until it is on file.", "comms__send_email", null],
   ];
   for (const [routineId, at, final, tool, channel] of trial) {
     const r = await L.run({ at, trigger: "routine", routineId, onBehalfOf: "usr_dana", final, tools: [{ name: tool, args: channel ? { channel } : {}, data: { ok: true } }] });
-    if (channel) {
-      const msg = await L.chat(channel, "Weft agent", final.replace(/^Posted /, "Celebrating today: ").replace(" in #general.", " (demo)."), at);
-      L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel, text: final }, summary: `Posted to ${channel} (${msg})`, reversible: "no" });
+    if (channel && !final.startsWith("No work anniversaries")) {
+      await L.chat(channel, "Weft agent", final, at);
+      L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel, text: final }, summary: `Posted the work anniversaries to ${channel}`, reversible: "no" });
     }
-  }
-  // The favorites' history: the monthly exec report on the 1st, the weekly cost by state on Mondays, and a ready
-  // check in the week before each 2026 hire starts. They stay disabled (a running dev clock never fires a live model
-  // call), but the gallery and their detail pages show real past runs.
-  const months = ["2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
-  for (const m of months) {
-    let day = `${m}-01`;
-    while (!isWeekday(day) || HOLIDAYS.has(day)) day = addDays(day, 1);
-    const prev = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 2, 1, 12)).toISOString().slice(0, 7);
-    const head = emp.filter((w) => w.startDate <= day && (!w.endDate || w.endDate >= day)).length;
-    const joined = emp.filter((w) => w.startDate.startsWith(prev)).length;
-    const left = emp.filter((w) => w.endDate?.startsWith(prev)).length;
-    const label = new Date(`${prev}-15T12:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-    const final = `Posted the ${label} exec report to #leadership: ${head} employees (${joined} joined, ${left} left), payroll cost by month and open compliance items.`;
-    const r = await L.run({ at: pt(day, 8), trigger: "routine", routineId: "rt_monthly_exec_report", triggerRef: `cron:${day}`, onBehalfOf: "usr_dana", final,
-      tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { rows: 1 } }, { name: "comms__send_message", args: { channel: "#leadership" }, data: { posted: true } }] });
-    const msg = await L.chat("#leadership", "Weft agent", `${label} exec report (demo): ${head} employees, ${joined} joined, ${left} left. Cost by month and compliance items are in Weft.`, pt(day, 8));
-    L.action({ ts: pt(day, 8), actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#leadership" }, summary: `Posted to #leadership (${msg})`, reversible: "no" });
-  }
-  for (const day of mondays("2026-08-03", "2026-10-19")) {
-    const states = [...new Set(emp.filter((w) => w.startDate <= day && (!w.endDate || w.endDate >= day)).map((w) => w.workState ?? "CA"))].sort();
-    await L.run({ at: pt(day, 8), trigger: "routine", routineId: "rt_weekly_cost_by_state", triggerRef: `cron:${day}`, onBehalfOf: "usr_theo",
-      final: `Payroll cost by state for the week of ${day}: ${states.join(", ")}. No state moved more than the alert threshold.`,
-      tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_state" }, data: { states: states.length } }] });
-  }
-  for (const w of emp.filter((x) => x.startDate >= "2026-01-05" && x.startDate <= "2026-10-26")) {
-    let day = addDays(w.startDate, -3);
-    while (!isWeekday(day)) day = addDays(day, -1);
-    await L.run({ at: pt(day, 9), trigger: "routine", routineId: "rt_new_hire_ready", triggerRef: `cron:${day}:${w.id}`, onBehalfOf: "usr_sam",
-      final: `${name(w)} is ready for ${w.startDate}: offer signed, W-4 and state form in, accounts created, laptop shipped.`,
-      tools: [{ name: "onboarding__ready_check", args: { worker_id: w.id }, data: { ready: true, open: 0 } }] });
   }
   // People ops chat spread over days.
   for (const [ch, author, text, at] of [
@@ -353,6 +334,153 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
     ["#people-ops", "Sam Okafor (demo)", "Reminder: managers, please decide pending time-off requests before Friday.", pt("2026-10-14", 10)],
     ["#leadership", "Dana Whitfield (demo)", "Colorado hiring plan is on track; registrations go in before Noor starts.", pt("2026-10-20", 16)],
   ] as const) await L.chat(ch, author, text, at);
+}
+
+/** Decided history in the Inbox and the suggestions waiting this week. Subjects are resolved by name from the seeded
+ * workers and the time-off decision points at a request the history really holds, so a headline never names one
+ * person while its arguments point at another. Previews come from the commands themselves where the subject allows. */
+async function seedDecidedProposals(L: Layer, ws: W[]): Promise<void> {
+  const byName = (first: string, last: string) => {
+    const w = ws.find((x) => x.firstName === first && x.lastName === last);
+    if (!w) throw new Error(`rich seed: no worker ${first} ${last}`);
+    return w;
+  };
+  const tomasz = byName("Tomasz", "Nowak");
+  const kofi = byName("Kofi", "Mensah");
+  const caleb = byName("Caleb", "Whitaker");
+  const rename = { worker_id: tomasz.id, preferred_name: "Tom" };
+  const laptop = { worker_id: kofi.id };
+  const laptopPreview = await L.preview("it.order_device", laptop);
+  // Caleb's September vacation, decided the way the history decided it; the proposal is the one that decision approved.
+  const [req] = (await L.tx.select().from(timeOffRequests).where(eq(timeOffRequests.workerId, caleb.id)).orderBy(asc(timeOffRequests.startAt)))
+    .filter((q) => q.status === "taken" && q.policyId === "top_vac_us" && q.decidedAt);
+  const decided: Parameters<Layer["proposal"]>[0][] = [
+    { at: pt("2026-03-03", 9), command: "people.update_profile", args: rename, subjectRef: tomasz.id, risk: L.risk("people.update_profile", rename), headline: `Set the preferred name for ${name(tomasz)} to Tom`,
+      diff: [{ label: "Preferred name", before: "none", after: "Tom" }], evidence: [{ label: "Worker", ref: tomasz.id }], domain: "people", status: "executed", decidedBy: "usr_sam", decidedAt: pt("2026-03-03", 11), reversible: true,
+      exec: { ts: pt("2026-03-03", 11), actorKind: "human", actorId: "usr_sam", summary: `Set the preferred name of ${name(tomasz)} to Tom`, reversible: "yes", reverse: { command: "people.update_profile", args: { worker_id: tomasz.id, preferred_name: null } } } },
+    { at: pt("2026-05-11", 10), command: "it.order_device", args: laptop, subjectRef: laptopPreview.subjectRef, risk: laptopPreview.risk, headline: laptopPreview.title, diff: laptopPreview.diff,
+      moneyCents: laptopPreview.moneyCents ?? undefined, evidence: laptopPreview.evidence, domain: "it", status: "denied", decidedBy: "usr_dana", decidedAt: pt("2026-05-11", 14), decisionCode: "not_needed",
+      decisionNote: "Repair first; the screen is under warranty." },
+    { at: pt("2026-07-30", 9), command: "comms.send_message", args: { channel: "#general", text: "Summer hours start Monday (demo)." }, subjectRef: "#general", risk: "R1", headline: "Post the summer hours note in #general", kind: "suggestion", domain: "comms", status: "dismissed", decidedBy: "usr_dana", decidedAt: pt("2026-07-30", 12) },
+    { at: pt("2026-10-05", 9), command: "benefits.nudge_open_enrollment", args: { plan_year: 2027 }, subjectRef: "open_enrollment:2027", risk: "R1", headline: "Remind the employees who have not opened the 2027 enrollment", kind: "suggestion", domain: "benefits", status: "dismissed", decidedBy: "usr_sam", decidedAt: pt("2026-10-05", 10), decisionNote: "Waiting until the carrier rates are final." },
+  ];
+  const decidedIds: string[] = [];
+  for (const d of decided) decidedIds.push(await L.proposal(d));
+  if (req) {
+    const year = Number(req.startAt.slice(0, 4));
+    const span = req.startAt === req.endAt ? payroll.shortDay(req.startAt, year) : `${payroll.shortDay(req.startAt, year)} to ${payroll.shortDay(req.endAt, year)}`;
+    const args = { request_id: req.id, decision: "approve" };
+    const id = await L.proposal({ at: req.createdAt, command: "time_off.decide", args, subjectRef: req.id, risk: "R1", headline: `Approve ${name(caleb)}'s vacation ${span} (${req.requestedMinutes / 60} h)`,
+      diff: [{ label: "Status", before: "pending", after: "approved" }], evidence: [{ label: "Request", ref: req.id }], domain: "people", status: "executed", decidedBy: req.decidedBy ?? "usr_dana",
+      decidedAt: req.decidedAt!, onBehalfOf: req.decidedBy ?? "usr_dana" });
+    // The history already logged this decision; it becomes the action the proposal executed.
+    const act = L.pending.find((a) => a.command === "time_off.decide" && a.args.request_id === req.id);
+    if (act) { act.proposalId = id; act.key = id; }
+  }
+  // The rolled-back profile edit: the reversing row points at the edit above (its action key is the proposal id).
+  L.action({ ts: pt("2026-03-03", 15), actorKind: "human", actorId: "usr_sam", command: "people.update_profile", args: { worker_id: tomasz.id, preferred_name: null }, summary: `Rolled back the preferred name edit on ${name(tomasz)}: he asked to keep his full name`, reversible: "no", reverses: decidedIds[0] });
+  // Pending suggestions in the Inbox for this week. Colorado's registrations are not among them: accepting Noor's offer
+  // files them through the new-hire routine, per tax account, and a planted one would sit beside those as a duplicate.
+  const sug: Parameters<Layer["proposal"]>[0][] = [
+    { at: pt("2026-10-26", 8, 5), command: "routines.enable", args: { routine_id: "rt_expense_review" }, subjectRef: "rt_expense_review", risk: "R1", headline: "Turn on the Expense review routine: 8 claims are waiting for a decision", kind: "suggestion", domain: "company", status: "pending", expiresAt: "2026-11-09T16:00:00.000Z",
+      agentNote: "The routine checks each claim against the policy and drafts the decision for a person to approve." },
+    { at: pt("2026-10-26", 8, 6), command: "benefits.nudge_open_enrollment", args: { plan_year: 2027 }, subjectRef: "open_enrollment:2027", risk: "R1", headline: "Nudge the open enrollment stragglers before the window closes", kind: "suggestion", domain: "benefits", status: "pending", expiresAt: "2026-11-09T16:00:00.000Z" },
+  ];
+  for (const x of sug) await L.proposal(x);
+}
+
+/** The routines that report on people: the weekly digest, the monthly exec report, the weekly cost by state and the
+ * ready check before each 2026 hire. They run after the turnover and the portal hires are planted, from the full worker
+ * list, and quote reports.query itself (headcount at the end of the reported month, hires and departures in it), so a
+ * post in #leadership agrees with the Reports page. They stay disabled (a running dev clock never fires a live model
+ * call), but the gallery and their detail pages show real past runs. */
+async function seedReportHistory(L: Layer): Promise<void> {
+  const all = await L.tx.select().from(workers).orderBy(asc(workers.id));
+  const emp = all.filter((w) => w.type === "employee" && w.status !== "draft");
+  const onRoll = (d: string) => emp.filter((w) => w.startDate <= d && (!w.endDate || w.endDate >= d));
+  const short = (d: string) => payroll.shortDay(d, 2026);
+  for (const day of mondays("2026-08-03", "2026-10-19")) {
+    const at = pt(day, 9);
+    const active = onRoll(day).length;
+    const joined = emp.filter((w) => w.startDate > addDays(day, -7) && w.startDate <= day);
+    const left = emp.filter((w) => w.endDate && w.endDate >= addDays(day, -7) && w.endDate < day);
+    const text = `Weekly people digest (demo): ${active} employees. New this week: ${joined.length ? joined.map(name).join(", ") : "none"}. `
+      + `Left last week: ${left.length ? left.map(name).join(", ") : "none"}. Open onboarding items and time-off requests are listed in Weft.`;
+    const r = await L.run({ at, trigger: "routine", routineId: "rt_people_digest", onBehalfOf: "usr_dana", final: `Posted the weekly digest to #people-ops for the week of ${short(day)}: ${active} employees.`,
+      tools: [{ name: "people__search", args: { status: "active" }, data: { count: active } }, { name: "comms__send_message", args: { channel: "#people-ops" }, data: { posted: true } }],
+      checklist: [{ id: "posted", label: "post the digest in #people-ops", passed: true }] });
+    await L.chat("#people-ops", "Weft agent", text, at);
+    L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#people-ops", text }, summary: "Posted the weekly people digest to #people-ops", reversible: "no" });
+  }
+  type Move = { period: string; hires: number; departures: number; headcount_end: number };
+  const moves = (await L.read<{ rows: Move[] }>("reports.query", { metric: "hires_and_departures_by_month", from: "2026-01-01", to: "2026-09-30" })).rows;
+  for (const mv of moves) {
+    const [y, mo] = mv.period.split("-").map(Number) as [number, number];
+    let day = new Date(Date.UTC(y, mo, 1, 12)).toISOString().slice(0, 10);
+    while (!isWeekday(day) || HOLIDAYS.has(day)) day = addDays(day, 1);
+    const label = new Date(`${mv.period}-15T12:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    const final = `Posted the ${label} exec report to #leadership: ${mv.headcount_end} employees at month end (${mv.hires} joined, ${mv.departures} left), payroll cost by month and open compliance items.`;
+    const r = await L.run({ at: pt(day, 8), trigger: "routine", routineId: "rt_monthly_exec_report", triggerRef: `cron:${day}`, onBehalfOf: "usr_dana", final,
+      tools: [{ name: "reports__query", args: { metric: "hires_and_departures_by_month" }, data: { period: mv.period, hires: mv.hires, departures: mv.departures, headcount_end: mv.headcount_end } },
+        { name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { rows: 1 } }, { name: "comms__send_message", args: { channel: "#leadership" }, data: { posted: true } }] });
+    await L.chat("#leadership", "Weft agent", `${label} exec report (demo): ${mv.headcount_end} employees at month end, ${mv.hires} joined, ${mv.departures} left. Cost by month and compliance items are in Weft.`, pt(day, 8));
+    L.action({ ts: pt(day, 8), actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#leadership" }, summary: `Posted the ${label} exec report to #leadership`, reversible: "no" });
+  }
+  for (const day of mondays("2026-08-03", "2026-10-19")) {
+    const states = [...new Set(onRoll(day).map((w) => w.workState ?? "CA"))].sort();
+    await L.run({ at: pt(day, 8), trigger: "routine", routineId: "rt_weekly_cost_by_state", triggerRef: `cron:${day}`, onBehalfOf: "usr_theo",
+      final: `Payroll cost by state for the week of ${short(day)}: ${states.join(", ")}. No state moved more than the alert threshold.`,
+      tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_state" }, data: { states: states.length } }] });
+  }
+  for (const w of emp.filter((x) => x.startDate >= "2026-01-05" && x.startDate <= "2026-10-26")) {
+    let day = addDays(w.startDate, -3);
+    while (!isWeekday(day)) day = addDays(day, -1);
+    await L.run({ at: pt(day, 9), trigger: "routine", routineId: "rt_new_hire_ready", triggerRef: `cron:${day}:${w.id}`, onBehalfOf: "usr_sam",
+      final: `${name(w)} is ready for ${short(w.startDate)}: offer signed, W-4 and state form in, accounts created, laptop shipped.`,
+      tools: [{ name: "onboarding__ready_check", args: { worker_id: w.id }, data: { ready: true, open: 0 } }] });
+  }
+}
+
+/** One or two past runs for each routine the gallery shows that has none yet, so no card reads "Last run never". They
+ * are scripted transcripts at $0.00 and every routine keeps its enabled flag: nothing here turns on live firing. Each
+ * summary names only what the rest of the layer planted (the offers, Mira's window, Odette's course, the checks). */
+async function seedQuietRoutines(L: Layer): Promise<void> {
+  const all = await L.tx.select().from(workers).orderBy(asc(workers.id));
+  const who = (first: string) => { const w = all.find((x) => x.firstName === first); return w ? name(w) : `${first} (demo)`; };
+  const contractors = all.filter((w) => w.type === "contractor" && w.status === "active").length;
+  const runs: [string, string, string, string, string][] = [
+    ["rt_ats_hire", pt("2026-10-19", 10, 2), "event:greenhouse:gh-hire-6600091", "integrations__apply_delivery", `Greenhouse marked ${who("Marisol")} hired; drafted the offer in Weft for Sam to review and send.`],
+    ["rt_ats_hire", pt("2026-10-23", 15, 2), "event:greenhouse:gh-hire-6600090", "integrations__apply_delivery", `Greenhouse marked ${who("Tess")} hired; drafted the offer in Weft for Sam to review. It is still a draft.`],
+    ["rt_benefits_window_reminders", pt("2026-10-20", 9), "cron:2026-10-20", "comms__send_email", `Reminded ${who("Mira")} that her new-hire benefits window is open until Nov 18.`],
+    ["rt_compliance_reminders", pt("2026-10-23", 8), "cron:2026-10-23", "compliance__post_reminders", "Posted the filing and deposit deadlines due in the next 14 days to #payroll."],
+    ["rt_compliance_training", pt("2026-10-23", 9), "cron:2026-10-23", "training__assign", `Assigned the New York harassment prevention course to ${who("Odette")}, due within 30 days of her Nov 2 start.`],
+    ["rt_compliance_uploads", pt("2026-09-21", 10), "event:notice.received:de428t", "notices__get", "Read the EDD statement of benefit charges and left it in review for Dana; an uploaded notice never changes a record without approval."],
+    ["rt_contractor_forms", pt("2026-10-01", 9), "cron:2026-10-01", "contractors__list_forms", `Checked the contractors' tax forms: a current W-8BEN is on file for all ${contractors}.`],
+    ["rt_exec_briefing", pt("2026-10-19", 8), "cron:2026-10-19", "reports__query", "Sent Dana the Monday briefing: approvals waiting, people out this week and the Oct 30 payroll deadline."],
+    ["rt_first_day_message", pt("2026-10-01", 8), "event:worker.started:oct01", "comms__send_email", `Sent ${who("Ana")} and ${who("Ben")} their first-day message: manager, desk and the #new-hires channel.`],
+    ["rt_first_day_message", pt("2026-10-19", 8), "event:worker.started:oct19", "comms__send_email", `Sent ${who("Mira")} her first-day message: manager, desk and the #new-hires channel.`],
+    ["rt_laptop_hand_delivery", pt("2026-10-16", 10), "cron:2026-10-16", "it__list_devices", `${who("Mira")}'s laptop is still in transit, so I asked the Oakland office to set out a loaner for her first day.`],
+    ["rt_life_event_window", pt("2026-10-19", 9), "cron:2026-10-19", "benefits__list_life_events", "No new life events this week, so no benefits window was opened."],
+    ["rt_memory_digest", pt("2026-10-19", 7), "cron:2026-10-19", "memory__write", "Wrote the weekly memory digest for the week of Oct 12: payroll settled, a resignation and the Colorado plan."],
+    ["rt_screening_follow_up", pt("2026-10-23", 10), "cron:2026-10-23", "screening__list", `${who("Marisol")}'s background check is still pending with an estimate of Oct 29; no follow-up needed yet.`],
+    ["rt_thirty_day_checkin", pt("2026-04-01", 9), "cron:2026-04-01", "comms__send_email", `Reminded Sam of the 30-day check-in for ${who("Lucia")}, who started on Mar 2.`],
+    ["rt_time_off_requests", pt("2026-10-23", 9), "cron:2026-10-23", "time_off__list_requests", "Routed the 3 pending time-off requests to their approvers and left the decisions with them."],
+  ];
+  for (const [routineId, at, triggerRef, tool, final] of runs) {
+    await L.run({ at, trigger: "routine", routineId, triggerRef, onBehalfOf: "usr_dana", final, tools: [{ name: tool, args: {}, data: { ok: true } }] });
+  }
+}
+
+/** Employee numbers for the layer's own employees, from the counter offers.accept and the portal use (numbered workers
+ * plus one), in start-date order, onboarding hires included: the next live accept continues the sequence. */
+async function numberRichEmployees(L: Layer): Promise<void> {
+  const all = await L.tx.select().from(workers).orderBy(asc(workers.id));
+  let n = all.filter((w) => w.id <= "wrk_0051" && w.employeeNumber !== null).length;
+  const mine = all.filter((w) => w.id > "wrk_0051" && w.type === "employee").sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : a.id < b.id ? -1 : 1));
+  for (const w of mine) {
+    n += 1;
+    await L.tx.update(workers).set({ employeeNumber: `EMP-${String(n).padStart(4, "0")}` }).where(eq(workers.id, w.id));
+  }
 }
 
 // ---- time off history -----------------------------------------------------------------------------------------
@@ -660,19 +788,23 @@ export async function seedRichProfile(ctx: SeedContext): Promise<RichSummary> {
   let L!: Layer;
   let tail: Awaited<ReturnType<Layer["flushActions"]>> = [];
   await withWriteLock(() => ctx.db.transaction(async (tx) => {
-    L = new Layer(tx);
+    L = new Layer(tx, createSimulators({ db: tx, clock: ctx.clock }), ctx.clock);
     const ws = await tx.select().from(workers).orderBy(asc(workers.id));
     await seedAgentHistory(L, ws);
     await seedTimeOffHistory(L, ws);
+    await seedDecidedProposals(L, ws);
     await seedPeopleRecords(L, ws);
     await seedMoneyAndCompliance(L, ws);
     const api: MotionApi = {
-      tx, bump: (t, n) => L.bump(t, n), chat: (c, a, t, ts) => L.chat(c, a, t, ts),
-      proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), run: (r) => L.run(r as unknown as RunSpec), action: (a) => L.action(a as unknown as PendingAction),
+      tx, dataDir: ctx.dataDir, bump: (t, n) => L.bump(t, n), chat: (c, a, t, ts) => L.chat(c, a, t, ts),
+      proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), preview: (c, a) => L.preview(c, a), run: (r) => L.run(r as unknown as RunSpec), action: (a) => L.action(a as unknown as PendingAction),
     };
     await seedRichMotion(api, ws);
     await seedTurnover({ tx, bump: (t, n) => L.bump(t, n), action: (a) => L.action(a as unknown as PendingAction) });
     await seedImportedPayHistory(tx, (t, n) => L.bump(t, n));
+    await seedReportHistory(L);
+    await seedQuietRoutines(L);
+    await numberRichEmployees(L);
     tail = await L.flushActions();
   }));
   const commits = await seedMemory(ctx, tail);

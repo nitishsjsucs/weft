@@ -78,7 +78,7 @@ function seriesChart(metric: ReportMetric, kind: ChartSpec["kind"], groupBy: Rep
 
 // ------------------------------------------------------------------------------------------------ metrics
 
-async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[]; chart: ChartSpec; summary: string }> {
+async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[]; chart: ChartSpec; summary: string; from: string }> {
   // Runs that moved money (submitted to the bank or settled), by payday; amounts are the run's own stored totals.
   const runs = await tx.all<{ m: string; runs: number; gross: number; er_tax: number; benefits: number; reimb: number; total: number }>(sql`
     SELECT substr(payday, 1, 7) AS m, count(*) AS runs,
@@ -90,10 +90,11 @@ async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[
     FROM payroll_runs
     WHERE company_id = ${q.companyId} AND status IN ('processing', 'processed') AND payday BETWEEN ${q.from} AND ${q.to}
     GROUP BY m ORDER BY m`);
+  // Contractor payouts on the same cash basis as payday: the month the rail delivered them, not the month booked.
   const contractors = await tx.all<{ m: string; usd: number }>(sql`
-    SELECT substr(cp.scheduled_for, 1, 7) AS m, sum(cp.usd_cents) AS usd
+    SELECT substr(cp.delivered_at, 1, 7) AS m, sum(cp.usd_cents) AS usd
     FROM contractor_payments cp JOIN workers w ON w.id = cp.worker_id
-    WHERE w.company_id = ${q.companyId} AND cp.status = 'paid' AND cp.scheduled_for BETWEEN ${q.from} AND ${q.to}
+    WHERE w.company_id = ${q.companyId} AND cp.status = 'paid' AND cp.delivered_at IS NOT NULL AND substr(cp.delivered_at, 1, 10) BETWEEN ${q.from} AND ${q.to}
     GROUP BY m ORDER BY m`);
   // The drivers beside the cost (round 1 R4): who was paid and who joined or left in the same period, so a question
   // about a change in cost has its headcount evidence in the same result instead of a second metric call.
@@ -112,9 +113,11 @@ async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[
       if (c) contractor += n(c.usd);
     }
     if (count === 0 && contractor === 0) continue;   // no paid runs: a zero here would read as "payroll cost nothing"
+    // A period cut short by the range's end (the current month) says so, so a half month never reads as a cost drop.
+    const toDate = p.end < lastDay(p.months[p.months.length - 1]!);
     const workersPaid = new Set(paid.filter((x) => p.months.includes(x.m)).map((x) => x.worker_id)).size;
     rows.push({
-      period: p.key, period_label: p.label, period_start: p.start, period_end: p.end, runs: count,
+      period: p.key, period_label: toDate ? `${p.label} (to date)` : p.label, period_start: p.start, period_end: p.end, to_date: toDate ? 1 : 0, runs: count,
       workers_paid: workersPaid, hires: p.months.reduce((a, m) => a + n(moves.hires.get(m)?.c), 0), departures: p.months.reduce((a, m) => a + n(moves.leaves.get(m)?.c), 0),
       gross_cents: gross, gross_display: formatCents(gross), employer_taxes_cents: erTax, employer_taxes_display: formatCents(erTax),
       benefits_cents: benefits, benefits_display: formatCents(benefits), reimbursements_cents: reimb, reimbursements_display: formatCents(reimb),
@@ -127,9 +130,11 @@ async function payrollCost(tx: DbTx, q: ReportQuery): Promise<{ rows: ReportRow[
     { key: "contractor_cents", label: "Contractor payouts", unit: "cents" },
   ]);
   const sum = rows.reduce((a, r) => a + n(r.total_cents), 0);
+  // The window starts at the first period with paid runs, so a chart never opens on months the company has no data for.
+  const from = rows.length ? String(rows[0]!.period_start) : q.from;
   const summary = rows.length === 0 ? `Payroll cost ${q.from} to ${q.to}: no paid runs in this range`
-    : `Payroll cost by ${q.groupBy}, ${q.from} to ${q.to}: ${rows.length} ${q.groupBy === "quarter" ? "quarters" : "months"} with paid runs, total ${formatCents(sum)}`;
-  return { rows, chart, summary };
+    : `Payroll cost by ${q.groupBy}, ${from} to ${q.to}: ${rows.length} ${q.groupBy === "quarter" ? "quarters" : "months"} with paid runs, total ${formatCents(sum)}`;
+  return { rows, chart, summary, from };
 }
 
 /** Employees counted on a date: started on or before it, not yet past their last day, not a draft record. */
@@ -234,5 +239,6 @@ export async function runReport(tx: DbTx, q: ReportQuery): Promise<ReportOutput>
     : q.metric === "turnover_rate" ? await hiresDepartures(tx, q, true)
     : q.metric === "time_off_minutes_by_month" ? await timeOffMinutes(tx, q)
     : await expensesByCategory(tx, q);
-  return { metric: q.metric, from: q.from, to: q.to, groupBy: q.groupBy, rows: r.rows, chart: r.chart, artifactRef: null, summary: r.summary };
+  const from = "from" in r && typeof r.from === "string" ? r.from : q.from;
+  return { metric: q.metric, from, to: q.to, groupBy: q.groupBy, rows: r.rows, chart: r.chart, artifactRef: null, summary: r.summary };
 }

@@ -45,6 +45,14 @@ describe("reports.query against the seed", () => {
     expect(body.artifactRef).toBeNull();
   });
 
+  it("payroll cost opens on the first month with paid runs and marks a month cut short by the range as to date", async () => {
+    const { status, body } = await report("payroll_cost_by_month", "?from=2025-11-01&to=2026-10-26");
+    expect(status).toBe(200);
+    expect(body.from).toBe("2026-09-01");
+    expect(body.rows.map((r) => r.period_label)).toEqual(["Sep 2026", "Oct 2026 (to date)"]);
+    expect(body.rows.map((r) => r.to_date)).toEqual([0, 1]);
+  });
+
   it("payroll cost by quarter folds September and October into Q3 and Q4", async () => {
     const m = (await report("payroll_cost_by_month", "?from=2026-01-01&to=2026-10-31")).body.rows;
     const { body } = await report("payroll_cost_by_month", "?from=2026-01-01&to=2026-10-31&groupBy=quarter");

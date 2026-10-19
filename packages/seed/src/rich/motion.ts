@@ -1,14 +1,18 @@
 // Rich profile, part 2: hiring in every offer state, an accepted hire who is still onboarding, the approvals waiting
 // this week, paid expense history, integration deliveries and sync items, reconciliation history, device orders and
 // the contractors' accounts and documents. Same rules as rich/index.ts: add rows, never edit a planted one.
-import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import {
   benefitReconFindings, contractorTaxForms, devices, documents, enrollmentWindows, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
   paychecks, payrollRuns, principals, routineRuns, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, timeOffPolicies, timeOffRequests, timeOffTypes, workers, type DbTx,
 } from "@weft/db";
 import { expenses as policy, newId, payroll, sha256Hex } from "@weft/core";
-import type { Flag } from "@weft/contracts";
+import { formatCents, type Flag, type Preview } from "@weft/contracts";
+import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { uploads } from "@weft/db";
+import { receiptPng } from "../w3-expenses";
 import { seedPortalHires } from "./portal-hires";
 import { day, joinAnd, paycheckNote } from "./flag-notes";
 
@@ -20,7 +24,22 @@ type Bump = (table: string, n?: number) => void;
 type Proposal = (p: Record<string, unknown>) => Promise<string>;
 type Run = (spec: Record<string, unknown>) => Promise<{ runId: string; routineRunId: string | null }>;
 type ActionFn = (a: Record<string, unknown>) => void;
-export interface MotionApi { tx: DbTx; bump: Bump; proposal: Proposal; run: Run; action: ActionFn; chat: (channel: string, author: string, text: string, ts: string) => Promise<string> }
+export interface MotionApi { dataDir?: string; tx: DbTx; bump: Bump; proposal: Proposal; run: Run; action: ActionFn; preview: (command: string, args: Record<string, unknown>) => Promise<Preview & { risk: string }>; chat: (channel: string, author: string, text: string, ts: string) => Promise<string> }
+
+/** A DEMO receipt image in the uploads store, as the base seed and a portal upload write one; returns the upload id. */
+export async function receiptUpload(L: { tx: DbTx; dataDir?: string; bump: Bump }, workerId: string, expenseId: string, n: number, at: string, extract: string): Promise<string | null> {
+  if (!L.dataDir) return null;
+  const png = receiptPng(1000 + n);
+  const sha = createHash("sha256").update(png).digest("hex");
+  const rel = `uploads/${sha}.bin`;
+  mkdirSync(join(L.dataDir, "uploads"), { recursive: true });
+  writeFileSync(join(L.dataDir, rel), png);
+  writeFileSync(join(L.dataDir, "uploads", `${sha}.extract.json`), extract);
+  const id = await newId(L.tx, "upl_");
+  await L.tx.insert(uploads).values({ id, workerId, purpose: "receipt", fileName: `receipt-${expenseId}.png`, storagePath: rel, bytes: png.length, sha256: sha, createdAt: at });
+  L.bump("uploads");
+  return id;
+}
 
 async function email(L: MotionApi, to: string, subject: string, body: string, kind: string, ref: string, ts: string) {
   await L.tx.insert(simEmailMessages).values({ id: await newId(L.tx, "eml_"), toAddr: to, fromAddr: "people@larkspur.example", subject, body, kind, relatedRef: ref, ts });
@@ -97,24 +116,25 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       final: `Elias Brandt (demo) accepted. Created accounts, posted the welcome in #new-hires and proposed the laptop order.`,
       tools: [{ name: "it__create_account", args: { worker_id: hireId, system: "google_ws" }, data: { created: true } }, { name: "it__order_device", args: { worker_id: hireId }, data: { proposed: true } }],
       checklist: [{ id: "accounts", label: "create accounts", passed: true }, { id: "device", label: "propose the laptop", passed: true }] });
-    await L.proposal({ at: pt("2026-10-07", 9, 6), command: "it.order_device", args: { worker_id: hireId }, subjectRef: hireId, risk: "R2", domain: "it", moneyCents: 189_900, status: "pending",
-      headline: `Order Larkspur standard laptop (sim) for Elias Brandt (demo) (${hireId}) at $1,899.00`, runId: r.runId, routineRunId: r.routineRunId, expiresAt: "2026-11-02T17:00:00.000Z",
-      diff: [{ label: "Device", before: "none", after: "Larkspur standard laptop (sim)" }, { label: "Ship to", before: "", after: "Oakland office" }], evidence: [{ label: "Offer accepted", ref: hireId }] });
+    // Planted from it.order_device's own preview: its risk (R4), the catalog price and the ship-to the live card shows.
+    const args = { worker_id: hireId };
+    const p = await L.preview("it.order_device", args);
+    await L.proposal({ at: pt("2026-10-07", 9, 6), command: "it.order_device", args, subjectRef: p.subjectRef, risk: p.risk, domain: "it", moneyCents: p.moneyCents ?? undefined, status: "pending",
+      headline: p.title, runId: r.runId, routineRunId: r.routineRunId, expiresAt: "2026-11-02T17:00:00.000Z", diff: p.diff, evidence: [...p.evidence, { label: "Offer accepted", ref: hireId }] });
   }
   // The submit for this payroll, proposed by Friday's pre-payroll review and waiting for Theo.
   const [draft] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, "pay_2026_10_30"));
   if (draft && draft.status === "draft") {
-    const t = JSON.parse(draft.totalsJson ?? "{}") as Record<string, number>;
-    const cost = t.totalCostCents ?? t.employerCostCents ?? null;
     const year = Number(draft.periodEnd.slice(0, 4));
     const flagged = (await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, draft.id)))
       .map((pc) => ({ pc, flags: JSON.parse(pc.flagsJson) as Flag[] })).filter((x) => x.flags.length > 0);
     const names = new Map(ws.map((w) => [w.id, `${w.firstName} ${w.lastName} (demo)`]));
     const blocked = flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => names.get(x.pc.workerId) ?? "One person");
-    const review = flagged.filter((x) => x.flags.some((f) => f.severity !== "info")).length;
+    // The counts the Payroll page shows for this draft (its anomaly summary), so the review and the page agree.
+    const counts = { needsReview: 0, blocked: 0, ...(JSON.parse(draft.anomalySummaryJson ?? "{}") as { needsReview?: number; blocked?: number }) };
     const period = `${day(draft.periodStart, year)} to ${day(draft.periodEnd, year)}`;
     const r = await L.run({ at: pt("2026-10-23", 9), trigger: "routine", routineId: "rt_pre_payroll", onBehalfOf: "usr_theo",
-      final: `Reviewed the ${period} payroll and explained all ${flagged.length} flagged paychecks; ${review} need review. `
+      final: `Reviewed the ${period} payroll: ${counts.needsReview} ${counts.needsReview === 1 ? "paycheck needs" : "paychecks need"} review${counts.blocked ? ` and ${counts.blocked} ${counts.blocked === 1 ? "is" : "are"} blocked` : ""}, and each flagged one has an explanation. `
         + (blocked.length ? `${joinAnd(blocked)} ${blocked.length === 1 ? "has" : "have"} no bank account on file, so I proposed the submit without ${blocked.length === 1 ? "that paycheck" : "those paychecks"} until one is.` : "Proposed the submit."),
       tools: [{ name: "payroll__get_run", args: { run_id: draft.id }, data: { id: draft.id, status: "draft" } }, { name: "payroll__submit_run", args: { run_id: draft.id, exclude_blocked: true }, data: { proposed: true } }],
       checklist: [{ id: "explain", label: "explain flagged paychecks", passed: true }, { id: "submit", label: "propose payroll.submit_run", passed: true }] });
@@ -139,10 +159,12 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       await tx.update(paychecks).set({ explanation: grounded ? text : base, explanationSource: grounded ? "agent" : "template", explanationRunId: r.runId }).where(eq(paychecks.id, pc.id));
       L.bump("paycheck_explanations");
     }
-    await L.proposal({ at: pt("2026-10-23", 9, 1), command: "payroll.submit_run", args: { run_id: draft.id, exclude_blocked: true }, subjectRef: draft.id, risk: "R4", domain: "payroll", moneyCents: cost ?? undefined,
-      status: "pending", headline: `Submit the ${period} payroll (payday ${day(draft.payday, year)})`, runId: r.runId, routineRunId: r.routineRunId,
-      expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: [{ label: "Pay run", ref: draft.id }, ...flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => ({ label: `Excluded: ${names.get(x.pc.workerId) ?? "a blocked paycheck"}`, ref: x.pc.workerId }))],
-      diff: [{ label: "Status", before: "draft", after: "processing" }, { label: "Excluded (blocked)", before: "none", after: blocked.length ? joinAnd(blocked) : "none" }] });
+    // From payroll.submit_run's own preview: the total without the blocked paycheck, the bank amount and the wording the
+    // live card uses. subjectHash stays null, so approving it runs the submit fresh against the run as it is then.
+    const submitArgs = { run_id: draft.id, exclude_blocked: true };
+    const sp = await L.preview("payroll.submit_run", submitArgs);
+    await L.proposal({ at: pt("2026-10-23", 9, 1), command: "payroll.submit_run", args: submitArgs, subjectRef: sp.subjectRef, risk: sp.risk, domain: "payroll", moneyCents: sp.moneyCents ?? undefined,
+      status: "pending", headline: sp.title, runId: r.runId, routineRunId: r.routineRunId, expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: sp.evidence, diff: sp.diff });
   }
   void ws;
   return hireId;
@@ -153,12 +175,12 @@ async function seedExpenseHistory(L: MotionApi, ws: W[]): Promise<void> {
   const emp = ws.filter((w) => w.type === "employee" && w.status === "active" && w.startDate < "2026-01-01");
   const claims: [string, string, number, string, string, number | null][] = [
     ["travel", "Bayline Air (demo)", 38_420, "2026-01-21", "Customer visit in Austin", null], ["meals", "Harbor Noodle Bar (demo)", 6_480, "2026-02-04", "Team lunch with a prospect", null],
-    ["mileage", "Mileage", 0, "2026-02-18", "Drive to the Austin Yard test site", 603], ["software", "Sketchwell (demo)", 4_800, "2026-03-02", "Design tool seat", null],
+    ["mileage", "Personal car (demo)", 0, "2026-02-18", "Drive to the Austin Yard test site", 603], ["software", "Sketchwell (demo)", 4_800, "2026-03-02", "Design tool seat", null],
     ["travel", "Cedar Rail (demo)", 12_900, "2026-03-19", "Train to the Brooklyn studio", null], ["meals", "Lantern Diner (demo)", 5_210, "2026-04-08", "Recruiting dinner", null],
-    ["lodging", "Pinecrest Inn (demo)", 10_840, "2026-04-22", "Night before the trade show", null], ["mileage", "Mileage", 0, "2026-05-06", "Supplier visit in Fremont", 392],
+    ["lodging", "Pinecrest Inn (demo)", 10_840, "2026-04-22", "Night before the trade show", null], ["mileage", "Personal car (demo)", 0, "2026-05-06", "Supplier visit in Fremont", 392],
     ["software", "Fleetlog Cloud (demo)", 4_900, "2026-05-27", "Fleet log analysis seat", null], ["travel", "Bayline Air (demo)", 41_250, "2026-06-10", "Field trial in Austin", null],
     ["meals", "Harbor Noodle Bar (demo)", 7_120, "2026-06-24", "Onboarding lunch", null], ["lodging", "Pinecrest Inn (demo)", 10_600, "2026-07-15", "Night before the site install", null],
-    ["mileage", "Mileage", 0, "2026-08-05", "Drives between Oakland and the warehouse", 820], ["software", "Sketchwell (demo)", 4_800, "2026-08-12", "Design tool seat", null],
+    ["mileage", "Personal car (demo)", 0, "2026-08-05", "Drives between Oakland and the warehouse", 820], ["software", "Sketchwell (demo)", 4_800, "2026-08-12", "Design tool seat", null],
     ["travel", "Cedar Rail (demo)", 9_800, "2026-08-18", "Train to the customer review", null], ["meals", "Lantern Diner (demo)", 6_900, "2026-07-28", "Dinner with the integration partner", null],
     ["travel", "Bayline Air (demo)", 29_300, "2026-04-02", "Conference travel, submitted after 60 days", null], ["meals", "Harbor Noodle Bar (demo)", 4_100, "2026-07-01", "Working lunch", null],
   ];
@@ -180,8 +202,11 @@ async function seedExpenseHistory(L: MotionApi, ws: W[]): Promise<void> {
       businessPurpose: purpose, attendees: who, milesX10: miles, tripRef: null, preApprovalRef: null, hasReceipt: !miles, extract: extract ? { totalCents: cents, date, merchant } : null, status: "submitted" };
     const checks = policy.evaluateExpense(item, { worker: { id: w.id, workState: w.workState, startDate: w.startDate, endDate: w.endDate }, others: seen.get(w.id) ?? [] }).checks;
     seen.set(w.id, [...(seen.get(w.id) ?? []), { ...item, status: "paid" }]);
+    // Every claim but mileage carries its receipt (the policy blocks lodging and $75 and up without one), stored the
+    // way an upload stores it, so the page's receipt column and the checks above agree.
+    const receiptUploadId = extract ? await receiptUpload(L, w.id, id, i, pt(submitted, 9), JSON.stringify(extract)) : null;
     await L.tx.insert(expenses).values({ id, companyId: CO, workerId: w.id, category, merchant, amountCents: cents, transactionDate: date, submittedAt: pt(submitted, 9), businessPurpose: purpose,
-      attendees: who, milesX10: miles, receiptExtractJson: extract ? JSON.stringify(extract) : null, status: "paid",
+      attendees: who, milesX10: miles, receiptUploadId, receiptExtractJson: extract ? JSON.stringify(extract) : null, status: "paid",
       checksJson: JSON.stringify(checks),
       approverPrincipalId: "usr_dana", decidedBy: "usr_dana", decidedAt: pt(decided, 11), decisionReasonCode: late ? "taxable_late" : null,
       decisionNote: late ? "Paid as taxable wages (accountable plan window passed). Reimbursed on the previous provider's payroll." : "Reimbursed on the previous provider's payroll.", policyVersion: 1, source: i % 5 === 0 ? "email" : "portal" });
@@ -272,12 +297,13 @@ async function seedExpenseDecisions(L: MotionApi, ws: W[]): Promise<void> {
     final: `Reviewed ${decided.length} submitted claims against the policy and proposed a decision for each; approvals stay with you.` });
   for (const e of decided) {
     const w = ws.find((x) => x.id === e.workerId);
-    const who = w ? `${w.firstName} ${w.lastName} (demo) (${w.id})` : e.workerId;
+    const who = w ? `${w.firstName} ${w.lastName} (demo)` : e.workerId;
     const approve = e.status === "approved";
+    const year = Number(e.transactionDate.slice(0, 4));
     await L.proposal({ at, command: "expenses.decide", args: { expense_id: e.id, decision: approve ? "approve" : "decline" }, subjectRef: `expense:${e.id}`, risk: "R2", domain: "payroll",
-      moneyCents: approve ? e.amountCents : 0, status: "executed", decidedBy: e.decidedBy ?? "usr_dana", decidedAt: e.decidedAt!, runId: r.runId, reversible: true,
-      headline: `${approve ? "Approve" : "Decline"} expense ${e.id} for ${who}: $${(e.amountCents / 100).toFixed(2)} ${e.category} on ${e.transactionDate}`,
-      diff: [{ label: "Status", before: "needs_review", after: e.status }], evidence: [{ label: "Expense", ref: e.id }],
+      moneyCents: approve ? e.amountCents : undefined, status: "executed", decidedBy: e.decidedBy ?? "usr_dana", decidedAt: e.decidedAt!, runId: r.runId, reversible: true,
+      headline: `${approve ? "Approve" : "Decline"} ${who}'s ${formatCents(e.amountCents)} ${e.category} claim from ${day(e.transactionDate, year)}`,
+      diff: [{ label: "Status", before: "Needs review", after: approve ? "Approved" : "Declined" }], evidence: [{ label: "Expense", ref: e.id }],
       exec: { ts: e.decidedAt!, actorKind: "human", actorId: e.decidedBy ?? "usr_dana", summary: `${approve ? "Approved" : "Declined"} expense ${e.id} for ${who}`, reversible: "no" } });
   }
 }

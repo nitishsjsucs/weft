@@ -138,9 +138,53 @@ describe("seed profiles", () => {
         expect(new Set(n.e.split(/(?<=\.)\s+/)).size, n.w).toBe(n.e.split(/(?<=\.)\s+/).length);
       }
       expect(notes.find((n) => n.w === "wrk_0022")?.e).toMatch(/direct deposit, the I-9 and benefits selection are still open/);
-      const submit = await db.all<{ h: string; d: string }>(sql`SELECT headline AS h, diff_json AS d FROM proposals WHERE command = 'payroll.submit_run' AND status = 'pending'`);
-      expect(submit.map((x) => x.h)).toEqual(["Submit the Oct 16 to Oct 31 payroll (payday Oct 30)"]);
+      const submit = await db.all<{ h: string; d: string; m: number | null }>(sql`SELECT headline AS h, diff_json AS d, money_cents AS m FROM proposals WHERE command = 'payroll.submit_run' AND status = 'pending'`);
+      expect(submit.map((x) => x.h)).toEqual(["Submit the Oct 16 to Oct 31 payroll (payday Oct 30): 47 paychecks, total cost $267,919.36"]);
+      expect(submit[0]!.m).toBe(26_791_936);
       expect(submit[0]!.d).not.toMatch(/wrk_\d{4}/);
+      // Every planted proposal carries its command's own risk class, and every submit moves the run's own total.
+      const props = await db.all<{ id: string; command: string; args: string; risk: string; m: number | null; h: string; status: string; run: string | null }>(sql`SELECT id, command, args_json AS args, risk, money_cents AS m, headline AS h, status,
+        json_extract(args_json, '$.run_id') AS run FROM proposals`);
+      for (const p of props) {
+        const cmd = commands.find((c) => c.name === p.command)!;
+        expect(cmd.risk(cmd.input.parse(JSON.parse(p.args))), `${p.id} ${p.command}`).toBe(p.risk);
+      }
+      for (const p of props.filter((x) => x.command === "payroll.submit_run" && x.status === "executed")) {
+        const [r] = await db.all<{ t: number }>(sql`SELECT json_extract(totals_json, '$.totalCost.amount') AS t FROM payroll_runs WHERE id = ${p.run}`);
+        expect(p.m, p.id).toBe(r!.t);
+      }
+      for (const p of props.filter((x) => x.command === "it.order_device")) expect(p.m, p.id).toBe(189_900);
+      // Colorado is not planted: accepting Noor's offer files the registrations, per tax account.
+      expect(props.filter((p) => p.command === "tax.register_state_account")).toEqual([]);
+      // A subject named in a headline is the worker the arguments point at.
+      const names = new Map((await db.all<{ id: string; n: string }>(sql`SELECT id, first_name || ' ' || last_name || ' (demo)' AS n FROM workers`)).map((x) => [x.id, x.n]));
+      for (const p of props) {
+        const a = JSON.parse(p.args) as { worker_id?: string; request_id?: string };
+        const wid = a.worker_id ?? (a.request_id ? (await db.all<{ w: string }>(sql`SELECT worker_id AS w FROM time_off_requests WHERE id = ${a.request_id}`))[0]?.w : undefined);
+        if (a.request_id) expect(wid, p.id).toBeTruthy();
+        if (wid) expect(p.h, p.id).toContain(names.get(wid)!);
+      }
+      // The monthly exec report quotes the hires and departures report for the month it covers.
+      const execs = await db.all<{ t: string }>(sql`SELECT text AS t FROM sim_chat_messages WHERE channel = '#leadership' AND text LIKE '%exec report (demo)%' ORDER BY ts`);
+      expect(execs.length).toBe(9);
+      const moves = await db.all<{ m: string; h: number; d: number }>(sql`SELECT m, SUM(h) AS h, SUM(d) AS d FROM (
+          SELECT substr(start_date, 1, 7) AS m, 1 AS h, 0 AS d FROM workers WHERE type = 'employee' AND status != 'draft' AND start_date BETWEEN '2026-01-01' AND '2026-09-30'
+          UNION ALL SELECT substr(end_date, 1, 7) AS m, 0 AS h, 1 AS d FROM workers WHERE type = 'employee' AND status != 'draft' AND end_date BETWEEN '2026-01-01' AND '2026-09-30') GROUP BY m`);
+      const byMonth = new Map(moves.map((x) => [x.m, x]));
+      for (const [i, e] of execs.entries()) {
+        const m = `2026-${String(i + 1).padStart(2, "0")}`;
+        expect(e.t, m).toContain(`${byMonth.get(m)?.h ?? 0} joined, ${byMonth.get(m)?.d ?? 0} left`);
+      }
+      expect(execs.some((e) => !/0 joined, 0 left/.test(e.t))).toBe(true);
+      // Every routine the gallery shows has a past run.
+      const quiet = await db.all<{ id: string }>(sql`SELECT r.id FROM routines r WHERE r.id != 'rt_compliance_notices' AND NOT EXISTS (SELECT 1 FROM routine_runs x WHERE x.routine_id = r.id)`);
+      expect(quiet).toEqual([]);
+      // Paid claims above the receipt threshold, and lodging, carry their receipt.
+      const noReceipt = await db.all<{ id: string }>(sql`SELECT id FROM expenses WHERE status IN ('paid', 'approved') AND category != 'mileage' AND receipt_upload_id IS NULL AND (amount_cents >= 7500 OR category = 'lodging')`);
+      expect(noReceipt).toEqual([]);
+      // Employee numbers continue the live counter with no gaps or repeats.
+      const nums = (await db.all<{ e: string }>(sql`SELECT employee_number AS e FROM workers WHERE employee_number IS NOT NULL ORDER BY employee_number`)).map((x) => x.e);
+      expect(nums).toEqual(nums.map((_, i) => `EMP-${String(i + 1).padStart(4, "0")}`));
       // Approved and taken time off has one use row per requested day, as time_off.decide writes them.
       const gaps = await db.all<{ id: string }>(sql`SELECT r.id FROM time_off_requests r WHERE r.status IN ('approved', 'taken') AND r.id > 'tor_0006'
         AND (SELECT COUNT(*) FROM time_off_ledger l WHERE l.source_ref = r.id AND l.kind = 'use') != json_array_length(r.days_json)`);

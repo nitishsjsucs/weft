@@ -79,7 +79,7 @@ describe("hero rate change (GP1 domain)", () => {
     const def = findCommand("tax.update_rate");
     const args = { tax_account_id: "txa_0002", code: "sui", rate: "0.015", effective_from: "2026-01-01", source_notice_id: noticeId };
     const pv = await def.preview!(def.input.parse(args), directCtx(weft.clock), deps());
-    expect(pv.title).toBe("Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 on account 000-4817-2 for 22 CA employees");
+    expect(pv.title).toBe("Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 on account 000-4817-2 for 22 CA employees paid in 2026");
     expect(pv.content).toEqual([]);
     expect(pv.diff[0]).toEqual({ label: "CA SUI rate", before: "3.4%", after: "1.5%" });
     expect(pv.evidence[0]).toEqual({ label: "Notice", ref: noticeId });
@@ -127,7 +127,7 @@ describe("rate changes after a rollback, and a notice that confirms the rate in 
     const again = await weft.executor.agent.exec(await open(), { callId: "r2", command: "tax.update_rate", args: args(notice) });
     if (!(again.ok && again.status === "pending_approval")) throw new Error(JSON.stringify(again));
     expect(again.proposalId).not.toBe(first.proposalId);
-    expect(again.title).toBe("Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 on account 000-4817-2 for 22 CA employees");
+    expect(again.title).toBe("Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 on account 000-4817-2 for 22 CA employees paid in 2026");
     // While the rate differs, the notice needs the change: it cannot be acknowledged away.
     expect(await dana().exec("notices.acknowledge", { notice_id: notice })).toMatchObject({ ok: false, refusal: { code: "DOMAIN_NEEDS_ACTION" } });
     // The first run's rate lease lasts 10 minutes on the frozen clock; let it lapse before the second execution.
