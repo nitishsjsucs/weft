@@ -69,6 +69,14 @@ See `docs/tour.md`. On the rich world, scripted: the whole tour read at its plan
 
 ## Merge state
 
+Merged into main on 2026-10-18 (after the review fix merge at 788a46e) with no conflict, as `Merge feat/tour`; the
+integration added the rich-profile route capture (`pnpm screenshots:rich`), per-step tour shots (`TOUR_SHOTS=1`), the
+autoplay spec's notes and status lines, and one fix: typing the chart prompt stops once the composer is sent or edited
+(the complete spec used to send at "Show payroll cost" while the letters kept coming). The branch and its round 2 notes
+below are kept as they were.
+
+Round 2 notes:
+
 - Round 2 merged `feat/rich-seed` (389f157) and then main at c8b5928, which already contains rich-seed round 2. The
   only conflict was Home's lucide import (the tour's Compass and rich-seed's UserRoundCheck). `feat/tour` now merges
   into main with no conflict. It is not merged into main and not pushed.

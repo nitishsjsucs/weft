@@ -17,7 +17,43 @@ pnpm dev
 
 Useful flags: `pnpm dev --fresh` (reseed first), `pnpm dev --api-port 4075 --web-port 3075`, `pnpm dev --api-only`.
 
-`pnpm dev` seeds the **rich** profile: the base world plus a deterministic layer of history (January to August pay runs imported from the previous provider, agent and routine runs with steps, decided and waiting approvals, a hash-chained action log, time off through the ledger, offers in every state, offboarding cases, contractor payouts, filed returns, notices and memory pages), so every screen has data. It only adds rows; the planted story beats (the Oct 30 draft, DE 2088, the expenses in review, Noor's offer, the open October reconciliation) stay as the base seed wrote them. `pnpm dev --fresh --profile base` seeds the base world alone, which is what tests, `pnpm e2e`, `pnpm demo` and the eval worlds always use. The layer lives in `packages/seed/src/rich/`; `pnpm e2e:rich` crawls the audited screens on a fresh rich world and fails on an empty state.
+### Seed profiles
+
+Every world starts from one deterministic seed, in one of two profiles:
+
+| Profile | What it holds | Used by |
+|---|---|---|
+| `rich` | The base world plus a deterministic layer of history (`packages/seed/src/rich/`): January to August pay runs imported from the previous provider, agent and routine runs with steps, decided and waiting approvals, a hash-chained action log, time off through the ledger, offers in every state and new-hire personas part way through the portal, offboarding cases, contractor payouts, filed returns, notices and memory pages. It only adds rows, so the planted story beats (the Oct 30 draft, DE 2088, the expenses in review, Noor's offer, the open October reconciliation) stay as the base seed wrote them | `pnpm dev` (the default), the guided tour, `pnpm e2e:rich`, `pnpm e2e:tour` and `pnpm screenshots:rich` |
+| `base` | The pinned test world: Larkspur Robotics (demo) on Mon Oct 26 2026 08:30 PT with its planted story beats and nothing else. Its digest and the golden numbers (the demo payroll total of $267,795.26) never move | `pnpm test`, `pnpm e2e` (`--e2e` always seeds base), `pnpm demo`, `pnpm demo:scenario`, `pnpm screenshots` and every eval world |
+
+`pnpm dev --fresh --profile base` (or `WEFT_SEED_PROFILE=base`) seeds the base world alone. A rich world remembers its
+profile, so "Reset demo data..." in the Viewing as menu and `POST /v1/sim/reset` rebuild it rich; the reset also takes
+`{ "profile": "base" }` or `{ "profile": "rich" }`, and `GET /v1/health` reports `seedProfile`. `pnpm e2e:rich` crawls
+every audited screen and tab on a fresh rich world and fails on an empty state.
+
+### The guided tour
+
+A three-minute walkthrough inside the app: 21 steps, about 2.5 minutes at its planned pace, with a hard budget of 180
+seconds. It starts with the agent working a California DE 2088 rate notice end to end (the notice arrives, the run
+reads it, the rate change waits in the Inbox, you approve it, the 1.5% SUI rate is live in Taxes and Compliance next
+to the compliance calendar, and the audit chain records it), then opens the flagged paychecks on the Oct 30 draft, asks
+the agent for payroll cost by month as a chart, and takes a fast lap of Expenses, Time Off, Hiring, the new-hire
+portal, Memory, Routines and Integrations.
+
+Start it from any of these:
+
+- Home: "Take the tour" next to the greeting.
+- The Viewing as menu in the top bar: Demo, then "Take the tour" (or "Reset demo data..." to rebuild the rich world).
+- The command menu (Cmd or Ctrl K): "Take the tour".
+- A link: http://127.0.0.1:3070/app?tour=1 starts it, `/app?tour=<stepId>` jumps to a step (for example
+  `?tour=ask-chart`), and `&autoplay=1` lets it play by itself (it pauses when you focus the card with the keyboard).
+
+It runs best on a clean rich world: on any other world it first offers to reset the demo data, and skipping that runs
+it on its fallbacks (a step whose data is missing says so and moves on). It approves exactly one proposal, the rate
+change, and leaves the agency filing waiting. It works on the scripted provider and on a live model; with
+`WEFT_LLM=openai` the agent steps wait for the real run, and a slow run says so and lets you carry on, so a card never
+gets stuck. There is no auto-start. The arrow keys move between steps, Escape exits, and the tour honours reduced
+motion and the phone layout. How it works and the measured timings: [docs/tour.md](docs/tour.md).
 
 Things to try in the demo:
 
@@ -94,6 +130,27 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
 
+### Guided tour and rich seed integration gate
+
+2026-10-18 from 17:27 PDT. `feat/rich-seed` was already on main (c8b5928); `feat/tour` merged into main after the
+review fix merge (788a46e) with no conflict (the two files both sides touched, `apps/api/src/routes/sim.ts` and the
+Time Off view, merged cleanly). Every figure below comes from scratch clones of the integration head on ports 5660 to
+5673; nothing is carried over.
+
+| Command | Outcome |
+|---|---|
+| `pnpm test` | 1,451 passed, 6 skipped (227 files, 1 skipped), 267 s |
+| `pnpm typecheck` | 16 of 16 tasks; `tsc -p e2e` clean |
+| `pnpm build` | ok |
+| `pnpm e2e` (base profile, unchanged) | 52 passed, 1 skipped (the DocuSign envelope test), 2.4 min |
+| `pnpm e2e:rich` | 3 of 3: every audited screen and tab filled, Reports adds up, the manager Home and each portal persona, 1.1 min |
+| `pnpm e2e:tour` (scripted) | 11 of 11 in 5.6 min. The whole tour read at its planned pace took 137 s with every step on its own target, autoplay 141 s (budget 180 s) |
+| Tour live on `gpt-5.6-luna`, twice (`WEFT_TOUR_LIVE=1`, `WEFT_BACKGROUND_LLM=1`, autoplay) | 149 s and 147 s; the notice run took 8.3 s and 5.9 s (soft timeout 12 s) and the chart step 5.5 s both times (soft 8 s); no step timed out or fell back; $0.0078 for both |
+| `pnpm demo` | exit 0 in 17 s, payroll total cost $267,795.26, audit chain verifies |
+| `pnpm eval:suite digests --split all` | 110 of 110 worlds reproduce their pinned digest; the base world digest is still `950933e7ed6a...10d9` |
+| `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` | ok: 1,429 files; 1,505 files with 28 denylist phrases and 54 reference files hashed; 894 files against 4 reference pages with 0 allowlisted phrases |
+| `pnpm screenshots:rich`, `TOUR_SHOTS=1 pnpm e2e:tour tour-complete` | 28 route shots on the rich world and 21 tour steps (list under Screenshots) |
+
 ### Final wave 4 gate
 
 2026-10-17 from 10:42 PDT, on a fresh clone of main at `1d93f63`, following the Quickstart with no API key in the
@@ -153,7 +210,6 @@ round 2 gate, the final wave 2 gate, wave 1) are in [docs/gates.md](docs/gates.m
 | `pnpm demo` | exit 0 in 12 s; GP1 to GP18 on one world, payroll total cost $267,795.26, GP9 final pay from the ledger at 90.00 h (1,003,846 cents), GP10 pays the $1,500.00 bonus, audit chain verifies |
 | `pnpm demo:tests` | 147 passed (37 files), 61 s. A first attempt with `WEFT_API_PORT=4782` exported failed the 3 S8 MCP tests with a 403 host check: the scenario helpers take the API port from the shell |
 | `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` (against `research/design/reference`) | ok: 829 files; 858 files with 28 denylist phrases and 54 reference files hashed; 704 files against 4 reference pages with 0 allowlisted phrases |
-| `pnpm e2e:rich` | Seeds the rich profile fresh into `.data-rich/` (ports 3270 and 4270; `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_RICH_DATA_DIR` move them) and crawls every audited screen and tab for empty states |
 | `pnpm screenshots` | 10 of 10 capture tests, 48 s (list below) |
 
 ### Live wave 3 agent golden paths
@@ -201,17 +257,30 @@ Found by this gate and not fixed here (each is in "Wave 3: left" below):
 
 ### Screenshots
 
-Retaken in this gate with `pnpm screenshots` (`e2e/screens/capture.screens.ts`: the e2e dev runner and a fresh world
-for each group), at 1440 by 900 with the agent panel docked unless noted. Before each shot the capture moves focus and
-the pointer off the control it last clicked, so the images show the resting state. They are in
-[docs/screenshots/](docs/screenshots):
+All in [docs/screenshots/](docs/screenshots), at 1440 by 900 with the agent panel docked unless noted. Before each shot
+the capture moves focus and the pointer off the control it last clicked, so the images show the resting state.
+
+On the rich profile (retaken on 2026-10-18 with `pnpm screenshots:rich`, `e2e/screens/rich.screens.ts`: a fresh rich
+world, as Dana), every main route. `pnpm screenshots` still writes base versions of the shared names, so run
+`pnpm screenshots:rich` after it:
 
 - `01-landing`, `01b-landing-full` (full page) and `12-landing-mobile` (390 by 844).
-- `02-app-home` (Home as Dana, with the Time off tile) and `03-simulators`.
+- `02-app-home` (approvals waiting, time off, your team, headcount), `26-inbox`, `06-payroll` (January to October,
+  imported and Weft runs), `38-payroll-imported-run`, `08-people`, `27-person` (Dana's record), `28-hiring-offers`
+  (offers in every state), `29-offboarding`, `30-benefits`, `31-it`, `32-contractors`, `22-expenses`, `33-time-off`,
+  `11-compliance`, `34-reports` (payroll cost by month, January to October), `09-routines`, `35-routine-detail` (the
+  pre-payroll review with its runs), `10-audit`, `17-memory`, `24-integrations`, `03-simulators`, `36-settings`,
+  `37-permissions`, `39-run-view` (a recorded agent run with its steps) and `40-portal-persona` (a new hire at 5 of 7).
+
+The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`), in
+[docs/screenshots/tour/](docs/screenshots/tour): `01-welcome` to `21-finish`, named by step.
+
+Flows on the base world, retaken in the final wave 3 gate with `pnpm screenshots` (`e2e/screens/capture.screens.ts`:
+the e2e dev runner and a fresh world for each group):
+
 - `04-agent-run` (the agency notice run waiting for approval) and `05-inbox` (the SUI rate change and the response).
-- `06-payroll` and `07-payroll-draft` (the Oct 16 to 31 draft after the pre-payroll review).
-- `08-people`, `09-routines` (the gallery with Try it, last run and next run), `10-audit` and `11-compliance`.
-- `13-hiring`, `14-portal` (0 of 7), `15-offboarding-case`, `16-benefits-reconciliation`, `17-memory`,
+- `07-payroll-draft` (the Oct 16 to 31 draft after the pre-payroll review).
+- `13-hiring`, `14-portal` (0 of 7), `15-offboarding-case`, `16-benefits-reconciliation`,
   `18-open-enrollment`, `19-contractor-payouts` and `20-off-cycle-proposal`.
 - New in wave 3:
   - `21-topbar`: the top bar as one strip (sidebar toggle, breadcrumb, the environment pill with model, simulated
@@ -219,12 +288,10 @@ the pointer off the control it last clicked, so the images show the resting stat
   - `21b-topbar-persona-menu` (the Viewing as menu grouped into Admins and Managers), `21c-topbar-clock` (the clock
     popover with +1 hour, +1 day and Next routine) and `21d-topbar-mobile` (390 wide: search icon, compact pill,
     avatar).
-  - `22-expenses` (the four bands, 8 in Needs review) and `22b-expense-drawer` (exp_0007 with the Duplicate and Over
-    limit checks, the explanation and the one-item decision).
+  - `22b-expense-drawer` (exp_0007 with the Duplicate and Over limit checks, the explanation and the one-item
+    decision).
   - `23-time-off-requests` (Ruth's coverage conflict and holidays routed to Imani, Ben's waiting period blocking
     Approve, viewed as Sam) and `23b-time-off-calendar` (Hardware in November, 33% out on Nov 23 to 25).
-  - `24-integrations` (Greenhouse and Workday cards, Simulated, secret names with Missing, free path and simulator
-    controls; Checkr, HireRight and DocuSign follow below the fold).
   - `25-chat-chart` (payroll cost by month as a stacked bar chart with a Table toggle, "Ran 1 tool").
 
 ## What works
@@ -423,6 +490,9 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm typecheck` | `tsc --noEmit` in every package |
 | `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP24 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm screenshots` | Retakes `docs/screenshots/` (or `SHOTS_DIR`) through the e2e dev runner at 1440 by 900; same ports and world reset as `pnpm e2e`, never part of it |
+| `pnpm e2e:rich` | Seeds the rich profile fresh into `.data-rich/` (ports 3270 and 4270; `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_RICH_DATA_DIR` move them) and crawls every audited screen and tab for empty states |
+| `pnpm e2e:tour` | The guided tour specs (`e2e/tour/`: the whole tour read at its pace, autoplay, the controls, accessibility and the phone sheet) on ports 5640 and 5641 (`WEFT_TOUR_WEB_PORT`, `WEFT_TOUR_API_PORT`) and `.data-e2e-tour/`, scripted, each test on a freshly reset rich world. `WEFT_TOUR_LIVE=1 pnpm e2e:tour tour-autoplay` plays it on live `gpt-5.6-luna` with a $0.05 cap; `TOUR_SHOTS=1 pnpm e2e:tour tour-complete` also saves every step to `docs/screenshots/tour/` |
+| `pnpm screenshots:rich` | Retakes the plain route shots in `docs/screenshots/` on a fresh rich world (the `pnpm e2e:rich` runner and ports), as Dana at 1440 by 900 |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |
 | `pnpm brand:overlap` | Fails on any run of 8 or more consecutive words shared between the visible text of the saved reference pages and the text in `apps/`, `packages/`, `docs/`, `research/`, `README.md` or `SPEC.md`, outside the (empty) allowlist `scripts/brand-overlap.allow.txt`; skips with a message when the gitignored reference folder is absent, as in CI |

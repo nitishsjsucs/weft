@@ -59,10 +59,20 @@ reset offer, a skipped portal stop, unanchored cards where data is missing).
 | tour-complete, scripted, reading each card for its seconds | rich (round 2) | 137 s | all 21 steps, every step on its own target |
 | tour-autoplay, scripted | rich (round 2) | 141 s | 21 steps |
 | tour-autoplay, live gpt-5.6-luna | rich (round 2) | 150 s | notice run 9.0 s (soft 12 s), chart step 5.5 s (soft 8 s); $0.0037 |
+| tour-complete, scripted, reading each card for its seconds | rich (integration, main) | 137 s | all 21 steps on their own targets; 138 s with a screenshot at every step |
+| tour-autoplay, scripted | rich (integration, main) | 141 s | 21 steps |
+| tour-autoplay, live gpt-5.6-luna, pass 1 | rich (integration, main) | 149 s | notice run 8.3 s, chart step 5.5 s; no timeout or fallback; $0.0048 |
+| tour-autoplay, live gpt-5.6-luna, pass 2 | rich (integration, main) | 147 s | notice run 5.9 s, chart step 5.5 s; no timeout or fallback; $0.0030 |
 
 Round 2, scripted on the rich world: Deliver ready to the run step 1.9 s, the run step 1.6 s, Approve 1.8 s, the chart
 answer 3.0 s including the typed prompt. The slowest step to get ready is the payroll flags (about 1 s: the page
 plus the flag popover).
 
 The live pass is opt-in: `WEFT_TOUR_LIVE=1 pnpm e2e:tour tour-autoplay` starts the same server on live Luna with
-`WEFT_LIVE_USD_CAP=0.05`, its own data dir (`.data-e2e-tour-live`) and tracing off.
+`WEFT_LIVE_USD_CAP=0.05`, its own data dir (`.data-e2e-tour-live`) and tracing off. The autoplay spec prints each step's start, and every note
+and status line a card showed, so a soft timeout ("Still working") or a fallback note shows in its output.
+
+## Screenshots
+
+`TOUR_SHOTS=1 pnpm e2e:tour tour-complete` saves the screen at every step, once its card is ready, to
+`docs/screenshots/tour/` (or `SHOTS_DIR`), named by step number and id (`01-welcome.png` to `21-finish.png`).
