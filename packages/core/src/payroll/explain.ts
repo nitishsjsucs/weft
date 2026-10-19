@@ -35,6 +35,41 @@ export function templateExplanation(flags: Flag[]): string {
   return parts.join(" ");
 }
 
+/**
+ * The words that show an explanation speaks to a flag, by rule (lower case, any one is enough). Every template sentence
+ * above carries one, so a template always covers its flags. The pre-payroll eval task (RT-02) checks the same words in
+ * SQL, so a paycheck whose note speaks to only one of its flags fails the task.
+ */
+export const FLAG_COVERAGE_WORDS: Readonly<Partial<Record<Flag["rule"], readonly string[]>>> = {
+  GROSS_CHANGE: ["gross", "raise", "rate", "%"],
+  HOURS_SPIKE: ["hour"],
+  NEW_IN_RUN: ["first", "new", "start", "hire", "join"],
+  PRORATED: ["day", "prorat", "partial"],
+  MISSING_BANK_ACCOUNT: ["bank", "direct deposit"],
+  UNREGISTERED_STATE: ["tax account", "regist", "state"],
+  NEGATIVE_NET: ["net"],
+  MISSING_FROM_RUN: ["not in this run", "missing", "previous", "last run", "left", "end date"],
+  TOTAL_CHANGE: ["total", "gross"],
+  DUPLICATE_SUPPLEMENTAL: ["duplicate", "supplemental", "bonus", "twice"],
+  RAISE_NOT_APPLIED: ["raise", "rate"],
+  WITHHOLDING_CHANGED: ["withholding", "w-4"],
+  PENDING_TIME_OFF_IN_PERIOD: ["time off", "leave", "pending"],
+  PTO_LINE: ["time off", "pto", "leave", "vacation", "sick"],
+  REIMBURSEMENT_SPIKE: ["reimburse", "expense"],
+};
+
+/** The rules of the review and block flags an explanation does not speak to (FLAG_COVERAGE_WORDS), in flag order. */
+export function uncoveredFlags(text: string, flags: Flag[]): Flag["rule"][] {
+  const t = text.toLowerCase();
+  const rules = flags.filter((f) => f.severity !== "info").map((f) => f.rule);
+  return rules.filter((rule, i) => rules.indexOf(rule) === i && !(FLAG_COVERAGE_WORDS[rule] ?? [""]).some((w) => t.includes(w)));
+}
+
+/** Several notes for one paycheck as one explanation, in the order given, each ending as a sentence. */
+export function joinExplanations(texts: string[]): string {
+  return texts.map((t) => t.trim()).filter(Boolean).map((t) => (/[.!?]$/.test(t) ? t : `${t}.`)).join(" ");
+}
+
 export interface GroundResult { ok: boolean; offending: string[] }
 /** Grounds text against the flags' evidence plus the paycheck's own amounts. */
 export function groundExplanation(text: string, flags: Flag[], paycheck: { gross_cents: number; net_cents: number; hours_x100: number | null }): GroundResult {

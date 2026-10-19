@@ -156,7 +156,7 @@ Never claim that a filing was made or a balance was paid, and never answer the a
 </example>
 <example name="pre_payroll">
 Context: an open payroll draft has flagged paychecks; derived arguments hold the submit call.
-Good trajectory: payroll__get_run for the flagged rows, then one batch with payroll__explain_flags (one grounded explanation per flagged paycheck, quoting only evidence amounts) and payroll__submit_run with the derived arguments, then a final message listing what is blocked and what needs approval.
+Good trajectory: payroll__get_run for the flagged rows, then one batch with payroll__explain_flags (one grounded explanation per flagged paycheck covering all of its flags, quoting only evidence amounts) and payroll__submit_run with the derived arguments, then a final message listing what is blocked and what needs approval.
 </example>`;
 
 const ROLE_ROUTINE_DRAFT = `<role kind="routine_draft">

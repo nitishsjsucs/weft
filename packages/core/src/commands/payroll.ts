@@ -7,8 +7,8 @@ import { formatCents, NotFound, Refused, type ExecContext, type Flag, type Previ
 import { actions, paychecks, principals, proposals, type DbTx } from "@weft/db";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import {
-  concisePayrollRun, createDraft, getRun, groundExplanation, listRuns, markFailed, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
-  readAttempts, runSubjectHash, submitPreviewText, submitRun, templateExplanation, totalsFromDto, workerNames, writeAttempts, writeRunSummary, type TotalsCents,
+  concisePayrollRun, createDraft, getRun, groundExplanation, joinExplanations, listRuns, markFailed, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
+  readAttempts, runSubjectHash, submitPreviewText, submitRun, templateExplanation, totalsFromDto, uncoveredFlags, workerNames, writeAttempts, writeRunSummary, type TotalsCents,
 } from "../payroll/index";
 import { DEMO_SUFFIX } from "../people/names";
 import { createSpecialRun, offCycleLines, OffCycleRefusal, planSpecialRun, specialSettleAt, type OffCycleInput as OffCycleSpecInput } from "../payroll/offcycle";
@@ -154,59 +154,96 @@ export const createDraftCommand: WeftCommand<CreateDraftInput> = {
 
 const ExplainInput = z.object({
   run_id: RunId,
-  items: z.array(z.object({ paycheck_id: z.string().startsWith("pyc_"), explanation: z.string().max(MAX_EXPLANATION_CHARS).optional() })).min(1).max(60),
+  items: z.array(z.object({
+    paycheck_id: z.string().startsWith("pyc_").describe("One item per paycheck: its explanation covers every one of its flags"),
+    explanation: z.string().max(MAX_EXPLANATION_CHARS).optional(),
+  })).min(1).max(60),
 });
 type ExplainInput = z.infer<typeof ExplainInput>;
+type ExplainItemResult = { paycheck_id: string; status: "saved" | "refused"; source: "agent" | "template" | null; code: string | null; offending: string[]; explanation: string | null; merged_items?: number; uncovered_flags?: string[] };
+
+/**
+ * The call's items by paycheck, in first-seen order. A paycheck named more than once (one item per flag) becomes one
+ * explanation: its texts joined in the order given, so a later item never overwrites an earlier one.
+ */
+function itemsByPaycheck(items: ExplainInput["items"]): { paycheck_id: string; texts: string[]; count: number }[] {
+  const out = new Map<string, { paycheck_id: string; texts: string[]; count: number }>();
+  for (const it of items) {
+    const g = out.get(it.paycheck_id) ?? { paycheck_id: it.paycheck_id, texts: [], count: 0 };
+    g.count += 1;
+    const t = it.explanation?.trim();
+    if (t) g.texts.push(t);
+    out.set(it.paycheck_id, g);
+  }
+  return [...out.values()];
+}
+
 export const explainFlagsCommand: WeftCommand<ExplainInput> = {
   ...base, name: "payroll.explain_flags", summary: "Save explanations for flagged paychecks",
-  description: "Saves one explanation per flagged paycheck in one call: one line per flag, in flag order, stating only what its evidence or a read shows. Numbers must come from that evidence; ungrounded items are refused (UNGROUNDED), and after one repair the template is saved. Omit explanation for the template. Example: {\"run_id\": \"pay_2026_09_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
-  compactDescription: "Save grounded explanations for flagged paychecks (batch).",
+  description: "One item per flagged paycheck, never one per flag: its text covers all of that paycheck's flags, one line each, from its evidence only (repeated paycheck_ids are joined). Ungrounded numbers: UNGROUNDED, then the template after one repair. Omit explanation for the template. saved counts paychecks. Example: {\"run_id\": \"pay_2026_09_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
+  compactDescription: "Save grounded explanations for flagged paychecks (batch, one item per paycheck covering all its flags).",
   input: ExplainInput, needs: "edit", effect: "draft", risk: () => "R1", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "hidden",
-  errorHints: { UNGROUNDED: { hint: "Use only numbers from that paycheck's flag evidence (cents as dollars, percents, dates, hours).", example: { run_id: "pay_2026_10_30", items: [{ paycheck_id: "pyc_0150", explanation: "Gross pay changed 18.0% from $5,000.00 to $5,900.00 after the raise took effect 2026-10-16." }] } } },
+  errorHints: {
+    UNGROUNDED: { hint: "Use only numbers from that paycheck's flag evidence (cents as dollars, percents, dates, hours).", example: { run_id: "pay_2026_10_30", items: [{ paycheck_id: "pyc_0150", explanation: "Gross pay changed 18.0% from $5,000.00 to $5,900.00 after the raise took effect 2026-10-16." }] } },
+    TOO_LONG: { hint: `One explanation per paycheck, covering all of its flags in at most ${MAX_EXPLANATION_CHARS} characters: one short line per flag.`, example: { run_id: "pay_2026_10_30", items: [{ paycheck_id: "pyc_0159", explanation: "First paycheck in this schedule. No active bank account, so this paycheck is blocked." }] } },
+  },
   async run(i, ctx, deps) {
     const run = await getRun(deps.tx, i.run_id);
     const rows = await deps.tx.select().from(paychecks).where(eq(paychecks.payrollRunId, run.id));
     const byId = new Map(rows.map((p) => [p.id, p]));
     const attempts = await readAttempts(deps.tx, run.id);
-    const results: { paycheck_id: string; status: "saved" | "refused"; source: "agent" | "template" | null; code: string | null; offending: string[]; explanation: string | null }[] = [];
-    for (const item of i.items) {
-      const p = byId.get(item.paycheck_id);
-      if (!p) { results.push({ paycheck_id: item.paycheck_id, status: "refused", source: null, code: "UNKNOWN_REFERENCE", offending: [], explanation: null }); continue; }
+    const results: ExplainItemResult[] = [];
+    for (const group of itemsByPaycheck(i.items)) {
+      const merged = group.count > 1 ? { merged_items: group.count } : {};
+      const p = byId.get(group.paycheck_id);
+      if (!p) { results.push({ paycheck_id: group.paycheck_id, status: "refused", source: null, code: "UNKNOWN_REFERENCE", offending: [], explanation: null, ...merged }); continue; }
       const flags = JSON.parse(p.flagsJson) as Flag[];
-      if (!flags.length) { results.push({ paycheck_id: p.id, status: "refused", source: null, code: "DOMAIN_NOT_FLAGGED", offending: [], explanation: null }); continue; }
+      if (!flags.length) { results.push({ paycheck_id: p.id, status: "refused", source: null, code: "DOMAIN_NOT_FLAGGED", offending: [], explanation: null, ...merged }); continue; }
       const save = async (text: string, source: "agent" | "template") => {
         await deps.tx.update(paychecks).set({ explanation: text, explanationSource: source, explanationRunId: ctx.run?.id ?? null }).where(eq(paychecks.id, p.id));
       };
-      const text = item.explanation?.trim() ?? "";
+      const text = joinExplanations(group.texts);
       if (!text) {
         const t = templateExplanation(flags);
         await save(t, "template");
-        results.push({ paycheck_id: p.id, status: "saved", source: "template", code: null, offending: [], explanation: t });
+        results.push({ paycheck_id: p.id, status: "saved", source: "template", code: null, offending: [], explanation: t, ...merged });
+        continue;
+      }
+      if (text.length > MAX_EXPLANATION_CHARS) {
+        // Joined items that run past the limit are refused whole, never cut: one shorter explanation is the repair.
+        results.push({ paycheck_id: p.id, status: "refused", source: null, code: "TOO_LONG", offending: [], explanation: null, ...merged });
         continue;
       }
       const g = groundExplanation(text, flags, { gross_cents: p.grossCents, net_cents: p.netCents, hours_x100: p.hoursX100 });
       if (g.ok) {
         await save(text, "agent");
         delete attempts[p.id];
-        results.push({ paycheck_id: p.id, status: "saved", source: "agent", code: null, offending: [], explanation: text });
+        const uncovered = uncoveredFlags(text, flags);
+        results.push({ paycheck_id: p.id, status: "saved", source: "agent", code: null, offending: [], explanation: text, ...merged, ...(uncovered.length ? { uncovered_flags: uncovered } : {}) });
       } else if ((attempts[p.id] ?? 0) >= 1) {
         const t = templateExplanation(flags);
         await save(t, "template");
         delete attempts[p.id];
         // The agent's text is refused again (code UNGROUNDED), and the row is saved with the labeled template instead.
-        results.push({ paycheck_id: p.id, status: "saved", source: "template", code: "UNGROUNDED", offending: g.offending, explanation: t });
+        results.push({ paycheck_id: p.id, status: "saved", source: "template", code: "UNGROUNDED", offending: g.offending, explanation: t, ...merged });
       } else {
         attempts[p.id] = (attempts[p.id] ?? 0) + 1;
-        results.push({ paycheck_id: p.id, status: "refused", source: null, code: "UNGROUNDED", offending: g.offending, explanation: null });
+        results.push({ paycheck_id: p.id, status: "refused", source: null, code: "UNGROUNDED", offending: g.offending, explanation: null, ...merged });
       }
     }
     await writeAttempts(deps.tx, run.id, attempts);
+    // Every count below is of paychecks: results hold one entry per distinct paycheck_id.
     const saved = results.filter((r) => r.source !== null);
     const remaining = rows.filter((p) => p.reviewGroup === "needs_review" && p.status !== "excluded").length
       - (await deps.tx.select({ id: paychecks.id, e: paychecks.explanation, g: paychecks.reviewGroup, s: paychecks.status }).from(paychecks).where(eq(paychecks.payrollRunId, run.id))).filter((r) => r.g === "needs_review" && r.s !== "excluded" && r.e !== null).length;
+    const uncovered = results.filter((r) => r.uncovered_flags?.length).length;
     return {
-      data: { run_id: run.id, items: results, saved: saved.length, refused: results.filter((r) => r.status === "refused").length, unexplained_flagged: remaining },
+      data: {
+        run_id: run.id, items: results, saved: saved.length, refused: results.filter((r) => r.status === "refused").length, unexplained_flagged: remaining,
+        ...(results.length < i.items.length ? { merged_note: `${i.items.length} items named ${results.length} paychecks; items for the same paycheck were joined into one explanation` } : {}),
+        ...(uncovered ? { uncovered_note: `${uncovered} saved ${uncovered === 1 ? "explanation does" : "explanations do"} not speak to every flag (uncovered_flags); send one item per paycheck covering all of its flags` } : {}),
+      },
       summary: `Explanations for ${run.id}: ${saved.filter((r) => r.source === "agent").length} agent, ${saved.filter((r) => r.source === "template").length} template, ${results.filter((r) => r.source === null).length} refused`,
     };
   },
