@@ -3,7 +3,7 @@
 // no row ids or enum values.
 import { describe, expect, it } from "vitest";
 import { humanDates } from "../src/components/app/format";
-import { cardField, valueText, quarantinedLines, taintSource, answerText, auditLabel, enumWords, humanDateLists, humanDateText, humanLine, noticeName, routineSummaryText, stepLine } from "../src/components/app/copy";
+import { humanCopy, cardField, valueText, quarantinedLines, taintSource, answerText, auditLabel, enumWords, humanDateLists, humanDateText, humanLine, noticeName, routineSummaryText, stepLine } from "../src/components/app/copy";
 
 describe("humanDates before a colon", () => {
   it("formats a date followed by a colon and keeps the year on the other end of the range", () => {
@@ -128,5 +128,11 @@ describe("proposal values", () => {
     expect(cardField("Status", "draft to processing")).toEqual({ label: "Status", value: "Draft → Submitted for processing" });
     expect(cardField("Check MEALS_DETAIL_MISSING", "review to Meals need the attendees and the business purpose"))
       .toEqual({ label: "Policy check, meals detail missing", value: "Meals need the attendees and the business purpose" });
+  });
+});
+
+describe("expense checks", () => {
+  it("a duplicate check names the earlier claim, not its id", () => {
+    expect(humanCopy("Same merchant, amount ($96.00) and date as exp_0009 (approved)")).toBe("Same merchant, amount ($96.00) and date as an earlier claim (approved)");
   });
 });

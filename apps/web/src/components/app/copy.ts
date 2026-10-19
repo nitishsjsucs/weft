@@ -45,6 +45,7 @@ export function humanCopy(text: string, year?: number): string {
     .replace(new RegExp(`;\\s*pay rate ${ID} effective`, "g"), "; new pay rate from")
     .replace(new RegExp(`\\b(in|from|Was in) (?:the previous run )?pay_[A-Za-z0-9_]+`, "g"), (_m, w: string) => `${w} the previous run`)
     .replace(new RegExp(`\\btor_\\d+ \\(`, "g"), "A time-off request (")
+    .replace(/\bas exp_[A-Za-z0-9_]+ \((\w+)\)/g, "as an earlier claim ($1)")
     .replace(new RegExp(`\\b${ID}\\b`, "g"), "")
     .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, (c) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))
     .replace(/ {2,}/g, " ").replace(/ ([,.;)])/g, "$1").replace(/\( /g, "(").trim();
