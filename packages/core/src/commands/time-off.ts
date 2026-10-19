@@ -170,13 +170,14 @@ const listRequests = readCommand({
       requests.push({
         ...dto, workerName: w ? displayName(w) : r.workerId, departmentId: w?.departmentId ?? null, policyName: pols.get(r.policyId)?.name ?? r.policyId, typeKind: pols.get(r.policyId)?.typeKind ?? null, source: r.source, extRef: r.extRef,
         ...timeForms("requested", r.requestedMinutes), submitted_date: ptDateOf(r.createdAt), decided_date: r.decidedAt ? ptDateOf(r.decidedAt) : null, ...(await balanceAround(r)),
-        holidays_note: holidaysNote(dto.days),
+        // Only on a request that spans a holiday, so the default read stays under the observation cap.
+        ...(holidaysNote(dto.days) ? { holidays_note: holidaysNote(dto.days) } : {}),
       });
     }
     const totals = requestTotals(rows, i.totals_by ?? [], (id) => (ws.get(id) ? workerRef(ws.get(id)!) : id), (id) => pols.get(id)?.name ?? id);
     // Holidays inside a request charge nothing, and an answer about the balance should say so; the line makes them
     // as visible in the summary as the hours are in the rows (demo check, scenario 6).
-    const withHolidays = requests.filter((r) => r.holidays_note).slice(0, 3).map((r) => `${r.workerName}: ${r.holidays_note}`);
+    const withHolidays = requests.flatMap((r) => ("holidays_note" in r && r.holidays_note ? [`${r.workerName}: ${r.holidays_note}`] : [])).slice(0, 3);
     return { data: { count: requests.length, ...totals, requests }, summary: [`${requests.length} time-off requests`, ...withHolidays].join("; ") };
   },
 });
