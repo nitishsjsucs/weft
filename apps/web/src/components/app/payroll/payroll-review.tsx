@@ -20,7 +20,7 @@ const SCHEDULE_LABEL: Record<string, string> = { ps_us_semimonthly: "Semi-monthl
 
 function OutcomeLine({ o }: { o: ToolOutcome | null }) {
   if (!o) return null;
-  if (!o.ok) return <span role="alert" className="text-1 text-red-11">{o.refusal.code}: {o.refusal.message}{o.refusal.hint ? ` (${o.refusal.hint})` : ""}</span>;
+  if (!o.ok) return <span role="alert" title={o.refusal.code} className="text-1 text-red-11">{o.refusal.message}{o.refusal.hint ? ` (${o.refusal.hint})` : ""}</span>;
   if (o.status === "pending_approval") return <span className="text-1 text-amber-11">Sent to the Inbox for approval: {o.title}</span>;
   return <span className="text-1 text-green-11">{o.summary}</span>;
 }

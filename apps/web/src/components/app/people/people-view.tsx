@@ -69,7 +69,7 @@ function OfferCard({ o }: { o: Offer }) {
       <div className="min-w-0 flex-1">
         <div className="text-3 font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
         <div className="text-[13px] text-gray-11">{o.title} · {deptName(o.departmentId)} · work state {o.workState} · {o.base.display} a year · starts {fmtDate(o.startDate, { month: "short", day: "numeric", year: "numeric" })}</div>
-        {out && !out.ok ? <div role="alert" className="mt-1 text-1 text-red-11">{out.refusal.code}: {out.refusal.message}</div> : null}
+        {out && !out.ok ? <div role="alert" title={out.refusal.code} className="mt-1 text-1 text-red-11">{out.refusal.message}</div> : null}
         {accept.error ? <div role="alert" className="mt-1 text-1 text-red-11">{errorText(accept.error)}</div> : null}
         {o.workerId ? <Link href={`/app/people/${o.workerId}`} className="mt-1 inline-block text-1 text-blue-11 hover:underline">Open onboarding</Link> : null}
       </div>

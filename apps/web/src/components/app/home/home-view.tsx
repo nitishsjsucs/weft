@@ -4,7 +4,8 @@ import { Banknote, CalendarDays, ChevronRight, Compass, Inbox, Landmark, UserRou
 import { Badge, Button, Card, CardHeading } from "@weft/ui/components";
 import { useTour } from "../../tour/tour-provider";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
-import { AGENCY, fmtDate, period, relative, runKind } from "../format";
+import { ACCOUNT_TYPE, AGENCY, fmtDate, period, relative, runKind, statusLabel } from "../format";
+import { humanLine } from "../copy";
 
 function greeting(iso: string | undefined): string {
   if (!iso) return "Hello";
@@ -81,14 +82,14 @@ export function HomeView() {
           {upcoming.map((r) => (
             <Link key={r.id} href={`/app/payroll/${r.id}`} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-3 last:border-0 hover:bg-gray-2">
               <div className="min-w-0 flex-1"><div className="text-2 font-medium">{period(r.periodStart, r.periodEnd)}</div><div className="text-1 text-gray-10">US · {runKind(r.subtype).label} · payday {fmtDate(r.payday)}</div></div>
-              <span className={`text-2 font-medium whitespace-nowrap ${r.status === "draft" ? "text-amber-11" : "text-blue-11"}`}>{r.status === "draft" ? (now ? `Due ${relative(r.approvalDeadline, now)}` : "Draft") : r.status}</span>
+              <span className={`text-2 font-medium whitespace-nowrap ${r.status === "draft" ? "text-amber-11" : "text-blue-11"}`}>{r.status === "draft" ? (now ? `Due ${relative(r.approvalDeadline, now)}` : "Draft") : statusLabel(r.status)}</span>
             </Link>
           ))}
         </Widget>
         <Widget testid="home-widget-approvals" icon={<Inbox />} title="Approvals waiting" href="/app/inbox">
           <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{props.data ? approvals.length : "-"}</span><span className="text-1 text-gray-10">waiting</span>{myTor.length ? <Link data-testid="home-approvals-time-off" href="/app/time-off" className="ml-auto text-1 text-blue-11 hover:underline">+ {myTor.length} time-off {myTor.length === 1 ? "decision" : "decisions"} for you</Link> : null}</div>
           <ul className="px-2 pt-2 pb-2">
-            {approvals.slice(0, 3).map((p) => <li key={p.id}><Link href="/app/inbox" className="block truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2">{p.risk ? <Badge size="xs" className="mr-1.5">{p.risk}</Badge> : null}{p.headline}</Link></li>)}
+            {approvals.slice(0, 3).map((p) => <li key={p.id}><Link href="/app/inbox" title={p.headline} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2">{p.risk ? <Badge size="xs" className="shrink-0">{p.risk}</Badge> : null}<span className="min-w-0 flex-1 truncate">{humanLine(p.headline)}</span></Link></li>)}
           </ul>
         </Widget>
         <Widget testid="home-widget-registrations" icon={<Landmark />} title="State tax registrations" href="/app/compliance">
@@ -96,7 +97,7 @@ export function HomeView() {
           <ul>
             {(accounts.data ?? []).filter((a) => a.jurisdiction !== "US").map((a) => (
               <li key={a.id} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-2 text-[13px] last:border-0">
-                <span className="w-8 font-medium">{a.jurisdiction}</span><span className="min-w-0 flex-1 truncate text-gray-11">{AGENCY[a.agency] ?? a.agency} <span className="text-gray-10">{a.accountType}{a.registeredAt ? ` · since ${fmtDate(a.registeredAt, { month: "short", year: "numeric" })}` : ""}</span></span>
+                <span className="w-8 font-medium">{a.jurisdiction}</span><span className="min-w-0 flex-1 text-gray-11">{AGENCY[a.agency] ?? a.agency} <span className="text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? statusLabel(a.accountType)}{a.registeredAt ? <span className="max-[1439px]:hidden"> · since {fmtDate(a.registeredAt, { month: "short", year: "numeric" })}</span> : ""}</span></span>
                 <Badge tone={a.status === "active" ? "green" : a.status === "awaiting_state" ? "amber" : "gray"}>{humanStatus(a.status)}</Badge>
               </li>
             ))}
@@ -107,6 +108,7 @@ export function HomeView() {
             <div><div data-testid="home-time-off-out" className="text-7 font-semibold tabular">{timeOff.data ? outToday.length : "-"}</div><div className="text-1 text-gray-10">out today</div></div>
             <div><div data-testid="home-time-off-pending" className="text-7 font-semibold tabular">{timeOff.data ? pendingTor.length : "-"}</div><div className="text-1 text-gray-10">waiting for a decision</div></div>
           </div>
+          {soon.length ? <div className="px-4 pb-1 text-0 font-medium text-gray-10">Coming up</div> : null}
           <ul className="px-2 pb-2">
             {soon.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
           </ul>
@@ -139,7 +141,4 @@ export function HomeView() {
 }
 
 /** "awaiting_state" to "Awaiting state". */
-function humanStatus(s: string): string {
-  const t = s.replace(/_/g, " ");
-  return t.charAt(0).toUpperCase() + t.slice(1);
-}
+const humanStatus = statusLabel;

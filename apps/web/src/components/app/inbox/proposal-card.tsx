@@ -6,12 +6,20 @@ import { Badge, Button, Card, DiffTable } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TID, tid, type DecisionResult, type Proposal } from "@weft/contracts";
 import { errorText, useMutation, useSimClock } from "@/lib/api/hooks";
-import { cents, fmtDateTime, humanTimes, relative } from "../format";
-import { auditLabel, enumWords, humanLine } from "../copy";
+import { cents, fmtDateTime, humanTimes, relative, statusLabel } from "../format";
+import { auditLabel, codeWords, humanCopy, humanLine, splitChecks, taintSource, valueText, type Severity } from "../copy";
+import { RULE_LABEL, SEVERITY_TONE } from "../expenses/labels";
 import { principalName, refHref } from "../refs";
 import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
 import { decideProposal, type Decision } from "./decide";
+
+const SEVERITY_WORD: Record<Severity, string> = { block: "Blocks", review: "Review", info: "Note" };
+const APPROVE_REASONS = [{ code: "looks_right", label: "Looks right" }, { code: "verified_source", label: "Verified against the source" }] as const;
+/** A decision's reason code as the words the person chose it by. */
+export function reasonLabel(code: string): string {
+  return [...DENY_REASONS, ...APPROVE_REASONS].find((r) => r.code === code)?.label ?? statusLabel(code);
+}
 
 export const DENY_REASONS = [
   { code: "incorrect", label: "Incorrect or not grounded" },
@@ -67,13 +75,14 @@ export function ProposalCard({ p }: { p: Proposal }) {
   const isSuggestion = p.kind === "suggestion";
   const expired = new Date(p.expiresAt).getTime() <= new Date(now).getTime();
   const who = proposerOf(p);
+  const diff = splitChecks(p.diff);
 
   return (
     <Card data-testid={tid.inboxCard(p.id)} data-tour="inbox-card" data-proposal-id={p.id} data-has-diff={p.diff.length ? "true" : "false"} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
       {p.taintedBy ? (
         <div data-testid={TID.inboxTaintedBanner} role="alert" className="flex items-start gap-2 border-b border-amber-9/30 bg-amber-3 px-4 py-2 text-[13px] text-amber-11">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 break-words">This run read untrusted content: {p.taintedBy}</span>
+          <span className="min-w-0 break-words" title={p.taintedBy}>This run read untrusted content: {taintSource(p.taintedBy)}. Read the content below before you approve.</span>
         </div>
       ) : null}
       <div className="flex flex-col gap-3 px-4 py-4">
@@ -88,16 +97,26 @@ export function ProposalCard({ p }: { p: Proposal }) {
             <span className={cn("inline-flex items-center gap-1 text-1 tabular", expired ? "text-red-11" : "text-gray-10")} title={`Expires ${fmtDateTime(p.expiresAt)}`}>
               <Clock className="size-3.5" /> {expired ? "Expired" : `Expires ${relative(p.expiresAt, now)}`}
             </span>
-          ) : <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "denied" || p.status === "failed" ? "red" : "gray"}>{p.status}</Badge>}
+          ) : <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "denied" || p.status === "failed" ? "red" : "gray"}>{statusLabel(p.status)}</Badge>}
         </div>
         <h3 className="text-3 font-medium leading-6 text-balance break-words">{humanLine(p.headline)}</h3>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 tablet:grid-cols-4">
           <Field label="On behalf of">{principalName(p.onBehalfOf)}</Field>
-          <Field label="Moves money">{p.moneyCents === null ? "No" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
+          <Field label="Moves money">{!p.moneyCents ? "No" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
           <Field label="Proposed by"><ProposedBy who={who} /></Field>
         </dl>
-        {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={p.diff.map((r) => ({ ...r, before: enumWords(humanTimes(r.before)), after: enumWords(humanTimes(r.after)) }))} /> : null}
+        {diff.rows.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={diff.rows.map((r) => ({ ...r, label: humanLine(r.label), before: valueText(r.before), after: valueText(r.after) }))} /> : null}
+        {diff.checks.length ? (
+          <ul data-testid="proposal-checks" className="flex flex-col gap-1.5">
+            {diff.checks.map((c, i) => (
+              <li key={i} title={c.rule} className="flex min-w-0 items-start gap-2 text-[13px] leading-5">
+                {c.severity ? <Badge size="xs" tone={SEVERITY_TONE[c.severity]} className="mt-0.5 shrink-0">{SEVERITY_WORD[c.severity]}</Badge> : null}
+                <span className="min-w-0 break-words"><span className="font-medium">Policy check, {(RULE_LABEL[c.rule] ?? codeWords(c.rule)).toLowerCase()}:</span> {c.message}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {p.content.length ? (
           <div data-testid={TID.proposalContent} className="flex flex-col gap-2">
             {p.content.map((c, i) => (
@@ -108,7 +127,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             ))}
           </div>
         ) : null}
-        {p.agentNote ? (
+        {p.agentNote && !p.content.some((c) => c.text.trim() === p.agentNote!.trim()) ? (
           <div className="rounded-lg bg-gray-2 px-3 py-2">
             <div data-testid="proposal-note-label" data-proposer={who.kind} className="text-1 font-medium text-gray-11">{noteLabel(who, principalName)}</div>
             <p className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12">{humanTimes(p.agentNote)}</p>
@@ -123,7 +142,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
                 // A linked chip names the record and the link opens it, so the raw ref only shows when the label is all there is.
                 <Link key={i} href={href} title={e.ref} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-blue-11 shadow-[var(--shadow-border)] hover:bg-blue-3">{e.label.trim() ? e.label : e.ref}</Link>
               ) : (
-                <span key={i} className="rounded-md px-1.5 py-0.5 shadow-[var(--shadow-border)]">{e.label}{e.ref && !e.label.includes(e.ref) && !/^not reversible/i.test(e.label) ? <> <span className="font-mono text-0 text-gray-10">{e.ref}</span></> : null}</span>
+                <span key={i} title={e.ref || undefined} className="rounded-md px-1.5 py-0.5 shadow-[var(--shadow-border)]">{humanLine(e.label) || e.label}{e.ref && !e.label.includes(e.ref) && !/^not reversible/i.test(e.label) && !/^[a-z]{2,5}_\w*\d/.test(e.ref) ? <> <span className="text-0 text-gray-10">{humanLine(e.ref)}</span></> : null}</span>
               );
             })}
           </div>
@@ -131,7 +150,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
         {!pending ? (
           <div className="text-1 text-gray-10">
             {p.decidedBy ? <>Decided by {principalName(p.decidedBy)}{p.decidedAt ? ` on ${fmtDateTime(p.decidedAt)}` : ""}</> : null}
-            {p.decisionCode ? <> · reason <code className="font-mono">{p.decisionCode}</code></> : null}
+            {p.decisionCode ? <> · Reason: {reasonLabel(p.decisionCode).toLowerCase()}</> : null}
             {p.decisionNote ? <> · {p.decisionNote}</> : null}
             {p.executedActionSeq !== null ? <> · <Link href="/app/audit" className="text-blue-11 hover:underline">{auditLabel(p.executedActionSeq)}</Link></> : null}
           </div>
@@ -143,7 +162,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             <div className="grid gap-2 tablet:grid-cols-[200px_1fr]">
               <select aria-label="Reason code" value={reason} onChange={(e) => setReason(e.target.value)} className="h-8 rounded-lg border border-[var(--app-border)] bg-card px-2 text-[13px]">
                 <option value="">{mode === "deny" ? "Choose a reason" : "Reason (optional)"}</option>
-                {(mode === "deny" ? DENY_REASONS : [{ code: "looks_right", label: "Looks right" }, { code: "verified_source", label: "Verified against the source" }]).map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+                {(mode === "deny" ? DENY_REASONS : APPROVE_REASONS).map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
               </select>
               <input aria-label="Note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional, never sent to the agent)" className="h-8 min-w-0 rounded-lg border border-[var(--app-border)] bg-card px-2 text-[13px]" />
             </div>
@@ -168,7 +187,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             )}
             <span className="flex-1" />
             {m.error ? <span role="alert" className="text-1 text-red-11">{errorText(m.error)}</span> : null}
-            {result && !result.ok ? <span role="alert" className="text-1 text-red-11">{result.code}: {humanTimes(result.message)}</span> : null}
+            {result && !result.ok ? <span role="alert" title={result.code} className="text-1 text-red-11">{humanTimes(result.message)}</span> : null}
           </div>
         </div>
       ) : null}

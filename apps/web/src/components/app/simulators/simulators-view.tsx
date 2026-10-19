@@ -5,7 +5,8 @@ import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } fro
 import { cn } from "@weft/ui";
 import { ApprovalCardW3, NoticeScenario, TID, tid, type ArmedFault, type ChatMessageDto, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, invalidate, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
-import { fmtDateTime, nextCronSlot, relative } from "../format";
+import { ACCOUNT_TYPE, AGENCY, cents, fmtDateTime, nextCronSlot, relative, statusLabel } from "../format";
+import { answerText, humanLine } from "../copy";
 import { PageHeader } from "../page";
 import { useAgent } from "../agent-context";
 import { ApprovalCard } from "../agent/approval-card";
@@ -21,10 +22,16 @@ const SCENARIOS: Record<(typeof NoticeScenario.options)[number], { label: string
   ca_de2088_rate_change: { label: "Deliver CA EDD DE 2088", note: "Revised 2026 UI rate, 3.4% to 1.5%" },
   ca_de2088_injection: { label: "Deliver DE 2088 with an injected line", note: "Same notice plus an instruction aimed at the agent" },
   ny_missing_filing: { label: "Deliver NY missing filing", note: "NYS-45 for Q3 not received" },
-  irs_deposit_schedule_change: { label: "Deliver IRS deposit schedule change", note: "Handling is P1" },
+  irs_deposit_schedule_change: { label: "Deliver IRS deposit schedule change", note: "A deposit schedule letter from the IRS" },
 };
 const FAULT_TARGETS = ["agency.CO.register", "agency.CA.fileResponse", "bank.submitBatch", "idp.createAccount", "devices.order", "chat.post"] as const;
 const FAULT_KIND: Record<string, ArmedFault["kind"]> = { "agency.CO.register": "needs_info", "bank.submitBatch": "return", "idp.createAccount": "delay" };
+/** What each fault target breaks, in words (the target code is the switch's title). */
+const FAULT_LABEL: Record<(typeof FAULT_TARGETS)[number], string> = {
+  "agency.CO.register": "CO state registration", "agency.CA.fileResponse": "CA EDD notice reply", "bank.submitBatch": "Bank batch submit",
+  "idp.createAccount": "Identity provider account", "devices.order": "Device order", "chat.post": "Chat post",
+};
+const FAULT_KIND_WORDS: Record<string, string> = { needs_info: "a request for more information", return: "a returned payment", delay: "a delay", error: "an error" };
 const CHANNELS = ["#people-ops", "#payroll", "#new-hires", "#general"] as const;
 
 /**
@@ -37,23 +44,68 @@ interface SimState {
   faults?: ArmedFault[]; nextEvent?: { at: string; label: string } | null;
 }
 type Row = Record<string, unknown>;
-const HIDDEN_COLS = new Set(["company_id", "payload_json", "body", "entries_json", "card_json"]);
 
-function cell(col: string, v: unknown): string {
-  if (v === null || v === undefined || v === "") return "-";
-  if (typeof v === "number" && /cents$/.test(col)) return `$${(v / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (typeof v === "string" && /(_at|At)$/.test(col) && !Number.isNaN(Date.parse(v))) return fmtDateTime(v);
-  return typeof v === "object" ? JSON.stringify(v) : String(v);
-}
+/** One column of a simulator table: a label people read and how its value reads. */
+interface Col { key: string; label: string; fmt?: (v: unknown, r: Row) => string }
+const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+const when = (v: unknown) => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? fmtDateTime(v) : str(v));
+const agencyName = (v: unknown) => AGENCY[str(v) as keyof typeof AGENCY] ?? str(v);
+const money = (v: unknown) => (typeof v === "number" ? cents(v) : str(v));
+/** A stored code that is a form or a kind ("W2_W3", "rate_change") as words. */
+const kindWords = (v: unknown) => { const t = str(v); return /^W2_W3$/i.test(t) ? "W-2 and W-3" : statusLabel(t.toLowerCase()); };
+/** "pay_2026_10_15" reads "Oct 15 run". */
+const runName = (v: unknown) => humanLine(str(v)).replace(/^the /, "").replace(/^./, (c) => c.toUpperCase());
+const SIM_COLS: Record<string, Col[]> = {
+  registrations: [
+    { key: "agency", label: "Agency", fmt: agencyName },
+    { key: "account_type", label: "Account type", fmt: (v) => ACCOUNT_TYPE[str(v) as keyof typeof ACCOUNT_TYPE] ?? statusLabel(str(v)) },
+    { key: "status", label: "Status", fmt: (v) => statusLabel(str(v)) },
+    { key: "account_number", label: "Account", fmt: (v) => str(v) || "Not issued yet" },
+    { key: "complete_at", label: "Completes", fmt: when },
+  ],
+  bankBatches: [
+    { key: "payroll_run_id", label: "Pay run", fmt: runName },
+    { key: "total_cents", label: "Amount", fmt: money },
+    { key: "entryCount", label: "Payments", fmt: str },
+    { key: "status", label: "Status", fmt: (v) => statusLabel(str(v)) },
+    { key: "settle_at", label: "Settles", fmt: when },
+  ],
+  agencyMail: [
+    { key: "agency", label: "Agency", fmt: agencyName },
+    { key: "direction", label: "Direction", fmt: (v) => (str(v) === "in" || str(v) === "inbound" ? "From the agency" : str(v) === "out" || str(v) === "outbound" ? "To the agency" : statusLabel(str(v))) },
+    { key: "kind", label: "Kind", fmt: kindWords },
+    { key: "confirmation", label: "Confirmation", fmt: (v) => str(v) || "None" },
+    { key: "ts", label: "When", fmt: when },
+  ],
+  idpAccounts: [
+    { key: "system", label: "System", fmt: (v) => humanLine(`Created ${str(v)} account`).replace(/^Created | account$/g, "") },
+    { key: "handle", label: "Handle", fmt: str },
+    { key: "status", label: "Status", fmt: (v) => statusLabel(str(v)) },
+    { key: "created_at", label: "Created", fmt: when },
+  ],
+  deviceOrders: [
+    { key: "sku", label: "Device", fmt: (v) => statusLabel(str(v).replace(/-/g, " ")) },
+    { key: "ship_to", label: "Ship to", fmt: str },
+    { key: "price_cents", label: "Price", fmt: money },
+    { key: "status", label: "Status", fmt: (v) => statusLabel(str(v)) },
+    { key: "eta", label: "Arrives", fmt: when },
+  ],
+};
+const MONO = new Set(["account_number", "handle", "confirmation"]);
 
-function Generic({ rows, empty, testid }: { rows: Row[] | undefined; empty: string; testid: string }) {
+/** A simulator table with labeled, formatted columns; the row id and stored JSON sit in the row's title. */
+function SimTable({ kind, rows, empty, testid }: { kind: keyof typeof SIM_COLS; rows: Row[] | undefined; empty: string; testid: string }) {
   if (!rows?.length) return <div data-testid={testid} className="px-4 py-4 text-[13px] text-gray-10">{empty}</div>;
-  const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => !HIDDEN_COLS.has(c)).slice(0, 7);
+  const cols = SIM_COLS[kind]!;
   return (
     <div data-testid={testid} className="overflow-x-auto">
       <Table className="text-[13px]">
-        <THead><TR>{cols.map((c) => <TH key={c}>{c.replace(/([A-Z])/g, " $1").replace(/_/g, " ").toLowerCase()}</TH>)}</TR></THead>
-        <TBody>{rows.map((r, i) => <TR key={i}>{cols.map((c) => <TD key={c} className="h-9 font-mono text-1 whitespace-nowrap">{cell(c, r[c])}</TD>)}</TR>)}</TBody>
+        <THead><TR>{cols.map((c) => <TH key={c.key}>{c.label}</TH>)}</TR></THead>
+        <TBody>{rows.map((r, i) => (
+          <TR key={i} title={[r.id, r.worker_id, r.related_notice_id, r.request_json].filter(Boolean).map(String).join(" · ")}>
+            {cols.map((c) => <TD key={c.key} className={cn("h-9 text-1 whitespace-nowrap", MONO.has(c.key) && "font-mono")}>{(c.fmt ?? str)(r[c.key], r) || "None"}</TD>)}
+          </TR>
+        ))}</TBody>
       </Table>
     </div>
   );
@@ -70,14 +122,22 @@ function ChatFeed({ channel }: { channel: (typeof CHANNELS)[number] }) {
         {msgs.slice(-20).map((m) => (
           <li key={m.id} className="text-[13px] leading-5">
             <div className="flex items-baseline gap-2"><span className="font-medium">{m.author}</span><span className="text-0 text-gray-10">{fmtDateTime(m.ts)}</span></div>
-            <p className="break-words whitespace-pre-wrap text-gray-12">{m.text}</p>
-            {(() => { const c = ApprovalCardW3.safeParse(m.card); return c.success ? <SimChatCard card={c.data} /> : null; })()}
+            {(() => {
+              // A person's post shows exactly as written; Weft's own posts read as copy, and a post that carries an
+              // approval card says only that, since the card below names the change.
+              const c = ApprovalCardW3.safeParse(m.card);
+              const text = m.inbound ? m.text : c.success ? "Approval needed" : answerText(m.text).text;
+              return <><p title={m.inbound ? undefined : m.text} className="break-words whitespace-pre-wrap text-gray-12">{text}</p>{c.success ? <SimChatCard card={c.data} /> : null}</>;
+            })()}
           </li>
         ))}
       </ul>
     </Card>
   );
 }
+
+/** "in 30m" reads "in 30 min", "in 1h 5m" reads "in 1 h 5 min". */
+const relWords = (r: string) => r.replace(/(\d+)m\b/g, "$1 min").replace(/(\d+)h\b/g, "$1 h").replace(/(\d+)d\b/g, "$1 d");
 
 /** Notices the prebuilt agency routine picks up; the others usually start no run, so the wait is short. */
 const ROUTED = new Set<string>(["ca_de2088_rate_change", "ca_de2088_injection"]);
@@ -107,10 +167,10 @@ export function SimulatorsView() {
     let before = new Set<string>();
     try { before = new Set(((await client.get("/v1/agent/runs", { query: { limit: 10 } })) as { data: { id: string }[] }).data.map((r) => r.id)); } catch { /* list may be unavailable */ }
     const o = (await client.post("/v1/sim/notices/deliver", { body: { scenario } })) as ToolOutcome;
-    setLast(o.ok && o.status === "done" ? o.summary : !o.ok ? `${o.refusal.code}: ${o.refusal.message}` : null);
+    setLast(o.ok && o.status === "done" ? `${humanLine(o.summary)}.` : !o.ok ? o.refusal.message : null);
     const hinted = o.ok && o.status === "done" ? (o.data as { agentRunId?: string } | null)?.agentRunId : undefined;
     const runId = o.ok ? await findNewRun(before, hinted, ROUTED.has(scenario) ? 12 : 3) : null;
-    if (!runId && o.ok && o.status === "done") setLast(`${o.summary}. No routine started a run for this notice, so it waits on the Notices tab of Compliance.`);
+    if (!runId && o.ok && o.status === "done") setLast(`${humanLine(o.summary)}. No routine started a run for this notice, so it waits on the Notices tab of Compliance.`);
     if (runId) agent.watch(runId, SCENARIOS[scenario as keyof typeof SCENARIOS]?.label.replace("Deliver ", "Agency notice: ") ?? scenario);
     return o;
   });
@@ -132,7 +192,7 @@ export function SimulatorsView() {
   const err = clock.error ?? state.error ?? advance.error ?? deliver.error ?? fault.error;
   const step = async (body: Record<string, string>) => { await advance.run(body); invalidate(); };
   const slot = now ? nextCronSlot(now) : null;
-  const nextEvent = s.nextEvent ?? (slot ? { at: slot, label: "prebuilt routine slot (weekdays 9:00 AM PT)" } : null);
+  const nextEvent = s.nextEvent ? { ...s.nextEvent, label: humanLine(s.nextEvent.label) } : slot ? { at: slot, label: "routine check" } : null;
   const idpRows = Array.isArray(s.idpAccounts) ? s.idpAccounts : undefined;
   const idpCount = typeof s.idpAccounts === "number" ? s.idpAccounts : idpRows?.length;
 
@@ -151,7 +211,7 @@ export function SimulatorsView() {
               <Button data-testid={tid.simAdvance("1d")} size="sm" disabled={advance.pending} onClick={() => void step({ by: "P1D" })}><FastForward /> +1 day</Button>
               <Button data-testid={tid.simAdvance("next")} size="sm" disabled={advance.pending} onClick={() => void step({ toNext: "cron" })}><CalendarClock /> Next scheduled event</Button>
             </div>
-            {nextEvent ? <p data-testid="sim-next-event" className="mt-3 text-1 break-words text-gray-11">Next: {nextEvent.label} at {fmtDateTime(nextEvent.at)}{now ? ` (${relative(nextEvent.at, now)})` : ""}</p> : null}
+            {nextEvent ? <p data-testid="sim-next-event" className="mt-3 text-1 break-words text-gray-11">Next {nextEvent.label}: {fmtDateTime(nextEvent.at)}{now ? ` (${relWords(relative(nextEvent.at, now))})` : ""}</p> : null}
           </Card>
         </section>
         <section>
@@ -159,7 +219,7 @@ export function SimulatorsView() {
           <Card className="divide-y divide-[var(--app-border)]">
             {Object.entries(SCENARIOS).map(([k, v]) => (
               <div key={k} className="flex items-center gap-3 px-4 py-2.5">
-                <div className="min-w-0 flex-1"><div className="text-[13px] font-medium">{v.label}</div><div className="truncate text-1 text-gray-10">{v.note} · <code className="font-mono">{k}</code></div></div>
+                <div className="min-w-0 flex-1" title={k}><div className="text-[13px] font-medium">{v.label}</div><div className="truncate text-1 text-gray-10">{v.note}</div></div>
                 <Button data-testid={tid.simDeliver(k)} data-tour="sim-deliver" data-scenario={k} size="sm" disabled={deliver.pending && busyKey === k} onClick={() => { setBusyKey(k); void deliver.run(k); }}>{deliver.pending && busyKey === k ? "Delivering..." : "Deliver"}</Button>
               </div>
             ))}
@@ -172,7 +232,7 @@ export function SimulatorsView() {
             {FAULT_TARGETS.map((t) => {
               const on = armed.get(t as ArmedFault["target"]);
               return (
-                <label key={t} className="flex cursor-pointer items-center gap-3 bg-card px-4 py-2.5">
+                <label key={t} title={t} className="flex min-w-0 cursor-pointer items-center gap-3 bg-card px-4 py-2.5">
                   <input
                     type="checkbox"
                     role="switch"
@@ -181,8 +241,8 @@ export function SimulatorsView() {
                     onChange={(e) => void toggleFault(t, e.target.checked)}
                     className="size-4 accent-[var(--accent-9)]"
                   />
-                  <span className="min-w-0 flex-1"><code className="font-mono text-1">{t}</code><span className="block text-0 text-gray-10">{on ? `armed: ${on.kind}, ${on.mode}, fired ${on.firedCount}` : `off (arms ${FAULT_KIND[t] ?? "error"}, once)`}</span></span>
-                  <span className={cn("size-2 rounded-full", isArmed(t) ? "bg-red-9" : "bg-gray-6")} />
+                  <span className="min-w-0 flex-1 break-words"><span className="text-1 font-medium">{FAULT_LABEL[t]}</span><span className="block text-0 text-gray-10">{on ? `Armed: ${FAULT_KIND_WORDS[on.kind] ?? statusLabel(on.kind)} ${on.mode === "once" ? "once" : "every time"}, fired ${on.firedCount} ${on.firedCount === 1 ? "time" : "times"}` : `Off. Arming sends ${FAULT_KIND_WORDS[FAULT_KIND[t] ?? "error"]} once`}</span></span>
+                  <span className={cn("size-2 shrink-0 rounded-full", isArmed(t) ? "bg-red-9" : "bg-gray-6")} />
                 </label>
               );
             })}
@@ -190,27 +250,27 @@ export function SimulatorsView() {
         </section>
         <section className="min-w-0">
           <CardHeading icon={<FlaskConical />}>Agency registrations</CardHeading>
-          <Card className="overflow-hidden"><Generic testid="sim-registrations" rows={s.registrations} empty="No registrations." /></Card>
+          <Card className="overflow-hidden"><SimTable kind="registrations" testid="sim-registrations" rows={s.registrations} empty="No registrations." /></Card>
         </section>
         <section className="min-w-0">
           <CardHeading icon={<FlaskConical />}>Bank batches</CardHeading>
-          <Card className="overflow-hidden"><Generic testid="sim-bank-batches" rows={s.bankBatches} empty="No batches." /></Card>
+          <Card className="overflow-hidden"><SimTable kind="bankBatches" testid="sim-bank-batches" rows={s.bankBatches} empty="No batches." /></Card>
         </section>
         <section className="min-w-0">
           <CardHeading icon={<FlaskConical />}>Identity provider accounts</CardHeading>
           <Card className="overflow-hidden">
-            {idpRows ? <Generic testid="sim-idp-accounts" rows={idpRows} empty="No accounts." /> : (
+            {idpRows ? <SimTable kind="idpAccounts" testid="sim-idp-accounts" rows={idpRows} empty="No accounts." /> : (
               <div data-testid="sim-idp-accounts" className="px-4 py-4"><div className="text-6 font-semibold tabular">{idpCount ?? "-"}</div><div className="text-1 text-gray-10">accounts in the simulated identity provider</div></div>
             )}
           </Card>
         </section>
         <section className="min-w-0">
           <CardHeading icon={<Mail />}>Agency mail</CardHeading>
-          <Card className="overflow-hidden"><Generic testid="sim-agency-mail" rows={s.agencyMail} empty="No mail from agencies yet." /></Card>
+          <Card className="overflow-hidden"><SimTable kind="agencyMail" testid="sim-agency-mail" rows={s.agencyMail} empty="No mail from agencies yet." /></Card>
         </section>
         <section className="min-w-0 laptop:col-span-2">
           <CardHeading icon={<FlaskConical />}>Device orders</CardHeading>
-          <Card className="overflow-hidden"><Generic testid="sim-device-orders" rows={s.deviceOrders} empty="No device orders." /></Card>
+          <Card className="overflow-hidden"><SimTable kind="deviceOrders" testid="sim-device-orders" rows={s.deviceOrders} empty="No device orders." /></Card>
         </section>
         <SimInboundControls />
         <section className="min-w-0 laptop:col-span-2">

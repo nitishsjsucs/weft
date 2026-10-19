@@ -72,7 +72,7 @@ export function AuditView() {
         }
       />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
-      {result && !result.ok ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{result.refusal.code}: {humanTimes(result.refusal.message)}</div> : null}
+      {result && !result.ok ? <div role="alert" title={result.refusal.code} className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{humanTimes(result.refusal.message)}</div> : null}
       {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{humanTimes(result.summary)}</div> : null}
       <Card className="overflow-hidden">
         <Table className="text-[13px]">

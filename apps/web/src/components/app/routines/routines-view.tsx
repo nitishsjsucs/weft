@@ -53,7 +53,7 @@ function DraftBox() {
         <Button data-testid={TID.routineDraftSubmit} variant="primary" disabled={!prompt.trim() || draft.pending} onClick={async () => setOut((await draft.run(prompt.trim())) ?? null)}>Create routine</Button>
       </div>
       {draft.error ? <p role="alert" className="mt-2 text-1 text-red-11">{errorText(draft.error)}</p> : null}
-      {out && !out.ok ? <p role="alert" className="mt-2 text-1 text-red-11">{out.refusal.code}: {out.refusal.message}</p> : null}
+      {out && !out.ok ? <p role="alert" title={out.refusal.code} className="mt-2 text-1 text-red-11">{out.refusal.message}</p> : null}
       {out && out.ok && out.status === "pending_approval" ? <p className="mt-2 text-1 text-amber-11">Created disabled. Enabling it waits in the <Link href="/app/inbox" className="underline">Inbox</Link>.</p> : null}
       {out && out.ok && out.status === "done" ? <p className="mt-2 text-1 text-green-11">{out.summary}</p> : null}
     </Card>

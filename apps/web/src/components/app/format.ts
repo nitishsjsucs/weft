@@ -96,3 +96,11 @@ export function runKind(subtype: string | null | undefined): { label: string; ba
 }
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A tax account's type as words. */
+export const ACCOUNT_TYPE: Record<TaxAccount["accountType"], string> = { federal: "Federal", withholding: "Withholding", unemployment: "Unemployment insurance", combined: "Combined withholding and UI" };
+/** A stored status as a capitalized label: "awaiting_state" is "Awaiting state". */
+export function statusLabel(s: string | null | undefined): string {
+  const t = (s ?? "").replace(/_/g, " ").trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
+}

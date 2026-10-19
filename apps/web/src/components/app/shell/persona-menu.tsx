@@ -114,7 +114,7 @@ export function PersonaMenu() {
           <DropdownMenuGroup aria-label="Demo">
             <DropdownMenuLabel>Demo</DropdownMenuLabel>
             <DropdownMenuItem data-tour="tour-menu-start" onSelect={() => tour.start()}>Take the tour</DropdownMenuItem>
-            <DropdownMenuItem data-tour="tour-menu-reset" onSelect={() => tour.openReset()}>Reset demo data...</DropdownMenuItem>
+            <DropdownMenuItem data-tour="tour-menu-reset" onSelect={() => tour.openReset()}>Reset demo data…</DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
