@@ -6,12 +6,15 @@
 // Phoenix binds its gRPC collector to [::] whatever PHOENIX_HOST says, so the server starts through
 // scripts/phoenix-loopback.py (which rewrites that bind to 127.0.0.1), and `up` verifies with lsof that every port
 // the process group listens on is loopback only: otherwise it stops the group and refuses to report ready.
+// Once Phoenix answers, `up` upserts Weft's model prices into it (scripts/phoenix-pricing.ts), so Phoenix prices every
+// new LLM span exactly as cost.ts does.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { PHOENIX } from "../packages/contracts/src/telemetry";
 import { isLoopbackAddress, listenAddresses } from "./phoenix-net";
+import { syncModelPricingLine } from "./phoenix-pricing";
 
 const httpPort = Number(process.env.WEFT_PHOENIX_PORT ?? PHOENIX.httpPort);
 const grpcPort = Number(process.env.WEFT_PHOENIX_GRPC_PORT ?? PHOENIX.grpcPort);
@@ -48,6 +51,7 @@ async function up(): Promise<void> {
     const open = exposed();
     if (open.length) throw new Error(`Phoenix ${running} at ${url} listens beyond loopback (${open.join(", ")}); restart it with pnpm phoenix:down and pnpm phoenix:up`);
     console.log(`Phoenix ${running} already running at ${url} (data ${workDir})`);
+    console.log(await syncModelPricingLine(url));
     return;
   }
   for (const p of [httpPort, grpcPort]) if (listening(p)) throw new Error(`port ${p} is in use by another process; set WEFT_PHOENIX_PORT and WEFT_PHOENIX_GRPC_PORT`);
@@ -77,6 +81,7 @@ async function up(): Promise<void> {
         throw new Error(`Phoenix listened beyond loopback (${open.join(", ")}); stopped it (pgid ${child.pid})`);
       }
       console.log(`Phoenix ${v} up at ${url}, gRPC on 127.0.0.1:${grpcPort} (data ${workDir}, log ${logFile}, pgid ${child.pid})`);
+      console.log(await syncModelPricingLine(url));
       return;
     }
     if (child.exitCode !== null) break;
