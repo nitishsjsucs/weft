@@ -9,6 +9,7 @@ export const W4_ADMIN_TID = {
   groupBy: "reports-group-by",
   chart: "reports-chart",
   table: "reports-table",
+  tableCounts: "reports-table-counts",
   emailOpen: "reports-email-open",
   emailRecipients: "reports-email-recipients",
   emailSend: "reports-email-send",
