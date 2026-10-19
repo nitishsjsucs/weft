@@ -11,6 +11,8 @@ import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { ProposalCard } from "../inbox/proposal-card";
+import { cn } from "@weft/ui";
+import { STACK } from "../stack";
 
 const STEP_LABEL: Record<OffboardingStep["kind"], string> = {
   final_pay: "Final pay", directory_suspend: "Directory suspend", sso_deactivate: "SSO deactivation", group_removal: "Group removal",
@@ -45,20 +47,20 @@ export function OffboardingList() {
     <div className="mx-auto w-full max-w-[1000px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="Offboarding" subtitle="Terminations with final pay, access revocation, benefits and the COBRA notice. Start one from a person's page with Terminate." />
       {q.error ? <div role="alert" className="text-1 text-red-11">{errorText(q.error)}</div> : null}
-      <Card className="overflow-x-auto">
-        <Table data-testid={W2_OFFBOARDING_TID.caseList}>
-          <THead><TR><TH>Person</TH><TH>Kind</TH><TH>Last day</TH><TH>Steps</TH><TH>Status</TH></TR></THead>
+      <Card className={STACK.box}>
+        <Table data-testid={W2_OFFBOARDING_TID.caseList} className={STACK.table}>
+          <THead className={STACK.head}><TR><TH>Person</TH><TH>Kind</TH><TH>Last day</TH><TH>Steps</TH><TH>Status</TH></TR></THead>
           <TBody>
             {cases.length === 0 ? <TR><TD colSpan={5} className="text-gray-10">No offboarding cases yet.</TD></TR> : null}
             {cases.map((c) => {
               const finished = c.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
               return (
-                <TR key={c.id} data-testid={w2OffboardingTid.caseRow(c.id)}>
-                  <TD><Link href={`/app/offboarding/${c.id}`} className="font-medium hover:underline">{names.get(c.workerId) ?? c.workerId}</Link></TD>
-                  <TD>{capitalize(human(c.kind))}</TD>
-                  <TD>{fmtDate(c.lastDay, { month: "short", day: "numeric", year: "numeric" })}</TD>
-                  <TD>{finished} of {c.steps.length}</TD>
-                  <TD><Badge tone={CASE_TONE[c.status]} data-status={c.status}>{CASE_LABEL[c.status]}</Badge></TD>
+                <TR key={c.id} data-testid={w2OffboardingTid.caseRow(c.id)} className={STACK.row}>
+                  <TD className={cn(STACK.leadShared, "@max-[40rem]:order-first")}><Link href={`/app/offboarding/${c.id}`} className="font-medium hover:underline">{names.get(c.workerId) ?? c.workerId}</Link></TD>
+                  <TD data-label="Kind" className={STACK.cell}>{capitalize(human(c.kind))}</TD>
+                  <TD data-label="Last day" className={STACK.cell}>{fmtDate(c.lastDay, { month: "short", day: "numeric", year: "numeric" })}</TD>
+                  <TD data-label="Steps" className={STACK.cell}>{finished} of {c.steps.length}</TD>
+                  <TD className={cn(STACK.bare, "@max-[40rem]:order-first")}><Badge tone={CASE_TONE[c.status]} data-status={c.status}>{CASE_LABEL[c.status]}</Badge></TD>
                 </TR>
               );
             })}

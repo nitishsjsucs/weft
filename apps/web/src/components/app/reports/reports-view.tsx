@@ -22,53 +22,96 @@ const field = "h-8 rounded-lg bg-card px-2.5 text-[13px] shadow-[var(--shadow-bo
 const DOMAIN_LABEL: Record<string, string> = { payroll: "Payroll", people: "People", tax: "Taxes" };
 const ptToday = (iso: string | undefined) => (iso ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(iso)) : null);
 
-/** Every column the rows carry, in a readable order: the x key first, then the chart series, then the rest. */
-export function tableColumns(spec: ChartSpec, rows: Row[]): { key: string; label: string; unit: Unit | null }[] {
-  // to_date is the engine's flag for a cut-short period; the period label already says "(to date)".
+type Col = { key: string; label: string; unit: Unit | null };
+/**
+ * Every column the rows carry, in a readable order: the x key first (the caller adds it), then the row total, the
+ * chart series and the other figures. The period's own flags (to_date, start and end) never show as columns; the
+ * period label already says "(to date)".
+ */
+export function tableColumns(spec: ChartSpec, rows: Row[]): Col[] {
   const skip = new Set([spec.x.key, `${spec.x.key}_label`, "period_start", "period_end", "to_date"]);
   const seen = new Set<string>();
-  const out: { key: string; label: string; unit: Unit | null }[] = [];
+  const out: Col[] = [];
+  const rest: Col[] = [];
   for (const s of spec.series) { out.push({ key: s.key, label: s.label, unit: s.unit }); seen.add(s.key); }
   for (const r of rows) for (const k of Object.keys(r)) {
     if (skip.has(k) || seen.has(k) || k.endsWith("_display")) continue;
     seen.add(k);
     const unit: Unit | null = k.endsWith("_cents") ? "cents" : k.endsWith("_pct") ? "pct" : k.endsWith("minutes") || k === "minutes_used" ? "minutes" : typeof r[k] === "number" ? "count" : null;
-    out.push({ key: k, label: k.replace(/_cents$|_pct$/, "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), unit });
+    rest.push({ key: k, label: k.replace(/_cents$|_pct$/, "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), unit });
   }
-  return out;
+  // A row total that is not itself a series reads first, next to the period, so it never sits past a sideways scroll.
+  const total = rest.findIndex((c) => c.key === "total_cents");
+  return total >= 0 ? [rest[total]!, ...out, ...rest.filter((_, i) => i !== total)] : [...out, ...rest];
+}
+
+/**
+ * The columns split for a narrow page: the money figures stay in the main table, and when the series are money the
+ * plain counts beside them (runs, workers paid, hires, departures) move to a second, smaller table.
+ */
+export function splitColumns(spec: ChartSpec, cols: Col[]): { main: Col[]; counts: Col[] } {
+  const series = new Set(spec.series.map((s) => s.key));
+  if (!spec.series.some((s) => s.unit === "cents")) return { main: cols, counts: [] };
+  const counts = cols.filter((c) => !series.has(c.key) && c.unit === "count");
+  return counts.length ? { main: cols.filter((c) => !counts.includes(c)), counts } : { main: cols, counts: [] };
+}
+
+// Below 54rem of content width (the main table needs about 820 px) (the docked panel at laptop sizes, and the phone) each row is a stacked card: the
+// period and its total on one line, then one line per figure with its label. One table either way, so a screen reader
+// and the tests read the same cells.
+// (Literal class names, so Tailwind's scanner sees every one.)
+const stackTable = "@max-[54rem]:block @max-[54rem]:[&_tbody]:block";
+const stackRow = "@max-[54rem]:grid @max-[54rem]:grid-cols-1 @min-[30rem]:grid-cols-2 @max-[54rem]:gap-x-6 @max-[54rem]:gap-y-0.5 @max-[54rem]:px-3 @max-[54rem]:py-3";
+const stackCell = "@max-[54rem]:flex @max-[54rem]:h-auto @max-[54rem]:items-baseline @max-[54rem]:justify-between @max-[54rem]:gap-3 @max-[54rem]:px-0 @max-[54rem]:py-0.5 @max-[54rem]:before:text-gray-10 @max-[54rem]:before:content-[attr(data-label)]";
+const stackHead = "@max-[54rem]:static @max-[54rem]:h-auto @max-[54rem]:px-0 @max-[54rem]:pb-1 @max-[54rem]:text-[14px]";
+const stackHidden = "@max-[54rem]:hidden";
+const stackSrOnly = "@max-[54rem]:sr-only";
+
+function StackTable({ testId, data, cols, label, totals }: { testId: string; data: ReportData; cols: Col[]; label: (r: Row) => string; totals: Record<string, number | string> | null }) {
+  const hasTotals = !!totals && cols.some((c) => c.unit === "cents" && typeof totals[c.key] === "number");
+  const cell = (c: Col, v: unknown) => (c.unit ? formatValue(v, c.unit) : String(v ?? ""));
+  return (
+    <Table data-testid={testId} data-rows={data.rows.length} className={`min-w-full tabular-nums ${stackTable}`}>
+      <THead className={stackSrOnly}>
+        <TR>
+          <TH scope="col" className="sticky left-0 z-[1] bg-card align-bottom">{data.chart.x.label}</TH>
+          {cols.map((c) => <TH key={c.key} scope="col" className="h-auto max-w-[6.5rem] py-2 text-right align-bottom leading-tight whitespace-normal">{c.label}</TH>)}
+        </TR>
+      </THead>
+      <TBody>
+        {data.rows.map((r, i) => (
+          <TR key={i} className={stackRow}>
+            <TD className={`sticky left-0 z-[1] bg-card whitespace-nowrap px-2.5 font-medium ${stackHead}`}>{label(r)}</TD>
+            {cols.map((c, j) => <TD key={c.key} data-label={c.label} className={`whitespace-nowrap px-2.5 text-right ${j === 0 && c.key === "total_cents" ? "font-medium" : ""} ${stackCell}`}>{cell(c, r[c.key])}</TD>)}
+          </TR>
+        ))}
+        {hasTotals ? (
+          <TR data-total="true" className={stackRow}>
+            <TD className={`sticky left-0 z-[1] bg-card font-medium ${stackHead}`}>Total</TD>
+            {cols.map((c) => {
+              const v = c.unit === "cents" && typeof totals![c.key] === "number" ? formatValue(totals![c.key], "cents") : "";
+              return <TD key={c.key} data-label={c.label} className={`whitespace-nowrap px-2.5 text-right font-medium ${stackCell} ${v ? "" : stackHidden}`}>{v}</TD>;
+            })}
+          </TR>
+        ) : null}
+      </TBody>
+    </Table>
+  );
 }
 
 function ReportTable({ data }: { data: ReportData }) {
-  const cols = tableColumns(data.chart, data.rows);
+  const { main, counts } = splitColumns(data.chart, tableColumns(data.chart, data.rows));
   const label = (r: Row) => String(r[`${data.chart.x.key}_label`] ?? r[data.chart.x.key] ?? "");
-  const totals = data.range_totals ?? {};
-  const hasTotals = cols.some((c) => c.unit === "cents" && typeof totals[c.key] === "number");
-  // One scroller (the Table's own, which fades the edge it runs past); headers wrap to two lines so the figures, not
-  // the labels, set each column's width.
+  // The Table's own scroller fades the edge it runs past; the period column stays pinned while it scrolls.
   return (
-    <div className="min-w-0">
-      <Table data-testid={T.table} data-rows={data.rows.length} className="min-w-full tabular-nums">
-        <THead>
-          <TR>
-            <TH scope="col" className="align-bottom">{data.chart.x.label}</TH>
-            {cols.map((c) => <TH key={c.key} scope="col" className="h-auto max-w-[7.5rem] py-2 text-right align-bottom leading-tight whitespace-normal">{c.label}</TH>)}
-          </TR>
-        </THead>
-        <TBody>
-          {data.rows.map((r, i) => (
-            <TR key={i}>
-              <TD className="whitespace-nowrap px-2.5 font-medium">{label(r)}</TD>
-              {cols.map((c) => <TD key={c.key} className="whitespace-nowrap px-2.5 text-right">{c.unit ? formatValue(r[c.key], c.unit) : String(r[c.key] ?? "")}</TD>)}
-            </TR>
-          ))}
-          {hasTotals ? (
-            <TR data-total="true">
-              <TD className="font-medium">Total</TD>
-              {cols.map((c) => <TD key={c.key} className="whitespace-nowrap text-right font-medium">{c.unit === "cents" && typeof totals[c.key] === "number" ? formatValue(totals[c.key], "cents") : ""}</TD>)}
-            </TR>
-          ) : null}
-        </TBody>
-      </Table>
+    <div className="@container flex min-w-0 flex-col gap-3">
+      <StackTable testId={T.table} data={data} cols={main} label={label} totals={data.range_totals ?? {}} />
+      {counts.length ? (
+        <section aria-label="Runs and people" className="flex flex-col gap-1 border-t border-[var(--app-border)] pt-2">
+          <h3 className="px-3 text-1 font-medium text-gray-11">Runs and people</h3>
+          <StackTable testId={T.tableCounts} data={data} cols={counts} label={label} totals={null} />
+        </section>
+      ) : null}
       {data.rows.length === 0 ? <p className="px-3 py-4 text-[13px] text-gray-10">No rows in this range.</p> : null}
     </div>
   );
@@ -146,6 +189,11 @@ export function ReportsView() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [groupBy, setGroupBy] = useState<"month" | "quarter">("month");
+  // ?metric= opens that metric (the agent panel's compact chart table links here for every column).
+  useEffect(() => {
+    const m = new URLSearchParams(window.location.search).get("metric");
+    if (m) setMetricId(m);
+  }, []);
   useEffect(() => {
     if (!today || to) return;
     setTo(today);

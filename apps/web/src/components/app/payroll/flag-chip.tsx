@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useState } from "react";
 import { Bot, FileText } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@weft/ui/components";
 import { cn } from "@weft/ui";
@@ -20,13 +21,32 @@ export const RULE_LABEL: Record<Flag["rule"], string> = {
   PENDING_TIME_OFF_IN_PERIOD: "Pending time off", PTO_LINE: "Time off paid", REIMBURSEMENT_SPIKE: "Reimbursement spike",
 };
 
+/**
+ * Room the popover leaves for the guided tour's phone sheet: the sheet docks at one edge of the window, over the main
+ * pane, and its Back and Next must stay reachable, so the popover's collision area stops short of it (it flips or
+ * scrolls inside the free part instead of opening over the sheet).
+ */
+export function tourSheetPadding(): { top: number; right: number; bottom: number; left: number } {
+  const pad = { top: 12, right: 12, bottom: 12, left: 12 };   // PopoverContent's own default on every side
+  if (typeof document === "undefined") return pad;
+  const sheet = document.querySelector<HTMLElement>("[data-tour-card][data-sheet-edge]");
+  const main = appMain()?.getBoundingClientRect();
+  if (!sheet || !main) return pad;
+  const r = sheet.getBoundingClientRect();
+  if (sheet.dataset.sheetEdge === "top") pad.top = Math.max(pad.top, Math.round(r.bottom - main.top) + 8);
+  else pad.bottom = Math.max(pad.bottom, Math.round(main.bottom - r.top) + 8);
+  return pad;
+}
+
 /** Flag chip with an explanation popover showing the grounded explanation and whether the agent or a template wrote it. */
 export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
   const src = pc.explanationSource;
   const note = flagExplanation(pc, flag);
   const rows = flagEvidence(flag);
+  // Read when the popover opens, not when the chip renders: the tour's sheet may have docked since.
+  const [pad, setPad] = useState(tourSheetPadding);
   return (
-    <Popover>
+    <Popover onOpenChange={(open) => { if (open) setPad(tourSheetPadding()); }}>
       <PopoverTrigger
         data-testid={tid.payrollFlag(pc.workerId, flag.rule)}
         data-severity={flag.severity}
@@ -37,7 +57,7 @@ export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
       >
         {RULE_LABEL[flag.rule]}{flag.severity === "block" ? " (blocks)" : ""}
       </PopoverTrigger>
-      <PopoverContent align="start" collisionBoundary={appMain()} className="max-h-[var(--radix-popover-content-available-height)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <PopoverContent align="start" collisionBoundary={appMain()} collisionPadding={pad} className="max-h-[var(--radix-popover-content-available-height)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2">
           <span className={cn("rounded-md px-1.5 py-0.5 text-0 font-medium", TONE[flag.severity])}>{RULE_LABEL[flag.rule]}</span>
           <span className="text-1 text-gray-10">{flag.severity === "block" ? "Blocks the run" : flag.severity === "review" ? "Needs review" : "Info"}</span>

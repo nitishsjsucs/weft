@@ -24,7 +24,7 @@ const asLevel = (v: string | undefined): Level => (v === "view" || v === "edit" 
 
 function LevelCell({ id, level, agent }: { id: string; level: Level; agent: Level }) {
   return (
-    <TD data-testid={id} data-level={level} data-agent-level={agent} className="whitespace-nowrap">
+    <TD data-testid={id} data-level={level} data-agent-level={agent} className="whitespace-nowrap px-1.5">
       <span className="flex flex-col items-start gap-0.5">
         <Badge tone={LEVEL_TONE[level]} size="xs">{LEVEL_LABEL[level]}</Badge>
         <span className="flex items-center gap-1 text-0 text-gray-10" title="What the agent may do when it acts for this person"><Bot className="size-3" aria-label="Agent" />{LEVEL_LABEL[agent]}</span>
@@ -86,30 +86,32 @@ export function PermissionsView() {
       <PageHeader title="Permissions" crumb="Permissions" subtitle="View, Edit and Approve per domain for each person. Under each level is what the agent may do when it acts for that person: never more than they can, and never Approve." />
       {q.error ? <Card className="mb-4 p-4 text-[13px] text-red-11">{errorText(q.error)}</Card> : null}
       <CardHeading icon={<ShieldCheck />}>Access by domain</CardHeading>
+      {/* Eight domain columns fit a 620 px content column (the agent panel docked at 1280): tight cells, a person
+          column that wraps, and each person's overrides under their role instead of a column of their own. The person
+          column stays pinned if a narrower screen scrolls the table sideways (the Table fades the edge it runs past). */}
       <Card className="mb-6 p-1">
-        <div className="overflow-x-auto">
           <Table data-testid={T.matrix} data-tour="permissions-matrix" data-count={rows.length} data-rows={rows.length} className="min-w-full">
             <THead>
               <TR>
-                <TH scope="col">Person</TH>
-                {DOMAINS.map((d) => <TH key={d} scope="col">{DOMAIN_LABEL[d]}</TH>)}
-                <TH scope="col">Overrides</TH>
+                <TH scope="col" className="sticky left-0 z-[1] bg-card">Person</TH>
+                {DOMAINS.map((d) => <TH key={d} scope="col" className="px-1.5">{DOMAIN_LABEL[d]}</TH>)}
               </TR>
             </THead>
             <TBody>
               {rows.map((r) => (
                 <TR key={r.principalId} data-testid={T.matrixRow(r.principalId)} data-tour={r.role === "agent" ? "permissions-agent-row" : undefined}>
-                  <TH scope="row" className="whitespace-nowrap text-left font-normal">
-                    <span className="block font-medium text-gray-12">{r.name}</span>
+                  <TH scope="row" className="sticky left-0 z-[1] h-auto w-[8.5rem] min-w-[8.5rem] bg-card py-2 text-left font-normal whitespace-normal">
+                    <span className="block leading-snug font-medium text-gray-12">{r.name}</span>
                     <span className="block text-1 text-gray-10">{r.role === "agent" ? "The agent (every run)" : ROLE_WORDS[r.role] ?? r.role.replace(/_/g, " ")}</span>
+                    <span data-testid={T.overrideList(r.principalId)} data-count={r.overrides.length} className={r.overrides.length ? "block text-1 text-amber-11" : "sr-only"}>
+                      {r.overrides.length ? `Override: ${r.overrides.map((o) => o.command).join(", ")}` : "No overrides"}
+                    </span>
                   </TH>
                   {DOMAINS.map((d) => <LevelCell key={d} id={T.matrixCell(r.principalId, d)} level={asLevel(r.domains[d])} agent={asLevel(r.agentDomains[d])} />)}
-                  <TD data-testid={T.overrideList(r.principalId)} data-count={r.overrides.length} className="text-1 text-gray-11">{r.overrides.length ? r.overrides.map((o) => o.command).join(", ") : "None"}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
-        </div>
       </Card>
       <CardHeading icon={<Bot />}>Per-action overrides</CardHeading>
       {overrides.length ? (

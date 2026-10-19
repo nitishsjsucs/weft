@@ -124,7 +124,7 @@ Fallback: scripted provider with "How many vacation days will Ruth have left?".
 
 Reset: `pnpm demo:scenario chart-memory`
 
-1. "Show payroll cost by month": stacked bars with a Table toggle over Jan to Oct 2026 (10 months with paid runs; contractor payouts included); Sep 2026 $537,996.96, Oct 2026 (to date) $287,078.55 (the Oct 15 run's $267,984.55 plus $19,094.00 of contractor payouts: Reports dates a payout by its rail delivery, so the Sep 30 payouts delivered Oct 2 count in October; Oct 30 is still a draft), total $5,300,054.10. The chart's note reads "Oct 2026 runs to Oct 26."
+1. "Show payroll cost by month": stacked bars with a Table toggle over Jan to Oct 2026 (10 months with paid runs; contractor payouts included); Sep 2026 $537,996.96, Oct 2026 (to date) $287,078.55 (the Oct 15 run's $267,984.55 plus $19,094.00 of contractor payouts: Reports dates a payout by its rail delivery, so the Sep 30 payouts delivered Oct 2 count in October; Oct 30 is still a draft), total $5,300,054.10. The chart's note reads "Oct* counts Oct 2026 to date, through Oct 26."
 2. "What changed for Lena Brooks recently?": $139,240.00 a year effective Oct 16, recorded Oct 9 as audit #1; the run starts with a recall block.
 3. Memory: entities, people, Lena Brooks (demo) (the filter matches names; or /app/memory#entities%2Fpeople%2Fwrk_0026.md): the dossier, the backlink to the timeline and the git history.
 

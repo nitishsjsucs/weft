@@ -3,8 +3,9 @@
 // result (or the run artifact the executor saved), never from model text. Colors are design-system tokens in a fixed
 // order validated for color-vision deficiency on the light surface; every chart has a legend for two or more series
 // and an accessible data table, so identity and values never depend on color alone.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import Link from "next/link";
 import { Table2 } from "lucide-react";
 import { formatCents, ReportResult, W3_CHAT_TID, type ChartSpec } from "@weft/contracts";
 import { client, errorText } from "@/lib/api/hooks";
@@ -37,8 +38,10 @@ export function formatTick(v: number, unit: Unit): string {
   return String(v);
 }
 
-/** The x label for a row: a period's label when the report has one, else the x key's value. */
-const xLabel = (spec: ChartSpec, r: Row) => String(r[`${spec.x.key}_label`] ?? r[spec.x.key] ?? "");
+/** The x label for a row: a period's label when the report has one, else the x key's value. A "(to date)" the server
+ * put on the current period is dropped here; the chart marks that period itself (see periodLabel and tickLabel). */
+const TO_DATE = / \(to date\)$/;
+const xLabel = (spec: ChartSpec, r: Row) => String(r[`${spec.x.key}_label`] ?? r[spec.x.key] ?? "").replace(TO_DATE, "");
 
 /** "Jan 1 to Oct 26, 2026" within a year, "Nov 1, 2025 to Oct 26, 2026" across years. */
 export function rangeText(from: string, to: string): string {
@@ -51,33 +54,75 @@ export function partialPeriod(report: Pick<ReportResult, "to">, rows: Row[]): { 
   const last = rows[rows.length - 1];
   if (!last || typeof last.period_end !== "string" || last.period_end !== report.to) return null;
   if (Number(report.to.slice(8, 10)) === lastDayOf(report.to)) return null;
-  return { key: String(last.period ?? ""), label: String(last.period_label ?? last.period ?? "") };
+  return { key: String(last.period ?? ""), label: String(last.period_label ?? last.period ?? "").replace(TO_DATE, "") };
 }
-function periodLabel(spec: ChartSpec, r: Row, partial: { key: string } | null): string {
+/** The long label (tooltip and table): "Oct 2026 (to date)" for the partial period, else the period's own label. */
+export function periodLabel(spec: ChartSpec, r: Row, partial: { key: string } | null): string {
   const l = xLabel(spec, r);
   // The engine's label already says "(to date)" for a cut-short period; the marker is added once, never twice.
   return partial && String(r.period ?? "") === partial.key && !/\(to date\)$/.test(l) ? `${l} (to date)` : l;
 }
-function tickLabel(spec: ChartSpec, r: Row, oneYear: boolean): string {
+/** The axis tick: short enough for its band. Within one year a month reads as its name alone (the year is in the
+ * range line); the partial period carries an asterisk the footnote explains ("Oct*"). */
+export function tickLabel(spec: ChartSpec, r: Row, oneYear: boolean, partial: { key: string } | null = null): string {
   const l = xLabel(spec, r);
-  return oneYear && /^[A-Z][a-z]{2} \d{4}$/.test(l) ? l.slice(0, 3) : l;
+  const short = oneYear && /^[A-Z][a-z]{2} \d{4}$/.test(l) ? l.slice(0, 3) : oneYear && /^Q[1-4] \d{4}$/.test(l) ? l.slice(0, 2) : l;
+  return partial && String(r.period ?? "") === partial.key ? `${short}*` : short;
 }
 
-function DataTable({ spec, rows, partial = null }: { spec: ChartSpec; rows: Row[]; partial?: { key: string } | null }) {
+/** Pixels a tick label needs at the axis' 11 px: a generous per-character width plus a gap to its neighbour. */
+const tickNeed = (label: string) => label.length * 6.6 + 8;
+/**
+ * Every step-th tick is labelled, counted back from the last period so the current (partial) one always shows. The
+ * step is the larger of an even thinning for long ranges (about eight labels) and what the band width allows, so a
+ * label never runs into its neighbour or past the plot in a narrow panel.
+ */
+export function tickStep(labels: string[], plotWidth: number): number {
+  const n = labels.length;
+  if (n === 0) return 1;
+  const even = n <= 12 ? 1 : Math.ceil(n / 8);
+  if (!(plotWidth > 0)) return even;
+  const need = Math.max(...labels.map(tickNeed));
+  return Math.max(even, Math.ceil(need / (plotWidth / n)));
+}
+/**
+ * The columns a narrow column (the agent panel) shows: the first two series and their total when the series add up
+ * (one unit, stacked), so the figures fit without a sideways scroll. The other series stay in the table for screen
+ * readers (sr-only cells), and the Reports page shows every column.
+ */
+export function compactColumns(spec: ChartSpec): { key: string; label: string; unit: Unit; sum?: string[] }[] {
+  const cols: { key: string; label: string; unit: Unit; sum?: string[] }[] = spec.series.slice(0, 2).map((s) => ({ key: s.key, label: s.label, unit: s.unit }));
+  const unit = spec.series[0]?.unit;
+  if (spec.series.length > 2 && spec.kind === "stacked_bar" && spec.series.every((s) => s.unit === unit)) cols.push({ key: "__total", label: "Total", unit: unit!, sum: spec.series.map((s) => s.key) });
+  return cols;
+}
+const Y_AXIS_W = 48;
+const PLOT_MARGIN = { top: 8, right: 12, bottom: 0, left: 0 };
+
+function DataTable({ spec, rows, ticks, partial = null }: { spec: ChartSpec; rows: Row[]; ticks: string[]; partial?: { key: string } | null }) {
+  // Every series plus their total when they add up; in a narrow column (under 27rem) only the first two and the total
+  // show, the rest stay for screen readers, and the period reads as its tick ("Oct*").
+  const total = compactColumns(spec).find((c) => c.sum);
+  const narrowHidden = (i: number) => (total && i >= 2 ? "@max-[27rem]:sr-only" : "");
   return (
     <table data-testid={W3_CHAT_TID.chartTable} className="w-full border-collapse text-1 tabular-nums">
       <caption className="sr-only">{spec.title}</caption>
       <thead>
         <tr className="text-left text-gray-10">
-          <th scope="col" className="py-1 pr-2 font-medium">{spec.x.label}</th>
-          {spec.series.map((s) => <th key={s.key} scope="col" className="py-1 pl-2 text-right font-medium">{s.label}</th>)}
+          <th scope="col" className="py-1 pr-2 align-bottom font-medium">{spec.x.label}</th>
+          {spec.series.map((s, i) => <th key={s.key} scope="col" className={`py-1 pl-2 text-right align-bottom leading-tight font-medium ${narrowHidden(i)}`}>{s.label}</th>)}
+          {total ? <th scope="col" className="py-1 pl-2 text-right align-bottom font-medium">Total</th> : null}
         </tr>
       </thead>
       <tbody>
         {rows.map((r, i) => (
           <tr key={i} className="border-t border-gray-a4 text-gray-12">
-            <th scope="row" className="py-1 pr-2 text-left font-normal">{periodLabel(spec, r, partial)}</th>
-            {spec.series.map((s) => <td key={s.key} className="py-1 pl-2 text-right">{formatValue(r[s.key], s.unit)}</td>)}
+            <th scope="row" className="py-1 pr-2 text-left font-normal whitespace-nowrap">
+              <span className={total ? "@max-[27rem]:sr-only" : ""}>{periodLabel(spec, r, partial)}</span>
+              {total ? <span aria-hidden="true" className="hidden @max-[27rem]:inline">{ticks[i]}</span> : null}
+            </th>
+            {spec.series.map((s, j) => <td key={s.key} className={`py-1 pl-2 text-right whitespace-nowrap ${narrowHidden(j)}`}>{formatValue(r[s.key], s.unit)}</td>)}
+            {total ? <td className="py-1 pl-2 text-right font-medium whitespace-nowrap">{formatValue(total.sum!.reduce((acc, k) => acc + Number(r[k] ?? 0), 0), total.unit)}</td> : null}
           </tr>
         ))}
       </tbody>
@@ -90,18 +135,33 @@ export function ReportChart({ report }: { report: ReportResult }) {
   const rows = report.rows as Row[];
   const unit = spec.series[0]!.unit;
   const [table, setTable] = useState(false);
-  // Within one year the ticks name the month only and every period gets one; across years they keep the year and
-  // thin out evenly, never skipping by label width.
+  // Within one year the ticks name the month only; across years they keep the year. tickStep thins them evenly from
+  // the last period back when the band is narrower than a label.
   const oneYear = new Set(rows.map((r) => String(r.period ?? "").slice(0, 4))).size <= 1;
-  const data = rows.map((r) => ({ ...r, __x: tickLabel(spec, r, oneYear) }));
-  const interval = rows.length <= 12 ? 0 : Math.ceil(rows.length / 8) - 1;
+  const partial = partialPeriod(report, rows);
+  const data = rows.map((r) => ({ ...r, __x: tickLabel(spec, r, oneYear, partial) }));
+  // The plot's width decides how many ticks get a label (tickStep); measured, since the panel and the page differ.
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, [table, rows.length]);
+  const step = tickStep(data.map((d) => d.__x), width - Y_AXIS_W - PLOT_MARGIN.left - PLOT_MARGIN.right);
+  const shown = (i: number) => (data.length - 1 - i) % step === 0;
+  const xTick = (p: { x?: number | string; y?: number | string; index?: number; payload?: { value?: unknown } }) =>
+    shown(p.index ?? 0) ? <text x={p.x} y={p.y} dy={12} textAnchor="middle" fill="var(--gray-10)" fontSize={11}>{String(p.payload?.value ?? "")}</text> : <g />;
   // Color follows the series (its index in the spec), so a series that is all zero in this range keeps its slot
   // empty instead of repainting the others; it is left out of the plot and the legend but stays in the table.
   const drawn = spec.series.map((s, i) => ({ ...s, color: SERIES_COLORS[i] ?? SERIES_COLORS[5] })).filter((s) => rows.some((r) => Number(r[s.key] ?? 0) !== 0));
   const zero = spec.series.filter((s) => !drawn.some((d) => d.key === s.key));
   const many = drawn.length > 1;
   const range = rangeText(report.from, report.to);
-  const partial = partialPeriod(report, rows);
+  const partialTick = partial ? data[data.length - 1]!.__x : "";
   const axis = { stroke: "var(--gray-a6)", tick: { fill: "var(--gray-10)", fontSize: 11 }, tickLine: false };
   const tooltip = (
     <Tooltip cursor={{ fill: "var(--gray-a3)" }} labelFormatter={(_l, p) => { const r = p?.[0]?.payload as Row | undefined; return r ? periodLabel(spec, r, partial) : String(_l); }} formatter={(v, name) => {
@@ -111,18 +171,18 @@ export function ReportChart({ report }: { report: ReportResult }) {
       itemStyle={{ color: "var(--gray-12)", padding: 0 }} labelStyle={{ color: "var(--gray-11)", marginBottom: 2 }} />
   );
   const chart = rows.length === 0 || drawn.length === 0 ? null : spec.kind === "line" ? (
-    <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+    <LineChart data={data} margin={PLOT_MARGIN}>
       <CartesianGrid vertical={false} stroke="var(--gray-a4)" />
-      <XAxis dataKey="__x" {...axis} interval={interval} />
-      <YAxis {...axis} axisLine={false} width={48} tickFormatter={(v: number) => formatTick(v, unit)} />
+      <XAxis dataKey="__x" {...axis} interval={0} tick={xTick} />
+      <YAxis {...axis} axisLine={false} width={Y_AXIS_W} tickFormatter={(v: number) => formatTick(v, unit)} />
       {tooltip}
       {drawn.map((s) => <Line key={s.key} dataKey={s.key} name={s.label} type="monotone" stroke={s.color} strokeWidth={2} dot={{ r: 3, strokeWidth: 2, stroke: "var(--card, #fff)" }} activeDot={{ r: 4 }} isAnimationActive={false} />)}
     </LineChart>
   ) : (
-    <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="24%">
+    <BarChart data={data} margin={PLOT_MARGIN} barCategoryGap="24%">
       <CartesianGrid vertical={false} stroke="var(--gray-a4)" />
-      <XAxis dataKey="__x" {...axis} interval={interval} />
-      <YAxis {...axis} axisLine={false} width={48} tickFormatter={(v: number) => formatTick(v, unit)} allowDecimals={unit !== "count"} />
+      <XAxis dataKey="__x" {...axis} interval={0} tick={xTick} />
+      <YAxis {...axis} axisLine={false} width={Y_AXIS_W} tickFormatter={(v: number) => formatTick(v, unit)} allowDecimals={unit !== "count"} />
       {tooltip}
       {drawn.map((s, i) => (
         <Bar key={s.key} dataKey={s.key} name={s.label} fill={s.color} stackId={spec.kind === "stacked_bar" ? "stack" : undefined}
@@ -133,7 +193,7 @@ export function ReportChart({ report }: { report: ReportResult }) {
   );
 
   return (
-    <figure data-testid={W3_CHAT_TID.chart} data-tour="agent-chart" data-metric={report.metric} data-kind={spec.kind} data-rows={rows.length} className="relative m-0 flex flex-col gap-2 rounded-xl border border-gray-a4 bg-card p-3">
+    <figure data-testid={W3_CHAT_TID.chart} data-tour="agent-chart" data-metric={report.metric} data-kind={spec.kind} data-rows={rows.length} className="@container relative m-0 flex flex-col gap-2 rounded-xl border border-gray-a4 bg-card p-3">
       <figcaption className="flex items-start gap-2">
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] font-medium text-gray-12">{spec.title}</span>
@@ -150,14 +210,16 @@ export function ReportChart({ report }: { report: ReportResult }) {
         </ul>
       ) : null}
       {chart && !table ? (
-        <div className="h-44 w-full" role="img" aria-label={`${spec.title}: ${spec.kind === "line" ? "line" : "bar"} chart of ${spec.series.map((s) => s.label).join(", ")} by ${spec.x.label.toLowerCase()}. The table below has every value.`}>
+        <div ref={box} className="h-44 w-full" role="img" aria-label={`${spec.title}: ${spec.kind === "line" ? "line" : "bar"} chart of ${spec.series.map((s) => s.label).join(", ")} by ${spec.x.label.toLowerCase()}. The table below has every value.`}>
           <ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer>
         </div>
       ) : null}
-      {partial ? <p data-testid="chart-partial-note" className="text-0 text-gray-10">{partial.label.replace(/\s*\(to date\)$/, "")} runs to {fmtDate(report.to)}.</p> : null}
+      {partial ? <p data-testid="chart-partial-note" className="text-0 text-gray-10">{partialTick} counts {partial.label} to date, through {fmtDate(report.to)}.</p> : null}
       {chart && !table && zero.length > 0 ? <p className="text-0 text-gray-10">Zero in this range, so not drawn: {zero.map((s) => s.label).join(", ")}. The table lists them.</p> : null}
-      {/* The table is always in the page for screen readers; the toggle shows it to everyone. */}
-      <div className={table ? "max-h-56 overflow-auto" : "sr-only"}><DataTable spec={spec} rows={rows} partial={partial} /></div>
+      {/* The table is always in the page for screen readers; the toggle shows it to everyone (in the agent panel, the
+          period, two series and the total; DataTable). */}
+      <div className={table ? "max-h-56 overflow-auto" : "sr-only"}><DataTable spec={spec} rows={rows} ticks={data.map((d) => d.__x)} partial={partial} /></div>
+      {table && compactColumns(spec).some((c) => c.sum) ? <Link href={`/app/reports?metric=${encodeURIComponent(report.metric)}`} className="text-1 text-gray-11 underline underline-offset-2 hover:text-gray-12 @min-[27rem]:hidden">Every column is on the Reports page</Link> : null}
     </figure>
   );
 }

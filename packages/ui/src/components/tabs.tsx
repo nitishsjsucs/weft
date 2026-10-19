@@ -6,14 +6,14 @@ import { useEdgeFade } from "./edge-fade";
 
 export const Tabs = T.Root;
 // A strip wider than its column scrolls sideways (no scrollbar) and fades the edge it runs past; the active tab is
-// scrolled into view.
+// scrolled into view. On a phone the strip wraps onto a second row instead, so every tab shows without a scroll.
 export function TabsList({ className, ...props }: ComponentProps<typeof T.List>) {
   const ref = useEdgeFade<HTMLDivElement>();
   return (
     <T.List
       ref={ref}
       data-edge-fade=""
-      className={cn("flex min-w-0 max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-[var(--app-border)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
+      className={cn("flex min-w-0 max-w-full items-center gap-1 max-tablet:flex-wrap max-tablet:gap-y-0 overflow-x-auto overflow-y-hidden border-b border-[var(--app-border)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
       onFocusCapture={(e) => { (e.target as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" }); }}
       {...props}
     />

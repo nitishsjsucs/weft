@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { STACK } from "../stack";
 import { Badge, Card, Drawer, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { TID, W3_ROUTINES_TID, tid, type EmployerRate, type Notice, type TaxAccount } from "@weft/contracts";
 import { cn } from "@weft/ui";
@@ -124,19 +125,19 @@ export function ComplianceView() {
           <TabsTrigger value="training">Training</TabsTrigger>
         </TabsList>
         <TabsContent value="registrations">
-          <Card className="overflow-hidden">
-            <Table className="min-w-[640px]">
-              <THead><TR><TH>State</TH><TH>Agency</TH><TH>Account</TH><TH numeric>SUI rate</TH><TH>Status</TH></TR></THead>
+          <Card className={cn("overflow-hidden", STACK.box)}>
+            <Table className={cn("min-w-[640px] @max-[40rem]:min-w-0", STACK.table)}>
+              <THead className={STACK.head}><TR><TH>State</TH><TH>Agency</TH><TH>Account</TH><TH numeric>SUI rate</TH><TH>Status</TH></TR></THead>
               <TBody>
                 {(accounts.data ?? []).map((a) => {
                   const sui = a.accountType === "unemployment" || a.accountType === "combined" ? currentRate(rs, a.jurisdiction, "sui") : undefined;
                   return (
-                    <TR key={a.id} data-testid={tid.registrationRow(a.jurisdiction)} data-status={a.status}>
-                      <TD className="font-medium">{a.jurisdiction}</TD>
-                      <TD className="h-auto py-2"><div className="whitespace-nowrap">{AGENCY[a.agency]}</div><div className="text-1 text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? human(a.accountType)}</div></TD>
-                      <TD className="font-mono text-1">{a.accountNumber ?? <span className="font-sans text-gray-9">{a.status === "awaiting_state" || a.status === "needs_info" ? "Pending" : "None yet"}</span>}</TD>
-                      <TD numeric>{sui ? ratePct(sui.rate) : "-"}</TD>
-                      <TD><Badge tone={STATUS_TONE[a.status]}>{a.status === "awaiting_state" ? "Awaiting state" : a.status === "needs_info" ? "Needs info" : a.status === "not_registered" ? "Not registered" : "Active"}</Badge></TD>
+                    <TR key={a.id} data-testid={tid.registrationRow(a.jurisdiction)} data-status={a.status} className={STACK.row}>
+                      <TD className={cn("font-medium", STACK.leadShared, "@max-[40rem]:order-first")}>{a.jurisdiction} <span className="hidden font-normal text-gray-11 @max-[40rem]:inline">{AGENCY[a.agency]}</span></TD>
+                      <TD className={cn("h-auto py-2", STACK.lead, "@max-[40rem]:hidden")}><div className="whitespace-nowrap">{AGENCY[a.agency]}</div><div className="text-1 text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? human(a.accountType)}</div></TD>
+                      <TD data-label="Account" className={cn("font-mono text-1", STACK.cell, "@max-[40rem]:before:font-sans")}>{a.accountNumber ?? <span className="font-sans text-gray-9">{a.status === "awaiting_state" || a.status === "needs_info" ? "Pending" : "None yet"}</span>}</TD>
+                      <TD numeric data-label="SUI rate" className={STACK.cell}>{sui ? ratePct(sui.rate) : "-"}</TD>
+                      <TD className={cn(STACK.bare, "@max-[40rem]:order-first")}><Badge tone={STATUS_TONE[a.status]}>{a.status === "awaiting_state" ? "Awaiting state" : a.status === "needs_info" ? "Needs info" : a.status === "not_registered" ? "Not registered" : "Active"}</Badge></TD>
                     </TR>
                   );
                 })}
@@ -145,23 +146,24 @@ export function ComplianceView() {
           </Card>
         </TabsContent>
         <TabsContent value="rates">
-          <Card className="overflow-hidden">
-            {/* Five columns that fit a 600 px content column: the state and its code read as one ("CA SUI"). */}
-            <Table>
-              <THead><TR><TH>Tax</TH><TH numeric>Rate</TH><TH numeric>Wage base</TH><TH>Effective</TH><TH>Source</TH></TR></THead>
+          <Card className={cn("overflow-hidden", STACK.box)}>
+            {/* Five columns that fit a 600 px content column: the state and its code read as one ("CA SUI"). On a phone
+                each rate stacks (STACK), so the tax, its rate and its source read together without a sideways scroll. */}
+            <Table className={STACK.table}>
+              <THead className={STACK.head}><TR><TH>Tax</TH><TH numeric>Rate</TH><TH numeric>Wage base</TH><TH>Effective</TH><TH>Source</TH></TR></THead>
               <TBody>
                 {[...rs].sort((a, b) => a.jurisdiction.localeCompare(b.jurisdiction) || a.code.localeCompare(b.code) || b.effectiveFrom.localeCompare(a.effectiveFrom)).map((r) => {
                   const href = r.source.startsWith("notice:") ? `/app/compliance?notice=${r.source.slice(7)}` : null;
                   return (
-                    <TR key={r.id} data-testid={tid.rateRow(r.jurisdiction, r.code)} data-tour="rate-row" data-jurisdiction={r.jurisdiction} data-code={r.code} data-source={r.source} data-current={r.supersededActionSeq === null && r.id === currentRate(rs, r.jurisdiction, r.code)?.id ? "true" : "false"} data-rate={r.rate} className={r.supersededActionSeq !== null ? "text-gray-9 line-through" : undefined}>
-                      <TD className="whitespace-nowrap"><span className="font-medium">{r.jurisdiction}</span> <span className="uppercase">{r.code}</span></TD>
-                      <TD numeric>{ratePct(r.rate)}</TD>
-                      <TD numeric>{r.wageBase.display}</TD>
-                      <TD className="h-auto py-2">
+                    <TR key={r.id} data-testid={tid.rateRow(r.jurisdiction, r.code)} data-tour="rate-row" data-jurisdiction={r.jurisdiction} data-code={r.code} data-source={r.source} data-current={r.supersededActionSeq === null && r.id === currentRate(rs, r.jurisdiction, r.code)?.id ? "true" : "false"} data-rate={r.rate} className={cn(STACK.row, r.supersededActionSeq !== null ? "text-gray-9 line-through" : undefined)}>
+                      <TD className={cn("whitespace-nowrap", STACK.leadShared)}><span className="font-medium">{r.jurisdiction}</span> <span className="uppercase">{r.code}</span></TD>
+                      <TD numeric className={cn(STACK.bare, "@max-[40rem]:font-medium")}>{ratePct(r.rate)}</TD>
+                      <TD numeric data-label="Wage base" className={cn(STACK.cell, "@max-[40rem]:basis-full")}>{r.wageBase.display}</TD>
+                      <TD data-label="Effective" className={cn("h-auto py-2", STACK.cell, "@max-[40rem]:[&>div]:inline @max-[40rem]:[&>div+div]:ml-1")}>
                         <div className="whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? "" : " onward"}</div>
                         {r.effectiveTo ? <div className="whitespace-nowrap text-1 text-gray-10">to {fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}</div> : null}
                       </TD>
-                      <TD className={cn("h-auto py-2 text-1", !href && "font-mono")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source === "seed" ? <span className="font-sans text-gray-11" title="seed">Initial setup</span> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">{auditLabel(r.createdActionSeq)}</Link> : null}</TD>
+                      <TD data-label="Source" className={cn("h-auto py-2 text-1", !href && "font-mono", STACK.cell, "@max-[40rem]:basis-full @max-[40rem]:before:font-sans")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source === "seed" ? <span className="font-sans text-gray-11" title="seed">Initial setup</span> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">{auditLabel(r.createdActionSeq)}</Link> : null}</TD>
                     </TR>
                   );
                 })}

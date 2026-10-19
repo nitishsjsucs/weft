@@ -7,7 +7,7 @@ import Link from "next/link";
 import { Badge, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import type { RoutineGalleryRow } from "@weft/contracts";
 import { errorText, useGet } from "@/lib/api/hooks";
-import { fmtDateTime, statusLabel } from "../../format";
+import { fmtDate, fmtDateTime, statusLabel } from "../../format";
 import { scheduleWords } from "../schedule";
 import { W4_GALLERY_TID } from "./testids";
 
@@ -25,21 +25,23 @@ function useGallery() {
 }
 
 const createdBy = (r: GalleryRow) => (r.source === "prebuilt" ? "Prebuilt" : r.createdByName ?? "Unknown");
-const nextRun = (r: GalleryRow) => (r.nextRunAt ? fmtDateTime(r.nextRunAt) : r.enabled ? (r.schedule.startsWith("on ") ? "On its event" : "Manual") : "Off while disabled");
+/** "Oct 23, 9:00 AM": the table's short form (the year is this year's, the zone is the workspace's, PT). */
+const shortWhen = (iso: string) => fmtDate(iso, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const nextRun = (r: GalleryRow, short = false) => (r.nextRunAt ? (short ? shortWhen(r.nextRunAt) : fmtDateTime(r.nextRunAt)) : r.enabled ? (r.schedule.startsWith("on ") ? "On its event" : "Manual") : "Off while disabled");
 
-function LastRun({ r }: { r: GalleryRow }) {
+function LastRun({ r, short = false }: { r: GalleryRow; short?: boolean }) {
   if (!r.lastRunAt) return <span className="text-gray-10">Never</span>;
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       {r.lastRunStatus ? <Badge tone={STATUS_TONE[r.lastRunStatus] ?? "gray"} size="xs">{r.lastRunStatus === "waiting_approval" ? "Waiting for approval" : statusLabel(r.lastRunStatus)}</Badge> : null}
-      <span>{fmtDateTime(r.lastRunAt)}</span>
+      <span title={short ? fmtDateTime(r.lastRunAt) : undefined}>{short ? shortWhen(r.lastRunAt) : fmtDateTime(r.lastRunAt)}</span>
     </span>
   );
 }
 
-function Counts({ r }: { r: GalleryRow }) {
+function Counts({ r, stacked = false }: { r: GalleryRow; stacked?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-2 tabular-nums" title="Proposals from this routine's runs that people approved, and that they denied, edited or dismissed">
+    <span className={stacked ? "inline-flex flex-col gap-0.5 whitespace-nowrap tabular-nums" : "inline-flex items-center gap-2 tabular-nums"} title="Proposals from this routine's runs that people approved, and that they denied, edited or dismissed">
       <span data-count="approvals" className="text-green-11">{r.approvals} approved</span>
       <span data-count="overrides" className={r.overrides ? "text-amber-11" : "text-gray-10"}>{r.overrides} denied or changed</span>
     </span>
@@ -56,18 +58,18 @@ export function RoutineGalleryW4() {
       <Card className="hidden overflow-x-auto tablet:block">
         <Table>
           <THead>
-            <TR><TH>Routine</TH><TH>Created by</TH><TH>Enabled</TH><TH>Last run</TH><TH>Next run</TH><TH>Autonomy</TH><TH>Decisions</TH></TR>
+            <TR><TH>Routine</TH><TH>Enabled</TH><TH>Last run</TH><TH>Next run</TH><TH>Decisions</TH></TR>
           </THead>
           <TBody>
             {rows.map((r) => (
               <TR key={r.routineId} data-testid={W4_GALLERY_TID.row(r.routineId)} data-next-run={r.nextRunAt ?? ""} data-last-run={r.lastRunAt ?? ""}>
-                <TD className="max-w-[240px]"><Link href={`/app/routines/${r.routineId}`} className="font-medium hover:underline">{r.name}</Link><div className="text-0 text-gray-10" title={r.schedule}>{scheduleWords(r.schedule)}</div></TD>
-                <TD className="whitespace-nowrap">{createdBy(r)}</TD>
+                {/* Five columns that fit the docked panel's 630 px content column: who made it and its autonomy read
+                    on the routine's own lines, and the dates take the short form (the full one is in the title). */}
+                <TD className="h-auto min-w-[200px] py-2"><Link href={`/app/routines/${r.routineId}`} className="font-medium hover:underline">{r.name}</Link><div className="text-0 text-gray-10" title={r.schedule}>{scheduleWords(r.schedule)}</div><div className="text-0 text-gray-10">{createdBy(r)} · {AUTONOMY_LABEL[r.autonomy]}</div></TD>
                 <TD className="whitespace-nowrap" title={r.enabled && r.enabledAt ? `Enabled ${fmtDateTime(r.enabledAt)}` : undefined}>{r.enabled ? "Yes" : <Badge tone="gray" size="xs">Disabled</Badge>}</TD>
-                <TD className="whitespace-nowrap"><LastRun r={r} /></TD>
-                <TD className="whitespace-nowrap">{nextRun(r)}</TD>
-                <TD className="whitespace-nowrap">{AUTONOMY_LABEL[r.autonomy]}</TD>
-                <TD className="whitespace-nowrap"><Counts r={r} /></TD>
+                <TD className="h-auto py-2"><LastRun r={r} short /></TD>
+                <TD className="h-auto py-2" title={r.nextRunAt ? fmtDateTime(r.nextRunAt) : undefined}>{nextRun(r, true)}</TD>
+                <TD className="h-auto py-2"><Counts r={r} stacked /></TD>
               </TR>
             ))}
           </TBody>

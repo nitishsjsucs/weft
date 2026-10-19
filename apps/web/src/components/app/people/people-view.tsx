@@ -96,7 +96,11 @@ function OfferCard({ o }: { o: Offer }) {
       </div>
       <Badge tone={o.status === "accepted" ? "green" : o.status === "sent" ? "blue" : "gray"} size="md" data-status={o.status}>{o.status.charAt(0).toUpperCase() + o.status.slice(1)}</Badge>
       {o.status === "sent" && can("people", "edit") ? (
-        <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={() => void onAccept()} title="Demo action: records the candidate's acceptance">Mark accepted</Button>
+        <>
+          {/* The visible label is the accessible name (WCAG 2.5.3); the demo note is its description. */}
+          <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={() => void onAccept()} aria-describedby={`offer-accept-note-${o.id}`}>Mark accepted</Button>
+          <span id={`offer-accept-note-${o.id}`} className="sr-only">Demo action: records the candidate's acceptance</span>
+        </>
       ) : null}
     </Card>
   );
@@ -300,7 +304,7 @@ export function PersonView({ id }: { id: string }) {
     <div className="mx-auto w-full max-w-[1000px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title={p.displayName} subtitle={`${p.title} · ${d.department ?? deptName(p.departmentId)}${d.workplace ? ` · ${d.workplace}` : ""}`} meta={<span className="flex items-center gap-3"><span className={`text-2 font-medium capitalize ${STATUS_CLASS[p.status]}`}>{p.status}</span><PersonActions workerId={p.id} status={p.status} /></span>} />
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="mb-4 overflow-x-auto" data-tour="person-tabs">
+        <TabsList className="mb-4 overflow-x-auto [&>button]:px-2" data-tour="person-tabs">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="pay" data-tour="person-tab" data-tab="pay">Pay and tax</TabsTrigger>
           <TabsTrigger value="benefits">Benefits</TabsTrigger>
