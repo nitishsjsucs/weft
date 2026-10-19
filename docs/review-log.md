@@ -397,8 +397,13 @@ admin and cli keys on purpose, because their routes accept API keys.
   the model's note is the letter's closing sentence with no "Note:" label. The tool description says the note is
   addressed to the agency, never to the approver, and G3 now fails a trial whose drafted reply note talks to the
   approver ("please review", "approve", "in the inbox"). Digests: no seed step and no eval world drafts a reply (every
-  seeded or world-built notice has `drafts_json` "[]"), so the base digest and all eval world digests are unchanged
-  and nothing was re-pinned; the full vitest suite, the seed digest tests and the eval grader tests pass.
+  seeded or world-built notice has `drafts_json` "[]"), so the letter moves neither the base digest nor any eval
+  world digest.
+- One eval digest re-pinned, on purpose: OF-01. Its world terminates Imani as Dana, which files the offboarding steps
+  as Dana's proposals with no run, and the proposal notifier now posts their chat cards as "Dana Whitfield (demo)"
+  instead of "Weft agent" (the Inbox already said "Proposed by Dana"). Only the cards' author column moves: with the
+  notifier change reverted the old digest reproduces. Re-pinned with `pnpm eval:suite digests --ids OF-01 --write`
+  (sha256:aa02e10c... to sha256:821ec9c5...); `pnpm eval:suite digests --split all` then reproduces 110 of 110.
 - Stored summaries the eval worlds never seed changed at the source where a number was missing: payroll.get_run gives
   paychecks, need review and blocked; people.search says "1 worker"; the submit diff's Excluded row lists names; a
   submit card is not "For" the person it excludes; channel posts drop a parenthesized row id; a person's proposal
