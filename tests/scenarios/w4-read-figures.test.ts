@@ -19,7 +19,7 @@ async function read<T = Record<string, unknown>>(command: string, args: Record<s
   return o.data as T;
 }
 type Bal = { minutes: number; hours: number; days: number };
-type Req = { id: string; status: string; requested_hours: number; requested_days: number; submitted_date: string; decided_date: string | null; balance_before_request: Bal | null; balance_after_request: Bal | null };
+type Req = { id: string; status: string; requestedMinutes: number; requested_hours: number; requested_days: number; submitted_date: string; decided_date: string | null; balance_now: Bal | null; balance_without_this_request: Bal | null };
 type Sum = { count: number; amount_cents: number; amount_display: string };
 
 describe("expense reads carry the sums people ask for", () => {
@@ -50,12 +50,12 @@ describe("expense reads carry the sums people ask for", () => {
 });
 
 describe("time-off reads carry hours, days and the balance left", () => {
-  it("a pending request has its hours and days and the policy balance before and after it", async () => {
+  it("a pending request has its hours and days, the policy balance now and the balance without it", async () => {
     const d = await read<{ requests: Req[]; totals: Record<string, number> }>("time_off.list_requests", { worker_id: "wrk_0010" });
     const r = d.requests.find((x) => x.id === "tor_0003")!;
     expect(r).toMatchObject({ requested_hours: 24, requested_days: 3, submitted_date: "2026-10-26", decided_date: null });
-    expect(r.balance_before_request).toEqual({ minutes: 6_780, hours: 113, days: 14.13 });
-    expect(r.balance_after_request).toEqual({ minutes: 5_340, hours: 89, days: 11.13 });
+    expect(r.balance_now).toEqual({ minutes: 5_340, hours: 89, days: 11.13 });
+    expect(r.balance_without_this_request).toEqual({ minutes: 6_780, hours: 113, days: 14.13 });
     expect(d.totals).toEqual({ count: 1, requested_minutes: 1_440, requested_hours: 24, requested_days: 3 });
   });
 
@@ -114,8 +114,29 @@ describe("dates in the company time zone", () => {
     expect(out.ok && out.status === "done", JSON.stringify(out).slice(0, 300)).toBe(true);
     const r = (await read<{ requests: Req[] }>("time_off.list_requests", { request_id: "tor_0005" })).requests[0]!;
     expect(r.decided_date).toBe("2026-10-26");
-    // A denied request holds nothing, so the balance is the same before and after it.
+    // A denied request holds nothing, so the balance without it is the balance now.
     expect(r.status).toBe("denied");
-    expect(r.balance_before_request).toEqual(r.balance_after_request);
+    expect(r.balance_without_this_request).toEqual(r.balance_now);
+  });
+});
+
+describe("two pending requests on one policy (review fix group expense-and-timeoff)", () => {
+  it("both show the same balance now, and each one's balance without it adds back only its own minutes", async () => {
+    // A second Larkspur Vacation request for Ruth beside tor_0003 (Nov 23 to 27, 1,440 minutes): Mon Dec 14 and Tue Dec 15.
+    const sub = await weft.executor.human.exec(S as never, "time_off.submit", { worker_id: "wrk_0010", policy_id: "top_vac_us", start_date: "2026-12-14", end_date: "2026-12-15", reason: "Family visit" });
+    expect(sub.ok && sub.status === "done", JSON.stringify(sub).slice(0, 300)).toBe(true);
+    const second = (sub as { data: { request_id: string; requested_minutes: number } }).data;
+    expect(second.requested_minutes).toBe(960);
+    const d = await read<{ requests: Req[] }>("time_off.list_requests", { worker_id: "wrk_0010", status: "pending" });
+    const first = d.requests.find((x) => x.id === "tor_0003")!, next = d.requests.find((x) => x.id === second.request_id)!;
+    const available = (await read<{ balances: { policyId: string; availableMinutes: number }[] }>("time_off.get_balance", { worker_id: "wrk_0010" })).balances.find((b) => b.policyId === "top_vac_us")!.availableMinutes;
+    // The balance now is today's available, which counts both holds: 5,340 minus the new 960.
+    expect(available).toBe(4_380);
+    for (const r of [first, next]) expect(r.balance_now).toEqual({ minutes: 4_380, hours: 73, days: 9.13 });
+    expect(first.balance_without_this_request).toEqual({ minutes: 5_820, hours: 97, days: 12.13 });
+    expect(next.balance_without_this_request).toEqual({ minutes: 5_340, hours: 89, days: 11.13 });
+    // Each request's balance without it differs from the balance now by exactly its own minutes, never by both.
+    for (const r of [first, next]) expect(r.balance_without_this_request!.minutes - r.balance_now!.minutes).toBe(r.requestedMinutes);
+    expect(Object.keys(first).filter((k) => /balance_(before|after)/.test(k))).toEqual([]);
   });
 });

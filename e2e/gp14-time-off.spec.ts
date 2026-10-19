@@ -24,6 +24,7 @@ test("GP14: coverage conflict routed to the manager, approved on the Requests ta
     await expect(ruth.getByTestId(T.check("INCLUDES_HOLIDAY"))).toBeVisible();
     await expect(ruth).toContainText("3 of 9 out (33.3%)");
     await expect(ruth).toContainText("Routed to Imani Ferreira (demo)");
+    await expect(ruth).toContainText("Larkspur Vacation balance 89.00 h now, every open request counted; 113.00 h without this request");
     await expect(page.getByTestId(T.requestRow("tor_0005")).getByTestId(T.check("WAITING_PERIOD"))).toBeVisible();
     const api = await weft.get<Req>("/v1/time-off/requests/tor_0003");
     expect(api).toMatchObject({ status: "pending", approverPrincipalId: "usr_imani" });

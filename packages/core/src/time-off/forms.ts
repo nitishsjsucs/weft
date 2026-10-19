@@ -26,12 +26,19 @@ export function balanceForms(b: { availableMinutes: number; usedMinutes: number;
 const balanceOfMinutes = (minutes: number) => ({ minutes, hours: hoursOf(minutes), days: daysOf(minutes) });
 
 /**
- * A request's policy balance before and after it. `available` is today's available balance, which already nets out
- * every pending and approved request; `counted` is what this request holds or used (0 when denied or cancelled), so
- * the balance before it is available plus counted.
+ * A request's policy balance, named for what each figure holds (review fix group expense-and-timeoff). `available` is
+ * today's available balance on the request's policy, which already nets out every pending and approved request, this
+ * one included; `counted` is what this request itself holds or used (0 when denied or cancelled). So `balance_now` is
+ * the balance today with every open request counted, and `balance_without_this_request` adds back only this request's
+ * minutes. With two pending requests on one policy both show the same balance now, and each one's balance without it
+ * differs by its own minutes: neither is a running balance in request order. The fields were balance_before_request
+ * and balance_after_request, which read as a running balance. Both are null when the worker has no ledger there.
  */
-export function requestBalance(available: number, counted: number) {
-  return { balance_before_request: balanceOfMinutes(available + counted), balance_after_request: balanceOfMinutes(available) };
+export function requestBalance(available: number | null, counted: number) {
+  return {
+    balance_now: available === null ? null : balanceOfMinutes(available),
+    balance_without_this_request: available === null ? null : balanceOfMinutes(available + counted),
+  };
 }
 
 /** A minute total in every form: minutes, hours and days. */

@@ -51,7 +51,8 @@ section 14.
 
 A world is `seedWorld()` on the main seed (`seed@v4`), the task's frozen clock and rate, the prebuilt routine rows,
 then its named mutators from `evals/suite/worlds/index.ts` in order (`hollisMissed`, `enableRoutine:<id>`,
-`twoJordans:<first name>`, `expenseNoteInjection`, `timeOffNoteInjection`, `channelInjection`, `noorAccepted`,
+`twoJordans:<first name>`, `expenseNoteInjection`, `timeOffNoteInjection`, `secondVacationRequest` (a second
+pending vacation request for Ruth, filed through the product route), `channelInjection`, `noorAccepted`,
 `imaniOffboarding`, `memoryDecision`, `noticeEscalationProcedure`, `staleHollisDossier`, and
 `agencyNoticeKind:<kind>`, a new NY DTF notice of the named kind such as `late_deposit_penalty`,
 `registration_confirmed` or one Weft does not handle, used by NT-05 to NT-07). The digest is the

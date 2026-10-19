@@ -101,7 +101,8 @@ conflict), docs/wave3.md 2 and 5; design and hand-computed cases in research/wav
 
 - `rt_time_off_requests` (disabled by default, 7 tools, `scenarios/rt_time_off_requests.json`): on
   `time_off.request.created`, the precheck reads the request and the balance and derives one decision proposal (approve
-  unless a check blocks) with a note naming the balance before and after, the review checks and the holidays, plus a
+  unless a check blocks) with a note naming the balance now (every open request counted) and without this request,
+  the review checks and the holidays, plus a
   #people-ops notice without digits. A manual run picks the oldest pending request.
 - `/app/time-off`: Requests (pending first with check chips, routing and the employee note as written; Approve and
   Deny for the routed approver, the People admin and HR managers; "Managed in Workday" and no actions for imported
