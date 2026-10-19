@@ -128,7 +128,7 @@ export function ComplianceView() {
                   return (
                     <TR key={a.id} data-testid={tid.registrationRow(a.jurisdiction)} data-status={a.status}>
                       <TD className="font-medium">{a.jurisdiction}</TD>
-                      <TD>{AGENCY[a.agency]} <span className="text-1 text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? human(a.accountType)}</span></TD>
+                      <TD className="h-auto py-2"><div className="whitespace-nowrap">{AGENCY[a.agency]}</div><div className="text-1 text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? human(a.accountType)}</div></TD>
                       <TD className="font-mono text-1">{a.accountNumber ?? <span className="font-sans text-gray-9">{a.status === "awaiting_state" || a.status === "needs_info" ? "Pending" : "None yet"}</span>}</TD>
                       <TD numeric>{sui ? ratePct(sui.rate) : "-"}</TD>
                       <TD><Badge tone={STATUS_TONE[a.status]}>{a.status === "awaiting_state" ? "Awaiting state" : a.status === "needs_info" ? "Needs info" : a.status === "not_registered" ? "Not registered" : "Active"}</Badge></TD>
@@ -141,19 +141,22 @@ export function ComplianceView() {
         </TabsContent>
         <TabsContent value="rates">
           <Card className="overflow-hidden">
-            <Table className="min-w-[720px]">
-              <THead><TR><TH>Jurisdiction</TH><TH>Code</TH><TH numeric>Rate</TH><TH numeric>Wage base</TH><TH>Effective</TH><TH>Source</TH></TR></THead>
+            {/* Five columns that fit a 600 px content column: the state and its code read as one ("CA SUI"). */}
+            <Table>
+              <THead><TR><TH>Tax</TH><TH numeric>Rate</TH><TH numeric>Wage base</TH><TH>Effective</TH><TH>Source</TH></TR></THead>
               <TBody>
                 {[...rs].sort((a, b) => a.jurisdiction.localeCompare(b.jurisdiction) || a.code.localeCompare(b.code) || b.effectiveFrom.localeCompare(a.effectiveFrom)).map((r) => {
                   const href = r.source.startsWith("notice:") ? `/app/compliance?notice=${r.source.slice(7)}` : null;
                   return (
                     <TR key={r.id} data-testid={tid.rateRow(r.jurisdiction, r.code)} data-tour="rate-row" data-jurisdiction={r.jurisdiction} data-code={r.code} data-source={r.source} data-current={r.supersededActionSeq === null && r.id === currentRate(rs, r.jurisdiction, r.code)?.id ? "true" : "false"} data-rate={r.rate} className={r.supersededActionSeq !== null ? "text-gray-9 line-through" : undefined}>
-                      <TD className="font-medium">{r.jurisdiction}</TD>
-                      <TD className="uppercase">{r.code}</TD>
+                      <TD className="whitespace-nowrap"><span className="font-medium">{r.jurisdiction}</span> <span className="uppercase">{r.code}</span></TD>
                       <TD numeric>{ratePct(r.rate)}</TD>
                       <TD numeric>{r.wageBase.display}</TD>
-                      <TD className="whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? ` to ${fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}` : " onward"}</TD>
-                      <TD className={cn("text-1", !href && "font-mono")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">{auditLabel(r.createdActionSeq)}</Link> : null}</TD>
+                      <TD className="h-auto py-2">
+                        <div className="whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? "" : " onward"}</div>
+                        {r.effectiveTo ? <div className="whitespace-nowrap text-1 text-gray-10">to {fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}</div> : null}
+                      </TD>
+                      <TD className={cn("h-auto py-2 text-1", !href && "font-mono")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source === "seed" ? <span className="font-sans text-gray-11" title="seed">Initial setup</span> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">{auditLabel(r.createdActionSeq)}</Link> : null}</TD>
                     </TR>
                   );
                 })}

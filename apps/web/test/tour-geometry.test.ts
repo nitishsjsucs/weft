@@ -1,6 +1,6 @@
 // The tour's ring and card geometry (owner: tour). Pure: no DOM, no React.
 import { describe, expect, it } from "vitest";
-import { overlapArea, placeCard, ringBox, sheetEdge, tightSides, type Rect } from "../src/components/tour/geometry";
+import { overlapArea, panelSpot, placeCard, ringBox, sheetEdge, tightSides, type Rect } from "../src/components/tour/geometry";
 import { sideOrder } from "../src/components/tour/tour-card";
 
 const r = (left: number, top: number, right: number, bottom: number): Rect => ({ left, top, right, bottom });
@@ -114,5 +114,25 @@ describe("tightSides", () => {
     expect(tightSides(t, ringBox(t, r(0, 48, 1000, 800), 4)!.box, [], 4)).toEqual([]);
     const long = r(100, 20, 300, 900), rb = ringBox(long, r(0, 48, 1000, 800), 4)!;
     expect(tightSides(long, rb.box, rb.clipped, 4)).toEqual([]);
+  });
+});
+
+describe("panelSpot", () => {
+  const main = r(244, 48, 940, 800), panel = r(940, 0, 1280, 800);
+  it("bottom-aligns the card inside a docked panel, as wide as the panel allows", () => {
+    const s = panelSpot(panel, main, { width: 360, height: 240 })!;
+    expect(s.width).toBe(316);
+    expect(s.left).toBe(952);
+    expect(s.top).toBe(800 - 12 - 240);
+    // Every flag popover lives in main: the spot never meets it.
+    expect(overlapArea(cardRect(s, 240, s.width), main)).toBe(0);
+  });
+  it("is null when the panel is not beside main or too narrow for a 260 px card", () => {
+    expect(panelSpot(null, main, { width: 360, height: 240 })).toBeNull();
+    expect(panelSpot(r(600, 0, 940, 800), main, { width: 360, height: 240 })).toBeNull();
+    expect(panelSpot(r(940, 0, 1180, 800), main, { width: 360, height: 240 })).toBeNull();
+  });
+  it("keeps a card taller than the panel inside its top pad", () => {
+    expect(panelSpot(r(940, 0, 1280, 300), main, { width: 360, height: 400 })!.top).toBe(12);
   });
 });

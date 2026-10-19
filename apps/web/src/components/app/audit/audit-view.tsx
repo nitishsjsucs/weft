@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
-import { ShieldCheck, ShieldX, Undo2 } from "lucide-react";
+import { Lock, ShieldCheck, ShieldX, Undo2 } from "lucide-react";
 import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TID, tid, type Action, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDateTime, humanTimes, notReversibleText } from "../format";
+import { AGENCY, fmtDateTime, humanTimes, notReversibleText } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { humanLine } from "../copy";
@@ -42,6 +42,24 @@ function useRoutineNames(runIds: string[]): Record<string, string> {
 
 const notReversible = (a: Action) => humanTimes(notReversibleText(a.notReversibleReason));
 
+/**
+ * A stored summary as a line a person reads. The few summaries whose ids, file names and agency codes humanLine does
+ * not know read as words first (the stored text stays in the row's title).
+ */
+export function auditSummary(summary: string): string {
+  const pre = summary
+    .replace(/^Delivered ([A-Z]+)_([A-Z]+)_([A-Z]+)(\d+)_\d{4}\.txt from \w+ as the notice$/, "Delivered the $1 $2 $3 $4 notice")
+    .replace(/^Delivered (\S+)\.txt from (\w+) as the notice$/, (_m, _f: string, ag: string) => `Delivered a notice from ${AGENCY[ag as keyof typeof AGENCY] ?? "the agency"}`)
+    .replace(/\boffer offr?_\w*\d\w*\b/g, "an offer")
+    .replace(/^Drafted response \d+ for/, "Drafted a response to")
+    .replace(/\b(\d{4})-Q([1-4])\b/g, "Q$2 $1")
+    .replace(/\bwith (irs|ca_edd|ny_dtf|ny_dol|tx_twc|co_dor|co_cdle) \(sim\)/g, (_m, ag: string) => `with ${AGENCY[ag as keyof typeof AGENCY]}`);
+  return humanLine(pre);
+}
+
+/** The audit log reads as a table at a column of 640 px or more and as stacked rows below it (container queries). */
+const STACK = "@max-[40rem]:block @max-[40rem]:w-full";
+
 export function AuditView() {
   const actions = useGet("/v1/actions", { query: { limit: 100 }, refreshMs: 5_000 });
   // A link to /app/audit#audit-<seq> (the offboarding case view) scrolls to and marks that row once it has loaded.
@@ -74,38 +92,46 @@ export function AuditView() {
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       {result && !result.ok ? <div role="alert" title={result.refusal.code} className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{humanTimes(result.refusal.message)}</div> : null}
       {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{humanTimes(result.summary)}</div> : null}
-      <Card className="overflow-hidden">
-        <Table className="text-[13px]">
-          <THead><TR><TH>Seq</TH><TH>Time</TH><TH>Actor</TH><TH>Command</TH><TH className="w-full min-w-[200px]">Summary</TH><TH>Run</TH><TH /></TR></THead>
-          <TBody>
-            {(actions.data?.data ?? []).map((a) => (
-              <TR key={a.seq} id={`audit-${a.seq}`} data-testid={tid.auditRow(a.seq)} data-tour="audit-row" data-seq={a.seq} data-reverses={a.reversesSeq ?? ""} data-reversible={a.reversible} className={cn(a.reversedBySeq !== null && "bg-gray-2")}>
-                <TD className="h-11 tabular text-gray-10">#{a.seq}</TD>
-                <TD className="h-11 whitespace-nowrap">{fmtDateTime(a.ts)}</TD>
-                <TD className="h-11 max-w-[10rem]">
-                  <div title={a.routineRunId ?? undefined}>{actor(a, routineNames)}</div>
-                  {a.onBehalfOf ? <div className="text-1 text-gray-10">for {principalName(a.onBehalfOf)}</div> : null}
+      <Card className="@container overflow-hidden">
+        <Table className={cn("text-[13px]", STACK, "@max-[40rem]:[&_thead]:hidden")}>
+          <THead><TR><TH className="w-[7.5rem]">When</TH><TH className="w-[11rem]">Actor</TH><TH>Summary</TH><TH className="w-[6.5rem]"><span className="sr-only">Run and undo</span></TH></TR></THead>
+          <TBody className={STACK}>
+            {(actions.data?.data ?? []).map((a) => {
+              const who = actor(a, routineNames);
+              const forWhom = a.onBehalfOf ? `for ${principalName(a.onBehalfOf)}` : null;
+              return (
+              <TR key={a.seq} id={`audit-${a.seq}`} data-testid={tid.auditRow(a.seq)} data-tour="audit-row" data-seq={a.seq} data-reverses={a.reversesSeq ?? ""} data-reversible={a.reversible} className={cn(a.reversedBySeq !== null && "bg-gray-2", "@max-[40rem]:grid @max-[40rem]:grid-cols-[1fr_auto] @max-[40rem]:gap-x-3 @max-[40rem]:px-3 @max-[40rem]:py-2.5")}>
+                <TD className="h-auto py-2.5 align-top whitespace-nowrap @max-[40rem]:col-span-2 @max-[40rem]:flex @max-[40rem]:h-auto @max-[40rem]:gap-2 @max-[40rem]:p-0">
+                  <div className="tabular text-gray-10">#{a.seq}</div>
+                  <div className="tabular text-1 text-gray-11 @max-[40rem]:text-[13px]">{fmtDateTime(a.ts)}</div>
                 </TD>
-                {/* A command breaks only after its dot ("notices." / "draft_response"), never inside a word. */}
-                <TD className="h-11 max-w-[11rem]"><code className="font-mono text-1">{a.command.split(".").map((part, i, all) => <Fragment key={i}><span className="whitespace-nowrap">{part}{i < all.length - 1 ? "." : ""}</span>{i < all.length - 1 ? <wbr /> : null}</Fragment>)}</code></TD>
-                <TD className="h-11 min-w-[200px] whitespace-normal break-words">
+                <TD className="h-auto max-w-[11rem] py-2.5 align-top @max-[40rem]:col-span-2 @max-[40rem]:max-w-none @max-[40rem]:p-0">
+                  <div className="truncate font-medium" title={[who, forWhom, a.routineRunId].filter(Boolean).join(", ")}>{who}</div>
+                  {forWhom ? <div className="truncate text-1 text-gray-10" title={forWhom}>{forWhom}</div> : null}
+                </TD>
+                <TD className="h-auto min-w-0 py-2.5 align-top whitespace-normal break-words @max-[40rem]:p-0 @max-[40rem]:pt-1">
                   {/* The stored summary carries row ids and ISO dates; it reads as words here, the stored text in the title. */}
-                  <div title={a.summary}>{humanLine(a.summary)}</div>
-                  <div className="text-1 text-gray-10">
-                    {a.reversesSeq !== null ? <>Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></> : null}
-                    {a.reversedBySeq !== null ? <>Reversed by <a href={`#audit-${a.reversedBySeq}`} className="text-blue-11 hover:underline">#{a.reversedBySeq}</a></> : null}
-                    {a.reversible === "no" ? <span className="text-amber-11" title={a.notReversibleReason ?? undefined}>{notReversible(a)}</span> : null}
-                    {a.proposalId ? <> · <span title={a.proposalId}>from an approved proposal</span></> : null}
+                  <div title={a.summary}>{auditSummary(a.summary)}</div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-1 text-gray-10">
+                    {/* A command breaks only after its dot ("notices." / "draft_response"), never inside a word. */}
+                    <code className="font-mono">{a.command.split(".").map((part, i, all) => <Fragment key={i}><span className="whitespace-nowrap">{part}{i < all.length - 1 ? "." : ""}</span>{i < all.length - 1 ? <wbr /> : null}</Fragment>)}</code>
+                    {a.reversible === "no" ? <span className="inline-flex items-center" title={notReversible(a)}><Lock aria-hidden className="size-3" /><span className="sr-only">{notReversible(a)}</span></span> : null}
+                    {a.reversesSeq !== null ? <span>· Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></span> : null}
+                    {a.reversedBySeq !== null ? <span>· Reversed by <a href={`#audit-${a.reversedBySeq}`} className="text-blue-11 hover:underline">#{a.reversedBySeq}</a></span> : null}
+                    {a.proposalId ? <span title={a.proposalId}>· from an approved proposal</span> : null}
                   </div>
                 </TD>
-                <TD className="h-11 max-w-[8rem]">{a.agentRunId ? <Link href={`/app/runs/${a.agentRunId}`} title={a.agentRunId} aria-label={`Agent run ${a.agentRunId}`} className="whitespace-nowrap text-1 text-blue-11 hover:underline">Agent run</Link> : "-"}</TD>
-                <TD className="h-11 text-right">
-                  {a.reversible === "yes" && a.reversedBySeq === null ? (
-                    <Button data-testid={tid.auditUndo(a.seq)} data-tour="audit-undo" data-seq={a.seq} size="xs" disabled={undo.pending} onClick={async () => setResult((await undo.run(a.seq)) ?? null)}><Undo2 /> Undo</Button>
-                  ) : null}
+                <TD className="h-auto py-2.5 align-top text-right @max-[40rem]:col-start-2 @max-[40rem]:row-start-1 @max-[40rem]:p-0">
+                  <div className="flex flex-col items-end gap-1">
+                    {a.agentRunId ? <Link href={`/app/runs/${a.agentRunId}`} title={a.agentRunId} aria-label={`Agent run ${a.agentRunId}`} className="whitespace-nowrap text-1 text-blue-11 hover:underline">Agent run</Link> : null}
+                    {a.reversible === "yes" && a.reversedBySeq === null ? (
+                      <Button data-testid={tid.auditUndo(a.seq)} data-tour="audit-undo" data-seq={a.seq} size="xs" disabled={undo.pending} onClick={async () => setResult((await undo.run(a.seq)) ?? null)}><Undo2 /> Undo</Button>
+                    ) : null}
+                  </div>
                 </TD>
               </TR>
-            ))}
+              );
+            })}
           </TBody>
         </Table>
       </Card>

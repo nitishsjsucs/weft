@@ -320,7 +320,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
 
       // 2. Shell: the agent panel for agent steps, the nav drawer below 1024 px.
       const b = getBridge();
-      if (step.agent) b?.setAgentOpen(true);
+      if (step.agent === true || (step.agent === "after" && b?.desktop())) b?.setAgentOpen(true);
       else if (b && !b.desktop()) b.setAgentOpen(false);
       if (step.nav && b && !b.laptop()) b.openNav();
 

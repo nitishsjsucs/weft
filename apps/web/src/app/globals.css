@@ -2,5 +2,6 @@
 @import "@weft/ui/fonts.css";
 @import "@weft/ui/tokens.css";
 @import "@weft/ui/theme.css";
+@import "@weft/ui/controls.css";
 
 @source "../../../../packages/ui/src";

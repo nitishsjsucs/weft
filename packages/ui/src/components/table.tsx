@@ -1,11 +1,15 @@
+"use client";
 import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { cn } from "../cn";
+import { useEdgeFade } from "./edge-fade";
 
 // Presentational table parts (design.md 13.3: header 12/500 gray-11, rows 48 px, tabular right-aligned money).
 // apps/web drives them with TanStack Table v9 useTable.
+// The wrapper scrolls sideways when the table is wider than its column and fades the edge it runs past.
 export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>) {
+  const ref = useEdgeFade<HTMLDivElement>();
   return (
-    <div className="w-full overflow-x-auto">
+    <div ref={ref} data-edge-fade="" className="w-full min-w-0 overflow-x-auto">
       <table className={cn("w-full border-collapse text-2", className)} {...props} />
     </div>
   );

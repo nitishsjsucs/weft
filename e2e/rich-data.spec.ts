@@ -88,6 +88,17 @@ test("the rich profile fills every audited screen", async ({ page, request }) =>
       await tabs.nth(i).click().catch(() => {});
       texts.push(await settled(page));
     }
+    // Native controls are drawn by the app (controls.css), never with the operating system's chrome, and no table
+    // runs past the main pane (its own scroller takes the overflow).
+    const look = await page.evaluate(() => {
+      const main = document.querySelector("[data-app-main]");
+      const mr = main?.getBoundingClientRect();
+      const native = [...document.querySelectorAll("select, input[type=date]")].filter((el) => getComputedStyle(el).appearance === "auto").map((el) => el.outerHTML.slice(0, 80));
+      const past = mr ? [...document.querySelectorAll("[data-app-main] table")].map((t) => t.parentElement!.getBoundingClientRect()).filter((r) => r.width > 0 && r.right > mr.right + 1).map((r) => Math.round(r.right - mr.right)) : [];
+      return { native, past };
+    });
+    for (const n of look.native) failures.push(`${r.path}: a native control with the OS look: ${n}`);
+    for (const p of look.past) failures.push(`${r.path}: a table scroller ends ${p} px past the main pane`);
     const all = texts.join(" | ");
     for (const e of r.empty ?? []) {
       if (!has(all, e)) continue;

@@ -5,6 +5,7 @@ import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-tab
 import { CircleCheck, CircleDashed, CircleSlash } from "lucide-react";
 import { Badge, Button, Card, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { tid, W3_TIMEOFF_TID, type BenefitPlan, type Enrollment, type ItAccount, type Money, type Offer, type ToolOutcome, type Worker } from "@weft/contracts";
+import { useAgent } from "../agent-context";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { useCan } from "@/lib/api/access";
 import { PAY_SCHEDULE, TASK_OWNER, WORKER_TYPE, fmtDate, initials, longDate, statusLabel, timeZoneName } from "../format";
@@ -30,12 +31,17 @@ const columns = h.columns([
   h.accessor("status", { header: "Status" }),
 ]);
 
+/** Columns that step aside in a narrow content column; name and status always show. */
+const COL_CLASS: Record<string, string> = { title: "hidden @min-[32rem]:table-cell", department: "hidden @min-[44rem]:table-cell", state: "hidden @min-[38rem]:table-cell" };
+
 function PeopleTable({ data }: { data: Worker[] }) {
   const table = useTable({ features, columns, data });
   return (
-    <Card className="overflow-hidden">
-      <Table className="min-w-[720px]">
-        <THead>{table.getHeaderGroups().map((g) => <TR key={g.id}>{g.headers.map((hd) => <TH key={hd.id}>{hd.isPlaceholder ? null : <table.FlexRender header={hd} />}</TH>)}</TR>)}</THead>
+    // Columns follow the content column (container queries): on a phone the title reads under the name and the
+    // department and state step aside, so name and status always show.
+    <Card className="@container overflow-hidden">
+      <Table>
+        <THead>{table.getHeaderGroups().map((g) => <TR key={g.id}>{g.headers.map((hd) => <TH key={hd.id} className={COL_CLASS[hd.column.id]}>{hd.isPlaceholder ? null : <table.FlexRender header={hd} />}</TH>)}</TR>)}</THead>
         <TBody>
           {table.getRowModel().rows.map((r) => {
             const w = r.original;
@@ -46,13 +52,13 @@ function PeopleTable({ data }: { data: Worker[] }) {
                     <TD key={cell.id}>
                       <Link href={`/app/people/${w.id}`} className="flex items-center gap-2.5">
                         <span className="grid size-6 shrink-0 place-items-center rounded-full bg-gray-4 text-0 font-medium text-gray-11">{initials(w.displayName)}</span>
-                        <span className="min-w-0"><span className="block truncate font-medium">{w.displayName}</span><span className="block truncate text-1 text-gray-10">{w.workEmail}</span></span>
+                        <span className="min-w-0"><span className="block truncate font-medium">{w.displayName}</span><span className="block truncate text-1 text-gray-10 @min-[32rem]:hidden">{w.title}</span><span className="hidden truncate text-1 text-gray-10 @min-[32rem]:block">{w.workEmail}</span></span>
                       </Link>
                     </TD>
                   ) : cell.column.id === "status" ? (
                     <TD key={cell.id} className={`font-medium capitalize ${STATUS_CLASS[w.status]}`}>{w.status}</TD>
                   ) : (
-                    <TD key={cell.id} className="text-gray-11"><table.FlexRender cell={cell} /></TD>
+                    <TD key={cell.id} className={`text-gray-11 ${COL_CLASS[cell.column.id] ?? ""}`}><table.FlexRender cell={cell} /></TD>
                   ),
                 )}
               </TR>
@@ -164,8 +170,8 @@ function PayTab({ d }: { d: Detail }) {
                 <TR key={r.id} data-testid={`pay-rate-${r.id}`}>
                   <TD className="h-10 capitalize">{r.kind}</TD>
                   <TD numeric className="h-10">{r.amount.display}{r.kind === "salary" ? " a year" : r.kind === "hourly" ? " an hour" : ""}</TD>
-                  <TD className="h-10 whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? ` to ${fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}` : " onward"}</TD>
-                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>{auditLabel(r.createdActionSeq)}</Link> : <span className="text-gray-10">On file at import</span>}</TD>
+                  <TD className="h-auto py-2"><div className="whitespace-nowrap">{longDate(r.effectiveFrom)}{r.effectiveTo ? "" : " onward"}</div>{r.effectiveTo ? <div className="whitespace-nowrap text-1 text-gray-10">to {longDate(r.effectiveTo)}</div> : null}</TD>
+                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>{auditLabel(r.createdActionSeq)}</Link> : <span className="text-gray-10">Initial record</span>}</TD>
                 </TR>
               ))}
             </TBody>

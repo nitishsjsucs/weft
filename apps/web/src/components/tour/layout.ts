@@ -152,3 +152,11 @@ export function useFrameValue<T>(read: () => T, same: (a: T, b: T) => boolean, d
   }, deps);
   return value;
 }
+
+/** The agent panel's rect when it is docked beside the page (a grid column), null when closed or an overlay. */
+export function dockedPanelRect(): Rect | null {
+  const aside = document.querySelector<HTMLElement>('aside[aria-label="Agent"]');
+  if (!aside || aside.closest(".fixed")) return null;
+  const r = aside.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 ? rectOf(r) : null;
+}

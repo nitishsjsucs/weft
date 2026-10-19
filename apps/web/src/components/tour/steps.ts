@@ -65,8 +65,19 @@ export interface TourStep {
   once?: boolean;
   /** Proxy button label for click and ask steps. */
   proxyLabel?: string;
-  /** Agent steps open the panel; on a phone the sheet docks at the top. */
-  agent?: boolean;
+  /**
+   * Agent steps open the panel; on a phone the sheet docks at the top. "after" opens it only where it docks beside
+   * the page: where the panel would cover the page (a phone, a tablet), it stays closed so the step's own target
+   * (outside the panel) can be seen and tapped, and the action the step asks for opens it (Deliver shows its run).
+   */
+  agent?: boolean | "after";
+  /** With the agent panel docked, the card sits in the panel's column, clear of every popover the step opens in main. */
+  dockPanel?: boolean;
+  /**
+   * Below this window width the card docks at the bottom of the content column instead of beside the target: the
+   * portal's checklist leaves no room beside it, and the card must not cover the items' status.
+   */
+  dockBottomUnder?: number;
   /** Steps that open an app popover or drawer dock the card beside it. */
   dock?: "side";
   /** Below 1024 px the bridge opens the nav drawer before locating the target. */
@@ -102,7 +113,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   },
   {
     id: "deliver-notice", n: 4, route: { kind: "path", path: "/app/simulators" },
-    target: `[data-tour~="sim-deliver"][data-scenario="${TOUR_NOTICE_SCENARIO}"]`, agent: true, once: true,
+    target: `[data-tour~="sim-deliver"][data-scenario="${TOUR_NOTICE_SCENARIO}"]`, agent: "after", once: true,
     title: "A letter from the state",
     body: "California just revised Larkspur's unemployment insurance rate. Deliver the simulated notice and watch what happens next.",
     action: "click", proxyLabel: "Deliver notice", seconds: 6, hardMs: 8_000,
@@ -151,7 +162,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "next", seconds: 9,
   },
   {
-    id: "payroll-flags", n: 10, route: { kind: "draft" }, target: '[data-tour~="payroll-needs-review"]', dock: "side", cardAbove: true,
+    id: "payroll-flags", n: 10, route: { kind: "draft" }, target: '[data-tour~="payroll-needs-review"]', dock: "side", cardAbove: true, dockPanel: true,
     prepare: [['[data-tour~="payroll-flag"][data-severity="block"]', '[data-tour~="payroll-flag"]']],
     title: "Checked before it is paid",
     body: "Before each payroll, fixed rules flag anything unusual: a new hire, a pay change, an hours spike, a missing bank account. Open a flag to read why it fired and what the agent made of it.",
@@ -195,7 +206,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   },
   {
     id: "portal", n: 16, route: { kind: "portal" }, target: '[data-tour~="portal-progress"]', fallbacks: ['[data-tour~="portal-checklist"]'], block: "start",
-    avoid: ['[data-tour~="portal-checklist"] ol'],
+    avoid: ['[data-tour~="portal-checklist"] ol'], dockBottomUnder: 1400,
     title: "What the new hire sees",
     body: "{hireName} signs by typing their name, then works through tax forms, direct deposit, the I-9 and benefits. Each item checks off as it is done.",
     action: "next", seconds: 9,

@@ -110,7 +110,7 @@ export function HiringView() {
                 return (
                   <li key={m.id} data-testid={T.outboxItem} data-kind={m.kind} data-ref={m.relatedRef ?? ""} className="rounded-lg border border-[var(--app-border)] p-3 text-[13px]">
                     <div className="font-medium">{m.subject}</div>
-                    <div className="text-1 text-gray-10">To {m.to} · {fmtDateTime(m.ts)}</div>
+                    <div className="text-1 text-gray-10"><span className="break-all">To {m.to}</span> · <span className="whitespace-nowrap">{fmtDateTime(m.ts)}</span></div>
                     {link ? <a className="mt-1 inline-block text-1 text-blue-11 hover:underline" href={link}>Open the new-hire portal</a> : null}
                   </li>
                 );

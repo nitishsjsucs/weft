@@ -217,3 +217,24 @@ Set aside:
   evidence are under the sheet; it needs the card to collapse its sections on a phone.
 - Audit routine run ids made during the tour are random (`rtr_mveqy7jqe8e097`), from the routine runtime's id
   generator, not the seed's counters; the table now shows the routine's name instead.
+
+## Demo-perfect round 1, layout and UI (dp/r1-layout-and-ui, 2026-10-18)
+
+Three of round 3's set-asides are fixed in the engine, not by scoring:
+
+- Step 10 docks its card in the docked agent panel's column (`dockPanel` on the step, `panelSpot` in `geometry.ts`,
+  `dockedPanelRect` in `layout.ts`). Every flag popover is bounded by the main pane, so none can reach the card and
+  Back and Next stay clickable while any flag is open. `tour-layout.spec.ts` hit-tests both buttons for every flag at
+  1280x800 and 1366x768; the card-over-panel check allows the panel only for a card placed there (`data-place="panel"`).
+- Step 4 is `agent: "after"`: the panel opens only where it docks. On a phone or tablet it stays closed, so the real
+  Deliver button is visible and tappable, and Deliver's own `watch` opens the sheet for step 5. A 390x844 spec checks it.
+- Step 6 on a phone: the proposal card reads its four facts as one line and clamps the agent note to three lines below
+  640 px, so the diff, the evidence and Approve fit above the bottom sheet.
+- Step 16 (portal) docks the card at the bottom of the content column under 1400 px (`dockBottomUnder`), so it never
+  covers the checklist items' status.
+- `scrollToView` keeps a target wider than its scroll box (a table row) at its inline start, so the tour never scrolls
+  a table's first columns away. The rates table also fits a 600 px column now (state and code in one cell).
+
+Shared pieces: `packages/ui/src/controls.css` draws every native select and date field with the app's chevron and
+calendar marks, and `useEdgeFade` fades the edge a wide table or tab strip runs past. The rich crawl fails on a
+control with `appearance: auto` or a table scroller that ends past the main pane.

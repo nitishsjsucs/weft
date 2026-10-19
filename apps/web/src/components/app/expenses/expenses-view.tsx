@@ -2,6 +2,7 @@
 // Expenses (wave 3, GP13). Owner: w3-expenses. Every claim in four bands (Needs review, Approved, Paid out, Declined)
 // with counts, the policy checks on each row, and a drawer to decide one item at a time. Merchant and purpose are the
 // employee's own text: React renders them as plain text, never markup.
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { CircleCheck, CircleDashed, CircleX, Receipt } from "lucide-react";
 import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
@@ -38,15 +39,16 @@ export function ExpensesView() {
   const bands = ExpenseBand.options.filter((b) => !band || b === band);
   const clock = useSimClock();
   const [adding, setAdding] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const agent = useAgent();
+  const [notice, setNotice] = useState<{ text: string; href: string } | null>(null);
   const review = useMutation(async () => (await client.post("/v1/routines/:id/trigger", { params: { id: "rt_expense_review" }, body: {} })) as { routineRunId: string; agentRunId?: string | null });
+  const agent = useAgent();
+  // The panel follows the review's agent run, as Run review now does; the banner links the run, never prints its id.
   const onReview = async () => {
     const r = await review.run();
     if (!r) return;
-    setNotice("Review started: the agent explains each item and files one proposal per item in the Inbox.");
-    const agentRunId = await agentRunOf(r.routineRunId, r.agentRunId);
-    if (agentRunId) agent.watch(agentRunId, "Expense review");
+    setNotice({ text: "Review started: the agent explains each item and files one proposal per item in the Inbox.", href: `/app/routines/rt_expense_review` });
+    const runId = await agentRunOf(r.routineRunId, r.agentRunId);
+    if (runId) { agent.watch(runId, "Expense review"); setNotice((n) => (n ? { ...n, href: `/app/runs/${runId}` } : n)); }
   };
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
@@ -59,7 +61,7 @@ export function ExpensesView() {
           <Button size="sm" variant="primary" onClick={() => setAdding(true)}>Add expense</Button>
         </>}
       />
-      {notice ? <div role="status" className="mb-4 rounded-lg bg-gray-3 px-3 py-2 text-1 text-gray-12">{notice}</div> : null}
+      {notice ? <div role="status" className="mb-4 rounded-lg bg-gray-3 px-3 py-2 text-1 text-gray-12">{notice.text} <Link href={notice.href} className="whitespace-nowrap text-blue-11 hover:underline">Open run</Link></div> : null}
       {review.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(review.error)}</div> : null}
       {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(q.error)}</div> : null}
       <div className="mb-4 grid grid-cols-2 gap-2 tablet:grid-cols-4">
@@ -82,39 +84,47 @@ export function ExpensesView() {
         </label>
         {band ? <button type="button" className="text-gray-10 hover:text-foreground" onClick={() => setBand("")}>Show all bands</button> : null}
       </div>
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table data-testid={TID.table} className="text-[13px]">
-            <THead><TR><TH>Employee</TH><TH className="hidden tablet:table-cell">Merchant</TH><TH>Category</TH><TH numeric>Amount</TH><TH className="hidden tablet:table-cell">Date</TH><TH>Status</TH></TR></THead>
-            <TBody>
-              {bands.map((b) => {
-                const inBand = rows.filter((r) => r.band === b);
-                return [
-                  <TR key={`band-${b}`} className="bg-gray-2 hover:bg-gray-2">
-                    <TD colSpan={6} className="h-8 text-1 font-medium tracking-wide text-gray-10 uppercase">{BAND_LABEL[b]} <span className="ml-1 tabular text-gray-9">{page?.bands[b] ?? inBand.length}</span></TD>
-                  </TR>,
-                  ...(inBand.length ? inBand.map((r) => (
-                    <TR key={r.id} data-testid={TID.row(r.id)} data-tour="expense-row" data-band={r.band} data-checks={r.checks.some((c) => c.severity === "block") ? "red" : r.checks.some((c) => c.severity === "review") ? "amber" : "none"} data-status={r.status} className="cursor-pointer" onClick={() => setOpenId(r.id)}
-                      tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(r.id); } }}>
-                      <TD className="h-12 max-w-[200px]">
-                        <div className="truncate font-medium" title={r.workerName}>{r.workerName}</div>
-                        <div className="truncate text-1 text-gray-10" title={r.workerTitle}>{r.workerTitle}</div>
-                      </TD>
-                      <TD className="hidden h-12 max-w-[150px] truncate tablet:table-cell" title={r.merchant}>{r.merchant}</TD>
-                      <TD className="h-12 whitespace-nowrap">{CATEGORY_LABEL[r.category]}{r.hasReceipt || r.category === "mileage" ? null : <span className="ml-1 text-1 text-gray-9">no receipt</span>}</TD>
-                      <TD numeric className="h-12 whitespace-nowrap">{usd(r.amountCents)}</TD>
-                      <TD className="hidden h-12 whitespace-nowrap tablet:table-cell">
-                        <div>{fmtDate(r.transactionDate)}</div>
-                        <div className="text-1 text-gray-10">submitted {fmtDate(r.submittedDate)}</div>
-                      </TD>
-                      <TD className="h-12 whitespace-nowrap"><Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge><CheckDots row={r} /></TD>
-                    </TR>
-                  )) : [<TR key={`empty-${b}`}><TD colSpan={6} className="h-9 text-gray-9">{q.data ? "Nothing here." : "Loading..."}</TD></TR>]),
-                ];
-              })}
-            </TBody>
-          </Table>
-        </div>
+      {/* Columns follow the content column, not the window (container queries): Merchant and Amount always show,
+          Category sits under the merchant, Date and Status appear once the column has room for them. */}
+      <Card className="@container overflow-hidden">
+        <Table data-testid={TID.table} className="text-[13px]">
+          <THead><TR><TH className="w-[45%]">Employee</TH><TH className="w-[55%]">Merchant</TH><TH numeric>Amount</TH><TH className="hidden @min-[46rem]:table-cell">Date</TH><TH className="hidden @min-[34rem]:table-cell">Status</TH></TR></THead>
+          <TBody>
+            {bands.map((b) => {
+              const inBand = rows.filter((r) => r.band === b);
+              return [
+                <TR key={`band-${b}`} className="bg-gray-2 hover:bg-gray-2">
+                  <TD colSpan={5} className="h-8 text-1 font-medium tracking-wide text-gray-10 uppercase">{BAND_LABEL[b]} <span className="ml-1 tabular text-gray-9">{page?.bands[b] ?? inBand.length}</span></TD>
+                </TR>,
+                ...(inBand.length ? inBand.map((r) => (
+                  <TR key={r.id} data-testid={TID.row(r.id)} data-tour="expense-row" data-band={r.band} data-checks={r.checks.some((c) => c.severity === "block") ? "red" : r.checks.some((c) => c.severity === "review") ? "amber" : "none"} data-status={r.status} className="cursor-pointer" onClick={() => setOpenId(r.id)}
+                    tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(r.id); } }}>
+                    <TD className="h-auto max-w-0 py-2">
+                      <div className="line-clamp-2 font-medium break-words" title={r.workerName}>{r.workerName}</div>
+                      <div className="truncate text-1 text-gray-10" title={r.workerTitle}>
+                        <span className="@min-[46rem]:hidden">{fmtDate(r.transactionDate)}, submitted {fmtDate(r.submittedDate)}</span>
+                        <span className="hidden @min-[46rem]:inline">{r.workerTitle}</span>
+                      </div>
+                    </TD>
+                    <TD className="h-auto max-w-0 py-2">
+                      <div className="line-clamp-2 break-words" title={r.merchant}>{r.merchant}</div>
+                      <div className="truncate text-1 text-gray-10">{CATEGORY_LABEL[r.category]}{r.hasReceipt || r.category === "mileage" ? null : <span className="text-gray-9">, no receipt</span>}</div>
+                    </TD>
+                    <TD numeric className="h-auto py-2 whitespace-nowrap">
+                      <div>{usd(r.amountCents)}<span className="@min-[34rem]:hidden"><CheckDots row={r} /></span></div>
+                      <div className="text-1 text-gray-10 @min-[34rem]:hidden">{STATUS_LABEL[r.status]}</div>
+                    </TD>
+                    <TD className="hidden h-auto py-2 whitespace-nowrap @min-[46rem]:table-cell">
+                      <div>{fmtDate(r.transactionDate)}</div>
+                      <div className="text-1 text-gray-10">submitted {fmtDate(r.submittedDate)}</div>
+                    </TD>
+                    <TD className="hidden h-auto py-2 whitespace-nowrap @min-[34rem]:table-cell"><Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge><CheckDots row={r} /></TD>
+                  </TR>
+                )) : [<TR key={`empty-${b}`}><TD colSpan={5} className="h-9 text-gray-9">{q.data ? "Nothing here." : "Loading..."}</TD></TR>]),
+              ];
+            })}
+          </TBody>
+        </Table>
       </Card>
       <p className="mt-2 text-1 text-gray-10">A dot marks policy checks: red blocks approval, amber needs a person&apos;s judgment. Receipts are simulated images with a simulated extraction.</p>
       <ExpenseDrawer id={openId} onClose={() => setOpenId(null)} />
