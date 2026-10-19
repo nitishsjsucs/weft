@@ -95,7 +95,7 @@ export function Sidebar({ id, onNavigate, onOpenSearch }: { id?: string; onNavig
       </div>
       <div className="mt-1 mb-2"><SearchRow onOpenSearch={onOpenSearch} onNavigate={onNavigate} /></div>
       {NAV.map((g, i) => (
-        <div key={g.label ?? i} className={cn(g.label && "mt-4")}>
+        <div key={g.label ?? i} data-tour="nav-group" data-group={g.label ?? "Main"} className={cn(g.label && "mt-4")}>
           {g.label ? <div className="mb-1 px-2 text-1 font-medium text-gray-10">{g.label}</div> : null}
           <div className="flex flex-col gap-0.5">
             {g.items.map((it) => <Item key={it.slug} item={it} active={active?.slug === it.slug} pending={pending} onNavigate={onNavigate} />)}

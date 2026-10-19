@@ -149,7 +149,7 @@ function ClockSegment() {
 /** Model, then simulated clock, then Viewing as (system, then time, then identity). */
 export function EnvPill() {
   return (
-    <div role="group" aria-label="Demo environment" data-testid={W3_SHELL_TID.envPill} className={pillClass}>
+    <div role="group" aria-label="Demo environment" data-testid={W3_SHELL_TID.envPill} data-tour="env-pill" className={pillClass}>
       <ModelSegment />
       <span aria-hidden data-divider="" className={dividerClass} />
       <ClockSegment />

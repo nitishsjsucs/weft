@@ -63,7 +63,9 @@ function usePortal(principal: string) {
     if (!res.ok || !b?.ok) { const i = b?.issues?.[0] ?? b?.extra?.issues?.[0]; return { ok: false, text: i ? `${i.path}: ${i.message}` : b?.message ?? `Not saved (${res.status})` }; }
     return { ok: true, text: b.summary ?? "Saved" };
   }, [headers]);
-  return { get, post };
+  // One object per principal: a fresh one each render changed `load` below every render, so its effect refetched in
+  // a loop (hundreds of requests a second) until the browser ran out of sockets and navigation away stalled.
+  return useMemo(() => ({ get, post }), [get, post]);
 }
 
 export function PortalW4People({ principal }: { workerId: string; principal: string }) {

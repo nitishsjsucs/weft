@@ -11,8 +11,8 @@ import { client, errorText, getPrincipal, rawFetch, useGet, useMutation } from "
 import { fmtDate, fmtDateTime, humanTimes } from "../format";
 import { CATEGORY_LABEL, DECISION_LABEL, REASON_LABEL, RULE_LABEL, SEVERITY_TONE, STATUS_LABEL, STATUS_TONE, usd } from "./labels";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="mb-5"><h3 className="mb-2 text-1 font-medium tracking-wide text-gray-10 uppercase">{title}</h3>{children}</section>;
+function Section({ title, children, tour }: { title: string; children: React.ReactNode; tour?: string }) {
+  return <section data-tour={tour} className="mb-5"><h3 className="mb-2 text-1 font-medium tracking-wide text-gray-10 uppercase">{title}</h3>{children}</section>;
 }
 function Row({ k, v, warn }: { k: string; v: React.ReactNode; warn?: boolean }) {
   return <div className="flex justify-between gap-3 border-b border-[var(--app-border)] py-1"><dt className="text-gray-11">{k}</dt><dd className={`text-right tabular ${warn ? "text-amber-11" : ""}`}>{v}</dd></div>;
@@ -81,7 +81,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
             </dl>
             <p className="mt-1 text-0 text-gray-9">Merchant, purpose and attendees are the employee&apos;s own words.</p>
           </Section>
-          <Section title="Policy checks">
+          <Section title="Policy checks" tour="expense-checks">
             {live.checks.length === 0 ? <p className="text-[13px] text-gray-11">No checks fired: within policy (version {live.policyVersion}).</p> : (
               <ul className="flex flex-col gap-1.5">
                 {live.checks.map((c) => (

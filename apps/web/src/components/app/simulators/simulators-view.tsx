@@ -160,7 +160,7 @@ export function SimulatorsView() {
             {Object.entries(SCENARIOS).map(([k, v]) => (
               <div key={k} className="flex items-center gap-3 px-4 py-2.5">
                 <div className="min-w-0 flex-1"><div className="text-[13px] font-medium">{v.label}</div><div className="truncate text-1 text-gray-10">{v.note} · <code className="font-mono">{k}</code></div></div>
-                <Button data-testid={tid.simDeliver(k)} size="sm" disabled={deliver.pending && busyKey === k} onClick={() => { setBusyKey(k); void deliver.run(k); }}>{deliver.pending && busyKey === k ? "Delivering..." : "Deliver"}</Button>
+                <Button data-testid={tid.simDeliver(k)} data-tour="sim-deliver" data-scenario={k} size="sm" disabled={deliver.pending && busyKey === k} onClick={() => { setBusyKey(k); void deliver.run(k); }}>{deliver.pending && busyKey === k ? "Delivering..." : "Deliver"}</Button>
               </div>
             ))}
           </Card>

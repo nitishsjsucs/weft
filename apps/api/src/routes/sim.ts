@@ -12,6 +12,7 @@ import { emitEvent, SEED_TIME } from "@weft/core";
 import { serialGit } from "@weft/executor";
 import { readSeedProfile, seedWorldProfile, type SeedProfile } from "@weft/seed/profile";
 import type { Weft, WeftEnv } from "../http/context";
+import { SimResetBody } from "../../../../packages/contracts/src/ext/tour";
 
 const AdvanceBody = z.union([
   z.object({ to: z.string() }).strict(),
@@ -176,9 +177,9 @@ export function simRoutes(weft: Weft): Hono<WeftEnv> {
   r.post("/v1/sim/reset", async (c) => {
     if (!weft.testMode && process.env.WEFT_ALLOW_RESET === "0") throw new NotImplemented("reset disabled by WEFT_ALLOW_RESET=0");
     // No scheduler kick here: a reset world must digest exactly like a fresh `pnpm db:seed` (no tick has run).
-    // Optional { profile: "base" | "rich" }; without it the world keeps the profile it was seeded with.
-    const body = (await c.req.json().catch(() => ({}))) as { profile?: unknown };
-    const profile = body && typeof body === "object" && (body.profile === "base" || body.profile === "rich") ? body.profile : undefined;
+    // Optional { profile: "base" | "rich" }; without it the world keeps the profile it was seeded with. Strict: an
+    // unknown profile or key is a 400 (packages/contracts/src/ext/tour.ts), and a missing body counts as {}.
+    const { profile } = SimResetBody.parse(await c.req.json().catch(() => ({})));
     const { ms, profile: seeded } = await resetWorld(weft, { profile });
     return c.json({ ok: true, ms, profile: seeded });
   });

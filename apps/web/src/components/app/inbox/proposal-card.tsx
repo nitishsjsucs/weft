@@ -60,7 +60,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
   const who = proposerOf(p);
 
   return (
-    <Card data-testid={tid.inboxCard(p.id)} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
+    <Card data-testid={tid.inboxCard(p.id)} data-tour="inbox-card" data-proposal-id={p.id} data-has-diff={p.diff.length ? "true" : "false"} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
       {p.taintedBy ? (
         <div data-testid={TID.inboxTaintedBanner} role="alert" className="flex items-start gap-2 border-b border-amber-9/30 bg-amber-3 px-4 py-2 text-[13px] text-amber-11">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
@@ -69,7 +69,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
       ) : null}
       <div className="flex flex-col gap-3 px-4 py-4">
         <div className="flex flex-wrap items-center gap-1.5">
-          <RiskChip risk={p.risk} />
+          <span data-tour="proposal-risk" className="inline-flex"><RiskChip risk={p.risk} /></span>
           {isSuggestion ? <Badge tone="blue">Suggestion</Badge> : null}
           {p.kind === "routine_enable" ? <Badge tone="blue">Enable routine</Badge> : null}
           {p.kind === "secret_request" ? <Badge tone="amber">Secret request</Badge> : null}
@@ -88,7 +88,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
           <Field label="Proposed by"><ProposedBy who={who} /></Field>
         </dl>
-        {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} rows={p.diff.map((r) => ({ ...r, before: humanTimes(r.before), after: humanTimes(r.after) }))} /> : null}
+        {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={p.diff.map((r) => ({ ...r, before: humanTimes(r.before), after: humanTimes(r.after) }))} /> : null}
         {p.content.length ? (
           <div data-testid={TID.proposalContent} className="flex flex-col gap-2">
             {p.content.map((c, i) => (
@@ -106,7 +106,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           </div>
         ) : null}
         {p.evidence.length ? (
-          <div className="flex flex-wrap items-center gap-1.5 text-1">
+          <div data-tour="proposal-evidence" className="flex flex-wrap items-center gap-1.5 text-1">
             <span className="text-gray-10">Evidence</span>
             {p.evidence.map((e, i) => {
               const href = refHref(e.ref);
@@ -151,7 +151,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
               </>
             ) : (
               <>
-                <Button data-testid={TID.inboxApprove} variant="primary" size="sm" disabled={m.pending || expired} onClick={() => void decide("approve", { reasonCode: reason || null, note: note || null })}><Check /> Approve</Button>
+                <Button data-testid={TID.inboxApprove} data-tour="proposal-approve" variant="primary" size="sm" disabled={m.pending || expired} onClick={() => void decide("approve", { reasonCode: reason || null, note: note || null })}><Check /> Approve</Button>
                 <Button data-testid={TID.inboxDeny} size="sm" disabled={m.pending} onClick={() => { setMode("deny"); setReason(""); }}><X /> Deny</Button>
                 {mode === "idle" ? <Button variant="ghost" size="sm" onClick={() => setMode("approve-note")}>Add reason</Button> : null}
               </>

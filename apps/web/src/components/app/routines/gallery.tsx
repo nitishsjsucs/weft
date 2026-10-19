@@ -52,7 +52,7 @@ export function RoutineGallery({ rows }: { rows: RoutineRow[] }) {
   const favs = FAVORITES.map((id) => rows.find((r) => r.id === id)).filter((r): r is RoutineRow => !!r);
   if (!favs.length) return null;
   return (
-    <section data-testid={W3_ROUTINES_TID.gallery} className="mb-8">
+    <section data-testid={W3_ROUTINES_TID.gallery} data-tour="routine-gallery" data-count={favs.length} className="mb-8">
       <h2 className="mb-2 text-3 font-medium">Favorites</h2>
       <div className="grid gap-3 tablet:grid-cols-2 laptop:grid-cols-3">
         {favs.map((r) => (

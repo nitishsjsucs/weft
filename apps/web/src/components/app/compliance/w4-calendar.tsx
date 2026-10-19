@@ -31,7 +31,7 @@ export function CalendarPanel() {
   const rows = ((cal.data ?? []) as unknown as CalendarRowDto[]).filter((r) => kind === "all" || r.kind === kind);
   const kinds = [...new Set(((cal.data ?? []) as unknown as CalendarRowDto[]).map((r) => r.kind))];
   return (
-    <div className="flex flex-col gap-3" data-testid="compliance-calendar">
+    <div className="flex flex-col gap-3" data-testid="compliance-calendar" data-tour="compliance-calendar" data-count={rows.length}>
       {cal.error ? <div role="alert" className="text-1 text-red-11">{errorText(cal.error)}</div> : null}
       <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by kind">
         {["all", ...kinds].map((k) => (

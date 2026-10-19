@@ -32,6 +32,8 @@ export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
       <PopoverTrigger
         data-testid={tid.payrollFlag(pc.workerId, flag.rule)}
         data-severity={flag.severity}
+        data-tour="payroll-flag"
+        data-rule={flag.rule}
         onClick={(e) => e.stopPropagation()}
         className={cn("inline-flex h-5 items-center rounded-md px-1.5 text-0 font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]", TONE[flag.severity])}
       >

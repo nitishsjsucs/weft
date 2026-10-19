@@ -92,13 +92,13 @@ export function HiringView() {
       <div className="grid gap-6 laptop:grid-cols-[1.4fr_1fr] [&>*]:min-w-0">
         <div className="flex flex-col gap-6">
           <OfferForm />
-          <Card className="p-4">
+          <Card className="p-4" data-tour="hiring-offers" data-count={rows.length}>
             <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Offers <Badge size="xs">{rows.length}</Badge></h2>
             {offers.error ? <p role="alert" className="text-[13px] text-red-11">{errorText(offers.error)}</p> : null}
             <ul className="flex flex-col divide-y divide-[var(--app-border)]">{rows.map((o) => <OfferRow key={o.id} o={o} />)}</ul>
           </Card>
         </div>
-        <Card className="h-fit p-4" data-testid={T.outbox}>
+        <Card className="h-fit p-4" data-testid={T.outbox} data-tour="hiring-outbox" data-count={inbox.length}>
           <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Email simulator outbox</h2>
           <p className="mb-3 text-1 text-gray-10">Simulated mail to *.example addresses. Nothing leaves this machine.</p>
           {inbox.length === 0 ? <p className="text-[13px] text-gray-10">No mail yet.</p> : (

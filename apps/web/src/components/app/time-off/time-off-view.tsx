@@ -69,7 +69,7 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
   const blocked = r.checks.some((c) => c.severity === "block");
   const go = async (d: "approve" | "deny") => { const o = await decide.run(d); if (o && o.ok) onDone(o.status === "done" ? o.summary : `Proposal ${o.proposalId} is waiting in the Inbox`); };
   return (
-    <li data-testid={TID.requestRow(r.id)} data-status={r.status} className="flex flex-col gap-2 px-4 py-3">
+    <li data-testid={TID.requestRow(r.id)} data-tour="time-off-request" data-checks={r.checks.map((c) => c.rule).join(" ")} data-status={r.status} className="flex flex-col gap-2 px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-medium">{r.workerName}</span>
         <span className="text-[13px] text-gray-11">{r.policyName}</span>

@@ -36,7 +36,7 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
   }
 
   return (
-    <aside id={id} aria-label="Agent" className={cn("flex h-full min-h-0 flex-col border-l border-[var(--app-border)] bg-[var(--app-sidebar-bg)]", className)}>
+    <aside id={id} aria-label="Agent" data-tour="agent-panel" className={cn("flex h-full min-h-0 flex-col border-l border-[var(--app-border)] bg-[var(--app-sidebar-bg)]", className)}>
       <div className="flex h-[var(--app-header-h)] shrink-0 items-center gap-2 border-b border-[var(--app-border)] px-4">
         <span className="flex-1 text-2 font-semibold">Weft agent</span>
         <Button variant="ghost" size="icon" onClick={agent.clear} aria-label="New thread"><Plus strokeWidth={1.5} /></Button>
@@ -65,7 +65,7 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
         <div ref={endRef} />
       </div>
       <div className="shrink-0 p-3">
-        <div className="rounded-xl border border-[var(--app-border)] bg-card px-3 py-2.5 shadow-xs">
+        <div data-tour="agent-composer" className="rounded-xl border border-[var(--app-border)] bg-card px-3 py-2.5 shadow-xs">
           <textarea
             data-testid={TID.agentComposer}
             value={text}
@@ -86,7 +86,7 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
               <FileSearch className="size-3.5" /> Ask about this page
             </button>
             <span className="flex-1" />
-            <Button data-testid={TID.agentSend} variant="primary" size="icon-sm" className="rounded-full" onClick={() => void send()} disabled={busy || !text.trim()} aria-label="Send">
+            <Button data-testid={TID.agentSend} data-tour="agent-send" variant="primary" size="icon-sm" className="rounded-full" onClick={() => void send()} disabled={busy || !text.trim()} aria-label="Send">
               <ArrowUp />
             </Button>
           </div>
