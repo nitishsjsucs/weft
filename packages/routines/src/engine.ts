@@ -51,7 +51,7 @@ export interface WeftRoutinesEngine extends RoutinesEngine {
   runs(routineId: string, limit?: number): Promise<RoutineRun[]>;
   getRun(routineRunId: string): Promise<RoutineRun | null>;
   ensurePrebuilt(): Promise<void>;
-  /** After POST /v1/sim/reset: the world and the clock went back to the seed, so cron slots count from `at` again. */
+  /** After POST /v1/sim/reset: the world and the clock went back to the seed, so cron slots count from `at` again and decisions remembered by proposal id (ids restart) are forgotten. */
   resetCursor(at: string): void;
   /** Fire one trigger now (tests and the scheduler use tick; this is the shared path). */
   fire(routine: RoutineDef, input: { triggerRef: string; payload: Record<string, unknown>; attended: boolean; event: WeftEvent | null; at?: string }): Promise<RoutineRun>;
@@ -431,7 +431,10 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
     async runs(routineId, limit = 50) {
       return (await db.select().from(routineRuns).where(eq(routineRuns.routineId, routineId)).orderBy(desc(routineRuns.startedAt)).limit(limit)).map(toRun);
     },
-    resetCursor(at: string) { cursor = at; seeded = false; },
+    // A world reset restarts every row id, so a decision remembered for prp_0001 before the reset would mark the new
+    // world's prp_0001 as decided: a demo that denied a card, reset and delivered the DE 2088 notice saw the notice
+    // run escalate NOT_DONE on its pending rate change. The reset forgets them with the cursor.
+    resetCursor(at: string) { cursor = at; seeded = false; decisions.clear(); },
     async tick(now) {
       await ensurePrebuilt();
       if (cursor > now) cursor = now; // the sim clock was set back (reset): never backfill
