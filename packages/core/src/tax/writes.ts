@@ -8,7 +8,7 @@ import { sha256Hex } from "../shared/hash";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, nextActionSeq, notFound, ptDateOf, rateDisplay, rateSub, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { getNotice, parseExtract } from "../notices/queries";
-import { refreshOpenDrafts } from "../payroll/lifecycle";
+import { refreshOpenDrafts, STALE_SUBMIT_NOTE } from "../payroll/lifecycle";
 import { rateChangeImpact } from "./impact";
 import { AGENCY_LABELS, CO_NEW_EMPLOYER_RATES, effectiveRate } from "./queries";
 
@@ -138,9 +138,10 @@ export const updateRate = writeCommand({
     const id = await deps.newId("etr_");
     await tx.insert(employerTaxRates).values({ id, companyId: ctx.companyId, jurisdiction: acct.jurisdiction, code: i.code, rate: i.rate, wageBaseCents: cur?.wageBaseCents ?? 0, effectiveFrom: i.effective_from, effectiveTo: cur?.effectiveFrom && cur.effectiveFrom >= i.effective_from ? cur.effectiveTo : null, source: `notice:${notice.id}`, createdActionSeq: seq, supersededActionSeq: null });
     if (notice.status === "new" || notice.status === "in_review") await tx.update(notices).set({ status: "proposed" }).where(eq(notices.id, notice.id));
-    const refreshed = await refreshOpenDrafts(tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, i.effective_from);
+    const superseded: string[] = [];
+    const refreshed = await refreshOpenDrafts(tx, { newId: deps.newId, now: ctx.now, superseded }, ctx.companyId, i.effective_from);
     return {
-      data: { rate_id: id, refreshed_drafts: refreshed, previous_rate_id: cur?.id ?? null, jurisdiction: acct.jurisdiction, code: i.code, rate: i.rate, rate_display: rateDisplay(i.rate), previous_rate: cur?.rate ?? null, effective_from: i.effective_from, source: `notice:${notice.id}` },
+      data: { rate_id: id, refreshed_drafts: refreshed, ...(superseded.length ? { superseded_submit_proposals: superseded, superseded_note: STALE_SUBMIT_NOTE } : {}), previous_rate_id: cur?.id ?? null, jurisdiction: acct.jurisdiction, code: i.code, rate: i.rate, rate_display: rateDisplay(i.rate), previous_rate: cur?.rate ?? null, effective_from: i.effective_from, source: `notice:${notice.id}` },
       summary: `Updated ${acct.jurisdiction} ${i.code.toUpperCase()} rate ${cur ? rateDisplay(cur.rate) : "none"} to ${rateDisplay(i.rate)} effective ${i.effective_from} (${id})`,
       reverseArgs: { rate_id: id },
     };
@@ -181,8 +182,9 @@ export const revertRate = writeCommand({
       restored = await deps.newId("etr_");
       await tx.insert(employerTaxRates).values({ id: restored, companyId: ctx.companyId, jurisdiction: r.jurisdiction, code: r.code, rate: prior.rate, wageBaseCents: prior.wageBaseCents, effectiveFrom: prior.effectiveFrom, effectiveTo: prior.effectiveTo, source: `revert:${r.id}`, createdActionSeq: seq, supersededActionSeq: null });
     }
-    const refreshed = await refreshOpenDrafts(tx, { newId: deps.newId, now: ctx.now }, ctx.companyId, r.effectiveFrom);
-    return { data: { reverted_rate_id: r.id, restored_rate_id: restored, rate: prior?.rate ?? null, refreshed_drafts: refreshed }, summary: `Reverted ${r.jurisdiction} ${r.code.toUpperCase()} rate ${r.id}${prior ? ` to ${rateDisplay(prior.rate)}` : ""}` };
+    const superseded: string[] = [];
+    const refreshed = await refreshOpenDrafts(tx, { newId: deps.newId, now: ctx.now, superseded }, ctx.companyId, r.effectiveFrom);
+    return { data: { reverted_rate_id: r.id, restored_rate_id: restored, rate: prior?.rate ?? null, refreshed_drafts: refreshed, ...(superseded.length ? { superseded_submit_proposals: superseded } : {}) }, summary: `Reverted ${r.jurisdiction} ${r.code.toUpperCase()} rate ${r.id}${prior ? ` to ${rateDisplay(prior.rate)}` : ""}` };
   },
 });
 

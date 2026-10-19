@@ -54,6 +54,10 @@ export function PayrollReview({ id }: { id: string }) {
   // GP2: when the agent has proposed submitting this run, say so here and make the human Submit secondary.
   const pendingProps = useGet("/v1/proposals", { query: { status: "pending", limit: 100 }, refreshMs: 5_000 });
   const pendingSubmit = (pendingProps.data?.data ?? []).find((p) => p.command === "payroll.submit_run" && (p.args as { run_id?: string } | null)?.run_id === id) ?? null;
+  // A submit card the draft outgrew (a rate change re-previewed it) is withdrawn as STALE_SUBJECT: say so instead of
+  // printing its old total, until a review files a current one.
+  const supersededProps = useGet("/v1/proposals", { query: { status: "superseded", limit: 100 }, refreshMs: 5_000 });
+  const staleSubmit = pendingSubmit ? null : ((supersededProps.data?.data ?? []).filter((p) => p.command === "payroll.submit_run" && p.decisionCode === "STALE_SUBJECT" && (p.args as { run_id?: string } | null)?.run_id === id).at(-1) ?? null);
   const now = clock.data?.now;
   const err = run.error ?? pcs.error ?? preview.error ?? submit.error ?? review.error ?? draft.error;
 
@@ -98,6 +102,12 @@ export function PayrollReview({ id }: { id: string }) {
             return ex && ex !== "none" ? ` ${humanLine(ex)} excluded as blocked, so the totals below, which count every paycheck, are higher.` : "";
           })()} Waiting for approval in the Inbox.</span>
           <Link href="/app/inbox" className="font-medium hover:underline">Open the Inbox ›</Link>
+        </div>
+      ) : null}
+      {staleSubmit && r.status === "draft" ? (
+        <div data-testid="payroll-stale-submit" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-amber-3 px-3 py-2 text-1 text-amber-11">
+          <span className="min-w-0 flex-1">The submit card is out of date: this draft changed after it was filed, so it was withdrawn. Run review again for a current one.</span>
+          <button type="button" className="font-medium hover:underline disabled:opacity-50" disabled={review.pending} onClick={() => void review.run()}>Run review again ›</button>
         </div>
       ) : null}
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}

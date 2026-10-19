@@ -3,7 +3,7 @@
 // for commands, the seed's for history. They never emit events or append actions; commands return those.
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { Conflict, NotFound, type BankSim, type Flag, type IdPrefix } from "@weft/contracts";
-import { bankAccounts, paychecks, payrollRuns, paySchedules, workers, ytdLedger, type DbTx } from "@weft/db";
+import { bankAccounts, paychecks, payrollRuns, paySchedules, proposals, workers, ytdLedger, type DbTx } from "@weft/db";
 import { TAX_DATA_VERSION, ytdDeltasFromLines, type TaxCalcLine, type TaxTables } from "@weft/payroll-tax";
 import { semimonthlyRunDates, runIdForPayday } from "./calendar";
 import { computePeriod, type ComputedPaycheck, type DeductionJson, type PeriodSpec } from "./compute";
@@ -11,7 +11,11 @@ import { flagsFor, isBlocked, loadFlagContext, reviewGroupOf, runFlags } from ".
 import { assertTotalsIdentities, bankBatchTotal, computeTotals, totalsDto, type TotalsCents } from "./totals";
 import { activeBankOf, includedPaychecks, rowAmounts, runSubjectHash } from "./subject";
 
-export interface LifecycleDeps { newId(prefix: IdPrefix): Promise<string>; now: string; tables?: TaxTables }
+export interface LifecycleDeps {
+  newId(prefix: IdPrefix): Promise<string>; now: string; tables?: TaxTables;
+  /** Collects the pending submit proposals a refresh withdrew (supersedeStaleSubmits), for the caller's events. */
+  superseded?: string[];
+}
 export type RunRow = typeof payrollRuns.$inferSelect;
 
 /** A domain refusal the command layer maps to its RefusalCode (BLOCKED_LINES, DOMAIN_*). */
@@ -112,6 +116,30 @@ async function writePaychecks(tx: DbTx, deps: LifecycleDeps, run: RunRow): Promi
   const stale = existing.filter((p) => !keep.has(p.id)).map((p) => p.id);
   if (stale.length) await tx.delete(paychecks).where(inArray(paychecks.id, stale));
   await writeRunSummary(tx, deps, run.id, runFlags({ included: computed, ctx, previousRunGrossCents: ctx.previousRunGrossCents }));
+  deps.superseded?.push(...(await supersedeStaleSubmits(tx, run.id, deps.now)));
+}
+
+export const STALE_SUBMIT_NOTE = "The draft's numbers changed after this was proposed; run the pre-payroll review again for a current submit card.";
+
+/**
+ * A pending payroll.submit_run proposal on a draft whose numbers just changed (a rate update, a dismissal or a time-off
+ * decision re-previews it) is withdrawn: superseded with decision code STALE_SUBJECT, so no card or banner keeps the
+ * old total. Its stored preview and subject hash are never rewritten (approval still checks the hash it was shown
+ * with); a proposal whose subject still matches stays pending.
+ */
+export async function supersedeStaleSubmits(tx: DbTx, runId: string, now: string): Promise<string[]> {
+  const pending = await tx.select().from(proposals)
+    .where(and(eq(proposals.command, "payroll.submit_run"), eq(proposals.subjectRef, runId), eq(proposals.status, "pending")));
+  const out: string[] = [];
+  for (const p of pending) {
+    const args = (p.argsJson ? JSON.parse(p.argsJson) : {}) as { exclude_blocked?: boolean };
+    const { hash } = await runSubjectHash(tx, runId, args.exclude_blocked ?? false);
+    if (hash === p.subjectHash) continue;
+    await tx.update(proposals).set({ status: "superseded", decidedAt: now, decisionCode: "STALE_SUBJECT", decisionNote: STALE_SUBMIT_NOTE })
+      .where(and(eq(proposals.id, p.id), eq(proposals.status, "pending")));
+    out.push(p.id);
+  }
+  return out;
 }
 
 /**
