@@ -12,6 +12,7 @@ import { OpenEnrollmentTab } from "../benefits/open-enrollment-tab";
 import { PayoutsSection } from "../contractors/payouts-section";
 import { client, errorText, useGet, useVersion } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
+import { fmtDate } from "../format";
 
 type PagedPath = "/v1/benefits/enrollments" | "/v1/it/accounts" | "/v1/it/devices" | "/v1/workers";
 
@@ -77,7 +78,7 @@ export function BenefitsView() {
                     <TR key={p.id} data-testid={`benefit-plan-${p.id}`}>
                       <TD className="h-12 py-1.5"><div className="font-medium">{p.name}</div><div className="text-1 text-gray-10">{p.carrier} · <code className="font-mono text-0">{p.pretaxCode}</code></div></TD>
                       <TD className="h-12">{PLAN_TYPE[p.type] ?? human(p.type)}</TD>
-                      <TD numeric className="h-12">{p.prices.ee !== undefined ? dollars(p.prices.ee) : p.match ? "match" : "-"}</TD>
+                      <TD numeric className="h-12">{p.prices.ee !== undefined ? dollars(p.prices.ee) : p.match ? <span className="text-gray-11">Employer match</span> : "-"}</TD>
                       <TD numeric className="h-12">{dollars(p.prices.employer)}</TD>
                       <TD numeric className="h-12">{enr.rows ? count(p.id) : "..."}</TD>
                     </TR>
@@ -166,7 +167,7 @@ export function ContractorsView() {
                   <TD className="h-10">{w.title}</TD>
                   <TD className="h-10">{w.country}</TD>
                   <TD className="h-10 font-mono text-1">{w.currency}</TD>
-                  <TD className="h-10 whitespace-nowrap">{w.startDate}</TD>
+                  <TD className="h-10 whitespace-nowrap">{fmtDate(w.startDate, { month: "short", day: "numeric", year: "numeric" })}</TD>
                   <TD className="h-10 capitalize">{w.status}</TD>
                 </TR>
               ))}
