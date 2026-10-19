@@ -23,7 +23,11 @@ export interface NoteFacts {
   timeOff: Record<string, { policyName: string; paid: boolean }>;
   /** The payroll period's year: dates in it read without a year. */
   year: number;
+  /** Pay rates named in the flags, by id: their kind ("salary" reads "a year", "hourly" "an hour"). */
+  rateKinds?: Record<string, string>;
 }
+
+const PER: Record<string, string> = { salary: " a year", hourly: " an hour" };
 
 const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 /** "2026-10-19" as "Oct 19" (or "Jul 8, 2024" outside the period's year). */
@@ -57,14 +61,17 @@ export function flagNote(f: Flag, facts: NoteFacts): string {
       const head = `Gross pay is ${up ? "up" : "down"} ${pct.replace(/^[-+]/, "")}% from ${String(e.previous_gross_display)} to ${String(e.gross_display)}`;
       if (e.pay_rate_id) {
         const raise = e.created_action_seq !== null && e.created_action_seq !== undefined;
-        return `${head} because a new pay rate of ${String(e.pay_rate_display)} took effect ${day(e.pay_rate_effective_from, y)}. ${raise ? "That is the approved raise on the audit log; nothing to fix before payday." : "Check the new rate before payday."}`;
+        const per = PER[facts.rateKinds?.[String(e.pay_rate_id)] ?? ""] ?? "";
+        return `${head} because a new pay rate of ${String(e.pay_rate_display)}${per} took effect ${day(e.pay_rate_effective_from, y)}. ${raise ? "That is the approved raise on the audit log; nothing to fix before payday." : "Check the new rate before payday."}`;
       }
       if (e.hours_x100) return `${head} on ${String(e.hours_display)} hours. The change comes from the hours, not a pay rate change.`;
       if (e.worked_days) return `${head} for ${String(e.worked_days)} of ${String(e.period_days)} working days. The change comes from the partial period, not a pay rate change.`;
       return `${head}. No new pay rate explains it; check the earnings lines before payday.`;
     }
     case "HOURS_SPIKE":
-      return `${String(e.hours_display)} hours this period against an average of ${String(e.average_hours_display)} over the last ${String(e.runs_compared)} runs. Hours above ${String(e.overtime_threshold_hours)} in the period are paid as overtime; confirm them with the manager before payday.`;
+      // What was computed, not a rule: overtime is owed by the workweek, so the period's total alone does not say how
+      // much of it is overtime.
+      return `${String(e.hours_display)} hours this period against an average of ${String(e.average_hours_display)} over the last ${String(e.runs_compared)} runs. Overtime is owed by the workweek, not the pay period, so confirm the weekly hours with the manager before payday.`;
     case "NEW_IN_RUN": {
       const w4 = e.has_w4 === false ? " No W-4 is on file yet." : "";
       const open = facts.openOnboarding.map((k) => TASK[k] ?? k.replaceAll("_", " "));

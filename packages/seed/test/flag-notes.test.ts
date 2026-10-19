@@ -49,6 +49,23 @@ describe("rich flag notes", () => {
     for (const t of [hours, partial]) expect(t).not.toMatch(/raise/i);
   });
 
+  it("gives a new pay rate its unit from the rate's kind, and adds no figure the grounding check lacks", () => {
+    const f = gross({ pay_rate_id: "prt_0052", created_action_seq: 1, pay_rate_display: "$139,240.00", pay_rate_effective_from: "2026-10-16" });
+    const year = flagNote(f, facts({ rateKinds: { prt_0052: "salary" } }));
+    expect(year).toContain("a new pay rate of $139,240.00 a year took effect Oct 16.");
+    expect(flagNote(f, facts({ rateKinds: { prt_0052: "hourly" } }))).toContain("$139,240.00 an hour took effect");
+    expect(payroll.groundExplanation(year, [f], { gross_cents: 580167, net_cents: 400000, hours_x100: null }).ok).toBe(true);
+  });
+
+  it("an hours spike says what was computed and leaves overtime to the workweek, not a per-period rule", () => {
+    const f: Flag = { rule: "HOURS_SPIKE", severity: "review", message: "120.00 hours vs an average of 86.67 over the last 3 runs",
+      evidence: { worker_id: "wrk_0040", hours_x100: 12000, hours_display: "120.00", average_hours_x100: 8667, average_hours_display: "86.67", runs_compared: 3, overtime_threshold_hours: "86.67" } };
+    const t = flagNote(f, facts());
+    expect(t).toBe("120.00 hours this period against an average of 86.67 over the last 3 runs. Overtime is owed by the workweek, not the pay period, so confirm the weekly hours with the manager before payday.");
+    expect(t).not.toMatch(/above 86\.67|paid as overtime/);
+    expect(payroll.groundExplanation(t, [f], { gross_cents: 500000, net_cents: 400000, hours_x100: 12000 }).ok).toBe(true);
+  });
+
   it("tells a final partial period from a first one", () => {
     const last = flagNote({ ...mira[1]!, evidence: { ...mira[1]!.evidence, start_date: "2024-07-08", end_date: "2026-10-23", worked_days: 6 } }, facts());
     expect(last).toBe("Paid for 6 of 11 working days; the last day on record is Oct 23. Expected for a final partial period.");

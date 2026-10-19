@@ -124,6 +124,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
     const nudged = await tx.select({ summary: routineRuns.summary }).from(routineRuns).where(eq(routineRuns.routineId, "rt_onboarding_nudge"));
     const reqs = new Map((await tx.select({ id: timeOffRequests.id, name: timeOffPolicies.name, paid: timeOffTypes.paid }).from(timeOffRequests)
       .innerJoin(timeOffPolicies, eq(timeOffPolicies.id, timeOffRequests.policyId)).innerJoin(timeOffTypes, eq(timeOffTypes.id, timeOffPolicies.typeId))).map((q) => [q.id, { policyName: q.name, paid: q.paid }]));
+    const rateKinds = Object.fromEntries((await tx.select({ id: payRates.id, kind: payRates.kind }).from(payRates).orderBy(asc(payRates.id))).map((q) => [q.id, q.kind]));
     for (const { pc, flags } of flagged) {
       if (pc.explanation) continue;
       const name = names.get(pc.workerId) ?? pc.workerId;
@@ -131,7 +132,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       const text = paycheckNote(flags, {
         name, year, hasOnboarding: mine.length > 0, openOnboarding: mine.filter((k) => k.status !== "done").map((k) => k.kind),
         reminded: nudged.some((n) => (n.summary ?? "").includes(name) && /bank account/.test(n.summary ?? "")),
-        submitExcludesBlocked: true, timeOff: Object.fromEntries(flags.map((f) => String(f.evidence.request_id ?? "")).filter((id) => reqs.has(id)).map((id) => [id, reqs.get(id)!])),
+        submitExcludesBlocked: true, rateKinds, timeOff: Object.fromEntries(flags.map((f) => String(f.evidence.request_id ?? "")).filter((id) => reqs.has(id)).map((id) => [id, reqs.get(id)!])),
       });
       const base = payroll.templateExplanation(flags) || flags.map((f) => f.message.replace(/\.?$/, ".")).join(" ");
       const grounded = payroll.groundExplanation(text, flags, { gross_cents: pc.grossCents, net_cents: pc.netCents, hours_x100: pc.hoursX100 }).ok;

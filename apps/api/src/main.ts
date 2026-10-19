@@ -28,6 +28,13 @@ weft.scheduler.start();
 const server = serve({ fetch: weft.app.fetch, hostname: host, port }, (info) => {
   console.log(`weft api listening on http://${host}:${info.port} (provider: ${weft.provider.label}, clock ${weft.clock.now()})`);
 });
+// The web app's proxy keeps sockets to this server alive between requests. Node closes an idle keep-alive socket
+// after 5 s by default, and a request the proxy sends on a socket the server is closing fails with ECONNRESET (a 500
+// in the browser). Idle sockets stay open well past the proxy's own idle time instead; headers time out after that.
+if ("keepAliveTimeout" in server) {
+  (server as { keepAliveTimeout: number }).keepAliveTimeout = 65_000;
+  (server as { headersTimeout: number }).headersTimeout = 66_000;
+}
 
 let stopping = false;
 async function shutdown(sig: string) {
