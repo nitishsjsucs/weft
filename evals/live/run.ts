@@ -20,6 +20,7 @@ const { seedWorld } = await import("../../packages/seed/src/index");
 const { check } = await import("../../packages/grounding/src/index");
 const { summarize } = await import("../../packages/agent/src/index");
 const db = await import("../../packages/db/src/index");
+const { uncoveredFlags } = await import("../../packages/core/src/payroll/explain");
 
 type Weft = Awaited<ReturnType<typeof createWeft>>;
 interface CaseResult { id: string; pass: boolean; reasons: string[]; runId: string | null; modelSteps: number; toolCalls: number; invalidArgs: number; tokens: unknown; cacheHitRatio: number | null; usd: number; wallMs: number; notes: Record<string, unknown> }
@@ -124,6 +125,11 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
     const model = sources.filter((s) => s === "agent").length;
     if (explained.length !== checks.length || checks.length !== 4) reasons.push(`${explained.length} of ${checks.length} flagged paychecks explained`);
     if (model < 3) reasons.push(`${model} model-written explanations (need 3)`);
+    // One explanation per paycheck covering all of its flags (a live run once filed one item per flag, last write wins).
+    for (const p of explained) {
+      const miss = uncoveredFlags(p.explanation ?? "", JSON.parse(p.flagsJson) as never);
+      if (miss.length) reasons.push(`${p.id}'s explanation does not cover ${miss.join(", ")}`);
+    }
     const submit = (await w.db.select().from(db.proposals)).filter((p) => p.proposerRunId === runId && p.command === "payroll.submit_run");
     if (submit.length !== 1 || JSON.parse(submit[0]!.argsJson ?? "{}").exclude_blocked !== true) reasons.push(`submit proposals ${submit.length}`);
     if (run.stepsUsed > 6) reasons.push(`${run.stepsUsed} model steps`);
