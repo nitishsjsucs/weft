@@ -27,6 +27,6 @@ describe("humanTimes", () => {
     const s = { runId: "run_0001", n: 5, parentN: null, stage: "dispatch", kind: "tool_call", callId: "c", toolName: "payroll__submit_run", toolArgs: null,
       outcome: "ok", result: { output: "{}", outcome: { ok: true, status: "done", summary: "Submitted pay_2026_10_30: 47 paychecks, settles 2026-10-30T13:00:00.000Z" } },
       native: null, usage: null, costUsdMicros: 0, attempt: 1, requestId: null, prefixHash: null, timings: null, createdAt: "2026-10-26T15:30:00.000Z" } as RunStepRow;
-    expect(plain(stepSummary(s))).toBe("Submitted pay_2026_10_30: 47 paychecks, settles Fri, Oct 30, 6:00 AM PT");
+    expect(plain(stepSummary(s))).toBe("Submitted the Oct 30 run: 47 paychecks, settles Fri, Oct 30, 6:00 AM PT");
   });
 });

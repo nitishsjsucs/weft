@@ -9,6 +9,7 @@ import { W3_TIMEOFF_TID as TID, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, PRINCIPALS, useGet, useMutation, usePrincipal } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 import { fmtDate } from "../format";
+import { humanDateText } from "../copy";
 
 export interface TimeOffRequestRow {
   id: string; workerId: string; workerName: string; departmentId: string | null; policyId: string; policyName: string; typeKind: string | null;
@@ -56,7 +57,7 @@ export function CheckChips({ checks }: { checks: TimeOffRequestRow["checks"] }) 
   if (!checks.length) return <span className="text-1 text-gray-10">All checks passed</span>;
   return (
     <span className="flex flex-wrap gap-1">
-      {checks.map((c) => <Badge key={c.rule} tone={SEVERITY_TONE[c.severity]} data-testid={TID.check(c.rule)} title={c.message}>{RULE_LABEL[c.rule] ?? c.rule}</Badge>)}
+      {checks.map((c) => <Badge key={c.rule} tone={SEVERITY_TONE[c.severity]} data-testid={TID.check(c.rule)} title={humanDateText(c.message)}>{RULE_LABEL[c.rule] ?? c.rule}</Badge>)}
     </span>
   );
 }
@@ -81,7 +82,7 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
         </span>
       </div>
       <CheckChips checks={r.checks} />
-      {r.checks.filter((c) => c.severity !== "info").map((c) => <p key={c.rule} className="text-1 text-gray-11">{c.message}</p>)}
+      {r.checks.filter((c) => c.severity !== "info").map((c) => <p key={c.rule} className="text-1 text-gray-11">{humanDateText(c.message)}</p>)}
       {r.status === "pending" && r.balance_now && r.balance_without_this_request ? (
         <p className="text-1 tabular-nums text-gray-10">{r.policyName} balance <span className="text-gray-12">{hrs(r.balance_now.minutes)}</span> now, every open request counted; {hrs(r.balance_without_this_request.minutes)} without this request</p>
       ) : null}

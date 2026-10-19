@@ -6,7 +6,8 @@ import { Badge, Button, Card, DiffTable } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TID, tid, type DecisionResult, type Proposal } from "@weft/contracts";
 import { errorText, useMutation, useSimClock } from "@/lib/api/hooks";
-import { cents, fmtDateTime, humanDates, humanTimes, relative } from "../format";
+import { cents, fmtDateTime, humanTimes, relative } from "../format";
+import { enumWords, humanLine } from "../copy";
 import { principalName, refHref } from "../refs";
 import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
@@ -33,7 +34,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function ProposedBy({ who }: { who: Proposer }) {
   const run = (id: string | null) => id ? <Link className="inline-flex items-center gap-0.5 text-blue-11 hover:underline" href={`/app/runs/${id}`}>Open run <ExternalLink className="size-3" /></Link> : null;
   switch (who.kind) {
-    case "routine": return <span className="flex flex-wrap gap-x-2">Routine <span className="font-mono text-1">{who.routineRunId}</span>{run(who.runId)}</span>;
+    // The routine run id is for whoever traces the run, so it sits behind the word, not on the card.
+    case "routine": return (
+      <span className="flex flex-wrap items-baseline gap-x-2">
+        <details className="inline-block">
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden" title="Show the routine run id">Routine</summary> <span className="font-mono text-0 text-gray-10 select-all">{who.routineRunId}</span>
+        </details>
+        {run(who.runId)}
+      </span>
+    );
     case "agent": return <span className="flex flex-wrap gap-x-2">Weft agent{run(who.runId)}</span>;
     case "person": return <>{principalName(who.principalId)}</>;
     case "unknown": return <span className="text-gray-10">Not recorded</span>;
@@ -81,14 +90,14 @@ export function ProposalCard({ p }: { p: Proposal }) {
             </span>
           ) : <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "denied" || p.status === "failed" ? "red" : "gray"}>{p.status}</Badge>}
         </div>
-        <h3 className="text-3 font-medium leading-6 text-balance break-words">{humanDates(humanTimes(p.headline))}</h3>
+        <h3 className="text-3 font-medium leading-6 text-balance break-words">{humanLine(p.headline)}</h3>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 tablet:grid-cols-4">
           <Field label="On behalf of">{principalName(p.onBehalfOf)}</Field>
           <Field label="Moves money">{p.moneyCents === null ? "No" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
           <Field label="Proposed by"><ProposedBy who={who} /></Field>
         </dl>
-        {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={p.diff.map((r) => ({ ...r, before: humanTimes(r.before), after: humanTimes(r.after) }))} /> : null}
+        {p.diff.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={p.diff.map((r) => ({ ...r, before: enumWords(humanTimes(r.before)), after: enumWords(humanTimes(r.after)) }))} /> : null}
         {p.content.length ? (
           <div data-testid={TID.proposalContent} className="flex flex-col gap-2">
             {p.content.map((c, i) => (
@@ -111,7 +120,8 @@ export function ProposalCard({ p }: { p: Proposal }) {
             {p.evidence.map((e, i) => {
               const href = refHref(e.ref);
               return href ? (
-                <Link key={i} href={href} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-blue-11 shadow-[var(--shadow-border)] hover:bg-blue-3">{e.label} {e.ref && !e.label.includes(e.ref) ? <span className="font-mono text-0 text-gray-10">{e.ref}</span> : null}</Link>
+                // A linked chip names the record and the link opens it, so the raw ref only shows when the label is all there is.
+                <Link key={i} href={href} title={e.ref} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-blue-11 shadow-[var(--shadow-border)] hover:bg-blue-3">{e.label.trim() ? e.label : e.ref}</Link>
               ) : (
                 <span key={i} className="rounded-md px-1.5 py-0.5 shadow-[var(--shadow-border)]">{e.label}{e.ref && !e.label.includes(e.ref) && !/^not reversible/i.test(e.label) ? <> <span className="font-mono text-0 text-gray-10">{e.ref}</span></> : null}</span>
               );

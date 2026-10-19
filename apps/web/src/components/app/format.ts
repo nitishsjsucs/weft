@@ -21,8 +21,11 @@ const ISO_INSTANT = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+
 export function humanTimes(text: string): string {
   return text.replace(ISO_INSTANT, (m) => (Number.isNaN(Date.parse(m)) ? m : fmtDateTime(m)));
 }
-/** A plain calendar date inside free text ("start date 2026-10-19"); instants, ids and longer numbers never match. */
-const PLAIN_DATE = /(?<![\w-])(\d{4})-(\d{2})-(\d{2})(?![\w-]|:|T\d)/g;
+/**
+ * A plain calendar date inside free text ("start date 2026-10-19", "to 2026-10-26: 10 months"); instants (a T or a
+ * colon and digits after the date), ids and longer numbers never match.
+ */
+const PLAIN_DATE = /(?<![\w-])(\d{4})-(\d{2})-(\d{2})(?![\w-]|:\d|T\d)/g;
 /**
  * Plain YYYY-MM-DD dates in server text read as "Oct 19" (with the year when it is not `year`). Calendar dates are
  * days, not instants, so no time zone shift applies. The stored text stays as written.

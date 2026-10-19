@@ -6,8 +6,9 @@ import { FilePlus2, Play, RefreshCw, Send } from "lucide-react";
 import { Badge, Button, Drawer } from "@weft/ui/components";
 import { TID, type Paycheck, type PayrollRun, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
-import { fmtDate, fmtDateTime, humanDates, humanTimes, nextPeriodEnd, period, relative } from "../format";
+import { fmtDate, fmtDateTime, nextPeriodEnd, period, relative } from "../format";
 import { PageHeader } from "../page";
+import { humanLine } from "../copy";
 import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
 import { PaycheckDrawer } from "./paycheck-drawer";
@@ -102,7 +103,7 @@ export function PayrollReview({ id }: { id: string }) {
       />
       {pendingSubmit && r.status === "draft" ? (
         <div data-testid="payroll-pending-submit" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-blue-3 px-3 py-2 text-1 text-blue-11">
-          <span className="min-w-0 flex-1">{humanDates(humanTimes(pendingSubmit.headline))}. Waiting for approval in the Inbox.</span>
+          <span className="min-w-0 flex-1">{humanLine(pendingSubmit.headline)}. Waiting for approval in the Inbox.</span>
           <Link href="/app/inbox" className="font-medium hover:underline">Open the Inbox ›</Link>
         </div>
       ) : null}
@@ -111,7 +112,7 @@ export function PayrollReview({ id }: { id: string }) {
       <TotalsStrip totals={r.totals} count={r.paycheckCount - r.excludedWorkerIds.length} />
       <div className="mb-3 flex flex-wrap items-center gap-2 text-1 text-gray-11">
         <span>{data.length} paychecks</span><span>·</span><span>{nr} need review</span>{blocked ? <><span>·</span><span className="text-red-11">{blocked} blocked</span></> : null}
-        {r.previousRunId ? <><span>·</span><span>compared with <Link className="text-blue-11 hover:underline" href={`/app/payroll/${r.previousRunId}`}>{r.previousRunId}</Link></span></> : null}
+        {r.previousRunId ? <><span>·</span><span>compared with <Link className="text-blue-11 hover:underline" href={`/app/payroll/${r.previousRunId}`} title={r.previousRunId}>{humanLine(r.previousRunId)}</Link></span></> : null}
       </div>
       <PaycheckTable data={data} onOpen={setOpen} />
       <PaycheckDrawer paycheck={open} onClose={() => setOpen(null)} />

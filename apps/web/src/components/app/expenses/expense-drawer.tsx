@@ -9,6 +9,7 @@ import { W3_EXPENSES_TID as TID, type ExpenseDecision, type ExpenseDeclineReason
 import type { W3ExpensesDetail } from "../../../../../../packages/contracts/src/ext/w3-expenses";
 import { client, errorText, getPrincipal, rawFetch, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, fmtDateTime, humanTimes } from "../format";
+import { humanDateText } from "../copy";
 import { CATEGORY_LABEL, DECISION_LABEL, REASON_LABEL, RULE_LABEL, SEVERITY_TONE, STATUS_LABEL, STATUS_TONE, usd } from "./labels";
 
 function Section({ title, children, tour }: { title: string; children: React.ReactNode; tour?: string }) {
@@ -57,7 +58,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
   const err = decide.error ?? reopen.error ?? q.error;
   return (
     <Drawer open={!!id} onOpenChange={(o) => { if (!o) onClose(); }} title={live ? `${usd(live.amountCents)} ${CATEGORY_LABEL[live.category].toLowerCase()}` : "Expense"}
-      description={live ? `${live.workerName} · ${live.id} · ${STATUS_LABEL[live.status]}` : undefined}>
+      description={live ? `${live.workerName} · ${STATUS_LABEL[live.status]}` : undefined}>
       {live ? (
         <div data-testid={TID.drawer} data-status={live.status}>
           {err ? <div role="alert" className="mb-3 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
@@ -86,7 +87,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
               <ul className="flex flex-col gap-1.5">
                 {live.checks.map((c) => (
                   <li key={c.rule} data-testid={TID.check(c.rule)} data-severity={c.severity} className="flex items-start gap-2 text-[13px]">
-                    <Badge tone={SEVERITY_TONE[c.severity]}>{RULE_LABEL[c.rule] ?? c.rule}</Badge><span className="text-gray-11">{c.message}</span>
+                    <Badge tone={SEVERITY_TONE[c.severity]}>{RULE_LABEL[c.rule] ?? c.rule}</Badge><span className="text-gray-11">{humanDateText(c.message)}</span>
                   </li>
                 ))}
               </ul>

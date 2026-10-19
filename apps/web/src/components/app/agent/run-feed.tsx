@@ -11,6 +11,7 @@ import { isChipStep, ranToolsLine, reportOf, stepState, stepSummary, toolLabel, 
 import { StepReport } from "./chart";
 import { ApprovalCard } from "./approval-card";
 import { humanDates, humanTimes } from "../format";
+import { humanLine } from "../copy";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
 export function RunFeed({ runId, label, latest = true }: { runId: string; label?: string; latest?: boolean }) {
@@ -60,8 +61,10 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
           : status === "done" ? <span className="text-gray-10">Done</span>
           : <span className="text-red-11">{status}{w.run?.terminalReason ? `: ${w.run.terminalReason}` : ""}</span>}
       </div>
+      {/* A routine's summary is its tool outcomes joined (ids and action numbers); a chat answer is the model's own
+          words and keeps the result ids it cites. */}
       {w.run?.summary && !working ? (
-        <p data-testid={TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{humanDates(humanTimes(w.run.summary))}</p>
+        <p data-testid={TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{w.run.routineRunId ? humanLine(w.run.summary) : humanDates(humanTimes(w.run.summary))}</p>
       ) : null}
       <Link href={`/app/runs/${runId}`} className={cn("inline-flex w-fit items-center gap-1 text-1 text-gray-10 hover:text-foreground")}>Open run <ExternalLink className="size-3" /></Link>
     </div>

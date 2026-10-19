@@ -4,33 +4,15 @@
 // explanation line when the review wrote one line per flag, and evidence rows with labels, human dates and links
 // instead of ids.
 import { formatCents, type Flag, type Paycheck } from "@weft/contracts";
-import { fmtDate, humanDates, humanTimes } from "../format";
+import { fmtDate, humanDates } from "../format";
+import { CODE_WORDS, humanCopy } from "../copy";
 
-const ID = "[a-z]{2,5}_[A-Za-z0-9_]*\\d[A-Za-z0-9_]*";
-/** Words for the engine's codes that can appear in flag text. */
-const CODE_WORDS: Record<string, string> = { WAITING_PERIOD: "the policy's waiting period", INSUFFICIENT_BALANCE: "the balance", USE_CAP: "the yearly use cap" };
+export { humanCopy };
 
 /** The latest year among a flag's dates: dates in that year read without one. */
 export function refYear(flag: Flag): number {
   const years = [...JSON.stringify(flag.evidence).matchAll(/"(\d{4})-\d{2}-\d{2}"/g), ...flag.message.matchAll(/\b(\d{4})-\d{2}-\d{2}\b/g)].map((m) => Number(m[1]));
   return years.length ? Math.max(...years) : new Date().getUTCFullYear();
-}
-
-/**
- * Server text as copy: instants in Pacific time, plain dates as "Oct 19", no row ids (a parenthesized id list goes,
- * an id the sentence leans on becomes words) and engine codes as words.
- */
-export function humanCopy(text: string, year?: number): string {
-  return humanDates(humanTimes(text), year)
-    .replace(new RegExp(`\\s*\\((?:${ID})(?:,\\s*${ID})*\\)`, "g"), "")
-    .replace(new RegExp(`\\bafter pay rate ${ID} took effect`, "g"), "after the new pay rate took effect")
-    .replace(/\s*\(action \d+\)/g, "")
-    .replace(new RegExp(`;\\s*pay rate ${ID} effective`, "g"), "; new pay rate from")
-    .replace(new RegExp(`\\b(in|from|Was in) (?:the previous run )?pay_[A-Za-z0-9_]+`, "g"), (_m, w: string) => `${w} the previous run`)
-    .replace(new RegExp(`\\btor_\\d+ \\(`, "g"), "A time-off request (")
-    .replace(new RegExp(`\\b${ID}\\b`, "g"), "")
-    .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, (c) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))
-    .replace(/ {2,}/g, " ").replace(/ ([,.;)])/g, "$1").replace(/\( /g, "(").trim();
 }
 
 const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));

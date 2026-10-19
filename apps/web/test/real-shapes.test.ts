@@ -39,9 +39,9 @@ describe("SSE frames from GET /v1/agent/runs/:id/events", () => {
 describe("step chips from the API's tool results", () => {
   it("reads { output, outcome } results: summary for done, title for a pending proposal, refusal message", () => {
     expect(stepSummary(step({ result: { output: "{}", outcome: { ok: true, status: "done", summary: "Explanations for pay_2026_10_30: 0 agent, 4 template, 0 refused" } } })))
-      .toBe("Explanations for pay_2026_10_30: 0 agent, 4 template, 0 refused");
+      .toBe("Explanations for the Oct 30 run: 0 agent, 4 template, 0 refused");
     expect(stepSummary(step({ outcome: "pending:prp_0001", result: { output: "{}", outcome: { ok: true, status: "pending_approval", proposalId: "prp_0001", title: "Submit payroll pay_2026_10_30" } } })))
-      .toBe("Submit payroll pay_2026_10_30");
+      .toBe("Submit the Oct 30 run");
     expect(stepSummary(step({ outcome: "refused:NOT_PERMITTED", result: { outcome: { ok: false, refusal: { code: "NOT_PERMITTED", message: "Not allowed here" } } } }))).toBe("Not allowed here");
   });
 
