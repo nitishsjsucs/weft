@@ -1,11 +1,14 @@
 // /v1 hand-offs to a person routes (wave 4, docs/wave4.md). Owner: w4-parity-compliance. Paths come from packages/contracts/src/api.ts.
 // Every route answers 501 until the owner registers real handlers before stubRoutes and lists them in `except`.
 // The Inbox reads the open cases here; resolving runs handoffs.resolve (human only) as the signed-in person.
+// A case about a person (a worker or an offer) follows the person read scope: a manager reads the cases about her
+// own record and her reports only (an outsider's case is a 404, never a "you may not"); company cases stay.
 import { Hono } from "hono";
 import { z } from "zod";
 import { HandoffKind, HandoffStatus, NotFound, Unauthorized } from "@weft/contracts";
-import { getHandoff, listHandoffs, toHandoffDto } from "../../../../packages/core/src/compliance/handoffs";
+import { getHandoff, listHandoffs, scopeHandoffs, toHandoffDto } from "../../../../packages/core/src/compliance/handoffs";
 import type { Weft, WeftEnv } from "../http/context";
+import { viewerScope } from "../http/scope";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
 
@@ -17,13 +20,15 @@ export function handoffsRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/handoffs", async (c) => {
     const q = Query.parse({ kind: c.req.query("kind"), status: c.req.query("status") });
     const page = parsePage(c);
-    let rows = await listHandoffs(weft.db, c.var.session?.companyId ?? "cmp_larkspur", q);
+    const companyId = c.var.session?.companyId ?? "cmp_larkspur";
+    let rows = (await scopeHandoffs(weft.db, companyId, await viewerScope(weft, c), await listHandoffs(weft.db, companyId, q))).shown;
     if (page.afterId) rows = rows.filter((x) => x.id > page.afterId!);
     return c.json(toPage(rows.slice(0, page.limit + 1).map(toHandoffDto), page.limit));
   });
   r.get("/v1/handoffs/:id", async (c) => {
-    const h = await getHandoff(weft.db, c.var.session?.companyId ?? "cmp_larkspur", c.req.param("id"));
-    if (!h) throw new NotFound(`No hand-off ${c.req.param("id")}`);
+    const companyId = c.var.session?.companyId ?? "cmp_larkspur";
+    const h = await getHandoff(weft.db, companyId, c.req.param("id"));
+    if (!h || !(await scopeHandoffs(weft.db, companyId, await viewerScope(weft, c), [h])).shown.length) throw new NotFound(`No hand-off ${c.req.param("id")}`);
     return c.json(toHandoffDto(h));
   });
   r.post("/v1/handoffs/:id/resolve", async (c) => {

@@ -10,12 +10,17 @@ export type Level = "view" | "edit" | "approve";
 
 interface PermissionsBody { principals?: { id: string; grants?: Record<string, string> }[] }
 
-/** The viewing person's grants per domain, or null until they are known. */
-export function useGrants(): Record<string, string> | null {
+/** The viewing person's grants per domain (null when unknown), and whether the first read of them is still out. */
+export function useGrantState(): { grants: Record<string, string> | null; loading: boolean } {
   const who = usePrincipal();
   const q = useGet("/v1/settings/permissions", { refreshMs: 60_000 });
   const me = (q.data as PermissionsBody | undefined)?.principals?.find((p) => p.id === who);
-  return me?.grants ?? null;
+  return { grants: me?.grants ?? null, loading: q.data === undefined && !q.error };
+}
+
+/** The viewing person's grants per domain, or null until they are known. */
+export function useGrants(): Record<string, string> | null {
+  return useGrantState().grants;
 }
 
 /** True unless the viewer's grants are known and below `level` on `domain`. */

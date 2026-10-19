@@ -207,5 +207,33 @@ test("a manager's screens show nothing private about people outside her reports"
   const foreignBalance = timeOff.testids.filter((t) => t.startsWith("time-off-balance-") && !mine.has(t.slice("time-off-balance-".length).split("-")[0]!));
   if (foreignBalance.length) failures.push(`/app/time-off: shows ${foreignBalance.length} balances outside her reports`);
   await crawl("/app/offboarding", [...caseNames, "Involuntary"], "offboarding of");
+  // Benefits and contractor pay are closed by her grants (benefits: none, payroll: none): no sidebar link, and the
+  // pages by URL say so instead of listing anyone's elections, premiums or payouts.
+  const findings = await get<{ workerId: string | null; billedCents: number }[]>("/v1/benefits/reconciliation");
+  const billed = findings.filter((f) => f.workerId && !mine.has(f.workerId)).map((f) => `$${(f.billedCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`);
+  const enrollment = await get<{ workerId: string; name: string }[]>("/v1/benefits/open-enrollment");
+  const enrolled = enrollment.filter((r) => !mine.has(r.workerId)).map((r) => r.name);
+  const payouts = (await get<{ data: { workerId: string; usdCents: number }[] }>("/v1/contractors/payouts?limit=100")).data;
+  const paid = payouts.map((x) => `$${(x.usdCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`);
+  expect(billed.length && enrolled.length && paid.length, "benefits and payouts outside her chain").toBeTruthy();
+  for (const slug of ["benefits", "contractors", "it"]) await expect(page.getByTestId(`nav-${slug}`), `nav-${slug}`).toHaveCount(0);
+  for (const [path, banned, testid] of [["/app/benefits", [...billed, ...enrolled], "benefits-no-access"], ["/app/contractors", paid, "contractors-no-access"], ["/app/it", [], "it-no-access"]] as const) {
+    const { all, testids } = await crawl(path, [...banned], "other people's");
+    if (!testids.includes(testid) || !all.includes("not shared with your role")) failures.push(`${path}: no access note`);
+    if (/Pay \d+ contractors?/.test(all)) failures.push(`${path}: shows the Pay contractors action`);
+  }
+  // Compliance: required training only for her reports; the company's filing deadlines stay.
+  const assignments = (await get<{ data: { id: string; workerId: string }[] }>("/v1/training/assignments?limit=100")).data;
+  const trainee = new Map(assignments.map((a) => [a.id, a.workerId]));
+  const calendar = await get<{ kind: string; title: string; subjectRef: string | null }[]>("/v1/compliance/calendar");
+  const foreignTraining = calendar.filter((r) => r.kind === "training_due" && !mine.has(trainee.get(r.subjectRef ?? "") ?? "")).map((r) => r.title);
+  expect(foreignTraining.length, "training rows outside her chain").toBeGreaterThan(0);
+  await crawl("/app/compliance", foreignTraining, "the training of");
+  // Her report's person page offers no Benefits or IT tab, and an outsider's note does not promise them.
+  const report = [...mine].find((id) => id !== imaniId)!;
+  await page.goto(`/app/people/${report}`);
+  await settled(page);
+  for (const tab of ["Benefits", "IT accounts"]) if (await page.getByRole("tab", { name: tab, exact: true }).count()) failures.push(`/app/people/${report}: offers the ${tab} tab`);
+  if (person.all.includes("tax, benefits")) failures.push(`/app/people/${outsider.workerId}: the note promises benefits`);
   expect(failures, failures.join("\n")).toEqual([]);
 });

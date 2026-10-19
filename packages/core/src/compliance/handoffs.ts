@@ -7,6 +7,7 @@ import { and, asc, eq } from "drizzle-orm";
 import type { HandoffCase, HandoffKind, HandoffReason, HandoffStatus } from "@weft/contracts";
 import { handoffCases, notices, type DbTx } from "@weft/db";
 import { evidencePack, SPECIALIST } from "../parity/escalation";
+import { subjectInScope, type ReadScope } from "../people/scope";
 
 export type HandoffRow = typeof handoffCases.$inferSelect;
 
@@ -42,6 +43,22 @@ export function toHandoffDto(r: HandoffRow): HandoffCase & { resolutionNote: str
 export async function listHandoffs(tx: DbTx, companyId: string, f: { kind?: string; status?: string } = {}): Promise<HandoffRow[]> {
   const rows = await tx.select().from(handoffCases).where(eq(handoffCases.companyId, companyId)).orderBy(asc(handoffCases.id));
   return rows.filter((r) => (!f.kind || r.kind === f.kind) && (!f.status || r.status === f.status));
+}
+
+/**
+ * The cases a narrowed viewer (a manager) may read. A case about a person (its worker, or a worker or offer subject)
+ * says why that person needed help, so it follows the person read scope; a case about the company (a tax account, a
+ * notice) stays. Not narrowed (scope null) keeps every case.
+ */
+export async function scopeHandoffs<T extends { subjectRef: string | null; workerId: string | null }>(tx: DbTx, companyId: string, scope: ReadScope | null, rows: readonly T[]): Promise<{ shown: T[]; withheld: number }> {
+  if (!scope) return { shown: [...rows], withheld: 0 };
+  const shown: T[] = [];
+  for (const h of rows) {
+    if (h.workerId && !(await subjectInScope(tx, companyId, scope, h.workerId))) continue;
+    if (h.subjectRef && !(await subjectInScope(tx, companyId, scope, h.subjectRef))) continue;
+    shown.push(h);
+  }
+  return { shown, withheld: rows.length - shown.length };
 }
 
 export async function getHandoff(tx: DbTx, companyId: string, id: string): Promise<HandoffRow | null> {

@@ -18,8 +18,8 @@ import { readScopeOf, reportsAccess, splitByScope } from "../people/scope";
 import { AGENCY_LABELS } from "../tax/queries";
 import { ratesAlreadyInEffect } from "../tax/writes";
 import { parseExtract } from "../notices/queries";
-import { listCalendar, refreshCalendar } from "../compliance/calendar";
-import { evidenceFor, getHandoff, HANDOFF_ASSIGNEE, handoffEmail, listHandoffs, openCaseFor, toHandoffDto } from "../compliance/handoffs";
+import { listCalendar, refreshCalendar, scopeCalendar } from "../compliance/calendar";
+import { evidenceFor, getHandoff, HANDOFF_ASSIGNEE, handoffEmail, listHandoffs, openCaseFor, scopeHandoffs, toHandoffDto } from "../compliance/handoffs";
 import { isPreparable, prepareFiling, type PreparedFiling } from "../compliance/prepare";
 import { periodBounds, RULE_BY_FORM } from "../compliance/rules";
 import { addDays, ensureCourses, getAssignment, listAssignments, missingAssignments, RULE_BY_CODE } from "../compliance/training";
@@ -79,12 +79,13 @@ const calendarCmd = readCommand({
   input: CalendarInput,
   async run(i: CalendarInput, ctx, deps) {
     const today = ptDateOf(ctx.now);
-    const rows = await listCalendar(deps.tx, ctx.companyId, today, { from: i.from, to: i.to, kind: i.kind, status: i.status });
+    const scope = await readScopeOf(deps.tx, ctx);
+    const { shown: rows, withheld } = await scopeCalendar(deps.tx, scope, await listCalendar(deps.tx, ctx.companyId, today, { from: i.from, to: i.to, kind: i.kind, status: i.status }));
     const counts: Record<string, number> = {};
     for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
     const items = rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, due_on: r.dueOn, days_left: r.daysLeft, status: r.status, subject_ref: r.subjectRef, form: r.form, period: r.period,
       ...(isDetailed(i) ? { jurisdiction: r.jurisdiction, agency: r.agency, proposal_id: r.proposalId, source_url: r.sourceUrl } : {}) }));
-    return { data: { as_of: today, count: items.length, by_status: counts, items }, summary: `Listed ${items.length} compliance calendar rows` };
+    return { data: { as_of: today, count: items.length, by_status: counts, items, ...(scope && withheld ? { access: reportsAccess(scope, "calendar rows about a person", withheld) } : {}) }, summary: `Listed ${items.length} compliance calendar rows` };
   },
 });
 
@@ -231,10 +232,12 @@ const listHandoffsCmd = readCommand({
   description: "List hand-off cases: kind (tax_specialist, hr_person, vendor_specialist), reason code, subject, status (open, acknowledged, resolved, cancelled), assignee and the evidence pack refs. Filter by kind or status. Summaries are written by Weft or the agent from structured fields.",
   input: ListHandoffsInput,
   async run(i: ListHandoffsInput, ctx, deps) {
-    const rows = (await listHandoffs(deps.tx, ctx.companyId, { kind: i.kind, status: i.status })).map(toHandoffDto);
+    const scope = await readScopeOf(deps.tx, ctx);
+    const { shown, withheld } = await scopeHandoffs(deps.tx, ctx.companyId, scope, await listHandoffs(deps.tx, ctx.companyId, { kind: i.kind, status: i.status }));
+    const rows = shown.map(toHandoffDto);
     const cases = rows.map((c) => ({ id: c.id, kind: c.kind, reason: c.reason, subject_ref: c.subjectRef, status: c.status, assignee: c.assigneeName, created_at: c.createdAt,
       ...(isDetailed(i) ? { summary: c.summary, evidence: c.evidence, run_id: c.runId, resolved_at: c.resolvedAt } : {}) }));
-    return { data: { count: cases.length, cases }, summary: `Listed ${cases.length} hand-offs` };
+    return { data: { count: cases.length, cases, ...(scope && withheld ? { access: reportsAccess(scope, "hand-offs about a person", withheld) } : {}) }, summary: `Listed ${cases.length} hand-offs` };
   },
 });
 

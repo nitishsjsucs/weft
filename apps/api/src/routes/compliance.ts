@@ -11,10 +11,11 @@ import { ComplianceItemKind, ComplianceItemStatus, FilingForm, NoticeUploadBody,
 import { ptDateOf } from "@weft/core";
 import { filings, taxAccounts } from "@weft/db";
 import { eq } from "drizzle-orm";
-import { listCalendar } from "../../../../packages/core/src/compliance/calendar";
+import { listCalendar, scopeCalendar } from "../../../../packages/core/src/compliance/calendar";
 import { RULE_BY_FORM, periodBounds } from "../../../../packages/core/src/compliance/rules";
 import type { PreparedFiling } from "../../../../packages/core/src/compliance/prepare";
 import type { Weft, WeftEnv } from "../http/context";
+import { viewerScope } from "../http/scope";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
 
@@ -61,7 +62,9 @@ export function complianceRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
   r.get("/v1/compliance/calendar", async (c) => {
     const q = CalendarQuery.parse({ from: c.req.query("from"), to: c.req.query("to"), kind: c.req.query("kind"), status: c.req.query("status") });
-    return c.json(await listCalendar(weft.db, companyOf(c), ptDateOf(weft.clock.now()), q));
+    // A row about a person (required training, a contractor's tax form) follows the person read scope.
+    const rows = await listCalendar(weft.db, companyOf(c), ptDateOf(weft.clock.now()), q);
+    return c.json((await scopeCalendar(weft.db, await viewerScope(weft, c), rows)).shown);
   });
   r.get("/v1/filings", async (c) => {
     const q = FilingQuery.parse({ form: c.req.query("form"), period: c.req.query("period"), status: c.req.query("status") });

@@ -1,5 +1,42 @@
 # Review log
 
+## Demo fix round 2, privacy: benefits, contractor pay, the compliance calendar, hand-offs and simulator state (2026-10-19)
+
+Found by the round 2 demo audit, viewing as Imani Ferreira (demo) (role manager, payroll, benefits, tax and IT: none):
+round 1 put the read scope on the routes it listed, and the benefits routes, contractor payouts and the compliance
+calendar still read the database directly. Benefits > Reconciliation (by URL) showed every billed and expected
+premium, Open enrollment every employee's election status, Contractors (in her sidebar) every payout with the Pay
+contractors action, and the calendar every person's required training. The audit for this round also found the
+hand-offs list (an outsider's leave question) and the simulator state (pay run totals in bank batches, IT device
+orders) open to her. Branch `dp/r2-privacy`.
+
+**Root cause and fix.** Same rule as round 1: a route that reads the database directly applies the scope itself.
+
+| Read | What a manager gets now |
+|---|---|
+| `GET /v1/benefits/enrollments`, `/v1/benefits/reconciliation`, `/v1/benefits/open-enrollment` | 403 `NOT_PERMITTED` without benefits view, as `benefits.*` refuse; the plan catalog stays open |
+| `GET /v1/contractors/payouts` | 403 `NOT_PERMITTED` without payroll view, as `contractors.list_payouts` refuses; the synthetic FX table stays |
+| `GET /v1/compliance/calendar`, `compliance.calendar` | `scopeCalendar` (core): required training only for her own record and reports, a contractor's tax form only with payroll view and in her chain; filing, deposit and notice deadlines stay (no person or amount in them) |
+| `GET /v1/handoffs`, `/v1/handoffs/:id`, `handoffs.list` | `scopeHandoffs` (core): a case about a worker or an offer outside her chain is not listed and reads as a 404; company cases stay |
+| `GET /v1/sim/state` | `bankBatches` and `deviceOrders` arrive empty and named in `withheld` without payroll or IT view |
+
+On the web, `DomainGate` (generalized from the payroll gate) guards Benefits, Contractors and IT by URL with a plain
+"not shared with your role" page, so no refused read flashes an error and Pay contractors never shows; Contractors
+joins Payroll, Benefits and IT in the grant-filtered sidebar and command menu. On a report's person page the Benefits
+and IT tabs follow her grants, and an outsider's directory note no longer promises benefits or IT. The Simulators page
+says why its bank batch and device order tables are empty.
+
+**Tests.** `apps/api/test/manager-privacy-routes.test.ts` gains five cases (benefits, payouts, calendar, hand-offs, sim
+state), each failing on the old routes. The rich crawl as Imani now checks the hidden nav items, visits Benefits,
+Contractors and IT for the access note (failing on any foreign premium, election name, payout or Pay contractors),
+visits every Compliance tab (failing on any outsider's training title) and checks a report's person page tabs.
+
+**Left as is, with the reason.** The tax domain is `none` for her, and the agent's `compliance.calendar`,
+`handoffs.list` and `tax.*` reads refuse her, while the Taxes & Compliance page still shows the company's
+registrations, rates, notices and filings. Those name no person; closing the page by the tax grant is a product call
+(her reports' training lives on the same page). `GET /v1/events` lists a `pay_rate.created` event about an outsider
+with ids only and no amount.
+
 ## Demo fix round 1, privacy: a manager's reads stop at her reports on every route (2026-10-18)
 
 Found by the demo audit, viewing as Imani Ferreira (demo) (role manager, payroll: none, it: none): the scope helper

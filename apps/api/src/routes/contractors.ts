@@ -2,6 +2,8 @@
 // GET payouts first brings open payouts up to the rail simulator's state at the sim clock (like a sim tick: no action
 // row, writes only when a transfer moved), so pending, sent and delivered follow the clock without a scheduler hook
 // (see .scratch/contract-requests/w2-benefits-contractors.md); POST payouts proposes through the executor.
+// Payouts are each contractor's pay, so GET needs the payroll grant like contractors.list_payouts (a manager has
+// payroll: none and gets 403 NOT_PERMITTED). The FX table is synthetic market data and names no one.
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { Unauthorized, ValidationError, type ToolOutcome } from "@weft/contracts";
@@ -10,6 +12,7 @@ import { listFxRates, listPayouts, pageById, syncRail, toPayoutDto } from "@weft
 import { contractorPayments, withWriteLock } from "@weft/db";
 import { createSimulators } from "@weft/sim";
 import type { Weft, WeftEnv } from "../http/context";
+import { needDomain, viewerScope } from "../http/scope";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
 
@@ -35,6 +38,7 @@ export async function syncContractorRail(weft: Pick<Weft, "db" | "clock">): Prom
 export function contractorsRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
   r.get("/v1/contractors/payouts", async (c) => {
+    needDomain(await viewerScope(weft, c), "payroll", "contractor payouts");
     const page = parsePage(c);
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
     const status = RailStatus.safeParse(c.req.query("status") || undefined);
