@@ -64,7 +64,7 @@ export function RoutinesView() {
       {list.error ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(list.error)}</div> : null}
       <div className="grid gap-4 tablet:grid-cols-2">
         {(list.data ?? []).map((r) => (
-          <Link key={r.id} href={`/app/routines/${r.id}`} title={r.id} data-testid={tid.routineCard(r.id)} data-enabled={String(r.enabled)} className="group">
+          <Link key={r.id} href={`/app/routines/${r.id}`} data-testid={tid.routineCard(r.id)} data-enabled={String(r.enabled)} className="group">
             <Card className="flex h-full flex-col gap-2 p-4 transition-shadow group-hover:shadow-[var(--shadow-medium)]">
               <div className="flex items-start gap-2">
                 <h3 className="min-w-0 flex-1 text-3 font-medium">{r.name}</h3>
@@ -76,7 +76,8 @@ export function RoutinesView() {
                 <TriggerChip t={r.trigger} />
                 {r.autonomy !== "approve" ? <Badge tone="outline">{AUTONOMY_COPY[r.autonomy].label}</Badge> : null}
                 {r.source === "custom" ? <Badge tone="blue">Custom</Badge> : null}
-                {r.taintedBy ? <Badge tone="amber">Tainted draft</Badge> : null}
+                {/* A prebuilt routine that reads uploaded files is marked by design: it says what that means, not "draft". */}
+                {r.taintedBy ? (r.source === "prebuilt" ? <Badge tone="outline">Reads uploaded files, proposes only</Badge> : <Badge tone="amber">Tainted draft</Badge>) : null}
 
               </div>
             </Card>
@@ -168,7 +169,7 @@ export function RoutineDetail({ id }: { id: string }) {
                 <TD className="h-11 whitespace-nowrap">{x.startedAt ? fmtDateTime(x.startedAt) : "-"}</TD>
                 <TD numeric className="h-11">{duration(x)}</TD>
                 <TD numeric className="h-11">{usd(x.costUsdMicros)}</TD>
-                <TD className="h-11 min-w-[280px] py-2">{x.leftForHuman.length ? x.leftForHuman.map(leftWords).join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div title={x.summary} className="text-1 text-gray-10">{routineSummaryText(x.summary)}</div> : null}</TD>
+                <TD className="h-11 min-w-[280px] py-2">{x.leftForHuman.length ? x.leftForHuman.map(leftWords).join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div className="text-1 text-gray-10">{routineSummaryText(x.summary)}</div> : null}</TD>
                 <TD className="h-11">{x.agentRunId ? <Link href={`/app/runs/${x.agentRunId}`} title={x.agentRunId} className="text-1 text-blue-11 hover:underline">Open run</Link> : <span className="text-1 text-gray-10">Precheck only</span>}</TD>
               </TR>
             ))}

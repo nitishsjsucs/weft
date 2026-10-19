@@ -21,12 +21,12 @@ describe("humanDates before a colon", () => {
 
 describe("date lists", () => {
   it("a run of days reads as a range, other lists as a list", () => {
-    expect(humanDateLists("on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("on Nov 23 to Nov 25");
+    expect(humanDateLists("on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("from Nov 23 to Nov 25");
     expect(humanDateLists("on 2026-11-23, 2026-11-25")).toBe("on Nov 23 and Nov 25");
-    expect(humanDateLists("on 2025-12-31, 2026-01-01, 2026-01-02")).toBe("on Dec 31, 2025 to Jan 2, 2026");
+    expect(humanDateLists("on 2025-12-31, 2026-01-01, 2026-01-02")).toBe("from Dec 31, 2025 to Jan 2, 2026");
   });
   it("the coverage check on a time-off request and the lodging check on an expense", () => {
-    expect(humanDateText("3 of 9 out (33.3%) on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("3 of 9 out (33.3%) on Nov 23 to Nov 25");
+    expect(humanDateText("3 of 9 out (33.3%) on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("3 of 9 out (33.3%) from Nov 23 to Nov 25");
     expect(humanDateText("Lodging $289.00 is over the standard $113.00 night rate for 2026-10-15")).toBe("Lodging $289.00 is over the standard $113.00 night rate for Oct 15");
   });
 });
@@ -82,10 +82,16 @@ describe("audit and step lines carry no ids, codes or file names", () => {
   });
   it("step lines read as sentences", () => {
     expect(stepLine("Found 1 workers")).toBe("Found 1 worker");
-    expect(stepLine("1 actions for people.set_pay_rate")).toBe("Found 1 set pay rate action");
+    expect(stepLine("1 actions for people.set_pay_rate")).toBe("Found 1 pay change");
+    expect(stepLine("2 actions for people.offboard")).toBe("Found 2 offboard actions");
+    expect(stepLine("Read entities/people/wrk_0026.md")).toBe("Read the person's memory page");
+    expect(humanLine("Read entities/people/wrk_0026.md")).toBe("Read entities/people/wrk_0026.md");
     expect(stepLine("pay_2026_10_30 (draft): 48 paychecks, 4 need review, 1 blocked")).toBe("The Oct 30 run (draft): 48 paychecks, 4 need review, 1 blocked");
-    expect(stepLine("Explanations for pay_2026_10_30: 4 agent, 0 template, 0 refused")).toBe("Explained 4 flagged paychecks");
-    expect(stepLine("Explanations for pay_2026_10_30: 3 agent, 0 template, 1 refused")).toBe("Explained 3 flagged paychecks; 1 could not be explained");
+    expect(stepLine("Explanations for pay_2026_10_30: 4 agent, 0 template, 0 refused")).toBe("Explained 4 flagged paychecks on the Oct 30 run");
+    expect(stepLine("Explanations for pay_2026_10_30: 0 agent, 4 template, 0 refused")).toBe("Explained 4 flagged paychecks on the Oct 30 run (from the rule templates)");
+    expect(routineSummaryText("Explanations for pay_2026_10_30: 8 agent, 0 template, 0 refused")).toBe("Explained 8 flagged paychecks on the Oct 30 run");
+    expect(humanLine("Explanations for pay_2026_10_30: 6 agent, 2 template, 0 refused")).toBe("Explained 8 flagged paychecks on the Oct 30 run (6 by the agent, 2 from the rule templates)");
+    expect(stepLine("Explanations for pay_2026_10_30: 3 agent, 0 template, 1 refused")).toBe("Explained 3 flagged paychecks on the Oct 30 run; 1 could not be explained");
     expect(stepLine("Drafted response 1 for ntc_0005")).toBe("Drafted the reply to the notice");
   });
   it("a routine summary reads as a short list in run order", () => {
@@ -125,13 +131,31 @@ describe("proposal values", () => {
     expect(valueText("pay_2026_10_30, reimbursement outside gross")).toBe("The Oct 30 run, reimbursement outside gross");
     expect(valueText("$267,919.36")).toBe("$267,919.36");
     expect(cardField("Status", "draft to processing")).toEqual({ label: "Status", value: "Draft → Submitted for processing" });
+    // The expense cards (scenario 5): the Inbox's check names, and the executor's joined Payroll row as two values.
+    expect(cardField("Check DUPLICATE", "review to Same merchant, amount ($96.00) and date as exp_0009 (approved)").label).toBe("Policy check, duplicate");
+    expect(cardField("Check CA_NECESSARY_EXPENSE", "info to California workers must be reimbursed").label).toBe("Policy check, california duty");
+    expect(cardField("Payroll", "not scheduled to not paid")).toEqual({ label: "Payroll", value: "Not scheduled → Not paid" });
+    expect(cardField("Payroll", "not scheduled to pay_2026_10_30, reimbursement outside gross").value).toBe("Not scheduled → The Oct 30 run, reimbursement outside gross");
     expect(cardField("Check MEALS_DETAIL_MISSING", "review to Meals need the attendees and the business purpose"))
-      .toEqual({ label: "Policy check, meals detail missing", value: "Meals need the attendees and the business purpose" });
+      .toEqual({ label: "Policy check, meal details", value: "Meals need the attendees and the business purpose" });
   });
 });
 
 describe("expense checks", () => {
   it("a duplicate check names the earlier claim, not its id", () => {
     expect(humanCopy("Same merchant, amount ($96.00) and date as exp_0009 (approved)")).toBe("Same merchant, amount ($96.00) and date as an earlier claim (approved)");
+  });
+});
+
+describe("round 2 copy fixes (demo-perfect)", () => {
+  it("the claim drawer's policy summary reads in words, each sentence once", async () => {
+    const { expenseExplanation } = await import("../src/components/app/copy");
+    const t = expenseExplanation("$1,249.00 equipment on 2026-10-14, submitted 2026-10-15. California workers must be reimbursed for necessary business expenses. Suggested: approve. California workers must be reimbursed for necessary business expenses. (template)");
+    expect(t).toBe("$1,249.00 equipment on Oct 14, submitted Oct 15. California workers must be reimbursed for necessary business expenses.");
+    expect(expenseExplanation("Same merchant, amount ($96.00) and date as exp_0009 (approved). Same merchant, amount ($96.00) and date as exp_0009 (approved).")).toBe("Same merchant, amount ($96.00) and date as an earlier claim (approved).");
+  });
+  it("the Undo strip after reverting a rate names no rate row", async () => {
+    const { auditSummary } = await import("../src/components/app/audit/audit-view");
+    expect(auditSummary("Reverted CA SUI rate etr_0005 to 3.4%")).toBe("Reverted CA SUI rate to 3.4%");
   });
 });

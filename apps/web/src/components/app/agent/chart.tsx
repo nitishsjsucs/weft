@@ -55,7 +55,8 @@ export function partialPeriod(report: Pick<ReportResult, "to">, rows: Row[]): { 
 }
 function periodLabel(spec: ChartSpec, r: Row, partial: { key: string } | null): string {
   const l = xLabel(spec, r);
-  return partial && String(r.period ?? "") === partial.key ? `${l} (to date)` : l;
+  // The engine's label already says "(to date)" for a cut-short period; the marker is added once, never twice.
+  return partial && String(r.period ?? "") === partial.key && !/\(to date\)$/.test(l) ? `${l} (to date)` : l;
 }
 function tickLabel(spec: ChartSpec, r: Row, oneYear: boolean): string {
   const l = xLabel(spec, r);
@@ -153,7 +154,7 @@ export function ReportChart({ report }: { report: ReportResult }) {
           <ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer>
         </div>
       ) : null}
-      {partial ? <p data-testid="chart-partial-note" className="text-0 text-gray-10">{partial.label} is to date, through {fmtDate(report.to)}.</p> : null}
+      {partial ? <p data-testid="chart-partial-note" className="text-0 text-gray-10">{partial.label.replace(/\s*\(to date\)$/, "")} runs to {fmtDate(report.to)}.</p> : null}
       {chart && !table && zero.length > 0 ? <p className="text-0 text-gray-10">Zero in this range, so not drawn: {zero.map((s) => s.label).join(", ")}. The table lists them.</p> : null}
       {/* The table is always in the page for screen readers; the toggle shows it to everyone. */}
       <div className={table ? "max-h-56 overflow-auto" : "sr-only"}><DataTable spec={spec} rows={rows} partial={partial} /></div>

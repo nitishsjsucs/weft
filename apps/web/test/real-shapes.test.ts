@@ -39,7 +39,7 @@ describe("SSE frames from GET /v1/agent/runs/:id/events", () => {
 describe("step chips from the API's tool results", () => {
   it("reads { output, outcome } results: summary for done, title for a pending proposal, refusal message", () => {
     expect(stepSummary(step({ result: { output: "{}", outcome: { ok: true, status: "done", summary: "Explanations for pay_2026_10_30: 0 agent, 4 template, 0 refused" } } })))
-      .toBe("Explained 4 flagged paychecks");
+      .toBe("Explained 4 flagged paychecks on the Oct 30 run (from the rule templates)");
     expect(stepSummary(step({ outcome: "pending:prp_0001", result: { output: "{}", outcome: { ok: true, status: "pending_approval", proposalId: "prp_0001", title: "Submit payroll pay_2026_10_30" } } })))
       .toBe("Submit the Oct 30 run");
     expect(stepSummary(step({ outcome: "refused:NOT_PERMITTED", result: { outcome: { ok: false, refusal: { code: "NOT_PERMITTED", message: "Not allowed here" } } } }))).toBe("Not allowed here");
@@ -97,3 +97,12 @@ describe("mock GET /v1/workers/:id returns a WorkerDetail like the API", () => {
     expect((it.data as unknown[]).length).toBeGreaterThan(0);
   });
 });
+
+describe("round 2: an expense explanation from the template reads as a policy summary", () => {
+  it("names template saves as policy summaries", async () => {
+    const { stepSummary } = await import("../src/components/app/agent/run-steps");
+    const row = { kind: "tool_call", toolName: "expenses__explain", result: { outcome: { summary: "Saved 8 of 8 expense explanations", data: { results: Array.from({ length: 8 }, () => ({ source: "template" })) } } } };
+    expect(stepSummary(row as never)).toBe("Saved 8 policy summaries from the template");
+  });
+});
+

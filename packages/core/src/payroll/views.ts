@@ -6,11 +6,13 @@ import { paychecks, payrollRuns, workers, type DbTx } from "@weft/db";
 import type { TaxCalcLine } from "@weft/payroll-tax";
 import { computeWorkerPaycheck, loadWorld, loadYtd, type BenefitJson, type DeductionJson, type EarningJson } from "./compute";
 import { totalsFromDto } from "./totals";
+import { displayName } from "../people/names";
 
 type RunRow = typeof payrollRuns.$inferSelect;
 type PaycheckRow = typeof paychecks.$inferSelect;
 
-export const workerDisplayName = (w: { firstName: string; lastName: string }) => `${w.firstName} ${w.lastName}`;
+/** A worker's name of record, as every other screen and the agent print it ("Mira Delgado (demo)"). */
+export const workerDisplayName = (w: { firstName: string; lastName: string }) => displayName(w.firstName, w.lastName);
 
 export async function workerNames(tx: DbTx, ids: string[]): Promise<Map<string, { name: string; state: string | null }>> {
   const rows = ids.length ? await tx.select({ id: workers.id, firstName: workers.firstName, lastName: workers.lastName, state: workers.workState }).from(workers).where(inArray(workers.id, ids)) : [];

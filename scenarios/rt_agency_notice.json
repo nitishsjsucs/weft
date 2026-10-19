@@ -3,7 +3,7 @@
     "main": [
       {
         "output": [
-          { "type": "function_call", "name": "notices__draft_response", "arguments": { "notice_id": "{{trigger.notice_id}}", "note": "We will apply the new rate from the effective date and request the credit for prior overpayment." } },
+          { "type": "function_call", "name": "notices__draft_response", "arguments": { "notice_id": "{{trigger.notice_id}}", "note": "Thank you for the notice; questions can go to payroll@larkspur.example." } },
           { "type": "function_call", "name": "tax__update_rate", "arguments": "{{derived.tax.update_rate}}" },
           { "type": "function_call", "name": "notices__send_response", "arguments": { "notice_id": "{{trigger.notice_id}}" } }
         ]

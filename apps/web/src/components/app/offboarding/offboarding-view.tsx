@@ -3,6 +3,7 @@
 // detail and proposal link; pending proposals render as approval cards, and once final pay is done the direct steps
 // run with "Run remaining steps" (one offboarding.run_step call each, so each gets its own action row).
 import Link from "next/link";
+import { auditLabel } from "../copy";
 import { useState } from "react";
 import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { W2_OFFBOARDING_TID, w2OffboardingTid, type OffboardingCase, type OffboardingStep, type Proposal, type Worker, type PageResult } from "@weft/contracts";
@@ -130,10 +131,10 @@ export function OffboardingCaseView({ id }: { id: string }) {
                 <TD className="hidden text-gray-10 tabular-nums tablet:table-cell">{i + 1}</TD>
                 <TD className="font-medium">{STEP_LABEL[s.kind]}{PROPOSAL_STEPS.has(s.kind) ? <span className="ml-1.5 text-0 text-gray-10">approval</span> : null}<span className="mt-0.5 block text-1 font-normal text-gray-11 tablet:hidden">{s.detail}</span></TD>
                 <TD><Badge data-testid={w2OffboardingTid.stepStatus(s.kind)} data-status={s.status} tone={STEP_TONE[s.status]}>{STEP_STATUS_LABEL[s.status]}</Badge></TD>
-                <TD className="hidden max-w-[420px] text-[13px] break-words text-gray-11 tablet:table-cell">{s.detail}{s.actionSeq !== null ? <> · <Link href={`/app/audit#audit-${s.actionSeq}`} className="hover:underline">action {s.actionSeq}</Link></> : null}</TD>
+                <TD className="hidden max-w-[420px] text-[13px] break-words text-gray-11 tablet:table-cell">{s.detail}{s.actionSeq !== null ? <> · <Link href={`/app/audit#audit-${s.actionSeq}`} className="hover:underline">{auditLabel(s.actionSeq)}</Link></> : null}</TD>
                 <TD>
                   <span className="flex flex-wrap items-center gap-2">
-                    {s.proposalId ? <Link data-testid={w2OffboardingTid.stepProposal(s.kind)} href={`/app/inbox?proposal=${s.proposalId}`} className="font-mono text-0 text-accent-11 hover:underline">{s.proposalId}</Link> : <span className="text-gray-10">-</span>}
+                    {s.proposalId ? <Link data-testid={w2OffboardingTid.stepProposal(s.kind)} href={`/app/inbox?proposal=${s.proposalId}`} className="text-1 text-accent-11 hover:underline">Proposal</Link> : <span className="text-gray-10">-</span>}
                     {c.status === "open" && s.status === "pending" ? (
                       <Button data-testid={w2OffboardingTid.stepSkip(s.kind)} size="xs" variant="ghost" onClick={() => setSkipping(s.kind)}>Skip</Button>
                     ) : null}

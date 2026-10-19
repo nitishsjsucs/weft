@@ -9,6 +9,7 @@ import { AGENCY, fmtDateTime, humanTimes, notReversibleText } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { humanLine } from "../copy";
+import { useRoutineNames } from "../routine-names";
 import { Fragment, useEffect, useRef, useState } from "react";
 
 /** Who wrote the row: a routine by its name (its run id is for whoever traces it, so it sits in the title). */
@@ -16,28 +17,6 @@ function actor(a: Action, routineNames: Record<string, string>): string {
   if (a.actorKind === "agent") return "Weft agent";
   if (a.actorKind === "routine") return a.routineRunId && routineNames[a.routineRunId] ? `Routine: ${routineNames[a.routineRunId]}` : "Routine";
   return principalName(a.actorId);
-}
-
-/** The routines' names for the routine runs on the page, read once per run id. */
-function useRoutineNames(runIds: string[]): Record<string, string> {
-  const [names, setNames] = useState<Record<string, string>>({});
-  const asked = useRef(new Set<string>());
-  const routines = useGet("/v1/routines", { enabled: runIds.length > 0 });
-  const key = runIds.join(",");
-  useEffect(() => {
-    const defs = (routines.data ?? []) as { id: string; name: string }[];
-    if (!defs.length) return;
-    for (const id of runIds) {
-      if (asked.current.has(id)) continue;
-      asked.current.add(id);
-      client.get("/v1/routine-runs/:id", { params: { id } }).then(
-        (r) => { const name = defs.find((d) => d.id === (r as { routineId: string }).routineId)?.name; if (name) setNames((n) => ({ ...n, [id]: name })); },
-        () => undefined,
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, routines.data]);
-  return names;
 }
 
 const notReversible = (a: Action) => humanTimes(notReversibleText(a.notReversibleReason));
@@ -90,8 +69,9 @@ export function AuditView() {
         }
       />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
-      {result && !result.ok ? <div role="alert" title={result.refusal.code} className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{humanTimes(result.refusal.message)}</div> : null}
-      {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{humanTimes(result.summary)}</div> : null}
+      {/* The Undo outcome reads as the rows do: the stored text names the reversed row by its id, the line never does. */}
+      {result && !result.ok ? <div role="alert" data-testid="audit-undo-result" data-code={result.refusal.code} className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{auditSummary(result.refusal.message)}</div> : null}
+      {result && result.ok && result.status === "done" ? <div data-testid="audit-undo-result" className="mb-4 text-1 text-green-11">{auditSummary(result.summary)}</div> : null}
       <Card className="@container overflow-hidden">
         <Table className={cn("text-[13px]", STACK, "@max-[40rem]:[&_thead]:hidden")}>
           <THead><TR><TH className="w-[7.5rem]">When</TH><TH className="w-[11rem]">Actor</TH><TH>Summary</TH><TH className="w-[6.5rem]"><span className="sr-only">Run and undo</span></TH></TR></THead>
@@ -106,24 +86,24 @@ export function AuditView() {
                   <div className="tabular text-1 text-gray-11 @max-[40rem]:text-[13px]">{fmtDateTime(a.ts)}</div>
                 </TD>
                 <TD className="h-auto max-w-[11rem] py-2.5 align-top @max-[40rem]:col-span-2 @max-[40rem]:max-w-none @max-[40rem]:p-0">
-                  <div className="truncate font-medium" title={[who, forWhom, a.routineRunId].filter(Boolean).join(", ")}>{who}</div>
+                  <div className="truncate font-medium" title={[who, forWhom].filter(Boolean).join(", ")}>{who}</div>
                   {forWhom ? <div className="truncate text-1 text-gray-10" title={forWhom}>{forWhom}</div> : null}
                 </TD>
                 <TD className="h-auto min-w-0 py-2.5 align-top whitespace-normal break-words @max-[40rem]:p-0 @max-[40rem]:pt-1">
-                  {/* The stored summary carries row ids and ISO dates; it reads as words here, the stored text in the title. */}
-                  <div title={a.summary}>{auditSummary(a.summary)}</div>
+                  {/* The stored summary carries row ids and ISO dates; it reads as words here and in its tooltip. */}
+                  <div>{auditSummary(a.summary)}</div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-1 text-gray-10">
                     {/* A command breaks only after its dot ("notices." / "draft_response"), never inside a word. */}
                     <code className="font-mono">{a.command.split(".").map((part, i, all) => <Fragment key={i}><span className="whitespace-nowrap">{part}{i < all.length - 1 ? "." : ""}</span>{i < all.length - 1 ? <wbr /> : null}</Fragment>)}</code>
                     {a.reversible === "no" ? <span className="inline-flex items-center" title={notReversible(a)}><Lock aria-hidden className="size-3" /><span className="sr-only">{notReversible(a)}</span></span> : null}
                     {a.reversesSeq !== null ? <span>· Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></span> : null}
                     {a.reversedBySeq !== null ? <span>· Reversed by <a href={`#audit-${a.reversedBySeq}`} className="text-blue-11 hover:underline">#{a.reversedBySeq}</a></span> : null}
-                    {a.proposalId ? <span title={a.proposalId}>· from an approved proposal</span> : null}
+                    {a.proposalId ? <span>· from an approved proposal</span> : null}
                   </div>
                 </TD>
                 <TD className="h-auto py-2.5 align-top text-right @max-[40rem]:col-start-2 @max-[40rem]:row-start-1 @max-[40rem]:p-0">
                   <div className="flex flex-col items-end gap-1">
-                    {a.agentRunId ? <Link href={`/app/runs/${a.agentRunId}`} title={a.agentRunId} aria-label={`Agent run ${a.agentRunId}`} className="whitespace-nowrap text-1 text-blue-11 hover:underline">Agent run</Link> : null}
+                    {a.agentRunId ? <Link href={`/app/runs/${a.agentRunId}`} aria-label="Agent run" className="whitespace-nowrap text-1 text-blue-11 hover:underline">Agent run</Link> : null}
                     {a.reversible === "yes" && a.reversedBySeq === null ? (
                       <Button data-testid={tid.auditUndo(a.seq)} data-tour="audit-undo" data-seq={a.seq} size="xs" disabled={undo.pending} onClick={async () => setResult((await undo.run(a.seq)) ?? null)}><Undo2 /> Undo</Button>
                     ) : null}

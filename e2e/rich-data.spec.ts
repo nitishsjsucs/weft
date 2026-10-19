@@ -66,6 +66,18 @@ test("the screens a demo opens first show no row ids", async ({ page }) => {
   }
 });
 
+/** Screens whose stored codes read as words: no snake_case enum codes ("hsa_cafeteria", "to_date") in visible text. */
+const NO_CODES = ["/app/benefits", "/app/reports", "/app/time-off"];
+test("benefits, reports and time off show no raw enum codes", async ({ page }) => {
+  for (const path of NO_CODES) {
+    await page.goto(path);
+    const text = await settled(page);
+    const codes = [...new Set(text.match(/\b[a-z][a-z0-9]*_[a-z0-9_]+\b/g) ?? [])];
+    expect(codes, `snake_case codes in the visible text of ${path}`).toEqual([]);
+    expect(text, `${path} doubles the to-date marker`).not.toContain("(to date) (to date)");
+  }
+});
+
 test("the rich profile fills every audited screen", async ({ page, request }) => {
   const stats = await (await request.get("/api/v1/stats")).json() as { runsLogged?: number; actionsLogged?: number };
   expect(stats.runsLogged ?? 0, "agent runs logged").toBeGreaterThanOrEqual(20);

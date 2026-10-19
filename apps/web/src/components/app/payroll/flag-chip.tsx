@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { tid, type Flag, type Paycheck } from "@weft/contracts";
 import { appMain } from "../shell/main-pane";
-import { flagEvidence, flagExplanation, flagHeadline } from "./flag-text";
+import { emptyExplanation, flagEvidence, flagExplanation, flagHeadline } from "./flag-text";
 
 const TONE: Record<Flag["severity"], string> = {
   block: "bg-red-3 text-red-11",
@@ -52,7 +52,7 @@ export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
               {pc.explanationRunId ? <Link href={`/app/runs/${pc.explanationRunId}`} className="ml-auto text-blue-11 hover:underline">Run</Link> : null}
             </div>
           </div>
-        ) : <p className="mt-2 text-1 text-gray-10">No explanation yet. Run review to have the agent explain it.</p>}
+        ) : <p className="mt-2 text-1 text-gray-10">{emptyExplanation(pc.flags)}</p>}
         {rows.length ? (
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-1">
             {rows.flatMap((r) => [<dt key={`k${r.label}`} className="text-gray-10">{r.label}</dt>,

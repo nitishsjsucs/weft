@@ -48,7 +48,7 @@ export function ApprovalCard({ card, status, taintedBy = null, known = true, com
     <div data-testid={W3_CHAT_TID.card(card.proposalId)} data-status={live} className={cn("flex flex-col gap-2 rounded-xl border border-gray-a4 bg-card p-3 shadow-[var(--shadow-xs)]", compact && "p-2.5")}>
       <div className="flex flex-wrap items-center gap-1.5">
         <span data-tour="proposal-risk" className="inline-flex"><RiskChip risk={card.risk as RiskClass} /></span>
-        {card.moneyCents !== null ? <span className="text-1 font-medium tabular-nums text-gray-12">{formatCents(card.moneyCents)}</span> : null}
+        {card.moneyCents ? <span className="text-1 font-medium tabular-nums text-gray-12">{formatCents(card.moneyCents)}</span> : null}
         <span className="flex-1" />
         <span className="text-0 text-gray-10">{pending ? "Needs approval" : "Decided"}</span>
       </div>

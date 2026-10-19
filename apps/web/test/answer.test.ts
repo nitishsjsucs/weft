@@ -31,6 +31,16 @@ describe("chat answers as copy", () => {
     expect(flat(parseAnswer("The new annual pay rate is $139,240.00, effective October 16, under pay rate record prt_0052. The flag reflects the approved raise. [res_0231]")))
       .toBe("The new annual pay rate is $139,240.00, effective October 16. The flag reflects the approved raise. [1]");
   });
+  it("an id-only clause goes with its verb, and a pointer the sentence leans on keeps its noun (live takes, scenario 2)", () => {
+    expect(flat(parseAnswer("The increase comes from pay rate $139,240.00 effective October 16, 2026, recorded under pay rate prt_0052. [res_0251]")))
+      .toBe("The increase comes from pay rate $139,240.00 effective October 16, 2026. [1]");
+    expect(flat(parseAnswer("The increase comes from pay rate prt_0052, set at $139,240.00 effective October 16.")))
+      .toBe("The increase comes from the new pay rate, set at $139,240.00 effective October 16.");
+    expect(flat(parseAnswer("The flag is a gross-change review item, tied to action result res_0001.")))
+      .toBe("The flag is a gross-change review item [1].");
+    expect(answerPlain("The increase comes from pay rate prt_0052, set to $139,240.00 effective October 16, recorded in action 1."))
+      .toBe("The increase comes from the new pay rate, set to $139,240.00 effective October 16, recorded in audit #1.");
+  });
   it("a day range reads with 'to', and a possessive keeps the name of record whole (live takes, demo check)", () => {
     expect(flat(parseAnswer("The conflict is November 23\u201325 for Ruth Okoro\u2019s (demo) vacation \u2014 Grace is out. [res_0238]")))
       .toBe("The conflict is November 23 to 25 for Ruth Okoro (demo)\u2019s vacation, Grace is out. [1]");

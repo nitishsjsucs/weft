@@ -3,6 +3,7 @@
 // ids, enum codes and ISO dates that mean nothing to a person. These helpers turn them into words; the stored text
 // never changes.
 import { fmtDate, humanDates, humanTimes, statusLabel, textYear } from "./format";
+import { RULE_LABEL as RULE_WORDS } from "./expenses/labels";
 
 const ID = "[a-z]{2,5}_[A-Za-z0-9_]*\\d[A-Za-z0-9_]*";
 /** Words for the engine's codes that can appear in flag text. */
@@ -22,9 +23,9 @@ export function humanDateLists(text: string, year?: number): string {
     const ds = m.split(/,\s*/);
     const one = (d: string) => humanDates(d, ref);
     const consecutive = ds.length > 2 && ds.every((d, i) => i === 0 || dayOf(d) - dayOf(ds[i - 1]!) === 86_400_000);
-    if (consecutive) return `${one(ds[0]!)} to ${one(ds[ds.length - 1]!)}`;
+    if (consecutive) return `\u0003${one(ds[0]!)} to ${one(ds[ds.length - 1]!)}`;
     return `${ds.slice(0, -1).map(one).join(", ")} and ${one(ds[ds.length - 1]!)}`;
-  });
+  }).replace(/\bon \u0003/g, "from ").replace(/\u0003/g, "");   // "on Nov 23 to Nov 25" reads "from Nov 23 to Nov 25"
 }
 
 /** Instants, plain dates and date lists in server text as words, and nothing else changed (ids and codes stay). */
@@ -48,6 +49,21 @@ export function humanCopy(text: string, year?: number): string {
     .replace(new RegExp(`\\b${ID}\\b`, "g"), "")
     .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, (c) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))
     .replace(/ {2,}/g, " ").replace(/ ([,.;)])/g, "$1").replace(/\( /g, "(").trim();
+}
+
+/**
+ * An expense's stored explanation as copy (the claim drawer): dates as days, no row ids, each sentence once (the
+ * policy template repeats a check in its suggestion) and no "(template)" tag, which the drawer shows as a label.
+ */
+export function expenseExplanation(text: string): string {
+  const t = humanCopy(text).replace(/\s*\((?:template|agent)\)\s*$/i, "");
+  const seen = new Set<string>(); const out: string[] = [];
+  for (const raw of t.split(/(?<=[.!?])\s+/)) {
+    const k = raw.trim().toLowerCase().replace(/^suggested:\s*\w+\.\s*/, "");
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(raw.trim());
+  }
+  return out.join(" ");
 }
 
 /** What a bare id stands for in a sentence ("Drafted response 1 for ntc_0005" is "... for the notice"). */
@@ -84,6 +100,26 @@ function deliveredLine(file: string, agency: string): string {
  * as names, and a count of one is singular. Ids of kinds not listed here stay as written.
  */
 export function humanLine(text: string): string {
+  // A file path keeps the ids it is named by ("entities/people/wrk_0026.md" is a path, not "the person").
+  const paths: string[] = [];
+  const kept = explanationsLine(text).replace(/\b[\w-]+(?:\/[\w.-]+)+\.(?:md|txt|json|csv)\b/g, (m) => `\u0002${paths.push(m) - 1}\u0002`);
+  return humanLineBody(kept).replace(/\u0002(\d+)\u0002/g, (_m, i: string) => paths[Number(i)]!);
+}
+
+/**
+ * The pre-payroll review's tally ("Explanations for pay_X: 0 agent, 4 template, 0 refused") as a sentence: "Explained 4
+ * flagged paychecks on the Oct 30 run (from the rule templates)." Zero counts go; the counts are the tool's own.
+ */
+export function explanationsLine(text: string): string {
+  return text.replace(/\bExplanations for (pay_\d{4}_\d{2}_\d{2}|the [A-Z][a-z]{2} \d{1,2} run): (\d+) agent, (\d+) template, (\d+) refused\b/g, (_m, run: string, a: string, b: string, c: string) => {
+    const agent = Number(a); const tpl = Number(b); const refused = Number(c); const n = agent + tpl;
+    const how = agent && tpl ? ` (${agent} by the agent, ${tpl} from the rule templates)` : tpl ? " (from the rule templates)" : "";
+    const head = n ? `Explained ${n} flagged ${n === 1 ? "paycheck" : "paychecks"} on ${run}${how}` : `No flagged paychecks to explain on ${run}`;
+    return refused ? `${head}; ${refused} could not be explained` : head;
+  });
+}
+
+function humanLineBody(text: string): string {
   return humanDates(humanTimes(humanDateLists(text)))
     .replace(/\bDelivered (\S+\.txt) from ([a-z_]+) as [a-z]{2,5}_\w+/g, (_m, f: string, a: string) => deliveredLine(f, a))
     .replace(new RegExp(`\\s*\\((?:${ID}|#\\d+)(?:,\\s*(?:${ID}|#\\d+))*\\)`, "g"), "")
@@ -93,6 +129,7 @@ export function humanLine(text: string): string {
     .replace(/\bresponse \d+ (?:for|to) (?:the )?/g, "the reply to the ").replace(/\bresponse \d+\b/g, "the reply")
     .replace(/\bRecorded mention in\b/g, "Recorded a mention in")
     .replace(/\bAccepted offer: created (.+?) as onboarding\b/g, "Accepted the offer: added $1 to onboarding")
+    .replace(/\b[Cc]reated (.+?)(?: \(EMP-\d+\))? as onboarding\b/g, (m, who: string) => `${m[0] === "C" ? "Added" : "added"} ${who} to onboarding`)
     .replace(/\bCreated (google_ws|chat|github|sso) account\b/g, (_m, k: string) => `Created ${SYSTEM_WORDS[k]} account`)
     .replace(AGENCY_RE, (k) => AGENCY_WORDS[k]!)
     .replace(/\b1 (workers|actions|paychecks|results|proposals|requests|expenses|notices|items|people|flags|tools)\b/g, (_m, w: string) => `1 ${SINGULAR[w]}`)
@@ -109,13 +146,29 @@ export const sentenceCase = (s: string): string => (s ? s[0]!.toUpperCase() + s.
  */
 export function stepLine(text: string): string {
   const t = text
-    .replace(/^Explanations for (\S+): (\d+) agent, (\d+) template, (\d+) refused/, (_m, _r: string, a: string, b: string, c: string) => {
-      const n = Number(a) + Number(b);
-      return `Explained ${n} flagged ${n === 1 ? "paycheck" : "paychecks"}${Number(c) ? `; ${c} could not be explained` : ""}`;
+    .replace(/^(\d+) actions? for ([a-z_]+\.[a-z_]+)/, (_m, n: string, cmd: string) => {
+      const noun = COMMAND_NOUN[cmd];
+      if (noun) return `Found ${n} ${n === "1" ? noun[0] : noun[1]}`;
+      const verb = cmd.split(".")[1]!.replaceAll("_", " ");
+      return `Found ${n} ${verb} ${n === "1" ? "action" : "actions"}`;
     })
-    .replace(/^(\d+) actions? for ([a-z_]+)\.([a-z_]+)/, (_m, n: string, _ns: string, verb: string) => `Found ${n} ${verb.replaceAll("_", " ")} ${n === "1" ? "action" : "actions"}`)
-    .replace(/^(\d+) actions?\b/, (_m, n: string) => `Found ${n} ${n === "1" ? "action" : "actions"}`);
+    .replace(/^(\d+) actions?\b/, (_m, n: string) => `Found ${n} ${n === "1" ? "action" : "actions"}`)
+    .replace(/^Read entities\/people\/wrk_[A-Za-z0-9_]+\.md$/, "Read the person's memory page");
   return sentenceCase(humanLine(t));
+}
+
+/** What an audit search by command found, as people name those changes. */
+const COMMAND_NOUN: Record<string, [string, string]> = {
+  "people.set_pay_rate": ["pay change", "pay changes"], "tax.update_rate": ["tax rate change", "tax rate changes"],
+  "payroll.submit": ["payroll submission", "payroll submissions"], "time_off.decide": ["time-off decision", "time-off decisions"],
+  "expenses.decide": ["expense decision", "expense decisions"], "people.update": ["profile change", "profile changes"],
+};
+
+/** A memory page read named by its page: "Read Lena Brooks (demo)'s memory page" for a person's page. */
+export function memoryReadLine(path: string, body: string | null | undefined): string | null {
+  const title = /^#\s+(.+)$/m.exec(body ?? "")?.[1]?.trim();
+  if (!title) return null;
+  return path.startsWith("entities/people/") ? `Read ${title}'s memory page` : `Read the memory page ${title}`;
 }
 
 /**
@@ -187,6 +240,14 @@ export function noticeName(formCode: string | null | undefined): string {
   return /\bnotice$/i.test(f) ? f : `${f} notice`;
 }
 
+/** Filing and deposit periods as words: "2026-Q3" is "Q3 2026", "2026-01" is "January 2026". */
+export function periodWords(text: string): string {
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  return text
+    .replace(/\b(\d{4})-Q([1-4])\b/g, "Q$2 $1")
+    .replace(/(?<![\w-])(\d{4})-(0[1-9]|1[0-2])(?![\w-])/g, (_m, y: string, mo: string) => `${MONTHS[Number(mo) - 1]} ${y}`);
+}
+
 /** The one label for a row of the audit log, wherever a page links to it. */
 export const auditLabel = (seq: number): string => `audit #${seq}`;
 
@@ -204,6 +265,9 @@ export function valueText(v: string): string {
   if (/^[a-z]+(?:_[a-z0-9]+)*$/.test(t)) return STATUS_WORDS[t] ?? statusLabel(t);
   const m = /^([a-z]+(?:_[a-z]+)*) (?:to|->|→) ([a-z]+(?:_[a-z]+)*)$/.exec(t);
   if (m) return `${valueText(m[1]!)} → ${valueText(m[2]!)}`;
+  // The approval card's executor joins a row as "before to after": "Not scheduled to not_paid" is two values.
+  const j = /^(not scheduled|pay_\d{4}_\d{2}_\d{2}|[a-z]+(?:_[a-z0-9]+)+) to (.+)$/.exec(t);
+  if (j) return `${valueText(j[1]!)} → ${valueText(j[2]!)}`;
   return sentenceCase(enumWords(humanLine(t)));
 }
 
@@ -230,6 +294,6 @@ export function splitChecks<R extends { label: string; before: string; after: st
  */
 export function cardField(label: string, value: string): { label: string; value: string } {
   const m = /^Check ([A-Z][A-Z0-9_]*)(?: \((?:block|review|info)\))?$/.exec(label);
-  if (m) return { label: `Policy check, ${codeWords(m[1]!)}`, value: humanCopy(value.replace(/^(?:block|review|info) to /, "")) };
+  if (m) return { label: `Policy check, ${(RULE_WORDS[m[1]!] ?? codeWords(m[1]!)).toLowerCase()}`, value: humanCopy(value.replace(/^(?:block|review|info) to /, "")) };
   return { label: humanLine(label), value: valueText(value) };
 }

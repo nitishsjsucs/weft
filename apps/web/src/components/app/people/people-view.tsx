@@ -272,7 +272,7 @@ export function PersonView({ id }: { id: string }) {
         <PageHeader title={p.displayName} subtitle={`${p.title} · ${d.department ?? deptName(p.departmentId)}${d.workplace ? ` · ${d.workplace}` : ""}`} />
         <Card className="max-w-[560px] p-4" data-testid="person-directory-only">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Directory</h2>
-          <Facts rows={[["Title", p.title], ["Department", d.department ?? deptName(p.departmentId)], ["Manager", d.manager ?? "-"], ["Work state", p.workState ?? "-"]]} />
+          <Facts rows={[["Title", p.title], ["Department", d.department ?? deptName(p.departmentId)], ["Manager", d.manager ? humanLine(d.manager) : "-"], ["Work state", p.workState ?? "-"]]} />
           <p className="mt-4 text-[13px] text-gray-11">Pay, bank, tax, benefits, IT, onboarding, documents and time off are shared only for your own record and your direct and indirect reports.</p>
         </Card>
       </div>

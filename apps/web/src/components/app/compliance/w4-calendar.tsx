@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Badge, Button, Card, Drawer, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { cents, fmtDate, statusLabel } from "../format";
-import { humanCopy, humanLine } from "../copy";
+import { humanCopy, humanLine, periodWords } from "../copy";
 import { refHref } from "../refs";
 
 export interface CalendarRowDto {
@@ -47,7 +47,7 @@ export function CalendarPanel() {
             {rows.map((r) => (
               <TR key={r.id} data-testid={`calendar-row-${r.id}`} data-kind={r.kind} data-status={r.status}>
                 <TD className="whitespace-nowrap">{fmtDate(r.dueOn, { month: "short", day: "numeric", year: "numeric" })}<div className="text-0 text-gray-10">{days(r.daysLeft)}</div></TD>
-                <TD className="font-medium">{r.title}</TD>
+                <TD className="font-medium">{periodWords(r.title)}</TD>
                 <TD>{KIND[r.kind] ?? human(r.kind)}</TD>
                 <TD><Badge tone={TONE[r.status]}>{human(r.status)}</Badge>{r.proposalId ? <Link href="/app/inbox" className="ml-2 text-1 text-blue-11 hover:underline">In Inbox</Link> : null}</TD>
                 <TD className="text-1">{r.sourceUrl ? <a href={r.sourceUrl} target="_blank" rel="noreferrer noopener" className="text-blue-11 hover:underline">Rule</a> : <span className="text-gray-9">-</span>}</TD>
@@ -117,10 +117,10 @@ export function FilingsPanel() {
             {rows.map((f) => (
               <TR key={f.id} data-testid={`filing-row-${f.form}-${f.period}`} data-status={f.status} className="cursor-pointer hover:bg-gray-2" onClick={() => setOpen(f.id)}>
                 <TD className="font-medium">{f.formLabel}<span className="ml-2 text-1 text-gray-10">{f.jurisdiction}</span></TD>
-                <TD>{f.period}</TD>
+                <TD>{periodWords(f.period)}</TD>
                 <TD className="whitespace-nowrap">{f.dueOn ? fmtDate(f.dueOn, { month: "short", day: "numeric", year: "numeric" }) : "-"}</TD>
                 <TD numeric>{f.totalDueCents !== null ? cents(f.totalDueCents) : "-"}</TD>
-                <TD><Badge tone={f.status === "filed" || f.status === "accepted" ? "green" : f.prepared ? "blue" : "gray"}>{f.status === "draft" ? (f.prepared ? "prepared" : "not prepared") : f.status}</Badge></TD>
+                <TD><Badge tone={f.status === "filed" || f.status === "accepted" ? "green" : f.prepared ? "blue" : "gray"}>{f.status === "draft" ? (f.prepared ? "Prepared" : "Not prepared") : statusLabel(f.status)}</Badge></TD>
               </TR>
             ))}
           </TBody>
@@ -141,13 +141,14 @@ export function HandoffsPanel({ status = "open" }: { status?: string }) {
       {list.error ? <div role="alert" className="text-1 text-red-11">{errorText(list.error)}</div> : null}
       {rows.length === 0 && list.data ? <p className="text-[13px] text-gray-10">No open hand-offs.</p> : null}
       {rows.map((h) => (
-        <Card key={h.id} title={h.id} className="flex flex-col gap-1.5 p-3" data-testid={`handoff-${h.id}`}>
+        <Card key={h.id} className="flex flex-col gap-1.5 p-3" data-testid={`handoff-${h.id}`}>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="amber">{statusLabel(h.kind)}</Badge><span className="text-1 text-gray-10">{statusLabel(h.reason)}</span>
             {h.subjectRef ? <SubjectLink r={h.subjectRef} /> : null}
           </div>
           <p className="text-[13px]">{humanCopy(h.summary)}</p>
-          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-0 text-gray-11">{h.evidence.map((e) => <li key={`${e.label}${e.ref}`} title={e.ref}>{humanLine(e.label)}{/^[a-z]{2,5}_\w*\d/.test(e.ref) ? null : <>: {humanLine(e.ref)}</>}</li>)}</ul>
+          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-0 text-gray-11">{/* Evidence that only points at a row by its id says nothing on its own (the subject link above names it). */}
+            {h.evidence.filter((e) => !/^[a-z]{2,5}_\w*\d/.test(e.ref)).map((e) => <li key={`${e.label}${e.ref}`}>{humanLine(e.label)}: {humanLine(e.ref)}</li>)}</ul>
           <div className="flex items-center gap-2 text-1 text-gray-10">With {h.assigneeName}
             {h.status === "open" || h.status === "acknowledged" ? <Button size="sm" variant="secondary" disabled={resolve.pending} onClick={() => void resolve.run(h.id)}>Mark resolved</Button> : null}
           </div>
@@ -161,5 +162,5 @@ export function HandoffsPanel({ status = "open" }: { status?: string }) {
 function SubjectLink({ r }: { r: string }) {
   const words = r.startsWith("txa_") ? "Tax account" : r.startsWith("ntc_") ? "Agency notice" : r.startsWith("wrk_") ? "Person" : r.startsWith("pay_") ? humanLine(r).replace(/^the /, "").replace(/^./, (c) => c.toUpperCase()) : "Record";
   const href = refHref(r);
-  return href ? <Link href={href} title={r} className="text-1 text-blue-11 hover:underline">{words}</Link> : <span title={r} className="text-1 text-gray-10">{words}</span>;
+  return href ? <Link href={href} className="text-1 text-blue-11 hover:underline">{words}</Link> : <span className="text-1 text-gray-10">{words}</span>;
 }

@@ -7,7 +7,7 @@ import type { ToolOutcome } from "@weft/contracts";
 import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { ApiError } from "@/lib/api/client";
 import { errorText, getPrincipal, invalidate, rawFetch, useGet } from "@/lib/api/hooks";
-import { fmtDate } from "../format";
+import { fmtDate, statusLabel } from "../format";
 
 export interface TrainingRowDto {
   id: string; workerId: string; workerName: string; courseCode: string; courseTitle: string; jurisdiction: string | null; minutes: number; dueOn: string; status: string;
@@ -79,7 +79,7 @@ export function TrainingPanel() {
                 <TD className="font-medium">{a.workerName}</TD>
                 <TD>{a.courseTitle}<div className="text-0 text-gray-10">{a.minutes} min · <a href={a.sourceUrl} target="_blank" rel="noreferrer noopener" className="text-blue-11 hover:underline">Statute</a></div></TD>
                 <TD className="whitespace-nowrap">{fmtDate(a.dueOn, { month: "short", day: "numeric", year: "numeric" })}</TD>
-                <TD><Badge tone={TRAINING_TONE[a.status] ?? "gray"}>{a.status}</Badge></TD>
+                <TD><Badge tone={TRAINING_TONE[a.status] ?? "gray"}>{statusLabel(a.status)}</Badge></TD>
                 <TD>{a.status !== "completed" && a.status !== "waived" ? <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void complete(a.id)}>Record completion</Button> : a.certificateUploadId ? <span className="text-0 text-gray-10">Certificate on file</span> : null}</TD>
               </TR>
             ))}

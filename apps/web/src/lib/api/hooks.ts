@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, buildPath, createClient, type CallOptions, type GetPath } from "./client";
 import { mockFetch, mocksEnabled, PRINCIPALS } from "./mocks";
+import { setClockNow } from "@/components/app/format";
 
 export { PRINCIPALS };
 export type PrincipalId = (typeof PRINCIPALS)[number]["id"];
@@ -94,7 +95,12 @@ export function useMutation<A extends unknown[], R>(fn: (...args: A) => Promise<
 
 // Typed convenience hooks used across screens.
 export const useHealth = () => useGet("/v1/health", { refreshMs: 15_000 });
-export const useSimClock = () => useGet("/v1/sim/clock", { refreshMs: 5_000 });
+export const useSimClock = () => {
+  const q = useGet("/v1/sim/clock", { refreshMs: 5_000 });
+  // Dates outside the clock's year read with their year everywhere (format.ts fmtDateTime).
+  setClockNow((q.data as { now?: string } | undefined)?.now);
+  return q;
+};
 export const usePendingCount = () => {
   const q = useGet("/v1/proposals", { query: { status: "pending", limit: 100 }, refreshMs: 5_000 });
   return q.data ? q.data.data.filter((p) => p.kind !== "suggestion").length : null;

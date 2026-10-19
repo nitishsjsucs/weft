@@ -7,8 +7,16 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { AtSign, Inbox } from "lucide-react";
 import { Badge, Button, Card, CardHeading } from "@weft/ui/components";
-import { client, errorText, invalidate, useGet, useMutation } from "@/lib/api/hooks";
+import { client, errorText, invalidate, PRINCIPALS, useGet, useMutation } from "@/lib/api/hooks";
 import { useAgent } from "../agent-context";
+import { fmtDateTime, statusLabel } from "../format";
+import { principalName } from "../refs";
+
+/** The people a message can be posted as: the demo personas by name and role (the form sends the id). */
+const ROLE_WORDS: Record<string, string> = { admin: "admin", payroll_admin: "payroll admin", hr_manager: "HR manager", manager: "manager" };
+const POSTERS = PRINCIPALS.map((p) => ({ id: p.id, label: `${p.name}, ${ROLE_WORDS[p.role] ?? p.role.replaceAll("_", " ")}` }));
+/** A mention's status as words. */
+const MENTION_STATUS: Record<string, string> = { queued: "Queued", running: "Answering", answered: "Answered", refused: "Refused", ignored: "Ignored" };
 
 const CHANNELS = ["#people-ops", "#payroll", "#new-hires", "#general", "#leadership"] as const;
 const FIXTURES = [
@@ -21,7 +29,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="flex min-w-0 flex-col gap-1 text-1 text-gray-11">{label}{children}</label>;
 }
 
-type Mention = { id: string; channel: string; status: string; runId: string | null };
+type Mention = { id: string; channel: string; status: string; runId: string | null; mentionedBy?: string; createdAt?: string };
 type Intake = { id: string; fromAddress: string; status: string; expenseId: string | null };
 
 export function SimInboundControls() {
@@ -34,7 +42,7 @@ export function SimInboundControls() {
 
   const post = useMutation(async () => {
     const r = (await client.post("/v1/sim/chat/inbound", { body: chat })) as unknown as { messageRef: string; mentionId: string | null; runId?: string };
-    setNote(r.mentionId ? `Posted ${r.messageRef}; mention ${r.mentionId}${r.runId ? " started a read-only run" : " was ignored"}.` : `Posted ${r.messageRef}; no mention of @weft.`);
+    setNote(r.mentionId ? (r.runId ? `Posted in ${chat.channel}. The agent is answering in the thread (read only).` : `Posted in ${chat.channel}. The agent did not take this one.`) : `Posted in ${chat.channel}; it does not tag @weft, so the agent stays out.`);
     if (r.runId) agent.watch(r.runId, `Chat mention in ${chat.channel}`);
     invalidate();
     return r;
@@ -42,7 +50,8 @@ export function SimInboundControls() {
   const email = useMutation(async () => {
     const body = { from: mail.from.trim(), subject: mail.subject, body: mail.body, attachment: mail.fixture ? { fileName: `${mail.fixture}.pdf`, fixture: mail.fixture } : null };
     const r = (await client.post("/v1/sim/email/inbound", { body })) as unknown as { intakeId: string | null; status: string; expenseId?: string | null };
-    setNote(r.expenseId ? `Filed ${r.expenseId} from the email (${r.intakeId}).` : `Email ${r.intakeId ?? ""}: ${r.status.replaceAll("_", " ")}.`);
+    const receipt = FIXTURES.find((f) => f.key === mail.fixture)?.label;
+    setNote(r.expenseId ? `Filed an expense claim from the email${receipt ? ` (${receipt})` : ""}. It is on the Expenses page.` : `The email was not filed: ${statusLabel(r.status).toLowerCase()}.`);
     invalidate();
     return r;
   });
@@ -58,13 +67,13 @@ export function SimInboundControls() {
           <form onSubmit={onChat} className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Channel"><select className={field} value={chat.channel} onChange={(e) => setChat({ ...chat, channel: e.target.value as (typeof CHANNELS)[number] })}>{CHANNELS.map((c) => <option key={c}>{c}</option>)}</select></Field>
-              <Field label="As (principal id or email)"><input className={field} value={chat.from} onChange={(e) => setChat({ ...chat, from: e.target.value })} /></Field>
+              <Field label="Post as"><select data-testid="sim-inbound-chat-from" className={field} value={chat.from} onChange={(e) => setChat({ ...chat, from: e.target.value })}>{POSTERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
             </div>
             <Field label="Message (tag @weft to ask the agent)"><input data-testid="sim-inbound-chat-text" className={field} maxLength={4000} value={chat.text} onChange={(e) => setChat({ ...chat, text: e.target.value })} /></Field>
             <div><Button type="submit" size="sm" disabled={post.pending || !chat.text.trim()} data-testid="sim-inbound-chat-send">{post.pending ? "Posting..." : "Post message"}</Button></div>
           </form>
           <ul className="mt-3 flex flex-col gap-1 text-1 text-gray-11" data-testid="sim-mentions">
-            {(mentions.data ?? []).slice(0, 5).map((m) => <li key={m.id} className="flex items-center gap-2"><code className="font-mono">{m.id}</code> {m.channel} <Badge tone="outline">{m.status}</Badge></li>)}
+            {(mentions.data ?? []).slice(0, 5).map((m) => <li key={m.id} className="flex flex-wrap items-center gap-x-2"><span className="font-medium text-gray-12">{m.channel}</span>{m.mentionedBy ? <span>{principalName(m.mentionedBy)}</span> : null}{m.createdAt ? <span className="text-gray-10">{fmtDateTime(m.createdAt)}</span> : null} <Badge tone="outline">{MENTION_STATUS[m.status] ?? statusLabel(m.status)}</Badge></li>)}
           </ul>
         </Card>
       </section>
@@ -78,7 +87,7 @@ export function SimInboundControls() {
             <div><Button type="submit" size="sm" disabled={email.pending || !mail.from.includes("@")} data-testid="sim-inbound-email-send">{email.pending ? "Sending..." : "Send email"}</Button></div>
           </form>
           <ul className="mt-3 flex flex-col gap-1 text-1 text-gray-11" data-testid="sim-intake">
-            {(intake.data ?? []).slice(0, 5).map((x) => <li key={x.id} className="flex items-center gap-2"><code className="font-mono">{x.id}</code> <span className="truncate">{x.fromAddress}</span> <Badge tone="outline">{x.status.replaceAll("_", " ")}</Badge></li>)}
+            {(intake.data ?? []).slice(0, 5).map((x) => <li key={x.id} className="flex items-center gap-2"><span className="truncate">{x.fromAddress}</span> <Badge tone="outline">{statusLabel(x.status)}</Badge></li>)}
           </ul>
         </Card>
       </section>

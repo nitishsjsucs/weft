@@ -8,7 +8,7 @@ import { errorText, useGet } from "@/lib/api/hooks";
 import { ACCOUNT_TYPE, AGENCY, fmtDate, fmtDateTime, longDate, statusLabel } from "../format";
 import { PageHeader } from "../page";
 import { refHref } from "../refs";
-import { auditLabel, noticeName } from "../copy";
+import { auditLabel, humanLine, noticeName } from "../copy";
 import { CalendarPanel, FilingsPanel, HandoffsPanel } from "./w4-calendar";
 import { NoticeUpload, TrainingPanel } from "./w4-upload-training";
 import { HeldBack } from "../agent/held-back";
@@ -73,9 +73,9 @@ function NoticeDetail({ id, onClose }: { id: string | null; onClose: () => void 
               <ul className="flex flex-col gap-1.5 text-[13px]">
                 {linked.map((p) => (
                   <li key={p.id} className="flex flex-wrap items-center gap-2">
-                    <Badge tone={p.status === "pending" ? "amber" : p.status === "executed" ? "green" : "gray"}>{p.status}</Badge>
-                    <Link href="/app/inbox" className="min-w-0 flex-1 truncate hover:underline">{p.headline}</Link>
-                    {p.proposerRunId ? <Link href={`/app/runs/${p.proposerRunId}`} className="font-mono text-0 text-blue-11 hover:underline">{p.proposerRunId}</Link> : null}
+                    <Badge tone={p.status === "pending" ? "amber" : p.status === "executed" ? "green" : "gray"}>{p.status === "executed" ? "Done" : statusLabel(p.status)}</Badge>
+                    <Link href={`/app/inbox?proposal=${encodeURIComponent(p.id)}`} className="min-w-0 flex-1 truncate hover:underline">{linkedHeadline(p.headline)}</Link>
+                    {p.proposerRunId ? <Link href={`/app/runs/${p.proposerRunId}`} className="text-1 text-blue-11 hover:underline">Agent run</Link> : null}
                   </li>
                 ))}
               </ul>
@@ -85,6 +85,11 @@ function NoticeDetail({ id, onClose }: { id: string | null; onClose: () => void 
       ) : null}
     </Drawer>
   );
+}
+
+/** A linked proposal's headline as copy: ids go, and a rate reads as the notice does ("3.80%" is "3.8%"). */
+export function linkedHeadline(h: string): string {
+  return humanLine(h).replace(/\b(\d+)\.(\d*?)0+%/g, (_m, a: string, b: string) => `${a}${b ? `.${b}` : ""}%`);
 }
 
 export function ComplianceView() {

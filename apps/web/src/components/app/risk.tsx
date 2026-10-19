@@ -2,7 +2,7 @@ import { Badge } from "@weft/ui/components";
 import type { RiskClass } from "@weft/contracts";
 
 const TONE: Record<RiskClass, "gray" | "blue" | "amber" | "red"> = { R0: "gray", R1: "gray", R2: "blue", R3: "amber", R4: "red" };
-const LABEL: Record<RiskClass, string> = { R0: "read", R1: "draft", R2: "internal write", R3: "money or records", R4: "external or irreversible" };
+const LABEL: Record<RiskClass, string> = { R0: "read", R1: "draft", R2: "internal write", R3: "messages or outside systems", R4: "external or irreversible" };
 
 export function RiskChip({ risk }: { risk: RiskClass | null }) {
   if (!risk) return null;

@@ -24,7 +24,8 @@ const ptToday = (iso: string | undefined) => (iso ? new Intl.DateTimeFormat("en-
 
 /** Every column the rows carry, in a readable order: the x key first, then the chart series, then the rest. */
 export function tableColumns(spec: ChartSpec, rows: Row[]): { key: string; label: string; unit: Unit | null }[] {
-  const skip = new Set([spec.x.key, `${spec.x.key}_label`, "period_start", "period_end"]);
+  // to_date is the engine's flag for a cut-short period; the period label already says "(to date)".
+  const skip = new Set([spec.x.key, `${spec.x.key}_label`, "period_start", "period_end", "to_date"]);
   const seen = new Set<string>();
   const out: { key: string; label: string; unit: Unit | null }[] = [];
   for (const s of spec.series) { out.push({ key: s.key, label: s.label, unit: s.unit }); seen.add(s.key); }

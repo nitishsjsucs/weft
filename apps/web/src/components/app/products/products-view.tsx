@@ -43,6 +43,14 @@ function useAll<T extends { id: string }>(path: PagedPath): { rows: T[] | null; 
 
 const human = (s: string) => s.replace(/_/g, " ");
 const dollars = (c: number | undefined) => (c === undefined ? "-" : `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+/** The payroll pretax treatment of a plan, as words ("section125_medical" is "Section 125 pre-tax"). */
+export const PRETAX_WORDS: Record<string, string> = { section125_medical: "Section 125 pre-tax", hsa_cafeteria: "HSA pre-tax", "401k_traditional": "Traditional 401(k)" };
+/** A 401(k) match as the plan states it: "Match 100% up to 4%". */
+function matchText(m: Record<string, unknown>): string {
+  const pct = (bps: unknown) => (typeof bps === "number" ? `${Number((bps / 100).toFixed(2))}%` : null);
+  const rate = pct(m.match_bps); const cap = pct(m.up_to_bps);
+  return rate && cap ? `Match ${rate} up to ${cap}` : "Employer match";
+}
 const PLAN_TYPE: Record<string, string> = { medical: "Medical", dental: "Dental", vision: "Vision", hsa: "HSA", "401k": "401(k)", fsa: "FSA" };
 const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace (sim)", chat: "Chat (sim)", github: "Code host (sim)" };
 
@@ -77,10 +85,10 @@ export function BenefitsView() {
                 <TBody>
                   {list.map((p) => (
                     <TR key={p.id} data-testid={`benefit-plan-${p.id}`}>
-                      <TD className="h-12 py-1.5"><div className="font-medium">{p.name}</div><div className="text-1 text-gray-10">{p.carrier} · <code className="font-mono text-0">{p.pretaxCode}</code></div></TD>
+                      <TD className="h-12 py-1.5"><div className="font-medium">{p.name}</div><div className="text-1 text-gray-10">{p.carrier} · {PRETAX_WORDS[p.pretaxCode] ?? human(p.pretaxCode)}</div></TD>
                       <TD className="h-12">{PLAN_TYPE[p.type] ?? human(p.type)}</TD>
-                      <TD numeric className="h-12">{p.prices.ee !== undefined ? dollars(p.prices.ee) : p.match ? <span className="text-gray-11">Employer match</span> : "-"}</TD>
-                      <TD numeric className="h-12">{dollars(p.prices.employer)}</TD>
+                      <TD numeric className="h-12">{dollars(p.prices.ee)}</TD>
+                      <TD numeric className="h-12">{p.prices.employer === undefined && p.match ? <span className="text-gray-11">{matchText(p.match)}</span> : dollars(p.prices.employer)}</TD>
                       <TD numeric className="h-12">{enr.rows ? count(p.id) : "..."}</TD>
                     </TR>
                   ))}
