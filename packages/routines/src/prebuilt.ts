@@ -40,7 +40,7 @@ export const RT_PRE_PAYROLL: RoutineDef = {
   id: "rt_pre_payroll", name: "Pre-payroll review",
   description: "On the approval-deadline day of a draft pay run, explain every flagged paycheck from its evidence and propose submitting the run without blocked paychecks.",
   ownerPrincipalId: OWNER, enabled: true, autonomy: "approve", trigger: { type: "cron", cron: "0 9 * * 1-5", tz: TZ }, filter: null,
-  instructions: "Read the flagged rows, then in one batch explain every flagged paycheck with payroll.explain_flags (one item per paycheck covering all of its flags; quote only evidence amounts) and propose payroll.submit_run with the derived arguments. Then write a short final message.",
+  instructions: "Read the flagged rows, then in one batch explain every flagged paycheck with payroll.explain_flags (quote only evidence amounts) and propose payroll.submit_run with the derived arguments. Then write a short final message.",
   tools: ["payroll.get_run", "people.get", "actions.list", "payroll.explain_flags", "payroll.submit_run", "agent.read_artifact"],
   precheck: "pre_payroll",
   checklist: [
