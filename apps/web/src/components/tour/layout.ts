@@ -101,6 +101,17 @@ export function appLayerRects(): Rect[] {
   return out;
 }
 
+/** Closes the newest open app popover (not the tour's card) through its trigger; false when none is open. */
+export function closeAppPopover(): boolean {
+  const open = [...document.querySelectorAll<HTMLElement>("[data-radix-popper-content-wrapper]")].filter((w) => !w.querySelector("[data-tour-card]"));
+  for (const w of open.reverse()) {
+    const id = w.firstElementChild?.id;
+    const trigger = id ? document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(id)}"][aria-expanded="true"]`) : null;
+    if (trigger) { trigger.click(); return true; }
+  }
+  return false;
+}
+
 /** The visible part of an element (null when it is gone, empty, clipped away or hidden under another layer). */
 export function visibleRect(el: Element | null): Rect | null {
   if (!el || !el.isConnected) return null;

@@ -1,6 +1,6 @@
 // The tour's ring and card geometry (owner: tour). Pure: no DOM, no React.
 import { describe, expect, it } from "vitest";
-import { overlapArea, placeCard, ringBox, type Rect } from "../src/components/tour/geometry";
+import { overlapArea, placeCard, ringBox, sheetEdge, tightSides, type Rect } from "../src/components/tour/geometry";
 import { sideOrder } from "../src/components/tour/tour-card";
 
 const r = (left: number, top: number, right: number, bottom: number): Rect => ({ left, top, right, bottom });
@@ -77,5 +77,42 @@ describe("placeCard", () => {
 
   it("is null when the column is narrower than the card (the caller docks a sheet)", () => {
     expect(placeCard({ target: r(10, 100, 200, 140), card, bounds: r(0, 0, 300, 800), obstacles: [], avoid: [], order: ["bottom"] })).toBeNull();
+  });
+});
+
+describe("sheetEdge (phone sheet)", () => {
+  const vp = { width: 390, height: 844, headerH: 48 };
+  const R = (left: number, top: number, right: number, bottom: number): Rect => ({ left, top, right, bottom });
+  it("keeps the step's edge when it covers nothing", () => {
+    expect(sheetEdge("top", R(16, 600, 374, 700), [], 220, vp)).toEqual({ top: true, under: false });
+    expect(sheetEdge("bottom", R(16, 80, 374, 200), [], 220, vp)).toEqual({ top: false, under: false });
+  });
+  it("moves to the other edge when the chart it rings would sit under the top sheet", () => {
+    // The chart lands at the top of the agent thread: title and legend under a top sheet, the bottom edge is clear.
+    expect(sheetEdge("top", R(16, 240, 374, 560), [], 220, vp)).toEqual({ top: false, under: false });
+  });
+  it("drops under an open menu when neither edge clears it", () => {
+    // The Viewing as menu runs from under the header nearly to the bottom: it meets both edges.
+    expect(sheetEdge("bottom", R(200, 8, 374, 40), [R(40, 96, 374, 700)], 220, vp)).toEqual({ top: false, under: true });
+  });
+  it("moves off an open menu when the other edge is clear", () => {
+    expect(sheetEdge("bottom", R(200, 8, 374, 40), [R(40, 300, 374, 640)], 220, vp)).toEqual({ top: true, under: false });
+  });
+});
+
+describe("tightSides", () => {
+  const r = (left: number, top: number, right: number, bottom: number): Rect => ({ left, top, right, bottom });
+  it("names the sides a clipping parent squeezed while the target is visible there", () => {
+    // The matrix's scroll box ends at the agent row's left and bottom edges.
+    const t = r(282, 380, 900, 424), clip = r(282, 100, 1000, 424);
+    const rb = ringBox(t, clip, 4)!;
+    expect(rb.clipped).toEqual([]);
+    expect(tightSides(t, rb.box, rb.clipped, 4)).toEqual(["bottom", "left"]);
+  });
+  it("is empty with room on every side, and never names a side the target runs past", () => {
+    const t = r(100, 100, 300, 200);
+    expect(tightSides(t, ringBox(t, r(0, 48, 1000, 800), 4)!.box, [], 4)).toEqual([]);
+    const long = r(100, 20, 300, 900), rb = ringBox(long, r(0, 48, 1000, 800), 4)!;
+    expect(tightSides(long, rb.box, rb.clipped, 4)).toEqual([]);
   });
 });

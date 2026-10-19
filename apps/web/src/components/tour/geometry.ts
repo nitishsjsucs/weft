@@ -40,6 +40,16 @@ export function ringBox(target: Rect, clip: Rect, pad: number): { box: Rect; cli
   return { box, clipped };
 }
 
+/**
+ * Sides where an overflow-clipping parent took the ring's pad away although the target itself is fully visible there
+ * (a matrix row at the scroll box's edge): a border drawn there would run along the target's own edge, so the ring
+ * draws only its inset halo on those sides.
+ */
+export function tightSides(target: Rect, box: Rect, clipped: Side[], pad: number): Side[] {
+  const room: Record<Side, number> = { top: target.top - box.top, right: box.right - target.right, bottom: box.bottom - target.bottom, left: target.left - box.left };
+  return (["top", "right", "bottom", "left"] as const).filter((sd) => !clipped.includes(sd) && room[sd] < pad - 1);
+}
+
 export interface PlaceInput {
   /** The visible part of the target, or null for an unanchored card. */
   target: Rect | null;
@@ -137,4 +147,21 @@ export function placeCard(i: PlaceInput): Placement | null {
   }
   if (!best) return null;
   return { left: best.left, top: best.top, side: best.side, cost: best.cost, ...(best.w !== W ? { width: best.w } : {}) };
+}
+
+/**
+ * Which edge a phone sheet docks to: the step's own edge, unless the sheet there would cover the target or an open
+ * app layer (a menu, a popover) and the other edge is clear of both. With no clear edge it keeps its edge and, when it
+ * would cover an open layer, drops under the app's layers (z 49), as the anchored card does. The sheet spans the
+ * window inside 16 px gutters, below the header at the top or 16 px above the bottom.
+ */
+export function sheetEdge(pref: "top" | "bottom", target: Rect | null, layers: Rect[], height: number, vp: { width: number; height: number; headerH: number }): { top: boolean; under: boolean } {
+  const at = (top: boolean): Rect => (top
+    ? { left: 16, top: vp.headerH + 8, right: vp.width - 16, bottom: vp.headerH + 8 + height }
+    : { left: 16, top: vp.height - 16 - height, right: vp.width - 16, bottom: vp.height - 16 });
+  const layerCost = (r: Rect) => layers.reduce((n, o) => n + overlapArea(r, o), 0);
+  const cost = (r: Rect) => (target ? overlapArea(r, target) : 0) + layerCost(r);
+  const mine = at(pref === "top"), other = at(pref !== "top");
+  const flip = cost(mine) > 1 && cost(other) <= 1;
+  return { top: flip ? pref !== "top" : pref === "top", under: layerCost(flip ? other : mine) > 1 };
 }

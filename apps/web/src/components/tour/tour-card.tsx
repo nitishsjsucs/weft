@@ -10,8 +10,8 @@ import { Pause, Play, X } from "lucide-react";
 import { Button, Kbd, ShimmerText } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TOUR_STEPS, type TourStep } from "./steps";
-import { overlapArea, placeCard, sameRect, type Rect, type Side } from "./geometry";
-import { appLayerRects, contentBounds, occluded, useFrameValue, visibleRect } from "./layout";
+import { overlapArea, placeCard, sameRect, sheetEdge, type Rect, type Side } from "./geometry";
+import { appLayerRects, closeAppPopover, contentBounds, occluded, useFrameValue, visibleRect } from "./layout";
 
 export type StatusTone = "working" | "waiting" | "done" | "error" | "muted";
 
@@ -138,6 +138,11 @@ function Inner({ v, h }: { v: CardView; h: CardHandlers }) {
   );
 }
 
+/** The window and header the phone sheet docks against. */
+function sheetViewport(): { width: number; height: number; headerH: number } {
+  return { width: document.documentElement.clientWidth, height: window.innerHeight, headerH: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-header-h")) || 48 };
+}
+
 function dataAttrs(v: CardView) {
   return { "data-tour-card": "", "data-step": v.step.id, "data-ready": v.ready ? "true" : "false", "data-target-found": v.found ? "true" : "false", "data-target-match": v.match ?? "", "data-sheet": v.sheet ?? "" };
 }
@@ -156,6 +161,8 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
     return () => ro.disconnect();
   }, [cardEl]);
   const scene = useFrameValue(() => (anchored ? readScene(v.target, v.marks, v.avoid) : null), sameScene, [anchored, v.target, v.marks, v.avoid.join("|")]);
+  // A phone sheet reads the same scene (the target and the open app layers), so it can move off what it would cover.
+  const sheetScene = useFrameValue(() => (!anchored && v.sheet ? readScene(v.target, [], []) : null), sameScene, [anchored, v.sheet, v.target]);
   const prevSide = useRef<Side | "free" | null>(null);
   // The natural width (360 px), not the measured one, so a card narrowed to fit beside one target widens again.
   const natural = typeof window !== "undefined" ? Math.min(360, document.documentElement.clientWidth - 24) : 360;
@@ -200,8 +207,9 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
   if (!anchored || !place) {
     const t = scene?.target;
     const lower = !!t && t.top + (t.bottom - t.top) / 2 > (typeof window !== "undefined" ? window.innerHeight / 2 : 0);
+    const edge = v.sheet && sheetScene && typeof window !== "undefined" ? sheetEdge(v.sheet, sheetScene.target, sheetScene.obstacles, size.height, sheetViewport()) : { top: v.sheet ? v.sheet === "top" : lower, under: false };
     return (
-      <FixedSheet v={v} h={h} common={common} top={v.sheet ? v.sheet === "top" : lower} bounds={v.sheet ? null : (scene?.bounds ?? (typeof window !== "undefined" ? contentBounds(null) : null))} cardRef={setCardEl}>
+      <FixedSheet v={v} h={h} common={common} top={edge.top} under={edge.under} bounds={v.sheet ? null : (scene?.bounds ?? (typeof window !== "undefined" ? contentBounds(null) : null))} cardRef={setCardEl}>
         <Inner v={v} h={h} />
       </FixedSheet>
     );
@@ -226,7 +234,10 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
           updatePositionStrategy="always"
           onOpenAutoFocus={(e) => e.preventDefault()}
           onCloseAutoFocus={(e) => e.preventDefault()}
-          onEscapeKeyDown={(e) => { e.preventDefault(); h.onExit(); }}
+          // The card is a Radix layer too: when it mounted after the popover the step opened (the payroll flag), it is the
+          // top layer and gets Escape first. Escape closes that popover, as it does any layer opened later; only then
+          // does it exit.
+          onEscapeKeyDown={(e) => { e.preventDefault(); if (!closeAppPopover()) h.onExit(); }}
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
           onFocusOutside={(e) => e.preventDefault()}
@@ -244,7 +255,7 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
   );
 }
 
-function FixedSheet({ v, h, common, top, bounds, cardRef, children }: { v: CardView; h: CardHandlers; common: Record<string, (e: React.FocusEvent) => void>; top: boolean; bounds: Rect | null; cardRef: (el: HTMLElement | null) => void; children: ReactNode }) {
+function FixedSheet({ v, h, common, top, under, bounds, cardRef, children }: { v: CardView; h: CardHandlers; common: Record<string, (e: React.FocusEvent) => void>; top: boolean; under: boolean; bounds: Rect | null; cardRef: (el: HTMLElement | null) => void; children: ReactNode }) {
   const pos = top
     ? "top-[calc(var(--app-header-h,48px)+8px+env(safe-area-inset-top))]"
     : "bottom-[calc(16px+env(safe-area-inset-bottom))]";
@@ -256,6 +267,8 @@ function FixedSheet({ v, h, common, top, bounds, cardRef, children }: { v: CardV
       ref={cardRef}
       {...dataAttrs(v)} {...common}
       data-place="sheet"
+      data-sheet-edge={v.sheet ? (top ? "top" : "bottom") : undefined}
+      data-under-layer={under ? "true" : undefined}
       role="dialog"
       aria-modal="false"
       aria-labelledby={h.titleId}
@@ -263,7 +276,7 @@ function FixedSheet({ v, h, common, top, bounds, cardRef, children }: { v: CardV
       style={{ pointerEvents: "auto", ...(left !== null ? { left } : {}) }}
       className={cn(
         cardClass,
-        "fixed z-[70]",
+        "fixed", under ? "z-[49]" : "z-[70]",
         v.sheet ? cn("inset-x-4 max-h-[50dvh] overflow-y-auto", pos) : cn("w-[min(360px,calc(100vw-24px))] -translate-x-1/2", left === null && "left-1/2", pos),
       )}
     >

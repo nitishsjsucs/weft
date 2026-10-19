@@ -169,3 +169,39 @@ for (const [width, height] of [[1280, 800], [1440, 900]] as const) {
     });
   });
 }
+
+// With no clean spot left (a flag lower in the group opens a tall popover on a short laptop screen) the card drops
+// under the app's layers. Radix copies the content's z-index to its wrapper only once, so the drop has to reach the
+// wrapper: every popover the person opens paints over the card, never the reverse.
+for (const [width, height] of [[1280, 800], [1366, 768]] as const) {
+  test.describe(`${width}x${height}, every flag in the group`, () => {
+    test.use({ viewport: { width, height } });
+
+    test("payroll flags: the card never paints over a flag popover the person opens", async ({ page, world }) => {
+      test.skip(!world.rich, "the flags are on the rich world's draft");
+      await page.addInitScript(() => { try { localStorage.setItem("weft.agentOpen", "1"); } catch { /* blocked */ } });
+      await openStep(page, "payroll-flags");
+      const chips = page.locator('[data-tour~="payroll-needs-review"] [data-tour~="payroll-flag"]');
+      const n = await chips.count();
+      expect(n, "flags in the Needs Review group").toBeGreaterThan(3);
+      let overlapped = 0;
+      for (let i = 0; i < n; i++) {
+        // Close the open popover first (Escape closes the app layer, never the tour), then open this flag.
+        if (await page.locator("[data-radix-popper-content-wrapper]:not(:has([data-tour-card]))").count()) await page.keyboard.press("Escape");
+        await chips.nth(i).scrollIntoViewIfNeeded();
+        await chips.nth(i).evaluate((el) => (el as HTMLElement).click());
+        await page.waitForTimeout(350);
+        const s = await scene(page);
+        const pop = s.layers.find((l) => l.z === 50);
+        expect(pop, `flag ${i}: its popover is open`).toBeTruthy();
+        await expect(readyCard(page, "payroll-flags")).toBeVisible();
+        if (overlap(s.card, pop!.rect) > 1) {
+          overlapped++;
+          expect(s.cardZ, `flag ${i}: the card over the popover`).toBeLessThan(pop!.z);
+          await expect(page.locator("[data-tour-card]")).toHaveAttribute("data-under-layer", "true");
+        }
+      }
+      console.log(`${width}x${height}: ${n} flags, the card under ${overlapped} popovers`);
+    });
+  });
+}

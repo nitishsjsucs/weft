@@ -4,10 +4,10 @@
 // target's own layer: z 45 for page content, so popovers, menus and drawers (z 50) the step opens sit on top of it.
 // A side where the target runs on past the visible area fades out instead of drawing an edge. A target hidden under
 // another layer (the phone's agent sheet) gets no ring. Secondary marks get a dashed outline. No dimming scrim.
-import { intersect, rectOf, ringBox, sameRect, type Rect, type Side } from "./geometry";
+import { intersect, rectOf, ringBox, sameRect, tightSides, type Rect, type Side } from "./geometry";
 import { clipRectOf, layerZOf, occluded, ringZFor, useFrameValue } from "./layout";
 
-export interface RingMeasure { box: Rect; clipped: Side[]; z: number }
+export interface RingMeasure { box: Rect; clipped: Side[]; tight: Side[]; z: number }
 
 function measure(el: Element | null, pad: number): RingMeasure | null {
   if (!el || !el.isConnected) return null;
@@ -17,11 +17,11 @@ function measure(el: Element | null, pad: number): RingMeasure | null {
   const rb = ringBox(r, clip, pad);
   const vis = intersect(rectOf(r), clip);
   if (!rb || !vis || occluded(el, vis)) return null;
-  return { box: rb.box, clipped: rb.clipped, z: ringZFor(layerZOf(el)) };
+  return { box: rb.box, clipped: rb.clipped, tight: tightSides(rectOf(r), rb.box, rb.clipped, pad), z: ringZFor(layerZOf(el)) };
 }
 
 const same = (a: RingMeasure | null, b: RingMeasure | null): boolean =>
-  a === b || (!!a && !!b && a.z === b.z && a.clipped.join() === b.clipped.join() && sameRect(a.box, b.box));
+  a === b || (!!a && !!b && a.z === b.z && a.clipped.join() === b.clipped.join() && a.tight.join() === b.tight.join() && sameRect(a.box, b.box));
 
 /** The ring box for an element, re-read every frame; null when it is gone, clipped away or hidden. */
 export function useRing(el: Element | null, pad: number): RingMeasure | null {
@@ -37,6 +37,8 @@ const FADE: Record<Side, string> = {
 
 function styleOf(m: RingMeasure): React.CSSProperties {
   const s: React.CSSProperties = { top: m.box.top, left: m.box.left, width: m.box.right - m.box.left, height: m.box.bottom - m.box.top, zIndex: m.z };
+  // A side whose pad a clipping parent took away keeps only the inset halo, so no border runs along the target's edge.
+  for (const t of m.tight) (s as Record<string, unknown>)[`border${t[0]!.toUpperCase()}${t.slice(1)}Color`] = "transparent";
   if (m.clipped.length) {
     const mask = m.clipped.map((c) => FADE[c]).join(", ");
     Object.assign(s, { maskImage: mask, WebkitMaskImage: mask, maskComposite: "intersect", WebkitMaskComposite: "source-in" });
@@ -58,6 +60,7 @@ export function TourRing({ target, found, secondary }: { target: Element | null;
           data-tour-ring=""
           data-target-found={found ? "true" : "false"}
           data-clip={m.clipped.join(" ")}
+          data-tight={m.tight.join(" ")}
           className="weft-tour-ring pointer-events-none fixed rounded-[10px]"
           style={styleOf(m)}
         />

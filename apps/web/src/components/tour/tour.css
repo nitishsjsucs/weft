@@ -1,9 +1,10 @@
 /* Guided tour (owner: tour). tokens.css is frozen, so the tour's own keyframes live here; the card reuses weft-pop.
    The ring stays within 4 px of its target: a 2 px border plus a 2 px inset halo inside the 4 px pad, so it never
    paints over the text next to the target. */
+/* The pulse fades the whole ring rather than its border color, so a side drawn halo only (data-tight) stays that way. */
 @keyframes weft-tour-pulse {
-  0%, 100% { border-color: var(--accent-9); }
-  50% { border-color: color-mix(in oklab, var(--accent-9) 45%, transparent); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
 }
 .weft-tour-ring {
   border: 2px solid var(--accent-9);
@@ -16,3 +17,6 @@
   .weft-tour-ring { animation: none; }
   .weft-tour-card { animation: none; }
 }
+/* Radix Popper copies the content's z-index to its wrapper (the stacking context) once, when the content mounts, so
+   the card's switch to under the app's layers (data-under-layer, no clean spot left) has to reach the wrapper here. */
+[data-radix-popper-content-wrapper]:has(> [data-tour-card][data-under-layer="true"]) { z-index: 49 !important; }
