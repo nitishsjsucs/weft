@@ -35,7 +35,7 @@ export type TourEvent =
   | { type: "reset-done"; at: number }
   | { type: "reset-skip"; at: number }
   | { type: "reset-cancel" }
-  | { type: "resume"; persisted: TourPersisted }
+  | { type: "resume"; persisted: TourPersisted; auto?: boolean }
   | { type: "resume-accept" }
   | { type: "phase"; phase: TourPhase }
   | { type: "next" }
@@ -72,7 +72,8 @@ export function reduce(s: TourState, e: TourEvent): TourState {
       // Cancel from the menu or the close step: back to wherever we were (a running tour keeps going, else idle).
       return { ...s, status: s.resetReturn, resetFrom: null, resetReasons: [] };
     case "resume":
-      return { ...IDLE, ...e.persisted, stepId: validId(e.persisted.stepId), status: "resume", phase: "navigating" };
+      // auto: the reload was the tour's own navigation (Next fell back to a full page load), so it carries on.
+      return { ...IDLE, ...e.persisted, stepId: validId(e.persisted.stepId), status: e.auto ? "running" : "resume", phase: "navigating" };
     case "resume-accept":
       return s.status === "resume" ? { ...s, status: "running", phase: "navigating" } : s;
     case "phase":
@@ -131,7 +132,31 @@ export function loadTour(store: StorageLike | null): TourPersisted | null {
   } catch { return null; }
 }
 
-export function clearTour(store: StorageLike | null): void { try { store?.removeItem(TOUR_STATE_KEY); } catch { /* blocked */ } }
+// ---- the tour's own navigations ------------------------------------------------------------------------------
+
+/** sessionStorage key for the route change the tour just asked for, so a full page load it caused is not a "resume". */
+export const TOUR_NAV_KEY = "weft.tour.nav";
+/** How long after a tour navigation a page load still counts as that navigation. */
+export const OWN_NAV_MS = 30_000;
+
+export function markNavigation(store: StorageLike | null, path: string, at: number): void {
+  try { store?.setItem(TOUR_NAV_KEY, JSON.stringify({ path, at })); } catch { /* blocked */ }
+}
+
+/** Reads and clears the navigation mark: true when this page load is the tour's own hop to `pathname`. */
+export function takeOwnNavigation(store: StorageLike | null, pathname: string, now: number): boolean {
+  try {
+    const raw = store?.getItem(TOUR_NAV_KEY);
+    store?.removeItem(TOUR_NAV_KEY);
+    if (!raw) return false;
+    const v = JSON.parse(raw) as { path?: unknown; at?: unknown };
+    return v.path === pathname && typeof v.at === "number" && now - v.at >= 0 && now - v.at <= OWN_NAV_MS;
+  } catch { return false; }
+}
+
+export function clearNavigation(store: StorageLike | null): void { try { store?.removeItem(TOUR_NAV_KEY); } catch { /* blocked */ } }
+
+export function clearTour(store: StorageLike | null): void { try { store?.removeItem(TOUR_STATE_KEY); store?.removeItem(TOUR_NAV_KEY); } catch { /* blocked */ } }
 export function markSeen(store: StorageLike | null): void { try { store?.setItem(TOUR_SEEN_KEY, "1"); } catch { /* blocked */ } }
 export function hasSeen(store: StorageLike | null): boolean { try { return store?.getItem(TOUR_SEEN_KEY) === "1"; } catch { return true; } }
 

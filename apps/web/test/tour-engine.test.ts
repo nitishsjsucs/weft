@@ -1,8 +1,8 @@
 // The tour's state machine, persistence and preflight (owner: tour), driven with fakes: no router, DOM or API.
 import { describe, expect, it } from "vitest";
 import {
-  clearTour, hasSeen, IDLE, loadTour, markSeen, preflightReasons, readPreflight, reduce, resetErrorText, restorePlan, saveTour,
-  SEED_NOW, type TourEvent, type TourState,
+  clearNavigation, clearTour, hasSeen, IDLE, loadTour, markNavigation, markSeen, OWN_NAV_MS, preflightReasons, readPreflight, reduce,
+  resetErrorText, restorePlan, saveTour, SEED_NOW, takeOwnNavigation, TOUR_NAV_KEY, type TourEvent, type TourState,
 } from "../src/components/tour/engine";
 import { TOUR_RESET_COPY, TOUR_SEEN_KEY, TOUR_STATE_KEY, TOUR_STEPS } from "../src/components/tour/steps";
 
@@ -126,6 +126,30 @@ describe("persistence", () => {
     expect(loadTour(blocked)).toBeNull();
     expect(() => clearTour(blocked)).not.toThrow();
     expect(hasSeen(blocked)).toBe(true);
+  });
+
+  it("carries on by itself after a full page load the tour caused, and only then", () => {
+    const store = new FakeStorage();
+    const s = run([start, { type: "preflight-done", reasons: [] }, { type: "goto", stepId: "memory" }]);
+    saveTour(store, s);
+    // The tour pushed /app/memory and Next fell back to a document load: same path, within the window.
+    markNavigation(store, "/app/memory", 5_000);
+    expect(takeOwnNavigation(store, "/app/memory", 6_000)).toBe(true);
+    expect(store.getItem(TOUR_NAV_KEY), "the mark is used once").toBeNull();
+    expect(reduce(IDLE, { type: "resume", persisted: loadTour(store)!, auto: true })).toMatchObject({ status: "running", stepId: "memory" });
+    // A person's own reload (no mark), a different page, or a stale mark asks first.
+    expect(takeOwnNavigation(store, "/app/memory", 6_000)).toBe(false);
+    markNavigation(store, "/app/memory", 5_000);
+    expect(takeOwnNavigation(store, "/app/routines", 6_000)).toBe(false);
+    markNavigation(store, "/app/memory", 5_000);
+    expect(takeOwnNavigation(store, "/app/memory", 5_000 + OWN_NAV_MS + 1)).toBe(false);
+    expect(reduce(IDLE, { type: "resume", persisted: loadTour(store)!, auto: false }).status).toBe("resume");
+    // Exit clears the mark with the state; blocked storage never throws.
+    markNavigation(store, "/app/memory", 5_000);
+    clearTour(store);
+    expect(store.getItem(TOUR_NAV_KEY)).toBeNull();
+    expect(() => { markNavigation(blocked, "/app", 1); clearNavigation(blocked); }).not.toThrow();
+    expect(takeOwnNavigation(blocked, "/app", 1)).toBe(false);
   });
 
   it("marks the tour seen", () => {
