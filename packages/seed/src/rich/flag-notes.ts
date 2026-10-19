@@ -69,7 +69,8 @@ export function flagNote(f: Flag, facts: NoteFacts): string {
       const w4 = e.has_w4 === false ? " No W-4 is on file yet." : "";
       const open = facts.openOnboarding.map((k) => TASK[k] ?? k.replaceAll("_", " "));
       const ctx = !facts.hasOnboarding ? "" : open.length ? ` Onboarding is not finished: ${joinAnd(open)} ${open.length === 1 ? "is" : "are"} still open.` : " Onboarding is complete.";
-      return `First paycheck on this schedule; started ${day(e.start_date, y)}.${w4}${ctx}`;
+      // The headline and the evidence already give the start date, so the note does not repeat it.
+      return `First paycheck on this schedule.${w4}${ctx}`;
     }
     case "PRORATED":
       return e.end_date

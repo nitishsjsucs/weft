@@ -125,3 +125,42 @@ sidebar, the card over the docked agent panel) came from three engine gaps. Fixe
   panel docked (ring encloses the visible target and hugs it within 6 px on 16 steps; no card over the target, an
   open layer, the sidebar or the panel; the flag popover paints over the ring, checked by hit-testing the ring's edge,
   and stays inside main; the ring follows a style-only move; the env pill's three popovers and menu).
+
+## Review round 2 fixes (tp/merged, 2026-10-18)
+
+The QA pass on tp/merged at 1280x800, 1366x768, 1440x900, 1512x982 and 390x844 found these; all fixed at display
+time or in the rich layer, so base digests, base e2e and eval digests are unchanged:
+
+- The card's drop under the app's layers never reached its stacking context: Radix Popper copies the content's
+  z-index to `[data-radix-popper-content-wrapper]` once, when the content mounts, so the wrapper stayed at 70 and the
+  card's corner painted over a flag popover lower in the group. `tour.css` sets the wrapper to 49 whenever it holds a
+  card with `data-under-layer`. `tour-layout.spec.ts` now opens every flag in the Needs Review group at 1280x800 and
+  1366x768 and checks the card is under any popover it overlaps.
+- Escape at step 10 exited the tour instead of closing the flag popover the step opened: the card is a Radix layer
+  that mounts after that popover, so it was the top layer and got Escape first. The card now closes an open app
+  popover through its trigger (`closeAppPopover` in `layout.ts`) and exits only when none is open; the flag sweep
+  above presses Escape between flags, so it covers this.
+- The phone sheet reads the target and the open app layers every frame (`sheetEdge` in `geometry.ts`, unit-tested):
+  it moves to the other edge when its own covers the target or an open menu and the other edge is clear (the chart's
+  head at step 11), and drops under the layers (z 49) when no edge clears an open menu (the Viewing as menu at step
+  2). `data-sheet` still names the step's edge; `data-sheet-edge` is where the sheet is.
+- One display helper for server text, `apps/web/src/components/app/copy.ts`: `humanCopy` (moved from `flag-text.ts`),
+  `humanLine` (step lines, routine summaries, proposal headlines: a payroll run id reads as "the Oct 30 run", an id
+  after the noun it names goes, a bare id becomes its noun, parenthesized id lists and "(#n)" go), `humanDateText` and
+  `humanDateLists` (a run of days is "Nov 23 to Nov 25"), and `enumWords` ("in review to resolved"). Used by the agent
+  panel's step lines, a routine run's summary (a chat answer keeps the result id it cites, which GP5 pins), the
+  approval card and the Inbox card's headline and diff, the time-off coverage line, the expense policy checks, the
+  payroll page's "compared with the Oct 15 run" and the rate table's source ("DE 2088 notice", "audit #229").
+- `humanDates` formatted no date followed by a colon, so the chart step line read "Nov 1 to 2026-10-26: 10 months"; only
+  a colon and digits (a time) excludes a date now.
+- The Inbox card's routine run id sits behind the word Routine (a `details` disclosure), and a linked evidence chip
+  shows its label, not the raw ref (the link and its title carry it). The expense drawer's subtitle drops the id.
+- Rich layer: the NEW_IN_RUN note no longer repeats the start date (the headline and the evidence give it), the
+  seeded submit proposal's evidence names the excluded person, and the seeded chat answer says "a gross change flag".
+- The ring draws only its inset halo on a side whose pad an overflow-clipping parent took away (`tightSides`,
+  `data-tight`), so at step 20 no border runs along the agent row's own edge. The pulse fades the ring's opacity
+  instead of its border color, so that side stays halo only.
+
+Left: steps 5 and 18 still ring targets with no inner padding (the halo sits 2 to 3 px from the label); the chat
+system prompt still lets a live answer cite a result id ("Source: res_0234"), since the drafting rule and GP5 ask for
+cited ids; the expense drawer is still a full-height modal over the docked agent panel (app behavior).

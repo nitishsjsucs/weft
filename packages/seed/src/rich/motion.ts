@@ -140,7 +140,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
     }
     await L.proposal({ at: pt("2026-10-23", 9, 1), command: "payroll.submit_run", args: { run_id: draft.id, exclude_blocked: true }, subjectRef: draft.id, risk: "R4", domain: "payroll", moneyCents: cost ?? undefined,
       status: "pending", headline: `Submit the ${period} payroll (payday ${day(draft.payday, year)})`, runId: r.runId, routineRunId: r.routineRunId,
-      expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: [{ label: "Pay run", ref: draft.id }, ...flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => ({ label: "Excluded worker", ref: x.pc.workerId }))],
+      expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: [{ label: "Pay run", ref: draft.id }, ...flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => ({ label: `Excluded: ${names.get(x.pc.workerId) ?? "a blocked paycheck"}`, ref: x.pc.workerId }))],
       diff: [{ label: "Status", before: "draft", after: "processing" }, { label: "Excluded (blocked)", before: "none", after: blocked.length ? joinAnd(blocked) : "none" }] });
   }
   void ws;

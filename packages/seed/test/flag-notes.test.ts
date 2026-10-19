@@ -15,14 +15,14 @@ const gross = (extra: Record<string, unknown>, pct = "18.0"): Flag => ({ rule: "
   worker_id: "wrk_0026", previous_gross_cents: 491667, previous_gross_display: "$4,916.67", gross_cents: 580167, gross_display: "$5,801.67", change_pct: pct, pay_rate_id: null, created_action_seq: null, ...extra } });
 
 describe("rich flag notes", () => {
-  it("writes one line per flag in flag order, states the start date once and never shows an id or ISO date", () => {
+  it("writes one line per flag in flag order, leaves the start date to the headline and evidence and never shows an id or ISO date", () => {
     const text = paycheckNote(mira, facts({ openOnboarding: ["direct_deposit", "i9_sim", "benefits_selection"], reminded: true, submitExcludesBlocked: true }));
     const lines = text.split("\n");
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toBe("First paycheck on this schedule; started Oct 19. Onboarding is not finished: direct deposit, the I-9 and benefits selection are still open.");
+    expect(lines[0]).toBe("First paycheck on this schedule. Onboarding is not finished: direct deposit, the I-9 and benefits selection are still open.");
     expect(lines[1]).toBe("Paid for 10 of 11 working days, counted from the start date. Expected for a partial first period.");
     expect(lines[2]).toBe("No active bank account, so this paycheck is blocked until direct deposit is set up. The onboarding nudge reminded Mira Delgado (demo) to add one. The proposed submit leaves this paycheck out until it is on file.");
-    expect(text.match(/Oct 19/g)).toHaveLength(1);
+    expect(text).not.toMatch(/Oct 19|started/);
     expect(text).not.toMatch(/\b[a-z]{2,4}_\d{4}\b|\d{4}-\d{2}-\d{2}/);
     expect(payroll.groundExplanation(text, mira, { gross_cents: 393939, net_cents: 300000, hours_x100: null }).ok).toBe(true);
   });
@@ -30,7 +30,7 @@ describe("rich flag notes", () => {
   it("calls onboarding complete only when every task is done, and says nothing about it without a checklist", () => {
     expect(flagNote(mira[0]!, facts())).toContain("Onboarding is complete.");
     expect(flagNote(mira[0]!, facts({ openOnboarding: ["i9_sim"] }))).toContain("the I-9 is still open");
-    expect(flagNote(mira[0]!, facts({ hasOnboarding: false }))).toBe("First paycheck on this schedule; started Oct 19.");
+    expect(flagNote(mira[0]!, facts({ hasOnboarding: false }))).toBe("First paycheck on this schedule.");
     expect(flagNote({ ...mira[0]!, evidence: { ...mira[0]!.evidence, has_w4: false } }, facts({ hasOnboarding: false }))).toContain("No W-4 is on file yet.");
   });
 

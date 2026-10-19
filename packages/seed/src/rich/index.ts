@@ -253,7 +253,7 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
     { at: pt("2026-10-23", 10, 12), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { chart: { kind: "stacked_bar" } } }],
       final: "Payroll cost by month for 2026: January to August from the imported history of the previous provider, September and October from the runs Weft paid. The chart splits each month into gross pay, employer taxes and benefits." },
     { at: pt("2026-10-23", 10, 20), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "payroll__get_paycheck", args: { run_id: "pay_2026_10_30", worker: "Lena Brooks (demo)" }, data: { flags: ["GROSS_CHANGE"] } }, { name: "actions__list", args: { command: "people.set_pay_rate" }, data: { seq: 1 } }],
-      final: "Lena Brooks (demo) is flagged GROSS_CHANGE: her gross changed against the last processed run because the raise in action #1 took effect on Oct 16." },
+      final: "Lena Brooks (demo) has a gross change flag: her gross changed against the last processed run because the raise in action #1 took effect on Oct 16." },
     { at: pt("2026-10-22", 15, 4), trigger: "chat", onBehalfOf: "usr_theo", tools: [], status: "refused",
       final: "I can't approve anything: approvals are human-only and there is no approve tool. Open each card in the Inbox to review the diff, then approve or deny it yourself." },
     { at: pt("2026-10-21", 11, 40), trigger: "chat", onBehalfOf: "usr_sam", tools: [{ name: "time_off__balances", args: { worker: "Dana Whitfield (demo)" }, data: { policies: 2 } }],
