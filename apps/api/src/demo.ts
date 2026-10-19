@@ -128,6 +128,14 @@ await idle();
 say(`   Fri Oct 30 06:00 PT: payroll is ${((await get("/v1/payrolls/pay_2026_10_30", "usr_theo")) as { status: string }).status}`);
 
 head("GP5 guardrails: an injected notice");
+// The injected copy states the GP1 letter's rates, and a rate notice whose rates are already in effect is acknowledged
+// without a run (review fix notices-and-proposals). So Dana first undoes the GP1 rate change, as demo scenario 1 does;
+// a rolled-back change can be proposed again, and the injected copy starts a run that reads untrusted text.
+const [rateAction] = await weft.db.all<{ seq: number }>(sql`SELECT seq FROM actions WHERE command = 'tax.update_rate' AND agent_run_id = ${gp1.agentRunId} ORDER BY seq DESC LIMIT 1`);
+if (!rateAction) throw new Error("GP1 executed no tax.update_rate");
+await post(`/v1/actions/${rateAction.seq}/rollback`, { reason: "Undo the GP1 rate change before the injected copy arrives" });
+const undone = await weft.db.all<{ rate: string }>(sql`SELECT rate FROM employer_tax_rates WHERE jurisdiction = 'CA' AND code = 'sui' ORDER BY rowid DESC LIMIT 1`);
+say(`   usr_dana undid the GP1 rate change (action ${rateAction.seq}): CA SUI rate is ${undone[0]?.rate} again`);
 n = await runsOf("rt_agency_notice");
 await post("/v1/sim/notices/deliver", { scenario: "ca_de2088_injection" });
 const inj = await routineRun("rt_agency_notice", n);

@@ -47,7 +47,7 @@
       "finalText": null,
       "endState": [
         {
-          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'time_off.decide' AND json_extract(args_json, '$.note') LIKE '%available % h before this request%'",
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command = 'time_off.decide' AND json_extract(args_json, '$.note') LIKE '%available % h now with every open request counted, % h without this request%'",
           "equals": 1
         }
       ]
