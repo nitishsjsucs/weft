@@ -8,10 +8,11 @@ import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { ChatChannel, FaultKind, FaultMode, NoticeScenario, NotImplemented, ValidationError, type ChatMessageDto, type HumanSession } from "@weft/contracts";
 import { migrate, withWriteLock } from "@weft/db";
-import { emitEvent, SEED_TIME } from "@weft/core";
+import { emitEvent, hasDomain, SEED_TIME } from "@weft/core";
 import { serialGit } from "@weft/executor";
 import { readSeedProfile, seedWorldProfile, type SeedProfile } from "@weft/seed/profile";
 import type { Weft, WeftEnv } from "../http/context";
+import { viewerScope } from "../http/scope";
 import { SimResetBody } from "../../../../packages/contracts/src/ext/tour";
 
 const AdvanceBody = z.union([
@@ -151,7 +152,12 @@ export function simRoutes(weft: Weft): Hono<WeftEnv> {
       faults: await weft.sims.faults.list(),
       catalog: weft.sims.devices.catalog(),
     };
-    let text = JSON.stringify(state);
+    // A bank batch carries a pay run's total and a device order an IT purchase: a person whose grants close payroll or
+    // IT (a manager) gets the section empty and named in withheld, as GET /v1/payrolls and /v1/it/* refuse them.
+    const scope = await viewerScope(weft, c);
+    const withheld = [...(hasDomain(scope, "payroll") ? [] : ["bankBatches"] as const), ...(hasDomain(scope, "it") ? [] : ["deviceOrders"] as const)];
+    for (const k of withheld) state[k] = [];
+    let text = JSON.stringify(withheld.length ? { ...state, withheld } : state);
     try { text = weft.executor.redact(text); } catch { /* executor stub: nothing to redact yet */ }
     return c.body(text, 200, { "content-type": "application/json" });
   });

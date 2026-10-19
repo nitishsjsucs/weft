@@ -56,6 +56,8 @@ const CHANNELS = ["#people-ops", "#payroll", "#new-hires", "#general"] as const;
  */
 interface SimState {
   registrations?: Row[]; agencyMail?: Row[]; bankBatches?: Row[]; idpAccounts?: Row[] | number; deviceOrders?: Row[];
+  /** Sections the viewer's grants close (a manager: payroll's bank batches, IT's device orders); they arrive empty. */
+  withheld?: ("bankBatches" | "deviceOrders")[];
   faults?: ArmedFault[]; nextEvent?: { at: string; label: string } | null;
 }
 type Row = Record<string, unknown>;
@@ -290,7 +292,7 @@ export function SimulatorsView() {
         </section>
         <section className="min-w-0">
           <CardHeading icon={<FlaskConical />}>Bank batches</CardHeading>
-          <Card className="overflow-hidden"><SimTable kind="bankBatches" testid="sim-bank-batches" rows={s.bankBatches} empty="No batches." /></Card>
+          <Card className="overflow-hidden"><SimTable kind="bankBatches" testid="sim-bank-batches" rows={s.bankBatches} empty={s.withheld?.includes("bankBatches") ? "Bank batches carry pay run totals, which are not shared with your role." : "No batches."} /></Card>
         </section>
         <section className="min-w-0">
           <CardHeading icon={<FlaskConical />}>Identity provider accounts</CardHeading>
@@ -306,7 +308,7 @@ export function SimulatorsView() {
         </section>
         <section className="min-w-0 @min-[68rem]:col-span-2">
           <CardHeading icon={<FlaskConical />}>Device orders</CardHeading>
-          <Card className="overflow-hidden"><SimTable kind="deviceOrders" testid="sim-device-orders" rows={s.deviceOrders} empty="No device orders." /></Card>
+          <Card className="overflow-hidden"><SimTable kind="deviceOrders" testid="sim-device-orders" rows={s.deviceOrders} empty={s.withheld?.includes("deviceOrders") ? "Device orders are not shared with your role." : "No device orders."} /></Card>
         </section>
         <SimInboundControls />
         <section className="min-w-0 @min-[68rem]:col-span-2">

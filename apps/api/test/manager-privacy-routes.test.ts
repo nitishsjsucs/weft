@@ -1,6 +1,7 @@
 // Manager read scope on the routes and reads the first privacy fix left open (docs/review-log.md, fix group
 // manager-privacy, "Left"): payroll, offers, time off, offboarding, background checks, sync items, IT, training,
-// documents and onboarding tasks. Runs on the rich world, where each of these has rows about people outside Imani
+// documents and onboarding tasks; then (demo-perfect round 2) benefits, contractor payouts, the compliance calendar,
+// hand-offs and the simulator state. Runs on the rich world, where each of these has rows about people outside Imani
 // Ferreira (demo)'s reports. A manager (payroll: none, it: none) reads no pay run or paycheck at all, and for anyone
 // outside her reporting chain no leave reason or balance, no offboarding case, no background check, no onboarding
 // task, no document and no offer pay. Dana (admin) still reads everything. Scripted provider only.
@@ -216,6 +217,78 @@ describe("offboarding, background checks, onboarding, documents, training, IT an
     for (const path of [`/v1/agent/runs/${foreign.id}`, `/v1/agent/runs/${foreign.id}/trace`]) expect((await get(IMANI, path)).status, path).toBe(404);
     expect((await get(IMANI, `/v1/agent/runs/${hers[0]!.id}/trace`)).status).toBe(200);
     expect((await get("usr_dana", `/v1/agent/runs/${foreign.id}/trace`)).status).toBe(200);
+  });
+
+  it("benefits elections, premiums and open enrollment: closed by her grants (benefits: none); the plan catalog stays", async () => {
+    for (const path of ["/v1/benefits/enrollments?limit=100", `/v1/benefits/enrollments?workerId=${outsider}`, "/v1/benefits/reconciliation", "/v1/benefits/reconciliation?month=2026-09", "/v1/benefits/open-enrollment"]) {
+      const res = await get(IMANI, path);
+      expect(res.status, path).toBe(403);
+      const body = await res.text();
+      expect(body, path).toContain("NOT_PERMITTED");
+      expect(body, path).not.toMatch(/Cents"|wrk_\d/);
+      expect((await get("usr_dana", path)).status, path).toBe(200);
+    }
+    expect(rowsOf(await json(IMANI, "/v1/benefits/plans")).length).toBeGreaterThan(0);
+    // Dana's reads hold rows about people outside Imani's chain, so the 403 is what keeps them from her.
+    const findings = rowsOf<{ workerId: string | null }>(await json("usr_dana", "/v1/benefits/reconciliation"));
+    expect(findings.some((f) => f.workerId && !mine.has(f.workerId))).toBe(true);
+    expect(rowsOf<{ workerId: string }>(await json("usr_dana", "/v1/benefits/open-enrollment")).some((r) => !mine.has(r.workerId))).toBe(true);
+  });
+
+  it("contractor payouts: closed by her grants (payroll: none), open to Dana and Theo", async () => {
+    const res = await get(IMANI, "/v1/contractors/payouts?limit=100");
+    expect(res.status).toBe(403);
+    const body = await res.text();
+    expect(body).toContain("NOT_PERMITTED");
+    expect(body).not.toMatch(/usdCents|amountMinor/);
+    for (const who of ["usr_dana", "usr_theo"]) expect(rowsOf(await json(who, "/v1/contractors/payouts?limit=100")).length, who).toBeGreaterThan(0);
+  });
+
+  it("compliance calendar: training only for her own record and reports, no contractor forms; company deadlines stay", async () => {
+    type Row = { id: string; kind: string; title: string; subjectRef: string | null };
+    const all = await json<Row[]>("usr_dana", "/v1/compliance/calendar");
+    const hers = await json<Row[]>(IMANI, "/v1/compliance/calendar");
+    const assignments = rowsOf<{ id: string; workerId: string }>(await json("usr_dana", "/v1/training/assignments?limit=100"));
+    const trainee = new Map(assignments.map((a) => [a.id, a.workerId]));
+    const foreign = all.filter((r) => r.kind === "training_due" && !mine.has(trainee.get(r.subjectRef ?? "") ?? ""));
+    expect(foreign.length, "training rows outside her chain").toBeGreaterThan(0);
+    const herIds = new Set(hers.map((r) => r.id));
+    for (const r of foreign) expect(herIds.has(r.id), r.title).toBe(false);
+    for (const r of hers.filter((x) => x.kind === "training_due")) expect(mine.has(trainee.get(r.subjectRef ?? "") ?? ""), r.title).toBe(true);
+    expect(hers.some((r) => r.kind === "contractor_form_expiry")).toBe(false);
+    const company = all.filter((r) => r.kind === "filing" || r.kind === "deposit" || r.kind === "notice_response");
+    expect(company.length).toBeGreaterThan(0);
+    for (const r of company) expect(herIds.has(r.id), r.title).toBe(true);
+    const names = foreign.map((r) => r.title.split(" for ").at(-1)!);
+    const text = JSON.stringify(hers);
+    for (const n of names) expect(text, n).not.toContain(`for ${n}`);
+  });
+
+  it("hand-offs about someone outside her chain are not listed and read as not found; company cases stay", async () => {
+    type Case = { id: string; subjectRef: string | null; workerId: string | null };
+    const all = rowsOf<Case>(await json("usr_dana", "/v1/handoffs?limit=100"));
+    const offerManagers = new Map((await weft.db.select({ id: offers.id, managerId: offers.managerId }).from(offers)).map((o) => [o.id, o.managerId]));
+    const about = (h: Case) => [h.workerId, h.subjectRef].filter((r): r is string => !!r && (r.startsWith("wrk_") || r.startsWith("offr_")));
+    const ok = (h: Case) => about(h).every((r) => (r.startsWith("wrk_") ? mine.has(r) : mine.has(offerManagers.get(r) ?? "")));
+    const foreign = all.filter((h) => !ok(h));
+    expect(foreign.length, "cases about people outside her chain").toBeGreaterThan(0);
+    const hers = rowsOf<Case>(await json(IMANI, "/v1/handoffs?limit=100"));
+    expect(hers.length).toBe(all.length - foreign.length);
+    for (const h of hers) expect(ok(h), h.id).toBe(true);
+    expect(hers.some((h) => about(h).length === 0)).toBe(true);
+    expect((await get(IMANI, `/v1/handoffs/${foreign[0]!.id}`)).status).toBe(404);
+    expect((await get("usr_dana", `/v1/handoffs/${foreign[0]!.id}`)).status).toBe(200);
+  });
+
+  it("the simulator state leaves out pay run totals and device orders for her, and names what it left out", async () => {
+    const dana = await json<{ bankBatches: unknown[]; deviceOrders: unknown[]; withheld?: string[] }>("usr_dana", "/v1/sim/state");
+    expect(dana.bankBatches.length).toBeGreaterThan(0);
+    expect(dana.withheld).toBeUndefined();
+    const hers = await json<{ bankBatches: unknown[]; deviceOrders: unknown[]; withheld?: string[]; registrations: unknown[] }>(IMANI, "/v1/sim/state");
+    expect(hers.bankBatches).toEqual([]);
+    expect(hers.deviceOrders).toEqual([]);
+    expect(hers.withheld).toEqual(["bankBatches", "deviceOrders"]);
+    expect(hers.registrations.length).toBeGreaterThan(0);
   });
 
   it("the People and payroll roles still read every row", async () => {

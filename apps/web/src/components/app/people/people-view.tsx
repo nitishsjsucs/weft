@@ -263,6 +263,11 @@ export function PersonView({ id }: { id: string }) {
   const d = toDetail(w.data);
   const p = d?.worker;
   const [tab, setTab] = useState("profile");
+  // Benefits and IT follow the viewer's grants as well as the reporting chain: a manager (benefits: none, it: none)
+  // reads neither for anyone, so those tabs are not offered and the directory note does not promise them.
+  const can = useCan();
+  const benefits = can("benefits");
+  const it = can("it");
   // The portal's order first (sign the offer before the confidentiality agreement), then the agent's own tasks.
   const list = ((tasks.data ?? []) as { id: string; kind: string; status: "pending" | "done" | "blocked"; owner: string; dueOn: string | null; blockedReason: string | null }[])
     .slice().sort((a, b) => TASK_ORDER.indexOf(a.kind) - TASK_ORDER.indexOf(b.kind));
@@ -277,7 +282,7 @@ export function PersonView({ id }: { id: string }) {
         <Card className="max-w-[560px] p-4" data-testid="person-directory-only">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Directory</h2>
           <Facts rows={[["Title", p.title], ["Department", d.department ?? deptName(p.departmentId)], ["Manager", d.manager ? humanLine(d.manager) : "-"], ["Work state", p.workState ?? "-"]]} />
-          <p className="mt-4 text-[13px] text-gray-11">Pay, bank, tax, benefits, IT, onboarding, documents and time off are shared only for your own record and your direct and indirect reports.</p>
+          <p className="mt-4 text-[13px] text-gray-11">{`Pay, bank, tax, ${benefits ? "benefits, " : ""}${it ? "IT, " : ""}onboarding, documents and time off are shared only for your own record and your direct and indirect reports.`}</p>
         </Card>
       </div>
     );
@@ -307,8 +312,8 @@ export function PersonView({ id }: { id: string }) {
         <TabsList className="mb-4 overflow-x-auto [&>button]:px-2" data-tour="person-tabs">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="pay" data-tour="person-tab" data-tab="pay">Pay and tax</TabsTrigger>
-          <TabsTrigger value="benefits">Benefits</TabsTrigger>
-          <TabsTrigger value="it">IT accounts</TabsTrigger>
+          {benefits ? <TabsTrigger value="benefits">Benefits</TabsTrigger> : null}
+          {it ? <TabsTrigger value="it">IT accounts</TabsTrigger> : null}
           <TabsTrigger value="onboarding">Onboarding {list.length ? <Badge size="xs">{list.filter((t) => t.status !== "done").length}</Badge> : null}</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           {p.type === "employee" ? <TabsTrigger value="time-off" data-testid={W3_TIMEOFF_TID.personTab}>Time off</TabsTrigger> : null}
@@ -323,8 +328,8 @@ export function PersonView({ id }: { id: string }) {
           </div>
         </TabsContent>
         <TabsContent value="pay"><PayTab d={d} /></TabsContent>
-        <TabsContent value="benefits">{tab === "benefits" ? <BenefitsTab id={id} /> : null}</TabsContent>
-        <TabsContent value="it">{tab === "it" ? <ItTab id={id} /> : null}</TabsContent>
+        {benefits ? <TabsContent value="benefits">{tab === "benefits" ? <BenefitsTab id={id} /> : null}</TabsContent> : null}
+        {it ? <TabsContent value="it">{tab === "it" ? <ItTab id={id} /> : null}</TabsContent> : null}
         <TabsContent value="onboarding">{onboarding}</TabsContent>
         <TabsContent value="documents">{tab === "documents" ? <DocumentLibrary workerId={id} /> : null}</TabsContent>
         <TabsContent value="time-off">{tab === "time-off" ? <div className="flex flex-col gap-6"><BalancesTab workerId={id} /><RequestsTab workerId={id} /></div> : null}</TabsContent>

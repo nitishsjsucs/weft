@@ -84,7 +84,8 @@ Things to try in the demo:
 
 The "Viewing as" segment of the header's environment pill is a demo control for acting as Dana, Theo, Sam or Imani
 (a manager who decides time off for her direct reports only and reads private records, leave, offboarding and offer
-pay only for her reporting chain; Payroll, Benefits and IT are closed to her role); new hires whose offer
+pay only for her reporting chain; Payroll, Benefits, IT and contractor pay are closed to her role, and the compliance
+calendar and hand-offs show only rows about her chain or the company); new hires whose offer
 was sent from Hiring are listed there too and open the portal (the seeded offer for Noor Castellanos (demo) is
 accepted from People > Offers instead).
 

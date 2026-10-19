@@ -4,9 +4,10 @@
 // due soon or overdue; reads recompute the date-driven status, so a stale row never shows the wrong state.
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { COMPLIANCE_DUE_SOON_DAYS, type ComplianceItem, type ComplianceItemKind, type ComplianceItemStatus, type FilingForm } from "@weft/contracts";
-import { complianceItems, filings, notices, payrollRuns, proposals, taxAccounts, trainingAssignments, trainingCourses, workers, type DbTx } from "@weft/db";
+import { complianceItems, contractorTaxForms, filings, notices, payrollRuns, proposals, taxAccounts, trainingAssignments, trainingCourses, workers, type DbTx } from "@weft/db";
 import { listTaxForms } from "../parity/contractor-forms";
 import { displayName } from "../people/names";
+import { hasDomain, inScope, type ReadScope } from "../people/scope";
 import { daysBetween, dueOn, FILING_RULES, monthlyDepositDueOn, periodBounds, periodOf, previousPeriod, RULE_BY_FORM } from "./rules";
 
 export type CalendarRow = typeof complianceItems.$inferSelect;
@@ -157,4 +158,28 @@ export async function listCalendar(tx: DbTx, companyId: string, today: string, f
   return rows.map((r) => toCalendarDto(r, today))
     .filter((r) => (!f.from || r.dueOn >= f.from) && (!f.to || r.dueOn <= f.to) && (!f.status || r.status === f.status))
     .sort((a, b) => (a.dueOn === b.dueOn ? (a.id < b.id ? -1 : 1) : a.dueOn < b.dueOn ? -1 : 1));
+}
+
+/**
+ * The calendar rows a narrowed viewer (a manager) may read. A row about a person names them in its title, so it follows
+ * the person read scope: required training only for the viewer's own record and reports, a contractor's tax form only
+ * with payroll view and for a contractor in their reports. Filing, deposit and notice rows are company deadlines with
+ * no person or amount in them and stay. Not narrowed (scope null) keeps every row.
+ */
+export async function scopeCalendar<T extends { kind: string; subjectRef: string | null }>(tx: DbTx, scope: ReadScope | null, rows: readonly T[]): Promise<{ shown: T[]; withheld: number }> {
+  if (!scope) return { shown: [...rows], withheld: 0 };
+  const refs = (kind: string) => [...new Set(rows.filter((r) => r.kind === kind && r.subjectRef).map((r) => r.subjectRef!))];
+  const training = refs("training_due");
+  const forms = refs("contractor_form_expiry").filter((r) => !r.startsWith("wrk_"));
+  const workerOf = new Map<string, string>([
+    ...(training.length ? await tx.select({ id: trainingAssignments.id, workerId: trainingAssignments.workerId }).from(trainingAssignments).where(inArray(trainingAssignments.id, training)) : []).map((a) => [a.id, a.workerId] as const),
+    ...(forms.length ? await tx.select({ id: contractorTaxForms.id, workerId: contractorTaxForms.workerId }).from(contractorTaxForms).where(inArray(contractorTaxForms.id, forms)) : []).map((f) => [f.id, f.workerId] as const),
+  ]);
+  const about = (r: T) => (r.subjectRef?.startsWith("wrk_") ? r.subjectRef : workerOf.get(r.subjectRef ?? "") ?? null);
+  const shown = rows.filter((r) => {
+    if (r.kind === "training_due") return inScope(scope, about(r));
+    if (r.kind === "contractor_form_expiry") return hasDomain(scope, "payroll") && inScope(scope, about(r));
+    return true;
+  });
+  return { shown, withheld: rows.length - shown.length };
 }
