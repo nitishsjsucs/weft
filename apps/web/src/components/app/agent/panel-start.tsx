@@ -4,6 +4,7 @@
 import { History, Sparkles } from "lucide-react";
 import { useGet } from "@/lib/api/hooks";
 import { fmtDateTime } from "../format";
+import { answerPlain } from "./answer";
 
 function promptsFor(pathname: string): string[] {
   if (pathname.startsWith("/app/payroll")) return ["What is the status of the draft payroll?", "Why is the NY raise flagged on this run?", "Show payroll cost by month"];
@@ -34,7 +35,7 @@ export function PanelStart({ pathname, onAsk, onOpen }: { pathname: string; onAs
           <div className="flex flex-col gap-1.5">
             {recent.map((r) => (
               <button key={r.id} type="button" onClick={() => onOpen(r.id, "Earlier answer")} className="rounded-lg px-2.5 py-1.5 text-left hover:bg-gray-2" data-testid="agent-recent-run">
-                <div className="line-clamp-2 text-2">{r.summary}</div>
+                <div className="line-clamp-2 text-2">{answerPlain(r.summary ?? "")}</div>
                 <div className="text-1 text-gray-10">{fmtDateTime(r.createdAt)}</div>
               </button>
             ))}

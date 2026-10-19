@@ -10,11 +10,13 @@ import { invalidate } from "@/lib/api/hooks";
 import { isChipStep, ranToolsLine, reportOf, stepState, stepSummary, toolLabel, type ReportRef } from "./run-steps";
 import { StepReport } from "./chart";
 import { ApprovalCard } from "./approval-card";
-import { humanDates, humanTimes } from "../format";
+import { AnswerView } from "./answer-view";
 import { humanLine } from "../copy";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
-export function RunFeed({ runId, label, latest = true }: { runId: string; label?: string; latest?: boolean }) {
+/** `background`: a routine run the panel followed on its own; its answer keeps a separate test id so a scripted check
+ * that waits for "the next answer" after a question never takes a routine summary for it. */
+export function RunFeed({ runId, label, latest = true, background = false }: { runId: string; label?: string; latest?: boolean; background?: boolean }) {
   const [w, setW] = useState<RunWatch>({ run: null, steps: [], trace: null, mode: "idle" });
   // Decisions made on this feed's own cards, so the step line changes at once (the trace re-read follows).
   const [decided, setDecided] = useState<Record<string, ProposalStatus>>({});
@@ -37,7 +39,7 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
   const ran = working ? null : ranToolsLine(w.steps);
   return (
     <div className="flex flex-col gap-1.5" data-tour="agent-run" data-run-id={runId} data-status={status ?? "starting"} data-stream-mode={w.mode}>
-      {label ? <div className="text-1 text-gray-10">{label}</div> : null}
+      {label ? <div className="text-1 text-gray-10">{label}{background ? <span className="text-gray-9"> (started on its own)</span> : null}</div> : null}
       {w.run?.tainted ? (
         <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" />This run read untrusted content: {w.run.taintedBy ?? "unknown source"}</div>
       ) : null}
@@ -61,10 +63,12 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
           : status === "done" ? <span className="text-gray-10">Done</span>
           : <span className="text-red-11">{status}{w.run?.terminalReason ? `: ${w.run.terminalReason}` : ""}</span>}
       </div>
-      {/* A routine's summary is its tool outcomes joined (ids and action numbers); a chat answer is the model's own
-          words and keeps the result ids it cites. */}
+      {/* A routine's summary is its tool outcomes joined (ids and action numbers) and reads through humanLine; a chat
+          answer is the model's own words, shown as a safe Markdown subset with its cited results as source chips. */}
       {w.run?.summary && !working ? (
-        <p data-testid={TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{w.run.routineRunId ? humanLine(w.run.summary) : humanDates(humanTimes(w.run.summary))}</p>
+        w.run.routineRunId
+          ? <p data-testid={background ? "agent-background-answer" : TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{humanLine(w.run.summary)}</p>
+          : <AnswerView testId={TID.agentAnswer} text={w.run.summary} runId={runId} />
       ) : null}
       <Link href={`/app/runs/${runId}`} className={cn("inline-flex w-fit items-center gap-1 text-1 text-gray-10 hover:text-foreground")}>Open run <ExternalLink className="size-3" /></Link>
     </div>
