@@ -33,6 +33,14 @@ never gets stuck.
 Wait timeouts are budget-aware: hard timeout = min(step hard, 180 s - elapsed - planned seconds of the steps left),
 never below the step's own seconds.
 
+Once the notice run is waiting or the chart is drawn, the result stays on screen: a reader moves on with Next, and
+autoplay waits out the step's seconds (at least 4 s for the run and 5 s for the chart while the budget has room,
+`lingerMs`). The chart step sends its prompt once. Autoplay clicks Approve only for the proposal this session's own
+notice run made (`autoApproveAllowed`); after a deep link, a timed-out delivery or with a stale pending card the
+step waits for a person. While a tour runs, the agent thread is kept in sessionStorage, so the hop to /portal and
+back keeps the notice run and the chart in the panel. Every card is paced at about 4 words a second or less
+(unit tested).
+
 ## Seed profiles
 
 The base world is what every test, `pnpm e2e`, `pnpm demo` and the evals use, and it does not change. A rich world
@@ -63,6 +71,8 @@ reset offer, a skipped portal stop, unanchored cards where data is missing).
 | tour-autoplay, scripted | rich (integration, main) | 141 s | 21 steps |
 | tour-autoplay, live gpt-5.6-luna, pass 1 | rich (integration, main) | 149 s | notice run 8.3 s, chart step 5.5 s; no timeout or fallback; $0.0048 |
 | tour-autoplay, live gpt-5.6-luna, pass 2 | rich (integration, main) | 147 s | notice run 5.9 s, chart step 5.5 s; no timeout or fallback; $0.0030 |
+| tour-complete, scripted, reading each card for its seconds | rich (review fixes) | 137 s | all 21 steps on their own targets, including the person page and Permissions |
+| tour-autoplay, scripted | rich (review fixes) | 157 s | 21 steps; the run step 10.2 s and the chart step 11.8 s on screen; one chat run |
 
 Round 2, scripted on the rich world: Deliver ready to the run step 1.9 s, the run step 1.6 s, Approve 1.8 s, the chart
 answer 3.0 s including the typed prompt. The slowest step to get ready is the payroll flags (about 1 s: the page
