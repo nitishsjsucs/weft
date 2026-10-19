@@ -93,6 +93,54 @@ describe("spend ledger", () => {
   });
 });
 
+describe("the per-run cap keys a run by its world (run ids restart with every rebuilt world)", () => {
+  const caps = { runUsd: 0.1, dayUsd: 2, liveUsd: 0.5 };
+
+  it("a new world's run_0001 gets its own run cap; the day and live caps stay cumulative", async () => {
+    const dir = tmp();
+    let world = "wld_aaaaaaaaaaaaaaaa";
+    const ledger = createSpendLedger({ dir, caps, world: () => world, wallNow: () => new Date("2026-10-18T20:00:00Z") });
+    const a = await ledger.reserve({ runId: "run_0001", usdMicros: 80_000, model: "gpt-5.6-luna", live: true });
+    if (!a.ok) throw new Error("expected ok");
+    await ledger.settle(a.reservationId, 80_000);
+    // The same run in the same world is still capped: $0.08 spent, $0.03 more would cross $0.10.
+    expect(await ledger.reserve({ runId: "run_0001", usdMicros: 30_000, model: "gpt-5.6-luna", live: true })).toMatchObject({ ok: false, cap: "run", spentMicros: 80_000 });
+    // The world is rebuilt (a reset, the next eval trial): run_0001 is another run now.
+    world = "wld_bbbbbbbbbbbbbbbb";
+    expect(await ledger.spent({ runId: "run_0001" })).toBe(0);
+    const b = await ledger.reserve({ runId: "run_0001", usdMicros: 30_000, model: "gpt-5.6-luna", live: true });
+    if (!b.ok) throw new Error(`expected ok, got the ${b.cap} cap`);
+    await ledger.settle(b.reservationId, 30_000);
+    expect(await ledger.spent({ live: true })).toBe(110_000);
+    expect(await ledger.spent({ day: "2026-10-18" })).toBe(110_000);
+    // Each line records its world; settle copies it from the reservation.
+    const lines = ledger.entries();
+    expect(lines.map((e) => [e.kind, e.world])).toEqual([
+      ["reserve", "wld_aaaaaaaaaaaaaaaa"], ["settle", "wld_aaaaaaaaaaaaaaaa"], ["reserve", "wld_bbbbbbbbbbbbbbbb"], ["settle", "wld_bbbbbbbbbbbbbbbb"],
+    ]);
+    // Back in the first world (an API restart on the same world), the first run still counts what it spent.
+    world = "wld_aaaaaaaaaaaaaaaa";
+    expect(await ledger.committed({ runId: "run_0001" })).toEqual({ settledMicros: 80_000, openMicros: 0 });
+  });
+
+  it("the live cap still binds across worlds", async () => {
+    let n = 0;
+    const ledger = createSpendLedger({ dir: tmp(), caps: { runUsd: 0.4, dayUsd: 2, liveUsd: 0.5 }, world: () => `wld_${String(++n).padStart(16, "0")}` });
+    expect((await ledger.reserve({ runId: "run_0001", usdMicros: 300_000, model: "m", live: true })).ok).toBe(true);
+    expect(await ledger.reserve({ runId: "run_0001", usdMicros: 300_000, model: "m", live: true })).toMatchObject({ ok: false, cap: "live" });
+  });
+
+  it("without a world, or when the world is unknown, run ids alone key the cap as before", async () => {
+    for (const world of [undefined, () => null]) {
+      const ledger = createSpendLedger({ dir: tmp(), caps, ...(world ? { world } : {}) });
+      const a = await ledger.reserve({ runId: "run_0001", usdMicros: 80_000, model: "m", live: true });
+      if (!a.ok) throw new Error("expected ok");
+      expect(await ledger.reserve({ runId: "run_0001", usdMicros: 30_000, model: "m", live: true })).toMatchObject({ ok: false, cap: "run" });
+      expect(ledger.entries()[0]).not.toHaveProperty("world");
+    }
+  });
+});
+
 describe("prices per provider (wave 2)", () => {
   it("prices Claude Opus 5.5 at $4, $0.20 and $20 per million, local models at zero, and WEFT_PRICES_JSON still overrides", async () => {
     const { pricesFor, CLAUDE_OPUS_5_5 } = await import("../src/index");

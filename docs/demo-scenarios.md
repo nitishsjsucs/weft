@@ -12,11 +12,12 @@ WEFT_LLM=openai WEFT_BACKGROUND_LLM=1 WEFT_CLOCK_RATE=0 WEFT_TRACE=phoenix WEFT_
 WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev --fresh
 ```
 
-3. Before each scenario (or once before a short demo): `pnpm demo:scenario <name>`. It resets the running world to the seed, checks the clock is back at Mon Oct 26 8:30 AM PT with no pending proposals, warns if the clock is running, and prints the click path and the prompts. It calls no model and costs nothing. `pnpm demo:scenario list` names the scenarios. On other ports add `--api-port` and `--web-port`.
+3. Before each scenario (or once before a short demo): `pnpm demo:scenario <name>`. It first prints the target, `target API http://127.0.0.1:4070, data dir <checkout>/.data`, and asks `[y/N]` before it resets, because a reset wipes everything done in that world; from a script or any shell without a terminal pass `--yes`, or it refuses without calling the API. Then it resets the running world to the seed, checks the clock is back at Mon Oct 26 8:30 AM PT with no pending proposals, warns if the clock is running, and prints the click path and the prompts. It calls no model and costs nothing. `pnpm demo:scenario list` names the scenarios and prints the start command above. On other ports add `--api-port` and `--web-port`. The data dir is `WEFT_DATA_DIR` (default `.data`) in the checkout you run it from, and its proxy secret must belong to the API on the target port, so check both printed values before you answer y.
 4. Open http://127.0.0.1:3070/app, Viewing as Dana. A 1440 wide window with the agent panel docked works; close the panel on the Audit log.
 
 Other resets: `curl -s -X POST http://127.0.0.1:3070/api/v1/sim/reset -H 'x-weft-principal: usr_dana' -H 'content-type: application/json' -d '{}'` (about 0.6 s), or Ctrl+C and `pnpm dev --fresh`.
 
+<!-- Integrator: remove the next paragraph only after the manager-privacy fix group lands on main (people.get must stop returning pay, bank last4 and the W-4 to a manager for a worker outside her reports). Left in place by rf/eval-and-demo-tooling. -->
 Do not do this live: switch Viewing as to Imani Ferreira and ask for the pay of someone outside her reports (for example Lena Brooks). The round 2 confirmation found that people.get returns pay, bank last4 and the W-4 to a manager for a worker outside her reports (CQ-63 class); it is an open product defect.
 
 ## Reliability at a glance
@@ -136,7 +137,7 @@ Say: "Every number must appear in a tool result or the answer is rejected and re
 
 Reset: `pnpm demo:scenario trace-mcp` (run one of 1 to 7 first).
 
-1. Phoenix http://127.0.0.1:6206, Tracing, project weft-demo, filter parent_id is None, open the latest agent.run: admission, model (llm.responses with tokens), assemble (memory.recall), dispatch with one span per tool call.
+1. Phoenix http://127.0.0.1:6206, Tracing, project weft-demo, filter parent_id is None, open the latest agent.run: admission, model (llm.responses with tokens), assemble (memory.recall), dispatch with one span per tool call. The traces are there only when the world was started with the command in Before you start (`WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=weft-demo`); without `WEFT_TRACE` nothing is exported, and without the project name the runs land in the default project `weft`.
 2. MCP: in any MCP client use the stdio server `WEFT_API_URL=http://127.0.0.1:4070 WEFT_API_KEY=$(cat .data/demo-mcp-key.txt) pnpm --filter @weft/mcp start`. List the tools (122), call actions__list, then tax__update_rate: it returns pending_approval and the card appears in the Inbox. Approve, deny, rollback, vault and settings are not exposed.
 
 Say: "Every run is traced: what it was asked, what it recalled, each tool call, tokens and cost. Another agent can drive Weft over MCP with the same rules: a rate change from outside is a proposal waiting for a person."

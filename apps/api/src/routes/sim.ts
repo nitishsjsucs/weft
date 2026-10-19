@@ -93,7 +93,7 @@ async function rebuild(weft: Weft, want?: SeedProfile): Promise<{ ms: number; pr
   await exclusive(async () => {
     await settleBackgroundWork(weft);
     await serialGit(async () => {
-      removeTree(join(weft.dataDir, "companies"));   // memory repos and run workspaces; never spend/
+      removeTree(join(weft.dataDir, "companies"));   // memory repos, run workspaces and the world id; never spend/
       removeTree(join(weft.dataDir, "run", "handles"));   // run ids restart after a reset
     });
     await withWriteLock(async () => {
