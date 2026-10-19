@@ -73,6 +73,9 @@ reset offer, a skipped portal stop, unanchored cards where data is missing).
 | tour-autoplay, live gpt-5.6-luna, pass 2 | rich (integration, main) | 147 s | notice run 5.9 s, chart step 5.5 s; no timeout or fallback; $0.0030 |
 | tour-complete, scripted, reading each card for its seconds | rich (review fixes) | 137 s | all 21 steps on their own targets, including the person page and Permissions |
 | tour-autoplay, scripted | rich (review fixes) | 157 s | 21 steps; the run step 10.2 s and the chart step 11.8 s on screen; one chat run |
+| tour-complete, scripted, reading each card for its seconds | rich (final gate, main accef12) | 138 s | all 21 steps, with a screenshot at every step |
+| tour-autoplay, scripted | rich (final gate, main accef12) | 158 s | 21 steps |
+| tour-autoplay, live gpt-5.6-luna | rich (final gate, main accef12) | 159 s | the run step 12.6 s and the chart step 11.5 s on screen; no timeout or fallback; one chat run; $0.0034 |
 
 Round 2, scripted on the rich world: Deliver ready to the run step 1.9 s, the run step 1.6 s, Approve 1.8 s, the chart
 answer 3.0 s including the typed prompt. The slowest step to get ready is the payroll flags (about 1 s: the page

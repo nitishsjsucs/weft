@@ -130,6 +130,27 @@ More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
 
+### Final guided tour gate
+
+2026-10-18 from 18:53 PDT, on a fresh clone of main at `accef12` (the tour and rich data review fixes) on ports 5700
+to 5708, with no API key in the environment except for the one live pass. Every figure below was produced in the
+gate; nothing is carried over.
+
+| Command | Outcome |
+|---|---|
+| `pnpm install --frozen-lockfile` | ok |
+| `pnpm test` | 1,456 passed, 6 skipped (227 files, 1 skipped), 425 s (run alongside `pnpm e2e` and the crawl) |
+| `pnpm typecheck` | 16 of 16 tasks; `tsc -p e2e` clean |
+| `pnpm build` | ok |
+| `pnpm e2e` (base profile, unchanged) | 52 passed, 1 skipped (the DocuSign envelope test), 2.4 min |
+| `pnpm e2e:rich` | 3 of 3 in 1.5 min: 29 routes and every top-level tab on a fresh rich world show no empty state (`KNOWN_GAPS` is empty), Reports adds up, the manager Home and each portal persona see their own data |
+| `pnpm e2e:tour` (scripted, `TOUR_SHOTS=1`) | 11 of 11 in 6.6 min. The whole tour read at its planned pace took 138 s with a screenshot at every step, autoplay 158 s, both over all 21 steps (budget 180 s) |
+| Tour live on `gpt-5.6-luna` (`WEFT_TOUR_LIVE=1`, `WEFT_BACKGROUND_LLM=1`, autoplay) | 159 s over 21 steps; the notice run step stayed on screen 12.6 s and the chart step 11.5 s; no "Still working" line and no fallback note; one chat run; only `tax.update_rate` executed; $0.0034 for 2 live runs |
+| `pnpm demo` | exit 0 in 11 s, payroll total cost $267,795.26, audit chain verifies |
+| `pnpm eval:suite digests --split all` | 110 of 110 worlds reproduce their pinned digest; the base world digest is still `950933e7ed6a...10d9` |
+| `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` | ok: 1,429 files; 1,505 files with 28 denylist phrases and 54 reference files hashed; 894 files against 4 reference pages with 0 allowlisted phrases |
+| Tour screenshots | 21 retaken in this gate (`01-welcome` to `21-finish`), now named by the current steps, including `12-person` and `20-permissions` |
+
 ### Guided tour and rich seed integration gate
 
 2026-10-18 from 17:27 PDT. `feat/rich-seed` was already on main (c8b5928); `feat/tour` merged into main after the
@@ -272,7 +293,8 @@ world, as Dana), every main route. `pnpm screenshots` still writes base versions
   pre-payroll review with its runs), `10-audit`, `17-memory`, `24-integrations`, `03-simulators`, `36-settings`,
   `37-permissions`, `39-run-view` (a recorded agent run with its steps) and `40-portal-persona` (a new hire at 5 of 7).
 
-The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`), in
+The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`, retaken in the
+final guided tour gate), in
 [docs/screenshots/tour/](docs/screenshots/tour): `01-welcome` to `21-finish`, named by step.
 
 Flows on the base world, retaken in the final wave 3 gate with `pnpm screenshots` (`e2e/screens/capture.screens.ts`:
