@@ -2,10 +2,10 @@
 // window and limit report, people.get's onboarding and offboarding blocks, and the approval facts on pay run reads.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ExecContext, SimClock, Simulators } from "@weft/contracts";
-import { onboardingTasks, principals, workers, type Db } from "@weft/db";
+import { departments, onboardingTasks, principals, workers, type Db } from "@weft/db";
 import { eq } from "drizzle-orm";
 import { idMinter } from "../../src/shared/ids";
-import { peopleCommands, SEARCH_MAX } from "../../src/commands/people";
+import { departmentNamed, peopleCommands, SEARCH_MAX } from "../../src/commands/people";
 import { onboardingCommands } from "../../src/commands/onboarding";
 import { payrollCommands } from "../../src/commands/payroll";
 import { insertCase } from "../../src/offboarding/cases";
@@ -68,6 +68,35 @@ describe("people.search", () => {
     const d = await exec<{ total: number; by_department: { department_id: string; count: number }[] }>("people.search", {});
     expect(d.by_department.reduce((s, x) => s + x.count, 0)).toBeLessThanOrEqual(d.total);
     for (const x of d.by_department) expect(typeof x.department_id).toBe("string");
+  });
+});
+
+describe("people.search by department name", () => {
+  it("a query that is a department name lists the whole department, not the few titles that contain the word", async () => {
+    // Hardware: 4 workers, one onboarding; only one has "Hardware" in the title. Elsewhere one more title says Hardware.
+    await db.insert(departments).values([{ id: "dpt_hardware", companyId: CO, name: "Hardware" }, { id: "dpt_ops", companyId: CO, name: "Operations" }] as never);
+    const all = (await db.select().from(workers).orderBy(workers.id)).slice(0, 6);
+    for (const [k, w] of all.entries()) await db.update(workers).set({ departmentId: k < 4 ? "dpt_hardware" : "dpt_ops", title: k === 0 || k === 5 ? "Hardware Lead" : w.title }).where(eq(workers.id, w.id));
+    await db.update(workers).set({ status: "onboarding" }).where(eq(workers.id, all[1]!.id));
+    for (const query of ["Hardware", "hardware", "the Hardware team", "people in Hardware"]) {
+      const d = await exec<{ total: number; by_status: Record<string, number>; department_note: string; workers: { id: string }[] }>("people.search", { query });
+      expect(d.total, query).toBe(4);
+      expect(d.workers.map((w) => w.id).sort()).toEqual(all.slice(0, 4).map((w) => w.id).sort());
+      expect(d.by_status).toEqual({ active: 3, onboarding: 1 });
+      expect(d.department_note).toContain("department_id dpt_hardware");
+    }
+    // A longer query still matches names and titles, and says the department exists.
+    const t = await exec<{ total: number; department_note: string }>("people.search", { query: "Hardware Lead" });
+    expect(t.total).toBe(2);
+    expect(t.department_note).toBe("Query matched names and titles only; the Hardware department has 4 people: pass department_id dpt_hardware for the department");
+    // department_id given: no rewrite, no note.
+    const byId = await exec<Record<string, unknown> & { total: number }>("people.search", { department_id: "dpt_hardware" });
+    expect(byId.total).toBe(4);
+    expect(byId).not.toHaveProperty("department_note");
+    expect(departmentNamed(["Hard"], [{ id: "dpt_hardware", name: "Hardware" }])).toBeNull();
+    const def = peopleCommands.find((c) => c.name === "people.search")!;
+    const out = await def.run(def.input.parse({ query: "Hardware" }) as never, ctx(), deps());
+    expect(out.summary).toBe("Found 4 workers in Hardware");
   });
 });
 
