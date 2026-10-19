@@ -21,12 +21,12 @@ describe("humanDates before a colon", () => {
 
 describe("date lists", () => {
   it("a run of days reads as a range, other lists as a list", () => {
-    expect(humanDateLists("on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("on Nov 23 to Nov 25");
+    expect(humanDateLists("on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("from Nov 23 to Nov 25");
     expect(humanDateLists("on 2026-11-23, 2026-11-25")).toBe("on Nov 23 and Nov 25");
-    expect(humanDateLists("on 2025-12-31, 2026-01-01, 2026-01-02")).toBe("on Dec 31, 2025 to Jan 2, 2026");
+    expect(humanDateLists("on 2025-12-31, 2026-01-01, 2026-01-02")).toBe("from Dec 31, 2025 to Jan 2, 2026");
   });
   it("the coverage check on a time-off request and the lodging check on an expense", () => {
-    expect(humanDateText("3 of 9 out (33.3%) on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("3 of 9 out (33.3%) on Nov 23 to Nov 25");
+    expect(humanDateText("3 of 9 out (33.3%) on 2026-11-23, 2026-11-24, 2026-11-25")).toBe("3 of 9 out (33.3%) from Nov 23 to Nov 25");
     expect(humanDateText("Lodging $289.00 is over the standard $113.00 night rate for 2026-10-15")).toBe("Lodging $289.00 is over the standard $113.00 night rate for Oct 15");
   });
 });
@@ -144,5 +144,18 @@ describe("proposal values", () => {
 describe("expense checks", () => {
   it("a duplicate check names the earlier claim, not its id", () => {
     expect(humanCopy("Same merchant, amount ($96.00) and date as exp_0009 (approved)")).toBe("Same merchant, amount ($96.00) and date as an earlier claim (approved)");
+  });
+});
+
+describe("round 2 copy fixes (demo-perfect)", () => {
+  it("the claim drawer's policy summary reads in words, each sentence once", async () => {
+    const { expenseExplanation } = await import("../src/components/app/copy");
+    const t = expenseExplanation("$1,249.00 equipment on 2026-10-14, submitted 2026-10-15. California workers must be reimbursed for necessary business expenses. Suggested: approve. California workers must be reimbursed for necessary business expenses. (template)");
+    expect(t).toBe("$1,249.00 equipment on Oct 14, submitted Oct 15. California workers must be reimbursed for necessary business expenses.");
+    expect(expenseExplanation("Same merchant, amount ($96.00) and date as exp_0009 (approved). Same merchant, amount ($96.00) and date as exp_0009 (approved).")).toBe("Same merchant, amount ($96.00) and date as an earlier claim (approved).");
+  });
+  it("the Undo strip after reverting a rate names no rate row", async () => {
+    const { auditSummary } = await import("../src/components/app/audit/audit-view");
+    expect(auditSummary("Reverted CA SUI rate etr_0005 to 3.4%")).toBe("Reverted CA SUI rate to 3.4%");
   });
 });

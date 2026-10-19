@@ -76,7 +76,8 @@ export function RoutinesView() {
                 <TriggerChip t={r.trigger} />
                 {r.autonomy !== "approve" ? <Badge tone="outline">{AUTONOMY_COPY[r.autonomy].label}</Badge> : null}
                 {r.source === "custom" ? <Badge tone="blue">Custom</Badge> : null}
-                {r.taintedBy ? <Badge tone="amber">Tainted draft</Badge> : null}
+                {/* A prebuilt routine that reads uploaded files is marked by design: it says what that means, not "draft". */}
+                {r.taintedBy ? (r.source === "prebuilt" ? <Badge tone="outline">Reads uploaded files, proposes only</Badge> : <Badge tone="amber">Tainted draft</Badge>) : null}
 
               </div>
             </Card>

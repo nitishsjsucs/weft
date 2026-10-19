@@ -9,7 +9,8 @@ import { W3_EXPENSES_TID as TID, type ExpenseDecision, type ExpenseDeclineReason
 import type { W3ExpensesDetail } from "../../../../../../packages/contracts/src/ext/w3-expenses";
 import { client, errorText, getPrincipal, rawFetch, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, fmtDateTime, humanTimes, statusLabel } from "../format";
-import { humanDateText, humanLine } from "../copy";
+import { principalName } from "../refs";
+import { expenseExplanation, humanDateText, humanLine } from "../copy";
 
 /** "pay_2026_10_30" reads "Oct 30 run". */
 const runLabel = (id: string) => humanLine(id).replace(/^the /, "").replace(/^./, (c) => c.toUpperCase());
@@ -95,7 +96,13 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
                 ))}
               </ul>
             )}
-            {live.explanation ? <p className="mt-3 rounded-lg bg-gray-2 px-3 py-2 text-[13px]">{live.explanation} <span className="text-1 text-gray-9">({live.explanationSource === "agent" ? "agent, grounded" : "template"})</span></p> : null}
+            {live.explanation ? (
+              <div className="mt-3 rounded-lg bg-gray-2 px-3 py-2 text-[13px]">
+                {/* The stored text keeps ISO dates and row ids; it reads as copy here, labelled by who wrote it. */}
+                <p className="mb-1 text-1 text-gray-10">{live.explanationSource === "agent" ? "Explanation by the agent, grounded in the checks" : "Policy summary"}</p>
+                <p className="leading-5">{expenseExplanation(live.explanation)}</p>
+              </div>
+            ) : null}
           </Section>
           {live.allowedDecisions.length ? (
             <Section title="Decision">
@@ -136,7 +143,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
           {live.trail.length ? (
             <Section title="Audit trail">
               <ol className="flex flex-col gap-1 text-1">
-                {live.trail.map((a) => <li key={a.seq} className="text-gray-11"><span className="font-mono text-gray-9">#{a.seq}</span> {fmtDateTime(a.at)} · {a.actor} · {humanTimes(a.summary)}</li>)}
+                {live.trail.map((a) => <li key={a.seq} className="text-gray-11"><span className="font-mono text-gray-9">#{a.seq}</span> {fmtDateTime(a.at)} · {principalName(a.actor)} · {humanLine(a.summary)}</li>)}
               </ol>
             </Section>
           ) : null}

@@ -53,8 +53,9 @@ const today = (iso: string | undefined) => (iso ? new Intl.DateTimeFormat("en-CA
 
 function Empty({ text }: { text: string }) { return <p className="px-4 py-4 text-[13px] text-gray-10">{text}</p>; }
 
-export function CheckChips({ checks }: { checks: TimeOffRequestRow["checks"] }) {
-  if (!checks.length) return <span className="text-1 text-gray-10">All checks passed</span>;
+export function CheckChips({ checks, status }: { checks: TimeOffRequestRow["checks"]; status?: string }) {
+  // "All checks passed" next to a denial or a cancellation reads as a contradiction: those rows show no line.
+  if (!checks.length) return status === "denied" || status === "cancelled" ? null : <span className="text-1 text-gray-10">All checks passed</span>;
   return (
     <span className="flex flex-wrap gap-1">
       {checks.map((c) => <Badge key={c.rule} tone={SEVERITY_TONE[c.severity]} data-testid={TID.check(c.rule)} title={humanDateText(c.message)}>{RULE_LABEL[c.rule] ?? c.rule}</Badge>)}
@@ -85,13 +86,14 @@ function RequestCard({ r, viewer, onDone, today }: { r: TimeOffRequestRow; viewe
             : <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{STATUS_LABEL[r.status] ?? r.status}</Badge>}
         </span>
       </div>
-      <CheckChips checks={r.checks} />
+      <CheckChips checks={r.checks} status={r.status} />
       {r.checks.filter((c) => c.severity !== "info").map((c) => <p key={c.rule} className="text-1 text-gray-11">{humanDateText(c.message)}</p>)}
       {r.status === "pending" && r.balance_now && r.balance_without_this_request ? (
         <p className="text-1 tabular-nums text-gray-10">{r.policyName} balance after this request: {r.balance_now.minutes < 0 ? <span className="text-amber-11">would be {hrs(-r.balance_now.minutes)} short</span> : <span className="text-gray-12">{hrs(r.balance_now.minutes)}</span>} ({hrs(r.balance_without_this_request.minutes)} before it, counting other open requests)</p>
       ) : null}
       <p className="text-1 text-gray-10">
         {r.status === "pending" ? <>Routed to <span className="text-gray-12">{principalName(r.approverPrincipalId)}</span>{r.routing.length > 1 ? `: ${r.routing.filter((s) => !s.principalId).map((s) => s.why).join("; ")}` : ""}</>
+          : r.status === "cancelled" ? <>Cancelled{r.decisionNote ? `: ${r.decisionNote}` : ""}</>
           : r.decidedBy ? <>Decided by {principalName(r.decidedBy)}{r.decisionNote ? `: ${r.decisionNote}` : ""}</> : null}
       </p>
       {r.reason ? <p className="text-1 text-gray-10">Employee note (as written): <q className="text-gray-11">{r.reason}</q></p> : null}

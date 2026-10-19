@@ -10,8 +10,19 @@ export const TOTAL_LABEL: Record<(typeof TOTALS_FIELDS)[number], string> = {
 };
 const STRIP: (typeof TOTALS_FIELDS)[number][] = ["cashRequirement", "grossPay", "employerTaxes", "netPay"];
 
+/**
+ * What the totals count. They count every paycheck in the run, a blocked one too, while the submit leaves a blocked
+ * paycheck out; the note says so by name, so "excluded as blocked" on the banner never reads as missing from these.
+ */
+export function totalsNote(count: number, blockedNames: string[]): string {
+  const n = `${count} ${count === 1 ? "paycheck" : "paychecks"}`;
+  if (!blockedNames.length) return `${n}.`;
+  const who = blockedNames.length === 1 ? `${blockedNames[0]}'s blocked one` : `${blockedNames.length} blocked ones (${blockedNames.join(", ")})`;
+  return `${n}, including ${who}. The submit leaves ${blockedNames.length === 1 ? "it" : "them"} out.`;
+}
+
 /** Totals strip (4 headline fields) with all 12 fields in a drawer (SPEC 7.4). */
-export function TotalsStrip({ totals, count }: { totals: Totals | null; count: number }) {
+export function TotalsStrip({ totals, count, blockedNames = [] }: { totals: Totals | null; count: number; blockedNames?: string[] }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="@container mb-6">
@@ -25,7 +36,7 @@ export function TotalsStrip({ totals, count }: { totals: Totals | null; count: n
       <div className="col-span-2 flex items-center justify-center border-t border-[var(--app-border)] px-3 py-2 @min-[820px]:col-span-1 @min-[820px]:border-t-0 @min-[820px]:border-l">
         <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>All 12 totals</Button>
       </div>
-      <Drawer open={open} onOpenChange={setOpen} title="Run totals" description={`${count} included paychecks. Excluded paychecks are not counted.`}>
+      <Drawer open={open} onOpenChange={setOpen} title="Run totals" description={totalsNote(count, blockedNames)}>
         <dl data-testid="payroll-totals-all" className="flex flex-col">
           {TOTALS_FIELDS.map((k) => (
             <div key={k} data-total={k} data-amount={totals?.[k].amount ?? ""} className="flex items-center justify-between gap-3 border-b border-[var(--app-border)] py-2.5 text-2">

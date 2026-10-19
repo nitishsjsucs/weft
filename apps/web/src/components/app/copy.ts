@@ -23,9 +23,9 @@ export function humanDateLists(text: string, year?: number): string {
     const ds = m.split(/,\s*/);
     const one = (d: string) => humanDates(d, ref);
     const consecutive = ds.length > 2 && ds.every((d, i) => i === 0 || dayOf(d) - dayOf(ds[i - 1]!) === 86_400_000);
-    if (consecutive) return `${one(ds[0]!)} to ${one(ds[ds.length - 1]!)}`;
+    if (consecutive) return `\u0003${one(ds[0]!)} to ${one(ds[ds.length - 1]!)}`;
     return `${ds.slice(0, -1).map(one).join(", ")} and ${one(ds[ds.length - 1]!)}`;
-  });
+  }).replace(/\bon \u0003/g, "from ").replace(/\u0003/g, "");   // "on Nov 23 to Nov 25" reads "from Nov 23 to Nov 25"
 }
 
 /** Instants, plain dates and date lists in server text as words, and nothing else changed (ids and codes stay). */
@@ -49,6 +49,21 @@ export function humanCopy(text: string, year?: number): string {
     .replace(new RegExp(`\\b${ID}\\b`, "g"), "")
     .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, (c) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))
     .replace(/ {2,}/g, " ").replace(/ ([,.;)])/g, "$1").replace(/\( /g, "(").trim();
+}
+
+/**
+ * An expense's stored explanation as copy (the claim drawer): dates as days, no row ids, each sentence once (the
+ * policy template repeats a check in its suggestion) and no "(template)" tag, which the drawer shows as a label.
+ */
+export function expenseExplanation(text: string): string {
+  const t = humanCopy(text).replace(/\s*\((?:template|agent)\)\s*$/i, "");
+  const seen = new Set<string>(); const out: string[] = [];
+  for (const raw of t.split(/(?<=[.!?])\s+/)) {
+    const k = raw.trim().toLowerCase().replace(/^suggested:\s*\w+\.\s*/, "");
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(raw.trim());
+  }
+  return out.join(" ");
 }
 
 /** What a bare id stands for in a sentence ("Drafted response 1 for ntc_0005" is "... for the notice"). */

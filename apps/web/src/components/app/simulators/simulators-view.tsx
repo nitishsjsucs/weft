@@ -93,6 +93,10 @@ const SIM_COLS: Record<string, Col[]> = {
   ],
 };
 const MONO = new Set(["account_number", "handle", "confirmation"]);
+/** Rows in time order, newest first, by an ISO field (agency mail arrives from several sources out of order). */
+export function newestFirst(rows: Row[] | undefined, key: string): Row[] | undefined {
+  return rows ? [...rows].sort((a, b) => str(b[key]).localeCompare(str(a[key]))) : rows;
+}
 
 /** A simulator table with labeled, formatted columns; the row id and stored JSON sit in the row's title. */
 function SimTable({ kind, rows, empty, testid }: { kind: keyof typeof SIM_COLS; rows: Row[] | undefined; empty: string; testid: string }) {
@@ -103,7 +107,7 @@ function SimTable({ kind, rows, empty, testid }: { kind: keyof typeof SIM_COLS; 
       <Table className="text-[13px]">
         <THead><TR>{cols.map((c) => <TH key={c.key}>{c.label}</TH>)}</TR></THead>
         <TBody>{rows.map((r, i) => (
-          <TR key={i} title={[r.id, r.worker_id, r.related_notice_id, r.request_json].filter(Boolean).map(String).join(" · ")}>
+          <TR key={i} data-row-id={str(r.id)}>
             {cols.map((c) => <TD key={c.key} className={cn("h-9 text-1 whitespace-nowrap", MONO.has(c.key) && "font-mono")}>{(c.fmt ?? str)(r[c.key], r) || "None"}</TD>)}
           </TR>
         ))}</TBody>
@@ -219,7 +223,7 @@ export function SimulatorsView() {
           <CardHeading icon={<CalendarClock />}>Sim clock</CardHeading>
           <Card className="p-4">
             <div className="text-6 font-semibold tabular" data-testid="sim-clock-now">{now ? fmtDateTime(now) : "..."}</div>
-            <div className="mt-1 text-1 text-gray-10">Rate {clock.data?.rate ?? "-"}x · cron, expiry and simulator delays all read this clock</div>
+            <div className="mt-1 text-1 text-gray-10">{clock.data ? (clock.data.rate === 0 ? "Paused" : `Rate ${clock.data.rate}x`) : "Rate -"} · cron, expiry and simulator delays all read this clock</div>
             <div className="mt-4 flex min-w-0 flex-wrap gap-2">
               <Button data-testid={tid.simAdvance("30m")} size="sm" disabled={advance.pending} onClick={() => void step({ by: "PT30M" })}><FastForward /> +30 min</Button>
               <Button data-testid={tid.simAdvance("1d")} size="sm" disabled={advance.pending} onClick={() => void step({ by: "P1D" })}><FastForward /> +1 day</Button>
@@ -281,7 +285,7 @@ export function SimulatorsView() {
         </section>
         <section className="min-w-0">
           <CardHeading icon={<Mail />}>Agency mail</CardHeading>
-          <Card className="overflow-hidden"><SimTable kind="agencyMail" testid="sim-agency-mail" rows={s.agencyMail} empty="No mail from agencies yet." /></Card>
+          <Card className="overflow-hidden"><SimTable kind="agencyMail" testid="sim-agency-mail" rows={newestFirst(s.agencyMail, "ts")} empty="No mail from agencies yet." /></Card>
         </section>
         <section className="min-w-0 laptop:col-span-2">
           <CardHeading icon={<FlaskConical />}>Device orders</CardHeading>

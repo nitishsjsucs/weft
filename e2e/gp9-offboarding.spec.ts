@@ -38,7 +38,7 @@ test("GP9: terminating Imani opens an offboarding case that revokes access and c
       const s = c.steps.find((x) => x.kind === kind)!;
       expect(s.proposalId).toMatch(/^prp_/);
       proposalIds[kind] = s.proposalId!;
-      await expect(page.getByTestId(ot.stepProposal(kind))).toHaveText(s.proposalId!);
+      await expect(page.getByTestId(ot.stepProposal(kind))).toHaveAttribute("href", `/app/inbox?proposal=${s.proposalId}`);
     }
     const fp = await weft.proposal(proposalIds.final_pay!);
     expect(fp.taintedBy).toBeNull();

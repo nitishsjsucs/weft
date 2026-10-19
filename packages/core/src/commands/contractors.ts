@@ -64,7 +64,7 @@ const schedulePayoutsCmd = writeCommand({
     const p = await plan(i, ctx.companyId, deps);
     return {
       title: `Pay ${p.lines.length} contractor${p.lines.length === 1 ? "" : "s"} ${formatCents(p.totalUsdCents)} on ${i.scheduled_for}`,
-      diff: p.lines.map((l) => ({ label: l.name, before: "no payout", after: `${(l.amountMinor / 100).toFixed(2)} ${l.currency} at ${l.fxRate} = ${formatCents(l.usdCents)}` })),
+      diff: p.lines.map((l) => ({ label: l.name, before: "no payout", after: `${(l.amountMinor / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${l.currency} at ${l.fxRate} = ${formatCents(l.usdCents)}` })),
       content: [], moneyCents: p.totalUsdCents, // The worker ids are part of the subject, so a proposal for other contractors on the same date never supersedes this one.
       subjectRef: `contractor_payouts:${i.scheduled_for}:${[...new Set(i.worker_ids)].sort().join(",")}`,
       subjectHash: sha256Hex(canonicalJson({ at: i.scheduled_for, lines: p.lines.map((l) => [l.workerId, l.amountMinor, l.currency, l.fxRate, l.usdCents]) })),

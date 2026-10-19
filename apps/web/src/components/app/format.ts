@@ -6,8 +6,22 @@ export function fmtDate(isoOrDate: string, opts: Intl.DateTimeFormatOptions = { 
   const d = /^\d{4}-\d{2}-\d{2}$/.test(isoOrDate) ? new Date(`${isoOrDate}T12:00:00Z`) : new Date(isoOrDate);
   return new Intl.DateTimeFormat("en-US", { timeZone: /^\d{4}-\d{2}-\d{2}$/.test(isoOrDate) ? "UTC" : TZ, ...opts }).format(d);
 }
+/** The sim clock's year, once a page has read the clock; until then the year on this machine. */
+let clockYear: number | null = null;
+/** The sim clock as the app read it last: instants outside its year read with their year (fmtDateTime). */
+export function setClockNow(iso: string | null | undefined): void {
+  const y = Number((iso ?? "").slice(0, 4));
+  if (y > 1900) clockYear = y;
+}
+const yearIn = (d: Date) => Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, year: "numeric" }).format(d));
+/**
+ * "Mon, Nov 17, 8:00 AM PT" in the clock's year; an instant from another year keeps it ("Mon, Nov 17, 2025, 8:00 AM
+ * PT"), so last year's letter never reads as next month's.
+ */
 export function fmtDateTime(iso: string): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(iso)) + " PT";
+  const d = new Date(iso);
+  const other = !Number.isNaN(d.getTime()) && yearIn(d) !== (clockYear ?? new Date().getFullYear());
+  return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", ...(other ? { year: "numeric" } : {}), hour: "numeric", minute: "2-digit" }).format(d) + " PT";
 }
 export function fmtClock(iso: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
