@@ -45,6 +45,9 @@ test("autoplay finishes the tour by itself within 180 s", async ({ page, weft, w
   await info.attach("autoplay.json", { body: JSON.stringify({ total, seen, at, notes, usd, model: after.provider.model }, null, 2), contentType: "application/json" });
   expect(total).toBeLessThanOrEqual(180_000);
   expect(seen[seen.length - 1]).toBe("finish");
+  // Step 6 (the rate card, 11 s planned) once took 35 s live while it searched the Inbox: it now rings the notice
+  // run's own card, resolved when step 5's run settles, and its setup never outlasts its own seconds.
+  expect(at["approve"]! - at["inbox-proposal"]!, "step 6 runs under 15 s").toBeLessThan(15_000);
   const executed = (await weft.proposals("executed")).filter((p) => !executedBefore.has(p.id));
   expect(executed.map((p) => p.command), "only the rate change executes").toEqual(["tax.update_rate"]);
   // Exactly one chat question (the chart): the ask step must never send a second, cut-off prompt.

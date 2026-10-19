@@ -41,6 +41,31 @@ async function apiGet<T>(path: string): Promise<T> {
   if (!res.ok) throw new ApiError(res.status, json ?? { _tag: "Internal", message: res.statusText });
   return json as T;
 }
+/** A step-entry lookup never holds a step past its own seconds: the read gives up after `ms` (the caller falls back). */
+async function apiGetWithin<T>(path: string, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([apiGet<T>(path), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`timeout ${path}`)), ms); })]);
+  } finally { clearTimeout(timer); }
+}
+
+type PendingRate = { id: string; command: string | null; proposerRunId: string | null; routineRunId?: string | null };
+/**
+ * The pending tax.update_rate proposal the notice run filed: by proposer run, or by the run's routine run when a child
+ * run filed it. The live model files its proposals in either order (the reply first in some runs), so the step never
+ * guesses by position.
+ */
+async function ownRateProposal(runId: string, ms: number): Promise<{ own: string | null; any: string | null }> {
+  const [run, props] = await Promise.all([
+    apiGetWithin<{ routineRunId?: string | null }>(`/v1/agent/runs/${encodeURIComponent(runId)}`, ms).catch(() => null),
+    apiGetWithin<{ data: PendingRate[] }>("/v1/proposals?status=pending&limit=100", ms),
+  ]);
+  const rate = props.data.filter((p) => p.command === "tax.update_rate");
+  const rr = run?.routineRunId ?? null;
+  const own = rate.filter((p) => p.proposerRunId === runId || (!!rr && p.routineRunId === rr)).at(-1);
+  return { own: own?.id ?? null, any: rate[0]?.id ?? null };
+}
+
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await rawFetch(`/api${path}`, { method: "POST", headers: { accept: "application/json", "content-type": "application/json", "x-weft-principal": getPrincipal() }, body: JSON.stringify(body) });
   const text = await res.text();
@@ -120,7 +145,16 @@ export function TourProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "memo", patch });
   }, []);
   const elapsed = () => Date.now() - (sRef.current.startedAt || Date.now());
-  const paused = () => hover.current.pointer || hover.current.focus || (typeof document !== "undefined" && document.hidden);
+  // Focus inside the card pauses autoplay only once a person has pressed a key or a pointer: autoplay's own focus moves
+  // (the title on each step, a control it clicks) read as :focus-visible in a browser nobody has touched.
+  const touched = useRef(false);
+  useEffect(() => {
+    const on = () => { touched.current = true; };
+    window.addEventListener("keydown", on, { capture: true });
+    window.addEventListener("pointerdown", on, { capture: true });
+    return () => { window.removeEventListener("keydown", on, { capture: true }); window.removeEventListener("pointerdown", on, { capture: true }); };
+  }, []);
+  const paused = () => hover.current.pointer || (hover.current.focus && touched.current) || (typeof document !== "undefined" && document.hidden);
 
   // ---- persistence, resume and deep links ---------------------------------------------------------------------
   const booted = useRef(false);
@@ -239,13 +273,15 @@ export function TourProvider({ children }: { children: ReactNode }) {
   const resolveMemo = useCallback(async (step: TourStep) => {
     if (step.id === "inbox-proposal" || (step.id === "approve" && !memo().rateProposalId)) {
       if (memo().approved && memo().rateProposalId) return;
+      // Step 5 resolves the notice run's own card the moment the run settles; nothing to look up again.
+      if (memo().rateProposalOwn && memo().rateProposalId) return;
       try {
-        const props = await apiGet<{ data: { id: string; command: string | null; proposerRunId: string | null }[] }>("/v1/proposals?status=pending&limit=100");
-        const rate = props.data.filter((p) => p.command === "tax.update_rate");
-        const mine = memo().noticeRunId ? rate.find((p) => p.proposerRunId === memo().noticeRunId) : undefined;
+        const runId = memo().noticeRunId;
+        const found = runId ? await ownRateProposal(runId, Math.min(3_000, step.seconds * 1000)) : null;
+        const ids = found ?? { own: null, any: (await apiGetWithin<{ data: PendingRate[] }>("/v1/proposals?status=pending&limit=100", 3_000)).data.find((p) => p.command === "tax.update_rate")?.id ?? null };
         // Step 6 may show any pending rate card; only the one this session's notice run made counts as the tour's own.
-        const pick = mine ?? (step.id === "inbox-proposal" ? rate[0] : undefined);
-        patchMemo({ rateProposalId: pick?.id ?? null, rateProposalOwn: !!mine });
+        const pick = ids.own ?? (step.id === "inbox-proposal" ? ids.any : null);
+        patchMemo({ rateProposalId: pick, rateProposalOwn: !!ids.own });
       } catch { /* the step falls back to any pending card */ }
     }
     if (step.id === "audit" && memo().rateProposalId && !memo().rateSeq) {
@@ -335,7 +371,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
 
       // 4. Locate the target (5 s), then ring it.
       const cands = targetCandidates(step, memo());
-      const hit = step.target ? await waitForAny(cands, 5_000, signal) : null;
+      // At most 5 s, and never longer than the step's own seconds less what routing took: then the fallback card.
+      const hit = step.target ? await waitForAny(cands, Math.max(1_000, Math.min(5_000, step.seconds * 1000 - (Date.now() - enteredAt))), signal) : null;
       if (signal.aborted) return;
       if (hit) {
         // Card height (about 220 px) plus its gap and padding, so it fits between the pane's top and the ring. The ring
@@ -496,6 +533,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
           }
           const st = dom && dom !== "starting" && dom !== "queued" && dom !== "running" ? dom : apiStatus;
           if (st === "waiting" || st === "held" || st === "done") {
+            // The run's own rate card, read now, so step 6 rings it at once instead of searching the Inbox for it.
+            if (step.id === "agent-run") void ownRateProposal(runId, 4_000).then((ids) => { if (ids.own && !memo().approved) patchMemo({ rateProposalId: ids.own, rateProposalOwn: true }); }, () => undefined);
             if (st === "done") statusLine(TOUR_COPY.agentDone, "done", "The agent finished");
             else statusLine(TOUR_COPY.agentWaiting, "waiting", "The agent finished and is waiting for your approval");
             // The finished run stays on screen: a reader moves on with Next, autoplay after the step's own seconds.
