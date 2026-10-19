@@ -87,8 +87,8 @@ export function ExpensesView() {
       {/* Columns follow the content column, not the window (container queries): Merchant and Amount always show,
           Category sits under the merchant, Date and Status appear once the column has room for them. */}
       <Card className="@container overflow-hidden">
-        <Table data-testid={TID.table} className="table-fixed text-[13px]">
-          <THead><TR><TH>Employee</TH><TH>Merchant</TH><TH numeric className="w-[6.5rem]">Amount</TH><TH className="hidden w-[7.5rem] @min-[46rem]:table-cell">Date</TH><TH className="hidden w-[8.5rem] @min-[34rem]:table-cell">Status</TH></TR></THead>
+        <Table data-testid={TID.table} className="text-[13px]">
+          <THead><TR><TH className="w-[45%]">Employee</TH><TH className="w-[55%]">Merchant</TH><TH numeric>Amount</TH><TH className="hidden @min-[46rem]:table-cell">Date</TH><TH className="hidden @min-[34rem]:table-cell">Status</TH></TR></THead>
           <TBody>
             {bands.map((b) => {
               const inBand = rows.filter((r) => r.band === b);
@@ -99,14 +99,14 @@ export function ExpensesView() {
                 ...(inBand.length ? inBand.map((r) => (
                   <TR key={r.id} data-testid={TID.row(r.id)} data-tour="expense-row" data-band={r.band} data-checks={r.checks.some((c) => c.severity === "block") ? "red" : r.checks.some((c) => c.severity === "review") ? "amber" : "none"} data-status={r.status} className="cursor-pointer" onClick={() => setOpenId(r.id)}
                     tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(r.id); } }}>
-                    <TD className="h-auto py-2">
-                      <div className="truncate font-medium" title={r.workerName}>{r.workerName}</div>
+                    <TD className="h-auto max-w-0 py-2">
+                      <div className="line-clamp-2 font-medium break-words" title={r.workerName}>{r.workerName}</div>
                       <div className="truncate text-1 text-gray-10" title={r.workerTitle}>
                         <span className="@min-[46rem]:hidden">{fmtDate(r.transactionDate)}, submitted {fmtDate(r.submittedDate)}</span>
                         <span className="hidden @min-[46rem]:inline">{r.workerTitle}</span>
                       </div>
                     </TD>
-                    <TD className="h-auto py-2">
+                    <TD className="h-auto max-w-0 py-2">
                       <div className="line-clamp-2 break-words" title={r.merchant}>{r.merchant}</div>
                       <div className="truncate text-1 text-gray-10">{CATEGORY_LABEL[r.category]}{r.hasReceipt || r.category === "mileage" ? null : <span className="text-gray-9">, no receipt</span>}</div>
                     </TD>
