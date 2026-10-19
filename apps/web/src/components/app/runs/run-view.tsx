@@ -180,7 +180,7 @@ export function RunView({ id }: { id: string }) {
           <Card className="divide-y divide-[var(--app-border)]">
             {w.trace.actions.map((a) => (
               <Link key={a.seq} href="/app/audit" className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
-                <span className="tabular text-gray-10">{auditLabel(a.seq)}</span><code className="font-mono text-0">{a.command}</code><span className="min-w-0 flex-1 truncate" title={a.summary}>{humanLine(a.summary)}</span>
+                <span className="tabular text-gray-10">{auditLabel(a.seq)}</span><code className="font-mono text-0">{a.command}</code><span className="min-w-0 flex-1 truncate" title={humanLine(a.summary)}>{humanLine(a.summary)}</span>
               </Link>
             ))}
           </Card>

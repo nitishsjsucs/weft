@@ -129,6 +129,7 @@ function humanLineBody(text: string): string {
     .replace(/\bresponse \d+ (?:for|to) (?:the )?/g, "the reply to the ").replace(/\bresponse \d+\b/g, "the reply")
     .replace(/\bRecorded mention in\b/g, "Recorded a mention in")
     .replace(/\bAccepted offer: created (.+?) as onboarding\b/g, "Accepted the offer: added $1 to onboarding")
+    .replace(/\b[Cc]reated (.+?)(?: \(EMP-\d+\))? as onboarding\b/g, (m, who: string) => `${m[0] === "C" ? "Added" : "added"} ${who} to onboarding`)
     .replace(/\bCreated (google_ws|chat|github|sso) account\b/g, (_m, k: string) => `Created ${SYSTEM_WORDS[k]} account`)
     .replace(AGENCY_RE, (k) => AGENCY_WORDS[k]!)
     .replace(/\b1 (workers|actions|paychecks|results|proposals|requests|expenses|notices|items|people|flags|tools)\b/g, (_m, w: string) => `1 ${SINGULAR[w]}`)
@@ -237,6 +238,14 @@ export function noticeName(formCode: string | null | undefined): string {
   const f = (formCode ?? "").trim();
   if (!f) return "Agency notice";
   return /\bnotice$/i.test(f) ? f : `${f} notice`;
+}
+
+/** Filing and deposit periods as words: "2026-Q3" is "Q3 2026", "2026-01" is "January 2026". */
+export function periodWords(text: string): string {
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  return text
+    .replace(/\b(\d{4})-Q([1-4])\b/g, "Q$2 $1")
+    .replace(/(?<![\w-])(\d{4})-(0[1-9]|1[0-2])(?![\w-])/g, (_m, y: string, mo: string) => `${MONTHS[Number(mo) - 1]} ${y}`);
 }
 
 /** The one label for a row of the audit log, wherever a page links to it. */

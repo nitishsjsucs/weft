@@ -105,7 +105,7 @@ export function PayrollReview({ id }: { id: string }) {
       <TotalsStrip totals={r.totals} count={r.paycheckCount - r.excludedWorkerIds.length} blockedNames={data.filter((p) => p.status === "blocked").map((p) => p.workerName)} />
       <div className="mb-3 flex flex-wrap items-center gap-2 text-1 text-gray-11">
         <span>{data.length} paychecks</span><span>·</span><span>{nr} need review</span>{blocked ? <><span>·</span><span className="text-red-11">{blocked} blocked</span></> : null}
-        {r.previousRunId ? <><span>·</span><span>compared with <Link className="text-blue-11 hover:underline" href={`/app/payroll/${r.previousRunId}`} title={r.previousRunId}>{humanLine(r.previousRunId)}</Link></span></> : null}
+        {r.previousRunId ? <><span>·</span><span>compared with <Link className="text-blue-11 hover:underline" href={`/app/payroll/${r.previousRunId}`}>{humanLine(r.previousRunId)}</Link></span></> : null}
       </div>
       <PaycheckTable data={data} onOpen={setOpen} />
       <PaycheckDrawer paycheck={open} onClose={() => setOpen(null)} />

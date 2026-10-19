@@ -74,6 +74,9 @@ function OverrideForm({ rows }: { rows: PermissionMatrixRow[] }) {
   );
 }
 
+/** Roles as people say them ("hr_manager" is "HR manager"). */
+const ROLE_WORDS: Record<string, string> = { admin: "Admin", payroll_admin: "Payroll admin", hr_manager: "HR manager", manager: "Manager", employee: "Employee" };
+
 export function PermissionsView() {
   const q = useGet("/v1/permissions/matrix");
   const rows = (q.data ?? []) as unknown as PermissionMatrixRow[];
@@ -98,7 +101,7 @@ export function PermissionsView() {
                 <TR key={r.principalId} data-testid={T.matrixRow(r.principalId)} data-tour={r.role === "agent" ? "permissions-agent-row" : undefined}>
                   <TH scope="row" className="whitespace-nowrap text-left font-normal">
                     <span className="block font-medium text-gray-12">{r.name}</span>
-                    <span className="block text-1 text-gray-10">{r.role === "agent" ? "The agent (every run)" : r.role.replace(/_/g, " ")}</span>
+                    <span className="block text-1 text-gray-10">{r.role === "agent" ? "The agent (every run)" : ROLE_WORDS[r.role] ?? r.role.replace(/_/g, " ")}</span>
                   </TH>
                   {DOMAINS.map((d) => <LevelCell key={d} id={T.matrixCell(r.principalId, d)} level={asLevel(r.domains[d])} agent={asLevel(r.agentDomains[d])} />)}
                   <TD data-testid={T.overrideList(r.principalId)} data-count={r.overrides.length} className="text-1 text-gray-11">{r.overrides.length ? r.overrides.map((o) => o.command).join(", ") : "None"}</TD>
