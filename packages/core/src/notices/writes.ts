@@ -37,7 +37,7 @@ export function responseTemplate(n: NoticeRow, accountNumber: string | null): st
   const by = letterDate(n.respondBy) ?? "the respond-by date";
   if (n.kind === "rate_change" && ex && ex.rates.length) {
     const lines = ex.rates.map((r) => `${r.code.toUpperCase()} ${rateDisplay(r.newRate)}${r.oldRate ? ` replacing ${rateDisplay(r.oldRate)}` : ""}`).join("; ");
-    return `${head}We acknowledge the revised ${ex.taxYear ?? ""} contribution rates (${lines}) effective ${letterDate(ex.effectiveFrom) ?? "as stated"} and have applied them in payroll. Please credit any contributions paid above the revised rate to our account.`.replace("revised  contribution", "revised contribution");
+    return `${head}We acknowledge the revised ${ex.taxYear ?? ""} contribution rates (${lines}) effective ${letterDate(ex.effectiveFrom) ?? "as stated"} and will apply them in payroll from that date. Please credit any contributions paid above the revised rate to our account.`.replace("revised  contribution", "revised contribution");
   }
   if (n.kind === "missing_filing") return `${head}We are reviewing the ${ex?.period ?? ""} filing named in this notice and will file or confirm the return on file by ${by}.`;
   return `${head}We acknowledge this notice and will respond by ${by}.`;
@@ -53,7 +53,7 @@ async function loadNotice(tx: DbTx, companyId: string, id: string) {
 const DraftInput = z.object({ notice_id: z.string(), note: z.string().max(MAX_NOTE_CHARS).optional() });
 export const draftResponse = writeCommand({
   name: "notices.draft_response", summary: "Draft a reply to an agency notice from the template.",
-  description: "Draft a reply to an agency notice: the body comes from Weft's template for the notice kind (built from the parsed fields); you supply only note, one optional closing sentence (plain text, up to 400 characters) to the agency, filed as written, never to the approver. Saves a numbered draft on the notice. R1: no approval; sending is notices.send_response.",
+  description: "Draft a reply to an agency notice. The body is Weft's template for the notice kind, built from the parsed fields, and already acknowledges its figures. You supply only note: one optional closing sentence to the agency (plain text, up to 400 characters), filed as written, never asking the agency to confirm its own figures. Saves a numbered draft. R1: no approval; sending is notices.send_response.",
   input: DraftInput, domain: "tax", needs: "edit", effect: "draft", risk: riskOf("R1"), approval: "never", reversible: false,
   tiers: { main: "executable", task: "executable" }, preview: null,
   async run(i, ctx, deps) {

@@ -11,6 +11,7 @@ import { auditLabel, codeWords, humanCopy, humanLine, splitChecks, valueText, ty
 import { RULE_LABEL, SEVERITY_TONE } from "../expenses/labels";
 import { principalName, refHref } from "../refs";
 import { noteLabel, proposerOf, type Proposer } from "./proposer";
+import { useRoutineNames } from "../routine-names";
 import { RiskChip } from "../risk";
 import { decideProposal, type Decision } from "./decide";
 import { taintText } from "../agent/untrusted";
@@ -39,15 +40,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** A content block's heading: a decision note stays on the claim, so it is not labelled as content to be sent. */
+export function contentLabel(label: string): string {
+  if (label === "Content to be sent") return label;
+  if (/^Decision note$/i.test(label)) return "Decision note (kept on the claim)";
+  return `Content to be sent: ${label}`;
+}
+
 /** Who proposed the change, with the routine run and a link to the agent run when there is one. */
 function ProposedBy({ who }: { who: Proposer }) {
+  const names = useRoutineNames(who.kind === "routine" ? [who.routineRunId] : []);
   const run = (id: string | null) => id ? <Link className="inline-flex items-center gap-0.5 text-blue-11 hover:underline" href={`/app/runs/${id}`}>Open run <ExternalLink className="size-3" /></Link> : null;
   switch (who.kind) {
     // The routine run id is for whoever traces the run, so it sits behind the word, not on the card.
     case "routine": return (
       <span className="flex flex-wrap items-baseline gap-x-2">
         <details className="inline-block">
-          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden" title="Show the routine run id">Routine</summary> <span className="font-mono text-0 text-gray-10 select-all">{who.routineRunId}</span>
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden" title="Show the routine run id">{names[who.routineRunId] ? `Routine: ${names[who.routineRunId]}` : "Routine"}</summary> <span className="font-mono text-0 text-gray-10 select-all">{who.routineRunId}</span>
         </details>
         {run(who.runId)}
       </span>
@@ -77,6 +86,8 @@ export function ProposalCard({ p }: { p: Proposal }) {
   const expired = new Date(p.expiresAt).getTime() <= new Date(now).getTime();
   const who = proposerOf(p);
   const diff = splitChecks(p.diff);
+  // A row whose before and after read the same ("Excluded (blocked) None → None") says nothing, so it goes.
+  const shown = diff.rows.map((r) => ({ ...r, label: humanLine(r.label), before: valueText(r.before), after: valueText(r.after) })).filter((r) => r.before !== r.after);
 
   return (
     <Card data-testid={tid.inboxCard(p.id)} data-tour="inbox-card" data-proposal-id={p.id} data-has-diff={p.diff.length ? "true" : "false"} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
@@ -111,7 +122,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
           <Field label="Proposed by"><ProposedBy who={who} /></Field>
         </dl>
-        {diff.rows.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={diff.rows.map((r) => ({ ...r, label: humanLine(r.label), before: valueText(r.before), after: valueText(r.after) }))} /> : null}
+        {shown.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={shown} /> : null}
         {diff.checks.length ? (
           <ul data-testid="proposal-checks" className="flex flex-col gap-1.5">
             {diff.checks.map((c, i) => (
@@ -126,7 +137,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           <div data-testid={TID.proposalContent} className="flex flex-col gap-2">
             {p.content.map((c, i) => (
               <div key={i} className="rounded-lg border border-[var(--app-border)]">
-                <div className="border-b border-[var(--app-border)] bg-gray-2 px-3 py-1.5 text-1 font-medium text-gray-11">{c.label === "Content to be sent" ? c.label : `Content to be sent: ${c.label}`}</div>
+                <div className="border-b border-[var(--app-border)] bg-gray-2 px-3 py-1.5 text-1 font-medium text-gray-11">{contentLabel(c.label)}</div>
                 <pre className="max-w-full overflow-x-auto px-3 py-2 font-sans text-[13px] leading-5 break-words whitespace-pre-wrap">{c.text}</pre>
               </div>
             ))}

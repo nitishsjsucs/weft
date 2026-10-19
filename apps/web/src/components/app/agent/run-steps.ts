@@ -1,5 +1,5 @@
 import { ReportResult, type ProposalStatus, type RunStepRow } from "@weft/contracts";
-import { stepLine } from "../copy";
+import { memoryReadLine, stepLine } from "../copy";
 
 /** Tool names arrive in wire form (`payroll__explain_flags`); the UI shows the dotted command name. */
 export function toolLabel(name: string | null): string | null {
@@ -13,8 +13,13 @@ export function toolLabel(name: string | null): string | null {
  * never as raw ISO, and row ids read as words ("Drafted response 1 for the notice"), as stepLine does.
  */
 export function stepSummary(s: RunStepRow): string {
-  const r = s.result as { summary?: unknown; outcome?: { summary?: unknown; title?: unknown; refusal?: { message?: unknown } } } | null;
+  const r = s.result as { summary?: unknown; outcome?: { summary?: unknown; title?: unknown; refusal?: { message?: unknown }; data?: { path?: unknown; body?: unknown } } } | null;
   const o = r && typeof r === "object" ? r.outcome : undefined;
+  // A memory read names the page it read, by its heading ("Read Lena Brooks (demo)'s memory page"), not its path.
+  if (toolLabel(s.toolName) === "memory.read" && typeof o?.data?.path === "string") {
+    const line = memoryReadLine(o.data.path, typeof o.data.body === "string" ? o.data.body : null);
+    if (line) return line;
+  }
   for (const v of [o?.summary, o?.title, o?.refusal?.message, r && typeof r === "object" ? r.summary : undefined]) {
     if (typeof v === "string" && v.trim()) return stepLine(v);
   }

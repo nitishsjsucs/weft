@@ -30,8 +30,10 @@ function extractCites(text: string): { text: string; cites: string[] } {
     const rest = inner.replace(new RegExp(CITE_ONE, "g"), "").replace(/\b(see|from|per|the|and|in|results?|search|tool|people|payroll|policy|record|source:?|sources:?|ids?)\b/gi, "").replace(/[\s,;:.`*]+/g, "");
     return rest === "" ? ` ${ids.map((id) => SENTINEL(num(id))).join("")}` : all;
   });
+  // "..., tied to action result res_0001." points only at the result: the clause goes, its chip stays.
+  out = out.replace(new RegExp(`,?\\s*\\b(?:tied|linked|attached|traced)\\s+(?:back\\s+)?to\\s+(?:the\\s+)?(?:(?:action|tool|payroll) )?results?\\s+(?:id\\s+)?${CITE_ONE}`, "gi"), (_m, id: string) => ` ${SENTINEL(num(id))}`);
   // "result `res_0001`", "payroll result res_0227": the noun goes, the citation stays.
-  out = out.replace(new RegExp(`\\b(?:(?:payroll|tool|people search|policy|search) )?results?\\s+(?:id\\s+)?${CITE_ONE}`, "gi"), (_m, id: string) => SENTINEL(num(id)));
+  out = out.replace(new RegExp(`\\b(?:(?:payroll|tool|people search|policy|search|action) )?results?\\s+(?:id\\s+)?${CITE_ONE}`, "gi"), (_m, id: string) => SENTINEL(num(id)));
   out = out.replace(new RegExp(CITE_ONE, "g"), (_m, id: string) => SENTINEL(num(id)));
   return { text: out, cites };
 }
@@ -41,12 +43,17 @@ function wordsOnly(text: string): string {
   return humanLine(humanDateText(text
     .replace(new RegExp(`\\s*\\(\\s*\`?${OTHER_ID}\`?(?:\\s*,\\s*\`?${OTHER_ID}\`?)*\\s*\\)`, "g"), "")
     .replace(new RegExp(`\`(${OTHER_ID}|pay_\\d{4}_\\d{2}_\\d{2}|\\d{4}-\\d{2}-\\d{2}(?:T[\\d:.]+(?:Z|[+-]\\d{2}:\\d{2})?)?|\\$?[\\d,]+(?:\\.\\d+)?%?)\``, "g"), "$1")
-    // A pay rate the sentence points at by its row id: "effective Oct 16, under pay rate record prt_0052" ends at the
-    // date; "recorded as pay rate prt_0052" keeps the noun.
-    .replace(/,?\s*\b(?:under|in|as|per|on|from|with)\s+(?:the\s+)?(?:new\s+)?pay rate(?:\s+(?:record|id))?\s+`?prt_[A-Za-z0-9_]+`?/g, "")
+    // A pay rate the sentence points at by its row id. A clause that is only the pointer goes with its verb ("...,
+    // recorded under pay rate prt_0052." and "..., under pay rate record prt_0052." end at the date before them); a
+    // pointer the sentence leans on keeps its preposition and noun ("comes from pay rate prt_0052, set at" is "comes
+    // from the new pay rate, set at").
+    .replace(/,\s*(?:and\s+)?(?:(?:was|is|are)\s+)?(?:recorded|stored|saved|filed|logged|kept|captured)\s+(?:under|in|as|with|on)\s+(?:the\s+)?(?:new\s+)?pay rate(?:\s+(?:record|row|id))?\s+`?prt_[A-Za-z0-9_]+`?(?=\s*(?:[.,;)\u0001]|$))/gm, "")
+    .replace(/,\s*(?:under|in|as|per|on|from|with)\s+(?:the\s+)?(?:new\s+)?pay rate(?:\s+(?:record|row|id))?\s+`?prt_[A-Za-z0-9_]+`?(?=\s*(?:[.;)\u0001]|$))/gm, "")
+    .replace(/\b(under|in|as|per|on|from|with)\s+(?:the\s+)?(?:new\s+)?pay rate(?:\s+(?:record|row|id))?\s+`?prt_[A-Za-z0-9_]+`?/g, "$1 the new pay rate")
     .replace(/\b(?:pay rate|rate)(?:\s+(?:record|id))?\s+`?prt_[A-Za-z0-9_]+`?/g, "pay rate")
     .replace(/\b(?:the )?(?:audit )?action (?:with )?(?:sequence|seq\.?)(?: number)? (?:\*\*)?(\d+)(?:\*\*)?/gi, "audit #$1")
     .replace(/\b(?:audit )?(?:sequence|seq\.?) (?:\*\*)?(\d+)(?:\*\*)?/gi, "audit #$1")
+    .replace(/\b(recorded|logged|saved) (in|as|by) action #?(\d+)\b/g, (_m, v: string, p: string, n: string) => `${v} ${p === "by" ? "in" : p} audit #${n}`)
     .replace(/\baudit #(\d+)\s*\(audit #\1\)/g, "audit #$1")
     .replace(/(`?)\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b\1/g, (_m, _q: string, c: string) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))));
 }

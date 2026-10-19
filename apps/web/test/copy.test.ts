@@ -82,10 +82,16 @@ describe("audit and step lines carry no ids, codes or file names", () => {
   });
   it("step lines read as sentences", () => {
     expect(stepLine("Found 1 workers")).toBe("Found 1 worker");
-    expect(stepLine("1 actions for people.set_pay_rate")).toBe("Found 1 set pay rate action");
+    expect(stepLine("1 actions for people.set_pay_rate")).toBe("Found 1 pay change");
+    expect(stepLine("2 actions for people.offboard")).toBe("Found 2 offboard actions");
+    expect(stepLine("Read entities/people/wrk_0026.md")).toBe("Read the person's memory page");
+    expect(humanLine("Read entities/people/wrk_0026.md")).toBe("Read entities/people/wrk_0026.md");
     expect(stepLine("pay_2026_10_30 (draft): 48 paychecks, 4 need review, 1 blocked")).toBe("The Oct 30 run (draft): 48 paychecks, 4 need review, 1 blocked");
-    expect(stepLine("Explanations for pay_2026_10_30: 4 agent, 0 template, 0 refused")).toBe("Explained 4 flagged paychecks");
-    expect(stepLine("Explanations for pay_2026_10_30: 3 agent, 0 template, 1 refused")).toBe("Explained 3 flagged paychecks; 1 could not be explained");
+    expect(stepLine("Explanations for pay_2026_10_30: 4 agent, 0 template, 0 refused")).toBe("Explained 4 flagged paychecks on the Oct 30 run");
+    expect(stepLine("Explanations for pay_2026_10_30: 0 agent, 4 template, 0 refused")).toBe("Explained 4 flagged paychecks on the Oct 30 run (from the rule templates)");
+    expect(routineSummaryText("Explanations for pay_2026_10_30: 8 agent, 0 template, 0 refused")).toBe("Explained 8 flagged paychecks on the Oct 30 run");
+    expect(humanLine("Explanations for pay_2026_10_30: 6 agent, 2 template, 0 refused")).toBe("Explained 8 flagged paychecks on the Oct 30 run (6 by the agent, 2 from the rule templates)");
+    expect(stepLine("Explanations for pay_2026_10_30: 3 agent, 0 template, 1 refused")).toBe("Explained 3 flagged paychecks on the Oct 30 run; 1 could not be explained");
     expect(stepLine("Drafted response 1 for ntc_0005")).toBe("Drafted the reply to the notice");
   });
   it("a routine summary reads as a short list in run order", () => {
@@ -125,8 +131,13 @@ describe("proposal values", () => {
     expect(valueText("pay_2026_10_30, reimbursement outside gross")).toBe("The Oct 30 run, reimbursement outside gross");
     expect(valueText("$267,919.36")).toBe("$267,919.36");
     expect(cardField("Status", "draft to processing")).toEqual({ label: "Status", value: "Draft → Submitted for processing" });
+    // The expense cards (scenario 5): the Inbox's check names, and the executor's joined Payroll row as two values.
+    expect(cardField("Check DUPLICATE", "review to Same merchant, amount ($96.00) and date as exp_0009 (approved)").label).toBe("Policy check, duplicate");
+    expect(cardField("Check CA_NECESSARY_EXPENSE", "info to California workers must be reimbursed").label).toBe("Policy check, california duty");
+    expect(cardField("Payroll", "not scheduled to not paid")).toEqual({ label: "Payroll", value: "Not scheduled → Not paid" });
+    expect(cardField("Payroll", "not scheduled to pay_2026_10_30, reimbursement outside gross").value).toBe("Not scheduled → The Oct 30 run, reimbursement outside gross");
     expect(cardField("Check MEALS_DETAIL_MISSING", "review to Meals need the attendees and the business purpose"))
-      .toEqual({ label: "Policy check, meals detail missing", value: "Meals need the attendees and the business purpose" });
+      .toEqual({ label: "Policy check, meal details", value: "Meals need the attendees and the business purpose" });
   });
 });
 
