@@ -122,6 +122,25 @@ describe("seed profiles", () => {
       const flagged = await db.all<{ e: string | null }>(sql`SELECT explanation AS e FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' AND flags_json != '[]'`);
       expect(flagged.length).toBeGreaterThanOrEqual(4);
       for (const f of flagged) expect(f.e).toBeTruthy();
+      // Each explanation is the agent's, one line per flag, with no row ids or ISO dates, and it never contradicts the
+      // worker's rows: no "complete" onboarding while a task is open, no raise without a new pay rate, and the blocked
+      // paycheck is left out by the pending submit, not already excluded.
+      const notes = await db.all<{ w: string; e: string; s: string; f: string; open: number }>(sql`SELECT p.worker_id AS w, p.explanation AS e, p.explanation_source AS s, p.flags_json AS f,
+        (SELECT COUNT(*) FROM onboarding_tasks t WHERE t.worker_id = p.worker_id AND t.status != 'done') AS open FROM paychecks p WHERE p.payroll_run_id = 'pay_2026_10_30' AND p.flags_json != '[]'`);
+      for (const n of notes) {
+        const flags = JSON.parse(n.f) as { rule: string; evidence: Record<string, unknown> }[];
+        expect(n.s, n.w).toBe("agent");
+        expect(n.e.split("\n"), n.w).toHaveLength(flags.length);
+        expect(n.e, n.w).not.toMatch(/\b[a-z]{2,4}_\d{4}\b|\d{4}-\d{2}-\d{2}|\b[A-Z]+_[A-Z_]+\b/);
+        if (n.open > 0) expect(n.e, n.w).not.toMatch(/complete/i);
+        if (!flags.some((f) => f.evidence.pay_rate_id)) expect(n.e, n.w).not.toMatch(/raise/i);
+        expect(n.e, n.w).not.toMatch(/\bis excluded\b/i);
+        expect(new Set(n.e.split(/(?<=\.)\s+/)).size, n.w).toBe(n.e.split(/(?<=\.)\s+/).length);
+      }
+      expect(notes.find((n) => n.w === "wrk_0022")?.e).toMatch(/direct deposit, the I-9 and benefits selection are still open/);
+      const submit = await db.all<{ h: string; d: string }>(sql`SELECT headline AS h, diff_json AS d FROM proposals WHERE command = 'payroll.submit_run' AND status = 'pending'`);
+      expect(submit.map((x) => x.h)).toEqual(["Submit the Oct 16 to Oct 31 payroll (payday Oct 30)"]);
+      expect(submit[0]!.d).not.toMatch(/wrk_\d{4}/);
       // Approved and taken time off has one use row per requested day, as time_off.decide writes them.
       const gaps = await db.all<{ id: string }>(sql`SELECT r.id FROM time_off_requests r WHERE r.status IN ('approved', 'taken') AND r.id > 'tor_0006'
         AND (SELECT COUNT(*) FROM time_off_ledger l WHERE l.source_ref = r.id AND l.kind = 'use') != json_array_length(r.days_json)`);

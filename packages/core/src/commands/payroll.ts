@@ -159,7 +159,7 @@ const ExplainInput = z.object({
 type ExplainInput = z.infer<typeof ExplainInput>;
 export const explainFlagsCommand: WeftCommand<ExplainInput> = {
   ...base, name: "payroll.explain_flags", summary: "Save explanations for flagged paychecks",
-  description: "Saves one plain explanation per flagged paycheck in one call. Each is checked against that paycheck's flag evidence: numbers must come from it. Ungrounded items are refused per item (UNGROUNDED); after one repair the template is saved (source template). Omit explanation to save the template. Example: {\"run_id\": \"pay_2026_09_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
+  description: "Saves one explanation per flagged paycheck in one call: one line per flag, in flag order, stating only what its evidence or a read shows. Numbers must come from that evidence; ungrounded items are refused (UNGROUNDED), and after one repair the template is saved. Omit explanation for the template. Example: {\"run_id\": \"pay_2026_09_30\", \"items\": [{\"paycheck_id\": \"pyc_0150\", \"explanation\": \"...\"}]}.",
   compactDescription: "Save grounded explanations for flagged paychecks (batch).",
   input: ExplainInput, needs: "edit", effect: "draft", risk: () => "R1", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "hidden",

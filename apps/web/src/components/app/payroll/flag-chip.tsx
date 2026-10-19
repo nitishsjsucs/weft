@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { tid, type Flag, type Paycheck } from "@weft/contracts";
 import { appMain } from "../shell/main-pane";
+import { flagEvidence, flagExplanation, flagHeadline } from "./flag-text";
 
 const TONE: Record<Flag["severity"], string> = {
   block: "bg-red-3 text-red-11",
@@ -19,16 +20,11 @@ export const RULE_LABEL: Record<Flag["rule"], string> = {
   PENDING_TIME_OFF_IN_PERIOD: "Pending time off", PTO_LINE: "Time off paid", REIMBURSEMENT_SPIKE: "Reimbursement spike",
 };
 
-function evidenceRows(ev: Record<string, unknown>): [string, string][] {
-  return Object.entries(ev)
-    .filter(([, v]) => v !== null && v !== undefined && v !== "")   // "bank account id null" reads as a bug, not evidence
-    .filter(([k]) => !k.endsWith("_cents") || !(`${k.slice(0, -6)}_display` in ev))
-    .map(([k, v]) => [k.replace(/_display$/, "").replaceAll("_", " "), typeof v === "string" || typeof v === "number" ? String(v) : JSON.stringify(v)]);
-}
-
 /** Flag chip with an explanation popover showing the grounded explanation and whether the agent or a template wrote it. */
 export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
   const src = pc.explanationSource;
+  const note = flagExplanation(pc, flag);
+  const rows = flagEvidence(flag);
   return (
     <Popover>
       <PopoverTrigger
@@ -46,19 +42,21 @@ export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
           <span className={cn("rounded-md px-1.5 py-0.5 text-0 font-medium", TONE[flag.severity])}>{RULE_LABEL[flag.rule]}</span>
           <span className="text-1 text-gray-10">{flag.severity === "block" ? "Blocks the run" : flag.severity === "review" ? "Needs review" : "Info"}</span>
         </div>
-        <p className="mt-2 font-medium">{flag.message}</p>
-        {pc.explanation ? (
+        <p className="mt-2 font-medium">{flagHeadline(flag)}</p>
+        {note ? (
           <div className="mt-2 rounded-lg bg-gray-2 px-2.5 py-2">
-            <p className="leading-5 whitespace-pre-wrap">{pc.explanation}</p>
+            {note.scope === "paycheck" ? <p className="mb-1 text-1 text-gray-10">Note on this paycheck</p> : null}
+            <p data-explanation-scope={note.scope} className="leading-5 whitespace-pre-wrap">{note.text}</p>
             <div data-explanation-source={src ?? ""} className="mt-1.5 flex items-center gap-1 text-1 text-gray-10">
               {src === "agent" ? <><Bot className="size-3.5" /> Explanation written by the agent</> : <><FileText className="size-3.5" /> Explanation from a template</>}
               {pc.explanationRunId ? <Link href={`/app/runs/${pc.explanationRunId}`} className="ml-auto text-blue-11 hover:underline">Run</Link> : null}
             </div>
           </div>
         ) : <p className="mt-2 text-1 text-gray-10">No explanation yet. Run review to have the agent explain it.</p>}
-        {evidenceRows(flag.evidence).length ? (
+        {rows.length ? (
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-1">
-            {evidenceRows(flag.evidence).flatMap(([k, v]) => [<dt key={`k${k}`} className="text-gray-10">{k}</dt>, <dd key={`v${k}`} className="font-mono break-all">{v}</dd>])}
+            {rows.flatMap((r) => [<dt key={`k${r.label}`} className="text-gray-10">{r.label}</dt>,
+              <dd key={`v${r.label}`} className="tabular-nums break-words">{r.href ? <Link href={r.href} className="text-blue-11 hover:underline">{r.value}</Link> : r.value}</dd>])}
           </dl>
         ) : null}
       </PopoverContent>

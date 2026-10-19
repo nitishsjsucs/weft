@@ -2,6 +2,7 @@
 // its planned seconds, click the real controls on the click steps, and finish within 180 s (owner: tour).
 import { card, expect, noHorizontalScroll, pressPrimary, readyCard, readyStep, targetInfo, test, TOUR_STEPS } from "./tour-fixtures";
 import { TOUR_CHART_PROMPT } from "../../apps/web/src/components/tour/steps";
+import { TID } from "../../packages/contracts/src/testids";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -69,6 +70,21 @@ test("completes the whole tour on the scripted provider in 180 s or less", async
     if (step.id === "memory" && world.rich) {
       // The procedure the notice run followed, with a thread linking it and its git history.
       expect(Number(await page.locator('[data-tour~="memory-backlinks"]').getAttribute("data-count")), "memory backlinks").toBeGreaterThan(0);
+    }
+    if (step.id === "payroll-flags" && world.rich) {
+      // The open flag's popover reads as copy: its own line, human dates, no row ids or engine codes.
+      const pop = page.locator("[data-radix-popper-content-wrapper]").filter({ has: page.locator("[data-explanation-source]") });
+      await expect(pop).toBeVisible();
+      const text = await pop.innerText();
+      expect(text, "flag popover copy").not.toMatch(/\b(?:wrk|pyc|prt|tor|res|pay|prp)_\d{4}|\d{4}-\d{2}-\d{2}|\b[A-Z]+_[A-Z_]+\b/);
+      expect(text, "the blocking flag's own line").toContain("No active bank account, so this paycheck is blocked");
+      expect(text, "no other flag's line").not.toContain("First paycheck");
+    }
+    if (TOUR_STEPS.findIndex((x) => x.id === "approve") < i) {
+      // After the approval, the notice run's step line for the rate change shows the decision, not the filing.
+      const memo = await page.evaluate(() => (JSON.parse(sessionStorage.getItem("weft.tour.v1") ?? "{}") as { memo?: { rateProposalId?: string } }).memo ?? {});
+      const line = page.locator(`[data-testid="${TID.agentStep}"][data-outcome="pending:${memo.rateProposalId}"]:visible`);
+      if (memo.rateProposalId && (await line.count()) > 0) await expect(line.first(), `${step.id} rate step line`).not.toContainText("waiting for approval", { timeout: 5_000 });
     }
 
     if (SHOTS) {

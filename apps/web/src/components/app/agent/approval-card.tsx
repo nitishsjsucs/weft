@@ -14,6 +14,7 @@ import { cn } from "@weft/ui";
 import { errorText, useMutation } from "@/lib/api/hooks";
 import { decideProposal } from "../inbox/decide";
 import { RiskChip } from "../risk";
+import { humanDates, humanTimes } from "../format";
 
 const OUTCOME: Partial<Record<ProposalStatus, { text: string; tone: string }>> = {
   executed: { text: "Approved and done", tone: "text-green-11" },
@@ -56,7 +57,7 @@ export function ApprovalCard({ card, status, taintedBy = null, known = true, com
           <span className="min-w-0 break-words">This run read untrusted content: {taintedBy}.{pending ? " Review it in the Inbox before approving." : ""}</span>
         </div>
       ) : null}
-      <p className="text-[13px] leading-5 font-medium break-words text-gray-12">{card.headline}</p>
+      <p className="text-[13px] leading-5 font-medium break-words text-gray-12">{humanDates(humanTimes(card.headline))}</p>
       <dl className="flex flex-col gap-0.5 text-1 text-gray-11">
         {card.subjectName ? <div className="flex gap-1.5"><dt className="text-gray-10">For</dt><dd className="min-w-0 break-words">{card.subjectName}</dd></div> : null}
         {card.routineName ? <div className="flex gap-1.5"><dt className="text-gray-10">Routine</dt><dd className="min-w-0 break-words">{card.routineName}</dd></div> : null}

@@ -21,6 +21,21 @@ const ISO_INSTANT = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+
 export function humanTimes(text: string): string {
   return text.replace(ISO_INSTANT, (m) => (Number.isNaN(Date.parse(m)) ? m : fmtDateTime(m)));
 }
+/** A plain calendar date inside free text ("start date 2026-10-19"); instants, ids and longer numbers never match. */
+const PLAIN_DATE = /(?<![\w-])(\d{4})-(\d{2})-(\d{2})(?![\w-]|:|T\d)/g;
+/**
+ * Plain YYYY-MM-DD dates in server text read as "Oct 19" (with the year when it is not `year`). Calendar dates are
+ * days, not instants, so no time zone shift applies. The stored text stays as written.
+ */
+export function humanDates(text: string, year?: number): string {
+  // Without a year from the caller, dates in the text's latest year read without one ("Oct 16 to Oct 31, payday Oct 30").
+  const ref = year ?? Math.max(0, ...[...text.matchAll(PLAIN_DATE)].map((m) => Number(m[1])));
+  return text.replace(PLAIN_DATE, (m, y: string, mo: string, d: string) => {
+    const t = Date.UTC(Number(y), Number(mo) - 1, Number(d), 12);
+    if (Number.isNaN(t) || new Date(t).getUTCDate() !== Number(d)) return m;
+    return fmtDate(m, Number(y) === ref ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+  });
+}
 export function fmtShortClock(iso: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 }
