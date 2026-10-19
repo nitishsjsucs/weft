@@ -9,7 +9,7 @@ import { fmtDateTime, humanTimes, notReversibleText } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { humanLine } from "../copy";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 /** Who wrote the row: a routine by its name (its run id is for whoever traces it, so it sits in the title). */
 function actor(a: Action, routineNames: Record<string, string>): string {
@@ -82,11 +82,12 @@ export function AuditView() {
               <TR key={a.seq} id={`audit-${a.seq}`} data-testid={tid.auditRow(a.seq)} data-tour="audit-row" data-seq={a.seq} data-reverses={a.reversesSeq ?? ""} data-reversible={a.reversible} className={cn(a.reversedBySeq !== null && "bg-gray-2")}>
                 <TD className="h-11 tabular text-gray-10">#{a.seq}</TD>
                 <TD className="h-11 whitespace-nowrap">{fmtDateTime(a.ts)}</TD>
-                <TD className="h-11 max-w-[12rem]">
+                <TD className="h-11 max-w-[10rem]">
                   <div title={a.routineRunId ?? undefined}>{actor(a, routineNames)}</div>
                   {a.onBehalfOf ? <div className="text-1 text-gray-10">for {principalName(a.onBehalfOf)}</div> : null}
                 </TD>
-                <TD className="h-11 whitespace-nowrap"><code className="font-mono text-1">{a.command}</code></TD>
+                {/* A command breaks only after its dot ("notices." / "draft_response"), never inside a word. */}
+                <TD className="h-11 max-w-[11rem]"><code className="font-mono text-1">{a.command.split(".").map((part, i, all) => <Fragment key={i}><span className="whitespace-nowrap">{part}{i < all.length - 1 ? "." : ""}</span>{i < all.length - 1 ? <wbr /> : null}</Fragment>)}</code></TD>
                 <TD className="h-11 min-w-[200px] whitespace-normal break-words">
                   {/* The stored summary carries row ids and ISO dates; it reads as words here, the stored text in the title. */}
                   <div title={a.summary}>{humanLine(a.summary)}</div>

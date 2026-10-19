@@ -188,7 +188,8 @@ cited ids; the expense drawer is still a full-height modal over the docked agent
   sheet leaves the sheet's height above the target (`sheetRoom`).
 - Copy on the path: the audit table names a routine by its name (the run id in the title), reads each summary through
   `humanLine` (the stored text in the title), says "from an approved proposal" and "Agent run" with the ids in titles,
-  and keeps the Command cell on one line in mono. `noticeName` does not double "notice" ("UI rate notice"); one
+  and sets the Command cell in mono, breaking only after a dot ("notices." / "draft_response"), never inside a
+  word (one unbroken line overflowed the table at 1440 px, which `e2e/rich-data.spec.ts` checks). `noticeName` does not double "notice" ("UI rate notice"); one
   `auditLabel` ("audit #N") on the rates table, the person page, the approval card and the document library. The
   memory chip reads "updated Oct 26". Flag evidence dates in the period's year read without one, as the headline does.
   New-hire personas in the Viewing as menu read "(demo)". The rate step avoids the other rate rows, so the card goes
