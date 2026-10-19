@@ -48,8 +48,7 @@ function wordsOnly(text: string): string {
     .replace(/\b(?:the )?(?:audit )?action (?:with )?(?:sequence|seq\.?)(?: number)? (?:\*\*)?(\d+)(?:\*\*)?/gi, "audit #$1")
     .replace(/\b(?:audit )?(?:sequence|seq\.?) (?:\*\*)?(\d+)(?:\*\*)?/gi, "audit #$1")
     .replace(/\baudit #(\d+)\s*\(audit #\1\)/g, "audit #$1")
-    .replace(/(`?)\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b\1/g, (_m, _q: string, c: string) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))))
-    .replace(/\btor\b(?=[\s,.;])/g, "the time-off request");
+    .replace(/(`?)\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b\1/g, (_m, _q: string, c: string) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))));
 }
 
 /** Dashes as Weft's copy writes them: a day or number range reads "23 to 25", any other dash a comma. */
