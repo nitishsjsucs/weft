@@ -1,5 +1,6 @@
 // The tour under reduced motion, at phone width, and for screen readers (owner: tour).
 import { expect, noHorizontalScroll, readyCard, test } from "./tour-fixtures";
+import { TOUR_CHART_PROMPT } from "../../apps/web/src/components/tour/steps";
 
 async function startTour(page: import("@playwright/test").Page, query = "1"): Promise<void> {
   await page.goto(`/app?tour=${query}`);
@@ -71,6 +72,8 @@ test.describe("phone", () => {
     await check("approve");
     await page.goto("/app/payroll?tour=ask-chart");
     const ask = await check("ask-chart", true);
+    // Ask once the prompt is typed (before that the primary is Next), then the chart stays up until Next.
+    await expect(page.locator('[data-tour~="agent-composer"] textarea')).toHaveValue(TOUR_CHART_PROMPT, { timeout: 10_000 });
     await ask.locator("[data-tour-primary]").click();
     // The chart stays up until Next.
     await expect(ask.locator('[data-tour-status="done"], [data-tour-note]').first()).toBeVisible({ timeout: 20_000 });
