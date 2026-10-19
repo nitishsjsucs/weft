@@ -20,6 +20,7 @@ export const RULE_LABEL: Record<Flag["rule"], string> = {
 
 function evidenceRows(ev: Record<string, unknown>): [string, string][] {
   return Object.entries(ev)
+    .filter(([, v]) => v !== null && v !== undefined && v !== "")   // "bank account id null" reads as a bug, not evidence
     .filter(([k]) => !k.endsWith("_cents") || !(`${k.slice(0, -6)}_display` in ev))
     .map(([k, v]) => [k.replace(/_display$/, "").replaceAll("_", " "), typeof v === "string" || typeof v === "number" ? String(v) : JSON.stringify(v)]);
 }
@@ -54,7 +55,7 @@ export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
             </div>
           </div>
         ) : <p className="mt-2 text-1 text-gray-10">No explanation yet. Run review to have the agent explain it.</p>}
-        {Object.keys(flag.evidence).length ? (
+        {evidenceRows(flag.evidence).length ? (
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-1">
             {evidenceRows(flag.evidence).flatMap(([k, v]) => [<dt key={`k${k}`} className="text-gray-10">{k}</dt>, <dd key={`v${k}`} className="font-mono break-all">{v}</dd>])}
           </dl>

@@ -20,12 +20,17 @@ const KIND_LABEL: Record<string, string> = {
 };
 const STATUS_TONE: Record<string, "amber" | "blue" | "green" | "gray"> = { open: "amber", disputed: "blue", resolved: "green", dismissed: "gray" };
 const FINDING_LABEL: Record<string, string> = { open: "Open", disputed: "Disputed", resolved: "Resolved" };
+const monthLabel = (m: string) => new Date(`${m}-15T12:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 export const dollars = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function ReconciliationTab({ names, plans }: { names: Map<string, string>; plans: Map<string, string> }) {
   const [month, setMonth] = useState("2026-10");
   const q = useGet("/v1/benefits/reconciliation", { query: { month } });
   const rows = (q.data ?? []) as ReconFinding[];
+  // A month not reconciled yet shows the month before it underneath, so the tab is never just an empty state.
+  const prevMonth = (() => { const [y, m] = month.split("-").map(Number) as [number, number]; return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`; })();
+  const prev = useGet("/v1/benefits/reconciliation", { query: { month: prevMonth } });
+  const prevRows = q.data && rows.length === 0 ? ((prev.data ?? []) as ReconFinding[]) : [];
   const [notice, setNotice] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const run = useMutation(async () => (await client.post("/v1/benefits/reconciliation/run", { body: { month } })) as ToolOutcome);
@@ -57,7 +62,26 @@ export function ReconciliationTab({ names, plans }: { names: Map<string, string>
       {notice ? <div data-testid={TID.reconNotice} role="status" className="mb-3 rounded-lg bg-gray-3 px-3 py-2 text-1 text-gray-12">{notice}</div> : null}
       <CardHeading icon={<Scale />}>Findings{rows.length ? ` (${open.length} open${over ? `, ${dollars(over)} overbilled` : ""})` : ""}</CardHeading>
       <Card className="overflow-hidden">
-        {rows.length === 0 ? <p className="px-4 py-4 text-[13px] text-gray-10">{q.data ? `No findings for ${month}. Run reconciliation to compare the carrier invoice.` : "Loading..."}</p> : (
+        {rows.length === 0 ? (
+          <div className="px-4 py-4 text-[13px]">
+            <p className="text-gray-10">{!q.data ? "Loading..." : prevRows.length ? `${monthLabel(month)} is not reconciled yet. Run reconciliation to compare the carrier invoice.` : `No findings for ${month}. Run reconciliation to compare the carrier invoice.`}</p>
+            {prevRows.length ? (
+              <div data-testid="recon-previous" className="mt-3">
+                <p className="mb-1.5 font-medium text-gray-12">{monthLabel(prevMonth)}: {prevRows.length} {prevRows.length === 1 ? "finding" : "findings"}</p>
+                <ul className="flex flex-col gap-1.5">
+                  {prevRows.map((f) => (
+                    <li key={f.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-medium">{KIND_LABEL[f.kind] ?? f.kind}</span>
+                      {f.workerId ? <Link href={`/app/people/${f.workerId}`} className="text-gray-11 hover:underline">{names.get(f.workerId) ?? f.workerId}</Link> : null}
+                      <span className="tabular text-gray-10">billed {dollars(f.billedCents)}, expected {dollars(f.expectedCents)}</span>
+                      <Badge tone={STATUS_TONE[f.status] ?? "gray"}>{FINDING_LABEL[f.status] ?? f.status}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : (
           <div className="overflow-x-auto">
             <Table data-testid={TID.reconTable} className="text-[13px]">
               <THead><TR><TH>Finding</TH><TH>Person</TH><TH className="hidden tablet:table-cell">Plan</TH><TH numeric className="hidden tablet:table-cell">Billed</TH><TH numeric className="hidden tablet:table-cell">Expected</TH><TH numeric className="hidden tablet:table-cell">Deducted</TH><TH>Status</TH><TH /></TR></THead>

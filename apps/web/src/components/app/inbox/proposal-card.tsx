@@ -84,7 +84,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
         <h3 className="text-3 font-medium leading-6 text-balance break-words">{humanTimes(p.headline)}</h3>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 tablet:grid-cols-4">
           <Field label="On behalf of">{principalName(p.onBehalfOf)}</Field>
-          <Field label="Money">{p.moneyCents === null ? "None" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
+          <Field label="Moves money">{p.moneyCents === null ? "No" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
           <Field label="Proposed by"><ProposedBy who={who} /></Field>
         </dl>

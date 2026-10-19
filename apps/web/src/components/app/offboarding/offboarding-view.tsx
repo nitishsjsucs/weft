@@ -36,7 +36,10 @@ function useWorkerNames(): Map<string, string> {
 export function OffboardingList() {
   const q = useGet("/v1/offboarding", { refreshMs: 5_000 });
   const names = useWorkerNames();
-  const cases = ((q.data ?? []) as OffboardingCase[]).slice().reverse();
+  // Open cases first, then by last day, newest first (ties keep the newest case on top).
+  const rank = (c: OffboardingCase) => (c.status === "open" ? 0 : 1);
+  const cases = ((q.data ?? []) as OffboardingCase[]).slice().reverse()
+    .sort((a, b) => rank(a) - rank(b) || (a.lastDay < b.lastDay ? 1 : a.lastDay > b.lastDay ? -1 : 0));
   return (
     <div className="mx-auto w-full max-w-[1000px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="Offboarding" subtitle="Terminations with final pay, access revocation, benefits and the COBRA notice. Start one from a person's page with Terminate." />
@@ -51,7 +54,7 @@ export function OffboardingList() {
               return (
                 <TR key={c.id} data-testid={w2OffboardingTid.caseRow(c.id)}>
                   <TD><Link href={`/app/offboarding/${c.id}`} className="font-medium hover:underline">{names.get(c.workerId) ?? c.workerId}</Link></TD>
-                  <TD className="capitalize">{human(c.kind)}</TD>
+                  <TD>{capitalize(human(c.kind))}</TD>
                   <TD>{fmtDate(c.lastDay, { month: "short", day: "numeric", year: "numeric" })}</TD>
                   <TD>{finished} of {c.steps.length}</TD>
                   <TD><Badge tone={CASE_TONE[c.status]} data-status={c.status}>{CASE_LABEL[c.status]}</Badge></TD>
