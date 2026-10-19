@@ -4,6 +4,7 @@ import { Bot, FileText } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { tid, type Flag, type Paycheck } from "@weft/contracts";
+import { appMain } from "../shell/main-pane";
 
 const TONE: Record<Flag["severity"], string> = {
   block: "bg-red-3 text-red-11",
@@ -40,7 +41,7 @@ export function FlagChip({ pc, flag }: { pc: Paycheck; flag: Flag }) {
       >
         {RULE_LABEL[flag.rule]}{flag.severity === "block" ? " (blocks)" : ""}
       </PopoverTrigger>
-      <PopoverContent onClick={(e) => e.stopPropagation()}>
+      <PopoverContent align="start" collisionBoundary={appMain()} className="max-h-[var(--radix-popover-content-available-height)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2">
           <span className={cn("rounded-md px-1.5 py-0.5 text-0 font-medium", TONE[flag.severity])}>{RULE_LABEL[flag.rule]}</span>
           <span className="text-1 text-gray-10">{flag.severity === "block" ? "Blocks the run" : flag.severity === "review" ? "Needs review" : "Info"}</span>
