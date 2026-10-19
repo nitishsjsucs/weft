@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import {
-  actions, agentRuns, approvalAudit, contractorPayments, documents, filings, handoffCases, notices, offboardingCases, offboardingSteps,
+  actions, agentRuns, approvalAudit, contractorPayments, documents, employerTaxRates, filings, handoffCases, notices, offboardingCases, offboardingSteps,
   onboardingTasks, payRates, payrollRuns, proposals, routineRuns, runSteps, simAgencyMail, simChatMessages, simRailTransfers, simRegistrations,
   taxAccounts, taxProfiles, timeOffAssignments, timeOffLedger, timeOffRequests, workers, withWriteLock, type DbTx,
 } from "@weft/db";
@@ -235,12 +235,18 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
     const at = "2026-02-14T17:30:00.000Z";
     const r = await L.run({ at, trigger: "routine", routineId: "rt_agency_notice", triggerRef: "event:ntc_0001", onBehalfOf: "usr_dana",
       final: "Read the NY DOL 2026 UI rate notice (ntc_0001), checked the account and proposed the rate update with the notice as the source.",
-      tools: [{ name: "notices__get", args: { notice_id: "ntc_0001" }, data: { agency: "ny_dol", kind: "rate_change" } }, { name: "tax__update_rate", args: { notice_id: "ntc_0001" }, data: { proposed: true } }],
+      tools: [{ name: "notices__get", args: { notice_id: "ntc_0001" }, data: { agency: "ny_dol", kind: "rate_change" } }, { name: "tax__update_rate", args: { code: "sui", rate: "0.041", effective_from: "2026-01-01", source_notice_id: "ntc_0001" }, data: { proposed: true } }],
       checklist: [{ id: "rate", label: "propose tax.update_rate", passed: true }] });
-    await L.proposal({ at, command: "tax.update_rate", args: { notice_id: "ntc_0001", jurisdiction: "NY", code: "sui" }, subjectRef: "ntc_0001", risk: "R3",
-      headline: "Update the NY SUI rate from the NY DOL 2026 rate notice (ntc_0001)", domain: "tax", evidence: [{ label: "Notice", ref: "ntc_0001" }], runId: r.runId,
+    // Shaped like tax.update_rate itself: its input fields, risk R2, reversible through tax.revert_rate.
+    const [ny] = await L.tx.select().from(taxAccounts).where(eq(taxAccounts.agency, "ny_dol"));
+    const [nyRate] = await L.tx.select().from(employerTaxRates).where(eq(employerTaxRates.source, "notice:ntc_0001"));
+    const args = { tax_account_id: ny?.id ?? "txa_ny_dol", code: "sui", rate: nyRate?.rate ?? "0.041", effective_from: nyRate?.effectiveFrom ?? "2026-01-01", source_notice_id: "ntc_0001" };
+    await L.proposal({ at, command: "tax.update_rate", args, subjectRef: `${args.tax_account_id}:sui`, risk: "R2",
+      headline: `Update NY SUI rate 3.80% to 4.10% effective Jan 1, 2026 on account ${ny?.accountNumber ?? "00-48172 6"}`, domain: "tax",
+      diff: [{ label: "NY SUI rate", before: "3.80%", after: "4.10%" }], evidence: [{ label: "Notice", ref: "ntc_0001" }], runId: r.runId, reversible: true,
       routineRunId: r.routineRunId, status: "executed", decidedBy: "usr_dana", decidedAt: "2026-02-14T19:05:00.000Z",
-      exec: { ts: "2026-02-14T19:05:00.000Z", actorKind: "human", actorId: "usr_dana", summary: "Updated the NY SUI rate from ntc_0001; notice resolved", reversible: "no" } });
+      exec: { ts: "2026-02-14T19:05:00.000Z", actorKind: "human", actorId: "usr_dana", summary: `Updated NY SUI rate 3.80% to 4.10% effective 2026-01-01${nyRate ? ` (${nyRate.id})` : ""}`,
+        reversible: nyRate ? "yes" : "no", reverse: nyRate ? { rate_id: nyRate.id } : undefined } });
   }
   // Chat runs a viewer can open from the agent panel and the run view.
   const chats: RunSpec[] = [
@@ -308,6 +314,37 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
       L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel, text: final }, summary: `Posted to ${channel} (${msg})`, reversible: "no" });
     }
   }
+  // The favorites' history: the monthly exec report on the 1st, the weekly cost by state on Mondays, and a ready
+  // check in the week before each 2026 hire starts. They stay disabled (a running dev clock never fires a live model
+  // call), but the gallery and their detail pages show real past runs.
+  const months = ["2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
+  for (const m of months) {
+    let day = `${m}-01`;
+    while (!isWeekday(day) || HOLIDAYS.has(day)) day = addDays(day, 1);
+    const prev = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 2, 1, 12)).toISOString().slice(0, 7);
+    const head = emp.filter((w) => w.startDate <= day && (!w.endDate || w.endDate >= day)).length;
+    const joined = emp.filter((w) => w.startDate.startsWith(prev)).length;
+    const left = emp.filter((w) => w.endDate?.startsWith(prev)).length;
+    const label = new Date(`${prev}-15T12:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    const final = `Posted the ${label} exec report to #leadership: ${head} employees (${joined} joined, ${left} left), payroll cost by month and open compliance items.`;
+    const r = await L.run({ at: pt(day, 8), trigger: "routine", routineId: "rt_monthly_exec_report", triggerRef: `cron:${day}`, onBehalfOf: "usr_dana", final,
+      tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { rows: 1 } }, { name: "comms__send_message", args: { channel: "#leadership" }, data: { posted: true } }] });
+    const msg = await L.chat("#leadership", "Weft agent", `${label} exec report (demo): ${head} employees, ${joined} joined, ${left} left. Cost by month and compliance items are in Weft.`, pt(day, 8));
+    L.action({ ts: pt(day, 8), actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#leadership" }, summary: `Posted to #leadership (${msg})`, reversible: "no" });
+  }
+  for (const day of mondays("2026-08-03", "2026-10-19")) {
+    const states = [...new Set(emp.filter((w) => w.startDate <= day && (!w.endDate || w.endDate >= day)).map((w) => w.workState ?? "CA"))].sort();
+    await L.run({ at: pt(day, 8), trigger: "routine", routineId: "rt_weekly_cost_by_state", triggerRef: `cron:${day}`, onBehalfOf: "usr_theo",
+      final: `Payroll cost by state for the week of ${day}: ${states.join(", ")}. No state moved more than the alert threshold.`,
+      tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_state" }, data: { states: states.length } }] });
+  }
+  for (const w of emp.filter((x) => x.startDate >= "2026-01-05" && x.startDate <= "2026-10-26")) {
+    let day = addDays(w.startDate, -3);
+    while (!isWeekday(day)) day = addDays(day, -1);
+    await L.run({ at: pt(day, 9), trigger: "routine", routineId: "rt_new_hire_ready", triggerRef: `cron:${day}:${w.id}`, onBehalfOf: "usr_sam",
+      final: `${name(w)} is ready for ${w.startDate}: offer signed, W-4 and state form in, accounts created, laptop shipped.`,
+      tools: [{ name: "onboarding__ready_check", args: { worker_id: w.id }, data: { ready: true, open: 0 } }] });
+  }
   // People ops chat spread over days.
   for (const [ch, author, text, at] of [
     ["#new-hires", "Weft agent", "Welcome Ana Sousa (demo) and Ben Ashdown (demo), who start today in Oakland. Accounts are ready.", pt("2026-10-01", 9)],
@@ -332,6 +369,7 @@ async function seedTimeOffHistory(L: Layer, ws: W[]): Promise<void> {
     const vac = mine.find((a) => a.policyId === "top_vac_us");
     const sick = mine.find((a) => a.policyId.startsWith("top_sick_"));
     const usedBy = new Map<string, number>();
+    const firstUse = new Map<string, string>();
     const firstDay = w.startDate > "2026-01-05" ? addDays(w.startDate, 30) : "2026-01-05";
     const lastDay = "2026-10-09";
     if (firstDay > lastDay) continue;
@@ -368,26 +406,44 @@ async function seedTimeOffHistory(L: Layer, ws: W[]): Promise<void> {
       if (status !== "cancelled") L.action({ ts: pt(addDays(createdAt.slice(0, 10), 1), 11), actorKind: "human", actorId: approver, command: "time_off.decide", args: { request_id: id, decision: status === "denied" ? "deny" : "approve" },
         summary: `${status === "denied" ? "Denied" : "Approved"} ${days.length * 8} h of ${isSick ? "sick leave" : "vacation"} for ${name(w)} (${id})`, reversible: "no" });
       if (status === "taken") {
-        await L.tx.insert(timeOffLedger).values({ id: await newId(L.tx, "tol_"), assignmentId: a.id, workerId: w.id, policyId: a.policyId, kind: "use", minutes: -minutes,
-          effectiveDate: start, sourceRef: id, note: "time off taken", createdAt: pt(start, 18) });
+        // One use row per day, as time_off.decide writes them.
+        for (const x of days) {
+          await L.tx.insert(timeOffLedger).values({ id: await newId(L.tx, "tol_"), assignmentId: a.id, workerId: w.id, policyId: a.policyId, kind: "use", minutes: -x.minutes,
+            effectiveDate: x.date, sourceRef: id, note: "time off taken", createdAt: pt(x.date, 18) });
+          L.bump("time_off_ledger");
+        }
         usedBy.set(a.id, (usedBy.get(a.id) ?? 0) + minutes);
-        L.bump("time_off_ledger");
+        firstUse.set(a.id, firstUse.has(a.id) && firstUse.get(a.id)! < start ? firstUse.get(a.id)! : start);
       }
     }
     // The imported opening balance is net of usage; itemizing the usage adds the same minutes back as accrued, so
-    // Available stays exactly what the base seed imported and caps still hold.
+    // Available stays exactly what the base seed imported and caps still hold. It is dated on the first itemized use,
+    // so an as-of balance from January on never dips below what the person really had.
     for (const [assignmentId, minutes] of usedBy) {
       const a = mine.find((x) => x.id === assignmentId)!;
+      const on = firstUse.get(assignmentId)!;
       await L.tx.insert(timeOffLedger).values({ id: await newId(L.tx, "tol_"), assignmentId, workerId: w.id, policyId: a.policyId, kind: "import", minutes,
-        effectiveDate: "2026-10-15", note: "accrued before the usage itemized above, imported from the previous provider", createdAt: "2026-10-15T16:00:00.000Z" });
+        effectiveDate: on, note: "accrued before the usage itemized above, imported from the previous provider", createdAt: pt(on, 6) });
       L.bump("time_off_ledger");
     }
   }
-  // Out today (Mon Oct 26): an approved CA sick day and a NY vacation day, outside the hardware team.
+  // Out today (Mon Oct 26): an approved CA sick day and a NY vacation day, outside the hardware team. Approved the way
+  // time_off.decide approves: a use row for the day and the decision on the action log. The day sits inside the
+  // Oct 16 to 31 draft, whose planted paychecks carry no leave line; a recompute (the tour's rate change runs one)
+  // adds it, which is the engine's own behavior for approved leave in an open period.
   for (const [wid, policy, reason] of [["wrk_0014", "top_sick_ca", "Sick day"], ["wrk_0028", "top_vac_us", "Long weekend"]] as const) {
     const w = ws.find((x) => x.id === wid);
     if (!w) continue;
-    await L.tx.insert(timeOffRequests).values({ id: await newId(L.tx, "tor_"), companyId: CO, workerId: wid, policyId: policy, status: "approved", startAt: "2026-10-26", endAt: "2026-10-26",
+    const reqId = await newId(L.tx, "tor_");
+    const a = (byWorker.get(wid) ?? []).find((x) => x.policyId === policy);
+    if (a) {
+      await L.tx.insert(timeOffLedger).values({ id: await newId(L.tx, "tol_"), assignmentId: a.id, workerId: wid, policyId: policy, kind: "use", minutes: -480,
+        effectiveDate: "2026-10-26", sourceRef: reqId, note: null, createdAt: pt("2026-10-23", 11) });
+      L.bump("time_off_ledger");
+    }
+    L.action({ ts: pt("2026-10-23", 11), actorKind: "human", actorId: "usr_dana", command: "time_off.decide", args: { request_id: reqId, decision: "approve" },
+      summary: `Approved 8 h of ${policy === "top_sick_ca" ? "sick leave" : "vacation"} for ${name(w)} (${reqId})`, reversible: "no" });
+    await L.tx.insert(timeOffRequests).values({ id: reqId, companyId: CO, workerId: wid, policyId: policy, status: "approved", startAt: "2026-10-26", endAt: "2026-10-26",
       rangeType: "date", timeZone: w.timezone, requestedMinutes: 480, daysJson: JSON.stringify([{ date: "2026-10-26", minutes: 480, holiday: false }]), reason,
       approverPrincipalId: "usr_dana", routingJson: JSON.stringify([{ principalId: "usr_dana", why: "Dana Whitfield (demo) decides for managers without a Weft login" }]),
       checksJson: "[]", decidedBy: "usr_dana", decidedAt: pt("2026-10-23", 11), decisionNote: "", createdAt: pt("2026-10-22", 9) });
@@ -493,7 +549,8 @@ async function seedMoneyAndCompliance(L: Layer, ws: W[]): Promise<void> {
   for (const w of ws.filter((x) => x.type === "contractor")) {
     const rate = rates.find((r) => r.workerId === w.id && r.kind === "contract_monthly");
     if (!rate) continue;
-    let month = w.startDate.slice(0, 7);
+    // From the first month Weft holds pay history for (January, the imported runs), so no month shows contractors alone.
+    let month = w.startDate.slice(0, 7) < "2026-01" ? "2026-01" : w.startDate.slice(0, 7);
     while (month <= "2026-09") {
       const day = lastWeekday(month);
       const usd = Math.round(Number(rate.amountCents) * Number(fx[w.currency] ?? "1"));
@@ -565,8 +622,8 @@ const MEMORY_DOCS: { path: string; day: string; id: string; type: string; links:
   { path: "workstreams/co-expansion.md", day: "2026-10-20", id: "ws-co-expansion", type: "workstream", links: ["entities/people/wrk_0004", "entities/people/wrk_0001"], message: "workstream: Colorado expansion",
     body: "# Colorado expansion (demo)\n\nFirst Colorado hire starts Nov 2 under [[entities/people/wrk_0004|Imani Ferreira]]. Withholding and unemployment registrations are still to do. Sponsor [[entities/people/wrk_0001|Dana Whitfield]].\n" },
   // The guided tour opens the SUI rate notice procedure; this thread links it, so its Backlinks are not empty.
-  { path: "workstreams/q3-agency-notices.md", day: "2026-09-25", id: "ws-q3-agency-notices", type: "workstream", links: ["knowledge/procedures/state-sui-rate-notice.md", "entities/agencies/ca_edd-combined.md"], message: "workstream: Q3 agency notices",
-    body: "# Q3 agency notices (demo)\n\nNew York's unemployment rate notice went through [[knowledge/procedures/state-sui-rate-notice|the state SUI rate notice procedure]]: the rate change and the reply each waited for an approval. The [[entities/agencies/ca_edd-combined|EDD]] statement of benefit charges is still in review.\n" },
+  { path: "workstreams/2026-agency-notices.md", day: "2026-09-25", id: "ws-2026-agency-notices", type: "workstream", links: ["knowledge/procedures/state-sui-rate-notice.md", "entities/agencies/ca_edd-combined.md"], message: "workstream: 2026 agency notices",
+    body: "# 2026 agency notices (demo)\n\nIn February, New York's unemployment rate notice went through [[knowledge/procedures/state-sui-rate-notice|the state SUI rate notice procedure]]: the rate change waited for Dana's approval. The Texas rate notice confirmed an unchanged rate. The [[entities/agencies/ca_edd-combined|EDD]] statement of benefit charges is still in review.\n" },
   { path: "workstreams/october-payroll.md", day: "2026-10-23", id: "ws-october-payroll", type: "workstream", links: ["entities/people/wrk_0002", "knowledge/preferences/agent/autonomy.md"], message: "workstream: October payroll",
     body: "# October payroll (demo)\n\nOct 15 settled. The Oct 30 draft has four flagged paychecks; [[entities/people/wrk_0002|Theo Marsh]] approves by the Wednesday deadline. The agent proposes the submit and waits, as [[knowledge/preferences/agent/autonomy|the autonomy preference]] asks.\n" },
   { path: "comms/2026-10-weekly-digests.md", day: "2026-10-19", id: "comms-2026-10-digests", type: "thread", links: ["workstreams/october-payroll.md"], message: "comms: October digests",

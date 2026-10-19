@@ -7,7 +7,7 @@
 // rate change in the tour) gets the same numbers as on the base seed. Wage-base codes (FUTA, SUI, ETT) fill the
 // earliest periods first, as they did in the real year; the rest split evenly over the periods a worker was on payroll.
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { complianceItems, expenses, payRates, paychecks, payrollRuns, workers, ytdLedger, type DbTx } from "@weft/db";
+import { benefitEnrollments, benefitPlans, complianceItems, expenses, payRates, paychecks, payrollRuns, workers, ytdLedger, type DbTx } from "@weft/db";
 import { newId, payroll } from "@weft/core";
 
 const CO = "cmp_larkspur";
@@ -94,11 +94,27 @@ export async function seedImportedPayHistory(tx: DbTx, bump: (t: string, n?: num
     const key = `${i}:${e.workerId}`;
     claims.set(key, [...(claims.get(key) ?? []), { id: e.id, category: e.category, amountCents: e.amountCents, taxable: e.decisionReasonCode === "taxable_late" }]);
   }
+  // Benefits on each imported paycheck, from the enrollments active in that period, as the engine reads them: the
+  // employer share per plan from the plan's match (so cost reports carry employer benefits from January), and the
+  // employee share split so the plan lines add up to the imported pretax deductions exactly.
+  const plans = new Map((await tx.select().from(benefitPlans)).map((p) => [p.id, p]));
+  const enrollments = (await tx.select().from(benefitEnrollments)).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const benefitsFor = (wid: string, p: { periodStart: string; periodEnd: string }, gross: number, s125: number, k401: number) => {
+    const mine = enrollments.filter((e) => e.workerId === wid && e.status === "active" && e.effectiveFrom <= p.periodEnd && (e.effectiveTo === null || e.effectiveTo >= p.periodStart));
+    const lines = mine.flatMap((e) => { const plan = plans.get(e.planId); return plan ? [{ plan, b: payroll.benefitAmounts(plan, e, gross) }] : []; });
+    const health = lines.filter((x) => x.plan.type !== "401k");
+    const weights = health.map((x) => x.b.employeeCents);
+    const shares = proportional(s125, weights.length ? weights : []);
+    return lines.map((x) => {
+      const employeeCents = x.plan.type === "401k" ? k401 : (shares[health.indexOf(x)] ?? 0);
+      return { planId: x.b.planId, employeeCents, employerCents: x.b.employerCents };
+    });
+  };
   // Runs, newest last so ids sort by period; the paychecks and the run totals.
   for (const [i, p] of periods.entries()) {
     const id = `pay_${p.periodEnd.replaceAll("-", "_")}`;
     const checks: (typeof paychecks.$inferInsert)[] = [];
-    let gross = 0, net = 0, workerTaxes = 0, employerTaxes = 0, pretax = 0, reimb = 0;
+    let gross = 0, net = 0, workerTaxes = 0, employerTaxes = 0, pretax = 0, reimb = 0, erBenefits = 0;
     const linked: string[] = [];
     for (const [wid, idx] of onPayroll) {
       const k = idx.indexOf(i);
@@ -113,7 +129,7 @@ export async function seedImportedPayHistory(tx: DbTx, bump: (t: string, n?: num
         return { code: tcode, jurisdiction: jur, payer, taxable_wages_cents: c(wageCodeFor(jur, tcode)), rate: null, amount_cents: amount };
       });
       const ee = taxes.filter((t) => t.payer === "employee").reduce((a, t) => a + t.amount_cents, 0);
-      const er = taxes.filter((t) => t.payer === "employer").reduce((a, t) => a + t.amount_cents, 0);
+      const erTax = taxes.filter((t) => t.payer === "employer").reduce((a, t) => a + t.amount_cents, 0);
       const deductions = [...(s125 ? [{ code: "section125_medical", pretax: true, amountCents: s125 }] : []), ...(k401 ? [{ code: "401k_traditional", pretax: true, amountCents: k401 }] : [])];
       const netCents = line.gross - ee - s125 - k401;
       const mine = claims.get(`${i}:${wid}`) ?? [];
@@ -122,21 +138,24 @@ export async function seedImportedPayHistory(tx: DbTx, bump: (t: string, n?: num
       const reimbursementsCents = plain.reduce((a, x) => a + x.amountCents, 0);
       const earnings = [{ type: hourly.has(w.id) ? "hourly" : "salary", amountCents: line.gross - taxable, hoursX100: null }, ...(taxable ? [{ type: "taxable_reimbursement", amountCents: taxable, hoursX100: null }] : [])];
       linked.push(...mine.filter((x) => !x.taxable || x.amountCents < line.gross).map((x) => x.id));
+      const benefits = benefitsFor(wid, p, line.gross, s125, k401);
+      // A pretax amount with no enrollment line behind it (none expected) stays a deduction only.
+      const er = benefits.reduce((a, b) => a + b.employerCents, 0);
       checks.push({
         id: await newId(tx, "pyc_"), payrollRunId: id, workerId: wid, status: "processed", reviewGroup: "ready", hoursX100: null, grossCents: line.gross, netCents,
         reimbursementsCents, reimbursementsJson: JSON.stringify(plain.map((x) => ({ expenseId: x.id, category: x.category, amountCents: x.amountCents }))), earningsJson: JSON.stringify(earnings),
-        deductionsJson: JSON.stringify(deductions), benefitsJson: "[]", taxesJson: JSON.stringify(taxes), flagsJson: "[]",
+        deductionsJson: JSON.stringify(deductions), benefitsJson: JSON.stringify(benefits), taxesJson: JSON.stringify(taxes), flagsJson: "[]",
         explanation: "Imported from the previous provider: totals per tax code match the year-to-date import.", explanationSource: "template",
       });
-      gross += line.gross; net += netCents; workerTaxes += ee; employerTaxes += er; pretax += s125 + k401; reimb += reimbursementsCents;
+      gross += line.gross; net += netCents; workerTaxes += ee; employerTaxes += erTax; pretax += s125 + k401; reimb += reimbursementsCents; erBenefits += er;
     }
     if (!checks.length) continue;
-    const total = gross + reimb + employerTaxes;
+    const total = gross + reimb + employerTaxes + erBenefits;
     await tx.insert(payrollRuns).values({
       id, companyId: CO, payScheduleId: "ps_us_semimonthly", type: "us", subtype: "regular", status: "processed", periodStart: p.periodStart, periodEnd: p.periodEnd, payday: p.payday,
       approvalDeadline: p.approvalDeadline, fundingMethod: "ach",
       totalsJson: JSON.stringify({ cashRequirement: usd(total), grossPay: usd(gross), netPay: usd(net), reimbursements: usd(reimb), workerTaxes: usd(workerTaxes), employerTaxes: usd(employerTaxes),
-        preTaxDeductions: usd(pretax), postTaxDeductions: usd(0), workerBenefitContributions: usd(pretax), employerBenefitContributions: usd(0), transactionFees: usd(0), totalCost: usd(total) }),
+        preTaxDeductions: usd(pretax), postTaxDeductions: usd(0), workerBenefitContributions: usd(pretax), employerBenefitContributions: usd(erBenefits), transactionFees: usd(0), totalCost: usd(total) }),
       anomalySummaryJson: JSON.stringify({ needsReview: 0, ready: checks.length, blocked: 0, excluded: 0, runFlags: [] }), subjectHash: null, taxDataVersion: "imported",
       previousRunId: null, excludedWorkerIdsJson: "[]", approvedBy: null, approvedAt: null, bankBatchId: null, settleAt: p.settleAt, processedAt: p.settleAt,
       createdAt: payroll.ptToUtc(p.periodStart, 9), updatedAt: p.settleAt,

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
-import { commands, createSimClock } from "@weft/core";
+import { commands, createSimClock, expenses as policy } from "@weft/core";
 import { createExecutor } from "@weft/executor";
 import { createSimulators } from "@weft/sim";
 import { digestDb, SEED_CLOCK, seedWorld } from "../src/index";
@@ -28,12 +28,14 @@ async function seeded<T>(profile: SeedProfile | "world", read: (db: Db, verify: 
   } finally { await closeDb(db); rmSync(dir, { recursive: true, force: true }); }
 }
 /** The planted rows the rich layer must leave alone: the four Weft pay runs and their paychecks, YTD, the base
- * expenses, time-off requests and ledger, offers, notices, filings, compliance items and the first action. */
+ * expenses, time-off requests and ledger, offers, notices, filings, compliance items and the first action. The one
+ * thing the rich layer adds to a planted paycheck is the pre-payroll review's flag explanation (asserted apart). */
 async function planted(db: Db): Promise<string> {
   const q = (s: string) => db.all<Record<string, unknown>>(sql.raw(s));
+  const own = (rows: Record<string, unknown>[]) => rows.map(({ explanation: _e, explanation_source: _s, explanation_run_id: _r, ...rest }) => rest);
   return JSON.stringify({
     runs: await q(`SELECT * FROM payroll_runs WHERE tax_data_version != 'imported' ORDER BY id`),
-    checks: await q(`SELECT p.* FROM paychecks p JOIN payroll_runs r ON r.id = p.payroll_run_id WHERE r.tax_data_version != 'imported' ORDER BY p.id`),
+    checks: own(await q(`SELECT p.* FROM paychecks p JOIN payroll_runs r ON r.id = p.payroll_run_id WHERE r.tax_data_version != 'imported' ORDER BY p.id`)),
     ytd: await q(`SELECT * FROM ytd_ledger WHERE worker_id <= 'wrk_0051' ORDER BY worker_id, year, code, source`),
     expenses: await q(`SELECT * FROM expenses WHERE id <= 'exp_0014' ORDER BY id`),
     requests: await q(`SELECT * FROM time_off_requests WHERE id <= 'tor_0006' ORDER BY id`),
@@ -95,7 +97,7 @@ describe("seed profiles", () => {
       }
       const unlinked = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expenses WHERE status = 'paid' AND payroll_run_id IS NULL`);
       expect(unlinked[0]!.n).toBe(0);
-      expect(await count(db, "contractor_payments")).toBeGreaterThanOrEqual(40);
+      expect(await count(db, "contractor_payments")).toBeGreaterThanOrEqual(25);   // monthly from January, with the pay history
       expect(await count(db, "payroll_runs")).toBe(20);
       expect((await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM time_off_requests WHERE status = 'pending'`))[0]!.n).toBe(3);
       expect((await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM expenses WHERE status = 'needs_review'`))[0]!.n).toBe(8);
@@ -103,6 +105,32 @@ describe("seed profiles", () => {
       const off = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM ytd_ledger y WHERE y.code = 'gross' AND y.source = 'import' AND y.amount_cents !=
         (SELECT COALESCE(SUM(p.gross_cents), 0) FROM paychecks p JOIN payroll_runs r ON r.id = p.payroll_run_id WHERE r.tax_data_version = 'imported' AND p.worker_id = y.worker_id)`);
       expect(off[0]!.n).toBe(0);
+      // Every month with pay runs carries employer benefits, and contractor payouts never start before the pay history.
+      const months = await db.all<{ m: string; b: number }>(sql`SELECT substr(payday, 1, 7) AS m, SUM(json_extract(totals_json, '$.employerBenefitContributions.amount')) AS b
+        FROM payroll_runs WHERE status IN ('processing', 'processed') GROUP BY m`);
+      expect(months.length).toBeGreaterThanOrEqual(9);
+      for (const m of months) expect(m.b, m.m).toBeGreaterThan(0);
+      const early = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM contractor_payments WHERE scheduled_for < '2026-01-01'`);
+      expect(early[0]!.n).toBe(0);
+      // Paid mileage is the IRS rate on the drive's date, and stored checks are the policy engine's own codes.
+      const miles = await db.all<{ id: string; d: string; m: number; c: number }>(sql`SELECT id, transaction_date AS d, miles_x10 AS m, amount_cents AS c FROM expenses WHERE category = 'mileage' AND status = 'paid'`);
+      expect(miles.length).toBeGreaterThan(0);
+      for (const x of miles) expect(x.c, x.id).toBe(policy.mileageCents(x.m, policy.mileageRateX10(x.d)!));
+      const codes = await db.all<{ rule: string }>(sql`SELECT DISTINCT json_extract(j.value, '$.rule') AS rule FROM expenses e, json_each(e.checks_json) j`);
+      for (const c of codes) expect(c.rule).not.toBe("OVER_ACCOUNTABLE_WINDOW");
+      // The four flagged paychecks on the Oct 30 draft carry the review's explanation.
+      const flagged = await db.all<{ e: string | null }>(sql`SELECT explanation AS e FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' AND flags_json != '[]'`);
+      expect(flagged.length).toBeGreaterThanOrEqual(4);
+      for (const f of flagged) expect(f.e).toBeTruthy();
+      // Approved and taken time off has one use row per requested day, as time_off.decide writes them.
+      const gaps = await db.all<{ id: string }>(sql`SELECT r.id FROM time_off_requests r WHERE r.status IN ('approved', 'taken') AND r.id > 'tor_0006'
+        AND (SELECT COUNT(*) FROM time_off_ledger l WHERE l.source_ref = r.id AND l.kind = 'use') != json_array_length(r.days_json)`);
+      expect(gaps).toEqual([]);
+      // The favorites in the routine gallery have run history.
+      for (const id of ["rt_new_hire_ready", "rt_monthly_exec_report", "rt_people_digest", "rt_pre_payroll", "rt_milestones"]) {
+        const n = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = ${id}`);
+        expect(n[0]!.n, id).toBeGreaterThan(0);
+      }
       return { digest: await digestDb(db), planted: await planted(db) };
     });
     // Planted rows stay exactly as the base seed wrote them.

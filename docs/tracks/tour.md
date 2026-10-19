@@ -41,7 +41,7 @@ Rounds 1 and 2, 2026-10-18. Branch `feat/tour` (worktree `weft-worktrees/tour`).
   offering "Resume tour". A reload by the person still offers it.
 - The memory step pointed at `procedures/state-sui-rate-notice.md`; the file is
   `knowledge/procedures/state-sui-rate-notice.md`, so round 1 rang the fallback (whatever file was open). Fixed, and
-  the rich layer gained one memory thread (`workstreams/q3-agency-notices.md`, in `packages/seed/src/rich/index.ts`)
+  the rich layer gained one memory thread (`workstreams/2026-agency-notices.md`, in `packages/seed/src/rich/index.ts`)
   that links the procedure, so its Backlinks are not empty when the tour opens it.
 - The card carries `data-target-match` (`primary` or `fallback`), and on the rich world the complete spec checks
   every step matched its own target, the memory backlinks are non-empty, and the read-backs compare against the

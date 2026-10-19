@@ -5,9 +5,10 @@ import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import {
   benefitReconFindings, contractorTaxForms, devices, documents, enrollmentWindows, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
-  payrollRuns, principals, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, workers, type DbTx,
+  paychecks, payrollRuns, principals, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, workers, type DbTx,
 } from "@weft/db";
-import { newId, payroll, sha256Hex } from "@weft/core";
+import { expenses as policy, newId, payroll, sha256Hex } from "@weft/core";
+import type { Flag } from "@weft/contracts";
 import { seedPortalHires } from "./portal-hires";
 
 const CO = "cmp_larkspur";
@@ -108,6 +109,29 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       final: "Reviewed pay_2026_10_30: four paychecks flagged with explanations, Mira Delgado (demo) excluded until her bank account is on file. Proposed the submit.",
       tools: [{ name: "payroll__get_run", args: { run_id: draft.id }, data: { id: draft.id, status: "draft" } }, { name: "payroll__submit_run", args: { run_id: draft.id, exclude_blocked: true }, data: { proposed: true } }],
       checklist: [{ id: "explain", label: "explain flagged paychecks", passed: true }, { id: "submit", label: "propose payroll.submit_run", passed: true }] });
+    // What that review wrote on the four flagged paychecks: the grounded template line plus a sentence of context
+    // with no numbers of its own, saved as the agent's explanation (payroll.explain_flags does the same grounding).
+    const context: Partial<Record<Flag["rule"], string>> = {
+      GROSS_CHANGE: "Expected after the approved raise; nothing to fix before payday.",
+      MISSING_BANK_ACCOUNT: "Mira Delgado (demo) has been reminded to add direct deposit; she is excluded from this run until it is on file.",
+      NEW_IN_RUN: "Expected for a new hire; the onboarding checklist is complete.",
+      PRORATED: "Expected for a partial first period.",
+      HOURS_SPIKE: "Overtime was approved by the manager for the release week.",
+      PTO_LINE: "Approved time off in the period, paid at the regular rate.",
+      PENDING_TIME_OFF_IN_PERIOD: "The manager decides the request before the approval deadline.",
+      REIMBURSEMENT_SPIKE: "Approved expense claims ride this paycheck outside gross pay.",
+    };
+    for (const pc of await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, draft.id))) {
+      const flags = JSON.parse(pc.flagsJson) as Flag[];
+      if (!flags.length || pc.explanation) continue;
+      // Wave 3 rules have no template line; their own flag message is the grounded fact.
+      const base = payroll.templateExplanation(flags) || flags.map((f) => f.message.replace(/\.?$/, ".")).join(" ");
+      const extra = [...new Set(flags.map((f) => context[f.rule]).filter((x): x is string => !!x))].join(" ");
+      const text = extra ? `${base} ${extra}` : base;
+      const grounded = payroll.groundExplanation(text, flags, { gross_cents: pc.grossCents, net_cents: pc.netCents, hours_x100: pc.hoursX100 }).ok;
+      await tx.update(paychecks).set({ explanation: grounded ? text : base, explanationSource: grounded ? "agent" : "template", explanationRunId: r.runId }).where(eq(paychecks.id, pc.id));
+      L.bump("paycheck_explanations");
+    }
     await L.proposal({ at: pt("2026-10-23", 9, 1), command: "payroll.submit_run", args: { run_id: draft.id, exclude_blocked: true }, subjectRef: draft.id, risk: "R4", domain: "payroll", moneyCents: cost ?? undefined,
       status: "pending", headline: `Submit payroll ${draft.id} (${draft.periodStart} to ${draft.periodEnd}, payday ${draft.payday})`, runId: r.runId, routineRunId: r.routineRunId,
       expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: [{ label: "Pay run", ref: draft.id }, { label: "Excluded worker", ref: "wrk_0022" }],
@@ -122,24 +146,36 @@ async function seedExpenseHistory(L: MotionApi, ws: W[]): Promise<void> {
   const emp = ws.filter((w) => w.type === "employee" && w.status === "active" && w.startDate < "2026-01-01");
   const claims: [string, string, number, string, string, number | null][] = [
     ["travel", "Bayline Air (demo)", 38_420, "2026-01-21", "Customer visit in Austin", null], ["meals", "Harbor Noodle Bar (demo)", 6_480, "2026-02-04", "Team lunch with a prospect", null],
-    ["mileage", "Mileage", 4_221, "2026-02-18", "Drive to the Austin Yard test site", 603], ["software", "Sketchwell (demo)", 4_800, "2026-03-02", "Design tool seat", null],
+    ["mileage", "Mileage", 0, "2026-02-18", "Drive to the Austin Yard test site", 603], ["software", "Sketchwell (demo)", 4_800, "2026-03-02", "Design tool seat", null],
     ["travel", "Cedar Rail (demo)", 12_900, "2026-03-19", "Train to the Brooklyn studio", null], ["meals", "Lantern Diner (demo)", 5_210, "2026-04-08", "Recruiting dinner", null],
-    ["lodging", "Pinecrest Inn (demo)", 31_600, "2026-04-22", "Two nights for the trade show", null], ["mileage", "Mileage", 2_744, "2026-05-06", "Supplier visit in Fremont", 392],
+    ["lodging", "Pinecrest Inn (demo)", 10_840, "2026-04-22", "Night before the trade show", null], ["mileage", "Mileage", 0, "2026-05-06", "Supplier visit in Fremont", 392],
     ["software", "Fleetlog Cloud (demo)", 4_900, "2026-05-27", "Fleet log analysis seat", null], ["travel", "Bayline Air (demo)", 41_250, "2026-06-10", "Field trial in Austin", null],
-    ["meals", "Harbor Noodle Bar (demo)", 7_120, "2026-06-24", "Onboarding lunch", null], ["lodging", "Pinecrest Inn (demo)", 17_800, "2026-07-15", "Night before the site install", null],
-    ["mileage", "Mileage", 5_740, "2026-08-05", "Drives between Oakland and the warehouse", 820], ["software", "Sketchwell (demo)", 4_800, "2026-08-12", "Design tool seat", null],
+    ["meals", "Harbor Noodle Bar (demo)", 7_120, "2026-06-24", "Onboarding lunch", null], ["lodging", "Pinecrest Inn (demo)", 10_600, "2026-07-15", "Night before the site install", null],
+    ["mileage", "Mileage", 0, "2026-08-05", "Drives between Oakland and the warehouse", 820], ["software", "Sketchwell (demo)", 4_800, "2026-08-12", "Design tool seat", null],
     ["travel", "Cedar Rail (demo)", 9_800, "2026-08-18", "Train to the customer review", null], ["meals", "Lantern Diner (demo)", 6_900, "2026-07-28", "Dinner with the integration partner", null],
     ["travel", "Bayline Air (demo)", 29_300, "2026-04-02", "Conference travel, submitted after 60 days", null], ["meals", "Harbor Noodle Bar (demo)", 4_100, "2026-07-01", "Working lunch", null],
   ];
-  for (const [i, [category, merchant, cents, date, purpose, miles]] of claims.entries()) {
+  const attendees = ["Priya Raman (demo), Marcus Hale (demo)", "Ana Sousa (demo)", "Jonah Pell (demo), Kofi Mensah (demo), Mira Delgado (demo)", "Ben Ashdown (demo)", "Lena Brooks (demo)"];
+  const seen = new Map<string, policy.PolicyItem[]>();
+  let meal = 0;
+  for (const [i, [category, merchant, listed, date, purpose, miles]] of claims.entries()) {
     const w = emp[(i * 7) % emp.length]!;
     const late = purpose.includes("after 60 days");
     const submitted = late ? "2026-06-15" : new Date(Date.parse(`${date}T12:00:00Z`) + 3 * 86_400_000).toISOString().slice(0, 10);
     const decided = new Date(Date.parse(`${submitted}T12:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10);
     const id = await newId(L.tx, "exp_");
+    // Mileage is paid at the IRS rate on the drive's date (72.5 cents to Jun 30, 76 cents from Jul 1), as the engine computes it.
+    const cents = miles ? policy.mileageCents(miles, policy.mileageRateX10(date) ?? 0) : listed;
+    const who = category === "meals" ? attendees[meal++ % attendees.length]! : null;
+    const extract = miles ? null : { merchant, date, total_cents: cents, source: "simulated extractor (sidecar)" };
+    // The checks are the policy engine's own result at submission, not hand-written JSON.
+    const item: policy.PolicyItem = { id, workerId: w.id, category: category as policy.PolicyItem["category"], merchant, amountCents: cents, transactionDate: date, submittedDate: submitted,
+      businessPurpose: purpose, attendees: who, milesX10: miles, tripRef: null, preApprovalRef: null, hasReceipt: !miles, extract: extract ? { totalCents: cents, date, merchant } : null, status: "submitted" };
+    const checks = policy.evaluateExpense(item, { worker: { id: w.id, workState: w.workState, startDate: w.startDate, endDate: w.endDate }, others: seen.get(w.id) ?? [] }).checks;
+    seen.set(w.id, [...(seen.get(w.id) ?? []), { ...item, status: "paid" }]);
     await L.tx.insert(expenses).values({ id, companyId: CO, workerId: w.id, category, merchant, amountCents: cents, transactionDate: date, submittedAt: pt(submitted, 9), businessPurpose: purpose,
-      milesX10: miles, receiptExtractJson: miles ? null : JSON.stringify({ merchant, date, total_cents: cents, source: "simulated extractor (sidecar)" }), status: "paid",
-      checksJson: late ? JSON.stringify([{ rule: "OVER_ACCOUNTABLE_WINDOW", severity: "review", message: "Submitted more than 60 days after the expense, so it is paid as taxable wages", evidence: [{ label: "Expense", ref: id }] }]) : "[]",
+      attendees: who, milesX10: miles, receiptExtractJson: extract ? JSON.stringify(extract) : null, status: "paid",
+      checksJson: JSON.stringify(checks),
       approverPrincipalId: "usr_dana", decidedBy: "usr_dana", decidedAt: pt(decided, 11), decisionReasonCode: late ? "taxable_late" : null,
       decisionNote: late ? "Paid as taxable wages (accountable plan window passed). Reimbursed on the previous provider's payroll." : "Reimbursed on the previous provider's payroll.", policyVersion: 1, source: i % 5 === 0 ? "email" : "portal" });
     L.action({ ts: pt(decided, 11), actorKind: "human", actorId: "usr_dana", command: "expenses.decide", args: { expense_id: id, decision: late ? "approve_taxable" : "approve" }, summary: `Approved expense ${id} for ${w.firstName} ${w.lastName} (demo)${late ? " as taxable wages" : ""}`, reversible: "no" });
@@ -167,12 +203,18 @@ async function seedIntegrations(L: MotionApi): Promise<void> {
   L.bump("sync_items", 2);
 }
 
-/** August clean (no findings), September with one resolved finding; October stays un-run for the tour. */
+/** August clean (no findings), September with three findings (two resolved, one disputed); October stays un-run. */
 async function seedReconciliation(L: MotionApi, ws: W[]): Promise<void> {
   const w = ws.find((x) => x.id === "wrk_0017");
   await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual (sim)", kind: "wrong_tier", workerId: w?.id ?? null, planId: null,
     billedCents: 98_400, expectedCents: 61_200, deductedCents: 61_200, status: "resolved", detail: "Billed at family tier after a tier change to employee and spouse; the carrier credited the difference on the October invoice.", createdAt: "2026-10-02T17:00:00.000Z" });
-  L.bump("benefit_recon_findings");
+  const leaver = ws.find((x) => x.type === "employee" && x.endDate !== null && x.endDate >= "2026-07-01" && x.endDate <= "2026-08-31");
+  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual (sim)", kind: "terminated_but_billed", workerId: leaver?.id ?? null, planId: null,
+    billedCents: 61_200, expectedCents: 0, deductedCents: 0, status: "resolved", detail: "Still billed after coverage ended with the August departure; the carrier credited the premium on the October invoice.", createdAt: "2026-10-02T17:05:00.000Z" });
+  const sam = ws.find((x) => x.id === "wrk_0025");
+  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual (sim)", kind: "amount_mismatch", workerId: sam?.id ?? null, planId: null,
+    billedCents: 39_800, expectedCents: 38_000, deductedCents: 38_000, status: "disputed", detail: "Billed at the 2027 rate a quarter early; a dispute went to the carrier on Oct 2 and is waiting for its reply.", createdAt: "2026-10-02T17:10:00.000Z" });
+  L.bump("benefit_recon_findings", 3);
 }
 
 /** Device orders for the 2026 hires, one in transit, and the contractors' guest accounts, forms and contracts. */
