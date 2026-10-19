@@ -174,7 +174,9 @@ export async function approvalCardOf(db: Db | DbTx, row: ProposalRow): Promise<A
   const evidence = parse<Preview["evidence"]>(row.evidenceJson, []);
   const lines = diff.map((d) => ({ label: plainText(d.label, 120), value: plainText(EMPTY_BEFORE.has(d.before.trim()) || d.before === d.after ? d.after : `${d.before} to ${d.after}`, 120) }));
   const fields = lines.length > CARD_MAX_FIELDS ? [...lines.slice(0, CARD_MAX_FIELDS - 1), { label: "More", value: `${lines.length - (CARD_MAX_FIELDS - 1)} more lines on the proposal page` }] : lines;
-  const workerIds = [...new Set([...((row.subjectRef ?? "").match(/wrk_[A-Za-z0-9]+/g) ?? []), ...evidence.map((x) => x.ref).filter((r) => r.startsWith("wrk_"))])];
+  // The card is "For" the people the change is about: a person the evidence lists as left out (the blocked paycheck
+  // a payroll submit excludes) is not its subject.
+  const workerIds = [...new Set([...((row.subjectRef ?? "").match(/wrk_[A-Za-z0-9]+/g) ?? []), ...evidence.filter((x) => x.ref.startsWith("wrk_") && !/^excluded\b/i.test(x.label)).map((x) => x.ref)])];
   const names = await payroll.workerNames(db as DbTx, workerIds);
   const demo = (n: string) => (n.endsWith(" (demo)") ? n : `${n} (demo)`);   // seeded people are fictional and say so
   const one = workerIds.length === 1 ? names.get(workerIds[0]!)?.name : undefined;

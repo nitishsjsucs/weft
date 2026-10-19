@@ -94,7 +94,7 @@ export const getRunCommand: WeftCommand<GetRunInput> = {
     const run = await getRun(deps.tx, i.run_id);
     const view = await concisePayrollRun(deps.tx, run, { flaggedOnly: i.flagged_only, workerId: i.worker_id, state: i.state, detailed: i.response_format === "detailed" });
     const data = { ...view, ...approvalOf(run, await approverNames(deps.tx, ctx.companyId, [run.approvedBy])) };
-    return { data, summary: `${run.id} ${run.status}: ${data.counts.needs_review} need review, ${data.counts.ready} ready` };
+    return { data, summary: `${run.id} (${run.status}): ${data.counts.paychecks} paychecks, ${data.counts.needs_review} need review, ${data.counts.blocked} blocked` };
   },
 };
 
@@ -244,7 +244,7 @@ export const submitRunCommand: WeftCommand<SubmitInput> = {
       diff: [
         { label: "Status", before: "draft", after: "processing" },
         { label: "Net pay to bank", before: "$0.00", after: formatCents(s.totals.netPay + s.totals.reimbursements) },
-        { label: "Excluded (blocked)", before: "none", after: s.excluded.length ? s.excluded.map((w) => `${names.get(w)?.name ?? w} (${w})`).join(", ") : "none" },
+        { label: "Excluded (blocked)", before: "none", after: s.excluded.length ? s.excluded.map((w) => names.get(w)?.name ?? w).join(", ") : "none" },
       ],
       content: [], moneyCents: s.totals.totalCost, subjectRef: run.id, subjectHash: s.hash,
       evidence: [{ label: "Pay run", ref: run.id }, ...s.excluded.map((w) => ({ label: "Excluded worker", ref: w }))],

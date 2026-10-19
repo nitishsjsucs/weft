@@ -95,7 +95,7 @@ const peopleSearch = readCommand({
     if (scope) data.access = searchAccess(scope, i, matched.length !== rows.length);
     Object.assign(data, { by_state: byState, by_department: byDepartment, workers: list });
     const window = data.start_window ? ` starting ${i.start_from ?? "any time"} to ${i.start_to ?? "any time"}` : "";
-    return { data, summary: `Found ${rows.length} workers${window}${truncated ? ` (showing ${list.length})` : ""}` };
+    return { data, summary: `Found ${rows.length} ${rows.length === 1 ? "worker" : "workers"}${window}${truncated ? ` (showing ${list.length})` : ""}` };
   },
 });
 
