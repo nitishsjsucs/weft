@@ -35,8 +35,8 @@
       "finalText": {
         "grounded": true,
         "mustMention": [
-          "73 h|9.13 days",
-          "97 h|12.13 days"
+          "73 h|73 vacation hours|9.13 days",
+          "97 h|97 vacation hours|12.13 days"
         ],
         "judges": [
           "J4_no_invention"
