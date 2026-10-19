@@ -15,6 +15,12 @@ export function toolLabel(name: string | null): string | null {
 export function stepSummary(s: RunStepRow): string {
   const r = s.result as { summary?: unknown; outcome?: { summary?: unknown; title?: unknown; refusal?: { message?: unknown }; data?: { path?: unknown; body?: unknown } } } | null;
   const o = r && typeof r === "object" ? r.outcome : undefined;
+  // An expense explanation saved from the policy template is a policy summary, not the agent's explanation.
+  const ex = (o as { data?: { results?: { source?: unknown; ok?: unknown }[] } } | undefined)?.data?.results;
+  if (toolLabel(s.toolName) === "expenses.explain" && Array.isArray(ex) && ex.length) {
+    const tpl = ex.filter((x) => x.source === "template").length; const agent = ex.filter((x) => x.source === "agent").length;
+    if (tpl || agent) return [agent ? `Saved ${agent} ${agent === 1 ? "explanation" : "explanations"} by the agent` : "", tpl ? `${agent ? "and" : "Saved"} ${tpl} policy ${tpl === 1 ? "summary" : "summaries"} from the template` : ""].filter(Boolean).join(" ");
+  }
   // A memory read names the page it read, by its heading ("Read Lena Brooks (demo)'s memory page"), not its path.
   if (toolLabel(s.toolName) === "memory.read" && typeof o?.data?.path === "string") {
     const line = memoryReadLine(o.data.path, typeof o.data.body === "string" ? o.data.body : null);

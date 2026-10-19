@@ -8,7 +8,7 @@ test("compliance calendar and the Q3 Form 941 filed through the Inbox", async ({
     await openApp(page, "/app/compliance?tab=calendar");
     const cal = page.getByTestId("compliance-calendar");
     await expect(cal).toBeVisible();
-    await expect(cal.locator('[data-kind="filing"][data-status="due_soon"]').filter({ hasText: "Form 941 for 2026-Q3" })).toBeVisible();
+    await expect(cal.locator('[data-kind="filing"][data-status="due_soon"]').filter({ hasText: "Form 941 for Q3 2026" })).toBeVisible();
     await expect(cal.locator('[data-kind="deposit"]').first()).toBeVisible();
     await expect(cal.locator('[data-kind="contractor_form_expiry"]').first()).toBeVisible();
   });

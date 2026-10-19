@@ -97,3 +97,12 @@ describe("mock GET /v1/workers/:id returns a WorkerDetail like the API", () => {
     expect((it.data as unknown[]).length).toBeGreaterThan(0);
   });
 });
+
+describe("round 2: an expense explanation from the template reads as a policy summary", () => {
+  it("names template saves as policy summaries", async () => {
+    const { stepSummary } = await import("../src/components/app/agent/run-steps");
+    const row = { kind: "tool_call", toolName: "expenses__explain", result: { outcome: { summary: "Saved 8 of 8 expense explanations", data: { results: Array.from({ length: 8 }, () => ({ source: "template" })) } } } };
+    expect(stepSummary(row as never)).toBe("Saved 8 policy summaries from the template");
+  });
+});
+

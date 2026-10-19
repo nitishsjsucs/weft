@@ -92,7 +92,7 @@ test("GP22: a chat mention gets one read-only answer and an emailed receipt file
     const mail = page.getByTestId("sim-inbound-email");
     await mail.getByTestId("sim-inbound-email-from").fill("someone@elsewhere.example");
     await mail.getByTestId("sim-inbound-email-send").click();
-    await expect(page.getByText(/^Email exi_\w+: bounced unknown sender\.$/)).toBeVisible();
+    await expect(page.getByText("The email was not filed: bounced unknown sender.")).toBeVisible();
     await expect(mail.getByTestId("sim-intake")).toContainText("Bounced unknown sender");
     const intake = await weft.get<{ status: string }[]>("/v1/expense-intake");
     expect(intake.filter((x) => x.status === "created").length).toBe(1);
