@@ -129,10 +129,18 @@ export async function listRequestRows(tx: DbTx, companyId: string, i: ListReques
   }
   return rows.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
+const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Nov 26 and Nov 27 are company holidays, charged 0 hours", or null when the request spans no holiday. */
+export function holidaysNote(days: { date: string; holiday: boolean }[]): string | null {
+  const h = days.filter((d) => d.holiday).map((d) => `${MONTH[Number(d.date.slice(5, 7)) - 1]} ${Number(d.date.slice(8, 10))}`);
+  if (!h.length) return null;
+  const list = h.length === 1 ? h[0]! : `${h.slice(0, -1).join(", ")} and ${h[h.length - 1]}`;
+  return `${list} ${h.length === 1 ? "is a company holiday" : "are company holidays"}, charged 0 hours`;
+}
 const listRequests = readCommand({
   name: "time_off.list_requests", domain: "people",
   summary: "List time-off requests with status, minutes, hours and days, checks, the routed approver and the policy balance now and without each request.",
-  description: "Requests by status, worker_id, department_id, approver (principal id) and dates (from, to). Each has minutes per day (holidays and weekends 0), hours, days, submitted and decided dates (Pacific), checks, routing, the decision, balance_now (today, every open request counted) and balance_without_this_request (as if only this one were denied). totals_by sums per worker or policy. reason is untrusted.",
+  description: "Requests by status, worker_id, department_id, approver (principal id) and dates (from, to). Each has minutes per day (holidays and weekends 0), hours, days, submitted and decided dates, checks, routing, decision, balance_now (today, every open request counted) and balance_without_this_request (if only this were denied), holidays_note. totals_by sums per worker or policy. reason is untrusted.",
   input: ListRequestsInput, untrustedFields: ["requests.*.reason"],
   async run(i: ListRequestsInput, ctx, deps) {
     const rows = await listRequestRows(deps.tx, ctx.companyId, i);
@@ -158,13 +166,18 @@ const listRequests = readCommand({
     const requests = [];
     for (const r of rows) {
       const w = ws.get(r.workerId);
+      const dto = requestDto(r);
       requests.push({
-        ...requestDto(r), workerName: w ? displayName(w) : r.workerId, departmentId: w?.departmentId ?? null, policyName: pols.get(r.policyId)?.name ?? r.policyId, typeKind: pols.get(r.policyId)?.typeKind ?? null, source: r.source, extRef: r.extRef,
+        ...dto, workerName: w ? displayName(w) : r.workerId, departmentId: w?.departmentId ?? null, policyName: pols.get(r.policyId)?.name ?? r.policyId, typeKind: pols.get(r.policyId)?.typeKind ?? null, source: r.source, extRef: r.extRef,
         ...timeForms("requested", r.requestedMinutes), submitted_date: ptDateOf(r.createdAt), decided_date: r.decidedAt ? ptDateOf(r.decidedAt) : null, ...(await balanceAround(r)),
+        holidays_note: holidaysNote(dto.days),
       });
     }
     const totals = requestTotals(rows, i.totals_by ?? [], (id) => (ws.get(id) ? workerRef(ws.get(id)!) : id), (id) => pols.get(id)?.name ?? id);
-    return { data: { count: requests.length, ...totals, requests }, summary: `${requests.length} time-off requests` };
+    // Holidays inside a request charge nothing, and an answer about the balance should say so; the line makes them
+    // as visible in the summary as the hours are in the rows (demo check, scenario 6).
+    const withHolidays = requests.filter((r) => r.holidays_note).slice(0, 3).map((r) => `${r.workerName}: ${r.holidays_note}`);
+    return { data: { count: requests.length, ...totals, requests }, summary: [`${requests.length} time-off requests`, ...withHolidays].join("; ") };
   },
 });
 

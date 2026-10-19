@@ -57,3 +57,13 @@ describe("time-off forms", () => {
     expect(workerRef({ id: "wrk_0010", firstName: "Ruth", lastName: "Okoro", preferredName: null })).toBe("Ruth Okoro (demo) (wrk_0010)");
   });
 });
+
+describe("holidaysNote", async () => {
+  const { holidaysNote } = await import("../../src/commands/time-off");
+  it("names the holidays a request spans and that they charge nothing", () => {
+    const days = [{ date: "2026-11-23", holiday: false }, { date: "2026-11-26", holiday: true }, { date: "2026-11-27", holiday: true }];
+    expect(holidaysNote(days)).toBe("Nov 26 and Nov 27 are company holidays, charged 0 hours");
+    expect(holidaysNote(days.slice(0, 2))).toBe("Nov 26 is a company holiday, charged 0 hours");
+    expect(holidaysNote(days.slice(0, 1))).toBeNull();
+  });
+});
