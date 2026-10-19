@@ -205,7 +205,14 @@ async function postCard(e: Engine, tx: DbTx, row: ProposalRow): Promise<void> {
     const chat = (e.simulators({ db: tx, clock: e.clock }) as Partial<ReturnType<Engine["simulators"]>> | undefined)?.chat;
     if (!chat || typeof chat.post !== "function") return;
     const card = await approvalCardOf(tx, row).catch(() => ({ proposalId: row.id, headline: row.headline, risk: row.risk ?? "R1", moneyCents: row.moneyCents }));
-    await chat.post({ channel: row.domain === "payroll" || row.domain === "tax" ? "#payroll" : "#people-ops", author: "Weft agent",
+    // The card is posted by whoever proposed the change: the agent for a run's proposal, the person for one made in
+    // the app with no run (the Inbox reads the same proposer fields).
+    let author = "Weft agent";
+    if (!row.routineRunId && !row.proposerRunId && row.onBehalfOf && !row.onBehalfOf.startsWith("agt_")) {
+      const [p] = await tx.select({ display: principals.display }).from(principals).where(inArray(principals.id, [row.onBehalfOf])).limit(1);
+      author = p?.display ?? author;
+    }
+    await chat.post({ channel: row.domain === "payroll" || row.domain === "tax" ? "#payroll" : "#people-ops", author,
       text: `Approval needed: ${row.headline}`, card });
   } catch { /* the chat simulator is optional here */ }
 }

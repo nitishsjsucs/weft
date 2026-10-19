@@ -84,7 +84,13 @@ export const newHire: Precheck = async (ctx, exec) => {
   const state = str(pick(person, "work_state", "state"));
   const regs = state ? await read(exec, ctx.companyId, "tax.list_registrations", { jurisdiction: state }) : null;
   const toRegister = arr(pick(regs ?? {}, "accounts", "registrations")).filter((a) => a.jurisdiction === state && (a.status === "not_registered" || a.status === "needs_info"));
-  const name = str(pick(person, "name", "display")) ?? "our new teammate";
+  // people.get names a person with their row id ("Noor Castellanos (demo) (wrk_0063)"); a channel post names them
+  // as people do, with the role and team, as the seeded welcomes read. No digits, so nothing needs grounding.
+  const name = (str(pick(person, "name", "display")) ?? "our new teammate").replace(/\s*\([a-z]{2,5}_\w*\d\w*\)/g, "");
+  const title = str(pick(person, "title"));
+  const dept = obj(pick(person, "department"));
+  const team = str(pick(dept, "name")) ?? str(pick(person, "department"));
+  const role = [title ? `our new ${title}` : null, team ? `joining ${team}` : null].filter(Boolean).join(", ");
   return {
     action: "run", severity: "interrupt", subjectRefs: [workerId],
     findings: { worker_id: workerId, state, to_register: toRegister.map((a) => ({ id: a.id, agency: a.agency, status: a.status })) },
@@ -92,7 +98,7 @@ export const newHire: Precheck = async (ctx, exec) => {
       worker_id: workerId,
       register_count: toRegister.length,
       "it.create_account": ["chat", "google_ws", "github"].map((system) => ({ worker_id: workerId, system })),
-      "comms.send_message": { channel: "#new-hires", text: `Please welcome ${name} to the team.` },
+      "comms.send_message": { channel: "#new-hires", text: `Please welcome ${name}${role ? `, ${role}` : " to the team"}.` },
       "tax.register_state_account": toRegister.map((a) => ({ tax_account_id: a.id })),
       "it.order_device": { worker_id: workerId },
     },
