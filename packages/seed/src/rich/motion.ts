@@ -5,11 +5,12 @@ import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import {
   benefitReconFindings, contractorTaxForms, devices, documents, enrollmentWindows, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
-  paychecks, payrollRuns, principals, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, workers, type DbTx,
+  paychecks, payrollRuns, principals, routineRuns, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, timeOffPolicies, timeOffRequests, timeOffTypes, workers, type DbTx,
 } from "@weft/db";
 import { expenses as policy, newId, payroll, sha256Hex } from "@weft/core";
 import type { Flag } from "@weft/contracts";
 import { seedPortalHires } from "./portal-hires";
+import { day, joinAnd, paycheckNote } from "./flag-notes";
 
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
@@ -105,37 +106,42 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
   if (draft && draft.status === "draft") {
     const t = JSON.parse(draft.totalsJson ?? "{}") as Record<string, number>;
     const cost = t.totalCostCents ?? t.employerCostCents ?? null;
+    const year = Number(draft.periodEnd.slice(0, 4));
+    const flagged = (await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, draft.id)))
+      .map((pc) => ({ pc, flags: JSON.parse(pc.flagsJson) as Flag[] })).filter((x) => x.flags.length > 0);
+    const names = new Map(ws.map((w) => [w.id, `${w.firstName} ${w.lastName} (demo)`]));
+    const blocked = flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => names.get(x.pc.workerId) ?? "One person");
+    const review = flagged.filter((x) => x.flags.some((f) => f.severity !== "info")).length;
+    const period = `${day(draft.periodStart, year)} to ${day(draft.periodEnd, year)}`;
     const r = await L.run({ at: pt("2026-10-23", 9), trigger: "routine", routineId: "rt_pre_payroll", onBehalfOf: "usr_theo",
-      final: "Reviewed pay_2026_10_30: four paychecks flagged with explanations, Mira Delgado (demo) excluded until her bank account is on file. Proposed the submit.",
+      final: `Reviewed the ${period} payroll and explained all ${flagged.length} flagged paychecks; ${review} need review. `
+        + (blocked.length ? `${joinAnd(blocked)} ${blocked.length === 1 ? "has" : "have"} no bank account on file, so I proposed the submit without ${blocked.length === 1 ? "that paycheck" : "those paychecks"} until one is.` : "Proposed the submit."),
       tools: [{ name: "payroll__get_run", args: { run_id: draft.id }, data: { id: draft.id, status: "draft" } }, { name: "payroll__submit_run", args: { run_id: draft.id, exclude_blocked: true }, data: { proposed: true } }],
       checklist: [{ id: "explain", label: "explain flagged paychecks", passed: true }, { id: "submit", label: "propose payroll.submit_run", passed: true }] });
-    // What that review wrote on the four flagged paychecks: the grounded template line plus a sentence of context
-    // with no numbers of its own, saved as the agent's explanation (payroll.explain_flags does the same grounding).
-    const context: Partial<Record<Flag["rule"], string>> = {
-      GROSS_CHANGE: "Expected after the approved raise; nothing to fix before payday.",
-      MISSING_BANK_ACCOUNT: "Mira Delgado (demo) has been reminded to add direct deposit; she is excluded from this run until it is on file.",
-      NEW_IN_RUN: "Expected for a new hire; the onboarding checklist is complete.",
-      PRORATED: "Expected for a partial first period.",
-      HOURS_SPIKE: "Overtime was approved by the manager for the release week.",
-      PTO_LINE: "Approved time off in the period, paid at the regular rate.",
-      PENDING_TIME_OFF_IN_PERIOD: "The manager decides the request before the approval deadline.",
-      REIMBURSEMENT_SPIKE: "Approved expense claims ride this paycheck outside gross pay.",
-    };
-    for (const pc of await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, draft.id))) {
-      const flags = JSON.parse(pc.flagsJson) as Flag[];
-      if (!flags.length || pc.explanation) continue;
-      // Wave 3 rules have no template line; their own flag message is the grounded fact.
+    // What that review wrote on the flagged paychecks (rich/flag-notes.ts): one line per flag, each the flag's fact and
+    // the context read from the worker's own rows, grounded as payroll.explain_flags grounds it, saved as the agent's.
+    const tasks = await tx.select().from(onboardingTasks).orderBy(asc(onboardingTasks.id));
+    const nudged = await tx.select({ summary: routineRuns.summary }).from(routineRuns).where(eq(routineRuns.routineId, "rt_onboarding_nudge"));
+    const reqs = new Map((await tx.select({ id: timeOffRequests.id, name: timeOffPolicies.name, paid: timeOffTypes.paid }).from(timeOffRequests)
+      .innerJoin(timeOffPolicies, eq(timeOffPolicies.id, timeOffRequests.policyId)).innerJoin(timeOffTypes, eq(timeOffTypes.id, timeOffPolicies.typeId))).map((q) => [q.id, { policyName: q.name, paid: q.paid }]));
+    for (const { pc, flags } of flagged) {
+      if (pc.explanation) continue;
+      const name = names.get(pc.workerId) ?? pc.workerId;
+      const mine = tasks.filter((k) => k.workerId === pc.workerId);
+      const text = paycheckNote(flags, {
+        name, year, hasOnboarding: mine.length > 0, openOnboarding: mine.filter((k) => k.status !== "done").map((k) => k.kind),
+        reminded: nudged.some((n) => (n.summary ?? "").includes(name) && /bank account/.test(n.summary ?? "")),
+        submitExcludesBlocked: true, timeOff: Object.fromEntries(flags.map((f) => String(f.evidence.request_id ?? "")).filter((id) => reqs.has(id)).map((id) => [id, reqs.get(id)!])),
+      });
       const base = payroll.templateExplanation(flags) || flags.map((f) => f.message.replace(/\.?$/, ".")).join(" ");
-      const extra = [...new Set(flags.map((f) => context[f.rule]).filter((x): x is string => !!x))].join(" ");
-      const text = extra ? `${base} ${extra}` : base;
       const grounded = payroll.groundExplanation(text, flags, { gross_cents: pc.grossCents, net_cents: pc.netCents, hours_x100: pc.hoursX100 }).ok;
       await tx.update(paychecks).set({ explanation: grounded ? text : base, explanationSource: grounded ? "agent" : "template", explanationRunId: r.runId }).where(eq(paychecks.id, pc.id));
       L.bump("paycheck_explanations");
     }
     await L.proposal({ at: pt("2026-10-23", 9, 1), command: "payroll.submit_run", args: { run_id: draft.id, exclude_blocked: true }, subjectRef: draft.id, risk: "R4", domain: "payroll", moneyCents: cost ?? undefined,
-      status: "pending", headline: `Submit payroll ${draft.id} (${draft.periodStart} to ${draft.periodEnd}, payday ${draft.payday})`, runId: r.runId, routineRunId: r.routineRunId,
-      expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: [{ label: "Pay run", ref: draft.id }, { label: "Excluded worker", ref: "wrk_0022" }],
-      diff: [{ label: "Status", before: "draft", after: "processing" }, { label: "Excluded (blocked)", before: "none", after: "Mira Delgado (demo) (wrk_0022)" }] });
+      status: "pending", headline: `Submit the ${period} payroll (payday ${day(draft.payday, year)})`, runId: r.runId, routineRunId: r.routineRunId,
+      expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: [{ label: "Pay run", ref: draft.id }, ...flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => ({ label: "Excluded worker", ref: x.pc.workerId }))],
+      diff: [{ label: "Status", before: "draft", after: "processing" }, { label: "Excluded (blocked)", before: "none", after: blocked.length ? joinAnd(blocked) : "none" }] });
   }
   void ws;
   return hireId;

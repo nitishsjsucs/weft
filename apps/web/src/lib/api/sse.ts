@@ -2,7 +2,7 @@
 // Live run steps (SPEC 9.6): SSE over fetch (so the "Viewing as" principal header rides along), with a 1 s trace
 // polling fallback whenever the stream is unavailable, blocked or ends early. Steps are merged by step number.
 import type { AgentRunRow, RunStatus, RunStepRow, RunTrace } from "@weft/contracts";
-import { getPrincipal, rawFetch } from "./hooks";
+import { getPrincipal, onInvalidate, rawFetch } from "./hooks";
 import { mocksEnabled } from "./mocks";
 
 export const TERMINAL: RunStatus[] = ["done", "failed", "refused", "escalated", "expired", "cancelled"];
@@ -59,6 +59,12 @@ export function mergeSteps(prev: RunStepRow[], incoming: RunStepRow[]): RunStepR
   return [...byN.values()].sort((a, b) => a.n - b.n);
 }
 
+/** Whether a watched run can still change on a decision: it is not finished, or one of its proposals is undecided. */
+export function needsRefresh(w: Pick<RunWatch, "run" | "trace">): boolean {
+  if (!w.run) return false;
+  return !isTerminal(w.run.status) || (w.trace?.proposals ?? []).some((p) => p.status === "pending");
+}
+
 /**
  * Watches a run until it reaches a terminal or waiting state. Returns a stop function.
  * `forcePolling` (or `?sse=off` in the page URL, or mocks) skips SSE to exercise the fallback.
@@ -94,6 +100,15 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
     };
     void loop();
   }
+
+  // A decision anywhere in the app (an approval card, the Inbox) invalidates; a run with a proposal still pending, or a
+  // run that is not finished, re-reads its trace at once instead of on the next slow re-poll (or never, once terminal),
+  // so its step lines and cards show the decision within a second. Bursts of invalidations collapse into one read.
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  const stopRefresh = onInvalidate(() => {
+    if (stopped || refreshTimer || !needsRefresh(state)) return;
+    refreshTimer = setTimeout(() => { refreshTimer = null; void pollOnce(); }, 150);
+  });
 
   const sseOff = opts.forcePolling || mocksEnabled || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sse") === "off");
   if (sseOff) startPolling();
@@ -134,5 +149,5 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
       }
     })();
   }
-  return () => { stopped = true; ctrl.abort(); if (pollTimer) clearTimeout(pollTimer); };
+  return () => { stopped = true; ctrl.abort(); stopRefresh(); if (pollTimer) clearTimeout(pollTimer); if (refreshTimer) clearTimeout(refreshTimer); };
 }

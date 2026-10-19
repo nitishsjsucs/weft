@@ -6,7 +6,7 @@ import { FilePlus2, Play, RefreshCw, Send } from "lucide-react";
 import { Badge, Button, Drawer } from "@weft/ui/components";
 import { TID, type Paycheck, type PayrollRun, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
-import { fmtDate, fmtDateTime, nextPeriodEnd, period, relative } from "../format";
+import { fmtDate, fmtDateTime, humanDates, humanTimes, nextPeriodEnd, period, relative } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
@@ -102,7 +102,7 @@ export function PayrollReview({ id }: { id: string }) {
       />
       {pendingSubmit && r.status === "draft" ? (
         <div data-testid="payroll-pending-submit" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-blue-3 px-3 py-2 text-1 text-blue-11">
-          <span className="min-w-0 flex-1">{pendingSubmit.headline}. Waiting for approval in the Inbox.</span>
+          <span className="min-w-0 flex-1">{humanDates(humanTimes(pendingSubmit.headline))}. Waiting for approval in the Inbox.</span>
           <Link href="/app/inbox" className="font-medium hover:underline">Open the Inbox ›</Link>
         </div>
       ) : null}

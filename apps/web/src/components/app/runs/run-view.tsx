@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { CircleCheck, CircleDashed, ShieldAlert } from "lucide-react";
 import { Badge, Card, ShimmerText, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { cn } from "@weft/ui";
-import { TID, type RunStepRow } from "@weft/contracts";
+import { TID, type ProposalStatus, type RunStepRow } from "@weft/contracts";
 import { watchRun, type RunWatch } from "@/lib/api/sse";
 import { fmtDateTime, humanTimes, usd } from "../format";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
-import { outcomeTone, stepSummary, toolLabel } from "../agent/run-steps";
+import { stepState, stepSummary, toolLabel } from "../agent/run-steps";
 
 const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "-");
 const int = (n: number) => n.toLocaleString("en-US");
@@ -24,10 +24,11 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
   );
 }
 
-function OutcomeBadge({ o }: { o: RunStepRow["outcome"] }) {
-  const tone = outcomeTone(o);
-  if (tone === "none") return <span className="text-gray-9">-</span>;
-  return <Badge tone={tone === "ok" ? "green" : tone === "pending" ? "amber" : "red"} className="max-w-[220px] truncate">{o}</Badge>;
+/** A step's outcome in words; a step that filed a proposal shows the proposal's live status, not the call-time "pending:<id>". */
+function OutcomeBadge({ o, statusOf }: { o: RunStepRow["outcome"]; statusOf: (id: string) => ProposalStatus | undefined }) {
+  const { tone, note } = stepState(o, statusOf);
+  if (tone === "none" || !note) return <span className="text-gray-9">-</span>;
+  return <Badge tone={tone === "ok" ? "green" : tone === "pending" ? "amber" : tone === "declined" ? "gray" : "red"} title={o ?? undefined} className="max-w-[220px] truncate">{note}</Badge>;
 }
 
 /** Gate report item 6: only a run on a real model reads (live); scripted and template runs say so instead. */
@@ -139,7 +140,7 @@ export function RunView({ id }: { id: string }) {
                     <div className="min-w-0 break-words">{s.toolName ? stepSummary(s) : STEP_KIND[s.kind] ?? stepSummary(s)}</div>
                     <StepDetail s={s} />
                   </TD>
-                  <TD className="h-10"><OutcomeBadge o={s.outcome} /></TD>
+                  <TD className="h-10"><OutcomeBadge o={s.outcome} statusOf={(pid) => w.trace?.proposals.find((p) => p.id === pid)?.status} /></TD>
                   <TD numeric className={cn("h-10 whitespace-nowrap", STEP_WIDE)}>{s.usage ? `${int(s.usage.input)} / ${int(s.usage.cached)} / ${int(s.usage.output)}` : "-"}</TD>
                   <TD numeric className={cn("h-10", STEP_OPTIONAL)}>{s.usage ? pct(s.usage.cached, s.usage.input) : "-"}</TD>
                   <TD numeric className={cn("h-10", STEP_WIDE)}>{s.costUsdMicros ? usd(s.costUsdMicros) : "-"}</TD>
