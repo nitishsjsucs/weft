@@ -8,6 +8,8 @@ import { IntegrationVendor, VENDOR_CATEGORY, type AtsHire } from "@weft/contract
 import { departments, extLinks, integrationDeliveries, offers, payRates, syncItems, timeOffRequests, workers, workplaces } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, notFound, readCommand, riskOf, writeCommand } from "../demo/define";
+import { inScope, readScopeOf, withheldReason, type ReadScope } from "../people/scope";
+import type { DbTx } from "@weft/db";
 import { sha256Hex } from "../shared/hash";
 import { canonicalJson } from "../shared/canonical-json";
 import { allJobs, recordAtsHire } from "./ats";
@@ -37,6 +39,24 @@ const status = readCommand({
 });
 
 const ListSyncInput = z.object({ status: z.enum(["open", "resolved", "dismissed", "all"]).optional(), vendor: IntegrationVendor.optional(), subject_ref: z.string().optional() });
+/** A sync item's subject is a worker or an offer; anything else (an unmatched vendor record) names no Weft person. */
+async function subjectInScope(tx: DbTx, companyId: string, scope: ReadScope, subjectRef: string): Promise<boolean> {
+  if (subjectRef.startsWith("wrk_")) return inScope(scope, subjectRef);
+  if (subjectRef.startsWith("offr_")) return offerInScope(tx, companyId, scope, subjectRef);
+  return true;
+}
+
+/** An offer is in a narrowed viewer's scope when its hiring manager is the viewer or one of their reports. */
+async function offerInScope(tx: DbTx, companyId: string, scope: ReadScope, offerId: string | null | undefined): Promise<boolean> {
+  if (!offerId) return false;
+  const [o] = await tx.select({ managerId: offers.managerId }).from(offers).where(and(eq(offers.id, offerId), eq(offers.companyId, companyId))).limit(1);
+  return !!o && inScope(scope, o.managerId);
+}
+
+function withheldDetail(scope: ReadScope, detail: Record<string, unknown>, subject: string) {
+  return { field: detail.field ?? null, label: detail.label ?? null, withheld: ["weft_value", "vendor_value"], reason: withheldReason(scope, subject) };
+}
+
 const listSync = readCommand({
   name: "integrations.list_sync_items", domain: "people",
   summary: "Open integration sync items: conflicts and values Weft could not map.",
@@ -45,7 +65,14 @@ const listSync = readCommand({
   async run(i, ctx, deps) {
     const status = i.status ?? "open";
     const rows = await listSyncItems(deps.tx, ctx.companyId, { status, vendor: i.vendor, subjectRef: i.subject_ref });
-    const items = rows.map(toSyncItem).map((s) => ({ id: s.id, vendor: s.vendor, kind: s.kind, subject_ref: s.subjectRef, status: s.status, detail: s.detail, created_at: s.createdAt }));
+    const viewer = await readScopeOf(deps.tx, ctx);
+    const items = [];
+    for (const s of rows.map(toSyncItem)) {
+      // A narrowed viewer sees the values of an item only for a worker or offer in their reports (pay conflicts carry pay).
+      const open = !viewer || (await subjectInScope(deps.tx, ctx.companyId, viewer, s.subjectRef));
+      const detail = open ? s.detail : withheldDetail(viewer, s.detail as Record<string, unknown>, s.subjectRef);
+      items.push({ id: s.id, vendor: s.vendor, kind: s.kind, subject_ref: s.subjectRef, status: s.status, detail, created_at: s.createdAt });
+    }
     // What the list covers (round 1 R5): the rows come from syncs, so a vendor that never synced has none to list.
     const vendors = [];
     for (const v of i.vendor ? [i.vendor] : IntegrationVendor.options) vendors.push({ vendor: v, last_sync_at: (await getConnection(deps.tx, ctx.companyId, v))?.lastSyncAt ?? null });
@@ -68,11 +95,18 @@ const getHire = readCommand({
   description: "Read a hired application from Greenhouse (simulated unless connected): candidate name and email (candidate-entered, untrusted), job, department and office ids, start date, salary in cents and the current offer version, plus the linked Weft offer id. Takes application_ref.",
   input: z.object({ application_ref: z.string().min(1).max(40) }),
   untrustedFields: ["hire.first", "hire.last", "hire.email", "hire.job_name"],
-  async run(i, _ctx, deps) {
+  async run(i, ctx, deps) {
     const h = await deps.sims.vendors.greenhouse.getHire(i.application_ref);
     if (!h) throw notFound("Greenhouse hire", i.application_ref);
     const [link] = await deps.tx.select().from(extLinks).where(and(eq(extLinks.vendor, "greenhouse"), eq(extLinks.extType, "application"), eq(extLinks.extId, h.applicationId))).limit(1);
-    return { data: { hire: hireDto(h), weft_offer_id: link?.weftId ?? null, linked_version: link?.extVersion ?? null }, summary: `Greenhouse application ${h.applicationId}, offer version ${h.offerVersion}` };
+    const hire = hireDto(h);
+    // A narrowed viewer sees the salary only for an offer they or one of their reports manage.
+    const scope = await readScopeOf(deps.tx, ctx);
+    if (scope && !(await offerInScope(deps.tx, ctx.companyId, scope, link?.weftId))) {
+      const data: Record<string, unknown> = { hire: { ...hire, salary_cents: null, salary_currency: null }, weft_offer_id: link?.weftId ?? null, linked_version: link?.extVersion ?? null, access: { withheld: ["salary"], reason: withheldReason(scope, `this hire (application ${h.applicationId})`) } };
+      return { data, summary: `Greenhouse application ${h.applicationId}, offer version ${h.offerVersion}; salary withheld` };
+    }
+    return { data: { hire, weft_offer_id: link?.weftId ?? null, linked_version: link?.extVersion ?? null }, summary: `Greenhouse application ${h.applicationId}, offer version ${h.offerVersion}` };
   },
 });
 
@@ -242,6 +276,13 @@ const getWorkerExternal = readCommand({
     const rate = (await deps.tx.select().from(payRates).where(eq(payRates.workerId, w.id))).filter((r) => r.effectiveTo === null).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
     const pairs: [string, string | number | null, string | number | null][] = [["title", w.title, wd.title], ["work_state", w.workState, wd.locationState], ["base_cents", rate?.amountCents ?? null, wd.baseAmountMinor], ["termination_date", w.endDate, wd.terminationDate]];
     const fields = pairs.map(([field, weft, workday]) => ({ field, weft, workday, same: weft === workday }));
+    const scope = await readScopeOf(deps.tx, ctx);
+    if (scope && !inScope(scope, w.id)) {
+      // Outside a narrowed viewer's reports: the directory fields only, never base pay, the termination date or the Workday id.
+      const shown = fields.filter((f) => f.field === "title" || f.field === "work_state");
+      const data: Record<string, unknown> = { worker_id: w.id, workday_ref: ref, fields: shown, access: { withheld: ["base_cents", "termination_date", "employee_id"], reason: withheldReason(scope, w.id) } };
+      return { data, summary: `${shown.filter((f) => !f.same).length} directory field(s) differ from Workday; pay and dates withheld` };
+    }
     return { data: { worker_id: w.id, workday_ref: ref, employee_id: wd.employeeId, fields }, summary: `${fields.filter((f) => !f.same).length} field(s) differ from Workday` };
   },
 });

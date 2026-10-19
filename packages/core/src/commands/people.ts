@@ -9,6 +9,7 @@ import { nameRef } from "../people/names";
 import { acceptOffer, revertPayRate, setPayRate, updateProfile } from "../people/writes";
 import { bankSummary, currentPayRate, getWorker, homeAddressText, lookups, payRateHistory, taxProfile, workerWhere } from "../people/queries";
 import { listTasks } from "../onboarding/queries";
+import { DIRECTORY_FIELDS, directoryAccess, inScope, readScopeOf, type ReadScope } from "../people/scope";
 import { caseDto, STEP_LABEL } from "../offboarding/cases";
 import { taskLabel } from "./onboarding";
 
@@ -36,10 +37,30 @@ const SearchInput = z.object({
 });
 type SearchInput = z.infer<typeof SearchInput>;
 
+/**
+ * A narrowed search shows a worker outside the viewer's reports only when the match rests on directory fields alone:
+ * no status or start date filter, and every query word in the name, title or worker id (never the employee number).
+ */
+function directoryMatch(w: typeof workers.$inferSelect, i: SearchInput, words: string[]): boolean {
+  if (i.status || i.start_from || i.start_to) return false;
+  const hay = [w.firstName, w.lastName, w.title ?? ""].map((x) => x.toLowerCase());
+  return words.every((q) => w.id === q || hay.some((h) => h.includes(q.toLowerCase())));
+}
+
+function searchAccess(scope: ReadScope, i: SearchInput, narrowed: boolean) {
+  const filtered = !!(i.status || i.start_from || i.start_to);
+  return {
+    scope: "reports" as const, full_records: `${scope.display}'s own record and their ${scope.reports.size} direct and indirect reports`,
+    others: `directory fields only (${DIRECTORY_FIELDS.join(", ")}), marked directory_only`,
+    withheld_for_others: ["status", "start date", "employee number", "pay", "bank account", "W-4", "benefits elections", "ID numbers"],
+    ...(filtered && narrowed ? { filter_note: "Status and start date filters cover only these reports; workers outside them are not listed" } : {}),
+  };
+}
+
 const peopleSearch = readCommand({
   name: "people.search", domain: "people",
   summary: "Search workers by name, state, status, department or start date window.",
-  description: "Search workers by name or title (query), work state, status, department_id or start date (start_from, start_to, YYYY-MM-DD, inclusive). Returns names with short ids, title, department, state, status, start date, total matches and counts by state and department. limit is 1 to 50. Detailed adds employee number, manager, workplace, end date.",
+  description: "Search workers by name or title (query), work state, status, department_id or start date (start_from, start_to, YYYY-MM-DD, inclusive). Returns names with short ids, title, department, state, status, start date, total matches and counts by state and department. limit is 1 to 50. Detailed adds employee number, manager, workplace, end date. Outside a manager's reports: directory fields only.",
   input: SearchInput,
   async run(i: SearchInput, ctx, deps) {
     const tx = deps.tx;
@@ -50,14 +71,16 @@ const peopleSearch = readCommand({
     // its fictional-data suffix ("Hollis Grey (demo)") finds the worker; a single word behaves as before.
     const words = searchWords(q);
     const filtered = words.length ? and(where, ...words.map((w) => or(like(workers.firstName, `%${w}%`), like(workers.lastName, `%${w}%`), like(workers.title, `%${w}%`), like(workers.employeeNumber, `%${w}%`), like(workers.id, w)))) : where;
-    const rows = await tx.select().from(workers).where(filtered).orderBy(asc(workers.id));
+    const matched = await tx.select().from(workers).where(filtered).orderBy(asc(workers.id));
+    const scope = await readScopeOf(tx, ctx);
+    const rows = scope ? matched.filter((w) => inScope(scope, w.id) || directoryMatch(w, i, words)) : matched;
     const limit = Math.min(Math.max(i.limit ?? 20, 1), SEARCH_MAX);
     const L = await lookups(tx, ctx.companyId);
     const detailed = isDetailed(i);
-    const list = rows.slice(0, limit).map((w) => ({
+    const list = rows.slice(0, limit).map((w) => (inScope(scope, w.id) ? {
       id: w.id, name: nameRef(w.firstName, w.lastName, w.id), title: w.title, department: L.dept(w.departmentId), work_state: w.workState, status: w.status, start_date: w.startDate,
       ...(detailed ? { employee_number: w.employeeNumber, type: w.type, manager: L.person(w.managerId), workplace: L.place(w.workplaceId), end_date: w.endDate } : {}),
-    }));
+    } : { id: w.id, name: nameRef(w.firstName, w.lastName, w.id), title: w.title, department: L.dept(w.departmentId), work_state: w.workState, manager: L.person(w.managerId), directory_only: true }));
     const byState: Record<string, number> = {};
     for (const w of rows) if (w.workState) byState[w.workState] = (byState[w.workState] ?? 0) + 1;
     // By department with ids, so a department filter (or a department-scoped read) can follow without guessing an id.
@@ -69,6 +92,7 @@ const peopleSearch = readCommand({
     if (i.start_from || i.start_to) data.start_window = { from: i.start_from ?? null, to: i.start_to ?? null };
     if (i.limit !== undefined && i.limit !== limit) data.limit_note = `limit ${i.limit} is outside 1 to ${SEARCH_MAX}; used ${limit}`;
     if (truncated) data.truncated_note = `Returned ${list.length} of ${rows.length} matches; narrow with status, state, department_id or the start date window`;
+    if (scope) data.access = searchAccess(scope, i, matched.length !== rows.length);
     Object.assign(data, { by_state: byState, by_department: byDepartment, workers: list });
     const window = data.start_window ? ` starting ${i.start_from ?? "any time"} to ${i.start_to ?? "any time"}` : "";
     return { data, summary: `Found ${rows.length} workers${window}${truncated ? ` (showing ${list.length})` : ""}` };
@@ -106,7 +130,7 @@ type GetInput = z.infer<typeof GetInput>;
 const peopleGet = readCommand({
   name: "people.get", domain: "people",
   summary: "Read one worker: role, manager, state, pay, open onboarding items or offboarding steps (masked).",
-  description: "Read one worker by worker_id: title, department, manager, state, status, dates, current pay, bank status (last4 only), W-4 summary; for an onboarding worker the open checklist items, for an offboarding worker every case step, each with its status. Detailed adds pay history, the tax profile and employee-entered fields (untrusted).",
+  description: "Read one worker by worker_id: title, department, manager, state, status, dates, current pay, bank status (last4 only), W-4 summary; for an onboarding worker the open checklist items, for an offboarding worker every case step, each with its status. Detailed adds pay history, the tax profile and employee-entered fields (untrusted). Managers: pay, bank and W-4 for their reports only.",
   input: GetInput,
   untrustedFields: ["worker.preferred_name", "worker.personal_email", "worker.home_address"],
   async run(i: GetInput, ctx, deps) {
@@ -114,6 +138,13 @@ const peopleGet = readCommand({
     const w = await getWorker(tx, ctx.companyId, i.worker_id);
     if (!w) throw notFound("worker", i.worker_id);
     const L = await lookups(tx, ctx.companyId);
+    const scope = await readScopeOf(tx, ctx);
+    if (scope && !inScope(scope, w.id)) {
+      // Outside the viewer's reports: directory fields only, and the result says what is withheld and why.
+      const name = nameRef(w.firstName, w.lastName, w.id);
+      const worker = { id: w.id, name, title: w.title, department: L.dept(w.departmentId), work_state: w.workState, manager: L.person(w.managerId), access: directoryAccess(scope, name) };
+      return { data: { worker }, summary: `Read ${name}: directory fields only; pay, bank account, W-4, benefits elections and ID numbers are not shared with ${scope.display}` };
+    }
     const today = ptDateOf(ctx.now);
     const rate = (await currentPayRate(tx, w.id, today)) ?? (await payRateHistory(tx, w.id)).at(-1) ?? null;
     const bank = await bankSummary(tx, w.id);

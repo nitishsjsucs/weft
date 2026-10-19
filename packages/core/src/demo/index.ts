@@ -5,6 +5,7 @@ export * from "../it/handles";
 export * from "./define";
 export * from "./direct";
 export * from "../people/queries";
+export * from "../people/scope";
 export * from "../tax/queries";
 export * from "../notices/queries";
 export * from "../benefits/queries";

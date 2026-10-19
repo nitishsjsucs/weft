@@ -5,6 +5,7 @@ import { and, asc, eq, gt, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { CHAT_TOOLS, NotFound, Unauthorized, ValidationError, type DecisionInput } from "@weft/contracts";
 import { proposals } from "@weft/db";
+import { auditRowVisible, commandDomain, readScopeFor, type ReadScope } from "@weft/core";
 import { executorInternals, toProposal } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
 import { parsePage, toPage } from "../http/paging";
@@ -22,6 +23,10 @@ export async function kick(weft: Weft): Promise<void> {
   try { await weft.scheduler.kick(); } catch { /* a stubbed part must not fail the human's request */ }
 }
 
+function proposalVisible(scope: ReadScope | null, p: typeof proposals.$inferSelect): boolean {
+  return auditRowVisible(scope, (cmd) => p.domain ?? commandDomain(cmd), { command: p.command, argsJson: p.argsJson, subjectRef: p.subjectRef, text: `${p.headline} ${p.diffJson ?? ""}` });
+}
+
 export function proposalsRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
 
@@ -34,7 +39,10 @@ export function proposalsRoutes(weft: Weft): Hono<WeftEnv> {
     if (status) conds.push(eq(proposals.status, status));
     if (kind) conds.push(eq(proposals.kind, kind));
     if (page.afterId) conds.push(gt(proposals.id, page.afterId));
-    const rows = await weft.db.select().from(proposals).where(and(...conds)).orderBy(asc(proposals.id)).limit(page.limit + 1);
+    // A manager (packages/core/src/people/scope.ts) sees only the proposals about their reports and their domains.
+    const scope = await readScopeFor(weft.db, s.companyId, s.principalId);
+    const query = weft.db.select().from(proposals).where(and(...conds)).orderBy(asc(proposals.id));
+    const rows = scope ? (await query).filter((p) => proposalVisible(scope, p)).slice(0, page.limit + 1) : await query.limit(page.limit + 1);
     return c.json(redactJson(weft, toPage(rows.map(toProposal), page.limit)));
   });
 
@@ -42,7 +50,7 @@ export function proposalsRoutes(weft: Weft): Hono<WeftEnv> {
     const s = c.var.session;
     if (!s) throw new Unauthorized();
     const [row] = await weft.db.select().from(proposals).where(and(eq(proposals.id, c.req.param("id")), eq(proposals.companyId, s.companyId))).limit(1);
-    if (!row) throw new NotFound(`No proposal ${c.req.param("id")}`);
+    if (!row || !proposalVisible(await readScopeFor(weft.db, s.companyId, s.principalId), row)) throw new NotFound(`No proposal ${c.req.param("id")}`);
     return c.json(redactJson(weft, toProposal(row)));
   });
 

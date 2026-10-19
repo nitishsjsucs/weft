@@ -4,6 +4,7 @@ import { and, asc, desc, eq, gt, isNotNull, lt, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { NotFound, Unauthorized, ValidationError, type Action } from "@weft/contracts";
 import { actions } from "@weft/db";
+import { auditRowVisible, commandDomain, readScopeFor, WITHHELD_SUMMARY, type ReadScope } from "@weft/core";
 import type { Weft, WeftEnv } from "../http/context";
 import { parsePage, toPage } from "../http/paging";
 import { kick, redactJson } from "./proposals";
@@ -24,6 +25,12 @@ export function toAction(r: ActionRow, reversedBySeq: number | null): Action {
     reversible: r.reversible as Action["reversible"], reversesSeq: r.reversesSeq, reversedBySeq,
     notReversibleReason: r.reversible === "yes" ? null : notReversibleReason(r.command), prevHash: r.prevHash, hash: r.hash,
   };
+}
+
+/** A manager's view of an audit row (packages/core/src/people/scope.ts): the row stays, its summary may be withheld. */
+function scoped(scope: ReadScope | null, a: Action, argsJson: unknown): Action {
+  if (auditRowVisible(scope, commandDomain, { command: a.command, argsJson, text: a.summary })) return a;
+  return { ...a, summary: WITHHELD_SUMMARY, resultId: null };
 }
 
 const seqParam = (s: string) => {
@@ -51,7 +58,8 @@ export function actionsRoutes(weft: Weft): Hono<WeftEnv> {
     const order = page.afterId ? asc(actions.seq) : desc(actions.seq);
     const rows = await weft.db.select().from(actions).where(conds.length ? and(...conds) : undefined).orderBy(order).limit(page.limit + 1);
     const rev = await reversals();
-    return c.json(redactJson(weft, toPage(rows.map((x) => toAction(x, rev.get(x.seq) ?? null)), page.limit)));
+    const scope = await readScopeFor(weft.db, c.var.session.companyId, c.var.session.principalId);
+    return c.json(redactJson(weft, toPage(rows.map((x) => scoped(scope, toAction(x, rev.get(x.seq) ?? null), x.argsJson)), page.limit)));
   });
 
   r.get("/v1/actions/verify", async (c) => {
@@ -65,7 +73,8 @@ export function actionsRoutes(weft: Weft): Hono<WeftEnv> {
     const [row] = await weft.db.select().from(actions).where(eq(actions.seq, seq)).limit(1);
     if (!row) throw new NotFound(`No action #${seq}`);
     const rev = await reversals();
-    return c.json(redactJson(weft, toAction(row, rev.get(seq) ?? null)));
+    const scope = await readScopeFor(weft.db, c.var.session.companyId, c.var.session.principalId);
+    return c.json(redactJson(weft, scoped(scope, toAction(row, rev.get(seq) ?? null), row.argsJson)));
   });
 
   r.post("/v1/actions/:seq/rollback", async (c) => {

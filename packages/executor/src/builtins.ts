@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_CODE_LIMITS, Refused, type Preview } from "@weft/contracts";
-import type { WeftCommand } from "@weft/core";
+import { auditAccess, auditRowVisible, readScopeOf, WITHHELD_SUMMARY, type ReadScope, type WeftCommand } from "@weft/core";
 import { actions, execRuns, proposals, runArtifacts } from "@weft/db";
 import type { Engine } from "./engine";
 import { codeFiles } from "./sandbox/files";
@@ -18,6 +18,12 @@ const base = {
   access: "all" as const, untrustedFields: [] as string[], afterPending: "run" as const, errorHints: {}, preview: null,
 };
 const fmt = z.enum(["concise", "detailed"]).optional();
+
+/** Audit rows a narrowed viewer may read in words (packages/core/src/people/scope.ts auditRowVisible). */
+function auditFilter(e: Engine, scope: ReadScope) {
+  return (command: string | null, argsJson: unknown, subjectRef: string | null, text: string): boolean =>
+    auditRowVisible(scope, (c) => e.registry.def(c)?.domain, { command, argsJson, subjectRef, text });
+}
 
 export function builtinCommands(e: Engine): WeftCommand[] {
   const postUpdate: WeftCommand<{ text: string }> = {
@@ -41,7 +47,7 @@ export function builtinCommands(e: Engine): WeftCommand[] {
     domain: "company", needs: "view", effect: "read", risk: () => "R0", approval: "never", autoAllow: "never", tiers: { main: "executable", task: "executable" }, mcp: "read",
     sandbox: "read",
     errorHints: { INVALID_INPUT: { hint: "limit is 1 to 50; agent_run_id is an agent run id (run_...)", example: { limit: 10 } } },
-    async run(i, _ctx, deps) {
+    async run(i, ctx, deps) {
       const runId = i.agent_run_id?.trim();
       if (runId && !runId.startsWith("run_")) {
         // Pay runs (pay_...) and agent runs (run_...) are different records; payroll.get_run reads a pay run and its approval.
@@ -68,12 +74,19 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       if (i.command) conds.push(eq(actions.command, i.command));
       const rows = await deps.tx.select().from(actions).where(conds.length ? and(...conds) : undefined).orderBy(desc(actions.seq)).limit(limit);
       const detailed = i.response_format === "detailed";
-      const data = rows.map((r) => ({
-        seq: r.seq, ts: r.ts, actor: `${r.actorKind}:${r.actorId}`, command: r.command, summary: r.summary, proposal_id: r.proposalId, result_id: r.resultId,
-        reversible: r.reversible, reverses_seq: r.reversesSeq, ...(detailed ? { on_behalf_of: r.onBehalfOf, run_id: r.agentRunId, routine_run_id: r.routineRunId, hash: r.hash } : {}),
-      }));
+      const scope = await readScopeOf(deps.tx, ctx);
+      const shows = scope ? auditFilter(e, scope) : null;
+      let withheld = 0;
+      const data = rows.map((r) => {
+        const open = !shows || shows(r.command, r.argsJson, null, r.summary);
+        if (!open) withheld++;
+        return {
+          seq: r.seq, ts: r.ts, actor: `${r.actorKind}:${r.actorId}`, command: r.command, summary: open ? r.summary : WITHHELD_SUMMARY, proposal_id: r.proposalId, result_id: open ? r.resultId : null,
+          reversible: r.reversible, reverses_seq: r.reversesSeq, ...(detailed ? { on_behalf_of: r.onBehalfOf, run_id: r.agentRunId, routine_run_id: r.routineRunId, hash: r.hash } : {}),
+        };
+      });
       const clamped = i.limit !== undefined && i.limit !== limit;
-      return { data: { limit_applied: limit, ...(clamped ? { limit_note: `limit ${i.limit} is outside 1 to 50; used ${limit}` } : {}), actions: data }, summary: `${data.length} actions${i.command ? ` for ${i.command}` : ""}` };
+      return { data: { limit_applied: limit, ...(clamped ? { limit_note: `limit ${i.limit} is outside 1 to 50; used ${limit}` } : {}), ...(scope && withheld ? { access: auditAccess(scope, withheld) } : {}), actions: data }, summary: `${data.length} actions${i.command ? ` for ${i.command}` : ""}${withheld ? ` (${withheld} withheld)` : ""}` };
     },
   };
 
@@ -84,17 +97,23 @@ export function builtinCommands(e: Engine): WeftCommand[] {
     input: z.object({ run_id: z.string().startsWith("run_"), response_format: fmt }), domain: "company", needs: "view", effect: "read", risk: () => "R0",
     approval: "never", autoAllow: "never", tiers: { main: "executable", task: "executable" }, mcp: "read", sandbox: "read",
     errorHints: { UNKNOWN_REFERENCE: { hint: "use a run id from actions.list", example: { run_id: "run_0001" } } },
-    async run(i, _ctx, deps) {
+    async run(i, ctx, deps) {
       const [run] = await deps.tx.select().from(execRuns).where(eq(execRuns.id, i.run_id)).limit(1);
       const acts = await deps.tx.select().from(actions).where(eq(actions.agentRunId, i.run_id)).orderBy(actions.seq);
       const props = await deps.tx.select().from(proposals).where(eq(proposals.proposerRunId, i.run_id)).orderBy(proposals.id);
+      const scope = await readScopeOf(deps.tx, ctx);
+      const shows = scope ? auditFilter(e, scope) : null;
+      let withheld = 0;
+      const open = (ok: boolean) => { if (!ok) withheld++; return ok; };
+      const actionRows = acts.map((a) => ({ seq: a.seq, command: a.command, summary: open(!shows || shows(a.command, a.argsJson, null, a.summary)) ? a.summary : WITHHELD_SUMMARY, proposal_id: a.proposalId }));
+      const proposalRows = props.map((p) => ({ id: p.id, command: p.command, status: p.status, headline: open(!shows || shows(p.command, p.argsJson, p.subjectRef, p.headline)) ? p.headline : WITHHELD_SUMMARY, risk: p.risk, executed_action_seq: p.executedActionSeq }));
       return {
         data: {
           run_id: i.run_id, kind: run?.agentKind ?? null, surface: run?.surface ?? null, attended: run?.attended ?? null, created_at: run?.createdAt ?? null,
-          actions: acts.map((a) => ({ seq: a.seq, command: a.command, summary: a.summary, proposal_id: a.proposalId })),
-          proposals: props.map((p) => ({ id: p.id, command: p.command, status: p.status, headline: p.headline, risk: p.risk, executed_action_seq: p.executedActionSeq })),
+          ...(scope && withheld ? { access: auditAccess(scope, withheld) } : {}),
+          actions: actionRows, proposals: proposalRows,
         },
-        summary: `${i.run_id}: ${acts.length} actions, ${props.length} proposals`,
+        summary: `${i.run_id}: ${acts.length} actions, ${props.length} proposals${withheld ? ` (${withheld} withheld)` : ""}`,
       };
     },
   };
