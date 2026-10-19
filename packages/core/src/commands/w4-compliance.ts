@@ -15,6 +15,7 @@ import { sha256Hex } from "../shared/hash";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import { DomainRefusal, isDetailed, notFound, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { AGENCY_LABELS } from "../tax/queries";
+import { ratesAlreadyInEffect } from "../tax/writes";
 import { parseExtract } from "../notices/queries";
 import { listCalendar, refreshCalendar } from "../compliance/calendar";
 import { evidenceFor, getHandoff, HANDOFF_ASSIGNEE, handoffEmail, listHandoffs, openCaseFor, toHandoffDto } from "../compliance/handoffs";
@@ -360,10 +361,13 @@ export const acknowledgeNoticeCmd = writeCommand<z.infer<typeof AckInput>>({
     const [n] = await deps.tx.select().from(notices).where(and(eq(notices.companyId, ctx.companyId), eq(notices.id, i.notice_id))).limit(1);
     if (!n) throw notFound("notice", i.notice_id);
     if (n.source === "upload" && ctx.principal.kind !== "human") throw new DomainRefusal("DOMAIN_UPLOAD_NEEDS_PERSON", `${n.id} was uploaded by a person, so a person closes it`, "Hand it to a tax specialist with handoffs.open", null);
-    if (NOTICE_HANDLING[n.kind] !== "acknowledge") throw new DomainRefusal("DOMAIN_NEEDS_ACTION", `A ${n.kind} notice needs a reply or a change, not an acknowledgment`, "Use the handling for its kind, or hand it to a person with handoffs.open", null);
+    // A rate notice that only confirms the rates already in effect changes nothing, so it is acknowledged like an
+    // informational one (review fix group notices-and-proposals); any rate that differs still needs tax.update_rate.
+    const confirmed = NOTICE_HANDLING[n.kind] === "acknowledge" ? null : await ratesAlreadyInEffect(deps.tx, ctx.companyId, n);
+    if (NOTICE_HANDLING[n.kind] !== "acknowledge" && !confirmed) throw new DomainRefusal("DOMAIN_NEEDS_ACTION", `A ${n.kind} notice needs a reply or a change, not an acknowledgment`, "Use the handling for its kind, or hand it to a person with handoffs.open", null);
     if (n.status === "resolved") return { data: { notice_id: n.id, status: "resolved", already: true }, summary: `${n.id} is already resolved` };
-    await deps.tx.update(notices).set({ status: "resolved", resolutionJson: JSON.stringify({ outcome: "acknowledged", resolved_at: ctx.now }) }).where(eq(notices.id, n.id));
-    return { data: { notice_id: n.id, status: "resolved" }, summary: `Acknowledged ${n.formCode} notice ${n.id}`, events: [{ type: "notice.resolved", subjectRef: n.id, payload: { notice_id: n.id } }] };
+    await deps.tx.update(notices).set({ status: "resolved", resolutionJson: JSON.stringify({ outcome: "acknowledged", resolved_at: ctx.now, ...(confirmed ? { rates_in_effect: confirmed } : {}) }) }).where(eq(notices.id, n.id));
+    return { data: { notice_id: n.id, status: "resolved", ...(confirmed ? { rates_in_effect: confirmed } : {}) }, summary: `Acknowledged ${n.formCode} notice ${n.id}${confirmed ? ` (confirms the rates in effect)` : ""}`, events: [{ type: "notice.resolved", subjectRef: n.id, payload: { notice_id: n.id } }] };
   },
 });
 

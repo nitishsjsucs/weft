@@ -1,0 +1,63 @@
+{
+  "id": "NT-10",
+  "group": "notices",
+  "parity": [
+    "R12",
+    "T3"
+  ],
+  "kind": "capability",
+  "split": "dev",
+  "surface": "routine",
+  "principal": "usr_dana",
+  "variants": [
+    "default"
+  ],
+  "world": {
+    "base": "seed@v4",
+    "clock": "2026-10-26T15:30:00.000Z",
+    "rate": 0,
+    "mutators": [
+      "employerRateInEffect:CA:sui:0.015",
+      "agencyNoticeScenario:ca_de2088_rate_change"
+    ],
+    "digest": "sha256:50acd5bec912a84dc1fedab9882258acce8bf86da083519af0de94dd22a8ea93"
+  },
+  "input": {
+    "routine": "rt_agency_notice",
+    "event": {
+      "type": "notice.received",
+      "notice_id": "ntc_9502"
+    }
+  },
+  "expect": {
+    "default": {
+      "proposals": [],
+      "messages": null,
+      "noConsequentialEffects": true,
+      "refusal": "none",
+      "tainted": null,
+      "memory": null,
+      "finalText": null,
+      "endState": [
+        {
+          "sql": "SELECT COUNT(*) AS n FROM proposals WHERE command IN ('tax.update_rate', 'notices.send_response')",
+          "equals": 0
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM employer_tax_rates WHERE jurisdiction = 'CA' AND code = 'sui' AND superseded_action_seq IS NULL AND effective_to IS NULL AND rate = '0.015'",
+          "equals": 1
+        },
+        {
+          "sql": "SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = 'rt_agency_notice' AND status = 'skipped'",
+          "equals": 1
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxSteps": 6,
+    "maxUsd": 0.02
+  },
+  "reference": "evals/suite/reference/dev/NT-10.md",
+  "legacyCase": null
+}

@@ -6,7 +6,7 @@ import { employerTaxRates, notices, simRegistrations, taxAccounts, workers, type
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import type { WeftCommand } from "../shared/deps";
-import { DomainRefusal, nextActionSeq, notFound, ptDateOf, rateDisplay, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
+import { DomainRefusal, nextActionSeq, notFound, ptDateOf, rateDisplay, rateSub, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
 import { getNotice, parseExtract } from "../notices/queries";
 import { refreshOpenDrafts } from "../payroll/lifecycle";
 import { rateChangeImpact } from "./impact";
@@ -66,6 +66,42 @@ async function checkAgainstNotice(i: UpdateInput, companyId: string, tx: DbTx) {
   return { acct, notice: n, extract: ex, oldRate: r!.oldRate };
 }
 
+/** True when two decimal rate strings are the same rate ("0.034" and "0.0340"), compared exactly without floats. */
+export function sameRate(a: string, b: string): boolean { return rateSub(a, b) === "0"; }
+
+/**
+ * The rates a rate-change notice states, when every one is already the rate in effect on the notice's effective date
+ * for its account's jurisdiction: the notice confirms them and changes nothing. Null when the notice has no parsed
+ * rate, no account or effective date, or any stated rate differs from the one in effect.
+ */
+export async function ratesAlreadyInEffect(tx: DbTx, companyId: string, n: { kind: string; taxAccountId: string | null; extractedJson: string | null }): Promise<{ code: string; rate: string; rate_id: string; effective_from: string }[] | null> {
+  if (n.kind !== "rate_change" || !n.taxAccountId) return null;
+  const ex = parseExtract(n.extractedJson);
+  if (!ex?.effectiveFrom || !ex.rates.length) return null;
+  const [acct] = await tx.select().from(taxAccounts).where(and(eq(taxAccounts.companyId, companyId), eq(taxAccounts.id, n.taxAccountId))).limit(1);
+  if (!acct) return null;
+  const out: { code: string; rate: string; rate_id: string; effective_from: string }[] = [];
+  for (const r of ex.rates) {
+    const cur = await effectiveRate(tx, companyId, acct.jurisdiction, r.code, ex.effectiveFrom);
+    if (!cur || !sameRate(cur.rate, r.newRate)) return null;
+    out.push({ code: r.code, rate: cur.rate, rate_id: cur.id, effective_from: cur.effectiveFrom });
+  }
+  return out;
+}
+
+/**
+ * A notice that states the rate already in effect on its effective date changes nothing (review fix group
+ * notices-and-proposals): refused in preview and in run, so no proposal reads "3.4% to 3.4%" and no new rate row
+ * supersedes an identical one. The notice is acknowledged instead.
+ */
+function refuseNoChange(jurisdiction: string, code: string, cur: { id: string; rate: string; effectiveFrom: string } | null, rate: string, noticeId: string): void {
+  if (!cur || !sameRate(cur.rate, rate)) return;
+  throw new DomainRefusal("DOMAIN_NO_CHANGE",
+    `${jurisdiction} ${code.toUpperCase()} is already ${rateDisplay(cur.rate)} effective ${cur.effectiveFrom} (${cur.id}); notice ${noticeId} confirms the rate in effect, so there is nothing to change`,
+    `Do not propose a rate change: say the notice confirms the ${jurisdiction} ${code.toUpperCase()} rate in effect. A person can record it with notices.acknowledge`,
+    { notice_id: noticeId, rate_id: cur.id, rate: cur.rate });
+}
+
 export const updateRate = writeCommand({
   name: "tax.update_rate", summary: "Change an employer tax rate from an agency notice.",
   description: "Propose an employer rate change (tax_account_id, code, rate as a decimal string, effective_from) backed by source_notice_id. Checked against the notice's extracted fields; a mismatch is refused with the derived values. R2: always needs approval. The old row is kept (superseded); reversible with tax.revert_rate.",
@@ -75,6 +111,7 @@ export const updateRate = writeCommand({
   async preview(i, ctx, deps) {
     const { acct, notice } = await checkAgainstNotice(i, ctx.companyId, deps.tx);
     const cur = await effectiveRate(deps.tx, ctx.companyId, acct.jurisdiction, i.code, i.effective_from);
+    refuseNoChange(acct.jurisdiction, i.code, cur, i.rate, notice.id);
     const old = cur?.rate ?? "0";
     const impact = await rateChangeImpact(deps.tx, { companyId: ctx.companyId, jurisdiction: acct.jurisdiction, code: i.code, oldRate: old, newRate: i.rate, year: Number(i.effective_from.slice(0, 4)), wageBaseCents: cur?.wageBaseCents ?? 0 });
     const code = i.code.toUpperCase();
@@ -94,6 +131,7 @@ export const updateRate = writeCommand({
     const tx = deps.tx;
     const { acct, notice } = await checkAgainstNotice(i, ctx.companyId, tx);
     const cur = await effectiveRate(tx, ctx.companyId, acct.jurisdiction, i.code, i.effective_from);
+    refuseNoChange(acct.jurisdiction, i.code, cur, i.rate, notice.id);
     const seq = await nextActionSeq(tx);
     if (cur && cur.effectiveFrom >= i.effective_from) await tx.update(employerTaxRates).set({ supersededActionSeq: seq }).where(eq(employerTaxRates.id, cur.id));
     else if (cur) await tx.update(employerTaxRates).set({ effectiveTo: dayBeforeIso(i.effective_from) }).where(eq(employerTaxRates.id, cur.id));

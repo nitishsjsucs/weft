@@ -305,6 +305,12 @@ accepts the reply path or an escalation, so a recalled procedure can steer the r
 missing-filing notice (it prepares the NYS-45 return and proposes filing it and the reply), and the notice stays open
 for a person to escalate.
 
+Review fix amendment (notices-and-proposals, 2026-10-18): a rate notice whose every stated rate equals the rate in
+effect on its effective date (read through `tax.rate_change_impact`) derives the acknowledge plan too and is skipped
+with the acknowledgment as its reason, so nothing is proposed. `tax.update_rate` refuses `DOMAIN_NO_CHANGE` in
+preview and run for a rate equal to the one in effect, and `notices.acknowledge` accepts such a notice. The allowlist
+stays at 8 tools.
+
 A registry test asserts the `rt_new_hire` and `rt_people_digest` allowlists contain no command that can taint in the concise format, and scenarios S3 and S4 assert `tainted === false` at the end. `memory.write_note` is on no golden-path allowlist in P0.
 
 ### 5.4 Tiers, risk classes and one policy function

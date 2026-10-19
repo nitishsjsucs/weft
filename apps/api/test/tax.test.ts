@@ -101,3 +101,53 @@ describe("hero rate change (GP1 domain)", () => {
     expect((await (await get("/v1/tax/rates?jurisdiction=CA")).json())).toHaveLength(4);
   });
 });
+
+// Review fix group notices-and-proposals: a rolled-back rate change can be proposed again, and a rate notice that
+// states the rate already in effect is refused DOMAIN_NO_CHANGE and acknowledged instead.
+describe("rate changes after a rollback, and a notice that confirms the rate in effect", () => {
+  const dana = () => directExecutors(weft.db, weft.clock, weft.sims).human("usr_dana");
+  const post = (path: string, who: string, body: unknown = {}) => weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders(who), "content-type": "application/json" }, body: JSON.stringify(body) });
+  const open = () => weft.executor.runs.openChatRun({ principalId: "usr_dana", companyId: "cmp_larkspur", via: "ui", keyScope: null }, { threadId: null, surface: "human_ui" });
+  const deliver = async () => ((await dana().exec("sim.deliver_notice", { scenario: "ca_de2088_rate_change" })) as { data: { notice_id: string } }).data.notice_id;
+  const args = (notice: string) => ({ tax_account_id: "txa_0002", code: "sui", rate: "0.015", effective_from: "2026-01-01", source_notice_id: notice });
+  const caSui = async () => ((await runDirect("tax.get_rates", { jurisdiction: "CA" }, directCtx(weft.clock), deps())).data.rates as { code: string; rate: string }[]).find((r) => r.code === "sui")!.rate;
+
+  it("propose, approve, roll back, propose again: the second proposal is filed, not refused as already done", async () => {
+    const notice = await deliver();
+    expect(await caSui()).toBe("0.034");
+    const first = await weft.executor.agent.exec(await open(), { callId: "r1", command: "tax.update_rate", args: args(notice) });
+    if (!(first.ok && first.status === "pending_approval")) throw new Error(JSON.stringify(first));
+    const approved = await (await post(`/v1/proposals/${first.proposalId}/approve`, "usr_theo")).json();
+    expect(approved.proposal.status).toBe("executed");
+    expect(await caSui()).toBe("0.015");
+    const undo = await post(`/v1/actions/${approved.proposal.executedActionSeq}/rollback`, "usr_dana", { reason: "Applied before the reserve review closed" });
+    expect(undo.status).toBe(200);
+    expect(await caSui()).toBe("0.034");
+
+    const again = await weft.executor.agent.exec(await open(), { callId: "r2", command: "tax.update_rate", args: args(notice) });
+    if (!(again.ok && again.status === "pending_approval")) throw new Error(JSON.stringify(again));
+    expect(again.proposalId).not.toBe(first.proposalId);
+    expect(again.title).toBe("Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 on account 000-4817-2 for 22 CA employees");
+    // While the rate differs, the notice needs the change: it cannot be acknowledged away.
+    expect(await dana().exec("notices.acknowledge", { notice_id: notice })).toMatchObject({ ok: false, refusal: { code: "DOMAIN_NEEDS_ACTION" } });
+    // The first run's rate lease lasts 10 minutes on the frozen clock; let it lapse before the second execution.
+    await weft.clock.set(new Date(Date.parse(weft.clock.now()) + 11 * 60_000).toISOString(), 0);
+    const second = await (await post(`/v1/proposals/${again.proposalId}/approve`, "usr_theo")).json();
+    expect(second.proposal.status, JSON.stringify(second)).toBe("executed");
+    expect(await caSui()).toBe("0.015");
+  });
+
+  it("a later DE 2088 stating the rate now in effect is refused DOMAIN_NO_CHANGE in preview and run, and can be acknowledged", async () => {
+    const copy = await deliver();
+    const def = findCommand("tax.update_rate");
+    const refused = { code: "DOMAIN_NO_CHANGE", example: { notice_id: copy, rate: "0.015" } };
+    await expect(def.preview!(def.input.parse(args(copy)), directCtx(weft.clock), deps())).rejects.toMatchObject(refused);
+    await expect(runDirect("tax.update_rate", args(copy), directCtx(weft.clock), deps())).rejects.toMatchObject(refused);
+    const viaAgent = await weft.executor.agent.exec(await open(), { callId: "r3", command: "tax.update_rate", args: args(copy) });
+    expect(viaAgent).toMatchObject({ ok: false, refusal: { code: "DOMAIN_NO_CHANGE" } });
+    expect(!viaAgent.ok && viaAgent.refusal.message).toBe(`CA SUI is already 1.5% effective 2026-01-01 (${(viaAgent as { refusal: { example: { rate_id: string } } }).refusal.example.rate_id}); notice ${copy} confirms the rate in effect, so there is nothing to change`);
+    const ack = await dana().exec("notices.acknowledge", { notice_id: copy });
+    expect(ack).toMatchObject({ ok: true, data: { notice_id: copy, status: "resolved", rates_in_effect: [{ code: "sui", rate: "0.015", effective_from: "2026-01-01" }] } });
+    expect(await caSui()).toBe("0.015");
+  });
+});

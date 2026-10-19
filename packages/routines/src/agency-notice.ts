@@ -23,7 +23,10 @@ async function read(exec: ReadOnlyExecutor, companyId: string, command: string, 
   return o.ok && o.status === "done" ? obj(o.data) : null;
 }
 
-/** The plans rt_agency_notice runs. `acknowledge` is not one: an informational notice is skipped with its reason. */
+/**
+ * The plans rt_agency_notice runs. `acknowledge` is not one: an informational notice, or a rate notice whose every
+ * stated rate is already in effect, is skipped with its reason.
+ */
 export type AgencyNoticePlan = Exclude<NoticePlan, "acknowledge">;
 
 /**
@@ -70,22 +73,54 @@ export function escalationReason(plan: NoticePlan, reason: string | null, kind: 
 
 const AGENCY_JURISDICTION: Record<string, string> = { irs: "US", ca_edd: "CA", ny_dtf: "NY", ny_dol: "NY", tx_twc: "TX", co_dor: "CO", co_cdle: "CO" };
 
-/** The GP1 path: a rate change with an account, a code, a rate and an effective date. */
+/** "0.015" (a decimal rate string) as "1.5%", exactly, without floats. */
+export function percentOf(rate: string): string {
+  const [i = "0", f = ""] = rate.split(".");
+  const f2 = f.padEnd(2, "0");
+  const whole = `${i}${f2.slice(0, 2)}`.replace(/^0+(?=\d)/, "");
+  const rest = f2.slice(2).replace(/0+$/, "");
+  return `${whole}${rest ? `.${rest}` : ""}%`;
+}
+
+/** A rate_delta of zero from tax.rate_change_impact ("0", "0.000" or "-0"). */
+const zeroDelta = (v: unknown) => typeof v === "string" && /^-?0+(\.0+)?$/.test(v);
+
+/**
+ * The GP1 path: a rate change with an account, a code, a rate and an effective date. Each stated rate is checked
+ * against the rate in effect on the effective date (tax.rate_change_impact, a read): the first one that differs is
+ * the change to propose (SUI first). When every stated rate is already in effect the notice only confirms them, so the
+ * plan is acknowledge-only (review fix group notices-and-proposals): the run is skipped with the acknowledgment
+ * recorded as its reason, and nothing is proposed, since a "3.4% to 3.4%" rate change or a reply has nothing to do.
+ */
 async function ratePath(ctx: Parameters<Precheck>[0], exec: ReadOnlyExecutor, noticeId: string, notice: Obj): Promise<PrecheckResult | null> {
   const ex = obj(pick(notice, "extracted"));
   const rates = arr(pick(ex, "rates"));
-  const change = rates.find((r) => r.code === "sui") ?? rates[0];
-  const rate = change ? str(pick(change, "newRate", "new_rate")) : null;
-  const code = change ? str(pick(change, "code")) : null;
+  const ordered = [...rates.filter((r) => r.code === "sui"), ...rates.filter((r) => r.code !== "sui")];
   const effective = str(pick(ex, "effectiveFrom", "effective_from"));
   const account = str(pick(notice, "tax_account_id")) ?? str(pick(ex, "taxAccountId"));
-  if (!rate || !code || !effective || !account) return null;
+  if (!ordered.length || !effective || !account) return null;
   const agency = str(pick(ex, "agency")) ?? str(pick(notice, "agency"));
   const jurisdiction = AGENCY_JURISDICTION[agency ?? ""] ?? null;
-  const impact = jurisdiction ? await read(exec, ctx.companyId, "tax.rate_change_impact", { jurisdiction, code, new_rate: rate, effective_from: effective }) : null;
+  const confirmed: { code: string; rate: string }[] = [];
+  let chosen: { change: Obj; rate: string; code: string; impact: Obj | null } | null = null;
+  for (const change of ordered) {
+    const rate = str(pick(change, "newRate", "new_rate"));
+    const code = str(pick(change, "code"));
+    if (!rate || !code) return null;
+    const impact = jurisdiction ? await read(exec, ctx.companyId, "tax.rate_change_impact", { jurisdiction, code, new_rate: rate, effective_from: effective }) : null;
+    if (impact && zeroDelta(impact.rate_delta)) { confirmed.push({ code, rate: str(impact.old_rate) ?? rate }); continue; }
+    chosen = { change, rate, code, impact };
+    break;
+  }
+  if (!chosen) {
+    const list = confirmed.map((c) => `${jurisdiction} ${c.code.toUpperCase()} ${percentOf(c.rate)}`).join(" and ");
+    const form = str(pick(notice, "form_code")) ?? "rate";
+    return { action: "skip", reason: `Acknowledge only: notice ${noticeId} (${form}) confirms the rate already in effect, ${list} effective ${effective}. Nothing to change or reply to, so no rate change or reply is proposed. A person can record it as read with notices.acknowledge.` };
+  }
+  const { change, rate, code, impact } = chosen;
   return {
     action: "run", severity: "interrupt", subjectRefs: [noticeId, account],
-    findings: { notice: { id: noticeId, agency: pick(ex, "agency"), kind: "rate_change", form: str(pick(notice, "form_code")), code, old_rate: change ? pick(change, "oldRate") : null, new_rate: rate, effective_from: effective, respond_by: pick(ex, "respondBy") }, impact, plan: "update_rate" },
+    findings: { notice: { id: noticeId, agency: pick(ex, "agency"), kind: "rate_change", form: str(pick(notice, "form_code")), code, old_rate: pick(change, "oldRate"), new_rate: rate, effective_from: effective, respond_by: pick(ex, "respondBy") }, impact, plan: "update_rate" },
     derivedArgs: {
       notice_id: noticeId, plan: "update_rate", kind: "rate_change",
       "tax.rate_change_impact": jurisdiction ? { jurisdiction, code, new_rate: rate, effective_from: effective } : null,
