@@ -36,10 +36,12 @@ never below the step's own seconds.
 ## Seed profiles
 
 The base world is what every test, `pnpm e2e`, `pnpm demo` and the evals use, and it does not change. A rich world
-is the base world plus the rich layer from the rich-seed track (`packages/seed/src/rich.ts`, export `seedRich`).
-`pnpm dev` defaults to `--profile rich`, `--e2e` to base. `POST /v1/sim/reset { profile }` picks one explicitly and
-`GET /v1/health` reports `seedProfile`. Until the rich layer lands, a rich request seeds the base world and the tour
-runs on its fallbacks (the reset offer, a skipped portal stop, unanchored cards where data is missing).
+is the base world plus the rich layer (`packages/seed/src/rich/`, through `seedWorldProfile` in
+`packages/seed/src/profile.ts`). `pnpm dev` seeds rich by default, `--e2e` always seeds base. A rich world carries
+the `seed.profile` settings row, so `POST /v1/sim/reset` with no profile rebuilds it rich. The tour sends
+`{ profile: "rich" }` explicitly; an unknown profile or an extra key is a 400. `GET /v1/health` reports `seedProfile`.
+On a world that is not a clean rich one, the tour offers the reset first and otherwise runs on its fallbacks (the
+reset offer, a skipped portal stop, unanchored cards where data is missing).
 
 ## Tests
 
