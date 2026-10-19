@@ -164,3 +164,55 @@ time or in the rich layer, so base digests, base e2e and eval digests are unchan
 Left: steps 5 and 18 still ring targets with no inner padding (the halo sits 2 to 3 px from the label); the chat
 system prompt still lets a live answer cite a result id ("Source: res_0234"), since the drafting rule and GP5 ask for
 cited ids; the expense drawer is still a full-height modal over the docked agent panel (app behavior).
+
+## Review round 3 fixes (tp/merged, 2026-10-18)
+
+- The app shell jumped up and snapped back on steps 12 to 20. Root cause: the chart answer's screen reader table
+  (`sr-only`, position absolute) had no positioned ancestor, so its containing block was the initial containing block:
+  it escaped the agent thread's and the shell's overflow clips and made the document 285 px taller than the window.
+  Each step's `scrollIntoView` then scrolled the document too, and a 450 ms `resetDocScroll` snapped it back. Fixed
+  at the root: the chart card, the agent thread and the main pane are positioned, and the shell grid is
+  `relative overflow-clip` (clip, unlike hidden, is not a scroll container), so nothing in /app can make the
+  document scroll again. `scrollToView` (`dom.ts`) scrolls only the target's own scroll containers (the document
+  only outside the app shell, the portal) and `resetDocScroll` is gone.
+- The ring trailed a smooth scroll by a frame or more. `scrollToView` now resolves once every container it moved has
+  reached its end position (900 ms cap), and the step sets the ring and the card after that, so both are placed on the
+  settled page. The ring also writes its box in the animation frame it reads the target (`useFrameValue`'s
+  `onFrame`), so a later move (a drawer, a style change) is followed in the same frame.
+- `tour-layout.spec.ts` walks the real path from the notice to the chart at 1280x800 and 1440x900 (so the agent thread
+  holds the notice run and the chart, taller than the panel) and checks every frame of steps 12 to 20: the document
+  never scrolls, is never taller than the window, and the ring never trails its target by more than 2 px. Without
+  the containment it fails with "the document is taller than the window: 285".
+- On a phone, routines and integrations scroll their target's head to the top and dock the sheet at the bottom, so
+  the gallery's first routine and the Greenhouse title are not under the sheet. A `block: "start"` step with a top
+  sheet leaves the sheet's height above the target (`sheetRoom`).
+- Copy on the path: the audit table names a routine by its name (the run id in the title), reads each summary through
+  `humanLine` (the stored text in the title), says "from an approved proposal" and "Agent run" with the ids in titles,
+  and keeps the Command cell on one line in mono. `noticeName` does not double "notice" ("UI rate notice"); one
+  `auditLabel` ("audit #N") on the rates table, the person page, the approval card and the document library. The
+  memory chip reads "updated Oct 26". Flag evidence dates in the period's year read without one, as the headline does.
+  New-hire personas in the Viewing as menu read "(demo)". The rate step avoids the other rate rows, so the card goes
+  below the table.
+- Rich layer: a new pay rate note gives its unit ("$139,240.00 a year") from the rate's kind, and the hours spike note
+  says what was computed and leaves overtime to the workweek instead of stating a per-period rule. Both stay grounded.
+- API: `keepAliveTimeout` 65 s and `headersTimeout` 66 s, so the web proxy never sends on a keep-alive socket the
+  server is closing (the ECONNRESET 500s seen once at 1512x982).
+
+Set aside:
+
+- The CA EDD response letter (`responseTemplate`, `packages/core/src/notices/writes.ts`) still cites the notice's row
+  id and ISO dates. It is the text that gets filed, so it can only change in core, and that moves the base and eval
+  digests this round must keep; it needs a re-pin with a review log note.
+- Audit sequence order on the rich world: the base world's raise is #1 (Oct 9, 2026) and the rich layer appends ten
+  months of earlier history after it (#2 is Dec 19, 2025). The honest fixes are re-sequencing the chain (every
+  `createdActionSeq`, `executedActionSeq`, `reversesSeq` and signature reference moves) or an imported-history marker
+  on the rows, which needs a column or a contract field; both are larger than this round.
+- Step 10 at 1280x800 and 1366x768: when a lower flag's popover opens upward over the card's spot, the card drops
+  under it as designed and its Back button is under the popover until the popover closes (Escape). The content column
+  is too narrow there (about 660 px with the panel docked) for a 260 px card beside a 360 px popover, and weighting
+  the card's button strip only moved the card onto the group; it needs a different layout (the card docked in the
+  agent panel's column, or a compact card) rather than a scoring change.
+- Step 6 on a phone: the inbox card is taller than the space beside the sheet, so either the head or the diff and
+  evidence are under the sheet; it needs the card to collapse its sections on a phone.
+- Audit routine run ids made during the tour are random (`rtr_mveqy7jqe8e097`), from the routine runtime's id
+  generator, not the seed's counters; the table now shows the routine's name instead.
