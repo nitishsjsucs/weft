@@ -24,11 +24,11 @@ const ROUTES: Check[] = [
   { path: "/app/time-off", need: ["Taken"] },
   { path: "/app/contractors", empty: ["No payouts yet."] },
   { path: "/app/compliance", empty: ["No open hand-offs."] },
-  { path: "/app/routines", need: [/Last run done/] },
+  { path: "/app/routines", need: [/Last run: Done/] },
   { path: "/app/routines/rt_people_digest", empty: ["No runs yet."] },
   { path: "/app/routines/rt_pre_payroll", empty: ["No runs yet."] },
-  { path: "/app/routines/rt_monthly_exec_report", empty: ["No runs yet.", "Last run never"] },
-  { path: "/app/routines/rt_new_hire_ready", empty: ["No runs yet.", "Last run never"] },
+  { path: "/app/routines/rt_monthly_exec_report", empty: ["No runs yet.", "Last run: none yet"] },
+  { path: "/app/routines/rt_new_hire_ready", empty: ["No runs yet.", "Last run: none yet"] },
   { path: "/app/benefits", empty: ["No findings for"] },
   { path: "/app/reports", empty: ["Zero in this range, so not drawn"] },
   { path: "/app/audit", need: ["offers.create", /Chain valid through #\d{3}/] },
@@ -54,6 +54,17 @@ async function settled(page: Page): Promise<string> {
   return (await page.locator("body").innerText()).replace(/\s+/g, " ");
 }
 const has = (text: string, p: string | RegExp) => (typeof p === "string" ? text.includes(p) : p.test(text));
+
+/** Screens a demo opens first read as copy: no row ids ("wrk_0054", "ntc_0005") in their visible text. */
+const NO_IDS = ["/app", "/app/inbox", "/app/simulators"];
+test("the screens a demo opens first show no row ids", async ({ page }) => {
+  for (const path of NO_IDS) {
+    await page.goto(path);
+    const text = await settled(page);
+    const ids = [...new Set(text.match(/\b[a-z]{2,5}_\d{4}\b/g) ?? [])];
+    expect(ids, `row ids in the visible text of ${path}`).toEqual([]);
+  }
+});
 
 test("the rich profile fills every audited screen", async ({ page, request }) => {
   const stats = await (await request.get("/api/v1/stats")).json() as { runsLogged?: number; actionsLogged?: number };
