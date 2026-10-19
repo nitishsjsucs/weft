@@ -34,10 +34,12 @@ async function proposal(routineRunId: string, status: string) {
 }
 
 describe("GET /v1/routine-gallery", () => {
-  it("returns a RoutineGalleryRow for every routine", async () => {
+  it("returns a RoutineGalleryRow for every routine but a retired one", async () => {
     const rows = await gallery();
     const all = await weft.db.select({ id: routines.id }).from(routines);
-    expect(rows.map((r) => r.routineId).sort()).toEqual(all.map((r) => r.id).sort());
+    // rt_compliance_notices was folded into rt_agency_notice: its row stays, disabled, and the gallery leaves it out.
+    expect(all.map((r) => r.id)).toContain("rt_compliance_notices");
+    expect(rows.map((r) => r.routineId).sort()).toEqual(all.map((r) => r.id).filter((id) => id !== "rt_compliance_notices").sort());
     for (const r of rows) expect(RoutineGalleryRow.safeParse(r).success, r.routineId).toBe(true);
   });
 

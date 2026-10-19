@@ -13,6 +13,7 @@ import { principals } from "@weft/db";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { kick, redactJson } from "./proposals";
+import { isRetiredRoutine } from "../../../../packages/contracts/src/ext/dp-agent-runtime";
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dates are YYYY-MM-DD");
 const SendBody = z.object({ from: Day, to: Day, groupBy: z.enum(["month", "quarter"]).optional(), recipients: z.array(z.string()).min(1).max(10) }).strict();
@@ -71,7 +72,8 @@ export function adminRoutes(weft: Weft): Hono<WeftEnv> {
     const outcome = await weft.executor.human.exec(s, "settings.permission_matrix", {});
     if (!outcome.ok) { const out = outcomeResponse(weft, outcome); return c.json(out.body, out.status); }
     if (outcome.status !== "done") throw new ValidationError("settings.permission_matrix does not propose");
-    return c.json(redactJson(weft, (outcome.data as { rows: unknown[] }).rows));
+    // A retired routine (folded into another, never run) keeps its row but is no entry in the gallery.
+    return c.json(redactJson(weft, (outcome.data as { rows: { routineId?: string }[] }).rows.filter((r) => !isRetiredRoutine(String(r.routineId ?? "")))));
   });
 
   /** A per-action override (deny, propose_only or clear) for one person or the agent: always a proposal. */
@@ -94,7 +96,8 @@ export function adminRoutes(weft: Weft): Hono<WeftEnv> {
     const outcome = await weft.executor.human.exec(s, "routines.gallery", {});
     if (!outcome.ok) { const out = outcomeResponse(weft, outcome); return c.json(out.body, out.status); }
     if (outcome.status !== "done") throw new ValidationError("routines.gallery does not propose");
-    return c.json(redactJson(weft, (outcome.data as { rows: unknown[] }).rows));
+    // A retired routine (folded into another, never run) keeps its row but is no entry in the gallery.
+    return c.json(redactJson(weft, (outcome.data as { rows: { routineId?: string }[] }).rows.filter((r) => !isRetiredRoutine(String(r.routineId ?? "")))));
   });
 
   return stubRoutes(r, "admin", ["GET /v1/reports", "POST /v1/reports/:metric/send", "GET /v1/permissions/matrix", "POST /v1/permissions/agent-actions", "GET /v1/routine-gallery"]);

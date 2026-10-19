@@ -12,6 +12,7 @@ import { useAgent } from "../agent-context";
 import { AUTONOMY_COPY, AutonomyControl } from "./autonomy-control";
 import { RoutineGallery, RunTimes, type RoutineRow } from "./gallery";
 import { RoutineDecisionCounts, RoutineGalleryW4 } from "./gallery/routine-gallery-w4";
+import { isRetiredRoutine } from "../../../../../../packages/contracts/src/ext/dp-agent-runtime";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /** Readable trigger: "Mondays 9:00 PT", "Weekdays 9:00 PT", "On notice.received". Falls back to the raw cron. */
@@ -61,7 +62,9 @@ function DraftBox() {
 }
 
 export function RoutinesView() {
-  const list = useGet("/v1/routines", { refreshMs: 5_000 }) as { data: RoutineRow[] | undefined; error: Error | null };
+  const all = useGet("/v1/routines", { refreshMs: 5_000 }) as { data: RoutineRow[] | undefined; error: Error | null };
+  // A retired routine (folded into another, never run) keeps its row for the record but is not listed here.
+  const list = { ...all, data: all.data?.filter((r) => !isRetiredRoutine(r.id)) };
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="Routines" subtitle="Standing jobs the agent runs on a schedule or an event. Deterministic prechecks decide whether a model is needed at all." />
