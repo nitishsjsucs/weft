@@ -24,7 +24,7 @@ Every world starts from one deterministic seed, in one of two profiles:
 | Profile | What it holds | Used by |
 |---|---|---|
 | `rich` | The base world plus a deterministic layer of history (`packages/seed/src/rich/`): January to August pay runs imported from the previous provider, agent and routine runs with steps, decided and waiting approvals, a hash-chained action log, time off through the ledger, offers in every state and new-hire personas part way through the portal, offboarding cases, contractor payouts, filed returns, notices and memory pages. It only adds rows, so the planted story beats (the Oct 30 draft, DE 2088, the expenses in review, Noor's offer, the open October reconciliation) stay as the base seed wrote them | `pnpm dev` (the default), the guided tour, `pnpm e2e:rich`, `pnpm e2e:tour` and `pnpm screenshots:rich` |
-| `base` | The pinned test world: Larkspur Robotics (demo) on Mon Oct 26 2026 08:30 PT with its planted story beats and nothing else. Its digest and the golden numbers (the demo payroll total of $267,795.26) never move | `pnpm test`, `pnpm e2e` (`--e2e` always seeds base), `pnpm demo`, `pnpm demo:scenario`, `pnpm screenshots` and every eval world |
+| `base` | The pinned test world: Larkspur Robotics (demo) on Mon Oct 26 2026 08:30 PT with its planted story beats and nothing else. Its digest and the golden numbers (the demo payroll total of $267,795.26) never move | `pnpm test`, `pnpm e2e` (`--e2e` always seeds base), `pnpm demo`, `pnpm demo:scenario --profile base`, `pnpm screenshots` and every eval world |
 
 `pnpm dev --fresh --profile base` (or `WEFT_SEED_PROFILE=base`) seeds the base world alone. A rich world remembers its
 profile, so "Reset demo data..." in the Viewing as menu and `POST /v1/sim/reset` rebuild it rich; the reset also takes
@@ -507,7 +507,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
 | `pnpm demo` | Narrated GP1 to GP18 and GP20, GP22, GP23 and GP24 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
 | `pnpm demo:tests` | The golden path scenario tests (GP1 to GP18, S6 to S9) in process on fresh seeded worlds |
-| `pnpm demo:scenario <name>` | Resets the running dev world to the base seed (not the rich profile; `pnpm dev --fresh` restores that) for one live demo scenario (`list` names them), checks it is clean and prints the click path and what to type; it calls no model. `--api-port` and `--web-port` follow `pnpm dev`, and the world should run with `WEFT_CLOCK_RATE=0` |
+| `pnpm demo:scenario <name>` | Resets the running dev world to its own seed profile (rich under `pnpm dev`; `--profile base` or `--profile rich` picks one) for one live demo scenario (`list` names them), checks it is clean (the seed clock, no pending proposal newer than the seed) and prints the click path and what to type; it calls no model. `--api-port` and `--web-port` follow `pnpm dev`, and the world should run with `WEFT_CLOCK_RATE=0` |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
 | `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP24 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
