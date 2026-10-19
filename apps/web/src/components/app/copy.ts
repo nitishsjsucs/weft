@@ -92,6 +92,7 @@ export function humanLine(text: string): string {
     .replace(new RegExp(`\\b(?:the )?(${KNOWN})_[A-Za-z0-9_]*\\d[A-Za-z0-9_]*\\b`, "g"), (_m, k: string) => ID_NOUN[k]!)
     .replace(/\bresponse \d+ (?:for|to) (?:the )?/g, "the reply to the ").replace(/\bresponse \d+\b/g, "the reply")
     .replace(/\bRecorded mention in\b/g, "Recorded a mention in")
+    .replace(/\bAccepted offer: created (.+?) as onboarding\b/g, "Accepted the offer: added $1 to onboarding")
     .replace(/\bCreated (google_ws|chat|github|sso) account\b/g, (_m, k: string) => `Created ${SYSTEM_WORDS[k]} account`)
     .replace(AGENCY_RE, (k) => AGENCY_WORDS[k]!)
     .replace(/\b1 (workers|actions|paychecks|results|proposals|requests|expenses|notices|items|people|flags|tools)\b/g, (_m, w: string) => `1 ${SINGULAR[w]}`)

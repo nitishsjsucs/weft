@@ -68,7 +68,7 @@ describe("notice and audit labels", () => {
 describe("audit and step lines carry no ids, codes or file names", () => {
   it("names offers, mentions, rates, tax accounts, agencies, systems and delivered notices", () => {
     expect(humanLine("Recorded mention mnt_0001 in #payroll")).toBe("Recorded a mention in #payroll");
-    expect(humanLine("Accepted offer offr_0001: created Noor Castellanos (demo) (wrk_0063) (EMP-0056) as onboarding")).toBe("Accepted offer: created Noor Castellanos (demo) (EMP-0056) as onboarding");
+    expect(humanLine("Accepted offer offr_0001: created Noor Castellanos (demo) (wrk_0063) (EMP-0056) as onboarding")).toBe("Accepted the offer: added Noor Castellanos (demo) (EMP-0056) to onboarding");
     expect(humanLine("Reverted CA SUI rate etr_0005 to 3.4%")).toBe("Reverted CA SUI rate to 3.4%");
     expect(humanLine("Register CO withholding account with CO DOR (sim) (txa_0006)")).toBe("Register CO withholding account with CO DOR (sim)");
     expect(humanLine("Delivered CA_EDD_DE2088_2026.txt from ca_edd as ntc_0005")).toBe("Delivered the DE 2088 notice from CA EDD (sim)");
