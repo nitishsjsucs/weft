@@ -5,7 +5,6 @@ import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-tab
 import { CircleCheck, CircleDashed, CircleSlash } from "lucide-react";
 import { Badge, Button, Card, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { tid, W3_TIMEOFF_TID, type BenefitPlan, type Enrollment, type ItAccount, type Money, type Offer, type ToolOutcome, type Worker } from "@weft/contracts";
-import { useAgent } from "../agent-context";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { useCan } from "@/lib/api/access";
 import { PAY_SCHEDULE, TASK_OWNER, WORKER_TYPE, fmtDate, initials, longDate, statusLabel, timeZoneName } from "../format";

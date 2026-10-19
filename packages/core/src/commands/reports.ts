@@ -65,6 +65,8 @@ export const reportsQueryCommand: WeftCommand<ReportsQueryInput> = {
     const range = defaultRange(i.to ?? today);
     const base = { companyId: ctx.companyId, metric: i.metric, to: i.to ?? today, groupBy: (i.group_by ?? "month") as ReportGroupBy };
     let r = await runReport(deps.tx, { ...base, from: i.from ?? range.from });
+    // An explicit from is the range the person asked for and stays as asked; the rows still start where the data does.
+    if (i.from != null) r = { ...r, from: i.from };
     // With no from, the window starts at the first period with data, so a chart never opens on empty months and its
     // range reads as the data does (the Reports page asks the same way, so both show one window).
     const first = typeof r.rows[0]?.period_start === "string" ? (r.rows[0].period_start as string) : null;
