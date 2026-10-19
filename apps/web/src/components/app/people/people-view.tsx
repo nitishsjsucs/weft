@@ -240,6 +240,10 @@ const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace (sim)", chat: 
 const human = (s: string) => s.replace(/_/g, " ");
 /** An engine value as a label: "single" is "Single", "head_of_household" is "Head of household". */
 const label = (s: string | null | undefined) => (s ? human(s).replace(/^./, (c) => c.toUpperCase()) : "-");
+const WORKER_TYPE: Record<string, string> = { us_w2: "W-2 employee", us_1099: "1099 contractor", global_contractor: "Global contractor", contractor: "Contractor", employee: "Employee" };
+const SCHEDULE: Record<string, string> = { semimonthly: "Semi-monthly", biweekly: "Every two weeks", weekly: "Weekly", monthly: "Monthly" };
+/** A pay schedule id ("ps_us_semimonthly") as its cadence. */
+const scheduleLabel = (id: string) => { const k = id.replace(/^ps_/, "").replace(/^us_/, ""); return SCHEDULE[k] ?? label(k); };
 const longDate = (d: string | null | undefined) => (d ? fmtDate(d, { month: "short", day: "numeric", year: "numeric" }) : "-");
 
 export function PersonView({ id }: { id: string }) {
@@ -288,7 +292,7 @@ export function PersonView({ id }: { id: string }) {
           <div className="grid gap-6 laptop:grid-cols-[1fr_1fr] [&>*]:min-w-0">
             <Card className="p-4">
               <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Profile</h2>
-              <Facts rows={[["Employee number", p.employeeNumber ?? "-"], ["Work email", p.workEmail], ["Manager", d.manager ? humanLine(d.manager) : "-"], ["Work state", p.workState ?? "-"], ["Country", p.country], ["Type", label(p.workerType)], ["Start date", longDate(p.startDate)], ["End date", longDate(p.endDate)], ["SSN", p.ssnMasked ?? "Not on file"], ["Pay schedule", p.payScheduleId ? label(p.payScheduleId.replace(/^ps_/, "")) : "-"], ["Time zone", p.timezone]]} />
+              <Facts rows={[["Employee number", p.employeeNumber ?? "-"], ["Work email", p.workEmail], ["Manager", d.manager ? humanLine(d.manager) : "-"], ["Work state", p.workState ?? "-"], ["Country", p.country], ["Type", WORKER_TYPE[p.workerType] ?? label(p.workerType)], ["Start date", longDate(p.startDate)], ["End date", longDate(p.endDate)], ["SSN", p.ssnMasked ?? "Not on file"], ["Pay schedule", p.payScheduleId ? scheduleLabel(p.payScheduleId) : "-"], ["Time zone", p.timezone]]} />
             </Card>
             {onboarding}
           </div>

@@ -9,6 +9,9 @@ describe("memoryText", () => {
   it("labels an engine status value", () => {
     expect(memoryText("- Status active (2026-10-26, src: seed)")).toBe("- Status Active (as of Oct 26, from setup)");
   });
+  it("labels the value when the bullet marker is already gone (the line renders after it)", () => {
+    expect(memoryText("Status active (2026-10-26, src: seed)")).toBe("Status Active (as of Oct 26, from setup)");
+  });
   it("leaves a code span and a plain line alone", () => {
     expect(memoryText("3. Propose `tax.update_rate` with the notice as the source.")).toBe("3. Propose `tax.update_rate` with the notice as the source.");
   });

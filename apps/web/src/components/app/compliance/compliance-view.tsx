@@ -154,7 +154,7 @@ export function ComplianceView() {
                         <div className="whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? "" : " onward"}</div>
                         {r.effectiveTo ? <div className="whitespace-nowrap text-1 text-gray-10">to {fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}</div> : null}
                       </TD>
-                      <TD className={cn("h-auto py-2 text-1", !href && "font-mono")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">{auditLabel(r.createdActionSeq)}</Link> : null}</TD>
+                      <TD className={cn("h-auto py-2 text-1", !href && "font-mono")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source === "seed" ? <span className="font-sans text-gray-11" title="seed">Initial setup</span> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">{auditLabel(r.createdActionSeq)}</Link> : null}</TD>
                     </TR>
                   );
                 })}

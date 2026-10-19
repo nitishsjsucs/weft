@@ -91,7 +91,11 @@ export function ProposalCard({ p }: { p: Proposal }) {
           ) : <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "denied" || p.status === "failed" ? "red" : "gray"}>{p.status}</Badge>}
         </div>
         <h3 className="text-3 font-medium leading-6 text-balance break-words">{humanLine(p.headline)}</h3>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 tablet:grid-cols-4">
+        {/* On a phone the four facts read as one line, so the diff, the evidence and Approve fit above the tour's sheet. */}
+        <p className="text-1 text-gray-11 mobile:hidden">
+          For {principalName(p.onBehalfOf)} · {p.moneyCents === null ? "moves no money" : <span className="tabular">moves {cents(p.moneyCents)}</span>} · {p.reversible ? "reversible" : <span className="text-red-11">not reversible</span>}
+        </p>
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 max-mobile:hidden tablet:grid-cols-4">
           <Field label="On behalf of">{principalName(p.onBehalfOf)}</Field>
           <Field label="Moves money">{p.moneyCents === null ? "No" : <span className="tabular">{cents(p.moneyCents)}</span>}</Field>
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
@@ -111,7 +115,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
         {p.agentNote ? (
           <div className="rounded-lg bg-gray-2 px-3 py-2">
             <div data-testid="proposal-note-label" data-proposer={who.kind} className="text-1 font-medium text-gray-11">{noteLabel(who, principalName)}</div>
-            <p className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12">{humanTimes(p.agentNote)}</p>
+            <p className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12 max-mobile:line-clamp-3" title={humanTimes(p.agentNote)}>{humanTimes(p.agentNote)}</p>
           </div>
         ) : null}
         {p.evidence.length ? (

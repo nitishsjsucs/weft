@@ -47,7 +47,7 @@ export function memoryText(text: string): string {
     text
       .replace(/\((\d{4}-\d{2}-\d{2}), src: seed\)/g, (_m, d: string) => `(as of ${d}, from setup)`)
       .replace(/\((\d{4}-\d{2}-\d{2}), src: ([^)]+)\)/g, (_m, d: string, src: string) => `(as of ${d}, from ${src.replace(/_/g, " ")})`)
-      .replace(/^(- (?:Status|Type|Pay kind|Filing status) )([a-z]+(?:_[a-z]+)*)\b/, (_m, k: string, v: string) => `${k}${v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}`),
+      .replace(/^((?:- )?(?:Status|Type|Pay kind|Filing status) )([a-z]+(?:_[a-z]+)*)\b/, (_m, k: string, v: string) => `${k}${v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}`),
     2026,
   );
 }
