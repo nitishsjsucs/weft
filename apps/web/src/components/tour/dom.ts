@@ -18,12 +18,27 @@ export function findFirst(selectors: string[]): { el: HTMLElement; selector: str
   return null;
 }
 
-/** Waits up to `ms` for any of the selectors; resolves null on timeout or abort. */
+/** How long a fallback selector waits for the step's own one to appear (a page that is still switching files). */
+export const PRIMARY_GRACE_MS = 1_200;
+
+/**
+ * Whether a match is good enough to stop waiting: the first selector (the step's own) always is; a fallback only once
+ * the grace period has passed, so a page that shows its default content first does not win over the real target.
+ */
+export function acceptHit(selector: string | null, selectors: string[], elapsedMs: number, graceMs = PRIMARY_GRACE_MS): boolean {
+  if (selector === null) return false;
+  return selector === selectors[0] || elapsedMs >= graceMs;
+}
+
+/** Waits up to `ms` for any of the selectors, preferring the first; resolves null on timeout or abort. */
 export function waitForAny(selectors: string[], ms: number, signal: AbortSignal): Promise<{ el: HTMLElement; selector: string } | null> {
   return new Promise((resolve) => {
     if (!selectors.length) return resolve(null);
+    const t0 = Date.now();
+    const grace = Math.min(PRIMARY_GRACE_MS, ms);
+    const good = (h: { el: HTMLElement; selector: string } | null) => !!h && acceptHit(h.selector, selectors, Date.now() - t0, grace);
     const hit = findFirst(selectors);
-    if (hit) return resolve(hit);
+    if (good(hit)) return resolve(hit);
     let done = false;
     let raf = 0;
     const finish = (v: { el: HTMLElement; selector: string } | null) => {
@@ -35,9 +50,9 @@ export function waitForAny(selectors: string[], ms: number, signal: AbortSignal)
       signal.removeEventListener("abort", onAbort);
       resolve(v);
     };
-    const check = () => { raf = 0; const h = findFirst(selectors); if (h) finish(h); };
+    const check = () => { raf = 0; const h = findFirst(selectors); if (good(h)) finish(h); };
     const obs = new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(check); });
-    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-tour", "data-status", "data-state", "data-count", "data-source", "data-current", "style", "class"] });
+    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-tour", "data-status", "data-state", "data-count", "data-source", "data-current", "data-path", "style", "class"] });
     const timer = setTimeout(() => finish(findFirst(selectors)), ms);
     const onAbort = () => finish(null);
     signal.addEventListener("abort", onAbort);

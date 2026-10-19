@@ -10,7 +10,7 @@ import { getPrincipal, invalidate, rawFetch, setPrincipal } from "@/lib/api/hook
 import { ApiError } from "@/lib/api/client";
 import { getBridge } from "./bridge";
 import { activate, closeAppLayers, isTypingTarget, reducedMotion, sleep, typeInto, waitForAny } from "./dom";
-import { clearTour, hasSeen, IDLE, loadTour, markSeen, preflightReasons, readPreflight, reduce, resetErrorText, restorePlan, saveTour } from "./engine";
+import { clearNavigation, clearTour, hasSeen, IDLE, loadTour, markNavigation, markSeen, preflightReasons, readPreflight, reduce, resetErrorText, restorePlan, saveTour, takeOwnNavigation } from "./engine";
 import {
   budgetHardMs, budgetSoftMs, fill, stepBody, stepIndex, targetCandidates, TOUR_CHART_PROMPT, TOUR_COPY, TOUR_PRINCIPAL, TOUR_STEPS,
   type TourMemo, type TourStep,
@@ -54,6 +54,8 @@ interface Ui {
   ready: boolean;
   target: HTMLElement | null;
   found: boolean;
+  /** Which selector the target matched: the step's own, or one of its fallbacks (data-target-match, for the specs). */
+  match: "primary" | "fallback" | null;
   secondary: Element[];
   status: { text: string; tone: StatusTone } | null;
   note: string | null;
@@ -64,7 +66,7 @@ interface Ui {
   link: { href: string; label: string } | null;
   offPage: boolean;
 }
-const freshUi = (stepId: string): Ui => ({ stepId, ready: false, target: null, found: false, secondary: [], status: null, note: null, body: null, nextEnabled: false, mode: "next", extra: [], link: null, offPage: false });
+const freshUi = (stepId: string): Ui => ({ stepId, ready: false, target: null, found: false, match: null, secondary: [], status: null, note: null, body: null, nextEnabled: false, mode: "next", extra: [], link: null, offPage: false });
 
 const RUN_TERMINAL_BAD = new Set(["failed", "refused", "escalated", "expired", "cancelled"]);
 
@@ -150,7 +152,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       start({ stepId: t === "1" ? undefined : t, autoplay });
     } else if (!booted.current) {
       const p = loadTour(session());
-      if (p) dispatch({ type: "resume", persisted: p });
+      if (p) dispatch({ type: "resume", persisted: p, auto: takeOwnNavigation(session(), window.location.pathname, Date.now()) });
     }
     booted.current = true;
   }, [pathname, router, start]);
@@ -209,7 +211,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
     if (r.kind === "draft") {
       if (!memo().draftId) {
         try {
-          const runs = await apiGet<{ data: { id: string; status: string; periodStart: string }[] }>("/v1/payrolls?limit=25");
+          const runs = await apiGet<{ data: { id: string; status: string; periodStart: string }[] }>("/v1/payrolls?limit=100");
           const draft = runs.data.filter((x) => x.status === "draft").sort((a, b) => (a.periodStart < b.periodStart ? -1 : 1))[0];
           patchMemo({ draftId: draft?.id ?? null });
         } catch { patchMemo({ draftId: null }); }
@@ -291,6 +293,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       if (href === "skip") { advance(); return; }
       if (pathOnly(href) !== window.location.pathname || (href.includes("?") && here() !== href.split("#")[0])) {
         if (window.location.pathname.startsWith("/portal") && !href.startsWith("/portal")) setPrincipal(TOUR_PRINCIPAL);
+        markNavigation(session(), pathOnly(href), Date.now());
         router.push(href);
       } else if (href.includes("#") && window.location.hash !== `#${href.split("#")[1]}`) {
         window.location.hash = href.split("#")[1]!;
@@ -299,6 +302,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       const until = Date.now() + 15_000;
       while (!signal.aborted && window.location.pathname !== expected.current && Date.now() < until) await sleep(50, signal);
       if (signal.aborted) return;
+      clearNavigation(session());
 
       // 2. Shell: the agent panel for agent steps, the nav drawer below 1024 px.
       const b = getBridge();
@@ -328,7 +332,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       }
       const missing = !!step.target && !hit;
       const body = step.id === "rate-live" && !memo().approved ? TOUR_COPY.rateNotApproved : null;
-      setUi({ ready: true, target: hit?.el ?? null, found: !!hit || step.target === null, secondary, note: missing ? TOUR_COPY.missing : null, body, nextEnabled: true, mode: step.action === "finish" ? "finish" : "next" });
+      setUi({ ready: true, target: hit?.el ?? null, found: !!hit || step.target === null, match: hit ? (hit.selector === cands[0] ? "primary" : "fallback") : null, secondary, note: missing ? TOUR_COPY.missing : null, body, nextEnabled: true, mode: step.action === "finish" ? "finish" : "next" });
       setAnnounce(`Step ${index + 1} of ${TOUR_STEPS.length}: ${step.title}`);
       // The card focuses its title (tour-card.tsx), except on steps that open an app popover or drawer: moving focus
       // out of the flag popover would close it (Radix dismisses on focus outside); the live region still announces.
@@ -601,7 +605,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
   const sheet: CardView["sheet"] = phone && step.target !== null ? (step.agent || lowerHalf ? "top" : "bottom") : null;
   const primaryLabel = ui.offPage ? "Back to step" : ui.mode === "finish" ? "Finish" : ui.mode === "proxy" ? (step.proxyLabel ?? "Next") : "Next";
   const view: CardView = {
-    step, index, ready: ui.ready && ui.stepId === step.id, found: ui.found && !ui.offPage, target: ui.offPage ? null : ui.target,
+    step, index, ready: ui.ready && ui.stepId === step.id, found: ui.found && !ui.offPage, match: ui.offPage ? null : ui.match, target: ui.offPage ? null : ui.target,
     body: ui.offPage ? "Go back to where the tour was, or exit." : ui.body ?? stepBody(step, s.memo),
     status: ui.offPage ? null : ui.status, note: ui.offPage ? null : ui.note,
     nextEnabled: ui.offPage || ui.nextEnabled || ui.mode !== "next",

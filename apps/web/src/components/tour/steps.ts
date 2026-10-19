@@ -187,8 +187,10 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "next", seconds: 9,
   },
   {
-    id: "memory", n: 18, route: { kind: "path", path: "/app/memory#procedures%2Fstate-sui-rate-notice.md" },
-    target: '[data-tour~="memory-file"][data-path="procedures/state-sui-rate-notice.md"]',
+    id: "memory", n: 18, route: { kind: "path", path: "/app/memory#knowledge%2Fprocedures%2Fstate-sui-rate-notice.md" },
+    // The hash opens the procedure on a fresh load; the tree click opens it when the page was already showing another file.
+    prepare: [['[data-tour~="memory-tree-file"][data-path="knowledge/procedures/state-sui-rate-notice.md"]']],
+    target: '[data-tour~="memory-file"][data-path="knowledge/procedures/state-sui-rate-notice.md"]',
     fallbacks: ['[data-tour~="memory-file"]'],
     secondary: ['[data-tour~="memory-backlinks"]', '[data-tour~="memory-history"]'],
     title: "Memory you can read",

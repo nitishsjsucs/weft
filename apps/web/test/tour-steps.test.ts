@@ -7,6 +7,7 @@ import {
   budgetHardMs, budgetSoftMs, fill, plannedAfterMs, stepBody, targetCandidates, tourTokens, TOUR_BUDGET_MS, TOUR_CHART_PROMPT,
   TOUR_COPY, TOUR_RESET_COPY, TOUR_STEPS,
 } from "../src/components/tour/steps";
+import { acceptHit, PRIMARY_GRACE_MS } from "../src/components/tour/dom";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 const webSrc = join(repo, "apps/web/src");
@@ -99,5 +100,28 @@ describe("budget-aware timeouts", () => {
       TOUR_STEPS.forEach((s, i) => { t += s.hardMs ? budgetHardMs(i, t) : s.seconds * 1000; });
       expect(t, `slack ${slack}`).toBeLessThanOrEqual(TOUR_BUDGET_MS);
     }
+  });
+});
+
+describe("targets", () => {
+  it("takes the step's own selector at once and a fallback only after the grace period", () => {
+    const sels = ['[data-tour~="memory-file"][data-path="a.md"]', '[data-tour~="memory-file"]'];
+    expect(acceptHit(sels[0]!, sels, 0)).toBe(true);
+    expect(acceptHit(sels[1]!, sels, 0)).toBe(false);
+    expect(acceptHit(sels[1]!, sels, PRIMARY_GRACE_MS - 1)).toBe(false);
+    expect(acceptHit(sels[1]!, sels, PRIMARY_GRACE_MS)).toBe(true);
+    expect(acceptHit(null, sels, 10_000)).toBe(false);
+    // The grace fits inside the 5 s locate window with room to spare.
+    expect(PRIMARY_GRACE_MS).toBeLessThan(5_000);
+  });
+
+  it("points the memory step at a file the seed writes", () => {
+    const step = TOUR_STEPS.find((s) => s.id === "memory")!;
+    const path = /data-path="([^"]+)"/.exec(step.target ?? "")?.[1];
+    expect(path).toBeTruthy();
+    const seed = readFileSync(join(repo, "packages/executor/src/memory/seed-content.ts"), "utf8");
+    expect(seed).toContain(`path: "${path}"`);
+    expect(step.route).toEqual({ kind: "path", path: `/app/memory#${encodeURIComponent(path!)}` });
+    expect(step.prepare?.[0]?.[0]).toContain(`data-path="${path}"`);
   });
 });

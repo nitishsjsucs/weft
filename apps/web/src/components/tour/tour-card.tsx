@@ -20,6 +20,8 @@ export interface CardView {
   body: string;
   ready: boolean;
   found: boolean;
+  /** The step's own selector matched, or a fallback did. */
+  match?: "primary" | "fallback" | null;
   target: HTMLElement | null;
   status: { text: string; tone: StatusTone } | null;
   note: string | null;
@@ -125,7 +127,7 @@ function Inner({ v, h }: { v: CardView; h: CardHandlers }) {
 }
 
 function dataAttrs(v: CardView) {
-  return { "data-tour-card": "", "data-step": v.step.id, "data-ready": v.ready ? "true" : "false", "data-target-found": v.found ? "true" : "false", "data-sheet": v.sheet ?? "" };
+  return { "data-tour-card": "", "data-step": v.step.id, "data-ready": v.ready ? "true" : "false", "data-target-found": v.found ? "true" : "false", "data-target-match": v.match ?? "", "data-sheet": v.sheet ?? "" };
 }
 
 export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {

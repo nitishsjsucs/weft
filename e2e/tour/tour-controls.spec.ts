@@ -89,3 +89,26 @@ test("a missing target shows the unanchored card and Next still works", async ({
   await c.locator("[data-tour-primary]").click();
   await expect(readyCard(page, "integrations")).toBeVisible();
 });
+
+test("the new-hire portal settles, and the tour leaves it for the app in one hop", async ({ page, weft, world }) => {
+  test.skip(!world.rich, "the base world has no new-hire persona");
+  // The offer row carries the portal persona (contracts ext w2-onboarding), beyond the frozen Offer type.
+  const offers = (await weft.offers()) as unknown as { status: string; personaPrincipalId?: string | null }[];
+  const persona = offers.find((o) => o.status === "accepted" && o.personaPrincipalId)?.personaPrincipalId;
+  expect(persona, "the rich world has an accepted offer with a portal persona").toBeTruthy();
+  // A portal section once refetched on every render (hundreds of requests a second), which starved the browser
+  // and stalled any navigation away from the portal.
+  let calls = 0;
+  page.on("request", (r) => { if (new URL(r.url()).pathname.startsWith("/api/")) calls++; });
+  await startTour(page, "portal");
+  await expect(readyCard(page, "portal")).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1_000);
+  calls = 0;
+  await page.waitForTimeout(3_000);
+  expect(calls, "API calls in 3 s on a settled portal").toBeLessThan(20);
+  await readyCard(page, "portal").locator("[data-tour-primary]").click();
+  // The memory step on /app/memory, without the "Resume tour" prompt a full page load would bring up.
+  await expect(readyCard(page, "memory")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("[data-tour-resume]")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("weft.viewingAs") ?? "usr_dana")).toBe("usr_dana");
+});
