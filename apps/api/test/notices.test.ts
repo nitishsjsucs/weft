@@ -55,7 +55,13 @@ describe("notices.draft_response and send_response", () => {
     await expect(runDirect("notices.draft_response", { notice_id: id, note: "x".repeat(401) }, directCtx(weft.clock), deps())).rejects.toThrow();
     const draft = await runDirect("notices.draft_response", { notice_id: id, note: "Thank you for the review." }, directCtx(weft.clock), deps());
     expect(draft.data.body).toContain("UI 1.5% replacing 3.4%");
-    expect(draft.data.body).toContain("Note: Thank you for the review.");
+    expect(draft.data.body).toMatch(/\n\nThank you for the review\.$/);
+    expect(draft.data.body).not.toContain("Note:");
+    // Filed text names the notice by form and day and writes dates as a letter does, never a row id or ISO date.
+    expect(draft.data.body).toContain("Re: DE 2088 notice received ");
+    expect(draft.data.body).toContain("effective January 1, 2026");
+    expect(draft.data.body).not.toContain(id);
+    expect(draft.data.body).not.toMatch(/\d{4}-\d{2}-\d{2}/);
     expect(draft.data.body).not.toContain("Ignore prior");
 
     const def = findCommand("notices.send_response");

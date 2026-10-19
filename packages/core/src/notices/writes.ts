@@ -16,17 +16,31 @@ export const NOT_REVERSIBLE_REASONS: Readonly<Record<string, string>> = {
   "tax.register_state_account": "Not reversible: filed with the agency simulator",
 };
 
-/** Deterministic response body per notice kind, built only from structured fields. */
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** A calendar date as a letter writes it: "2026-10-26" (or an instant on that day) is "October 26, 2026". */
+export function letterDate(isoOrDate: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoOrDate ?? "");
+  if (!m) return null;
+  const month = MONTHS[Number(m[2]) - 1];
+  return month ? `${month} ${Number(m[3])}, ${m[1]}` : null;
+}
+
+/**
+ * Deterministic response body per notice kind, built only from structured fields. It is the text filed with the
+ * agency, so it names the notice by its form and the day it arrived, never by Weft's row id, and writes dates as a
+ * letter does.
+ */
 export function responseTemplate(n: NoticeRow, accountNumber: string | null): string {
   const ex = parseExtract(n.extractedJson);
   const label = AGENCY_LABELS[n.agency] ?? n.agency;
-  const head = `To: ${label}\nRe: ${n.formCode} notice ${n.id} received ${n.receivedAt.slice(0, 10)}, employer account ${accountNumber ?? ex?.accountNumber ?? "on file"}\nFrom: Larkspur Robotics, Inc. (demo), payroll@larkspur.example\n\n`;
+  const head = `To: ${label}\nRe: ${n.formCode} notice received ${letterDate(n.receivedAt) ?? n.receivedAt}, employer account ${accountNumber ?? ex?.accountNumber ?? "on file"}\nFrom: Larkspur Robotics, Inc. (demo), payroll@larkspur.example\n\n`;
+  const by = letterDate(n.respondBy) ?? "the respond-by date";
   if (n.kind === "rate_change" && ex && ex.rates.length) {
     const lines = ex.rates.map((r) => `${r.code.toUpperCase()} ${rateDisplay(r.newRate)}${r.oldRate ? ` replacing ${rateDisplay(r.oldRate)}` : ""}`).join("; ");
-    return `${head}We acknowledge the revised ${ex.taxYear ?? ""} contribution rates (${lines}) effective ${ex.effectiveFrom ?? "as stated"} and have applied them in payroll. Please credit any contributions paid above the revised rate to our account.`.replace("revised  contribution", "revised contribution");
+    return `${head}We acknowledge the revised ${ex.taxYear ?? ""} contribution rates (${lines}) effective ${letterDate(ex.effectiveFrom) ?? "as stated"} and have applied them in payroll. Please credit any contributions paid above the revised rate to our account.`.replace("revised  contribution", "revised contribution");
   }
-  if (n.kind === "missing_filing") return `${head}We are reviewing the ${ex?.period ?? ""} filing named in this notice and will file or confirm the return on file by ${n.respondBy ?? "the respond-by date"}.`;
-  return `${head}We acknowledge this notice and will respond by ${n.respondBy ?? "the respond-by date"}.`;
+  if (n.kind === "missing_filing") return `${head}We are reviewing the ${ex?.period ?? ""} filing named in this notice and will file or confirm the return on file by ${by}.`;
+  return `${head}We acknowledge this notice and will respond by ${by}.`;
 }
 
 async function loadNotice(tx: DbTx, companyId: string, id: string) {
@@ -39,14 +53,15 @@ async function loadNotice(tx: DbTx, companyId: string, id: string) {
 const DraftInput = z.object({ notice_id: z.string(), note: z.string().max(MAX_NOTE_CHARS).optional() });
 export const draftResponse = writeCommand({
   name: "notices.draft_response", summary: "Draft a reply to an agency notice from the template.",
-  description: "Draft a reply to an agency notice: the body comes from Weft's template for the notice kind (built from the parsed fields); you supply only note, plain text up to 400 characters, appended as a closing line. Saves a numbered draft on the notice. R1: no approval; sending is notices.send_response.",
+  description: "Draft a reply to an agency notice: the body comes from Weft's template for the notice kind (built from the parsed fields); you supply only note, one optional closing sentence (plain text, up to 400 characters) to the agency, filed as written, never to the approver. Saves a numbered draft on the notice. R1: no approval; sending is notices.send_response.",
   input: DraftInput, domain: "tax", needs: "edit", effect: "draft", risk: riskOf("R1"), approval: "never", reversible: false,
   tiers: { main: "executable", task: "executable" }, preview: null,
   async run(i, ctx, deps) {
     const { n, acct } = await loadNotice(deps.tx, ctx.companyId, i.notice_id);
     if (n.status === "resolved") throw new DomainRefusal("DOMAIN_NOTICE_RESOLVED", `${n.id} is already resolved`, null, null);
     const note = (i.note ?? "").replace(/[<>]/g, "").trim();
-    const body = responseTemplate(n, acct?.accountNumber ?? null) + (note ? `\n\nNote: ${note}` : "");
+    // The note is the letter's closing sentence to the agency, so it carries no label.
+    const body = responseTemplate(n, acct?.accountNumber ?? null) + (note ? `\n\n${note}` : "");
     const drafts = parseDrafts(n.draftsJson);
     const draft: NoticeDraft = { n: drafts.length + 1, created_at: ctx.now, body, note, tainted_by: ctx.tainted ? `run:${ctx.run?.id ?? "unknown"}` : null };
     await deps.tx.update(notices).set({ draftsJson: JSON.stringify([...drafts, draft]), status: n.status === "new" ? "in_review" : n.status }).where(eq(notices.id, n.id));
