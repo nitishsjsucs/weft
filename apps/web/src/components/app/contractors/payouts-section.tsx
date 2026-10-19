@@ -8,7 +8,7 @@ import { ArrowLeftRight, Banknote } from "lucide-react";
 import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { W2_BENEFITS_TID as TID, type ContractorPayout, type ToolOutcome, type Worker } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDate, fmtDateTime } from "../format";
+import { fmtDate, fmtDateTime, longDate } from "../format";
 
 const TONE: Record<string, "amber" | "blue" | "green" | "red"> = { pending: "amber", sent: "blue", delivered: "green", returned: "red" };
 const usd = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -81,7 +81,7 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
             <THead><TR><TH>Currency</TH><TH numeric>USD per unit</TH><TH>As of</TH></TR></THead>
             <TBody>
               {rates.map((r) => (
-                <TR key={r.currency}><TD className="h-9 font-mono text-1">{r.currency}</TD><TD numeric className="h-9 font-mono text-1">{r.usdPerUnit}</TD><TD className="h-9 text-gray-10">{r.asOf}</TD></TR>
+                <TR key={r.currency}><TD className="h-9 font-mono text-1">{r.currency}</TD><TD numeric className="h-9 font-mono text-1">{r.usdPerUnit}</TD><TD className="h-9 text-gray-10">{/^\d{4}-\d{2}-\d{2}$/.test(r.asOf) ? longDate(r.asOf) : r.asOf}</TD></TR>
               ))}
             </TBody>
           </Table>
