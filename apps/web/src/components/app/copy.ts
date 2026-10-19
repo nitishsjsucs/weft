@@ -2,7 +2,7 @@
 // and proposal diffs are stored as the engine wrote them (base world digests and evals pin them), and they carry row
 // ids, enum codes and ISO dates that mean nothing to a person. These helpers turn them into words; the stored text
 // never changes.
-import { fmtDate, humanDates, humanTimes } from "./format";
+import { fmtDate, humanDates, humanTimes, textYear } from "./format";
 
 const ID = "[a-z]{2,5}_[A-Za-z0-9_]*\\d[A-Za-z0-9_]*";
 /** Words for the engine's codes that can appear in flag text. */
@@ -14,11 +14,10 @@ const dayOf = (iso: string): number => Date.UTC(Number(iso.slice(0, 4)), Number(
 
 /**
  * A comma list of plain dates reads as a run or a list: "2026-11-23, 2026-11-24, 2026-11-25" is "Nov 23 to Nov 25",
- * "2026-11-23, 2026-11-25" is "Nov 23 and Nov 25". Dates in the text's latest year read without one.
+ * "2026-11-23, 2026-11-25" is "Nov 23 and Nov 25". Dates read without a year only when the text has one year.
  */
 export function humanDateLists(text: string, year?: number): string {
-  const years = [...text.matchAll(/(?<![\w-])(\d{4})-\d{2}-\d{2}/g)].map((m) => Number(m[1]));
-  const ref = year ?? (years.length ? Math.max(...years) : undefined);
+  const ref = year ?? textYear(text);
   return text.replace(DATE_LIST, (m) => {
     const ds = m.split(/,\s*/);
     const one = (d: string) => humanDates(d, ref);

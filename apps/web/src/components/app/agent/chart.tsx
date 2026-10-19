@@ -40,7 +40,29 @@ export function formatTick(v: number, unit: Unit): string {
 /** The x label for a row: a period's label when the report has one, else the x key's value. */
 const xLabel = (spec: ChartSpec, r: Row) => String(r[`${spec.x.key}_label`] ?? r[spec.x.key] ?? "");
 
-function DataTable({ spec, rows }: { spec: ChartSpec; rows: Row[] }) {
+/** "Jan 1 to Oct 26, 2026" within a year, "Nov 1, 2025 to Oct 26, 2026" across years. */
+export function rangeText(from: string, to: string): string {
+  const full = { month: "short", day: "numeric", year: "numeric" } as const;
+  return from.slice(0, 4) === to.slice(0, 4) ? `${fmtDate(from)} to ${fmtDate(to, full)}` : `${fmtDate(from, full)} to ${fmtDate(to, full)}`;
+}
+const lastDayOf = (d: string) => new Date(Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)), 0)).getUTCDate();
+/** The last period when the range stops inside it (the current month): its bar is a month to date, not a whole month. */
+export function partialPeriod(report: Pick<ReportResult, "to">, rows: Row[]): { key: string; label: string } | null {
+  const last = rows[rows.length - 1];
+  if (!last || typeof last.period_end !== "string" || last.period_end !== report.to) return null;
+  if (Number(report.to.slice(8, 10)) === lastDayOf(report.to)) return null;
+  return { key: String(last.period ?? ""), label: String(last.period_label ?? last.period ?? "") };
+}
+function periodLabel(spec: ChartSpec, r: Row, partial: { key: string } | null): string {
+  const l = xLabel(spec, r);
+  return partial && String(r.period ?? "") === partial.key ? `${l} (to date)` : l;
+}
+function tickLabel(spec: ChartSpec, r: Row, oneYear: boolean): string {
+  const l = xLabel(spec, r);
+  return oneYear && /^[A-Z][a-z]{2} \d{4}$/.test(l) ? l.slice(0, 3) : l;
+}
+
+function DataTable({ spec, rows, partial = null }: { spec: ChartSpec; rows: Row[]; partial?: { key: string } | null }) {
   return (
     <table data-testid={W3_CHAT_TID.chartTable} className="w-full border-collapse text-1 tabular-nums">
       <caption className="sr-only">{spec.title}</caption>
@@ -53,7 +75,7 @@ function DataTable({ spec, rows }: { spec: ChartSpec; rows: Row[] }) {
       <tbody>
         {rows.map((r, i) => (
           <tr key={i} className="border-t border-gray-a4 text-gray-12">
-            <th scope="row" className="py-1 pr-2 text-left font-normal">{xLabel(spec, r)}</th>
+            <th scope="row" className="py-1 pr-2 text-left font-normal">{periodLabel(spec, r, partial)}</th>
             {spec.series.map((s) => <td key={s.key} className="py-1 pl-2 text-right">{formatValue(r[s.key], s.unit)}</td>)}
           </tr>
         ))}
@@ -67,16 +89,21 @@ export function ReportChart({ report }: { report: ReportResult }) {
   const rows = report.rows as Row[];
   const unit = spec.series[0]!.unit;
   const [table, setTable] = useState(false);
-  const data = rows.map((r) => ({ ...r, __x: xLabel(spec, r) }));
+  // Within one year the ticks name the month only and every period gets one; across years they keep the year and
+  // thin out evenly, never skipping by label width.
+  const oneYear = new Set(rows.map((r) => String(r.period ?? "").slice(0, 4))).size <= 1;
+  const data = rows.map((r) => ({ ...r, __x: tickLabel(spec, r, oneYear) }));
+  const interval = rows.length <= 12 ? 0 : Math.ceil(rows.length / 8) - 1;
   // Color follows the series (its index in the spec), so a series that is all zero in this range keeps its slot
   // empty instead of repainting the others; it is left out of the plot and the legend but stays in the table.
   const drawn = spec.series.map((s, i) => ({ ...s, color: SERIES_COLORS[i] ?? SERIES_COLORS[5] })).filter((s) => rows.some((r) => Number(r[s.key] ?? 0) !== 0));
   const zero = spec.series.filter((s) => !drawn.some((d) => d.key === s.key));
   const many = drawn.length > 1;
-  const range = `${fmtDate(report.from, { month: "short", day: "numeric", year: "numeric" })} to ${fmtDate(report.to, { month: "short", day: "numeric", year: "numeric" })}`;
+  const range = rangeText(report.from, report.to);
+  const partial = partialPeriod(report, rows);
   const axis = { stroke: "var(--gray-a6)", tick: { fill: "var(--gray-10)", fontSize: 11 }, tickLine: false };
   const tooltip = (
-    <Tooltip cursor={{ fill: "var(--gray-a3)" }} formatter={(v, name) => {
+    <Tooltip cursor={{ fill: "var(--gray-a3)" }} labelFormatter={(_l, p) => { const r = p?.[0]?.payload as Row | undefined; return r ? periodLabel(spec, r, partial) : String(_l); }} formatter={(v, name) => {
       const s = spec.series.find((x) => x.label === name || x.key === name);
       return [formatValue(v, s?.unit ?? unit), s?.label ?? String(name)];
     }} contentStyle={{ borderRadius: 8, border: "1px solid var(--gray-a5)", fontSize: 12, background: "var(--card, #fff)", color: "var(--gray-12)", padding: "6px 8px" }}
@@ -85,7 +112,7 @@ export function ReportChart({ report }: { report: ReportResult }) {
   const chart = rows.length === 0 || drawn.length === 0 ? null : spec.kind === "line" ? (
     <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
       <CartesianGrid vertical={false} stroke="var(--gray-a4)" />
-      <XAxis dataKey="__x" {...axis} interval="preserveStartEnd" minTickGap={12} />
+      <XAxis dataKey="__x" {...axis} interval={interval} />
       <YAxis {...axis} axisLine={false} width={48} tickFormatter={(v: number) => formatTick(v, unit)} />
       {tooltip}
       {drawn.map((s) => <Line key={s.key} dataKey={s.key} name={s.label} type="monotone" stroke={s.color} strokeWidth={2} dot={{ r: 3, strokeWidth: 2, stroke: "var(--card, #fff)" }} activeDot={{ r: 4 }} isAnimationActive={false} />)}
@@ -93,7 +120,7 @@ export function ReportChart({ report }: { report: ReportResult }) {
   ) : (
     <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="24%">
       <CartesianGrid vertical={false} stroke="var(--gray-a4)" />
-      <XAxis dataKey="__x" {...axis} interval="preserveStartEnd" minTickGap={8} />
+      <XAxis dataKey="__x" {...axis} interval={interval} />
       <YAxis {...axis} axisLine={false} width={48} tickFormatter={(v: number) => formatTick(v, unit)} allowDecimals={unit !== "count"} />
       {tooltip}
       {drawn.map((s, i) => (
@@ -126,9 +153,10 @@ export function ReportChart({ report }: { report: ReportResult }) {
           <ResponsiveContainer width="100%" height="100%">{chart}</ResponsiveContainer>
         </div>
       ) : null}
+      {partial ? <p data-testid="chart-partial-note" className="text-0 text-gray-10">{partial.label} is to date, through {fmtDate(report.to)}.</p> : null}
       {chart && !table && zero.length > 0 ? <p className="text-0 text-gray-10">Zero in this range, so not drawn: {zero.map((s) => s.label).join(", ")}. The table lists them.</p> : null}
       {/* The table is always in the page for screen readers; the toggle shows it to everyone. */}
-      <div className={table ? "max-h-56 overflow-auto" : "sr-only"}><DataTable spec={spec} rows={rows} /></div>
+      <div className={table ? "max-h-56 overflow-auto" : "sr-only"}><DataTable spec={spec} rows={rows} partial={partial} /></div>
     </figure>
   );
 }

@@ -26,13 +26,19 @@ export function humanTimes(text: string): string {
  * colon and digits after the date), ids and longer numbers never match.
  */
 const PLAIN_DATE = /(?<![\w-])(\d{4})-(\d{2})-(\d{2})(?![\w-]|:\d|T\d)/g;
+/** The one year every plain date in `text` shares, or -1 (no date reads without its year) when they span years. */
+export function textYear(text: string): number {
+  const years = new Set([...text.matchAll(PLAIN_DATE)].map((m) => Number(m[1])));
+  return years.size > 1 ? -1 : years.size === 1 ? [...years][0]! : 0;
+}
 /**
  * Plain YYYY-MM-DD dates in server text read as "Oct 19" (with the year when it is not `year`). Calendar dates are
  * days, not instants, so no time zone shift applies. The stored text stays as written.
  */
 export function humanDates(text: string, year?: number): string {
-  // Without a year from the caller, dates in the text's latest year read without one ("Oct 16 to Oct 31, payday Oct 30").
-  const ref = year ?? Math.max(0, ...[...text.matchAll(PLAIN_DATE)].map((m) => Number(m[1])));
+  // Without a year from the caller, dates read without one when the text has only one year ("Oct 16 to Oct 31, payday
+  // Oct 30"); a text that spans years keeps the year on every date, so a range never reads with it on one end only.
+  const ref = year ?? textYear(text);
   return text.replace(PLAIN_DATE, (m, y: string, mo: string, d: string) => {
     const t = Date.UTC(Number(y), Number(mo) - 1, Number(d), 12);
     if (Number.isNaN(t) || new Date(t).getUTCDate() !== Number(d)) return m;

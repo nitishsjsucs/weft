@@ -9,7 +9,7 @@ export function toolLabel(name: string | null): string | null {
 /**
  * Chip text for a step: the tool outcome's summary (or a proposal's title) when the tool returned one, else the tool
  * name (SPEC 9.6). The API stores tool results as `{ output, outcome }`; a bare `{ summary }` is accepted too. Times
- * in the text read in Pacific time ("settles Fri, Oct 30, 6:00 AM PT") and plain dates as days ("Nov 1, 2025 to Oct 26"),
+ * in the text read in Pacific time ("settles Fri, Oct 30, 6:00 AM PT") and plain dates as days ("Jan 1 to Oct 26"),
  * never as raw ISO, and row ids read as words ("Drafted response 1 for the notice"), as humanLine does.
  */
 export function stepSummary(s: RunStepRow): string {

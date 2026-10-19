@@ -107,7 +107,9 @@ function EmailReport({ metric, from, to, groupBy }: { metric: CatalogRow; from: 
 
 function useReport(metric: CatalogRow | null, from: string, to: string, groupBy: "month" | "quarter") {
   const [state, setState] = useState<{ key: string; data: ReportData | null; error: string | null }>({ key: "", data: null, error: null });
-  const key = metric && from && to ? `${metric.metric}|${from}|${to}|${groupBy}` : "";
+  // An empty from asks for the server's default window (the months with data in the last twelve), the same window the
+  // agent's reports.query uses, so the page and a chart answer show one range.
+  const key = metric && to ? `${metric.metric}|${from}|${to}|${groupBy}` : "";
   useEffect(() => {
     if (!metric || !key || !metric.allowed) return;
     let live = true;
@@ -115,9 +117,9 @@ function useReport(metric: CatalogRow | null, from: string, to: string, groupBy:
       try {
         let data: ReportData;
         if (metric.source === "reports.query") {
-          data = (await client.get("/v1/reports/:metric", { params: { metric: metric.metric }, query: { from, to, groupBy } })) as unknown as ReportData;
+          data = (await client.get("/v1/reports/:metric", { params: { metric: metric.metric }, query: { from: from || undefined, to, groupBy } })) as unknown as ReportData;
         } else {
-          const o = (await client.post("/v1/tools/:name", { params: { name: "reports.breakdown" }, body: { metric: metric.metric, from, to, group_by: groupBy } })) as ToolOutcome;
+          const o = (await client.post("/v1/tools/:name", { params: { name: "reports.breakdown" }, body: { metric: metric.metric, ...(from ? { from } : {}), to, group_by: groupBy } })) as ToolOutcome;
           if (!o.ok) throw new Error(o.refusal.message);
           if (o.status !== "done") throw new Error("reports.breakdown did not answer");
           data = o.data as ReportData;
@@ -144,10 +146,11 @@ export function ReportsView() {
   useEffect(() => {
     if (!today || to) return;
     setTo(today);
-    setFrom(`${today.slice(0, 4)}-01-01`);
   }, [today]); // eslint-disable-line react-hooks/exhaustive-deps
   const metric = useMemo(() => rows.find((r) => r.metric === metricId) ?? null, [rows, metricId]);
   const report = useReport(metric, from, to, groupBy);
+  // The first report fills From with the window the server chose; later metrics keep it.
+  useEffect(() => { if (!from && report.data?.from) setFrom(report.data.from); }, [report.data?.from]); // eslint-disable-line react-hooks/exhaustive-deps
   const asResult = report.data ? ({ ...report.data, artifactRef: null } as unknown as ReportResult) : null;
 
   return (

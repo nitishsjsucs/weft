@@ -161,4 +161,27 @@ describe("reports.query rules", () => {
     expect(body.from.endsWith("-01")).toBe(true);
     expect(body.rows[11]!.period).toBe(body.to.slice(0, 7));
   });
+
+  it("with no from, payroll cost starts at the first month with paid runs, not on empty months", async () => {
+    const { body } = await report("payroll_cost_by_month");
+    const b = body as typeof body & { imported_history?: string | null; source_phrase?: string };
+    expect(b.from).toBe("2026-09-01");
+    expect(b.rows.map((r) => r.period)).toEqual(["2026-09", "2026-10"]);
+    // The base world's paid runs are all Weft's own.
+    expect(b.imported_history).toBeNull();
+    expect(b.source_phrase).toBe("from the runs Weft has paid");
+    // An explicit from is kept as asked.
+    expect((await report("payroll_cost_by_month", "?from=2026-01-01")).body.from).toBe("2026-01-01");
+  });
+
+  it("names imported history in range, so imported months never read as runs Weft paid", async () => {
+    await weft.db.run(sql`UPDATE payroll_runs SET tax_data_version = 'imported' WHERE id = 'pay_2026_09_15'`);
+    try {
+      const b = (await report("payroll_cost_by_month")).body as ReportResult & { imported_history?: string | null; source_phrase?: string };
+      expect(b.imported_history).toBe("Sep 2026 imported from the previous provider");
+      expect(b.source_phrase).toBe("from the runs Weft has paid and the history Sep 2026, imported from the previous provider");
+    } finally {
+      await weft.db.run(sql`UPDATE payroll_runs SET tax_data_version = (SELECT tax_data_version FROM payroll_runs WHERE id = 'pay_2026_09_30') WHERE id = 'pay_2026_09_15'`);
+    }
+  });
 });

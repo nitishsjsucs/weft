@@ -12,7 +12,7 @@ import { formatCents, ReportMetric, Refused, type ExecContext } from "@weft/cont
 import { principals, type DbTx } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { ptDateOf } from "../demo/define";
-import { defaultRange, METRIC_DOMAIN, runReport, type ReportGroupBy } from "../reports/query";
+import { defaultRange, importedHistory, METRIC_DOMAIN, monthLabel, runReport, SNAPSHOT_METRICS, type ReportGroupBy } from "../reports/query";
 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const ReportsQueryInput = z.object({
@@ -56,16 +56,26 @@ export const reportsQueryCommand: WeftCommand<ReportsQueryInput> = {
   amountCents: null, ceilingKey: null, reversible: false, lease: null, tiers: { main: "executable", task: "executable" }, mcp: "read", sandbox: "read",
   access: "all", untrustedFields: [], afterPending: "run", preview: null,
   errorHints: {
-    INVALID_INPUT: { hint: "Use dates in YYYY-MM-DD form with from on or before to, at most 120 months apart; leave both out for the last twelve months.", example: { metric: "payroll_cost_by_month" } },
+    INVALID_INPUT: { hint: "Use dates in YYYY-MM-DD form with from on or before to, at most 120 months apart; leave both out for the last twelve months, from the first month with data.", example: { metric: "payroll_cost_by_month" } },
     NOT_PERMITTED: { hint: "Ask about a metric the person you act for can see, or say who can.", example: { metric: "headcount_by_state" } },
   },
   async run(i, ctx, deps) {
     await assertMetricGrant(deps.tx, ctx, i.metric);
     const today = ptDateOf(ctx.now);
     const range = defaultRange(i.to ?? today);
-    const r = await runReport(deps.tx, { companyId: ctx.companyId, metric: i.metric, from: i.from ?? range.from, to: i.to ?? today, groupBy: (i.group_by ?? "month") as ReportGroupBy });
-    const data = { metric: r.metric, from: r.from, to: r.to, group_by: r.groupBy, rows: r.rows, range_totals: rangeTotals(r.rows), chart: r.chart, artifactRef: r.artifactRef };
-    return { data, summary: r.summary };
+    const base = { companyId: ctx.companyId, metric: i.metric, to: i.to ?? today, groupBy: (i.group_by ?? "month") as ReportGroupBy };
+    let r = await runReport(deps.tx, { ...base, from: i.from ?? range.from });
+    // With no from, the window starts at the first period with data, so a chart never opens on empty months and its
+    // range reads as the data does (the Reports page asks the same way, so both show one window).
+    const first = typeof r.rows[0]?.period_start === "string" ? (r.rows[0].period_start as string) : null;
+    if (i.from == null && !SNAPSHOT_METRICS.has(i.metric) && first && first > r.from) r = await runReport(deps.tx, { ...base, from: first });
+    const imported = i.metric === "payroll_cost_by_month" ? await importedHistory(deps.tx, { companyId: ctx.companyId, from: r.from, to: r.to }) : null;
+    const history = imported ? `${monthLabel(imported.first)}${imported.first === imported.last ? "" : ` to ${monthLabel(imported.last)}`} imported from the previous provider` : null;
+    const data = {
+      metric: r.metric, from: r.from, to: r.to, group_by: r.groupBy, rows: r.rows, range_totals: rangeTotals(r.rows), chart: r.chart, artifactRef: r.artifactRef,
+      ...(i.metric === "payroll_cost_by_month" ? { imported_history: history, source_phrase: history ? `from the runs Weft has paid and the history ${history.replace(" imported", ", imported")}` : "from the runs Weft has paid" } : {}),
+    };
+    return { data, summary: history ? `${r.summary}; ${history}` : r.summary };
   },
 };
 
