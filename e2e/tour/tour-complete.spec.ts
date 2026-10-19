@@ -1,6 +1,7 @@
 // The whole guided tour on the scripted provider, as a person would take it: start from Home, read each card for
 // its planned seconds, click the real controls on the click steps, and finish within 180 s (owner: tour).
 import { card, expect, noHorizontalScroll, pressPrimary, readyStep, targetInfo, test, TOUR_STEPS } from "./tour-fixtures";
+import { TOUR_CHART_PROMPT } from "../../apps/web/src/components/tour/steps";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -90,7 +91,8 @@ test("completes the whole tour on the scripted provider in 180 s or less", async
       // Auto-advances once the run is waiting or done (or the budget-capped timeout passes).
       await expect(page.locator(`[data-tour-card][data-step="${nextId}"]`)).toBeVisible({ timeout: (step.hardMs ?? 20_000) + 5_000 });
     } else if (step.action === "ask" && found) {
-      await expect(page.locator('[data-tour~="agent-composer"] textarea')).toHaveValue(/payroll cost/i, { timeout: 5_000 });
+      // The whole prompt, not a prefix: the tour types it a letter at a time.
+      await expect(page.locator('[data-tour~="agent-composer"] textarea')).toHaveValue(TOUR_CHART_PROMPT, { timeout: 5_000 });
       await page.locator('[data-tour~="agent-send"]').click();
       await expect(page.locator(`[data-tour-card][data-step="${nextId}"]`)).toBeVisible({ timeout: (step.hardMs ?? 15_000) + 5_000 });
     } else if (step.action === "finish") {

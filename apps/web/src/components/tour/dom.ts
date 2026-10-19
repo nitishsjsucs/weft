@@ -88,6 +88,8 @@ export async function typeInto(el: HTMLTextAreaElement | HTMLInputElement, text:
   if (reducedMotion()) { setReactValue(el, text); return; }
   for (let i = 1; i <= text.length; i++) {
     if (signal.aborted) return;
+    // The person sent or edited the field mid-way (sending clears it): stop, rather than type into the cleared composer.
+    if (i > 1 && el.value !== text.slice(0, i - 1)) return;
     setReactValue(el, text.slice(0, i));
     await sleep(18, signal);
   }
