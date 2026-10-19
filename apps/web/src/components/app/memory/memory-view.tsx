@@ -9,7 +9,7 @@ import { cn } from "@weft/ui";
 import { getPrincipal, rawFetch, useGet, usePrincipal } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 import { fmtDate, fmtDateTime } from "../format";
-import { humanDateText } from "../copy";
+import { auditLabel, humanDateText } from "../copy";
 
 interface Frontmatter { id: string; type: string; aliases: string[]; links: string[]; sources: string[]; updated: string; taintedBy: string | null }
 interface Links { outgoing: { target: string; path: string; resolved: boolean }[]; backlinks: string[] }
@@ -42,11 +42,22 @@ function useJson<T>(url: string | null): { data: T | null; error: string | null;
  * A fact's provenance as words: "(2026-10-26, src: seed)" reads "(as of Oct 26, from setup)". Other plain dates in
  * the line read as on every other screen ("2024-03-04" is "Mar 4, 2024"); the stored Markdown never changes.
  */
+/** Where a fact came from, as words: "seed" is setup, "worker:wrk_0026" the person record, "action:12" audit #12. */
+export function sourceWords(src: string): string {
+  if (src === "seed") return "setup";
+  if (src === "digest") return "the memory digest";
+  const m = /^([a-z_]+):(.+)$/.exec(src);
+  if (!m) return src.replace(/_/g, " ");
+  const [, kind, ref] = m as unknown as [string, string, string];
+  if (kind === "action" && /^\d+$/.test(ref)) return auditLabel(Number(ref));
+  const KIND: Record<string, string> = { worker: "the person record", proposal: "an approved proposal", notice: "the notice", payroll: "the payroll run", run: "an agent run", expense: "the expense", offer: "the offer" };
+  return KIND[kind] ?? `the ${kind.replace(/_/g, " ")} record`;
+}
+
 export function memoryText(text: string): string {
   return humanDateText(
     text
-      .replace(/\((\d{4}-\d{2}-\d{2}), src: seed\)/g, (_m, d: string) => `(as of ${d}, from setup)`)
-      .replace(/\((\d{4}-\d{2}-\d{2}), src: ([^)]+)\)/g, (_m, d: string, src: string) => `(as of ${d}, from ${src.replace(/_/g, " ")})`)
+      .replace(/\((\d{4}-\d{2}-\d{2}), src: ([^)]+)\)/g, (_m, d: string, src: string) => `(as of ${d}, from ${sourceWords(src.trim())})`)
       .replace(/^((?:- )?(?:Status|Type|Pay kind|Filing status) )([a-z]+(?:_[a-z]+)*)\b/, (_m, k: string, v: string) => `${k}${v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}`),
     2026,
   );
@@ -85,10 +96,10 @@ function Line({ text, onOpen, resolved }: { text: string; onOpen: (path: string)
     let at0 = 2;
     for (const m of text.matchAll(LINK)) { const at = m.index ?? 0; if (at > at0) rest.push(<Inline key={`r${at0}`} text={text.slice(at0, at)} />); rest.push(parts.find((p) => (p as { key?: string }).key === String(at))); at0 = at + m[0].length; }
     if (at0 < text.length) rest.push(<Inline key={`r${at0}`} text={text.slice(at0)} />);
-    return <div className="relative whitespace-pre-wrap break-words pl-4 before:absolute before:left-1 before:top-[0.6em] before:size-1 before:rounded-full before:bg-gray-9">{rest}</div>;
+    return <div title={/src: /.test(text) ? text.slice(2) : undefined} data-source={/src: ([^)]+)\)/.exec(text)?.[1]} className="relative whitespace-pre-wrap break-words pl-4 before:absolute before:left-1 before:top-[0.6em] before:size-1 before:rounded-full before:bg-gray-9">{rest}</div>;
   }
   if (last < text.length) parts.push(<Inline key={`t${last}`} text={text.slice(last)} />);
-  return <div className="whitespace-pre-wrap break-words">{parts}</div>;
+  return <div className="whitespace-pre-wrap break-words" title={/src: /.test(text) ? text : undefined}>{parts}</div>;
 }
 
 function Tree({ paths, current, onOpen, titles }: { paths: string[]; current: string | null; onOpen: (p: string) => void; titles: Record<string, string> }) {
