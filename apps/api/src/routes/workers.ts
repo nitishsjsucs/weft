@@ -72,6 +72,8 @@ export function workersRoutes(weft: Weft): Hono<WeftEnv> {
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
     const w = await getWorker(weft.db, companyId, c.req.param("id"));
     if (!w) throw new NotFound(`No worker ${c.req.param("id")}`);
+    // Onboarding tasks (W-4, direct deposit, I-9, background check) are private to the hire's own management chain.
+    if (!inScope(await readScopeFor(weft.db, companyId, c.var.session?.principalId ?? null), w.id)) return c.json([]);
     return c.json((await listTasks(weft.db, w.id)).map(toTaskDto));
   });
   return r;

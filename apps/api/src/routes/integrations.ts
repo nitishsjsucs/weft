@@ -20,6 +20,8 @@ import { stubRoutes } from "../http/stub";
 import { applyWorkdayDetected, deliverSimWebhooks, webhookReceivers, type WebhookReceiver } from "../integrations/poll";
 import { ingestVendorDelivery } from "../integrations/poll-screening";
 import { canSeeComp } from "./workers";
+import { splitByScope, subjectInScope, withheldSyncDetail } from "@weft/core";
+import { viewerScope } from "../http/scope";
 
 const DEFAULT_OWNERSHIP = { people: "weft", compensation: "weft", time_off: "weft" } as const;
 const vendorOf = (c: Context<WeftEnv>) => {
@@ -178,13 +180,19 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     const rows = await weft.db.select().from(syncItems).where(eq(syncItems.companyId, companyId)).orderBy(desc(syncItems.id));
     // Pay values follow the workers route: hidden from people without compensation access.
     const comp = await canSeeComp(weft, c.var.session?.principalId);
-    const detailOf = (json: string) => {
+    // Same rule as integrations.list_sync_items: a conflict about someone outside a manager's reports keeps its field
+    // and label, never the Weft or vendor value.
+    const scope = await viewerScope(weft, c);
+    const detailOf = async (json: string, subjectRef: string) => {
       const d = JSON.parse(json) as Record<string, unknown>;
+      if (scope && !(await subjectInScope(weft.db, companyId, scope, subjectRef))) return withheldSyncDetail(scope, d, subjectRef);
       return !comp && (d.field === "base_cents" || d.field === "salary") ? { ...d, weft_value: null, vendor_value: null } : d;
     };
-    return c.json(rows.filter((x) => (status === "all" || x.status === status) && (!vendor || x.vendor === vendor)).map((x) => ({
-      id: x.id, vendor: x.vendor, kind: x.kind, subjectRef: x.subjectRef, status: x.status, detail: detailOf(x.detailJson), createdAt: x.createdAt, resolvedAt: x.resolvedAt,
-    })));
+    const out = [];
+    for (const x of rows.filter((x) => (status === "all" || x.status === status) && (!vendor || x.vendor === vendor))) {
+      out.push({ id: x.id, vendor: x.vendor, kind: x.kind, subjectRef: x.subjectRef, status: x.status, detail: await detailOf(x.detailJson, x.subjectRef), createdAt: x.createdAt, resolvedAt: x.resolvedAt });
+    }
+    return c.json(out);
   });
   r.post("/v1/sync-items/:id/resolve", async (c) => {
     const session = c.var.session;
@@ -212,7 +220,8 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/integrations/workday/imported", async (c) => {
     const s = c.var.session;
     if (!s) throw new Unauthorized();
-    const rows = await weft.db.select().from(timeOffRequests).where(and(eq(timeOffRequests.companyId, s.companyId), eq(timeOffRequests.source, "workday"))).orderBy(desc(timeOffRequests.id));
+    const every = await weft.db.select().from(timeOffRequests).where(and(eq(timeOffRequests.companyId, s.companyId), eq(timeOffRequests.source, "workday"))).orderBy(desc(timeOffRequests.id));
+    const rows = splitByScope(await viewerScope(weft, c), every, (t) => t.workerId).shown;   // leave is private outside a manager's reports
     const out = [];
     for (const t of rows) {
       const [w] = await weft.db.select().from(workers).where(eq(workers.id, t.workerId)).limit(1);

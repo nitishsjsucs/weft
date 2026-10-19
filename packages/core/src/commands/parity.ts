@@ -19,6 +19,7 @@ import { DomainRefusal, ptDateOf, readCommand, responseFormatField, riskOf, writ
 import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import { displayName } from "../people/names";
+import { readScopeOf, reportsAccess, splitByScope } from "../people/scope";
 import { blockedText, readyCheck } from "../parity/ready-check";
 import { execFigures, execReportText } from "../parity/exec-report";
 import { upsertSuggestion } from "../parity/suggestions";
@@ -40,7 +41,10 @@ const readyCheckCommand = readCommand({
   description: "For each employee starting within business_days (default 3) of as_of (default today), check accounts, laptop, direct deposit, W-4, state form, I-9, benefits and state registration, and name the owner of each blocking item (the hire, IT, payroll). Example: {\"business_days\":null,\"as_of\":null,\"worker_id\":null}",
   input: ReadyInput,
   async run(i: ReadyInput, ctx, deps) {
-    const r = await readyCheck(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now), { businessDays: i.business_days, workerId: i.worker_id });
+    const scope = await readScopeOf(deps.tx, ctx);
+    const all = await readyCheck(deps.tx, ctx.companyId, i.as_of ?? ptDateOf(ctx.now), { businessDays: i.business_days, workerId: i.worker_id });
+    const { shown, withheld } = splitByScope(scope, all.hires, (h) => h.worker_id);
+    const r = { ...all, hires: shown, ...(scope && withheld ? { access: reportsAccess(scope, "onboarding readiness checks", withheld) } : {}) };
     const blocked = r.hires.filter((h) => !h.ready).length;
     return { data: r, summary: `${r.hires.length} hires start by ${r.window_end}: ${r.hires.length - blocked} ready, ${blocked} blocked` };
   },

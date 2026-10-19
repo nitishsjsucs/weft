@@ -10,6 +10,8 @@ import {
   type HumanSession, type OffboardingCase, type OffboardingStep, type OffboardingStepKind, type ToolOutcome,
 } from "@weft/contracts";
 import { offboardingCases, offboardingSteps, proposals, type DbTx } from "@weft/db";
+import { inScope, splitByScope } from "@weft/core";
+import { viewerScope } from "../http/scope";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 
@@ -90,13 +92,14 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/offboarding", async (c) => {
     const s = session(c);
     const rows = await weft.db.select().from(offboardingCases).where(eq(offboardingCases.companyId, s.companyId)).orderBy(asc(offboardingCases.id));
-    return c.json(await caseDtos(weft.db, rows));
+    // A manager reads the cases of her own reports only: a departure and its kind are private to everyone else.
+    return c.json(await caseDtos(weft.db, splitByScope(await viewerScope(weft, c), rows, (x) => x.workerId).shown));
   });
 
   r.get("/v1/offboarding/:id", async (c) => {
     const s = session(c);
     const rows = await weft.db.select().from(offboardingCases).where(and(eq(offboardingCases.id, c.req.param("id")), eq(offboardingCases.companyId, s.companyId)));
-    if (!rows.length) throw new NotFound(`No offboarding case ${c.req.param("id")}`);
+    if (!rows.length || !inScope(await viewerScope(weft, c), rows[0]!.workerId)) throw new NotFound(`No offboarding case ${c.req.param("id")}`);
     return c.json((await caseDtos(weft.db, rows))[0]);
   });
 

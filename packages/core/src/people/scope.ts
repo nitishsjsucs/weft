@@ -8,7 +8,8 @@
 // grant check already applied to it.
 import { and, eq } from "drizzle-orm";
 import type { ExecContext } from "@weft/contracts";
-import { principals, workers, type DbTx } from "@weft/db";
+import { offers, principals, workers, type DbTx } from "@weft/db";
+import { DomainRefusal } from "../demo/define";
 
 /** Roles that read every worker's full record (their domain grants still apply). */
 export const FULL_RECORD_ROLES: ReadonlySet<string> = new Set(["admin", "payroll_admin", "hr_manager"]);
@@ -100,6 +101,61 @@ export function withheldReason(scope: ReadScope, subject: string): string {
 /** The access block a narrowed record carries, so the result itself says what is missing and why. */
 export function directoryAccess(scope: ReadScope, subject: string, withheld: readonly string[] = WITHHELD_FIELDS) {
   return { scope: "directory" as const, shown: [...DIRECTORY_FIELDS], withheld: [...withheld], reason: withheldReason(scope, subject) };
+}
+
+// ------------------------------------------------------------------------------------------------ lists about people
+
+/**
+ * A list read about people (leave requests, balances, offboarding cases, background checks, training, documents,
+ * onboarding): the rows about the viewer's own record and reports, and how many others it left out. Not narrowed
+ * (scope null) keeps every row. `workerOf` names the worker a row is about; a row about no one is left out.
+ */
+export function splitByScope<T>(scope: ReadScope | null, rows: readonly T[], workerOf: (row: T) => string | null | undefined): { shown: T[]; withheld: number } {
+  if (!scope) return { shown: [...rows], withheld: 0 };
+  const shown = rows.filter((r) => inScope(scope, workerOf(r)));
+  return { shown, withheld: rows.length - shown.length };
+}
+
+/** The access block of a list cut to the viewer's reports, so the result says how many rows it left out and why. */
+export function reportsAccess(scope: ReadScope, what: string, withheld: number) {
+  return {
+    scope: "reports" as const, withheld_rows: withheld,
+    reason: `${scope.display} is ${roleWord(scope)}: ${what} are shared only for their own record and their direct and indirect reports. Say plainly that you cannot share anyone else's.`,
+  };
+}
+
+/** The refusal for one record about someone outside the viewer's reports. It never says whether the record exists. */
+export function outsideReports(scope: ReadScope, what: string): DomainRefusal {
+  return new DomainRefusal("DOMAIN_OUTSIDE_REPORTS", `${scope.display} is ${roleWord(scope)}: ${what} are shared only for their own record and their direct and indirect reports`, "Ask about someone in your reporting chain, or ask a People admin", null);
+}
+
+/** True when an offer is the viewer's to read in full: no narrowing, or its hiring manager is the viewer or a report. */
+export const hiringManagerInScope = (scope: ReadScope | null, managerId: string | null | undefined): boolean => inScope(scope, managerId);
+
+/** Why an offer's pay is left out, in words the model can repeat to the person. */
+export function offerPayReason(scope: ReadScope, candidate: string): string {
+  return `${scope.display} is ${roleWord(scope)}: offer pay is shared only when they or one of their direct and indirect reports is the hiring manager, and the offer for ${candidate} is not one of them. Say plainly that you cannot share it; do not estimate it.`;
+}
+
+/** An offer is in a narrowed viewer's scope when its hiring manager is the viewer or one of their reports. */
+export async function offerIdInScope(tx: DbTx, companyId: string, scope: ReadScope | null, offerId: string | null | undefined): Promise<boolean> {
+  if (!scope) return true;
+  if (!offerId) return false;
+  const [o] = await tx.select({ managerId: offers.managerId }).from(offers).where(and(eq(offers.id, offerId), eq(offers.companyId, companyId))).limit(1);
+  return !!o && inScope(scope, o.managerId);
+}
+
+/** A record whose subject is a worker or an offer; any other subject (an unmatched vendor record) names no Weft person. */
+export async function subjectInScope(tx: DbTx, companyId: string, scope: ReadScope | null, subjectRef: string): Promise<boolean> {
+  if (!scope) return true;
+  if (subjectRef.startsWith("wrk_")) return inScope(scope, subjectRef);
+  if (subjectRef.startsWith("offr_")) return offerIdInScope(tx, companyId, scope, subjectRef);
+  return true;
+}
+
+/** A sync item's detail for a narrowed viewer outside its subject: the field and label stay, the values do not. */
+export function withheldSyncDetail(scope: ReadScope, detail: Record<string, unknown>, subject: string) {
+  return { field: detail.field ?? null, label: detail.label ?? null, withheld: ["weft_value", "vendor_value"], reason: withheldReason(scope, subject) };
 }
 
 // ------------------------------------------------------------------------------------------------ audit rows

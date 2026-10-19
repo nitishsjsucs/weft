@@ -8,13 +8,14 @@ import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { TrainingAssignmentStatus, TrainingCourseCode, Unauthorized, type ToolOutcome } from "@weft/contracts";
-import { ptDateOf } from "@weft/core";
+import { ptDateOf, splitByScope } from "@weft/core";
 import { principals, trainingCourses } from "@weft/db";
 import { eq } from "drizzle-orm";
 import { COURSE_RULES, getAssignment, listAssignments } from "../../../../packages/core/src/compliance/training";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
+import { viewerScope } from "../http/scope";
 
 const Query = z.object({ status: TrainingAssignmentStatus.optional(), workerId: z.string().startsWith("wrk_").optional(), courseCode: TrainingCourseCode.optional() });
 const CompleteBody = z.object({ certificateUploadId: z.string().startsWith("upl_").optional() }).strict();
@@ -58,7 +59,7 @@ export function trainingRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/training/assignments", async (c) => {
     const q = Query.parse({ status: c.req.query("status"), workerId: c.req.query("workerId"), courseCode: c.req.query("courseCode") });
     const page = parsePage(c);
-    let rows = await listAssignments(weft.db, companyOf(c), ptDateOf(weft.clock.now()), q);
+    let rows = splitByScope(await viewerScope(weft, c), await listAssignments(weft.db, companyOf(c), ptDateOf(weft.clock.now()), q), (x) => x.workerId).shown;
     if (page.afterId) rows = rows.filter((x) => x.id > page.afterId!);
     return c.json(toPage(rows.slice(0, page.limit + 1), page.limit));
   });

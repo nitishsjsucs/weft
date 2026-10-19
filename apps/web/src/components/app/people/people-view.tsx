@@ -6,6 +6,7 @@ import { CircleCheck, CircleDashed, CircleSlash } from "lucide-react";
 import { Badge, Button, Card, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { tid, W3_TIMEOFF_TID, type BenefitPlan, type Enrollment, type ItAccount, type Money, type Offer, type ToolOutcome, type Worker } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
+import { useCan } from "@/lib/api/access";
 import { fmtDate, initials } from "../format";
 import { PageHeader } from "../page";
 import { DocumentLibrary } from "../documents/document-library";
@@ -64,17 +65,20 @@ function PeopleTable({ data }: { data: Worker[] }) {
 function OfferCard({ o }: { o: Offer }) {
   const [out, setOut] = useState<ToolOutcome | null>(null);
   const accept = useMutation(() => client.post("/v1/offers/:id/accept", { params: { id: o.id } }));
+  const can = useCan();
+  // A manager reads an offer's pay only when she or one of her reports is the hiring manager (the API sends null).
+  const base = (o.base as Offer["base"] | null)?.display;
   return (
     <Card className="flex flex-col gap-3 p-4 tablet:flex-row tablet:items-center">
       <div className="min-w-0 flex-1">
         <div className="text-3 font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
-        <div className="text-[13px] text-gray-11">{o.title} · {deptName(o.departmentId)} · work state {o.workState} · {o.base.display} a year · starts {fmtDate(o.startDate, { month: "short", day: "numeric", year: "numeric" })}</div>
+        <div className="text-[13px] text-gray-11">{o.title} · {deptName(o.departmentId)} · work state {o.workState}{base ? ` · ${base} a year` : ""} · starts {fmtDate(o.startDate, { month: "short", day: "numeric", year: "numeric" })}</div>
         {out && !out.ok ? <div role="alert" className="mt-1 text-1 text-red-11">{out.refusal.code}: {out.refusal.message}</div> : null}
         {accept.error ? <div role="alert" className="mt-1 text-1 text-red-11">{errorText(accept.error)}</div> : null}
         {o.workerId ? <Link href={`/app/people/${o.workerId}`} className="mt-1 inline-block text-1 text-blue-11 hover:underline">Open onboarding</Link> : null}
       </div>
       <Badge tone={o.status === "accepted" ? "green" : o.status === "sent" ? "blue" : "gray"} size="md" data-status={o.status}>{o.status.charAt(0).toUpperCase() + o.status.slice(1)}</Badge>
-      {o.status === "sent" ? (
+      {o.status === "sent" && can("people", "edit") ? (
         <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={async () => setOut((await accept.run()) ?? null)} title="Demo action: records the candidate's acceptance">Mark accepted</Button>
       ) : null}
     </Card>
@@ -241,6 +245,20 @@ export function PersonView({ id }: { id: string }) {
     .slice().sort((a, b) => TASK_ORDER.indexOf(a.kind) - TASK_ORDER.indexOf(b.kind));
   if (w.error && !p) return <div role="alert" className="p-8 text-2 text-red-11">{errorText(w.error)}</div>;
   if (!d || !p) return <div className="p-8 text-2 text-gray-10">Loading...</div>;
+  // Someone outside a manager's reports: the API sends the directory record only (access.scope "directory"), so the
+  // page shows that and says what is private instead of tabs that would read "not on file".
+  if ((w.data as { access?: { scope?: string } } | undefined)?.access?.scope === "directory") {
+    return (
+      <div className="mx-auto w-full max-w-[1000px] px-4 py-6 tablet:px-8 tablet:py-8">
+        <PageHeader title={p.displayName} subtitle={`${p.title} · ${d.department ?? deptName(p.departmentId)}${d.workplace ? ` · ${d.workplace}` : ""}`} />
+        <Card className="max-w-[560px] p-4" data-testid="person-directory-only">
+          <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Directory</h2>
+          <Facts rows={[["Title", p.title], ["Department", d.department ?? deptName(p.departmentId)], ["Manager", d.manager ?? "-"], ["Work state", p.workState ?? "-"]]} />
+          <p className="mt-4 text-[13px] text-gray-11">Pay, bank, tax, benefits, IT, onboarding, documents and time off are shared only for your own record and your direct and indirect reports.</p>
+        </Card>
+      </div>
+    );
+  }
   const onboarding = (
     <Card className="p-4">
       <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Onboarding checklist</h2>

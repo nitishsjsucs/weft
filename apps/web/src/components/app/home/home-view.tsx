@@ -4,6 +4,7 @@ import { Banknote, CalendarDays, ChevronRight, Compass, Inbox, Landmark, UserRou
 import { Badge, Button, Card, CardHeading } from "@weft/ui/components";
 import { useTour } from "../../tour/tour-provider";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
+import { useCan } from "@/lib/api/access";
 import { AGENCY, fmtDate, period, relative, runKind } from "../format";
 
 function greeting(iso: string | undefined): string {
@@ -29,7 +30,9 @@ export function HomeView() {
   const clock = useSimClock();
   const now = clock.data?.now;
   const first = (PRINCIPALS.find((p) => p.id === who)?.name ?? "there").split(" ")[0];
-  const runs = useGet("/v1/payrolls", { query: { limit: 100 } });   // ordered by id: a year of history fills a short page
+  const can = useCan();
+  const payroll = can("payroll");   // a manager's grants close payroll: no widget, and no refused read behind it
+  const runs = useGet("/v1/payrolls", { query: { limit: 100 }, enabled: payroll });   // ordered by id: a year of history fills a short page
   const props = useGet("/v1/proposals", { query: { status: "pending", limit: 100 }, refreshMs: 5_000 });
   const accounts = useGet("/v1/tax/accounts");
   const workers = useGet("/v1/workers", { query: { type: "employee", limit: 100 } });
@@ -76,7 +79,7 @@ export function HomeView() {
         </span>
       </div>
       <div className="grid items-start gap-6 tablet:grid-cols-2">
-        <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Paid by simulated ACH debit</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
+        {payroll ? <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Paid by simulated ACH debit</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
           {upcoming.length === 0 ? <div className="p-4 text-2 text-gray-10">{runs.error ? "Payroll is not available yet." : "No upcoming payrolls."}</div> : null}
           {upcoming.map((r) => (
             <Link key={r.id} href={`/app/payroll/${r.id}`} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-3 last:border-0 hover:bg-gray-2">
@@ -84,7 +87,7 @@ export function HomeView() {
               <span className={`text-2 font-medium whitespace-nowrap ${r.status === "draft" ? "text-amber-11" : "text-blue-11"}`}>{r.status === "draft" ? (now ? `Due ${relative(r.approvalDeadline, now)}` : "Draft") : r.status}</span>
             </Link>
           ))}
-        </Widget>
+        </Widget> : null}
         <Widget testid="home-widget-approvals" icon={<Inbox />} title="Approvals waiting" href="/app/inbox">
           <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{props.data ? approvals.length : "-"}</span><span className="text-1 text-gray-10">waiting</span>{myTor.length ? <Link data-testid="home-approvals-time-off" href="/app/time-off" className="ml-auto text-1 text-blue-11 hover:underline">+ {myTor.length} time-off {myTor.length === 1 ? "decision" : "decisions"} for you</Link> : null}</div>
           <ul className="px-2 pt-2 pb-2">

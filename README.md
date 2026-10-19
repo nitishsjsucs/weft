@@ -83,7 +83,8 @@ Things to try in the demo:
     check after an offer is accepted; the hire authorizes it in the portal and it completes on the simulated clock.
 
 The "Viewing as" segment of the header's environment pill is a demo control for acting as Dana, Theo, Sam or Imani
-(a manager who decides time off for her direct reports only); new hires whose offer
+(a manager who decides time off for her direct reports only and reads private records, leave, offboarding and offer
+pay only for her reporting chain; Payroll, Benefits and IT are closed to her role); new hires whose offer
 was sent from Hiring are listed there too and open the portal (the seeded offer for Noor Castellanos (demo) is
 accepted from People > Offers instead).
 
@@ -143,7 +144,7 @@ gate; nothing is carried over.
 | `pnpm typecheck` | 16 of 16 tasks; `tsc -p e2e` clean |
 | `pnpm build` | ok |
 | `pnpm e2e` (base profile, unchanged) | 52 passed, 1 skipped (the DocuSign envelope test), 2.4 min |
-| `pnpm e2e:rich` | 3 of 3 in 1.5 min: 29 routes and every top-level tab on a fresh rich world show no empty state (`KNOWN_GAPS` is empty), Reports adds up, the manager Home and each portal persona see their own data |
+| `pnpm e2e:rich` | 4 of 4 in 1.5 min: 29 routes and every top-level tab on a fresh rich world show no empty state (`KNOWN_GAPS` is empty), Reports adds up, the manager Home and each portal persona see their own data, and the manager's screens show no pay, salary, leave or offboarding of anyone outside her reports |
 | `pnpm e2e:tour` (scripted, `TOUR_SHOTS=1`) | 11 of 11 in 6.6 min. The whole tour read at its planned pace took 138 s with a screenshot at every step, autoplay 158 s, both over all 21 steps (budget 180 s) |
 | Tour live on `gpt-5.6-luna` (`WEFT_TOUR_LIVE=1`, `WEFT_BACKGROUND_LLM=1`, autoplay) | 159 s over 21 steps; the notice run step stayed on screen 12.6 s and the chart step 11.5 s; no "Still working" line and no fallback note; one chat run; only `tax.update_rate` executed; $0.0034 for 2 live runs |
 | `pnpm demo` | exit 0 in 11 s, payroll total cost $267,795.26, audit chain verifies |

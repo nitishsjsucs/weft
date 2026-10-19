@@ -9,6 +9,7 @@ import { paychecks, payrollRuns, workers } from "@weft/db";
 import { payroll } from "@weft/core";
 import type { Weft, WeftEnv } from "../http/context";
 import { parsePage, toPage } from "../http/paging";
+import { needDomain, viewerScope } from "../http/scope";
 
 function session(c: Context<WeftEnv>): HumanSession {
   const s = c.var.session;
@@ -29,8 +30,12 @@ const DraftBody = z.object({ payScheduleId: z.string().startsWith("ps_"), period
 
 export function payrollsRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
+  // Every payroll read needs payroll view, as payroll.list_runs and payroll.get_run do on the agent surfaces: a
+  // manager (payroll: none) reads no run, total or paycheck here, her own included (the portal shows her own pay).
+  const canRead = async (c: Context<WeftEnv>) => needDomain(await viewerScope(weft, c), "payroll", "pay runs and paychecks");
 
   r.get("/v1/payrolls", async (c) => {
+    await canRead(c);
     const s = session(c);
     const page = parsePage(c);
     const { rows, counts } = await payroll.listRuns(weft.db, s.companyId, { limit: page.limit + 1, afterId: page.afterId });
@@ -43,6 +48,7 @@ export function payrollsRoutes(weft: Weft): Hono<WeftEnv> {
   });
 
   r.get("/v1/payrolls/:id", async (c) => {
+    await canRead(c);
     const s = session(c);
     const run = (await weft.db.select().from(payrollRuns).where(and(eq(payrollRuns.id, c.req.param("id")), eq(payrollRuns.companyId, s.companyId))))[0];
     if (!run) throw new NotFound(`No payroll run ${c.req.param("id")}`);
@@ -51,6 +57,7 @@ export function payrollsRoutes(weft: Weft): Hono<WeftEnv> {
   });
 
   r.get("/v1/payrolls/:id/paychecks", async (c) => {
+    await canRead(c);
     const s = session(c);
     const runId = c.req.param("id");
     const run = (await weft.db.select().from(payrollRuns).where(and(eq(payrollRuns.id, runId), eq(payrollRuns.companyId, s.companyId))))[0];
@@ -73,6 +80,7 @@ export function payrollsRoutes(weft: Weft): Hono<WeftEnv> {
   });
 
   r.get("/v1/paychecks/:id", async (c) => {
+    await canRead(c);
     const s = session(c);
     const p = (await weft.db.select().from(paychecks).where(eq(paychecks.id, c.req.param("id"))))[0];
     const run = p ? (await weft.db.select().from(payrollRuns).where(eq(payrollRuns.id, p.payrollRunId)))[0] : undefined;

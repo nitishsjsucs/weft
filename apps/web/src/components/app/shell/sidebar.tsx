@@ -11,6 +11,7 @@ import { cn } from "@weft/ui";
 import { TID, tid, W3_SHELL_TID } from "@weft/contracts";
 import { activeNav, NAV, SETTINGS_ITEM, type NavItem } from "../nav";
 import { usePendingCount } from "@/lib/api/hooks";
+import { useCan } from "@/lib/api/access";
 import { useAgent } from "../agent-context";
 import { WeftMark } from "../weft-mark";
 
@@ -84,6 +85,7 @@ export function Sidebar({ id, onNavigate, onOpenSearch }: { id?: string; onNavig
   const pathname = usePathname();
   const active = activeNav(pathname);
   const pending = usePendingCount();
+  const can = useCan();
   return (
     <nav id={id} aria-label="App" className="flex h-full flex-col gap-1 overflow-y-auto px-3 pt-2 pb-3">
       <div className="flex h-10 items-center gap-2.5 rounded-lg px-1.5">
@@ -98,7 +100,7 @@ export function Sidebar({ id, onNavigate, onOpenSearch }: { id?: string; onNavig
         <div key={g.label ?? i} data-tour="nav-group" data-group={g.label ?? "Main"} className={cn(g.label && "mt-4")}>
           {g.label ? <div className="mb-1 px-2 text-1 font-medium text-gray-10">{g.label}</div> : null}
           <div className="flex flex-col gap-0.5">
-            {g.items.map((it) => <Item key={it.slug} item={it} active={active?.slug === it.slug} pending={pending} onNavigate={onNavigate} />)}
+            {g.items.filter((it) => !it.domain || can(it.domain)).map((it) => <Item key={it.slug} item={it} active={active?.slug === it.slug} pending={pending} onNavigate={onNavigate} />)}
           </div>
         </div>
       ))}

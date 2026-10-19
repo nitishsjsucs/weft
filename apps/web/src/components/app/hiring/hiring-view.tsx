@@ -5,6 +5,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { formatCents, W2_ONBOARDING_TID as T, type W2OnboardingOfferDetail } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
+import { useCan } from "@/lib/api/access";
 import { fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { OfferScreening } from "../screening/offer-screening";
@@ -56,17 +57,18 @@ function OfferForm() {
 function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
   const send = useMutation(async () => client.post("/v1/offers/:id/send", { params: { id: o.id } }));
   const voidIt = useMutation(async () => client.post("/v1/offers/:id/void", { params: { id: o.id } }));
+  const edit = useCan()("people", "edit");   // Send and Void need people edit; a manager only reads
   const [confirmVoid, setConfirmVoid] = useState(false);
   const err = send.error ?? voidIt.error;
   return (
     <li data-testid={T.offerRow} data-tour="hiring-offer" data-offer={o.id} data-status={o.status} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
       <div className="min-w-[200px] flex-1">
         <div className="font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
-        <div className="text-gray-10">{o.title} · {o.workState} · {formatCents(o.baseCents)} · starts {fmtDate(o.startDate)}{o.expiresOn ? ` · open until ${fmtDate(o.expiresOn)}` : ""}</div>
+        <div className="text-gray-10">{o.title} · {o.workState}{o.baseCents === null ? "" : ` · ${formatCents(o.baseCents)}`} · starts {fmtDate(o.startDate)}{o.expiresOn ? ` · open until ${fmtDate(o.expiresOn)}` : ""}</div>
       </div>
       <Badge data-testid={T.offerStatus} data-status={o.status} tone={STATUS_TONE[o.status] ?? "gray"} size="md">{STATUS_LABEL[o.status] ?? o.status}</Badge>
-      {o.allowed.includes("sent") ? <Button size="sm" variant="primary" data-testid={T.offerSend} disabled={send.pending} onClick={() => void send.run()}>Send</Button> : null}
-      {o.allowed.includes("voided") && !confirmVoid ? <Button size="sm" variant="secondary" data-testid={T.offerVoid} onClick={() => setConfirmVoid(true)}>Void</Button> : null}
+      {edit && o.allowed.includes("sent") ? <Button size="sm" variant="primary" data-testid={T.offerSend} disabled={send.pending} onClick={() => void send.run()}>Send</Button> : null}
+      {edit && o.allowed.includes("voided") && !confirmVoid ? <Button size="sm" variant="secondary" data-testid={T.offerVoid} onClick={() => setConfirmVoid(true)}>Void</Button> : null}
       {o.allowed.includes("voided") && confirmVoid ? (
         <span className="flex items-center gap-2">
           <span className="text-1 text-gray-11">The candidate's portal link stops working.</span>

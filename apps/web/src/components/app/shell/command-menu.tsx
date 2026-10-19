@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { cn } from "@weft/ui";
 import { TID } from "@weft/contracts";
 import { ALL_NAV } from "../nav";
+import { useCan } from "@/lib/api/access";
 import { useGet } from "@/lib/api/hooks";
 import { period } from "../format";
 import { useTour } from "../../tour/tour-provider";
@@ -30,15 +31,16 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
   }, [open, onOpenChange]);
   useEffect(() => { if (!open) { setQ(""); setSel(0); } }, [open]);
 
+  const can = useCan();
   const entries = useMemo<Entry[]>(() => {
-    const nav: Entry[] = ALL_NAV.map((n) => ({ id: `nav-${n.slug}`, label: n.label, hint: "Go to", href: n.href }));
+    const nav: Entry[] = ALL_NAV.filter((n) => !n.domain || can(n.domain)).map((n) => ({ id: `nav-${n.slug}`, label: n.label, hint: "Go to", href: n.href }));
     const ppl: Entry[] = (workers.data?.data ?? []).map((w) => ({ id: w.id, label: w.displayName, hint: `${w.title}, ${w.workState ?? w.country}`, href: `/app/people/${w.id}` }));
     const pay: Entry[] = (runs.data?.data ?? []).map((r) => ({ id: r.id, label: `Payroll ${period(r.periodStart, r.periodEnd)}`, hint: r.status, href: `/app/payroll/${r.id}` }));
     const demo: Entry[] = [{ id: "tour-start", label: "Take the tour", hint: "3 minute walkthrough", href: "/app", run: () => tour.start() }];
     const needle = q.trim().toLowerCase();
     const all = needle ? [...demo, ...nav, ...pay, ...ppl] : [...demo, ...nav];
     return all.filter((e) => !needle || e.label.toLowerCase().includes(needle) || e.id.toLowerCase().includes(needle)).slice(0, 12);
-  }, [q, workers.data, runs.data, tour]);
+  }, [q, workers.data, runs.data, tour, can]);
 
   const go = (e: Entry | undefined) => { if (!e) return; onOpenChange(false); if (e.run) e.run(); else router.push(e.href); };
 
