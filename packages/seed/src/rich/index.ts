@@ -11,12 +11,13 @@ import { asc, eq } from "drizzle-orm";
 import {
   actions, agentRuns, approvalAudit, contractorPayments, documents, filings, handoffCases, notices, offboardingCases, offboardingSteps,
   onboardingTasks, payRates, payrollRuns, proposals, routineRuns, runSteps, simAgencyMail, simChatMessages, simRailTransfers, simRegistrations,
-  taxAccounts, timeOffAssignments, timeOffLedger, timeOffRequests, workers, withWriteLock, type DbTx,
+  taxAccounts, taxProfiles, timeOffAssignments, timeOffLedger, timeOffRequests, workers, withWriteLock, type DbTx,
 } from "@weft/db";
 import { canonicalJson, newId, payroll, sha256Hex } from "@weft/core";
 import type { SeedContext } from "../context";
 import { seedRichMotion, type MotionApi } from "./motion";
 import { seedImportedPayHistory } from "./pay-history";
+import { seedTurnover } from "./turnover";
 
 const CO = "cmp_larkspur";
 const GENESIS = "0".repeat(64);
@@ -442,6 +443,7 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
     workEmail: "rafael.ostrander@larkspur.example", title: "Field Service Technician", departmentId: "dpt_operations", managerId: null, workplaceId: "wkp_oakland", workState: "CA",
     timezone: "America/Los_Angeles", startDate: "2024-02-12", endDate: lastDay, payScheduleId: "ps_us_semimonthly", createdAt: "2024-02-01T17:00:00.000Z", updatedAt: pt(lastDay, 17) });
   await tx.insert(payRates).values({ id: await newId(tx, "prt_"), workerId: leaverId, kind: "salary", amountCents: 7_800_000, effectiveFrom: "2024-02-12", effectiveTo: lastDay });
+  await tx.insert(taxProfiles).values({ workerId: leaverId, w4Version: "2020", filingStatus: "mfj", source: "seed" });
   L.bump("workers");
   const done = await newId(tx, "ofb_");
   await tx.insert(offboardingCases).values({ id: done, companyId: CO, workerId: leaverId, kind: "voluntary", lastDay, reasonNote: "Relocating to be closer to family", status: "complete", createdAt: pt("2026-07-01", 10), closedAt: pt("2026-07-20", 12) });
@@ -523,7 +525,12 @@ async function seedMoneyAndCompliance(L: Layer, ws: W[]): Promise<void> {
     const taxAccountId = acct.get(a);
     if (!taxAccountId) continue;
     k += 1;
-    await tx.insert(filings).values({ id: await newId(tx, "fil_"), taxAccountId, form, period, status: "accepted", filedAt: pt(day, 11), confirmation: `SIM-${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()}-${period.replace("-", "")}-${String(4100 + k)}`, dueOn: null });
+    const confirmation = `SIM-${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()}-${period.replace("-", "")}-${String(4100 + k)}`;
+    await tx.insert(filings).values({ id: await newId(tx, "fil_"), taxAccountId, form, period, status: "accepted", filedAt: pt(day, 11), confirmation, dueOn: null });
+    // The return as the agency simulator received it, with the confirmation it gave back.
+    await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: a.split(":")[0]!, direction: "out", kind: "return_filing", body: canonicalJson({ form, period, note: "Filed from Weft (demo)" }),
+      relatedNoticeId: null, confirmation, credentialName: null, ts: pt(day, 11) });
+    L.bump("sim_agency_mail");
     L.action({ ts: pt(day, 11), actorKind: "human", actorId: "usr_theo", command: "tax.file_return", args: { form, period }, summary: `Filed ${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()} for ${period} with ${a.split(":")[0]} (sim); accepted`, reversible: "no" });
     L.bump("filings");
   }
@@ -539,8 +546,8 @@ async function seedMoneyAndCompliance(L: Layer, ws: W[]): Promise<void> {
     await tx.insert(notices).values({ id, companyId: CO, agency: n.agency, kind: n.kind, formCode: n.form, title: n.title, receivedAt: n.at, respondBy: n.status === "in_review" ? "2026-11-20" : null,
       status: n.status, taxAccountId: acc, fileName: `${n.agency.toUpperCase()}_${n.form.replace(/\W/g, "")}.txt`, bodyText: n.body, extractedJson: null, draftsJson: "[]",
       resolutionJson: n.resolution ? JSON.stringify({ note: n.resolution }) : null, responseConfirmation: n.confirmation ?? null, source: "simulated" });
-    await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: n.agency, direction: "outbound", kind: "notice", body: n.body, relatedNoticeId: id, confirmation: null, credentialName: null, ts: n.at });
-    if (n.confirmation) await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: n.agency, direction: "inbound", kind: "response", body: "Acknowledged (demo).", relatedNoticeId: id, confirmation: n.confirmation, credentialName: null, ts: new Date(Date.parse(n.at) + 2 * 86_400_000).toISOString() });
+    await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: n.agency, direction: "in", kind: "notice", body: n.body, relatedNoticeId: id, confirmation: null, credentialName: null, ts: n.at });
+    if (n.confirmation) await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: n.agency, direction: "out", kind: "notice_response", body: "Acknowledged (demo).", relatedNoticeId: id, confirmation: n.confirmation, credentialName: null, ts: new Date(Date.parse(n.at) + 2 * 86_400_000).toISOString() });
     L.bump("notices");
   }
   // The 2023 registrations as completed simulator records (Colorado stays for the tour).
@@ -607,6 +614,7 @@ export async function seedRichProfile(ctx: SeedContext): Promise<RichSummary> {
       proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), run: (r) => L.run(r as unknown as RunSpec), action: (a) => L.action(a as unknown as PendingAction),
     };
     await seedRichMotion(api, ws);
+    await seedTurnover({ tx, bump: (t, n) => L.bump(t, n), action: (a) => L.action(a as unknown as PendingAction) });
     await seedImportedPayHistory(tx, (t, n) => L.bump(t, n));
     tail = await L.flushActions();
   }));

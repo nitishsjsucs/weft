@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Banknote, CalendarDays, ChevronRight, Compass, Inbox, Landmark, Users } from "lucide-react";
+import { Banknote, CalendarDays, ChevronRight, Compass, Inbox, Landmark, UserRoundCheck, Users } from "lucide-react";
 import { Badge, Button, Card, CardHeading } from "@weft/ui/components";
 import { useTour } from "../../tour/tour-provider";
 import { PRINCIPALS, useGet, usePrincipal, useSimClock } from "@/lib/api/hooks";
@@ -53,6 +53,16 @@ export function HomeView() {
   // Time-off requests routed to the viewer are decisions too; they live on the Time off page, not in the Inbox.
   const myTor = pendingTor.filter((r) => r.approverPrincipalId === who);
   const soon = today && in30Days ? tor.filter((r) => r.status === "approved" && r.startAt > today && r.startAt <= in30Days).sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) : [];
+  // A manager's team: the viewer's direct reports (matched by name to the viewer's own worker record), who is out
+  // today or soon, and the hires joining the team. Shown only to a viewer with reports, so Home differs per persona.
+  const bare = (n: string) => n.replace(/ \(demo\)$/, "");
+  const viewerName = bare(PRINCIPALS.find((p) => p.id === who)?.name ?? "");
+  const me = viewerName ? ws.find((w) => bare(w.displayName) === viewerName || `${w.firstName} ${w.lastName}` === viewerName) : undefined;
+  const reports = me ? ws.filter((w) => w.managerId === me.id && (w.status === "active" || w.status === "onboarding")) : [];
+  const reportNames = new Set(reports.filter((w) => w.status === "active").map((w) => bare(w.displayName)));
+  const teamOut = outToday.filter((r) => reportNames.has(bare(r.workerName)));
+  const teamSoon = soon.filter((r) => reportNames.has(bare(r.workerName)));
+  const joining = reports.filter((w) => w.status === "onboarding").sort((a, b) => (a.startDate < b.startDate ? -1 : 1));
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
       <div className="mb-8 flex flex-wrap items-center gap-x-4 gap-y-3">
@@ -101,6 +111,21 @@ export function HomeView() {
             {soon.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
           </ul>
         </Widget>
+        {reports.length ? (
+          <Widget testid="home-widget-team" icon={<UserRoundCheck />} title="Your team" href="/app/time-off" footer={<><span>{joining.length ? `${joining.length} joining soon` : "Your direct reports"}</span><Link href="/app/people" className="hover:text-foreground">People</Link></>}>
+            <div className="grid grid-cols-2 gap-2 px-4 pt-4 pb-3">
+              <div><div data-testid="home-team-size" className="text-7 font-semibold tabular">{reports.filter((w) => w.status === "active").length}</div><div className="text-1 text-gray-10">direct reports</div></div>
+              {myTor.length ? <div><div data-testid="home-team-decisions" className="text-7 font-semibold tabular">{myTor.length}</div><div className="text-1 text-gray-10">time-off {myTor.length === 1 ? "decision" : "decisions"} for you</div></div>
+                : teamSoon.length ? <div><div className="text-7 font-semibold tabular">{teamSoon.length}</div><div className="text-1 text-gray-10">off in the next 30 days</div></div> : null}
+            </div>
+            <ul className="px-2 pb-2">
+              {teamOut.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span></Link></li>)}
+              {myTor.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="amber">Decide</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
+              {teamSoon.slice(0, 2).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="green">Approved</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}</span></Link></li>)}
+              {joining.slice(0, 2).map((w) => <li key={w.id}><Link href={`/app/people/${w.id}`} className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="blue">Joining</Badge><span className="min-w-0 flex-1 truncate">{w.displayName}</span><span className="text-1 text-gray-10 tabular">starts {fmtDate(w.startDate)}</span></Link></li>)}
+            </ul>
+          </Widget>
+        ) : null}
         <Widget testid="home-widget-headcount" icon={<Users />} title="Headcount" href="/app/people">
           <div className="flex items-baseline gap-2 px-4 pt-4"><span data-testid="home-headcount-active" className="text-7 font-semibold tabular">{workers.data ? active.length : "-"}</span>{in30 ? <span className="text-2 font-medium text-green-11">+{in30}</span> : null}<span className="text-1 text-gray-10">30d</span></div>
           <div className="flex flex-wrap items-baseline gap-x-3 px-4 pt-1 pb-4 text-1 text-gray-10">
