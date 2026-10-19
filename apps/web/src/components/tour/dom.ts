@@ -62,6 +62,35 @@ export function waitForAny(selectors: string[], ms: number, signal: AbortSignal)
   });
 }
 
+/**
+ * scrollIntoView with a 16 px margin, so a target scrolled to the start or end of its pane is not flush against the
+ * pane's edge (the sticky header, the window top), where the ring would have no room.
+ */
+export function scrollToView(el: HTMLElement, block: ScrollLogicalPosition, behavior: ScrollBehavior): void {
+  const prev = el.style.scrollMargin;
+  el.style.scrollMargin = "16px";
+  el.scrollIntoView({ block, behavior });
+  el.style.scrollMargin = prev;
+}
+
+/**
+ * Scrolls `el`'s scroll container so the element's top sits `room` px below the container's top (room for the card
+ * above it), when the element still fits below that line; otherwise centres it. For steps whose popover drops below
+ * the target, so the card has a free spot above.
+ */
+export function scrollWithRoomAbove(el: HTMLElement, room: number, behavior: ScrollBehavior): void {
+  let box: HTMLElement | null = el.parentElement;
+  while (box && box !== document.body) {
+    const oy = getComputedStyle(box).overflowY;
+    if ((oy === "auto" || oy === "scroll") && box.scrollHeight > box.clientHeight) break;
+    box = box.parentElement;
+  }
+  if (!box || box === document.body) { scrollToView(el, "center", behavior); return; }
+  const c = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+  if (r.height + room + 16 > box.clientHeight) { scrollToView(el, "center", behavior); return; }
+  box.scrollTo({ top: box.scrollTop + (r.top - (c.top + room)), behavior });
+}
+
 /** Clicks like a pointer: mousedown (Radix tabs) then click (buttons, popover triggers, rows). */
 export function activate(el: HTMLElement): void {
   const opts = { bubbles: true, cancelable: true, button: 0, view: window } as MouseEventInit;

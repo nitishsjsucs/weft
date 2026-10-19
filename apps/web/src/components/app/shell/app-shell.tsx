@@ -48,7 +48,7 @@ function Frame({ children }: { children: ReactNode }) {
       <div className={cn("flex min-h-0 min-w-0 flex-col bg-background", showSidebar && "border-l border-[var(--app-border)]")}>
         <Header sidebarVisible={showSidebar} sidebarExpanded={laptop ? showSidebar : mobileNav} onToggleSidebar={() => (laptop ? setSidebarHidden((h) => !h) : setMobileNav((v) => !v))} onOpenSearch={() => setSearch(true)} />
         {mocksEnabled ? <div className="border-b border-[var(--app-border)] bg-amber-3 px-4 py-1 text-1 text-amber-11">Mock data (NEXT_PUBLIC_WEFT_MOCKS=1). Nothing here talks to the API.</div> : null}
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">{children}</main>
+        <main data-app-main="" className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">{children}</main>
       </div>
       {dockAgent ? <AgentPanel id={AGENT_PANEL_ID} className="min-h-0" /> : null}
       {!desktop && agent.open ? (

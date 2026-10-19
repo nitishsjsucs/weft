@@ -4,13 +4,14 @@
 // app's bg-black/20 scrim; a missing target or a phone gets a fixed sheet. Styling follows PopoverContent and
 // research/design.md: bg-card, rounded-xl, --shadow-modal, 13 px text, the madder accent for progress.
 import { Dialog, Popover } from "radix-ui";
-import { useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { Pause, Play, X } from "lucide-react";
 import { Button, Kbd, ShimmerText } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TOUR_STEPS, type TourStep } from "./steps";
-import { useTrackedBox } from "./tour-ring";
+import { overlapArea, placeCard, sameRect, type Rect, type Side } from "./geometry";
+import { appLayerRects, contentBounds, occluded, useFrameValue, visibleRect } from "./layout";
 
 export type StatusTone = "working" | "waiting" | "done" | "error" | "muted";
 
@@ -32,6 +33,10 @@ export interface CardView {
   offPage: boolean;
   /** Phone layout: dock the sheet at the top (agent steps) or the bottom. */
   sheet: "top" | "bottom" | null;
+  /** Selectors for context the copy names (read every frame, as rows load late): the card keeps clear of them when it can. */
+  avoid: string[];
+  /** The secondary marks, which the card also keeps clear of. */
+  marks: Element[];
 }
 
 export interface CardHandlers {
@@ -50,27 +55,34 @@ export interface CardHandlers {
 }
 
 const TOTAL = TOUR_STEPS.length;
-type Side = "top" | "right" | "bottom" | "left";
 
-/**
- * The side with room for the card next to the visible part of the target, or null when none has room (a tall or
- * wide target such as the agent panel's full height on a small screen): the card then docks as a fixed sheet.
- */
-export function pickSide(box: { top: number; left: number; width: number; height: number }, vw: number, vh: number, dock?: "side"): { side: Side; align: "start" | "center" } | null {
-  const W = 372, H = 280;
-  const room: Record<Side, number> = { bottom: vh - (box.top + box.height), top: box.top, left: box.left, right: vw - (box.left + box.width) };
-  const order: Side[] = dock === "side" ? ["left", "right", "bottom", "top"] : ["bottom", "top", "left", "right"];
-  for (const side of order) if (room[side] >= (side === "left" || side === "right" ? W : H)) return { side, align: side === "left" || side === "right" ? "start" : "center" };
-  return null;
+/** Sides to try, best first: beside the drawer or popover a docked step opens, into the main column for a target in the agent panel, else below. */
+export function sideOrder(dock: "side" | undefined, inAgentPanel: boolean): Side[] {
+  if (inAgentPanel) return ["left", "bottom", "top", "right"];
+  return dock === "side" ? ["left", "right", "bottom", "top"] : ["bottom", "top", "left", "right"];
 }
 
-/** The target's rect clipped to the viewport, so the card anchors to what is on screen. */
-function clipped(el: HTMLElement | null): DOMRect {
-  if (!el) return new DOMRect();
-  const r = el.getBoundingClientRect();
-  const top = Math.max(0, r.top), left = Math.max(0, r.left);
-  const bottom = Math.min(window.innerHeight, r.bottom), right = Math.min(document.documentElement.clientWidth, r.right);
-  return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+interface Scene { target: Rect | null; bounds: Rect; obstacles: Rect[]; avoid: Rect[]; inAgent: boolean }
+const sameScene = (a: Scene | null, b: Scene | null): boolean =>
+  a === b || (!!a && !!b && a.inAgent === b.inAgent && sameRect(a.target, b.target) && sameRect(a.bounds, b.bounds)
+    && a.obstacles.length === b.obstacles.length && a.obstacles.every((r, i) => sameRect(r, b.obstacles[i]!))
+    && a.avoid.length === b.avoid.length && a.avoid.every((r, i) => sameRect(r, b.avoid[i]!)));
+
+/** What the card is placed against, read every frame: the target's visible rect, the content column, open layers. */
+function readScene(target: HTMLElement | null, marks: Element[], avoid: string[]): Scene | null {
+  if (typeof window === "undefined") return null;
+  const vis = visibleRect(target);
+  const t = vis && target && !occluded(target, vis) ? vis : null;
+  const els = new Set<Element>(marks);
+  for (const sel of avoid) { try { document.querySelectorAll(sel).forEach((el) => els.add(el)); } catch { /* bad selector */ } }
+  els.delete(target as Element);
+  return {
+    target: t,
+    bounds: contentBounds(t),
+    obstacles: appLayerRects(),
+    avoid: [...els].map((el) => visibleRect(el)).filter((r): r is Rect => !!r),
+    inAgent: !!target?.closest('aside[aria-label="Agent"]'),
+  };
 }
 const cardClass = "weft-tour-card flex flex-col gap-3 rounded-xl bg-card p-4 text-[13px] text-gray-12 shadow-[var(--shadow-modal)] outline-none";
 
@@ -131,12 +143,30 @@ function dataAttrs(v: CardView) {
 }
 
 export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
-  const targetRef = useRef<HTMLElement | null>(null);
-  targetRef.current = v.target;
-  const virtualRef = useMemo(() => ({ current: { getBoundingClientRect: () => clipped(targetRef.current), get contextElement() { return targetRef.current ?? undefined; } } }), []);
-  // Re-measured on scroll and resize, so the side follows the target.
-  const box = useTrackedBox(v.found && !v.sheet ? v.target : null, 0);
-  const place = box && typeof window !== "undefined" ? pickSide(box, document.documentElement.clientWidth, window.innerHeight, v.step.dock) : null;
+  const anchored = v.step.target !== null && !v.offPage && !v.sheet && v.found && !!v.target;
+  // The card's own size (it grows with status lines), so placement uses what is on screen, not a guess.
+  const [cardEl, setCardEl] = useState<HTMLElement | null>(null);
+  const [size, setSize] = useState({ width: 360, height: 240 });
+  useEffect(() => {
+    if (!cardEl) return;
+    const read = () => { const width = cardEl.offsetWidth, height = cardEl.offsetHeight; if (width && height) setSize((o) => (o.width === width && o.height === height ? o : { width, height })); };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(cardEl);
+    return () => ro.disconnect();
+  }, [cardEl]);
+  const scene = useFrameValue(() => (anchored ? readScene(v.target, v.marks, v.avoid) : null), sameScene, [anchored, v.target, v.marks, v.avoid.join("|")]);
+  const prevSide = useRef<Side | "free" | null>(null);
+  // The natural width (360 px), not the measured one, so a card narrowed to fit beside one target widens again.
+  const natural = typeof window !== "undefined" ? Math.min(360, document.documentElement.clientWidth - 24) : 360;
+  const place = scene && scene.target ? placeCard({ target: scene.target, card: { width: natural, height: size.height }, bounds: scene.bounds, obstacles: scene.obstacles, avoid: scene.avoid, order: sideOrder(v.step.dock, scene.inAgent), prev: prevSide.current, minWidth: 260 }) : null;
+  prevSide.current = place?.side ?? null;
+  const under = !!place && !!scene && scene.obstacles.some((o) => overlapArea({ left: place.left, top: place.top, right: place.left + (place.width ?? natural), bottom: place.top + size.height }, o) > 1);
+  const placeRef = useRef(place);
+  placeRef.current = place;
+  // A point anchor at the card's computed top-left: the card sits exactly where placeCard put it, and floating-ui
+  // re-reads it every frame (updatePositionStrategy "always").
+  const virtualRef = useMemo(() => ({ current: { getBoundingClientRect: () => { const p = placeRef.current; return p ? new DOMRect(p.left, p.top, 0, 0) : new DOMRect(); } } }), []);
   const common = {
     onPointerEnter: () => h.onHover("pointer", true),
     onPointerLeave: () => h.onHover("pointer", false),
@@ -167,10 +197,11 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
     );
   }
 
-  if (v.sheet || !v.found || !v.target || !place) {
-    const lower = !!box && box.top + box.height / 2 > (typeof window !== "undefined" ? window.innerHeight / 2 : 0);
+  if (!anchored || !place) {
+    const t = scene?.target;
+    const lower = !!t && t.top + (t.bottom - t.top) / 2 > (typeof window !== "undefined" ? window.innerHeight / 2 : 0);
     return (
-      <FixedSheet v={v} h={h} common={common} top={v.sheet ? v.sheet === "top" : lower}>
+      <FixedSheet v={v} h={h} common={common} top={v.sheet ? v.sheet === "top" : lower} bounds={v.sheet ? null : (scene?.bounds ?? (typeof window !== "undefined" ? contentBounds(null) : null))} cardRef={setCardEl}>
         <Inner v={v} h={h} />
       </FixedSheet>
     );
@@ -181,17 +212,18 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
       <Popover.Anchor virtualRef={virtualRef as never} />
       <Popover.Portal>
         <Popover.Content
+          ref={setCardEl}
           {...dataAttrs(v)} {...common}
+          data-place={place.side}
           role="dialog"
           aria-modal="false"
           aria-labelledby={h.titleId}
           aria-describedby={h.bodyId}
-          side={place.side}
-          align={place.align}
-          sticky="always"
-          sideOffset={12}
-          collisionPadding={12}
-          avoidCollisions
+          side="bottom"
+          align="start"
+          sideOffset={0}
+          avoidCollisions={false}
+          updatePositionStrategy="always"
           onOpenAutoFocus={(e) => e.preventDefault()}
           onCloseAutoFocus={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => { e.preventDefault(); h.onExit(); }}
@@ -199,8 +231,11 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
           onInteractOutside={(e) => e.preventDefault()}
           onFocusOutside={(e) => e.preventDefault()}
           // A modal drawer (expenses) sets body pointer-events: none; the card stays clickable on top of it.
-          style={{ pointerEvents: "auto" }}
-          className={cn(cardClass, "z-[70] w-[min(360px,calc(100vw-24px))]")}
+          data-under-layer={under ? "true" : undefined}
+          style={{ pointerEvents: "auto", ...(place.width ? { width: place.width } : {}) }}
+          // With no clean spot left (a tall menu on a short screen), the card drops under the app's layers (z 50)
+          // rather than covering the menu the person just opened.
+          className={cn(cardClass, under ? "z-[49]" : "z-[70]", "w-[min(360px,calc(100vw-24px))]")}
         >
           <Inner v={v} h={h} />
         </Popover.Content>
@@ -209,22 +244,27 @@ export function TourCard({ v, h }: { v: CardView; h: CardHandlers }) {
   );
 }
 
-function FixedSheet({ v, h, common, top, children }: { v: CardView; h: CardHandlers; common: Record<string, (e: React.FocusEvent) => void>; top: boolean; children: ReactNode }) {
+function FixedSheet({ v, h, common, top, bounds, cardRef, children }: { v: CardView; h: CardHandlers; common: Record<string, (e: React.FocusEvent) => void>; top: boolean; bounds: Rect | null; cardRef: (el: HTMLElement | null) => void; children: ReactNode }) {
   const pos = top
     ? "top-[calc(var(--app-header-h,48px)+8px+env(safe-area-inset-top))]"
     : "bottom-[calc(16px+env(safe-area-inset-bottom))]";
+  // Off a phone the unanchored card centres on the content column, not the window, so it never sits on the sidebar
+  // or the docked agent panel.
+  const left = bounds ? Math.round((bounds.left + bounds.right) / 2) : null;
   return (
     <div
+      ref={cardRef}
       {...dataAttrs(v)} {...common}
+      data-place="sheet"
       role="dialog"
       aria-modal="false"
       aria-labelledby={h.titleId}
       aria-describedby={h.bodyId}
-      style={{ pointerEvents: "auto" }}
+      style={{ pointerEvents: "auto", ...(left !== null ? { left } : {}) }}
       className={cn(
         cardClass,
         "fixed z-[70]",
-        v.sheet ? cn("inset-x-4 max-h-[50dvh] overflow-y-auto", pos) : cn("left-1/2 w-[min(360px,calc(100vw-24px))] -translate-x-1/2", pos),
+        v.sheet ? cn("inset-x-4 max-h-[50dvh] overflow-y-auto", pos) : cn("w-[min(360px,calc(100vw-24px))] -translate-x-1/2", left === null && "left-1/2", pos),
       )}
     >
       {children}

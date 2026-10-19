@@ -50,6 +50,8 @@ export interface TourStep {
   fallbacks?: string[];
   /** Dashed secondary marks. */
   secondary?: string[];
+  /** What the copy names next to the target: the card keeps clear of it when it can (secondary marks count too). */
+  avoid?: string[];
   /** Controls the tour clicks before it rings the target (a tab, a flag, a row). The first match of each list is used. */
   prepare?: string[][];
   title: string;
@@ -71,6 +73,8 @@ export interface TourStep {
   nav?: boolean;
   /** Where the card docks on a phone, when the default (top for agent steps, else away from the target) hides what the copy names. */
   sheet?: "top" | "bottom";
+  /** The popover the step opens drops below the target: scroll the target low enough for the card to fit above it. */
+  cardAbove?: boolean;
   /** How the target scrolls into view (default center); "start" for a tall target whose head is what matters. */
   block?: ScrollLogicalPosition;
   /** An element inside the target to scroll into view sideways (a column in a table that scrolls on a phone). */
@@ -138,12 +142,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "audit", n: 9, route: { kind: "path", path: "/app/audit" }, target: '[data-tour~="audit-chain"]',
     secondary: ['[data-tour~="audit-undo"][data-seq="{rateSeq}"]'],
+    // The newest rows: the rate change and the row Try Undo acts on.
+    avoid: ['[data-tour~="audit-row"][data-seq="{rateSeq}"]', '[data-tour~="audit-row"]:nth-child(-n+2)'],
     title: "Every change, on the record",
     body: "Each row is hash-chained to the one before, and the chain verifies end to end. Undo appends a reversing row; the original stays put.",
     action: "next", seconds: 9,
   },
   {
-    id: "payroll-flags", n: 10, route: { kind: "draft" }, target: '[data-tour~="payroll-needs-review"]', dock: "side",
+    id: "payroll-flags", n: 10, route: { kind: "draft" }, target: '[data-tour~="payroll-needs-review"]', dock: "side", cardAbove: true,
     prepare: [['[data-tour~="payroll-flag"][data-severity="block"]', '[data-tour~="payroll-flag"]']],
     title: "Checked before it is paid",
     body: "Before each payroll, fixed rules flag anything unusual: a new hire, a pay change, an hours spike, a missing bank account. Open a flag to read why it fired and what the agent made of it.",
@@ -187,6 +193,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   },
   {
     id: "portal", n: 16, route: { kind: "portal" }, target: '[data-tour~="portal-progress"]', fallbacks: ['[data-tour~="portal-checklist"]'], block: "start",
+    avoid: ['[data-tour~="portal-checklist"] ol'],
     title: "What the new hire sees",
     body: "{hireName} signs by typing their name, then works through the W-4, state form, direct deposit, I-9 and benefits. Each item checks off as it is done.",
     action: "next", seconds: 9,
@@ -216,6 +223,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   },
   {
     id: "permissions", n: 20, route: { kind: "path", path: "/app/settings/permissions" }, target: '[data-tour~="permissions-agent-row"]', fallbacks: ['[data-tour~="permissions-matrix"]'],
+    avoid: ['[data-tour~="permissions-matrix"]'],
     title: "Who can do what",
     body: "View, Edit and Approve per person. The agent never exceeds the person it acts for, and never approves.",
     action: "next", seconds: 6,

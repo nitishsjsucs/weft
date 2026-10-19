@@ -10,7 +10,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { getPrincipal, invalidate, rawFetch, setPrincipal } from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
 import { getBridge } from "./bridge";
-import { activate, closeAppLayers, isTypingTarget, reducedMotion, sleep, typeInto, waitForAny } from "./dom";
+import { activate, closeAppLayers, isTypingTarget, reducedMotion, scrollToView, scrollWithRoomAbove, sleep, typeInto, waitForAny } from "./dom";
 import { clearNavigation, clearTour, hasSeen, IDLE, loadTour, markNavigation, markSeen, preflightReasons, readPreflight, reduce, resetErrorText, restorePlan, saveTour, takeOwnNavigation } from "./engine";
 import {
   autoApproveAllowed, budgetHardMs, budgetSoftMs, fill, lingerMs, stepBody, stepIndex, targetCandidates, TOUR_CHART_PROMPT, TOUR_COPY, TOUR_PRINCIPAL, TOUR_STEPS,
@@ -58,6 +58,8 @@ interface Ui {
   /** Which selector the target matched: the step's own, or one of its fallbacks (data-target-match, for the specs). */
   match: "primary" | "fallback" | null;
   secondary: Element[];
+  /** The step's avoid selectors, filled from the memo: what the card keeps clear of, besides the secondary marks. */
+  avoid: string[];
   status: { text: string; tone: StatusTone } | null;
   note: string | null;
   body: string | null;
@@ -67,7 +69,7 @@ interface Ui {
   link: { href: string; label: string } | null;
   offPage: boolean;
 }
-const freshUi = (stepId: string): Ui => ({ stepId, ready: false, target: null, found: false, match: null, secondary: [], status: null, note: null, body: null, nextEnabled: false, mode: "next", extra: [], link: null, offPage: false });
+const freshUi = (stepId: string): Ui => ({ stepId, ready: false, target: null, found: false, match: null, secondary: [], avoid: [], status: null, note: null, body: null, nextEnabled: false, mode: "next", extra: [], link: null, offPage: false });
 
 const RUN_TERMINAL_BAD = new Set(["failed", "refused", "escalated", "expired", "cancelled"]);
 
@@ -330,7 +332,9 @@ export function TourProvider({ children }: { children: ReactNode }) {
       const hit = step.target ? await waitForAny(cands, 5_000, signal) : null;
       if (signal.aborted) return;
       if (hit) {
-        hit.el.scrollIntoView({ block: step.block ?? "center", behavior: motion });
+        // Card height (about 220 px) plus its gap and padding, so it fits between the pane's top and the ring.
+        if (step.cardAbove) scrollWithRoomAbove(hit.el, 268, motion);
+        else scrollToView(hit.el, step.block ?? "center", motion);
         ring(hit.el);
         // A column the copy names, inside a table that scrolls sideways on a phone (the rate's notice source).
         const inner = step.reveal ? hit.el.querySelector<HTMLElement>(step.reveal) : null;
@@ -343,9 +347,10 @@ export function TourProvider({ children }: { children: ReactNode }) {
         if (!f) continue;
         try { const el = document.querySelector(f); if (el && el !== hit?.el) secondary.push(el); } catch { /* bad selector */ }
       }
+      const avoid = (step.avoid ?? []).map((sel) => fill(sel, memo())).filter((x): x is string => !!x);
       const missing = !!step.target && !hit;
       const body = step.id === "rate-live" && !memo().approved ? TOUR_COPY.rateNotApproved : null;
-      setUi({ ready: true, target: hit?.el ?? null, found: !!hit || step.target === null, match: hit ? (hit.selector === cands[0] ? "primary" : "fallback") : null, secondary, note: missing ? TOUR_COPY.missing : null, body, nextEnabled: true, mode: step.action === "finish" ? "finish" : "next" });
+      setUi({ ready: true, target: hit?.el ?? null, found: !!hit || step.target === null, match: hit ? (hit.selector === cands[0] ? "primary" : "fallback") : null, secondary, avoid, note: missing ? TOUR_COPY.missing : null, body, nextEnabled: true, mode: step.action === "finish" ? "finish" : "next" });
       setAnnounce(`Step ${index + 1} of ${TOUR_STEPS.length}: ${step.title}`);
       // The card focuses its title (tour-card.tsx), except on steps that open an app popover or drawer: moving focus
       // out of the flag popover would close it (Radix dismisses on focus outside); the live region still announces.
@@ -376,9 +381,9 @@ export function TourProvider({ children }: { children: ReactNode }) {
                 setUi({ extra: [] });
                 void waitForAny([`[data-tour~="audit-row"][data-reverses="${seq}"]`], 8_000, signal).then((row) => {
                   if (!row || signal.aborted) return;
-                  row.el.scrollIntoView({ block: "center", behavior: motion });
+                  scrollToView(row.el, "center", motion);
                   ring(row.el);
-                  setUi({ target: row.el, found: true, secondary: [] });
+                  setUi({ target: row.el, found: true, secondary: [], avoid: [] });
                 });
               },
             }],
@@ -654,7 +659,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       label: primaryLabel, kbd: primaryLabel === "Next",
       onClick: () => { if (ui.offPage) setNonce((n) => n + 1); else if (ui.mode === "finish") finish(); else primaryRef.current?.(); },
     },
-    secondary: ui.offPage ? [] : ui.extra, link: ui.offPage ? null : ui.link, offPage: ui.offPage, sheet,
+    secondary: ui.offPage ? [] : ui.extra, link: ui.offPage ? null : ui.link, offPage: ui.offPage, sheet, avoid: ui.avoid, marks: ui.secondary,
   };
 
   return (
