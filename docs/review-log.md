@@ -1,5 +1,28 @@
 # Review log
 
+## Demo fix round 2, integration (2026-10-19)
+
+`dp/integration` merges the six round 2 branches in this order: copy-and-text, layout-and-ui, agent-runtime,
+data-and-seed, privacy, tracing-and-mcp. Ten files conflicted between copy-and-text and layout-and-ui, and one
+(the person page) between them and privacy. Each conflict keeps both sides:
+
+- Inbox card diff: the idle money row ("not scheduled" to "not paid") and any row whose before and after read the same
+  are both dropped.
+- Benefits plans: the stacked phone layout with the pretax codes in words and the 401(k) match in the Employer column.
+- Permissions matrix: the pinned, wrapping person column with overrides under the role, and roles in words.
+- Simulators: stacked tables, no id tooltips; the chat poster stays the persona select ("Post as"), defaulting to
+  `usr_theo`, so the docs and GP22 keep "Post as".
+- Chart note: the tick's asterisk note ("Oct* counts Oct 2026 to date, through Oct 26."); scenario 7 quotes it.
+- Person page: a manager's directory note names only the areas her grants share, with the manager in words.
+
+On the merged rich world the payroll cost range total is $5,302,554.78 (the leavers' imported benefits added
+$2,500.68); Sep 2026, Oct 2026 to date and the DE 2088 card figures are unchanged. Scenario 7 is updated.
+
+All on the merged branch: `pnpm test` (244 files, 1600 tests), typecheck, build, `pnpm e2e` (53 passed, 1 skipped),
+`pnpm e2e:rich` (6 passed), `pnpm e2e:tour` (31 passed; the scripted tour took 138 s, step 6 11 s), `pnpm demo`,
+lint:prose, lint:brand and brand:overlap. `pnpm eval:suite digests --split all`: 110 of 110 worlds reproduce, so
+nothing was re-pinned.
+
 ## Demo fix round 2, privacy: benefits, contractor pay, the compliance calendar, hand-offs and simulator state (2026-10-19)
 
 Found by the round 2 demo audit, viewing as Imani Ferreira (demo) (role manager, payroll, benefits, tax and IT: none):
