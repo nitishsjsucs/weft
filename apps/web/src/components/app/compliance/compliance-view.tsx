@@ -8,7 +8,7 @@ import { errorText, useGet } from "@/lib/api/hooks";
 import { ACCOUNT_TYPE, AGENCY, fmtDate, fmtDateTime, longDate, statusLabel } from "../format";
 import { PageHeader } from "../page";
 import { refHref } from "../refs";
-import { auditLabel, noticeName } from "../copy";
+import { auditLabel, noticeName, quarantinedLines } from "../copy";
 import { CalendarPanel, FilingsPanel, HandoffsPanel } from "./w4-calendar";
 import { NoticeUpload, TrainingPanel } from "./w4-upload-training";
 
@@ -16,6 +16,7 @@ const STATUS_TONE: Record<TaxAccount["status"], "green" | "amber" | "gray" | "re
 const NOTICE_TONE: Record<Notice["status"], "gray" | "blue" | "amber" | "green" | "red"> = { new: "blue", in_review: "blue", proposed: "amber", resolved: "green", escalated: "red" };
 export const ratePct = (r: string) => `${(Number(r) * 100).toFixed(r.length > 6 ? 3 : 2).replace(/0+$/, "").replace(/\.$/, "")}%`;
 const human = (s: string) => statusLabel(s);
+const quarantined = quarantinedLines;
 
 function currentRate(rates: EmployerRate[], j: string, code: string): EmployerRate | undefined {
   return rates.filter((r) => r.jurisdiction === j && r.code === code && r.supersededActionSeq === null).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
@@ -56,6 +57,13 @@ function NoticeDetail({ id, onClose }: { id: string | null; onClose: () => void 
             <pre data-testid="notice-body" className="max-h-80 overflow-auto rounded-lg border border-[var(--app-border)] bg-gray-2 p-3 font-mono text-0 leading-4 break-words whitespace-pre-wrap">{d.bodyText ?? "(no text)"}</pre>
             <p className="mt-1 text-0 text-gray-10">Shown as plain text. Notice text is untrusted: runs that read it are marked tainted.</p>
           </section>
+          {quarantined(d.bodyText).length ? (
+            <details data-testid="notice-quarantined" open className="rounded-lg bg-amber-3 px-3 py-2 text-[13px] text-amber-11">
+              <summary className="cursor-pointer font-medium">Quarantined text</summary>
+              <p className="mt-1">These lines speak to an AI system, not to the employer. The agent works from the extracted fields below; the notice&apos;s text reaches a run only when the run asks for the full notice, and that run is then marked untrusted and can only propose.</p>
+              <ul className="mt-1.5 flex flex-col gap-1">{quarantined(d.bodyText).map((l, i) => <li key={i} className="rounded-md bg-card/60 px-2 py-1 font-mono text-0 break-words text-gray-12">{l}</li>)}</ul>
+            </details>
+          ) : null}
           {d.extracted ? (
             <section>
               <h3 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Extracted fields (deterministic parser)</h3>

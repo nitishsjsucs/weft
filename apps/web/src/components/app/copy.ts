@@ -241,3 +241,10 @@ export function splitChecks<R extends { label: string; before: string; after: st
   }
   return { rows, checks };
 }
+
+/** A line of untrusted text that addresses an AI system rather than the employer ("Ignore prior instructions ..."). */
+const INSTRUCTION = /\b(?:ignore|disregard)\b[^.\n]*\binstructions?\b|\bsystem override\b|\bnote to the (?:payroll )?(?:assistant|agent|ai)\b|\b(?:ai|payroll) assistant\b/i;
+/** The lines of a notice's text the notice drawer shows as quarantined. */
+export function quarantinedLines(body: string | null | undefined): string[] {
+  return (body ?? "").split(/\n/).map((l) => l.trim()).filter((l) => l && INSTRUCTION.test(l));
+}
