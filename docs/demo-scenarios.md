@@ -4,7 +4,7 @@ Live behavior checked on 2026-10-18 at main `8e626f0` on the base world, live on
 
 ## Before you start
 
-1. Phoenix: `pnpm phoenix:up` (Phoenix 20.23.0 on http://127.0.0.1:6206). It also prints `Phoenix model pricing from cost.ts: ...`: Phoenix then prices runs as Weft's ledger does.
+1. Phoenix: `pnpm phoenix:up` (Phoenix 20.23.0 on http://127.0.0.1:6206). It also prints `Phoenix model pricing from cost.ts: ...`: Phoenix then prices runs as Weft's ledger does. Then it prints three links into project weft-demo (creating the project empty if no run has reached it yet): cost, traces and metrics. Scenario 8 uses them; `pnpm demo:scenario trace-mcp` prints them again.
 2. Start the world with a frozen clock, so no routine fires on its own mid-demo:
 
 ```sh
@@ -135,8 +135,8 @@ Say: "Every number must appear in a tool result or the answer is rejected and re
 Reset: `pnpm demo:scenario trace-mcp`, then run scenario 1 up to the two Approval needed cards (Deliver CA EDD DE 2088). The MCP calls below read that notice and its card.
 
 Phoenix:
-1. http://127.0.0.1:6206, Tracing, project weft-demo, Traces tab: open the latest agent.run: admission, model (llm.responses with tokens and cost), assemble (memory.recall), dispatch with one span per tool call. The traces are there only when the world was started with the command in Before you start (`WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=weft-demo`); without `WEFT_TRACE` nothing is exported, and without the project name the runs land in the default project `weft`.
-2. Cost: on the Spans tab set the filter to `span_kind == 'LLM'`. The Stats panel's Total Cost is then the project's model spend. The tab opens filtered to root spans (`parent_id is None`), and a Weft root (agent.run) carries no tokens, so that default view reads $0. The Metrics tab charts the cost per day and by model. Phoenix prints any amount under a cent as `<$0.01`; one DE 2088 run is $0.0012 to $0.0013. `pnpm phoenix:up` loads Weft's prices into Phoenix, so its figures match the ledger (docs/telemetry.md).
+1. The traces link `pnpm demo:scenario trace-mcp` printed (http://127.0.0.1:6206, Tracing, project weft-demo, Traces tab): open the latest agent.run: admission, model (llm.responses with tokens and cost), assemble (memory.recall), dispatch with one span per tool call. The traces are there only when the world was started with the command in Before you start (`WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=weft-demo`); without `WEFT_TRACE` nothing is exported, and without the project name the runs land in the default project `weft`.
+2. Cost: open the cost link it printed. It is the Spans tab already filtered to `span_kind == 'LLM'` over the last 7 days, and the Stats panel's Total Cost is the project's model spend. Do not land on the project from the Projects list: Phoenix opens a project's Spans tab filtered to root spans (`parent_id is None`), and a Weft root (agent.run) carries no tokens, so that view reads $0. The metrics link charts the cost per day and by model. Phoenix prints any amount under a cent as `<$0.01`; one DE 2088 run is $0.0012 to $0.0013. `pnpm phoenix:up` loads Weft's prices into Phoenix, so its figures match the ledger (docs/telemetry.md).
 
 MCP client: `pnpm mcp:config` prints the config for your checkout with the paths filled in. Paste it into Claude Desktop (Settings, Developer, Edit Config, `claude_desktop_config.json`) or pass the file to the MCP Inspector (`--config`). It has this shape:
 

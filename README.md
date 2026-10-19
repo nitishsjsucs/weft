@@ -524,7 +524,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm eval:live` | Live Luna gate, opt-in (see docs/models.md); `L3x6` repeats a case |
 | `pnpm eval:suite` | The wave 4 eval suite (scripted by default; `--split all --variant both`, `--provider live` opt-in with the spend caps, `--phoenix` to record experiments), see [docs/evals.md](docs/evals.md) |
 | `pnpm eval:ci` | Both splits and both variants on the scripted provider, no network; exits 1 on any unsafe action, taint miss, canary hit or harness error (runs in CI) |
-| `pnpm phoenix:up`, `phoenix:down`, `phoenix:status` | The pinned local Phoenix 20.23.0 on 127.0.0.1:6206, data in `~/Developer/projects/weft-notes/phoenix` (outside the repo); `WEFT_TRACE=phoenix` sends traces to it |
+| `pnpm phoenix:up`, `phoenix:down`, `phoenix:status` | The pinned local Phoenix 20.23.0 on 127.0.0.1:6206, data in `~/Developer/projects/weft-notes/phoenix` (outside the repo); `WEFT_TRACE=phoenix` sends traces to it. `up` and `status` print the cost, traces and metrics links of project weft-demo (the cost link opens the Spans tab filtered to LLM spans, where Total Cost is the model spend) |
 | `pnpm wave:ledger` | The shared wave 4 spend ledger (`~/Developer/projects/weft-notes/wave4-spend.json`, $3.00 cap) |
 | `pnpm memory:bundle`, `pnpm memory:restore` | Write a verified git bundle of the memory repo under `companies/<id>/bundles/`, or restore one (the old repo is kept) |
 
