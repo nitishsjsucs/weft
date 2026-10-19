@@ -37,7 +37,7 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
       {w.run?.tainted ? (
         <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" />This run read untrusted content: {w.run.taintedBy ?? "unknown source"}</div>
       ) : null}
-      <ul className="flex flex-col gap-1">
+      <ul className="flex flex-col gap-1" data-tour="agent-tool-lines">
         {chips.map((s) => {
           const tone = outcomeTone(s.outcome);
           return (

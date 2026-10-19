@@ -8,6 +8,7 @@ test("autoplay finishes the tour by itself within 180 s", async ({ page, weft, w
   const costs = () => weft.get<{ liveSpentUsd: number; daySpentUsd: number; provider: { model: string; live: boolean } }>("/v1/agent/costs");
   const before = await costs();
   const executedBefore = new Set((await weft.proposals("executed")).map((p) => p.id));
+  const runsBefore = new Set((await weft.agentRuns()).map((r) => r.id));
   await page.goto("/app?tour=1&autoplay=1");
   const skip = page.locator("[data-tour-reset-skip]");
   await expect(skip.or(readyCard(page, "welcome")).first()).toBeVisible({ timeout: 20_000 });
@@ -46,5 +47,8 @@ test("autoplay finishes the tour by itself within 180 s", async ({ page, weft, w
   expect(seen[seen.length - 1]).toBe("finish");
   const executed = (await weft.proposals("executed")).filter((p) => !executedBefore.has(p.id));
   expect(executed.map((p) => p.command), "only the rate change executes").toEqual(["tax.update_rate"]);
+  // Exactly one chat question (the chart): the ask step must never send a second, cut-off prompt.
+  const chats = (await weft.agentRuns()).filter((r) => !runsBefore.has(r.id) && r.trigger === "chat");
+  expect(chats.length, "one chat run, for the chart").toBe(1);
   expect(consoleErrors, "no console errors").toEqual([]);
 });

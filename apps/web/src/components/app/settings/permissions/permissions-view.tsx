@@ -85,7 +85,7 @@ export function PermissionsView() {
       <CardHeading icon={<ShieldCheck />}>Access by domain</CardHeading>
       <Card className="mb-6 p-1">
         <div className="overflow-x-auto">
-          <Table data-testid={T.matrix} data-rows={rows.length} className="min-w-full">
+          <Table data-testid={T.matrix} data-tour="permissions-matrix" data-count={rows.length} data-rows={rows.length} className="min-w-full">
             <THead>
               <TR>
                 <TH scope="col">Person</TH>
@@ -95,7 +95,7 @@ export function PermissionsView() {
             </THead>
             <TBody>
               {rows.map((r) => (
-                <TR key={r.principalId} data-testid={T.matrixRow(r.principalId)}>
+                <TR key={r.principalId} data-testid={T.matrixRow(r.principalId)} data-tour={r.role === "agent" ? "permissions-agent-row" : undefined}>
                   <TH scope="row" className="whitespace-nowrap text-left font-normal">
                     <span className="block font-medium text-gray-12">{r.name}</span>
                     <span className="block text-1 text-gray-10">{r.role === "agent" ? "The agent (every run)" : r.role.replace(/_/g, " ")}</span>

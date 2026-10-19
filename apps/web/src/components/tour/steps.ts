@@ -8,6 +8,8 @@ export const TOUR_BUDGET_MS = 180_000;
 export const TOUR_CHART_PROMPT = "Show payroll cost by month";
 /** The DE 2088 scenario the tour delivers (3.4% to 1.5%, from the simulator). */
 export const TOUR_NOTICE_SCENARIO = "ca_de2088_rate_change";
+/** The person page the tour opens: Lena Brooks (demo), whose raise flags GROSS_CHANGE on the Oct 30 draft. */
+export const TOUR_PERSON = "wrk_0026";
 /** The persona the tour views as (approve and undo need an admin); restored on exit. */
 export const TOUR_PRINCIPAL = "usr_dana";
 export const TOUR_STATE_KEY = "weft.tour.v1";
@@ -25,6 +27,8 @@ export interface TourMemo {
   noticeRunId?: string | null;
   delivered?: boolean;
   rateProposalId?: string | null;
+  /** True only when rateProposalId came from this session's own notice run (autoplay may approve only that one). */
+  rateProposalOwn?: boolean;
   approved?: boolean;
   approveError?: string | null;
   rateSeq?: number | null;
@@ -65,25 +69,31 @@ export interface TourStep {
   dock?: "side";
   /** Below 1024 px the bridge opens the nav drawer before locating the target. */
   nav?: boolean;
+  /** Where the card docks on a phone, when the default (top for agent steps, else away from the target) hides what the copy names. */
+  sheet?: "top" | "bottom";
+  /** How the target scrolls into view (default center); "start" for a tall target whose head is what matters. */
+  block?: ScrollLogicalPosition;
+  /** An element inside the target to scroll into view sideways (a column in a table that scrolls on a phone). */
+  reveal?: string;
 }
 
 export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "welcome", n: 1, route: { kind: "path", path: "/app" }, target: null,
     title: "Welcome to Weft",
-    body: "This is Larkspur Robotics (demo), a made-up company whose agencies, bank and carriers are all simulators. In three minutes you will watch the agent work a tax notice from start to finish, then take a fast lap of the rest.",
+    body: "Larkspur Robotics (demo) is a made-up company on simulators. Watch the agent handle a tax notice, then take a fast lap.",
     action: "next", seconds: 6,
   },
   {
     id: "env-pill", n: 2, route: { kind: "path", path: "/app" }, target: '[data-tour~="env-pill"]',
     title: "Your demo controls",
-    body: "The model the agent runs on, the simulated clock every date in Weft reads, and the person you are viewing as. The tour leaves the clock where it is.",
-    action: "next", seconds: 8,
+    body: "The agent's model, the simulated clock every date reads, and who you are viewing as. The tour leaves the clock alone.",
+    action: "next", seconds: 6,
   },
   {
     id: "agent-panel", n: 3, route: { kind: "path", path: "/app" }, target: '[data-tour~="agent-panel"]', agent: true,
     title: "Meet the agent",
-    body: "It works through the same tools you click, under your permissions. Anything that touches money, records or the outside world becomes a proposal for a person.",
+    body: "It uses the tools you click, under your permissions. Anything touching money or records waits for a person.",
     action: "next", seconds: 6,
   },
   {
@@ -94,14 +104,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "click", proxyLabel: "Deliver notice", seconds: 6, hardMs: 8_000,
   },
   {
-    id: "agent-run", n: 5, route: { kind: "same" }, target: '[data-tour~="agent-run"][data-run-id="{noticeRunId}"]', agent: true,
+    id: "agent-run", n: 5, route: { kind: "same" }, target: '[data-tour~="agent-run"][data-run-id="{noticeRunId}"]', agent: true, sheet: "bottom",
     title: "The agent at work",
     body: "Each line is a tool call: it read the notice, checked the current rate and drafted a reply. The rate change and the filing stop here and wait for you.",
     action: "wait-run", seconds: 10, softMs: 12_000, hardMs: 20_000,
   },
   {
     id: "inbox-proposal", n: 6, route: { kind: "path", path: "/app/inbox" },
-    target: '[data-tour~="inbox-card"][data-proposal-id="{rateProposalId}"]',
+    target: '[data-tour~="inbox-card"][data-proposal-id="{rateProposalId}"]', sheet: "bottom", block: "start",
     fallbacks: ['[data-tour~="inbox-card"][data-status="pending"][data-has-diff="true"]', '[data-tour~="inbox-card"][data-status="pending"]'],
     secondary: ['[data-tour~="inbox-card"][data-proposal-id="{rateProposalId}"] [data-tour~="proposal-risk"]', '[data-tour~="inbox-card"][data-proposal-id="{rateProposalId}"] [data-tour~="proposal-diff"]', '[data-tour~="inbox-card"][data-proposal-id="{rateProposalId}"] [data-tour~="proposal-evidence"]'],
     title: "One proposal, all the facts",
@@ -119,46 +129,42 @@ export const TOUR_STEPS: readonly TourStep[] = [
     prepare: [['[data-tour~="compliance-tab"][data-tab="rates"]']],
     target: '[data-tour~="rate-row"][data-jurisdiction="CA"][data-code="sui"][data-current="true"][data-source^="notice:"]',
     fallbacks: ['[data-tour~="rate-row"][data-jurisdiction="CA"][data-code="sui"][data-current="true"]'],
+    secondary: ['[data-tour~="compliance-tab"][data-tab="calendar"]'],
+    reveal: '[data-tour~="rate-source"]',
     title: "The new rate is live",
-    body: "California SUI now reads 1.5% from January 1, with the notice recorded as its source. The next payroll preview already uses it.",
-    action: "next", seconds: 7,
+    body: "California SUI now reads 1.5% from January 1, sourced to the notice. The Calendar tab tracks every deposit and filing due.",
+    action: "next", seconds: 8,
   },
   {
-    id: "calendar", n: 9, route: { kind: "same" },
-    prepare: [['[data-tour~="compliance-tab"][data-tab="calendar"]']],
-    target: '[data-tour~="compliance-calendar"]',
-    title: "Nothing slips",
-    body: "Tax deposits, quarterly filings, notice replies and required training, each due on the simulated clock with reminders before the date.",
-    action: "next", seconds: 6,
-  },
-  {
-    id: "audit", n: 10, route: { kind: "path", path: "/app/audit" }, target: '[data-tour~="audit-chain"]',
+    id: "audit", n: 9, route: { kind: "path", path: "/app/audit" }, target: '[data-tour~="audit-chain"]',
     secondary: ['[data-tour~="audit-undo"][data-seq="{rateSeq}"]'],
     title: "Every change, on the record",
     body: "Each row is hash-chained to the one before, and the chain verifies end to end. Undo appends a reversing row; the original stays put.",
     action: "next", seconds: 9,
   },
   {
-    id: "payroll-flags", n: 11, route: { kind: "draft" }, target: '[data-tour~="payroll-needs-review"]', dock: "side",
+    id: "payroll-flags", n: 10, route: { kind: "draft" }, target: '[data-tour~="payroll-needs-review"]', dock: "side",
     prepare: [['[data-tour~="payroll-flag"][data-severity="block"]', '[data-tour~="payroll-flag"]']],
     title: "Checked before it is paid",
     body: "Before each payroll, fixed rules flag anything unusual: a new hire, a pay change, an hours spike, a missing bank account. Open a flag to read why it fired and what the agent made of it.",
     action: "next", seconds: 11,
   },
   {
-    id: "ask-chart", n: 12, route: { kind: "same" }, target: '[data-tour~="agent-composer"]', agent: true,
+    id: "ask-chart", n: 11, route: { kind: "same" }, target: '[data-tour~="agent-composer"]', agent: true,
     title: "Ask in plain words",
     body: "The answer comes from the reports tool, not from memory, and arrives as a chart with the table one click away.",
     action: "ask", proxyLabel: "Ask", seconds: 11, softMs: 8_000, hardMs: 15_000,
   },
   {
-    id: "products-nav", n: 13, route: { kind: "same" }, target: '[data-tour~="nav-group"][data-group="Products"]', nav: true,
-    title: "The rest of the house",
-    body: "Benefits, IT and Contractors run against carrier, identity, device and payment simulators. People, Offboarding, Reports and Permissions are each a click away.",
-    action: "next", seconds: 5,
+    id: "person", n: 12, route: { kind: "path", path: `/app/people/${TOUR_PERSON}` },
+    prepare: [['[data-tour~="person-tab"][data-tab="pay"]']],
+    target: '[data-tour~="person-tabs"]', secondary: ['[data-tour~="person-pay"]'], block: "start",
+    title: "One record per person",
+    body: "Pay history, benefits, IT accounts, time off and documents sit on one page, each a tab.",
+    action: "next", seconds: 6,
   },
   {
-    id: "expenses", n: 14, route: { kind: "path", path: "/app/expenses" }, dock: "side",
+    id: "expenses", n: 13, route: { kind: "path", path: "/app/expenses" }, dock: "side",
     prepare: [['[data-tour~="expense-row"][data-band="needs_review"][data-checks="red"]', '[data-tour~="expense-row"][data-band="needs_review"][data-checks="amber"]', '[data-tour~="expense-row"][data-band="needs_review"]']],
     target: '[data-tour~="expense-checks"]',
     title: "Expenses, one claim at a time",
@@ -166,7 +172,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "next", seconds: 9,
   },
   {
-    id: "time-off", n: 15, route: { kind: "path", path: "/app/time-off" },
+    id: "time-off", n: 14, route: { kind: "path", path: "/app/time-off" },
     target: '[data-tour~="time-off-request"][data-checks~="COVERAGE_CONFLICT"]',
     fallbacks: ['[data-tour~="time-off-request"][data-status="pending"]'],
     title: "Time off with context",
@@ -174,20 +180,19 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "next", seconds: 8,
   },
   {
-    id: "hiring", n: 16, route: { kind: "path", path: "/app/hiring" }, target: '[data-tour~="hiring-offers"]',
-    secondary: ['[data-tour~="hiring-outbox"]'],
+    id: "hiring", n: 15, route: { kind: "path", path: "/app/hiring" }, target: '[data-tour~="hiring-offer"]', fallbacks: ['[data-tour~="hiring-offers"]'],
     title: "From offer to first day",
-    body: "Offers go out with a portal invite through the email simulator. Once signed, onboarding becomes a checklist the new hire works through.",
+    body: "Offers go out with a portal invite. Once signed, onboarding becomes the new hire's checklist.",
     action: "next", seconds: 6,
   },
   {
-    id: "portal", n: 17, route: { kind: "portal" }, target: '[data-tour~="portal-checklist"]',
+    id: "portal", n: 16, route: { kind: "portal" }, target: '[data-tour~="portal-progress"]', fallbacks: ['[data-tour~="portal-checklist"]'], block: "start",
     title: "What the new hire sees",
     body: "{hireName} signs by typing their name, then works through the W-4, state form, direct deposit, I-9 and benefits. Each item checks off as it is done.",
     action: "next", seconds: 9,
   },
   {
-    id: "memory", n: 18, route: { kind: "path", path: "/app/memory#knowledge%2Fprocedures%2Fstate-sui-rate-notice.md" },
+    id: "memory", n: 17, route: { kind: "path", path: "/app/memory#knowledge%2Fprocedures%2Fstate-sui-rate-notice.md" },
     // The hash opens the procedure on a fresh load; the tree click opens it when the page was already showing another file.
     prepare: [['[data-tour~="memory-tree-file"][data-path="knowledge/procedures/state-sui-rate-notice.md"]']],
     target: '[data-tour~="memory-file"][data-path="knowledge/procedures/state-sui-rate-notice.md"]',
@@ -198,21 +203,27 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "next", seconds: 8,
   },
   {
-    id: "routines", n: 19, route: { kind: "path", path: "/app/routines" }, target: '[data-tour~="routine-gallery"]',
+    id: "routines", n: 18, route: { kind: "path", path: "/app/routines" }, target: '[data-tour~="routine-gallery"]', block: "start",
     title: "Work that runs itself",
-    body: "Routines run on a schedule or an event, like the notice handler you just watched. Cheap checks decide first whether a model is needed at all.",
+    body: "Routines run on a schedule or an event. Cheap checks decide first whether a model is needed.",
     action: "next", seconds: 6,
   },
   {
-    id: "integrations", n: 20, route: { kind: "path", path: "/app/integrations" }, target: '[data-tour~="integrations-list"]',
-    title: "Plugs into the tools you have",
-    body: "Greenhouse, Workday, Checkr, HireRight and DocuSign each run as a simulator until you add credentials. Weft never signs up for a vendor on your behalf.",
+    id: "integrations", n: 19, route: { kind: "path", path: "/app/integrations" }, target: '[data-tour~="integration-card"]', fallbacks: ['[data-tour~="integrations-list"]'],
+    title: "Plugs into your tools",
+    body: "Greenhouse, Workday, Checkr, HireRight and DocuSign run as simulators until you add credentials.",
+    action: "next", seconds: 6,
+  },
+  {
+    id: "permissions", n: 20, route: { kind: "path", path: "/app/settings/permissions" }, target: '[data-tour~="permissions-agent-row"]', fallbacks: ['[data-tour~="permissions-matrix"]'],
+    title: "Who can do what",
+    body: "View, Edit and Approve per person. The agent never exceeds the person it acts for, and never approves.",
     action: "next", seconds: 6,
   },
   {
     id: "finish", n: 21, route: { kind: "same" }, target: null,
     title: "Yours to run",
-    body: "Weft is Apache-2.0 and runs on a laptop. MCP clients get the same tools through apps/mcp, and with WEFT_TRACE=phoenix every agent run lands in a local Phoenix with secrets redacted.",
+    body: "Ask the agent anything from the panel, or replay the tour. Weft is Apache-2.0 and runs on a laptop.",
     action: "finish", seconds: 8,
   },
 ];
@@ -233,6 +244,7 @@ export const TOUR_COPY = {
   agentWaiting: "Waiting for you in the Inbox",
   agentDone: "Done",
   noPersona: "No new hire with an open checklist on this world, so this stop is skipped.",
+  approveYourself: "Autoplay only approves the rate change this tour's own notice produced. Approve this one yourself, or go on.",
 } as const;
 
 export const TOUR_RESET_COPY = {
@@ -247,6 +259,24 @@ export const TOUR_RESET_COPY = {
 } as const;
 
 export const stepIndex = (id: string): number => TOUR_STEPS.findIndex((s) => s.id === id);
+
+/**
+ * Whether autoplay may click Approve: only for the proposal this session's own notice run made. A deep link
+ * (?tour=approve&autoplay=1), a delivery that timed out, or a stale pending card from an earlier session never
+ * qualifies, so those wait for a person.
+ */
+export function autoApproveAllowed(memo: TourMemo): boolean {
+  return !!memo.noticeRunId && !!memo.rateProposalId && memo.rateProposalOwn === true && !memo.approved;
+}
+
+/**
+ * How long a finished agent result stays on screen under autoplay: the step's remaining seconds, at least `minMs`
+ * while the budget has room for it (never below 1.5 s).
+ */
+export function lingerMs(index: number, elapsedMs: number, dwellMs: number, minMs: number, steps: readonly TourStep[] = TOUR_STEPS): number {
+  const room = TOUR_BUDGET_MS - Math.max(0, elapsedMs) - plannedAfterMs(index, steps);
+  return Math.max(dwellMs, Math.min(minMs, Math.max(1_500, room)));
+}
 
 /** Planned seconds of every step after `index`, in ms. */
 export function plannedAfterMs(index: number, steps: readonly TourStep[] = TOUR_STEPS): number {

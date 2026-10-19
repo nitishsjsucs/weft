@@ -147,7 +147,7 @@ export function ComplianceView() {
                       <TD numeric>{ratePct(r.rate)}</TD>
                       <TD numeric>{r.wageBase.display}</TD>
                       <TD className="whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? ` to ${fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}` : " onward"}</TD>
-                      <TD className="font-mono text-1">{href ? <a href={href} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{r.source}</a> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">#{r.createdActionSeq}</Link> : null}</TD>
+                      <TD className="font-mono text-1" data-tour="rate-source">{href ? <a href={href} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{r.source}</a> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">#{r.createdActionSeq}</Link> : null}</TD>
                     </TR>
                   );
                 })}

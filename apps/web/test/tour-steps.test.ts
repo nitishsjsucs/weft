@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  budgetHardMs, budgetSoftMs, fill, plannedAfterMs, stepBody, targetCandidates, tourTokens, TOUR_BUDGET_MS, TOUR_CHART_PROMPT,
+  autoApproveAllowed, budgetHardMs, budgetSoftMs, fill, lingerMs, plannedAfterMs, stepBody, targetCandidates, tourTokens, TOUR_BUDGET_MS, TOUR_CHART_PROMPT,
   TOUR_COPY, TOUR_RESET_COPY, TOUR_STEPS,
 } from "../src/components/tour/steps";
 import { acceptHit, PRIMARY_GRACE_MS } from "../src/components/tour/dom";
@@ -47,6 +47,24 @@ describe("tour steps", () => {
       expect(sentences(s.body), s.id).toBeLessThanOrEqual(2);
     }
     for (const [k, v] of Object.entries(TOUR_COPY)) expect(sentences(v), k).toBeLessThanOrEqual(2);
+  });
+
+  it("paces every card at about 4 words a second or less (title and body against its seconds)", () => {
+    for (const s of TOUR_STEPS) {
+      const words = `${s.title} ${stepBody(s, { hireName: "Noor Castellanos (demo)" })}`.split(/\s+/).filter(Boolean).length;
+      expect(words / s.seconds, s.id).toBeLessThanOrEqual(4.2);
+    }
+  });
+
+  it("ends on a product takeaway, not developer setup", () => {
+    const finish = TOUR_STEPS[TOUR_STEPS.length - 1]!;
+    expect(finish.body).not.toMatch(/apps\/mcp|WEFT_|phoenix/i);
+  });
+
+  it("opens People, Permissions and the person record, not only a sidebar list of names", () => {
+    const paths = TOUR_STEPS.map((s) => (s.route.kind === "path" ? s.route.path : "")).join(" ");
+    expect(paths).toMatch(/\/app\/people\/wrk_/);
+    expect(paths).toContain("/app/settings/permissions");
   });
 
   it("uses no em or en dash anywhere in the tour copy or source", () => {
@@ -100,6 +118,25 @@ describe("budget-aware timeouts", () => {
       TOUR_STEPS.forEach((s, i) => { t += s.hardMs ? budgetHardMs(i, t) : s.seconds * 1000; });
       expect(t, `slack ${slack}`).toBeLessThanOrEqual(TOUR_BUDGET_MS);
     }
+  });
+});
+
+describe("autoplay safety", () => {
+  it("autoplay approves only the proposal this session's own notice run made", () => {
+    expect(autoApproveAllowed({ noticeRunId: "run_0031", rateProposalId: "prp_0040", rateProposalOwn: true })).toBe(true);
+    // A deep link (?tour=approve&autoplay=1) has no notice run of its own.
+    expect(autoApproveAllowed({ rateProposalId: "prp_0040", rateProposalOwn: true })).toBe(false);
+    expect(autoApproveAllowed({ noticeRunId: "", rateProposalId: "prp_0040" })).toBe(false);
+    // A stale pending card picked for display on step 6 is not the tour's own.
+    expect(autoApproveAllowed({ noticeRunId: "run_0031", rateProposalId: "prp_0007", rateProposalOwn: false })).toBe(false);
+    expect(autoApproveAllowed({ noticeRunId: "run_0031", rateProposalId: "prp_0040", rateProposalOwn: true, approved: true })).toBe(false);
+  });
+
+  it("keeps a finished agent result on screen for the step's seconds, at least a few seconds while the budget allows", () => {
+    const i = TOUR_STEPS.findIndex((s) => s.id === "agent-run");
+    expect(lingerMs(i, 20_000, 8_000, 4_000)).toBe(8_000);
+    expect(lingerMs(i, 20_000, 0, 4_000)).toBe(4_000);
+    expect(lingerMs(i, TOUR_BUDGET_MS, 0, 4_000)).toBe(1_500);
   });
 });
 

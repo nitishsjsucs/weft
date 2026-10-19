@@ -59,7 +59,7 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
   const [confirmVoid, setConfirmVoid] = useState(false);
   const err = send.error ?? voidIt.error;
   return (
-    <li data-testid={T.offerRow} data-offer={o.id} data-status={o.status} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
+    <li data-testid={T.offerRow} data-tour="hiring-offer" data-offer={o.id} data-status={o.status} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
       <div className="min-w-[200px] flex-1">
         <div className="font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
         <div className="text-gray-10">{o.title} · {o.workState} · {formatCents(o.baseCents)} · starts {fmtDate(o.startDate)}{o.expiresOn ? ` · open until ${fmtDate(o.expiresOn)}` : ""}</div>

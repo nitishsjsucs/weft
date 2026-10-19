@@ -85,7 +85,7 @@ export function PortalView() {
         </div>
         {closed ? <Card className="p-4"><p role="alert" className="text-2 text-amber-11">This offer is {view.offer!.status === "voided" ? "no longer active" : "past its expiry date"}. Reach out to the hiring team with any questions.</p></Card> : null}
         <div data-tour="portal-checklist" data-count={view.total} className="flex flex-col gap-6">
-        <Card className="p-4">
+        <Card className="p-4" data-tour="portal-progress" data-count={view.total}>
           <div className="flex items-center gap-3">
             <span data-testid={T.portalCounter} data-done={view.done} data-total={view.total} className="text-3 font-semibold">{view.done} of {view.total} done</span>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-a3"><div className="h-full rounded-full bg-gray-12 transition-[width]" style={{ width: `${pct}%` }} /></div>

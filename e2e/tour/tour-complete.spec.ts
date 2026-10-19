@@ -88,13 +88,23 @@ test("completes the whole tour on the scripted provider in 180 s or less", async
       }
       await expect(page.locator(`[data-tour-card][data-step="${nextId}"]`)).toBeVisible({ timeout: (step.hardMs ?? 8_000) + 5_000 });
     } else if (step.action === "wait-run") {
-      // Auto-advances once the run is waiting or done (or the budget-capped timeout passes).
-      await expect(page.locator(`[data-tour-card][data-step="${nextId}"]`)).toBeVisible({ timeout: (step.hardMs ?? 20_000) + 5_000 });
+      // Once the run is waiting or done the result stays on screen until the reader presses Next (no auto-advance
+      // with autoplay off).
+      const primary = readyCard(page, step.id).locator("[data-tour-primary]");
+      await expect(primary).toBeEnabled({ timeout: (step.hardMs ?? 20_000) + 5_000 });
+      await page.waitForTimeout(2_000);
+      await expect(readyCard(page, step.id), `${step.id} waits for Next`).toBeVisible();
+      await pressPrimary(page, step.id);
+      await expect(page.locator(`[data-tour-card][data-step="${nextId}"]`)).toBeVisible({ timeout: 5_000 });
     } else if (step.action === "ask" && found) {
       // The whole prompt, not a prefix: the tour types it a letter at a time.
       await expect(page.locator('[data-tour~="agent-composer"] textarea')).toHaveValue(TOUR_CHART_PROMPT, { timeout: 5_000 });
       await page.locator('[data-tour~="agent-send"]').click();
-      await expect(page.locator(`[data-tour-card][data-step="${nextId}"]`)).toBeVisible({ timeout: (step.hardMs ?? 15_000) + 5_000 });
+      await expect(readyCard(page, step.id).locator('[data-tour-status="done"], [data-tour-note]').first()).toBeVisible({ timeout: (step.hardMs ?? 15_000) + 5_000 });
+      await page.waitForTimeout(1_500);
+      await expect(readyCard(page, step.id), `${step.id} waits for Next`).toBeVisible();
+      await pressPrimary(page, step.id);
+      await expect(page.locator(`[data-tour-card][data-step="${nextId}"]`)).toBeVisible({ timeout: 5_000 });
     } else if (step.action === "finish") {
       await dwell();
       await pressPrimary(page, step.id);

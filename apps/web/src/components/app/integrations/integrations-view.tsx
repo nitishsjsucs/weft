@@ -50,7 +50,7 @@ function VendorCard({ card }: { card: IntegrationCard }) {
   const simulate = connected ? [] : SIMULATE[v] ?? [];
   const realNote = VENDOR_COPY_NOTE[v];
   return (
-    <Card data-testid={T.card(v)} data-mode={card.status.mode} className="flex flex-col gap-3 p-4">
+    <Card data-testid={T.card(v)} data-tour="integration-card" data-mode={card.status.mode} className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
         <div className="min-w-[7.5rem] shrink-0">
           <h2 className="text-3 font-medium">{card.title}</h2>

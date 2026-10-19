@@ -3,7 +3,8 @@
 // nothing unless a tour is active. engine.ts holds the state machine; this file runs each step: navigate, locate the
 // target, ring it, then wait for Next, a click's observed effect, or an agent run (soft and budget-capped hard
 // timeouts with fallback copy). It never moves the simulated clock and never approves anything but the one rate
-// change the person (or autoplay) approves on step 7.
+// change the person approves on step 7. Autoplay clicks Approve only for the proposal this session's own notice run
+// made (autoApproveAllowed); a deep link or a stale pending card waits for a person.
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getPrincipal, invalidate, rawFetch, setPrincipal } from "@/lib/api/hooks";
@@ -12,7 +13,7 @@ import { getBridge } from "./bridge";
 import { activate, closeAppLayers, isTypingTarget, reducedMotion, sleep, typeInto, waitForAny } from "./dom";
 import { clearNavigation, clearTour, hasSeen, IDLE, loadTour, markNavigation, markSeen, preflightReasons, readPreflight, reduce, resetErrorText, restorePlan, saveTour, takeOwnNavigation } from "./engine";
 import {
-  budgetHardMs, budgetSoftMs, fill, stepBody, stepIndex, targetCandidates, TOUR_CHART_PROMPT, TOUR_COPY, TOUR_PRINCIPAL, TOUR_STEPS,
+  autoApproveAllowed, budgetHardMs, budgetSoftMs, fill, lingerMs, stepBody, stepIndex, targetCandidates, TOUR_CHART_PROMPT, TOUR_COPY, TOUR_PRINCIPAL, TOUR_STEPS,
   type TourMemo, type TourStep,
 } from "./steps";
 import { TourCard, type CardView, type StatusTone } from "./tour-card";
@@ -83,6 +84,8 @@ function useMedia(q: string): boolean {
 }
 
 const pathOnly = (href: string) => href.split("#")[0]!.split("?")[0]!;
+/** The app shell scrolls inside its own panes; a scrollIntoView can still nudge the document, which clips the top bar. */
+const resetDocScroll = () => { try { if (window.location.pathname.startsWith("/app") && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0); } catch { /* no window */ } };
 const here = () => `${window.location.pathname}${window.location.search}`;
 
 export function TourProvider({ children }: { children: ReactNode }) {
@@ -239,8 +242,10 @@ export function TourProvider({ children }: { children: ReactNode }) {
       try {
         const props = await apiGet<{ data: { id: string; command: string | null; proposerRunId: string | null }[] }>("/v1/proposals?status=pending&limit=100");
         const rate = props.data.filter((p) => p.command === "tax.update_rate");
-        const mine = rate.find((p) => p.proposerRunId && p.proposerRunId === memo().noticeRunId) ?? rate[0];
-        patchMemo({ rateProposalId: mine?.id ?? null });
+        const mine = memo().noticeRunId ? rate.find((p) => p.proposerRunId === memo().noticeRunId) : undefined;
+        // Step 6 may show any pending rate card; only the one this session's notice run made counts as the tour's own.
+        const pick = mine ?? (step.id === "inbox-proposal" ? rate[0] : undefined);
+        patchMemo({ rateProposalId: pick?.id ?? null, rateProposalOwn: !!mine });
       } catch { /* the step falls back to any pending card */ }
     }
     if (step.id === "audit" && memo().rateProposalId && !memo().rateSeq) {
@@ -262,6 +267,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
     const motion: ScrollBehavior = reducedMotion() ? "auto" : "smooth";
     let described: { el: HTMLElement; prev: string | null } | null = null;
     setUiState(freshUi(step.id));
+    resetDocScroll();
     primaryRef.current = null;
     hover.current = { pointer: false, focus: false };
 
@@ -323,7 +329,14 @@ export function TourProvider({ children }: { children: ReactNode }) {
       const cands = targetCandidates(step, memo());
       const hit = step.target ? await waitForAny(cands, 5_000, signal) : null;
       if (signal.aborted) return;
-      if (hit) { hit.el.scrollIntoView({ block: "center", behavior: motion }); ring(hit.el); }
+      if (hit) {
+        hit.el.scrollIntoView({ block: step.block ?? "center", behavior: motion });
+        ring(hit.el);
+        // A column the copy names, inside a table that scrolls sideways on a phone (the rate's notice source).
+        const inner = step.reveal ? hit.el.querySelector<HTMLElement>(step.reveal) : null;
+        if (inner) window.setTimeout(() => inner.scrollIntoView({ block: "nearest", inline: "nearest", behavior: motion }), 350);
+        window.setTimeout(resetDocScroll, 450);
+      }
       const secondary: Element[] = [];
       for (const sel of step.secondary ?? []) {
         const f = fill(sel, memo());
@@ -390,6 +403,9 @@ export function TourProvider({ children }: { children: ReactNode }) {
         let clickedAt = 0;
         el.addEventListener("click", () => { if (!clickedAt) { clickedAt = Date.now(); statusLine(TOUR_COPY.agentWorking, "working"); } }, { capture: true, signal });
         const proxy = () => { if (!clickedAt) activate(el); };
+        // Autoplay approves only the proposal this session's own notice run made; anything else waits for a person.
+        const autoOk = step.id !== "approve" || autoApproveAllowed(memo());
+        let waitNoted = false;
         primaryRef.current = proxy;
         setUi({ mode: "proxy", nextEnabled: false });
         const hard = budgetHardMs(index, elapsed());
@@ -399,7 +415,10 @@ export function TourProvider({ children }: { children: ReactNode }) {
         while (!signal.aborted) {
           await sleep(150, signal);
           if (signal.aborted) return;
-          if (!clickedAt && autoplayRef.current && !paused() && Date.now() - readyAt >= 1500) proxy();
+          if (!clickedAt && autoplayRef.current && !paused() && Date.now() - readyAt >= 1500) {
+            if (autoOk) proxy();
+            else if (!waitNoted) { waitNoted = true; setUi({ note: TOUR_COPY.approveYourself }); }
+          }
           if (step.id === "deliver-notice") {
             const fresh = (getBridge()?.runIds() ?? []).find((id) => !before.has(id));
             if (fresh) { patchMemo({ noticeRunId: fresh, delivered: true }); advance(); return; }
@@ -467,9 +486,12 @@ export function TourProvider({ children }: { children: ReactNode }) {
           if (st === "waiting" || st === "held" || st === "done") {
             if (st === "done") statusLine(TOUR_COPY.agentDone, "done", "The agent finished");
             else statusLine(TOUR_COPY.agentWaiting, "waiting", "The agent finished and is waiting for your approval");
-            setUi({ nextEnabled: true });
-            await sleep(1200, signal);
-            advance();
+            // The finished run stays on screen: a reader moves on with Next, autoplay after the step's own seconds.
+            const first = document.querySelector<HTMLElement>(`[data-tour~="agent-run"][data-run-id="${runId}"] [data-tour~="agent-tool-lines"]`);
+            if (first) first.scrollIntoView({ block: phone ? "start" : "center", behavior: motion });
+            setUi({ nextEnabled: true, mode: "next" });
+            primaryRef.current = advance;
+            void autoplayAfter(lingerMs(index, elapsed(), dwell(), 4_000), advance);
             return;
           }
           if (st && RUN_TERMINAL_BAD.has(st)) {
@@ -505,11 +527,23 @@ export function TourProvider({ children }: { children: ReactNode }) {
         if (field) await typeInto(field, TOUR_CHART_PROMPT, signal);
         if (signal.aborted) return;
         let sentAt = 0;
+        // One send per step: once Send is clicked the composer empties, and a later tick must not type or send again.
+        let clickedAt = 0;
+        let typing = false;
         const send = () => {
-          if (sentAt) return;
+          if (sentAt || typing) return;
+          if (clickedAt) {
+            // A click that never reached the agent leaves the prompt in the composer; only then try once more.
+            if (Date.now() - clickedAt < 4_000 || !field || field.value.trim() !== TOUR_CHART_PROMPT) return;
+          }
           const btn = document.querySelector<HTMLElement>('[data-tour~="agent-send"]');
-          if (field && !field.value.trim()) void typeInto(field, TOUR_CHART_PROMPT, signal);
-          if (btn) activate(btn);
+          if (field && !field.value.trim()) {
+            if (clickedAt) return;
+            typing = true;
+            void typeInto(field, TOUR_CHART_PROMPT, signal).finally(() => { typing = false; });
+            return;
+          }
+          if (btn) { clickedAt = Date.now(); activate(btn); }
         };
         primaryRef.current = send;
         setUi({ mode: "proxy", nextEnabled: false });
@@ -540,10 +574,10 @@ export function TourProvider({ children }: { children: ReactNode }) {
           if (chart) {
             chart.scrollIntoView({ block: "center", behavior: motion });
             ring(chart);
-            setUi({ target: chart, found: true, nextEnabled: true });
+            setUi({ target: chart, found: true, nextEnabled: true, mode: "next" });
             statusLine(TOUR_COPY.agentDone, "done", "The chart is ready");
-            await sleep(1500, signal);
-            advance();
+            primaryRef.current = advance;
+            void autoplayAfter(lingerMs(index, elapsed(), dwell(), 5_000), advance);
             return;
           }
           const status = document.querySelector<HTMLElement>(`[data-tour~="agent-run"][data-run-id="${runId}"]`)?.dataset.status;
@@ -562,7 +596,12 @@ export function TourProvider({ children }: { children: ReactNode }) {
     return () => {
       ctrl.abort();
       if (described) { if (described.prev) described.el.setAttribute("aria-describedby", described.prev); else described.el.removeAttribute("aria-describedby"); }
-      if (step.dock === "side") closeAppLayers();
+      if (step.dock === "side") {
+        // Close the popover or drawer the step opened, so it never lingers into the next step (or over the agent sheet).
+        document.querySelectorAll<HTMLElement>('[data-tour~="payroll-flag"][aria-expanded="true"]').forEach((el) => activate(el));
+        closeAppLayers();
+      }
+      resetDocScroll();
       if (step.nav) { const b = getBridge(); if (b && !b.laptop()) b.closeNav(); }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -602,7 +641,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
   const index = Math.max(0, stepIndex(s.stepId));
   const step = TOUR_STEPS[index]!;
   const lowerHalf = (() => { try { const r = ui.target?.getBoundingClientRect(); return !!r && r.top + r.height / 2 > window.innerHeight / 2; } catch { return false; } })();
-  const sheet: CardView["sheet"] = phone && step.target !== null ? (step.agent || lowerHalf ? "top" : "bottom") : null;
+  const sheet: CardView["sheet"] = phone && step.target !== null ? (step.sheet ?? (step.agent || lowerHalf ? "top" : "bottom")) : null;
   const primaryLabel = ui.offPage ? "Back to step" : ui.mode === "finish" ? "Finish" : ui.mode === "proxy" ? (step.proxyLabel ?? "Next") : "Next";
   const view: CardView = {
     step, index, ready: ui.ready && ui.stepId === step.id, found: ui.found && !ui.offPage, match: ui.offPage ? null : ui.match, target: ui.offPage ? null : ui.target,
