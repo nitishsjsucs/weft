@@ -248,3 +248,13 @@ const INSTRUCTION = /\b(?:ignore|disregard)\b[^.\n]*\binstructions?\b|\bsystem o
 export function quarantinedLines(body: string | null | undefined): string[] {
   return (body ?? "").split(/\n/).map((l) => l.trim()).filter((l) => l && INSTRUCTION.test(l));
 }
+
+/**
+ * An approval card's field (the executor joins a diff row as "before to after"): a policy check row ("Check
+ * MEALS_DETAIL_MISSING", "review to Meals need ...") reads "Policy check, meals detail missing" with its message.
+ */
+export function cardField(label: string, value: string): { label: string; value: string } {
+  const m = /^Check ([A-Z][A-Z0-9_]*)(?: \((?:block|review|info)\))?$/.exec(label);
+  if (m) return { label: `Policy check, ${codeWords(m[1]!)}`, value: humanCopy(value.replace(/^(?:block|review|info) to /, "")) };
+  return { label: humanLine(label), value: valueText(value) };
+}

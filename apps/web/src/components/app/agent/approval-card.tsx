@@ -14,7 +14,7 @@ import { cn } from "@weft/ui";
 import { errorText, useMutation } from "@/lib/api/hooks";
 import { decideProposal } from "../inbox/decide";
 import { RiskChip } from "../risk";
-import { humanLine, taintSource, valueText } from "../copy";
+import { cardField, humanLine, taintSource } from "../copy";
 
 const OUTCOME: Partial<Record<ProposalStatus, { text: string; tone: string }>> = {
   executed: { text: "Approved and done", tone: "text-green-11" },
@@ -65,12 +65,12 @@ export function ApprovalCard({ card, status, taintedBy = null, known = true, com
       </dl>
       {card.fields.length > 0 ? (
         <dl className="flex flex-col divide-y divide-gray-a3 rounded-lg bg-gray-2 px-2 py-1 text-1">
-          {card.fields.map((f, i) => (
+          {card.fields.map((f, i) => { const c = cardField(f.label, f.value); return (
             <div key={i} className="flex items-start justify-between gap-3 py-1">
-              <dt className="min-w-0 break-words text-gray-11">{humanLine(f.label)}</dt>
-              <dd className="min-w-0 text-right font-medium tabular-nums break-words text-gray-12">{valueText(f.value)}</dd>
+              <dt className="min-w-0 break-words text-gray-11">{c.label}</dt>
+              <dd className="min-w-0 text-right font-medium tabular-nums break-words text-gray-12">{c.value}</dd>
             </div>
-          ))}
+          ); })}
         </dl>
       ) : null}
       {outcome ? <p className={cn("text-1 font-medium", outcome.tone)}>{outcome.text}</p> : null}
