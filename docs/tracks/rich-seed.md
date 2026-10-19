@@ -100,8 +100,37 @@ Run it on other ports with `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_
 - Most routines stay disabled: enabling them in a dev world would spend on live runs. Every routine the gallery shows
   has at least one scripted past run, and the folded `rt_compliance_notices` is left out of `GET /v1/routines`
   (`?include=retired` returns it).
-- Odette's pre-start home office claim has its receipt but no stored checks: the policy engine flags an expense dated
-  before the start date as outside employment, and the story still needs a decision on how she bought it.
+- Odette's home office claim is a pre-start equipment stipend (its purpose and decision note say so). It has its
+  receipt but no stored checks: the policy engine flags an expense dated before the start date as outside employment.
+  The profile test fails any other claim dated before its worker's start.
 - August reconciliation has no row type for "clean"; September shows a resolved finding, October stays un-run.
-- Base chat messages keep the seed time; the rich ones are spread over days.
+- Base chat messages are re-dated in the rich layer to the day each one talks about (Ana and Ben's welcome on Oct 1,
+  the Oct 15 settlement on Oct 15); a channel lists in time order.
 - Workday stays unsynced on purpose: a sync hands People, Compensation and Time off to Workday.
+
+## Demo round 2 (dp/r2-data-and-seed)
+
+- Greenhouse: the seeded sync items use the engine's detail shapes (`label`, `weft_value`, `vendor_value`,
+  `offer_version`, `application_ref`), so step 19 reads "Start date changed in Greenhouse (offer version 2): Weft has
+  Nov 16, 2026, Greenhouse has Nov 23, 2026" on Marisol Quint (demo)'s offer, and Take Greenhouse value applies a date.
+- Offers: every sent, viewed, accepted, expired or voided offer's letter and agreement come from core's
+  `offerLetterFor` and `confidentialityText`, as `documents.send_offer` writes them. Only accepted offers have a
+  background check; the follow-up routine names Tobias Wren (demo)'s pending check (estimate Oct 30).
+- Routine runs: every seeded run of a cron routine sits at a slot its own cron produces (`cronSlot` reads the PREBUILT
+  trigger) with the engine's `cron:<slot>` ref; event routines carry `event:<name>:<subject>`. The Austin office laptop
+  routine names Lucia Ferrante (demo), its one Austin hire; the life-event routine reads a closed marriage window.
+- Owen Mercer (demo): his last day (Oct 23) is planted in base; the rich layer offboards him (open case, everything
+  done but final pay on the Oct 30 run, status offboarding, accounts suspended, enrollments ended through Oct 31), so
+  Home, People, Offboarding and Reports agree on 47 employees.
+- Benefits in the imported history: the salaried leavers (Rafael Ostrander, Wen Talbot, Dorian Pike) carry their
+  enrollments, 401(k) included, on their imported paychecks until they leave; the enrollments end through the month
+  of the last day. Employer benefits per month now move with them. Employer health contributions stay $0 because the
+  engine prices only the 401(k) match (a base engine behavior, unchanged here).
+- The July leaver's final pay is on the Jul 31 regular run; offboarding step details read days and the IT system
+  names (Workspace (sim), Chat (sim)); the quality inspector leaver is Wen Talbot (demo), not a second Calloway.
+- Audit log: the base world's #1 (Lena's raise, Oct 9) precedes ten months of imported history by sequence. The seq
+  stays as recorded (the memory timeline, the pay rate and the Oct 30 flag evidence all cite #1); the page lists by
+  time (`GET /v1/actions?order=time`), shows each row's #, has Show older, and an `#audit-N` link pages back until
+  that row has loaded.
+- Not done here: the Weekly people digest description still reads "9:00 PT"; the routine rows are in every eval world,
+  so that word moves all 110 eval digests and waits for a deliberate re-pin.

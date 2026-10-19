@@ -40,19 +40,55 @@ export function auditSummary(summary: string): string {
 const STACK = "@max-[40rem]:block @max-[40rem]:w-full";
 
 export function AuditView() {
-  const actions = useGet("/v1/actions", { query: { limit: 100 }, refreshMs: 5_000 });
-  // A link to /app/audit#audit-<seq> (the offboarding case view) scrolls to and marks that row once it has loaded.
-  const jumped = useRef(false);
+  // Newest first by time, the sequence shown on each row: the rich profile's imported history was appended after #1.
+  const actions = useGet("/v1/actions", { query: { limit: 100, order: "time" }, refreshMs: 5_000 });
+  const [older, setOlder] = useState<Action[]>([]);
+  const [olderMore, setOlderMore] = useState<boolean | null>(null);
+  const first = actions.data?.data ?? [];
+  const rows = [...first, ...older.filter((o) => !first.some((f) => f.seq === o.seq))];
+  const hasMore = olderMore ?? actions.data?.hasMore ?? false;
+  const pageBefore = async (seq: number) => client.get("/v1/actions", { query: { limit: 100, order: "time", beforeId: String(seq) } });
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  async function loadOlder() {
+    const last = rows.at(-1);
+    if (!last) return;
+    setLoadingOlder(true);
+    try { const page = await pageBefore(last.seq); setOlder((o) => [...o, ...page.data]); setOlderMore(page.hasMore); } finally { setLoadingOlder(false); }
+  }
+  // A link to /app/audit#audit-<seq> (the person page, the offboarding case, a rate's source) pages back until that
+  // row has loaded, then scrolls to and marks it; a later #audit-N link on this page does the same.
+  const [hash, setHash] = useState<string | null>(null);
   useEffect(() => {
-    if (jumped.current || !actions.data) return;
-    const m = /^#audit-(\d+)$/.exec(window.location.hash);
+    const read = () => setHash(window.location.hash);
+    read();
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
+  const jumped = useRef<string | null>(null);
+  useEffect(() => {
+    if (!actions.data || !hash || jumped.current === hash) return;
+    const m = /^#audit-(\d+)$/.exec(hash);
     if (!m) return;
-    jumped.current = true;
-    const el = document.getElementById(`audit-${m[1]}`);
-    if (el) { el.scrollIntoView({ block: "center" }); el.classList.add("bg-blue-3"); }
-  }, [actions.data]);
+    jumped.current = hash;
+    const seq = Number(m[1]);
+    void (async () => {
+      let all = [...rows];
+      let more = hasMore;
+      const extra: Action[] = [];
+      for (let i = 0; i < 20 && more && all.length && !all.some((a) => a.seq === seq); i++) {
+        const page = await pageBefore(all.at(-1)!.seq);
+        all = [...all, ...page.data]; extra.push(...page.data); more = page.hasMore;
+      }
+      if (extra.length) { setOlder((o) => [...o, ...extra]); setOlderMore(more); }
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`audit-${seq}`);
+        if (el) { el.scrollIntoView({ block: "center" }); el.classList.add("bg-blue-3"); }
+      });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actions.data, hash]);
   const chain = useGet("/v1/actions/verify", { refreshMs: 10_000 });
-  const routineNames = useRoutineNames([...new Set((actions.data?.data ?? []).map((a) => a.routineRunId).filter((x): x is string => !!x))]);
+  const routineNames = useRoutineNames([...new Set(rows.map((a) => a.routineRunId).filter((x): x is string => !!x))]);
   const [result, setResult] = useState<ToolOutcome | null>(null);
   const undo = useMutation((seq: number) => client.post("/v1/actions/:seq/rollback", { params: { seq }, body: { reason: "Undo from the audit log" } }));
   const c = chain.data;
@@ -76,7 +112,7 @@ export function AuditView() {
         <Table className={cn("text-[13px]", STACK, "@max-[40rem]:[&_thead]:hidden")}>
           <THead><TR><TH className="w-[7.5rem]">When</TH><TH className="w-[11rem]">Actor</TH><TH>Summary</TH><TH className="w-[6.5rem]"><span className="sr-only">Run and undo</span></TH></TR></THead>
           <TBody className={STACK}>
-            {(actions.data?.data ?? []).map((a) => {
+            {rows.map((a) => {
               const who = actor(a, routineNames);
               const forWhom = a.onBehalfOf ? `for ${principalName(a.onBehalfOf)}` : null;
               return (
@@ -115,7 +151,12 @@ export function AuditView() {
           </TBody>
         </Table>
       </Card>
-      {actions.data?.hasMore ? <p className="mt-2 text-1 text-gray-10">Showing the latest 100 of {actions.data.count}.</p> : null}
+      {hasMore ? (
+        <div className="mt-3 flex items-center gap-3 text-1 text-gray-10">
+          <span>Showing the latest {rows.length}.</span>
+          <Button size="sm" variant="secondary" data-testid="audit-load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>Show older</Button>
+        </div>
+      ) : null}
     </div>
   );
 }

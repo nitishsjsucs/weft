@@ -11,6 +11,8 @@ import { createExecutor } from "@weft/executor";
 import { createSimulators } from "@weft/sim";
 import { digestDb, SEED_CLOCK, seedWorld } from "../src/index";
 import { parseSeedProfile, seedWorldProfile, type SeedProfile } from "../src/profile";
+import { cronSlot } from "../src/rich/index";
+import { PREBUILT } from "@weft/routines";
 
 async function seeded<T>(profile: SeedProfile | "world", read: (db: Db, verify: () => Promise<{ ok: boolean; gitLag: number }>) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "weft-profile-"));
@@ -45,7 +47,8 @@ async function planted(db: Db): Promise<string> {
     filings: await q(`SELECT * FROM filings WHERE id <= 'fil_0013' ORDER BY id`),
     items: await q(`SELECT * FROM compliance_items WHERE id <= 'cal_0052' ORDER BY id`),
     action1: await q(`SELECT * FROM actions WHERE seq = 1`),
-    workers: await q(`SELECT * FROM workers WHERE id <= 'wrk_0051' ORDER BY id`),
+    // Owen Mercer's row is the one planted worker the rich layer moves: it offboards him (status and updated_at).
+    workers: (await q(`SELECT * FROM workers WHERE id <= 'wrk_0051' ORDER BY id`)).map((w) => (w.first_name === "Owen" && w.last_name === "Mercer" ? { ...w, status: null, updated_at: null } : w)),
     recon: await q(`SELECT * FROM benefit_recon_findings WHERE month = '2026-10'`),
   });
 }
@@ -71,7 +74,7 @@ describe("seed profiles", () => {
       expect(await count(db, "actions")).toBeGreaterThanOrEqual(100);
       expect(await count(db, "routine_runs")).toBeGreaterThanOrEqual(15);
       expect(await count(db, "time_off_requests")).toBeGreaterThanOrEqual(120);
-      expect(await count(db, "offboarding_cases")).toBe(8);
+      expect(await count(db, "offboarding_cases")).toBe(9);
       // Every 2026 departure the reports count is an inactive worker with a completed offboarding case and imported pay.
       const leavers = await db.all<{ id: string; end_date: string; cases: number; checks: number; ytd: number }>(sql`SELECT w.id, w.end_date,
           (SELECT COUNT(*) FROM offboarding_cases c WHERE c.worker_id = w.id AND c.status = 'complete') AS cases,
@@ -194,6 +197,50 @@ describe("seed profiles", () => {
         const n = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = ${id}`);
         expect(n[0]!.n, id).toBeGreaterThan(0);
       }
+      // Round 2 (demo-perfect): the rows a demo reads agree with each other.
+      // The open Greenhouse conflict has the engine's detail shape, with both dates, on Marisol's offer.
+      const conflict = await db.all<{ s: string; d: string }>(sql`SELECT subject_ref AS s, detail_json AS d FROM sync_items WHERE status = 'open'`);
+      expect(conflict).toHaveLength(1);
+      expect(JSON.parse(conflict[0]!.d)).toMatchObject({ field: "start_date", label: "Start date", weft_value: "2026-11-16", vendor_value: "2026-11-23", offer_version: "2" });
+      expect((await db.all<{ n: string }>(sql`SELECT candidate_first AS n FROM offers WHERE id = ${conflict[0]!.s}`))[0]!.n).toBe("Marisol");
+      // A sent offer's letter is the app's own template (no three-line stub), and only accepted offers have a check.
+      const letters = await db.all<{ b: string; st: string }>(sql`SELECT d.body_text AS b, o.status AS st FROM documents d JOIN offers o ON o.id = d.offer_id WHERE d.kind = 'offer_letter' AND o.id != 'offr_0001'`);
+      expect(letters.length).toBeGreaterThanOrEqual(5);
+      for (const l of letters) { expect(l.b, l.st).toMatch(/We are delighted to offer you/); expect(l.b).not.toMatch(/Start date \d{4}/); }
+      const checks = await db.all<{ st: string }>(sql`SELECT o.status AS st FROM screening_orders s JOIN offers o ON o.id = s.offer_id`);
+      for (const c of checks) expect(c.st).toBe("accepted");
+      // Every seeded routine run sits at a slot its own cron produces, and event routines carry an event ref.
+      const rruns = await db.all<{ r: string; at: string; ref: string }>(sql`SELECT routine_id AS r, started_at AS at, trigger_ref AS ref FROM routine_runs`);
+      for (const x of rruns) {
+        const def = PREBUILT.find((d) => d.id === x.r)!;
+        if (def.trigger.type === "cron") {
+          const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(x.at));
+          expect(x.at, `${x.r} ${x.at}`).toBe(cronSlot(x.r, day, Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hourCycle: "h23" }).format(new Date(x.at)))));
+          expect(x.ref, x.r).toBe(`cron:${x.at}`);
+        } else expect(x.ref, x.r).toMatch(/^event:[a-z_.]+:\w+$/);
+      }
+      // Leavers' enrollments ride their imported paychecks until the end date, then end; employer benefits move with them.
+      const rafael = await db.all<{ b: string; d: string }>(sql`SELECT p.benefits_json AS b, r.payday AS d FROM paychecks p JOIN payroll_runs r ON r.id = p.payroll_run_id JOIN workers w ON w.id = p.worker_id WHERE w.first_name = 'Rafael' ORDER BY r.payday`);
+      expect(rafael.length).toBeGreaterThan(10);
+      for (const r of rafael) expect(JSON.parse(r.b), r.d).toHaveLength(4);
+      const ended = await db.all<{ s: string; t: string | null }>(sql`SELECT e.status AS s, e.effective_to AS t FROM benefit_enrollments e JOIN workers w ON w.id = e.worker_id WHERE w.first_name = 'Rafael'`);
+      expect(ended).toEqual(Array.from({ length: 4 }, () => ({ s: "terminated", t: "2026-07-31" })));
+      const erByMonth = new Set(months.filter((m) => m.m <= "2026-09").map((m) => m.b));
+      expect(erByMonth.size).toBeGreaterThan(3);
+      // No claim predates its worker's start date unless it is the pre-start equipment stipend.
+      const early2 = await db.all<{ id: string; p: string }>(sql`SELECT e.id, e.business_purpose AS p FROM expenses e JOIN workers w ON w.id = e.worker_id WHERE e.transaction_date < w.start_date`);
+      for (const e of early2) expect(e.p, e.id).toMatch(/^Pre-start equipment stipend/);
+      // Owen Mercer's last day has passed: he is offboarding with an open case whose one open step is final pay.
+      const owen = await db.all<{ st: string; c: string; open: number }>(sql`SELECT w.status AS st, c.status AS c, (SELECT COUNT(*) FROM offboarding_steps s WHERE s.case_id = c.id AND s.status != 'done') AS open
+        FROM workers w JOIN offboarding_cases c ON c.worker_id = w.id WHERE w.first_name = 'Owen' AND w.last_name = 'Mercer'`);
+      expect(owen).toEqual([{ st: "offboarding", c: "open", open: 1 }]);
+      // Base channel posts carry the day they talk about, and no two people share a surname and a near first name.
+      const welcome = await db.all<{ ts: string }>(sql`SELECT ts FROM sim_chat_messages WHERE text = 'Welcome Ana and Ben to Larkspur (demo)!'`);
+      expect(welcome[0]!.ts.slice(0, 10)).toBe("2026-10-01");
+      expect((await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM workers WHERE last_name = 'Calloway'`))[0]!.n).toBe(1);
+      // Step details read as days, never ISO dates.
+      const isoSteps = await db.all<{ d: string }>(sql`SELECT detail AS d FROM offboarding_steps WHERE detail GLOB '*[0-9][0-9][0-9][0-9]-[0-9][0-9]*'`);
+      expect(isoSteps).toEqual([]);
       return { digest: await digestDb(db), planted: await planted(db) };
     });
     // Planted rows stay exactly as the base seed wrote them.

@@ -100,7 +100,8 @@ export async function seedImportedPayHistory(tx: DbTx, bump: (t: string, n?: num
   const plans = new Map((await tx.select().from(benefitPlans)).map((p) => [p.id, p]));
   const enrollments = (await tx.select().from(benefitEnrollments)).sort((a, b) => (a.id < b.id ? -1 : 1));
   const benefitsFor = (wid: string, p: { periodStart: string; periodEnd: string }, gross: number, s125: number, k401: number) => {
-    const mine = enrollments.filter((e) => e.workerId === wid && e.status === "active" && e.effectiveFrom <= p.periodEnd && (e.effectiveTo === null || e.effectiveTo >= p.periodStart));
+    // An enrollment ended since (Owen Mercer's, through October) still covered the periods inside its dates.
+    const mine = enrollments.filter((e) => e.workerId === wid && (e.status === "active" || e.status === "terminated") && e.effectiveFrom <= p.periodEnd && (e.effectiveTo === null || e.effectiveTo >= p.periodStart));
     const lines = mine.flatMap((e) => { const plan = plans.get(e.planId); return plan ? [{ plan, b: payroll.benefitAmounts(plan, e, gross) }] : []; });
     const health = lines.filter((x) => x.plan.type !== "401k");
     const weights = health.map((x) => x.b.employeeCents);

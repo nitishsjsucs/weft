@@ -8,7 +8,7 @@ import { Fragment, useState } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { W3_INTEGRATIONS_HR_TID as H, W3_INTEGRATIONS_TID as T, type ConnectorStatus, type IntegrationCard, type SyncItem } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDate, fmtDateTime } from "../format";
+import { cents, fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 
 const CATEGORY_LABEL: Record<string, string> = { ats: "Applicant tracking", hris: "HR system of record", screening: "Background screening", esign: "E-signature" };
@@ -113,14 +113,31 @@ function VendorCard({ card }: { card: IntegrationCard }) {
   );
 }
 
-function SyncItemRow({ s, simulated }: { s: SyncItem; simulated: boolean }) {
+/** A synced value as a person reads it: a date as a day, cents as dollars, anything else as stored. */
+export function syncValue(field: string | undefined, v: string | undefined): string {
+  if (!v) return "nothing";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtDate(v);
+  if ((field === "base_cents" || field === "salary") && /^\d+$/.test(v)) return cents(Number(v));
+  return v;
+}
+
+/** What a sync item is about: the candidate's offer by name, a Greenhouse application by its number. */
+export function syncSubject(subjectRef: string, offers: Record<string, string>): string {
+  if (offers[subjectRef]) return `${offers[subjectRef]}'s offer`;
+  const app = /^greenhouse:application:(\w+)$/.exec(subjectRef);
+  if (app) return `Greenhouse application ${app[1]}`;
+  return /^offr_/.test(subjectRef) ? "An offer" : subjectRef;
+}
+
+function SyncItemRow({ s, simulated, offers }: { s: SyncItem; simulated: boolean; offers: Record<string, string> }) {
   const resolve = useMutation(async (take: "weft" | "vendor") => client.post("/v1/sync-items/:id/resolve", { params: { id: s.id }, body: { take } }));
   const d = s.detail;
   const vendor = VENDOR_LABEL[s.vendor] ?? s.vendor;
-  const field = d.label ?? FIELD_LABEL[d.field ?? ""] ?? d.field;
+  // Pay values read as dollars (syncValue), so the stored "(cents)" unit leaves the label.
+  const field = (d.label ?? FIELD_LABEL[d.field ?? ""] ?? d.field ?? "").replace(/ \(cents\)$/, "");
   const payChange = d.reason === "pay_affecting";
   const text = s.kind === "sync_conflict"
-    ? `${field} changed in ${vendor}${d.offer_version ? ` (version ${d.offer_version})` : ""}: Weft has ${d.weft_value || "nothing"}, ${vendor} has ${d.vendor_value || "nothing"}.${payChange ? " Pay changes are applied from People so payroll previews them." : ""}`
+    ? `${field} changed in ${vendor}${d.offer_version ? ` (offer version ${d.offer_version})` : ""}: Weft has ${syncValue(d.field, d.weft_value)}, ${vendor} has ${syncValue(d.field, d.vendor_value)}.${payChange ? " Pay changes are applied from People so payroll previews them." : ""}`
     : s.kind === "unmapped_value" ? `${field} ${d.ext_name ? `"${d.ext_name}"` : ""} is not mapped. ${d.reason ?? ""}`
       : d.reason ?? KIND_LABEL[s.kind];
   return (
@@ -128,7 +145,7 @@ function SyncItemRow({ s, simulated }: { s: SyncItem; simulated: boolean }) {
       <Badge tone={s.kind === "sync_conflict" ? "amber" : "gray"} size="md">{KIND_LABEL[s.kind] ?? s.kind}</Badge>
       <div className="min-w-[220px] flex-1">
         <div>{text}</div>
-        <div className="text-1 text-gray-10">{vendor}{simulated ? " (sim)" : ""} · {s.subjectRef} · opened {fmtDateTime(s.createdAt)}</div>
+        <div className="text-1 text-gray-10" title={s.subjectRef}>{vendor}{simulated ? " (sim)" : ""} · {syncSubject(s.subjectRef, offers)} · opened {fmtDateTime(s.createdAt)}</div>
       </div>
       <Button size="sm" variant="secondary" data-testid={H.syncResolve(s.id, "weft")} disabled={resolve.pending} onClick={() => void resolve.run("weft")}>Keep Weft value</Button>
       {s.kind === "sync_conflict" && !payChange ? <Button size="sm" variant="primary" data-testid={H.syncResolve(s.id, "vendor")} disabled={resolve.pending} onClick={() => void resolve.run("vendor")}>Take {vendor} value</Button> : null}
@@ -149,6 +166,7 @@ export function IntegrationsView() {
   const list = (cards.data ?? []) as IntegrationCard[];
   const open = (items.data ?? []) as SyncItem[];
   const roles = (jobs.data ?? []) as Job[];
+  const offerNames = Object.fromEntries(imported.filter((x) => x.candidate).map((x) => [x.offerId, x.candidate!]));
   const modeOf = (vendor: string) => list.find((c) => c.status.vendor === vendor)?.status.mode ?? "simulated";
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
@@ -166,7 +184,7 @@ export function IntegrationsView() {
           <Card className="p-4" data-testid={T.syncItems}>
             <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Sync items <Badge size="xs">{open.length}</Badge></h2>
             <p className="mb-2 text-1 text-gray-10">Weft never overwrites a value silently. A changed value or a value it cannot map waits here for a person to decide.</p>
-            {open.length === 0 ? <p className="text-[13px] text-gray-10">Nothing to decide.</p> : <ul className="flex flex-col divide-y divide-[var(--app-border)]">{open.map((s) => <SyncItemRow key={s.id} s={s} simulated={modeOf(s.vendor) !== "real"} />)}</ul>}
+            {open.length === 0 ? <p className="text-[13px] text-gray-10">Nothing to decide.</p> : <ul className="flex flex-col divide-y divide-[var(--app-border)]">{open.map((s) => <SyncItemRow key={s.id} s={s} simulated={modeOf(s.vendor) !== "real"} offers={offerNames} />)}</ul>}
           </Card>
           <Card className="p-4" data-testid={H.importedOffers}>
             <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Hires imported as draft offers</h2>

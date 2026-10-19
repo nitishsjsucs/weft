@@ -17,6 +17,7 @@
     "@weft/contracts": "workspace:*",
     "@weft/core": "workspace:*",
     "@weft/db": "workspace:*",
+    "@weft/routines": "workspace:*",
     "drizzle-orm": "0.45.4"
   },
   "devDependencies": {
