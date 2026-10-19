@@ -1,6 +1,12 @@
 // The whole guided tour on the scripted provider, as a person would take it: start from Home, read each card for
 // its planned seconds, click the real controls on the click steps, and finish within 180 s (owner: tour).
 import { card, expect, noHorizontalScroll, pressPrimary, readyStep, targetInfo, test, TOUR_STEPS } from "./tour-fixtures";
+import { mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// TOUR_SHOTS=1 also saves the screen at every step (once its card is ready) to docs/screenshots/tour/ (or SHOTS_DIR),
+// named by step number and id. The shot is taken inside the step's reading time, so the pace is unchanged.
+const SHOTS = process.env.TOUR_SHOTS === "1" ? (process.env.SHOTS_DIR ?? fileURLToPath(new URL("../../docs/screenshots/tour", import.meta.url))) : null;
 
 test("completes the whole tour on the scripted provider in 180 s or less", async ({ page, weft, world, consoleErrors }, info) => {
   test.setTimeout(240_000);
@@ -62,6 +68,12 @@ test("completes the whole tour on the scripted provider in 180 s or less", async
     if (step.id === "memory" && world.rich) {
       // The procedure the notice run followed, with a thread linking it and its git history.
       expect(Number(await page.locator('[data-tour~="memory-backlinks"]').getAttribute("data-count")), "memory backlinks").toBeGreaterThan(0);
+    }
+
+    if (SHOTS) {
+      mkdirSync(SHOTS, { recursive: true });
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: `${SHOTS}/${String(step.n).padStart(2, "0")}-${step.id}.png` });
     }
 
     const dwell = async () => { const left = step.seconds * 1000 - (Date.now() - entered); if (left > 0) await page.waitForTimeout(left); };
