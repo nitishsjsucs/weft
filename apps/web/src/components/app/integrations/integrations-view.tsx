@@ -133,7 +133,8 @@ function SyncItemRow({ s, simulated, offers }: { s: SyncItem; simulated: boolean
   const resolve = useMutation(async (take: "weft" | "vendor") => client.post("/v1/sync-items/:id/resolve", { params: { id: s.id }, body: { take } }));
   const d = s.detail;
   const vendor = VENDOR_LABEL[s.vendor] ?? s.vendor;
-  const field = d.label ?? FIELD_LABEL[d.field ?? ""] ?? d.field;
+  // Pay values read as dollars (syncValue), so the stored "(cents)" unit leaves the label.
+  const field = (d.label ?? FIELD_LABEL[d.field ?? ""] ?? d.field ?? "").replace(/ \(cents\)$/, "");
   const payChange = d.reason === "pay_affecting";
   const text = s.kind === "sync_conflict"
     ? `${field} changed in ${vendor}${d.offer_version ? ` (offer version ${d.offer_version})` : ""}: Weft has ${syncValue(d.field, d.weft_value)}, ${vendor} has ${syncValue(d.field, d.vendor_value)}.${payChange ? " Pay changes are applied from People so payroll previews them." : ""}`

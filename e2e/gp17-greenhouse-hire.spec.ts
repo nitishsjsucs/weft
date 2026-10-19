@@ -46,7 +46,8 @@ test("GP17: a Greenhouse hire becomes a Weft draft offer, a proposal and a resol
     await page.getByTestId(T.simulate("greenhouse", "start_date_change")).click();
     const conflict = page.locator(`[data-testid^="sync-item-"][data-kind="sync_conflict"][data-subject="${offer.id}"]`);
     await expect(conflict).toBeVisible();
-    await expect(conflict).toContainText("2026-11-30");
+    await expect(conflict).toContainText("Weft has Nov 16, Greenhouse has Nov 30.");   // dates as days, never ISO
+    await expect(conflict).toContainText("Marisol Quint (demo)'s offer");
     await conflict.getByRole("button", { name: "Keep Weft value" }).click();
     await expect(conflict).toHaveCount(0);
     expect((await weft.get<OfferRow>(`/v1/offers/${offer.id}`)).startDate).toBe("2026-11-16");
@@ -72,7 +73,8 @@ test("GP17: Workday takes ownership, a promotion waits on pay, and two approved 
     await page.getByTestId(H.sync("workday")).click();
     const conflict = page.locator('[data-testid^="sync-item-"][data-kind="sync_conflict"][data-subject^="wrk_"]');
     await expect(conflict).toBeVisible();
-    await expect(conflict).toContainText("Base pay (cents) changed in Workday");
+    await expect(conflict).toContainText("Base pay changed in Workday");
+    await expect(conflict).toContainText(/Weft has \$[\d,]+\.\d{2}, Workday has \$[\d,]+\.\d{2}/);
     await expect(conflict.getByRole("button", { name: "Take Workday value" })).toHaveCount(0);
     await conflict.getByRole("button", { name: "Keep Weft value" }).click();
     await expect(conflict).toHaveCount(0);
