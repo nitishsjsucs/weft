@@ -6,7 +6,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { Badge, Button, Card, Drawer, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { cents, fmtDate } from "../format";
+import { cents, fmtDate, statusLabel } from "../format";
+import { humanCopy, humanLine } from "../copy";
+import { refHref } from "../refs";
 
 export interface CalendarRowDto {
   id: string; kind: string; title: string; jurisdiction: string | null; agency: string | null; form: string | null; period: string | null; dueOn: string;
@@ -22,7 +24,7 @@ interface Page<T> { data: T[]; count: number; hasMore: boolean }
 
 const TONE: Record<CalendarRowDto["status"], "gray" | "blue" | "amber" | "green" | "red"> = { upcoming: "gray", due_soon: "amber", prepared: "blue", proposed: "blue", done: "green", overdue: "red", waived: "gray" };
 const KIND: Record<string, string> = { filing: "Filing", deposit: "Deposit", notice_response: "Notice reply", registration: "Registration", training_due: "Training", contractor_form_expiry: "Contractor form", benefits_window_close: "Benefits window" };
-const human = (s: string) => s.replaceAll("_", " ");
+const human = (s: string) => statusLabel(s);
 const days = (n: number) => (n === 0 ? "today" : n > 0 ? `in ${n} day${n === 1 ? "" : "s"}` : `${-n} day${n === -1 ? "" : "s"} ago`);
 
 export function CalendarPanel() {
@@ -69,7 +71,7 @@ function FilingDrawer({ id, onClose }: { id: string | null; onClose: () => void 
   const err = f.error ?? prepare.error ?? file.error;
   const p = d?.preparedReturn ?? null;
   return (
-    <Drawer open={!!id} onOpenChange={(o) => { if (!o) onClose(); }} title={d ? `${d.formLabel} for ${d.period}` : "Filing"} description={d ? `Due ${d.dueOn ?? "-"} · ${human(d.status)}` : undefined}>
+    <Drawer open={!!id} onOpenChange={(o) => { if (!o) onClose(); }} title={d ? `${d.formLabel} for ${d.period}` : "Filing"} description={d ? `Due ${d.dueOn ? fmtDate(d.dueOn, { month: "short", day: "numeric", year: "numeric" }) : "date not set"} · ${human(d.status)}` : undefined}>
       {err ? <div role="alert" className="mb-3 text-1 text-red-11">{errorText(err)}</div> : null}
       {d ? (
         <div className="flex flex-col gap-4" data-testid="filing-detail">
@@ -139,13 +141,13 @@ export function HandoffsPanel({ status = "open" }: { status?: string }) {
       {list.error ? <div role="alert" className="text-1 text-red-11">{errorText(list.error)}</div> : null}
       {rows.length === 0 && list.data ? <p className="text-[13px] text-gray-10">No open hand-offs.</p> : null}
       {rows.map((h) => (
-        <Card key={h.id} className="flex flex-col gap-1.5 p-3" data-testid={`handoff-${h.id}`}>
+        <Card key={h.id} title={h.id} className="flex flex-col gap-1.5 p-3" data-testid={`handoff-${h.id}`}>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="amber">{human(h.kind)}</Badge><span className="text-1 text-gray-10">{human(h.reason)}</span>
-            <code className="font-mono text-0">{h.id}</code>{h.subjectRef ? <code className="font-mono text-0 text-gray-10">{h.subjectRef}</code> : null}
+            <Badge tone="amber">{statusLabel(h.kind)}</Badge><span className="text-1 text-gray-10">{statusLabel(h.reason)}</span>
+            {h.subjectRef ? <SubjectLink r={h.subjectRef} /> : null}
           </div>
-          <p className="text-[13px]">{h.summary}</p>
-          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-0 text-gray-11">{h.evidence.map((e) => <li key={`${e.label}${e.ref}`}>{e.label}: <code className="font-mono">{e.ref}</code></li>)}</ul>
+          <p className="text-[13px]">{humanCopy(h.summary)}</p>
+          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-0 text-gray-11">{h.evidence.map((e) => <li key={`${e.label}${e.ref}`} title={e.ref}>{humanLine(e.label)}{/^[a-z]{2,5}_\w*\d/.test(e.ref) ? null : <>: {humanLine(e.ref)}</>}</li>)}</ul>
           <div className="flex items-center gap-2 text-1 text-gray-10">With {h.assigneeName}
             {h.status === "open" || h.status === "acknowledged" ? <Button size="sm" variant="secondary" disabled={resolve.pending} onClick={() => void resolve.run(h.id)}>Mark resolved</Button> : null}
           </div>
@@ -153,4 +155,11 @@ export function HandoffsPanel({ status = "open" }: { status?: string }) {
       ))}
     </section>
   );
+}
+
+/** A hand-off's subject as words with a link ("txa_0001" is "Tax account", linked to Compliance). */
+function SubjectLink({ r }: { r: string }) {
+  const words = r.startsWith("txa_") ? "Tax account" : r.startsWith("ntc_") ? "Agency notice" : r.startsWith("wrk_") ? "Person" : r.startsWith("pay_") ? humanLine(r).replace(/^the /, "").replace(/^./, (c) => c.toUpperCase()) : "Record";
+  const href = refHref(r);
+  return href ? <Link href={href} title={r} className="text-1 text-blue-11 hover:underline">{words}</Link> : <span title={r} className="text-1 text-gray-10">{words}</span>;
 }

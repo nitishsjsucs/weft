@@ -5,7 +5,7 @@ import { Badge, Card, Drawer, Tabs, TabsContent, TabsList, TabsTrigger, TBody, T
 import { TID, W3_ROUTINES_TID, tid, type EmployerRate, type Notice, type TaxAccount } from "@weft/contracts";
 import { cn } from "@weft/ui";
 import { errorText, useGet } from "@/lib/api/hooks";
-import { AGENCY, fmtDate, fmtDateTime } from "../format";
+import { ACCOUNT_TYPE, AGENCY, fmtDate, fmtDateTime, longDate, statusLabel } from "../format";
 import { PageHeader } from "../page";
 import { refHref } from "../refs";
 import { auditLabel, noticeName } from "../copy";
@@ -15,7 +15,7 @@ import { NoticeUpload, TrainingPanel } from "./w4-upload-training";
 const STATUS_TONE: Record<TaxAccount["status"], "green" | "amber" | "gray" | "red"> = { active: "green", awaiting_state: "amber", needs_info: "red", not_registered: "gray" };
 const NOTICE_TONE: Record<Notice["status"], "gray" | "blue" | "amber" | "green" | "red"> = { new: "blue", in_review: "blue", proposed: "amber", resolved: "green", escalated: "red" };
 export const ratePct = (r: string) => `${(Number(r) * 100).toFixed(r.length > 6 ? 3 : 2).replace(/0+$/, "").replace(/\.$/, "")}%`;
-const human = (s: string) => s.replaceAll("_", " ");
+const human = (s: string) => statusLabel(s);
 
 function currentRate(rates: EmployerRate[], j: string, code: string): EmployerRate | undefined {
   return rates.filter((r) => r.jurisdiction === j && r.code === code && r.supersededActionSeq === null).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
@@ -60,7 +60,7 @@ function NoticeDetail({ id, onClose }: { id: string | null; onClose: () => void 
             <section>
               <h3 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Extracted fields (deterministic parser)</h3>
               <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13px]">
-                {([["Agency", AGENCY[d.extracted.agency]], ["Form", d.extracted.formCode], ["Kind", human(d.extracted.kind)], ["Account", d.extracted.accountNumber ?? "-"], ["Tax year", String(d.extracted.taxYear ?? "-")], ["Effective from", d.extracted.effectiveFrom ?? "-"], ["Respond by", d.extracted.respondBy ?? "-"]] as const).flatMap(([k, v]) => [<dt key={`k${k}`} className="text-gray-10">{k}</dt>, <dd key={`v${k}`}>{v}</dd>])}
+                {([["Agency", AGENCY[d.extracted.agency]], ["Form", d.extracted.formCode], ["Kind", human(d.extracted.kind)], ["Account", d.extracted.accountNumber ?? "None"], ["Tax year", String(d.extracted.taxYear ?? "None")], ["Effective from", d.extracted.effectiveFrom ? longDate(d.extracted.effectiveFrom) : "Not stated"], ["Respond by", d.extracted.respondBy ? longDate(d.extracted.respondBy) : "Not stated"]] as const).flatMap(([k, v]) => [<dt key={`k${k}`} className="text-gray-10">{k}</dt>, <dd key={`v${k}`}>{v}</dd>])}
                 {d.extracted.rates.map((r) => [<dt key={`rk${r.code}`} className="text-gray-10">{r.code.toUpperCase()} rate</dt>, <dd key={`rv${r.code}`}>{r.oldRate ? `${ratePct(r.oldRate)} to ` : ""}{ratePct(r.newRate)}</dd>])}
               </dl>
             </section>
@@ -126,8 +126,8 @@ export function ComplianceView() {
                   return (
                     <TR key={a.id} data-testid={tid.registrationRow(a.jurisdiction)} data-status={a.status}>
                       <TD className="font-medium">{a.jurisdiction}</TD>
-                      <TD>{AGENCY[a.agency]} <span className="text-1 text-gray-10">{human(a.accountType)}</span></TD>
-                      <TD className="font-mono text-1">{a.accountNumber ?? <span className="text-gray-9">Pending</span>}</TD>
+                      <TD>{AGENCY[a.agency]} <span className="text-1 text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? human(a.accountType)}</span></TD>
+                      <TD className="font-mono text-1">{a.accountNumber ?? <span className="font-sans text-gray-9">{a.status === "awaiting_state" || a.status === "needs_info" ? "Pending" : "None yet"}</span>}</TD>
                       <TD numeric>{sui ? ratePct(sui.rate) : "-"}</TD>
                       <TD><Badge tone={STATUS_TONE[a.status]}>{a.status === "awaiting_state" ? "Awaiting state" : a.status === "needs_info" ? "Needs info" : a.status === "not_registered" ? "Not registered" : "Active"}</Badge></TD>
                     </TR>

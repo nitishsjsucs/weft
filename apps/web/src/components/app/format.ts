@@ -82,10 +82,20 @@ export function nextCronSlot(now: string): string | null {
 /** Display names for the simulated agencies; every agency in Weft is a simulator. */
 export const AGENCY: Record<TaxAccount["agency"], string> = { irs: "IRS (sim)", ca_edd: "CA EDD (sim)", ny_dtf: "NY DTF (sim)", ny_dol: "NY DOL (sim)", tx_twc: "TX TWC (sim)", co_dor: "CO DOR (sim)", co_cdle: "CO CDLE (sim)" };
 
-/** "Not reversible: <reason>", without doubling the phrase when the API's reason already says so. */
+/**
+ * "Not reversible: <reason>", without doubling the phrase when the API's reason already says so, without a command
+ * name in prose ("agent.record_mention is not reversible." is "Not reversible"; the caller keeps the stored reason
+ * in a title), and with the reason in lower case after the colon.
+ */
 export function notReversibleText(reason: string | null): string {
-  const r = (reason ?? "no reverse command").trim();
-  return /not reversible|cannot be (undone|reversed)/i.test(r) ? r : `Not reversible: ${r}`;
+  const r = (reason ?? "").trim().replace(/\.$/, "");
+  if (!r) return "Not reversible";
+  if (/^[a-z_]+\.[a-z_]+ is not reversible$/i.test(r)) return "Not reversible";
+  const lead = (t: string) => (/^[A-Z](?:[a-z]|\s)/.test(t) ? t[0]!.toLowerCase() + t.slice(1) : t);
+  const m = /^not reversible:?\s*(.*)$/i.exec(r);
+  if (m) return m[1] ? `Not reversible: ${lead(m[1])}` : "Not reversible";
+  if (/not reversible|cannot be (undone|reversed)/i.test(r)) return `${r}.`;
+  return `Not reversible: ${lead(r)}`;
 }
 
 /** How a payroll run reads in lists: final pay and off-cycle runs never look like the regular semi-monthly run. */
@@ -104,3 +114,21 @@ export function statusLabel(s: string | null | undefined): string {
   const t = (s ?? "").replace(/_/g, " ").trim();
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
 }
+
+/** A worker's type of record. */
+export const WORKER_TYPE: Record<string, string> = { us_w2: "W-2 employee", us_1099: "1099 contractor", global_contractor: "Global contractor" };
+/** Pay schedules by id. */
+export const PAY_SCHEDULE: Record<string, string> = { ps_us_semimonthly: "Semi-monthly, US", ps_global_monthly: "Monthly, global contractors" };
+/** Who owns an onboarding task. */
+export const TASK_OWNER: Record<string, string> = { employee: "Employee", hr: "HR", agent: "Weft agent", payroll: "Payroll", manager: "Manager", it: "IT" };
+const TZ_NAME: Record<string, string> = { "America/New_York": "Eastern Time", "America/Chicago": "Central Time", "America/Denver": "Mountain Time", "America/Phoenix": "Mountain Time (Arizona)", "America/Los_Angeles": "Pacific Time" };
+/** "America/New_York" reads "Eastern Time"; other zones by their long name. */
+export function timeZoneName(tz: string): string {
+  if (TZ_NAME[tz]) return TZ_NAME[tz]!;
+  try {
+    const n = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longGeneric" }).formatToParts(new Date(0)).find((p) => p.type === "timeZoneName")?.value;
+    return n ?? tz;
+  } catch { return tz; }
+}
+/** A calendar date with its year: "Mar 4, 2024". */
+export const longDate = (d: string) => fmtDate(d, { month: "short", day: "numeric", year: "numeric" });

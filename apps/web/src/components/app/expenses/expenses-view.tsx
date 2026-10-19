@@ -38,7 +38,7 @@ export function ExpensesView() {
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const review = useMutation(async () => (await client.post("/v1/routines/:id/trigger", { params: { id: "rt_expense_review" }, body: {} })) as { routineRunId: string });
-  const onReview = async () => { const r = await review.run(); if (r) setNotice(`Review started (${r.routineRunId}): the agent explains each item and files one proposal per item in the Inbox.`); };
+  const onReview = async () => { const r = await review.run(); if (r) setNotice("Review started: the agent explains each item and files one proposal per item in the Inbox."); };
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader

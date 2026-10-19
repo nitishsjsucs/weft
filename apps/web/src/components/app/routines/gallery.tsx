@@ -6,7 +6,7 @@ import { Play } from "lucide-react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { W3_ROUTINES_TID, type RoutineDef, type RoutineRunDto } from "@weft/contracts";
 import { client, errorText, useMutation } from "@/lib/api/hooks";
-import { fmtDateTime } from "../format";
+import { fmtDateTime, statusLabel } from "../format";
 import { useAgent } from "../agent-context";
 
 /** GET /v1/routines rows carry these two fields since wave 3 (apps/api/src/routes/routines.ts). */
@@ -18,8 +18,8 @@ const LAST_TONE: Record<RoutineRunDto["status"], "gray" | "blue" | "amber" | "gr
 export function RunTimes({ r }: { r: RoutineRow }) {
   return (
     <div className="flex flex-col gap-0.5 text-1 text-gray-11">
-      <span>Last run {r.lastRun ? <><Badge tone={LAST_TONE[r.lastRun.status]} size="xs">{r.lastRun.status.replace("_", " ")}</Badge>{r.lastRun.startedAt ? ` ${fmtDateTime(r.lastRun.startedAt)}` : ""}</> : <span className="text-gray-10">never</span>}</span>
-      <span>Next run {r.nextRunAt ? fmtDateTime(r.nextRunAt) : <span className="text-gray-10">{r.enabled ? (r.trigger.type === "event" ? "on its event" : "manual") : "off while disabled"}</span>}</span>
+      <span className="inline-flex flex-wrap items-center gap-1">Last run: {r.lastRun ? <><Badge tone={LAST_TONE[r.lastRun.status]} size="xs">{r.lastRun.status === "waiting_approval" ? "Waiting for approval" : statusLabel(r.lastRun.status)}</Badge>{r.lastRun.startedAt ? ` ${fmtDateTime(r.lastRun.startedAt)}` : ""}</> : <span className="text-gray-10">none yet</span>}</span>
+      <span>Next run: {r.nextRunAt ? fmtDateTime(r.nextRunAt) : <span className="text-gray-10">{r.enabled ? (r.trigger.type === "event" ? "on its event" : "when run by hand") : "off while disabled"}</span>}</span>
     </div>
   );
 }

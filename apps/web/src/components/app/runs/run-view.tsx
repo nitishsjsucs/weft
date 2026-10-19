@@ -6,7 +6,8 @@ import { Badge, Card, ShimmerText, TBody, TD, TH, THead, TR, Table } from "@weft
 import { cn } from "@weft/ui";
 import { TID, type ProposalStatus, type RunStepRow } from "@weft/contracts";
 import { watchRun, type RunWatch } from "@/lib/api/sse";
-import { fmtDateTime, humanTimes, usd } from "../format";
+import { fmtDateTime, statusLabel, usd } from "../format";
+import { answerText, auditLabel, codeWords, humanLine, routineSummaryText, sentenceCase, taintSource } from "../copy";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { stepState, stepSummary, toolLabel } from "../agent/run-steps";
@@ -55,7 +56,7 @@ const STEP_KIND: Partial<Record<RunStepRow["kind"], string>> = { context: "Conte
 
 /** The mono line under a step title: its stage on a narrow card (where the Stage column steps aside), then kind, tool and attempt. */
 function StepDetail({ s }: { s: RunStepRow }) {
-  const extra = [s.toolName || s.attempt > 1 ? s.kind : null, s.toolName ? toolLabel(s.toolName) : null, s.attempt > 1 ? `attempt ${s.attempt}` : null].filter(Boolean).join(" · ");
+  const extra = [s.toolName || s.attempt > 1 ? statusLabel(s.kind) : null, s.toolName ? toolLabel(s.toolName) : null, s.attempt > 1 ? `attempt ${s.attempt}` : null].filter(Boolean).join(" · ");
   return (
     <div className="font-mono text-0 text-gray-10 [overflow-wrap:anywhere]">
       <span className="@min-[560px]:hidden">{s.stage}{extra ? " · " : ""}</span>{extra}
@@ -85,14 +86,14 @@ export function RunView({ id }: { id: string }) {
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
         title={<span className="font-mono text-5">{run.id}</span>}
-        subtitle={run.summary ? humanTimes(run.summary) : undefined}
+        subtitle={run.summary ? (run.routineRunId ? routineSummaryText(run.summary) : answerText(run.summary).text) : undefined}
         meta={
           <>
-            <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{run.status}</ShimmerText> : run.status}</Badge>
-            {run.terminalReason && run.terminalReason.toLowerCase() !== run.status ? <code className="font-mono text-0 text-gray-10">{run.terminalReason}</code> : null}
+            <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{statusLabel(run.status)}</ShimmerText> : run.status === "waiting" ? "Waiting for approval" : statusLabel(run.status)}</Badge>
+            {run.terminalReason && !/^(waiting_approval|done)$/i.test(run.terminalReason) && run.terminalReason.toLowerCase() !== run.status ? <span title={run.terminalReason} className="text-1 text-gray-10">{sentenceCase(codeWords(run.terminalReason))}</span> : null}
             <Badge data-testid="run-provider" data-live={live ? "true" : "false"} tone="outline" size="md">{providerLabel(run)}</Badge>
             <Badge tone={run.attended ? "blue" : "gray"} size="md">{run.attended ? "Attended" : "Unattended"}</Badge>
-            <span className="text-1 text-gray-11">Trigger <code className="font-mono">{run.trigger}</code></span>
+            <span className="text-1 text-gray-11" title={run.trigger}>Trigger: {triggerWords(run.trigger)}</span>
             <span className="text-1 text-gray-11">Started {fmtDateTime(run.createdAt)}</span>
             <span data-testid="run-feed-mode" className="text-1 text-gray-10">({w.mode === "sse" ? "streaming" : w.mode === "polling" ? "polling every 1 s" : "loaded"})</span>
           </>
@@ -100,7 +101,7 @@ export function RunView({ id }: { id: string }) {
       />
       {run.tainted ? (
         <div data-testid="run-tainted-banner" role="alert" className="mb-4 flex items-start gap-2 rounded-xl bg-amber-3 px-4 py-2.5 text-[13px] text-amber-11">
-          <ShieldAlert className="mt-0.5 size-4 shrink-0" />This run read untrusted content: {run.taintedBy ?? "unknown source"}. Every write it asked for became a proposal.
+          <ShieldAlert className="mt-0.5 size-4 shrink-0" /><span title={run.taintedBy ?? undefined}>This run read untrusted content: {taintSource(run.taintedBy)}. Every write it asked for became a proposal.</span>
         </div>
       ) : null}
       <Card className="@container mb-6">
@@ -133,7 +134,7 @@ export function RunView({ id }: { id: string }) {
             <THead><TR><TH>#</TH><TH className={STEP_WIDE}>Stage</TH><TH className="w-full">Step</TH><TH>Outcome</TH><TH numeric className={cn("whitespace-nowrap", STEP_WIDE)}>Tokens in / cached / out</TH><TH numeric className={STEP_OPTIONAL}>Cache hit</TH><TH numeric className={STEP_WIDE}>USD</TH><TH numeric className={STEP_OPTIONAL}>Model time</TH></TR></THead>
             <TBody>
               {w.steps.map((s) => (
-                <TR key={s.n} data-testid={TID.runStep} data-stage={s.stage} data-kind={s.kind}>
+                <TR key={s.n} id={resultIdOf(s) ?? undefined} data-testid={TID.runStep} data-stage={s.stage} data-kind={s.kind}>
                   <TD className="h-10 tabular text-gray-10">{s.n}</TD>
                   <TD className={cn("h-10", STEP_WIDE)}><code className="font-mono text-0">{s.stage}</code></TD>
                   <TD className="h-10 py-1.5">
@@ -157,10 +158,9 @@ export function RunView({ id }: { id: string }) {
           <h2 className="mb-2 text-2 font-medium">Proposals and their fate</h2>
           <Card className="divide-y divide-[var(--app-border)]">
             {w.trace.proposals.map((p) => (
-              <Link key={p.id} href="/app/inbox" className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
-                <code className="font-mono text-0 text-gray-10">{p.id}</code>
-                <span className="min-w-0 flex-1 truncate">{humanTimes(p.headline)}</span>
-                <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "pending" ? "amber" : "red"}>{p.status}</Badge>
+              <Link key={p.id} href={`/app/inbox?proposal=${encodeURIComponent(p.id)}`} title={`${p.id}: ${p.headline}`} className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
+                <span className="min-w-0 flex-1 truncate">{humanLine(p.headline)}</span>
+                <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "pending" ? "amber" : "red"}>{p.status === "pending" ? "Waiting for approval" : statusLabel(p.status)}</Badge>
                 {p.decidedBy ? <span className="hidden text-1 text-gray-10 tablet:inline">Decided by {principalName(p.decidedBy)}</span> : null}
               </Link>
             ))}
@@ -173,7 +173,7 @@ export function RunView({ id }: { id: string }) {
           <Card className="divide-y divide-[var(--app-border)]">
             {w.trace.actions.map((a) => (
               <Link key={a.seq} href="/app/audit" className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
-                <span className="tabular text-gray-10">#{a.seq}</span><code className="font-mono text-0">{a.command}</code><span className="min-w-0 flex-1 truncate">{humanTimes(a.summary)}</span>
+                <span className="tabular text-gray-10">{auditLabel(a.seq)}</span><code className="font-mono text-0">{a.command}</code><span className="min-w-0 flex-1 truncate" title={a.summary}>{humanLine(a.summary)}</span>
               </Link>
             ))}
           </Card>
@@ -181,4 +181,15 @@ export function RunView({ id }: { id: string }) {
       ) : null}
     </div>
   );
+}
+
+/** A run's trigger key as words ("routine:rtr_x" is "Routine"); the key itself is the title. */
+function triggerWords(t: string): string {
+  const k = t.split(":")[0] ?? t;
+  return ({ chat: "Chat", routine: "Routine", mention: "Chat mention", portal: "Portal question", mcp: "MCP client", draft: "Draft", task: "Task" } as Record<string, string>)[k] ?? sentenceCase(k.replace(/_/g, " "));
+}
+/** The result id a tool step returned, so a Sources chip can link to its row. */
+function resultIdOf(s: RunStepRow): string | null {
+  const o = (s.result as { outcome?: { resultId?: unknown } } | null)?.outcome;
+  return typeof o?.resultId === "string" ? o.resultId : null;
 }

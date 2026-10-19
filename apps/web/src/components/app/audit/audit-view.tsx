@@ -94,7 +94,7 @@ export function AuditView() {
                   <div className="text-1 text-gray-10">
                     {a.reversesSeq !== null ? <>Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></> : null}
                     {a.reversedBySeq !== null ? <>Reversed by <a href={`#audit-${a.reversedBySeq}`} className="text-blue-11 hover:underline">#{a.reversedBySeq}</a></> : null}
-                    {a.reversible === "no" ? <span className="text-amber-11">{notReversible(a)}</span> : null}
+                    {a.reversible === "no" ? <span className="text-amber-11" title={a.notReversibleReason ?? undefined}>{notReversible(a)}</span> : null}
                     {a.proposalId ? <> · <span title={a.proposalId}>from an approved proposal</span></> : null}
                   </div>
                 </TD>
