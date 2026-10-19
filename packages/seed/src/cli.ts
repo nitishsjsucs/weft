@@ -1,10 +1,12 @@
 // Scaffold (frozen): `pnpm db:seed`, `pnpm db:reset`, `pnpm db:digest`. Data dir: $WEFT_DATA_DIR (default .data).
+// Profile: $WEFT_SEED_PROFILE, base (default) or rich (packages/seed/src/profile.ts).
 // createWeft lives in apps/api; it is loaded by path so @weft/seed does not depend on @weft/api (which depends on it).
 import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeDb, migrate, openDb } from "@weft/db";
-import { digestDb, seedWorld, type SeedTarget } from "./index";
+import { digestDb, type SeedTarget } from "./index";
+import { parseSeedProfile, seedWorldProfile } from "./profile";
 
 type CreateWeft = (opts: { dataDir: string; testMode?: boolean; seeding?: boolean }) => Promise<SeedTarget & { close(): Promise<void> }>;
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -28,7 +30,7 @@ async function main(cmd: string | undefined): Promise<void> {
     console.log(`reset ${dataDir}`);
   } else if (cmd === "seed") {
     const weft = await (await loadCreateWeft())({ dataDir, seeding: true });
-    try { await seedWorld(weft, { log: (l) => console.log(l) }); } finally { await weft.close(); }
+    try { await seedWorldProfile(weft, parseSeedProfile(process.env.WEFT_SEED_PROFILE), { log: (l) => console.log(l) }); } finally { await weft.close(); }
   } else if (cmd === "digest") {
     if (!existsSync(join(dataDir, "weft.db"))) throw new Error(`no database at ${dataDir}/weft.db; run pnpm db:reset && pnpm db:seed`);
     const db = openDb({ dataDir });

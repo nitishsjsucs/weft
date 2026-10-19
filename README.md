@@ -17,6 +17,8 @@ pnpm dev
 
 Useful flags: `pnpm dev --fresh` (reseed first), `pnpm dev --api-port 4075 --web-port 3075`, `pnpm dev --api-only`.
 
+`pnpm dev` seeds the **rich** profile: the base world plus a deterministic layer of history (January to August pay runs imported from the previous provider, agent and routine runs with steps, decided and waiting approvals, a hash-chained action log, time off through the ledger, offers in every state, offboarding cases, contractor payouts, filed returns, notices and memory pages), so every screen has data. It only adds rows; the planted story beats (the Oct 30 draft, DE 2088, the expenses in review, Noor's offer, the open October reconciliation) stay as the base seed wrote them. `pnpm dev --fresh --profile base` seeds the base world alone, which is what tests, `pnpm e2e`, `pnpm demo` and the eval worlds always use. The layer lives in `packages/seed/src/rich/`; `pnpm e2e:rich` crawls the audited screens on a fresh rich world and fails on an empty state.
+
 Things to try in the demo:
 
 1. **Simulators**: deliver the "CA EDD DE 2088" notice. The agent drafts a SUI rate change and a reply to the agency; both wait in the **Inbox** for you.
@@ -151,6 +153,7 @@ round 2 gate, the final wave 2 gate, wave 1) are in [docs/gates.md](docs/gates.m
 | `pnpm demo` | exit 0 in 12 s; GP1 to GP18 on one world, payroll total cost $267,795.26, GP9 final pay from the ledger at 90.00 h (1,003,846 cents), GP10 pays the $1,500.00 bonus, audit chain verifies |
 | `pnpm demo:tests` | 147 passed (37 files), 61 s. A first attempt with `WEFT_API_PORT=4782` exported failed the 3 S8 MCP tests with a 403 host check: the scenario helpers take the API port from the shell |
 | `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` (against `research/design/reference`) | ok: 829 files; 858 files with 28 denylist phrases and 54 reference files hashed; 704 files against 4 reference pages with 0 allowlisted phrases |
+| `pnpm e2e:rich` | Seeds the rich profile fresh into `.data-rich/` (ports 3270 and 4270; `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_RICH_DATA_DIR` move them) and crawls every audited screen and tab for empty states |
 | `pnpm screenshots` | 10 of 10 capture tests, 48 s (list below) |
 
 ### Live wave 3 agent golden paths
@@ -414,7 +417,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm dev` | API and web on 127.0.0.1 after port checks; Ctrl+C stops both process groups |
 | `pnpm demo` | Narrated GP1 to GP18 and GP20, GP22, GP23 and GP24 on one seeded world in `.data-demo/`, scripted provider; browse it after with `WEFT_DATA_DIR=.data-demo pnpm dev` |
 | `pnpm demo:tests` | The golden path scenario tests (GP1 to GP18, S6 to S9) in process on fresh seeded worlds |
-| `pnpm demo:scenario <name>` | Resets the running dev world to the seed for one live demo scenario (`list` names them), checks it is clean and prints the click path and what to type; it calls no model. `--api-port` and `--web-port` follow `pnpm dev`, and the world should run with `WEFT_CLOCK_RATE=0` |
+| `pnpm demo:scenario <name>` | Resets the running dev world to the base seed (not the rich profile; `pnpm dev --fresh` restores that) for one live demo scenario (`list` names them), checks it is clean and prints the click path and what to type; it calls no model. `--api-port` and `--web-port` follow `pnpm dev`, and the world should run with `WEFT_CLOCK_RATE=0` |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package |
 | `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP24 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
@@ -422,7 +425,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |
 | `pnpm brand:overlap` | Fails on any run of 8 or more consecutive words shared between the visible text of the saved reference pages and the text in `apps/`, `packages/`, `docs/`, `research/`, `README.md` or `SPEC.md`, outside the (empty) allowlist `scripts/brand-overlap.allow.txt`; skips with a message when the gitignored reference folder is absent, as in CI |
-| `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world and print its digest (stable across runs) |
+| `pnpm db:reset && pnpm db:seed && pnpm db:digest` | Rebuild the world and print its digest (stable across runs); `WEFT_SEED_PROFILE=rich` adds the rich layer (its digest is stable too) |
 | `pnpm eval:live` | Live Luna gate, opt-in (see docs/models.md); `L3x6` repeats a case |
 | `pnpm eval:suite` | The wave 4 eval suite (scripted by default; `--split all --variant both`, `--provider live` opt-in with the spend caps, `--phoenix` to record experiments), see [docs/evals.md](docs/evals.md) |
 | `pnpm eval:ci` | Both splits and both variants on the scripted provider, no network; exits 1 on any unsafe action, taint miss, canary hit or harness error (runs in CI) |
