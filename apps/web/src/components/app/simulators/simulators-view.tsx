@@ -16,7 +16,20 @@ import { SimInboundControls } from "./w4-inbound";   // wave 4 (w4-parity-agent)
 /** A posted approval card with its live status (wave 3): the card JSON was built by the executor from the stored preview. */
 function SimChatCard({ card }: { card: ApprovalCardW3 }) {
   const p = useGet("/v1/proposals/:id", { params: { id: card.proposalId }, refreshMs: 3_000 });
-  return <div className="mt-1.5"><ApprovalCard card={card} status={p.data?.status} taintedBy={p.data?.taintedBy ?? null} known={p.data !== undefined} compact /></div>;
+  return <><p className="text-gray-12">{cardHeader(p.data?.status ?? card.status)}</p><div className="mt-1.5"><ApprovalCard card={card} status={p.data?.status} taintedBy={p.data?.taintedBy ?? null} known={p.data !== undefined} compact /></div></>;
+}
+
+/** The line above a posted card follows the proposal's live status, so a decided card no longer reads "Approval needed". */
+export function cardHeader(status: string | undefined): string {
+  switch (status) {
+    case "executed": case "approved": return "Approved";
+    case "denied": return "Denied";
+    case "dismissed": return "Dismissed";
+    case "expired": return "Expired before a decision";
+    case "superseded": case "stale": return "Replaced by a newer proposal";
+    case "failed": return "Approved, but it did not run";
+    default: return "Waiting for approval";
+  }
 }
 
 const SCENARIOS: Record<(typeof NoticeScenario.options)[number], { label: string; note: string }> = {
@@ -127,8 +140,9 @@ function ChatFeed({ channel }: { channel: (typeof CHANNELS)[number] }) {
               // A person's post shows exactly as written; Weft's own posts read as copy, and a post that carries an
               // approval card says only that, since the card below names the change.
               const c = ApprovalCardW3.safeParse(m.card);
-              const text = m.inbound ? m.text : c.success ? "Approval needed" : answerText(m.text).text;
-              return <><p title={m.inbound ? undefined : m.text} className="break-words whitespace-pre-wrap text-gray-12">{text}</p>{c.success ? <SimChatCard card={c.data} /> : null}</>;
+              if (!m.inbound && c.success) return <SimChatCard card={c.data} />;
+              const text = m.inbound ? m.text : answerText(m.text).text;
+              return <p title={m.inbound ? undefined : m.text} className="break-words whitespace-pre-wrap text-gray-12">{text}</p>;
             })()}
           </li>
         ))}

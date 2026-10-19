@@ -1,6 +1,6 @@
 // /v1 actions routes (SPEC 10). Owner: t3-governance. The audit log, chain verification and rollback (UI session only).
 import { Hono } from "hono";
-import { and, asc, desc, eq, gt, isNotNull, lt, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, lt, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { NotFound, Unauthorized, ValidationError, type Action } from "@weft/contracts";
 import { actions } from "@weft/db";
@@ -53,10 +53,16 @@ export function actionsRoutes(weft: Weft): Hono<WeftEnv> {
     const conds: SQL[] = [];
     const runId = c.req.query("runId");
     if (runId) conds.push(eq(actions.agentRunId, runId));
-    if (page.beforeId) conds.push(lt(actions.seq, seqParam(page.beforeId)));
+    // order=time lists newest first by timestamp, the sequence breaking ties, for a log whose imported history was
+    // appended after a later action (the rich profile's history sits after #1). beforeId is then the last row's seq.
+    const byTime = c.req.query("order") === "time";
+    if (byTime && page.beforeId) {
+      const [cur] = await weft.db.select({ ts: actions.ts, seq: actions.seq }).from(actions).where(eq(actions.seq, seqParam(page.beforeId))).limit(1);
+      if (cur) conds.push(or(lt(actions.ts, cur.ts), and(eq(actions.ts, cur.ts), lt(actions.seq, cur.seq)))!);
+    } else if (page.beforeId) conds.push(lt(actions.seq, seqParam(page.beforeId)));
     if (page.afterId) conds.push(gt(actions.seq, seqParam(page.afterId)));
-    const order = page.afterId ? asc(actions.seq) : desc(actions.seq);
-    const rows = await weft.db.select().from(actions).where(conds.length ? and(...conds) : undefined).orderBy(order).limit(page.limit + 1);
+    const order = byTime && !page.afterId ? [desc(actions.ts), desc(actions.seq)] : [page.afterId ? asc(actions.seq) : desc(actions.seq)];
+    const rows = await weft.db.select().from(actions).where(conds.length ? and(...conds) : undefined).orderBy(...order).limit(page.limit + 1);
     const rev = await reversals();
     const scope = await readScopeFor(weft.db, c.var.session.companyId, c.var.session.principalId);
     return c.json(redactJson(weft, toPage(rows.map((x) => scoped(scope, toAction(x, rev.get(x.seq) ?? null), x.argsJson)), page.limit)));

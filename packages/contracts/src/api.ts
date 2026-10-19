@@ -44,7 +44,7 @@ export const ROUTES = [
   r("POST", "/v1/proposals/:id/deny", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only", body: "{ reasonCode, note }" }),
   r("POST", "/v1/proposals/:id/dismiss", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only" }),
   r("POST", "/v1/proposals/:id/start", "proposals", "t3-governance", "DecisionResult", { auth: "ui_only" }),
-  r("GET", "/v1/actions", "actions", "t3-governance", "Page<Action>", { query: ["limit", "afterId", "beforeId", "runId"] }),
+  r("GET", "/v1/actions", "actions", "t3-governance", "Page<Action>", { query: ["limit", "afterId", "beforeId", "runId", "order"] }),
   r("GET", "/v1/actions/verify", "actions", "t3-governance", "ChainStatus"),
   r("GET", "/v1/actions/:seq", "actions", "t3-governance", "Action"),
   r("POST", "/v1/actions/:seq/rollback", "actions", "t3-governance", "ToolOutcome", { auth: "ui_only", body: "{ reason }" }),

@@ -488,3 +488,25 @@ agent-runtime, layout-and-ui, in that order). Where two branches built the same 
 Fixed while integrating: GP4 now reads the run log trigger as words; the routines tour step docks in the panel's
 column; docs/demo-scenarios.md re-read on the merged rich world (4 pending items in the seed, 2 to 5 approvals after
 Mark accepted, 25 CA employees paid in 2026 on the rate card, scenario 8's rich ids prp_0020 and prp_0022).
+
+## Demo round 2, data and seed (dp/r2-data-and-seed, 2026-10-19)
+
+All rich layer; the base digest and the eval world digests are unchanged (no seed step, eval world or engine path
+moved). Details in docs/tracks/rich-seed.md, "Demo round 2".
+
+- Greenhouse sync items carry the engine's detail shape, so the step 19 conflict names both dates and Take Greenhouse
+  value applies one; the row names the candidate's offer, not its id.
+- Seeded offers' letters and agreements are core's own templates; background checks exist only for accepted offers.
+- Seeded routine runs sit at their own cron slots with the engine's refs; event routines carry event refs.
+- Owen Mercer (demo) is offboarding after his Oct 23 last day (final pay on the Oct 30 run), so headcount reads 47 on
+  Home, People and Reports.
+- Leavers' enrollments ride their imported paychecks; employer benefits per month move with joins and leaves.
+- Offboarding step text reads days and the IT system names; the quality inspector leaver is renamed Wen Talbot (demo).
+- Base chat posts are re-dated to the day they describe; a posted approval card's line follows its live status.
+- The audit page lists by time with each row's # shown (`?order=time`), has Show older, and `#audit-N` pages back to
+  the row. The sequence is not rewritten: the memory timeline, Lena's pay rate and the Oct 30 flag evidence cite #1.
+
+Set aside: one headcount definition across `/v1/stats`, the weekly digest precheck and comms grounding (they count
+active, onboarding and offboarding as employees, 51 in the rich world, while Home shows 47 active and 3 onboarding).
+The digest's text and its grounding fact live in packages/routines and the comms grounding (agent-runtime), and the
+digest is in eval worlds, so it needs its own change with a deliberate digest re-pin.

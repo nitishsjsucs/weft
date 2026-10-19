@@ -1,12 +1,12 @@
 // Rich profile, part 2: hiring in every offer state, an accepted hire who is still onboarding, the approvals waiting
 // this week, paid expense history, integration deliveries and sync items, reconciliation history, device orders and
 // the contractors' accounts and documents. Same rules as rich/index.ts: add rows, never edit a planted one.
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
-  benefitReconFindings, contractorTaxForms, devices, documents, enrollmentWindows, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
+  benefitReconFindings, companies, contractorTaxForms, devices, documents, enrollmentWindows, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
   paychecks, payrollRuns, principals, routineRuns, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, timeOffPolicies, timeOffRequests, timeOffTypes, workers, type DbTx,
 } from "@weft/db";
-import { expenses as policy, newId, payroll, sha256Hex } from "@weft/core";
+import { confidentialityText, expenses as policy, newId, offerLetterFor, payroll, sha256Hex } from "@weft/core";
 import { formatCents, type Flag, type Preview } from "@weft/contracts";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -39,6 +39,25 @@ export async function receiptUpload(L: { tx: DbTx; dataDir?: string; bump: Bump 
   await L.tx.insert(uploads).values({ id, workerId, purpose: "receipt", fileName: `receipt-${expenseId}.png`, storagePath: rel, bytes: png.length, sha256: sha, createdAt: at });
   L.bump("uploads");
   return id;
+}
+
+/** The offer letter and confidentiality agreement for a sent offer, as documents.send_offer writes them: the body from
+ * core's own templates, its sha256, and the status the offer's state leaves them in. */
+export async function offerDocuments(L: { tx: DbTx; bump: Bump }, offerId: string, workerId: string | null, status: string, sentAt: string, signedAt: string | null,
+  nda: { status: string; signedAt: string | null } = { status, signedAt }): Promise<{ letter: string; nda: string }> {
+  const { tx } = L;
+  const [o] = await tx.select().from(offers).where(eq(offers.id, offerId));
+  if (!o) throw new Error(`rich seed: no offer ${offerId}`);
+  const [co] = await tx.select().from(companies).where(eq(companies.id, o.companyId));
+  const letterText = await offerLetterFor(tx, o);
+  const ndaText = confidentialityText({ companyName: co?.legalName ?? "Larkspur Robotics, Inc. (demo)", candidateFirst: o.candidateFirst, candidateLast: o.candidateLast, offerId: o.id });
+  const base = { companyId: o.companyId, workerId, offerId: o.id, createdAt: sentAt, sentAt, signedAt, status };
+  const letter = await newId(tx, "doc_");
+  await tx.insert(documents).values({ ...base, id: letter, kind: "offer_letter", title: `Offer letter: ${o.title}`, bodyText: letterText, sha256: sha256Hex(letterText) });
+  const ndaId = await newId(tx, "doc_");
+  await tx.insert(documents).values({ ...base, ...nda, id: ndaId, kind: "confidentiality_agreement", title: "Confidentiality and invention assignment agreement", bodyText: ndaText, sha256: sha256Hex(ndaText) });
+  L.bump("documents", 2);
+  return { letter, nda: ndaId };
 }
 
 async function email(L: MotionApi, to: string, subject: string, body: string, kind: string, ref: string, ts: string) {
@@ -81,26 +100,26 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
         grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
       L.bump("principals");
     }
-    let documentId: string | null = null;
-    if (o.status !== "draft") {
-      const body = `${DEMO_DOC}\n\nOffer letter: ${o.title}\nLarkspur Robotics (demo)\n${o.first} ${o.last} (demo)\nStart date ${o.start}.`;
-      documentId = await newId(tx, "doc_");
-      await tx.insert(documents).values({ id: documentId, companyId: CO, workerId: reserved, offerId: id, kind: "offer_letter", title: `Offer letter: ${o.title}`, status: o.status === "accepted" ? "signed" : o.status === "voided" ? "voided" : "sent",
-        bodyText: body, sha256: sha256Hex(body), createdAt: o.created, sentAt: o.sent ?? null, signedAt: o.accepted ?? null });
-      L.bump("documents");
-    }
     await tx.insert(offers).values({ id, companyId: CO, candidateFirst: o.first, candidateLast: o.last, candidateEmail: mail, title: o.title, departmentId: o.dept, workplaceId: o.wkp,
       workState: o.state, managerId: o.dept === "dpt_hardware" ? imani : null, baseCents: o.base, payKind: "salary", startDate: o.start, status: o.status, acceptedAt: o.accepted ?? null,
-      workerId, createdAt: o.created, sentAt: o.sent ?? null, viewedAt: o.viewed ?? null, voidedAt: o.voided ?? null, expiresOn: o.expires ?? null, documentId });
+      workerId, createdAt: o.created, sentAt: o.sent ?? null, viewedAt: o.viewed ?? null, voidedAt: o.voided ?? null, expiresOn: o.expires ?? null, documentId: null });
     L.bump("offers");
+    if (o.status !== "draft") {
+      // The letter and the agreement documents.send_offer writes (core offerLetterFor and confidentialityText), so the
+      // portal shows and signs the same text, and its sha256, as for an offer sent from the app.
+      const status = o.status === "accepted" ? "signed" : o.status === "voided" ? "voided" : "sent";
+      const ids = await offerDocuments(L, id, reserved, status, o.sent ?? o.created, o.accepted ?? null);
+      await tx.update(offers).set({ documentId: ids.letter }).where(eq(offers.id, id));
+    }
     if (o.sent) await email(L, mail, `Your offer from Larkspur Robotics (demo): ${o.title}`, `Hi ${o.first}, your offer is ready to review and sign in the Weft portal (demo). It expires on ${o.expires}.`, "offer_sent", id, o.sent);
     if (o.accepted) await email(L, mail, "Welcome to Larkspur Robotics (demo)", `Hi ${o.first}, thanks for signing. Your first day is ${o.start}. Your checklist is in the portal (demo).`, "offer_accepted", id, o.accepted);
     if (o.voided) await email(L, mail, "Your Larkspur Robotics (demo) offer was withdrawn", `Hi ${o.first}, the ${o.title} offer was withdrawn after the role was put on hold.`, "offer_voided", id, o.voided);
-    if (o.status === "accepted" || o.status === "viewed") {
-      const clear = o.status === "accepted";
+    // A background check is ordered once an offer is accepted (the screening follow-up routine's trigger); a sent or
+    // viewed offer has none yet.
+    if (o.status === "accepted") {
       await tx.insert(screeningOrders).values({ id: await newId(tx, "scr_"), companyId: CO, offerId: id, workerId, vendor: "checkr", mode: "simulated", packageSlug: "weft_standard_sim", priceCents: 3500,
-        phase: "full", status: clear ? "complete" : "pending", result: clear ? "clear" : null, adjudication: clear ? "engaged" : "none", vendorCandidateId: `sim-cand-${id}`, vendorOrderId: `sim-order-${id}`,
-        etaOn: clear ? null : "2026-10-29", createdAt: clear ? pt("2026-10-07", 10) : pt("2026-10-21", 10), completedAt: clear ? pt("2026-10-09", 12) : null });
+        phase: "full", status: "complete", result: "clear", adjudication: "engaged", vendorCandidateId: `sim-cand-${id}`, vendorOrderId: `sim-order-${id}`,
+        etaOn: null, createdAt: pt("2026-10-07", 10), completedAt: pt("2026-10-09", 12) });
       L.bump("screening_orders");
     }
     L.action({ ts: o.created, actorKind: "human", actorId: "usr_sam", command: "offers.create", args: { offer_id: id }, summary: `Drafted offer ${id} for ${o.first} ${o.last} (demo), ${o.title}`, reversible: "no" });
@@ -228,10 +247,24 @@ async function seedIntegrations(L: MotionApi): Promise<void> {
       extVersion: 1, status: "linked", createdAt: o.createdAt ?? pt("2026-10-19", 10), updatedAt: o.createdAt ?? pt("2026-10-19", 10) });
     L.bump("integration_deliveries");
   }
-  await tx.insert(syncItems).values({ id: await newId(tx, "syn_"), companyId: CO, vendor: "greenhouse", kind: "unmapped_value", subjectRef: linked[0]?.id ?? "offr_0001", status: "resolved",
-    detailJson: JSON.stringify({ field: "office", value: "Austin Yard", note: "Mapped the Greenhouse office to Austin Yard (demo)" }), createdAt: pt("2026-10-19", 10), resolvedAt: pt("2026-10-19", 14), resolvedBy: "usr_sam" });
-  await tx.insert(syncItems).values({ id: await newId(tx, "syn_"), companyId: CO, vendor: "greenhouse", kind: "sync_conflict", subjectRef: linked[1]?.id ?? "offr_0001", status: "open",
-    detailJson: JSON.stringify({ field: "start_date", weft: "2026-11-16", vendor: "2026-11-23", note: "Greenhouse changed the start date after the offer was drafted in Weft" }), createdAt: pt("2026-10-22", 16), resolvedAt: null, resolvedBy: null });
+  // Same detail shapes the Greenhouse engine writes (packages/core/src/integrations/ats.ts): an unmapped office blocks
+  // the application until a person maps it, and a start date changed in a later offer version is a conflict on the
+  // linked offer with both values, so "Take Greenhouse value" applies a real date.
+  const [tess, marisol] = linked;
+  const tessApp = String(6600090);
+  await tx.insert(syncItems).values({ id: await newId(tx, "syn_"), companyId: CO, vendor: "greenhouse", kind: "unmapped_value", subjectRef: `greenhouse:application:${tessApp}`, status: "resolved",
+    detailJson: JSON.stringify({ application_ref: tessApp, field: "office", ext_id: "4012", ext_name: "Austin Yard", reason: "The work state could not be resolved from the office. Map the office to a Weft workplace." }),
+    createdAt: tess?.createdAt ?? pt("2026-10-19", 10), resolvedAt: pt("2026-10-19", 14), resolvedBy: "usr_sam" });
+  if (marisol) {
+    const app = String(6600091);
+    await tx.update(extLinks).set({ extVersion: 2, updatedAt: pt("2026-10-22", 16) }).where(and(eq(extLinks.vendor, "greenhouse"), eq(extLinks.extId, app)));
+    const key = `gh-offer-${app}-v2`;
+    await tx.insert(integrationDeliveries).values({ id: await newId(tx, "dlv_"), vendor: "greenhouse", dedupeKey: key, action: "candidate_hired", receivedAt: pt("2026-10-22", 16),
+      verified: true, rawSha256: createHash("sha256").update(key).digest("hex"), appliedAt: pt("2026-10-22", 16), error: null });
+    L.bump("integration_deliveries");
+    await tx.insert(syncItems).values({ id: await newId(tx, "syn_"), companyId: CO, vendor: "greenhouse", kind: "sync_conflict", subjectRef: marisol.id, status: "open",
+      detailJson: JSON.stringify({ field: "start_date", label: "Start date", weft_value: marisol.startDate, vendor_value: "2026-11-23", offer_version: "2", application_ref: app }), createdAt: pt("2026-10-22", 16), resolvedAt: null, resolvedBy: null });
+  }
   L.bump("sync_items", 2);
 }
 

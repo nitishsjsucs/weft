@@ -9,7 +9,7 @@ import {
   trainingCourses, workers, type DbTx,
 } from "@weft/db";
 import { newId, payroll, sha256Hex } from "@weft/core";
-import { receiptUpload } from "./motion";
+import { offerDocuments, receiptUpload } from "./motion";
 
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
@@ -38,7 +38,7 @@ async function email(L: PortalHiresApi, to: string, subject: string, body: strin
 }
 
 async function doc(L: PortalHiresApi, workerId: string, offerId: string | null, kind: string, title: string, who: string, at: string): Promise<string> {
-  const body = `${DEMO_DOC}\n\n${title}\nLarkspur Robotics (demo)\n${who}\nSigned ${at.slice(0, 10)}.`;
+  const body = `${DEMO_DOC}\n\n${title}\nLarkspur Robotics (demo)\n${who}\nSigned ${payroll.shortDay(at.slice(0, 10), 0)}.`;
   const id = await newId(L.tx, "doc_");
   await L.tx.insert(documents).values({ id, companyId: CO, workerId, offerId, kind, title, status: "signed", bodyText: body, sha256: sha256Hex(body), createdAt: at, sentAt: at, signedAt: at });
   L.bump("documents");
@@ -63,11 +63,15 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
     await tx.insert(principals).values({ id: await newId(tx, "usr_"), companyId: CO, kind: "human", workerId, display: who, email: mail, role: "employee",
       grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
     L.bump("workers"); L.bump("principals");
-    const offerDoc = await doc(L, workerId, offerId, "offer_letter", `Offer letter: ${h.title}`, who, h.accepted);
     await tx.insert(offers).values({ id: offerId, companyId: CO, candidateFirst: h.first, candidateLast: h.last, candidateEmail: mail, title: h.title, departmentId: h.dept, workplaceId: h.wkp,
       workState: h.state, managerId: h.manager, baseCents: h.base, payKind: "salary", startDate: h.start, status: "accepted", acceptedAt: h.accepted, workerId,
-      createdAt: h.created, sentAt: h.sent, viewedAt: h.viewed, voidedAt: null, expiresOn: h.expires, documentId: offerDoc });
+      createdAt: h.created, sentAt: h.sent, viewedAt: h.viewed, voidedAt: null, expiresOn: h.expires, documentId: null });
     L.bump("offers");
+    // The letter and agreement documents.send_offer wrote from core's templates; the agreement is signed at its own
+    // checklist step (the second, a day after the offer).
+    const ndaSigned = h.done.includes("sign_confidentiality");
+    const offerDocs = await offerDocuments(L, offerId, workerId, "signed", h.sent, h.accepted, { status: ndaSigned ? "signed" : "sent", signedAt: ndaSigned ? pt(addDays(h.accepted.slice(0, 10), 1), 11) : null });
+    await tx.update(offers).set({ documentId: offerDocs.letter }).where(eq(offers.id, offerId));
     await email(L, mail, `Your offer from Larkspur Robotics (demo): ${h.title}`, `Hi ${h.first}, your offer is ready to review and sign in the Weft portal (demo). It expires on ${h.expires}.`, "offer_sent", offerId, h.sent);
     await email(L, mail, "Welcome to Larkspur Robotics (demo)", `Hi ${h.first}, thanks for signing. Your first day is ${h.start}. Your checklist is in the portal (demo).`, "offer_accepted", offerId, h.accepted);
     const clear = h.screening === "clear";
@@ -82,7 +86,6 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
       await tx.insert(onboardingTasks).values({ id: await newId(tx, "obt_"), workerId, kind: k, status: done ? "done" : "pending", owner: OWNER[k] ?? "employee", dueOn: h.start, doneAt: done ? at : null });
       L.bump("onboarding_tasks");
       if (!done) continue;
-      if (k === "sign_confidentiality") await doc(L, workerId, null, "confidentiality_agreement", "Confidentiality and invention assignment agreement", who, at);
       if (k === "federal_w4") await doc(L, workerId, null, "w4", "Form W-4, employee's withholding certificate", who, at);
       if (k === "state_withholding" && h.state === "NY") await doc(L, workerId, null, "state_withholding", "IT-2104: New York employee withholding certificate", who, at);
       if (k === "i9_sim") await doc(L, workerId, null, "i9", "Form I-9 receipt (masked)", who, at);
@@ -113,9 +116,9 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
   const extract = { merchant: "Deskline Supply (demo)", date: "2026-10-20", total_cents: 18_640, source: "simulated extractor (sidecar)" };
   const receiptUploadId = await receiptUpload(L, odette, exp, 900, pt("2026-10-21", 18), JSON.stringify(extract));
   await tx.insert(expenses).values({ id: exp, companyId: CO, workerId: odette, category: "equipment", merchant: "Deskline Supply (demo)", amountCents: 18_640, transactionDate: "2026-10-20",
-    submittedAt: pt("2026-10-21", 18), businessPurpose: "Monitor arm and keyboard for the home office, under the remote work policy",
+    submittedAt: pt("2026-10-21", 18), businessPurpose: "Pre-start equipment stipend: monitor arm and keyboard for the home office, under the remote work policy",
     receiptUploadId, receiptExtractJson: JSON.stringify(extract), status: "approved", checksJson: "[]",
-    approverPrincipalId: "usr_dana", decidedBy: "usr_dana", decidedAt: pt("2026-10-22", 10), decisionNote: "Approved. It pays with the first regular paycheck after the start date.", policyVersion: 1, source: "portal" });
+    approverPrincipalId: "usr_dana", decidedBy: "usr_dana", decidedAt: pt("2026-10-22", 10), decisionNote: "Approved as a pre-start equipment stipend under the remote work policy, bought before her Nov 2 start. It pays with her first regular paycheck.", policyVersion: 1, source: "portal" });
   L.bump("expenses");
   L.action({ ts: pt("2026-10-22", 10), actorKind: "human", actorId: "usr_dana", command: "expenses.decide", args: { expense_id: exp, decision: "approve" }, summary: `Approved expense ${exp} for Odette Marsh (demo)`, reversible: "no" });
   const [ny] = await tx.select().from(trainingCourses).where(and(eq(trainingCourses.companyId, CO), eq(trainingCourses.code, "ny_harassment")));

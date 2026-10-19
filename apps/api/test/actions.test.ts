@@ -43,6 +43,22 @@ describe("/v1/actions", () => {
     expect(page.data[0]).toMatchObject({ reversible: "no", notReversibleReason: "A sent message cannot be unsent." });
   });
 
+  it("order=time lists by timestamp with the seq on each row and pages with beforeId", async () => {
+    await approvedRate();
+    // History written after a later action: seq 2 is dated before seq 1, as the rich profile's imported history is.
+    await weft.clock.set("2025-12-19T17:00:00.000Z", 0);
+    await weft.executor.agent.exec(h, { callId: "c2", command: "comms.send_message", args: { channel: "#payroll", text: "done" }, batch: 2 } as never);
+    await weft.clock.set(new Date(Date.parse(SEED_TIME) + 3_600_000).toISOString(), 0);
+    await weft.executor.agent.exec(h, { callId: "c3", command: "comms.send_message", args: { channel: "#payroll", text: "again" }, batch: 3 } as never);
+    const get = async (q: string) => (await (await weft.app.request(`/v1/actions?${q}`, { headers: weft.uiHeaders("usr_dana") })).json()) as { data: { seq: number }[]; hasMore: boolean };
+    expect((await get("order=time")).data.map((a) => a.seq)).toEqual([3, 1, 2]);
+    const first = await get("order=time&limit=2");
+    expect(first.data.map((a) => a.seq)).toEqual([3, 1]);
+    expect(first.hasMore).toBe(true);
+    expect((await get("order=time&limit=2&beforeId=1")).data.map((a) => a.seq)).toEqual([2]);
+    expect((await get("")).data.map((a) => a.seq)).toEqual([3, 2, 1]);   // the default stays seq order
+  });
+
   it("verify reports ok with no gaps and gitLag <= 1", async () => {
     await approvedRate();
     const v = await (await weft.app.request("/v1/actions/verify", { headers: weft.uiHeaders("usr_dana") })).json();
