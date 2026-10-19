@@ -32,6 +32,15 @@ describe("R8: a month day range is two dates", () => {
     expect(check("Ruth is off November 23 to 27, 2026 and November 23 to 25.", request).ok).toBe(true);
   });
 
+  it("a pair of days after one month name is two dates, each from a record (live time-off answer, demo check)", () => {
+    const holidays = [{ resultId: "res_0238", data: { requests: [{ id: "tor_0003", holidays_note: "Nov 26 and Nov 27 are company holidays, charged 0 hours", days: [{ date: "2026-11-26", holiday: true }, { date: "2026-11-27", holiday: true }] }] } }];
+    expect(key("November 26 and 27")).toEqual(["0-11-26", "0-11-27"]);
+    expect(check("November 26 and 27 are company holidays and charge 0 vacation hours.", holidays)).toEqual({ ok: true, offending: [] });
+    expect(check("November 26 and 28 are company holidays.", holidays)).toEqual({ ok: false, offending: ["November 26 and 28"] });
+    // A second number that cannot be a later day is still a number, and is checked as one.
+    expect(check("Paid November 26 and 12 people.", holidays)).toEqual({ ok: false, offending: ["12"] });
+  });
+
   it("refuses a range whose second day no record holds, naming the whole range", () => {
     expect(check("Ruth is off November 23 to 28, 2026.", request)).toEqual({ ok: false, offending: ["November 23 to 28, 2026"] });
     expect(check(`Ruth is off Nov 24${EN_DASH}27.`, request)).toEqual({ ok: false, offending: [`Nov 24${EN_DASH}27`] });
