@@ -38,8 +38,8 @@ type ColMeta = { numeric?: boolean; showFrom?: ShowFrom } | undefined;
 const showFrom = (meta: ColMeta) => (meta?.showFrom ? SHOW_FROM[meta.showFrom] : undefined);
 
 const GROUPS = [
-  { key: "needs_review", label: "Needs Review", testid: TID.payrollGroupNeedsReview, wash: "bg-amber-9/20", dot: "bg-amber-9" },
-  { key: "ready", label: "Ready for Approval", testid: TID.payrollGroupReady, wash: "bg-green-9/20", dot: "bg-green-9" },
+  { key: "needs_review", label: "Needs review", testid: TID.payrollGroupNeedsReview, wash: "bg-amber-9/20", dot: "bg-amber-9" },
+  { key: "ready", label: "Ready for approval", testid: TID.payrollGroupReady, wash: "bg-green-9/20", dot: "bg-green-9" },
 ] as const;
 
 /** Paycheck table (TanStack Table v9 useTable) with Needs Review and Ready for Approval bands. */

@@ -197,7 +197,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     id: "portal", n: 16, route: { kind: "portal" }, target: '[data-tour~="portal-progress"]', fallbacks: ['[data-tour~="portal-checklist"]'], block: "start",
     avoid: ['[data-tour~="portal-checklist"] ol'],
     title: "What the new hire sees",
-    body: "{hireName} signs by typing their name, then works through the W-4, state form, direct deposit, I-9 and benefits. Each item checks off as it is done.",
+    body: "{hireName} signs by typing their name, then works through tax forms, direct deposit, the I-9 and benefits. Each item checks off as it is done.",
     action: "next", seconds: 9,
   },
   {
