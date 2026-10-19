@@ -58,7 +58,7 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
             ) : m.kind === "error" ? (
               <div key={m.id} className="rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{m.text}</div>
             ) : (
-              <RunFeed key={m.id} runId={m.runId!} label={m.label} latest={!agent.thread.slice(i + 1).some((x) => x.kind === "run")} />
+              <RunFeed key={m.id} runId={m.runId!} label={m.label} background={m.background} latest={!m.background && !agent.thread.slice(i + 1).some((x) => x.kind === "run" && !x.background)} />
             ),
           )}
         </div>

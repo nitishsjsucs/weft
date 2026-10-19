@@ -9,6 +9,8 @@ import { ExpenseBand, ExpenseCategory, W3_EXPENSES_TID as TID } from "@weft/cont
 import type { W3ExpensesPage, W3ExpensesRow } from "../../../../../../packages/contracts/src/ext/w3-expenses";
 import { client, errorText, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
+import { useAgent } from "../agent-context";
+import { agentRunOf } from "../agent/follow";
 import { fmtDate } from "../format";
 import { AddExpense } from "./add-expense";
 import { ExpenseDrawer } from "./expense-drawer";
@@ -37,8 +39,15 @@ export function ExpensesView() {
   const clock = useSimClock();
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const review = useMutation(async () => (await client.post("/v1/routines/:id/trigger", { params: { id: "rt_expense_review" }, body: {} })) as { routineRunId: string });
-  const onReview = async () => { const r = await review.run(); if (r) setNotice(`Review started (${r.routineRunId}): the agent explains each item and files one proposal per item in the Inbox.`); };
+  const agent = useAgent();
+  const review = useMutation(async () => (await client.post("/v1/routines/:id/trigger", { params: { id: "rt_expense_review" }, body: {} })) as { routineRunId: string; agentRunId?: string | null });
+  const onReview = async () => {
+    const r = await review.run();
+    if (!r) return;
+    setNotice("Review started: the agent explains each item and files one proposal per item in the Inbox.");
+    const agentRunId = await agentRunOf(r.routineRunId, r.agentRunId);
+    if (agentRunId) agent.watch(agentRunId, "Expense review");
+  };
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
