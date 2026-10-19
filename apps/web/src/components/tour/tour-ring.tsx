@@ -4,6 +4,7 @@
 // target's own layer: z 45 for page content, so popovers, menus and drawers (z 50) the step opens sit on top of it.
 // A side where the target runs on past the visible area fades out instead of drawing an edge. A target hidden under
 // another layer (the phone's agent sheet) gets no ring. Secondary marks get a dashed outline. No dimming scrim.
+import { useRef } from "react";
 import { intersect, rectOf, ringBox, sameRect, tightSides, type Rect, type Side } from "./geometry";
 import { clipRectOf, layerZOf, occluded, ringZFor, useFrameValue } from "./layout";
 
@@ -23,9 +24,18 @@ function measure(el: Element | null, pad: number): RingMeasure | null {
 const same = (a: RingMeasure | null, b: RingMeasure | null): boolean =>
   a === b || (!!a && !!b && a.z === b.z && a.clipped.join() === b.clipped.join() && a.tight.join() === b.tight.join() && sameRect(a.box, b.box));
 
-/** The ring box for an element, re-read every frame; null when it is gone, clipped away or hidden. */
-export function useRing(el: Element | null, pad: number): RingMeasure | null {
-  return useFrameValue(() => measure(el, pad), same, [el, pad]);
+/**
+ * The ring box for an element, re-read every frame; null when it is gone, clipped away or hidden. `node` (the ring's
+ * own element) gets its box written in the frame the target was read, so it moves with a scroll or a transition in
+ * the same frame instead of one behind it, while React's re-render catches up with the rest.
+ */
+export function useRing(el: Element | null, pad: number, node?: { current: HTMLElement | null }): RingMeasure | null {
+  return useFrameValue(() => measure(el, pad), same, [el, pad], (m) => {
+    const n = node?.current;
+    if (!n || !m) return;
+    n.style.top = `${m.box.top}px`; n.style.left = `${m.box.left}px`;
+    n.style.width = `${m.box.right - m.box.left}px`; n.style.height = `${m.box.bottom - m.box.top}px`;
+  });
 }
 
 const FADE: Record<Side, string> = {
@@ -51,11 +61,13 @@ function styleOf(m: RingMeasure): React.CSSProperties {
 }
 
 export function TourRing({ target, found, secondary }: { target: Element | null; found: boolean; secondary: Element[] }) {
-  const m = useRing(found ? target : null, 4);
+  const node = useRef<HTMLDivElement | null>(null);
+  const m = useRing(found ? target : null, 4, node);
   return (
     <>
       {m ? (
         <div
+          ref={node}
           aria-hidden
           data-tour-ring=""
           data-target-found={found ? "true" : "false"}
@@ -71,7 +83,8 @@ export function TourRing({ target, found, secondary }: { target: Element | null;
 }
 
 function SecondaryMark({ el }: { el: Element }) {
-  const m = useRing(el, 2);
+  const node = useRef<HTMLDivElement | null>(null);
+  const m = useRing(el, 2, node);
   if (!m) return null;
-  return <div aria-hidden data-tour-mark="" data-clip={m.clipped.join(" ")} className="weft-tour-mark pointer-events-none fixed rounded-[8px]" style={styleOf(m)} />;
+  return <div ref={node} aria-hidden data-tour-mark="" data-clip={m.clipped.join(" ")} className="weft-tour-mark pointer-events-none fixed rounded-[8px]" style={styleOf(m)} />;
 }

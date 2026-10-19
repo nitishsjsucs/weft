@@ -170,6 +170,77 @@ for (const [width, height] of [[1280, 800], [1440, 900]] as const) {
   });
 }
 
+// The app shell scrolls inside its panes, never the document. A screen reader table in the agent's chart answer once
+// escaped every overflow clip (position absolute with no positioned ancestor), so from step 12 on the document was
+// 285 px taller than the window and each step's scroll slid the whole shell up until a reset snapped it back.
+for (const [width, height] of [[1280, 800], [1440, 900]] as const) {
+  test.describe(`${width}x${height}, after the chart answer`, () => {
+    test.use({ viewport: { width, height } });
+
+    test("the document never scrolls on steps 12 to 20, and the ring is placed on the settled page", async ({ page, world }) => {
+      test.skip(!world.rich, "the tour runs on the rich world");
+      test.setTimeout(240_000);
+      await page.addInitScript(() => { try { localStorage.setItem("weft.agentOpen", "1"); } catch { /* blocked */ } });
+      // The real path from the notice on, so the agent thread holds the notice run and the chart answer and runs
+      // taller than the panel, as it does on a full tour.
+      await openStep(page, "deliver-notice");
+      for (const id of ["deliver-notice", "agent-run", "inbox-proposal", "approve", "rate-live", "audit", "payroll-flags"]) {
+        const c = readyCard(page, id);
+        await expect(c).toBeVisible({ timeout: 30_000 });
+        await expect(c.locator("[data-tour-primary]")).toBeEnabled({ timeout: 25_000 });
+        await c.locator("[data-tour-primary]").click();
+      }
+      await expect(readyCard(page, "ask-chart")).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('[data-tour~="agent-composer"] textarea')).toHaveValue(/Show payroll cost by month/, { timeout: 10_000 });
+      await readyCard(page, "ask-chart").locator("[data-tour-primary]").click();
+      await expect(page.locator('[data-tour~="agent-chart"]')).toBeVisible({ timeout: 20_000 });
+      await expect(readyCard(page, "ask-chart").locator('[data-tour-status="done"]')).toBeVisible({ timeout: 20_000 });
+      // A per-frame probe: the document's scroll offset and its overflow past the window, and the ring's distance
+      // from its target on every frame where both show (installed again after a full page load).
+      const probe = () => page.evaluate(() => {
+        const w = window as unknown as { __tp?: { y: number; over: number; drift: number } };
+        if (!w.__tp) {
+          const tp = { y: 0, over: 0, drift: 0 };
+          w.__tp = tp;
+          const tick = () => {
+            const se = document.scrollingElement!;
+            // The portal is a page that scrolls the document; only the app shell must not.
+            if (location.pathname.startsWith("/app")) {
+              tp.y = Math.max(tp.y, window.scrollY, se.scrollTop);
+              tp.over = Math.max(tp.over, se.scrollHeight - window.innerHeight);
+            }
+            const ring = document.querySelector("[data-tour-ring]");
+            const body = document.querySelector("[data-tour-card][data-ready=true] p[id]");
+            const target = body ? document.querySelector(`[aria-describedby~="${body.id}"]`) : null;
+            // A drawer or a popover may still slide in after ready; the steps checked here have none.
+            if (ring && target && !ring.getAttribute("data-clip") && !ring.getAttribute("data-tight") && !document.querySelector('[role="dialog"]')) {
+              const a = ring.getBoundingClientRect(), b = target.getBoundingClientRect();
+              tp.drift = Math.max(tp.drift, Math.abs(a.top + 4 - b.top), Math.abs(a.left + 4 - b.left));
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }
+        const out = { ...w.__tp };
+        w.__tp.y = 0; w.__tp.over = 0; w.__tp.drift = 0;
+        return out;
+      });
+      await probe();
+      await readyCard(page, "ask-chart").locator("[data-tour-primary]").click();
+      for (const id of ["person", "expenses", "time-off", "hiring", "portal", "memory", "routines", "integrations", "permissions"]) {
+        await expect(readyCard(page, id)).toBeVisible({ timeout: 30_000 });
+        await page.waitForTimeout(900);
+        const p = await probe();
+        expect(p.y, `${id}: the document scrolled`).toBe(0);
+        expect(p.over, `${id}: the document is taller than the window`).toBeLessThanOrEqual(0);
+        // A ring drawn while its target still moves (one frame behind a smooth scroll) shows as drift here.
+        if (id !== "portal") expect(p.drift, `${id}: the ring trailed its target`).toBeLessThanOrEqual(2);
+        await readyCard(page, id).locator("[data-tour-primary]").click();
+      }
+    });
+  });
+}
+
 // With no clean spot left (a flag lower in the group opens a tall popover on a short laptop screen) the card drops
 // under the app's layers. Radix copies the content's z-index to its wrapper only once, so the drop has to reach the
 // wrapper: every popover the person opens paints over the card, never the reverse.

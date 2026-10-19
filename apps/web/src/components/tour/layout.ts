@@ -127,9 +127,11 @@ export function visibleRect(el: Element | null): Rect | null {
  * it changed: one rect read per frame tracks a target through scroll, resize, layout shifts, text and attribute
  * changes and CSS transitions alike, none of which every observer catches.
  */
-export function useFrameValue<T>(read: () => T, same: (a: T, b: T) => boolean, deps: unknown[]): T {
+export function useFrameValue<T>(read: () => T, same: (a: T, b: T) => boolean, deps: unknown[], onFrame?: (v: T) => void): T {
   const readRef = useRef(read);
   readRef.current = read;
+  const frameRef = useRef(onFrame);
+  frameRef.current = onFrame;
   const sameRef = useRef(same);
   sameRef.current = same;
   const [value, setValue] = useState<T>(() => (typeof window === "undefined" ? (undefined as T) : read()));
@@ -139,7 +141,9 @@ export function useFrameValue<T>(read: () => T, same: (a: T, b: T) => boolean, d
     setValue(last);
     const tick = () => {
       const next = readRef.current();
-      if (!sameRef.current(last, next)) { last = next; setValue(next); }
+      // The caller may write the value to the DOM in the same frame it was read (the ring's box), so it never paints
+      // a frame behind what it follows; the state update after it re-renders the same values.
+      if (!sameRef.current(last, next)) { last = next; frameRef.current?.(next); setValue(next); }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);

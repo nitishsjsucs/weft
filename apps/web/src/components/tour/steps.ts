@@ -210,13 +210,15 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "next", seconds: 8,
   },
   {
-    id: "routines", n: 18, route: { kind: "path", path: "/app/routines" }, target: '[data-tour~="routine-gallery"]', block: "start",
+    // The gallery is taller than a phone screen: its head and first routine go at the top, the sheet at the bottom.
+    id: "routines", n: 18, route: { kind: "path", path: "/app/routines" }, target: '[data-tour~="routine-gallery"]', block: "start", sheet: "bottom",
     title: "Work that runs itself",
     body: "Routines run on a schedule or an event. Cheap checks decide first whether a model is needed.",
     action: "next", seconds: 6,
   },
   {
-    id: "integrations", n: 19, route: { kind: "path", path: "/app/integrations" }, target: '[data-tour~="integration-card"]', fallbacks: ['[data-tour~="integrations-list"]'],
+    // The card's title and badges name which integration is ringed: on a phone they go at the top, the sheet below.
+    id: "integrations", n: 19, route: { kind: "path", path: "/app/integrations" }, target: '[data-tour~="integration-card"]', fallbacks: ['[data-tour~="integrations-list"]'], block: "start", sheet: "bottom",
     title: "Plugs into your tools",
     body: "Greenhouse, Workday, Checkr, HireRight and DocuSign run as simulators until you add credentials.",
     action: "next", seconds: 6,

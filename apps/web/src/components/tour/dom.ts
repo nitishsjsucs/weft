@@ -62,15 +62,75 @@ export function waitForAny(selectors: string[], ms: number, signal: AbortSignal)
   });
 }
 
+const SCROLLS = new Set(["auto", "scroll"]);
+
 /**
- * scrollIntoView with a 16 px margin, so a target scrolled to the start or end of its pane is not flush against the
- * pane's edge (the sticky header, the window top), where the ring would have no room.
+ * The element's scroll containers, innermost first: every ancestor that scrolls (overflow auto or scroll, with
+ * content past its box) up to a fixed layer. The document is one only outside the app shell (the portal scrolls the
+ * page; /app scrolls inside its panes, and a scroll of the document there slides the whole shell up).
  */
-export function scrollToView(el: HTMLElement, block: ScrollLogicalPosition, behavior: ScrollBehavior): void {
-  const prev = el.style.scrollMargin;
-  el.style.scrollMargin = "16px";
-  el.scrollIntoView({ block, behavior });
-  el.style.scrollMargin = prev;
+export function scrollBoxes(el: HTMLElement): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+    const cs = getComputedStyle(p);
+    if ((SCROLLS.has(cs.overflowY) && p.scrollHeight > p.clientHeight + 1) || (SCROLLS.has(cs.overflowX) && p.scrollWidth > p.clientWidth + 1)) out.push(p);
+    if (cs.position === "fixed") return out;
+  }
+  const doc = document.scrollingElement as HTMLElement | null;
+  if (doc && !document.querySelector("[data-app-main]") && (doc.scrollHeight > doc.clientHeight + 1 || doc.scrollWidth > doc.clientWidth + 1)) out.push(doc);
+  return out;
+}
+
+/** How far a box must scroll on one axis to put [lo, hi] at `pos` inside [start, end] with a margin. */
+function axisDelta(lo: number, hi: number, start: number, end: number, pos: ScrollLogicalPosition, margin: number): number {
+  if (pos === "start") return lo - (start + margin);
+  if (pos === "end") return hi - (end - margin);
+  if (pos === "center") return (lo + hi) / 2 - (start + end) / 2;
+  if (lo < start + margin) return lo - (start + margin);
+  if (hi > end - margin) return Math.min(hi - (end - margin), lo - (start + margin));
+  return 0;
+}
+
+/**
+ * Scrolls the element into view like scrollIntoView, but only inside its own scroll containers (never the app
+ * shell's document), with a 16 px margin so a `block: "start"` target is not flush against the pane's edge (the
+ * sticky header), where the ring would have no room. Resolves once every container it moved has reached its end
+ * position (or after 900 ms), so the ring and the card are placed on the settled page, not one frame behind a
+ * smooth scroll.
+ */
+export function scrollToView(el: HTMLElement, block: ScrollLogicalPosition, behavior: ScrollBehavior, inline: ScrollLogicalPosition = "nearest", margin = 16): Promise<void> {
+  // `margin` is the room left on the block axis (more above a target the card sits over); inline keeps 16 px.
+  const r = el.getBoundingClientRect();
+  let { top, bottom, left, right } = r;
+  const moves: { box: HTMLElement; x: number; y: number }[] = [];
+  for (const box of scrollBoxes(el)) {
+    const doc = box === document.scrollingElement;
+    const b = doc ? { top: 0, left: 0 } : box.getBoundingClientRect();
+    const t = b.top + (doc ? 0 : box.clientTop), l = b.left + (doc ? 0 : box.clientLeft);
+    const h = doc ? window.innerHeight : box.clientHeight, w = doc ? document.documentElement.clientWidth : box.clientWidth;
+    const y = Math.max(0, Math.min(box.scrollHeight - h, box.scrollTop + (box.scrollHeight > h + 1 ? axisDelta(top, bottom, t, t + h, block, margin) : 0)));
+    const x = Math.max(0, Math.min(box.scrollWidth - w, box.scrollLeft + (box.scrollWidth > w + 1 ? axisDelta(left, right, l, l + w, inline, 16) : 0)));
+    const dy = y - box.scrollTop, dx = x - box.scrollLeft;
+    if (Math.abs(dy) < 1 && Math.abs(dx) < 1) continue;
+    box.scrollTo({ top: y, left: x, behavior });
+    moves.push({ box, x, y });
+    top -= dy; bottom -= dy; left -= dx; right -= dx;
+  }
+  return settled(moves);
+}
+
+/** Resolves once every box is at its end position (within a pixel), checked each frame, or after `maxMs`. */
+function settled(moves: { box: HTMLElement; x: number; y: number }[], maxMs = 900): Promise<void> {
+  if (!moves.length) return Promise.resolve();
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      const done = moves.every(({ box, x, y }) => Math.abs(box.scrollTop - y) < 1 && Math.abs(box.scrollLeft - x) < 1);
+      if (done || Date.now() - t0 >= maxMs) resolve();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
 }
 
 /**
@@ -78,17 +138,11 @@ export function scrollToView(el: HTMLElement, block: ScrollLogicalPosition, beha
  * above it), when the element still fits below that line; otherwise centres it. For steps whose popover drops below
  * the target, so the card has a free spot above.
  */
-export function scrollWithRoomAbove(el: HTMLElement, room: number, behavior: ScrollBehavior): void {
-  let box: HTMLElement | null = el.parentElement;
-  while (box && box !== document.body) {
-    const oy = getComputedStyle(box).overflowY;
-    if ((oy === "auto" || oy === "scroll") && box.scrollHeight > box.clientHeight) break;
-    box = box.parentElement;
-  }
-  if (!box || box === document.body) { scrollToView(el, "center", behavior); return; }
-  const c = box.getBoundingClientRect(), r = el.getBoundingClientRect();
-  if (r.height + room + 16 > box.clientHeight) { scrollToView(el, "center", behavior); return; }
-  box.scrollTo({ top: box.scrollTop + (r.top - (c.top + room)), behavior });
+export function scrollWithRoomAbove(el: HTMLElement, room: number, behavior: ScrollBehavior): Promise<void> {
+  const r = el.getBoundingClientRect();
+  const box = scrollBoxes(el).find((b) => b !== document.scrollingElement && b.scrollHeight > b.clientHeight + 1);
+  if (!box || r.height + room + 16 > box.clientHeight) return scrollToView(el, "center", behavior);
+  return scrollToView(el, "start", behavior, "nearest", room);
 }
 
 /** Clicks like a pointer: mousedown (Radix tabs) then click (buttons, popover triggers, rows). */

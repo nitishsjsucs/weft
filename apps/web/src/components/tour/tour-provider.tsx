@@ -86,8 +86,6 @@ function useMedia(q: string): boolean {
 }
 
 const pathOnly = (href: string) => href.split("#")[0]!.split("?")[0]!;
-/** The app shell scrolls inside its own panes; a scrollIntoView can still nudge the document, which clips the top bar. */
-const resetDocScroll = () => { try { if (window.location.pathname.startsWith("/app") && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0); } catch { /* no window */ } };
 const here = () => `${window.location.pathname}${window.location.search}`;
 
 export function TourProvider({ children }: { children: ReactNode }) {
@@ -269,10 +267,18 @@ export function TourProvider({ children }: { children: ReactNode }) {
     const motion: ScrollBehavior = reducedMotion() ? "auto" : "smooth";
     let described: { el: HTMLElement; prev: string | null } | null = null;
     setUiState(freshUi(step.id));
-    resetDocScroll();
     primaryRef.current = null;
     hover.current = { pointer: false, focus: false };
 
+    /**
+     * The room a `block: "start"` scroll leaves above the target: 16 px, or on a phone with the sheet docked at the
+     * top, the sheet's height and its gaps, so the target's head (what the copy names) lands below the sheet.
+     */
+    const sheetRoom = (st: TourStep): number => {
+      if (!phone || st.block !== "start" || (st.sheet ?? (st.agent ? "top" : null)) !== "top") return 16;
+      const h = document.querySelector("[data-tour-card]")?.getBoundingClientRect().height || 220;
+      return Math.round(h) + 24;
+    };
     const ring = (el: HTMLElement | null) => {
       if (!el) return;
       if (described) described.el.setAttribute("aria-describedby", described.prev ?? "");
@@ -324,7 +330,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       for (const list of step.prepare ?? []) {
         const hit = await waitForAny(list.map((x) => fill(x, memo())).filter((x): x is string => !!x), 5_000, signal);
         if (signal.aborted) return;
-        if (hit) { hit.el.scrollIntoView({ block: "center", behavior: "auto" }); activate(hit.el); await sleep(300, signal); }
+        if (hit) { await scrollToView(hit.el, "center", "auto"); activate(hit.el); await sleep(300, signal); }
       }
 
       // 4. Locate the target (5 s), then ring it.
@@ -332,14 +338,14 @@ export function TourProvider({ children }: { children: ReactNode }) {
       const hit = step.target ? await waitForAny(cands, 5_000, signal) : null;
       if (signal.aborted) return;
       if (hit) {
-        // Card height (about 220 px) plus its gap and padding, so it fits between the pane's top and the ring.
-        if (step.cardAbove) scrollWithRoomAbove(hit.el, 268, motion);
-        else scrollToView(hit.el, step.block ?? "center", motion);
-        ring(hit.el);
+        // Card height (about 220 px) plus its gap and padding, so it fits between the pane's top and the ring. The ring
+        // and the card wait for the scroll to settle, so they are never drawn a frame behind a smooth scroll.
+        await (step.cardAbove ? scrollWithRoomAbove(hit.el, 268, motion) : scrollToView(hit.el, step.block ?? "center", motion, "nearest", sheetRoom(step)));
         // A column the copy names, inside a table that scrolls sideways on a phone (the rate's notice source).
         const inner = step.reveal ? hit.el.querySelector<HTMLElement>(step.reveal) : null;
-        if (inner) window.setTimeout(() => inner.scrollIntoView({ block: "nearest", inline: "nearest", behavior: motion }), 350);
-        window.setTimeout(resetDocScroll, 450);
+        if (inner) await scrollToView(inner, "nearest", motion, "nearest");
+        if (signal.aborted) return;
+        ring(hit.el);
       }
       const secondary: Element[] = [];
       for (const sel of step.secondary ?? []) {
@@ -379,9 +385,10 @@ export function TourProvider({ children }: { children: ReactNode }) {
                 activate(undoEl);
                 patchMemo({ undoneSeq: seq });
                 setUi({ extra: [] });
-                void waitForAny([`[data-tour~="audit-row"][data-reverses="${seq}"]`], 8_000, signal).then((row) => {
+                void waitForAny([`[data-tour~="audit-row"][data-reverses="${seq}"]`], 8_000, signal).then(async (row) => {
                   if (!row || signal.aborted) return;
-                  scrollToView(row.el, "center", motion);
+                  await scrollToView(row.el, "center", motion);
+                  if (signal.aborted) return;
                   ring(row.el);
                   setUi({ target: row.el, found: true, secondary: [], avoid: [] });
                 });
@@ -493,7 +500,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
             else statusLine(TOUR_COPY.agentWaiting, "waiting", "The agent finished and is waiting for your approval");
             // The finished run stays on screen: a reader moves on with Next, autoplay after the step's own seconds.
             const first = document.querySelector<HTMLElement>(`[data-tour~="agent-run"][data-run-id="${runId}"] [data-tour~="agent-tool-lines"]`);
-            if (first) first.scrollIntoView({ block: phone ? "start" : "center", behavior: motion });
+            if (first) void scrollToView(first, phone ? "start" : "center", motion);
             setUi({ nextEnabled: true, mode: "next" });
             primaryRef.current = advance;
             void autoplayAfter(lingerMs(index, elapsed(), dwell(), 4_000), advance);
@@ -521,7 +528,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
         const prev = memo().chartRunId;
         if (prev) {
           const chart = document.querySelector<HTMLElement>(`[data-run-id="${prev}"] [data-tour~="agent-chart"]`);
-          if (chart) { chart.scrollIntoView({ block: "center", behavior: motion }); ring(chart); setUi({ target: chart }); }
+          if (chart) { await scrollToView(chart, "center", motion); if (signal.aborted) return; ring(chart); setUi({ target: chart }); }
           setUi({ mode: "next", nextEnabled: true });
           void autoplayAfter(dwell(), advance);
           return;
@@ -577,7 +584,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
           }
           const chart = document.querySelector<HTMLElement>(`[data-run-id="${runId}"] [data-tour~="agent-chart"]`);
           if (chart) {
-            chart.scrollIntoView({ block: "center", behavior: motion });
+            await scrollToView(chart, "center", motion);
+            if (signal.aborted) return;
             ring(chart);
             setUi({ target: chart, found: true, nextEnabled: true, mode: "next" });
             statusLine(TOUR_COPY.agentDone, "done", "The chart is ready");
@@ -608,7 +616,6 @@ export function TourProvider({ children }: { children: ReactNode }) {
         closeAppLayers();
         window.setTimeout(() => document.querySelectorAll<HTMLElement>('[data-tour~="payroll-flag"][aria-expanded="true"]').forEach((el) => activate(el)), 0);
       }
-      resetDocScroll();
       if (step.nav) { const b = getBridge(); if (b && !b.laptop()) b.closeNav(); }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

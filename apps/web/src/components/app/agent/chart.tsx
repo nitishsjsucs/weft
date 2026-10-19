@@ -105,7 +105,7 @@ export function ReportChart({ report }: { report: ReportResult }) {
   );
 
   return (
-    <figure data-testid={W3_CHAT_TID.chart} data-tour="agent-chart" data-metric={report.metric} data-kind={spec.kind} data-rows={rows.length} className="m-0 flex flex-col gap-2 rounded-xl border border-gray-a4 bg-card p-3">
+    <figure data-testid={W3_CHAT_TID.chart} data-tour="agent-chart" data-metric={report.metric} data-kind={spec.kind} data-rows={rows.length} className="relative m-0 flex flex-col gap-2 rounded-xl border border-gray-a4 bg-card p-3">
       <figcaption className="flex items-start gap-2">
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] font-medium text-gray-12">{spec.title}</span>

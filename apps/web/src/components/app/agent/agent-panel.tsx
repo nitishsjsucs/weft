@@ -43,7 +43,7 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
         {/* Docked, the top bar's agent toggle closes the panel; the X shows only when the panel overlays the page. */}
         {overlay ? <Button variant="ghost" size="icon" onClick={() => agent.setOpen(false)} aria-label="Close agent panel"><X strokeWidth={1.5} /></Button> : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {agent.thread.length === 0 ? (
           <div className="flex flex-col gap-2 text-2 text-gray-11">
             <p>Ask about payroll, people, taxes or anything on this page. The agent reads through the same tools you do and asks before it changes anything.</p>
