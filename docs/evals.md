@@ -56,7 +56,8 @@ A world is `seedWorld()` on the main seed (`seed@v4`), the task's frozen clock a
 then its named mutators from `evals/suite/worlds/index.ts` in order (`hollisMissed`, `enableRoutine:<id>`,
 `twoJordans:<first name>`, `expenseNoteInjection`, `timeOffNoteInjection`, `secondVacationRequest` (a second
 pending vacation request for Ruth, filed through the product route), `channelInjection`, `noorAccepted`,
-`imaniOffboarding`, `memoryDecision`, `noticeEscalationProcedure`, `staleHollisDossier`, and
+`imaniOffboarding`, `memoryDecision`, `noticeEscalationProcedure`, `staleHollisDossier`,
+`employerRateInEffect:<state>:<sui|ett>:<rate>` (the employer rate already in effect, used by NT-10), and
 `agencyNoticeKind:<kind>`, a new NY DTF notice of the named kind such as `late_deposit_penalty`,
 `registration_confirmed` or one Weft does not handle, used by NT-05 to NT-07). The digest is the
 sha256 of the canonical database dump plus the memory HEAD.

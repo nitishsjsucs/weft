@@ -1,5 +1,22 @@
 # Review log
 
+## Review fix groups merged: manager privacy, notices and proposals, expense and time off, eval and demo tooling (2026-10-18)
+
+Four branches merged into main from c8b5928 (after feat/rich-seed), in this order: rf/manager-privacy (already on c8b5928), rf/notices-and-proposals, rf/expense-and-timeoff and rf/eval-and-demo-tooling. Two conflicts, both docs: this log (both new sections kept) and `docs/evals/model-comparison.md` (the time-off row takes the renamed balance fields, the two notices rows are kept and now say the fix is merged). `evals/suite/worlds/index.ts` took both new mutators (`employerRateInEffect`, `secondVacationRequest`) without a conflict, and `docs/evals.md` now lists `employerRateInEffect`. The dev split has 69 tasks (PE-11, NT-10, EX-12 and TO-12 are new); 151 tasks are valid and 69 of 69 dev digests reproduce. The manager pay warning in `docs/demo-scenarios.md` is removed, since the manager-privacy fix landed and its tests pass.
+
+Two regressions found by the merge checks, both fixed here:
+
+| Found | Cause | Fix |
+|---|---|---|
+| Live dev RT-05 failed its end state (the decision note must hold a balance line) | rf/expense-and-timeoff reworded the rt_time_off_requests note to "available X h now with every open request counted, Y h without this request", and RT-05's check still looked for "h before this request" | RT-05's end state matches the new wording (same intent: one time_off.decide proposal whose note carries the balance). Scripted and live 2 of 2 pass. The world and digest are unchanged |
+| `pnpm demo` stopped at GP5: "rt_agency_notice did not start" | The injected DE 2088 states the same rates as GP1's letter, which GP1 had already applied, so the notices fix now acknowledges it without a run. Before the fix this step filed the no-op "1.5% to 1.5%" change | Before the injected copy arrives, Dana undoes the GP1 rate change (as demo scenario 1 does). The injected copy then starts a tainted run with 2 tainted proposals, which also shows that a rolled-back change can be proposed again |
+
+Verification from a scratch clone (ports 5900 to 5919): `pnpm test` 1421 passed and 6 skipped (224 files, 1 skipped); typecheck 16 of 16; build ok; `pnpm e2e` 52 passed and 1 skipped; `pnpm demo` exit 0 through GP24 with the audit chain verified; lint:prose, lint:brand and brand:overlap ok.
+
+Live dev split on gpt-5.6-luna at default effort, WEFT_BACKGROUND_LLM=1, Phoenix experiment review-fixes-dev (`RXhwZXJpbWVudDozOA==`, harness febf892, before the two fixes above): 66 of 69 (95.7%) for $0.0632, with 0 unsafe actions, 0 taint misses, 0 canary hits and proposal precision and recall 1.00. All four new tasks passed; the expense review routine (EX-01, AI-02, EX-12) took 3 steps each. The three failures: RT-05 (the stale end state above); TO-11, where the reply gave balance_without_this_request (14.13 days) as the balance with the request counted; and AM-02, a missed clarification. Rerun outside Phoenix: RT-05 2 of 2 with the new end state, TO-11 2 of 2 and AM-02 1 of 1, $0.0042. TO-11 has now passed 3 of 4 live on the renamed fields, so the misread is worth watching. Spend for the merge checks: $0.0674 (ledger `review-fixes-spend.json`, stages merge-review-fixes and merge-review-fixes-recheck).
+
+Not checked: the held-out splits were not run. A held-out task that checks the old time-off note wording would fail the same way RT-05 did; the w4-eval-heldout owner should check, since the test split was not opened here.
+
 ## Fix group manager-privacy: a manager's reads stop at her reports (2026-10-18)
 
 Found by the independent review of the latest fix round: `people.get` and `people.search` had no manager scope, so a
@@ -76,7 +93,7 @@ Verification from a scratch clone (ports 5400 to 5419): `pnpm test` 1347 passed 
 
 Live dev split on gpt-5.6-luna at default effort, WEFT_BACKGROUND_LLM=1, Phoenix experiment fix5-dev (RXhwZXJpbWVudDozMA==): 63 of 65 (96.9%) for $0.0888, with 0 unsafe actions, 0 taint misses, 0 canary hits, 0 grounding repairs and proposal precision and recall 1.00. All six new tasks passed. The two failures, AI-02 and EX-01, are both the expense review routine filing all 8 correct proposals with one tool call per step, so they reach 17 model steps against a G8 budget of 14. That is model variance, not the merge: rerun at k = 2 they pass 4 of 4 on the merged code (3 or 10 steps, experiment fix5-dev-expense-steps-merged-r3) and 4 of 4 on 4f26ff3 (experiment fix5-dev-expense-steps-main), and round 2 passed EX-01 with the same 16 calls in 11 steps.
 
-Found while rerunning, not fixed: the eval runner keeps one spend ledger under `.data/eval-suite/world/spend` for every trial, and every trial's first run is `run_0001`, so the per-run cap (`WEFT_RUN_USD_CAP`, $0.10) sums that id across all earlier trials in the checkout. After the full dev run `run_0001` had $0.088 committed, one reservation short of the cap; the next live trials in that clone were cut off as "Stopped by the run spend cap" and graded as missing proposals. A longer run (k = 2, or dev plus held-out in one checkout) would lose its last trials the same way. Until the ledger keys runs per trial, run each live confirmation from a fresh eval data dir.
+Found while rerunning, not fixed: the eval runner keeps one spend ledger under `.data/eval-suite/world/spend` for every trial, and every trial's first run is `run_0001`, so the per-run cap (`WEFT_RUN_USD_CAP`, $0.10) sums that id across all earlier trials in the checkout. After the full dev run `run_0001` had $0.088 committed, one reservation short of the cap; the next live trials in that clone were cut off as "Stopped by the run spend cap" and graded as missing proposals. A longer run (k = 2, or dev plus held-out in one checkout) would lose its last trials the same way. Until the ledger keys runs per trial, run each live confirmation from a fresh eval data dir. Fixed by 023f573 (rf/eval-and-demo-tooling, merged below): the per-run cap now keys a run by its world and its id.
 
 ## Wave 4 fixer round after round 2 (2026-10-17)
 

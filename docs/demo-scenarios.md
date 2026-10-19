@@ -17,9 +17,6 @@ WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev --fresh
 
 Other resets: `curl -s -X POST http://127.0.0.1:3070/api/v1/sim/reset -H 'x-weft-principal: usr_dana' -H 'content-type: application/json' -d '{}'` (about 0.6 s), or Ctrl+C and `pnpm dev --fresh`.
 
-<!-- Integrator: remove the next paragraph only after the manager-privacy fix group lands on main (people.get must stop returning pay, bank last4 and the W-4 to a manager for a worker outside her reports). Left in place by rf/eval-and-demo-tooling. -->
-Do not do this live: switch Viewing as to Imani Ferreira and ask for the pay of someone outside her reports (for example Lena Brooks). The round 2 confirmation found that people.get returns pay, bank last4 and the W-4 to a manager for a worker outside her reports (CQ-63 class); it is an open product defect.
-
 ## Reliability at a glance
 
 | # | Scenario | Live passes | Model steps | Time per run | Cost per take |
