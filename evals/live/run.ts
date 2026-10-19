@@ -20,6 +20,7 @@ const { seedWorld } = await import("../../packages/seed/src/index");
 const { check } = await import("../../packages/grounding/src/index");
 const { summarize } = await import("../../packages/agent/src/index");
 const db = await import("../../packages/db/src/index");
+const { uncoveredFlags } = await import("../../packages/core/src/payroll/explain");
 
 type Weft = Awaited<ReturnType<typeof createWeft>>;
 interface CaseResult { id: string; pass: boolean; reasons: string[]; runId: string | null; modelSteps: number; toolCalls: number; invalidArgs: number; tokens: unknown; cacheHitRatio: number | null; usd: number; wallMs: number; notes: Record<string, unknown> }
@@ -124,6 +125,11 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
     const model = sources.filter((s) => s === "agent").length;
     if (explained.length !== checks.length || checks.length !== 4) reasons.push(`${explained.length} of ${checks.length} flagged paychecks explained`);
     if (model < 3) reasons.push(`${model} model-written explanations (need 3)`);
+    // One explanation per paycheck covering all of its flags (a live run once filed one item per flag, last write wins).
+    for (const p of explained) {
+      const miss = uncoveredFlags(p.explanation ?? "", JSON.parse(p.flagsJson) as never);
+      if (miss.length) reasons.push(`${p.id}'s explanation does not cover ${miss.join(", ")}`);
+    }
     const submit = (await w.db.select().from(db.proposals)).filter((p) => p.proposerRunId === runId && p.command === "payroll.submit_run");
     if (submit.length !== 1 || JSON.parse(submit[0]!.argsJson ?? "{}").exclude_blocked !== true) reasons.push(`submit proposals ${submit.length}`);
     if (run.stepsUsed > 6) reasons.push(`${run.stepsUsed} model steps`);
@@ -296,13 +302,41 @@ const CASES: Record<string, (w: W) => Promise<CaseResult>> = {
     if (run.stepsUsed > 4) reasons.push(`${run.stepsUsed} model steps`);
     return score(w, "L10", runId, t0, reasons, { decision: a?.decision ?? null, note: a?.note ?? null, summary: run.summary });
   },
+  // L11 (demo-perfect round 2): a department headcount. people.search once matched "Hardware" against names and
+  // titles only and the agent answered 3; the answer must give the department's own count, read from the world.
+  async L11(w) {
+    const t0 = Date.now();
+    const reasons: string[] = [];
+    const dept = (await w.db.select().from(db.departments)).find((d) => d.name === "Hardware");
+    if (!dept) return score(w, "L11", null, t0, ["the world has no Hardware department"]);
+    const people = (await w.db.select().from(db.workers)).filter((x) => x.departmentId === dept.id && x.status !== "inactive" && x.status !== "draft");
+    const total = people.length, active = people.filter((x) => x.status === "active").length;
+    const before = await maxSeq(w);
+    const res = await post(w, "/v1/agent/runs", { text: "How many people work in Hardware?", pageContext: null });
+    if (res.status !== 202) return score(w, "L11", null, t0, [`start answered ${res.status}`]);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = await settled(w, runId);
+    if (run.status !== "done") reasons.push(`status ${run.status}`);
+    const answer = run.summary ?? "";
+    const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen"];
+    const says = (n: number) => new RegExp(`\\b(${n}${WORDS[n] ? `|${WORDS[n]}` : ""})\\b`, "i").test(answer);
+    if (!says(total) && !says(active)) reasons.push(`the answer gives neither ${total} people nor ${active} active: ${JSON.stringify(answer.slice(0, 200))}`);
+    const trace = await w.agent.trace(runId);
+    const results = trace.steps.filter((s) => s.kind === "tool_call").map((s) => (s.result as { outcome?: unknown } | null)?.outcome);
+    const g = check(answer, results);
+    if (!g.ok) reasons.push(`ungrounded: ${g.offending.join(", ")}`);
+    const written = await newActions(w, before);
+    if (written.length) reasons.push(`a write happened: ${written.map((a) => `${a.command} by ${a.principal}`).join(", ")}`);
+    if (run.stepsUsed > 4) reasons.push(`${run.stepsUsed} model steps`);
+    return score(w, "L11", runId, t0, reasons, { expected: { total, active }, answer });
+  },
 };
 
 const args = process.argv.slice(2);
 // "L3x6" runs L3 six times, each on a fresh world (gate report item 3).
-const bad = args.filter((a) => !/^L([1-9]|10)(x[1-9])?$/.test(a));
+const bad = args.filter((a) => !/^L([1-9]|10|11)(x[1-9])?$/.test(a));
 if (bad.length) {
-  console.error(`eval:live: unknown case ${bad.join(", ")}; use L1 to L10, optionally with a repeat such as L3x6`);
+  console.error(`eval:live: unknown case ${bad.join(", ")}; use L1 to L11, optionally with a repeat such as L3x6`);
   process.exit(2);
 }
 /**

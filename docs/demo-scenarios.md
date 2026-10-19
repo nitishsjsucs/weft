@@ -44,7 +44,7 @@ Click path:
 
 Say: "An agency letter just arrived. The agent read it, worked out the CA unemployment rate drops from 3.4 to 1.5 percent and what that means in dollars, and filed the change and the reply as proposals. Every number on the card comes from a tool result. I approve; Undo appends a reversing row and the original stays in a hash-chained log."
 
-Expect: notices.draft_response, then tax.update_rate (sui, 0.015, from 2026-01-01) and notices.send_response as pending proposals; nothing executes before approval.
+Expect: notices.draft_response, then tax.update_rate (sui, 0.015, from 2026-01-01) and notices.send_response as pending proposals; nothing executes before approval. Approving the rate re-previews the Oct 30 draft, so the seeded Submit card filed on the old total is withdrawn (it reads "Withdrawn as out of date") and the payroll page says "The submit card is out of date" until Run review now files one on the new numbers.
 
 Fallback: the scripted provider on the same path ($0, deterministic), or `pnpm demo` then `WEFT_DATA_DIR=.data-demo pnpm dev`.
 

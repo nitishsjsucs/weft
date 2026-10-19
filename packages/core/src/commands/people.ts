@@ -2,7 +2,7 @@
 import { and, asc, desc, eq, gte, like, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { formatCents } from "@weft/contracts";
-import { offboardingCases, workers, type DbTx } from "@weft/db";
+import { departments, offboardingCases, workers, type DbTx } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { isDetailed, notFound, ptDateOf, readCommand, responseFormatField } from "../demo/define";
 import { nameRef } from "../people/names";
@@ -47,6 +47,19 @@ function directoryMatch(w: typeof workers.$inferSelect, i: SearchInput, words: s
   return words.every((q) => w.id === q || hay.some((h) => h.includes(q.toLowerCase())));
 }
 
+/** Words a department question wraps around the name ("the Hardware team", "people in Hardware"). */
+const DEPARTMENT_FILLER = new Set(["the", "in", "department", "dept", "team", "people", "staff", "everyone", "all"]);
+
+/**
+ * The department a query names, if it names one and nothing else: "Hardware", "hardware team", "people in Hardware".
+ * A department question then lists the department instead of the names and titles that contain the word.
+ */
+export function departmentNamed<D extends { id: string; name: string }>(words: string[], depts: D[]): D | null {
+  const core = words.map((w) => w.toLowerCase()).filter((w) => !DEPARTMENT_FILLER.has(w)).join(" ");
+  if (!core) return null;
+  return depts.find((d) => d.name.toLowerCase() === core) ?? null;
+}
+
 function searchAccess(scope: ReadScope, i: SearchInput, narrowed: boolean) {
   const filtered = !!(i.status || i.start_from || i.start_to);
   return {
@@ -60,16 +73,21 @@ function searchAccess(scope: ReadScope, i: SearchInput, narrowed: boolean) {
 const peopleSearch = readCommand({
   name: "people.search", domain: "people",
   summary: "Search workers by name, state, status, department or start date window.",
-  description: "Search workers by name or title (query), work state, status, department_id or start date (start_from, start_to, YYYY-MM-DD, inclusive). Returns names with short ids, title, department, state, status, start date, total matches and counts by state and department. limit is 1 to 50. Detailed adds employee number, manager, workplace, end date. Outside a manager's reports: directory fields only.",
+  description: "Search workers by name or title (query), state, status, department_id or start date (start_from, start_to, YYYY-MM-DD). A query that is only a department name lists it (total = headcount). Returns ids, title, department, state, status, start date; counts by state, department, status. limit 1 to 50. Detailed adds employee number, manager, end date. Beyond a manager's reports: directory only.",
   input: SearchInput,
   async run(i: SearchInput, ctx, deps) {
     const tx = deps.tx;
-    const base = workerWhere(ctx.companyId, { state: i.state, status: i.status, departmentId: i.department_id });
-    const where = and(base, ...(i.start_from ? [gte(workers.startDate, i.start_from)] : []), ...(i.start_to ? [lte(workers.startDate, i.start_to)] : []))!;
     const q = i.query?.trim();
+    const deptRows = await tx.select({ id: departments.id, name: departments.name }).from(departments).where(eq(departments.companyId, ctx.companyId));
+    // "How many people work in Hardware?" sends query "Hardware": a query that names a department (and nothing else)
+    // lists that department, so total is its headcount and not the few names and titles that contain the word.
+    const named = i.department_id ? null : departmentNamed(searchWords(q), deptRows);
+    const departmentId = i.department_id ?? named?.id;
+    const base = workerWhere(ctx.companyId, { state: i.state, status: i.status, departmentId });
+    const where = and(base, ...(i.start_from ? [gte(workers.startDate, i.start_from)] : []), ...(i.start_to ? [lte(workers.startDate, i.start_to)] : []))!;
     // Every word must match a name, title or employee number, so a full name ("Hollis Grey") or the readable name with
     // its fictional-data suffix ("Hollis Grey (demo)") finds the worker; a single word behaves as before.
-    const words = searchWords(q);
+    const words = named ? [] : searchWords(q);
     const filtered = words.length ? and(where, ...words.map((w) => or(like(workers.firstName, `%${w}%`), like(workers.lastName, `%${w}%`), like(workers.title, `%${w}%`), like(workers.employeeNumber, `%${w}%`), like(workers.id, w)))) : where;
     const matched = await tx.select().from(workers).where(filtered).orderBy(asc(workers.id));
     const scope = await readScopeOf(tx, ctx);
@@ -87,15 +105,28 @@ const peopleSearch = readCommand({
     const depts = new Map<string, number>();
     for (const w of rows) if (w.departmentId) depts.set(w.departmentId, (depts.get(w.departmentId) ?? 0) + 1);
     const byDepartment = [...depts].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([id, n]) => ({ department_id: id, department: L.dept(id), count: n }));
+    // By status for the rows a full record shows (a department's headcount reads "11: 9 active, 2 onboarding").
+    const byStatus: Record<string, number> = {};
+    for (const w of rows) if (inScope(scope, w.id)) byStatus[w.status] = (byStatus[w.status] ?? 0) + 1;
     const truncated = list.length < rows.length;
     const data: Record<string, unknown> = { total: rows.length, count: list.length, limit_applied: limit };
+    if (named) data.department_note = `Query "${q}" is the ${named.name} department: listed everyone in it (department_id ${named.id}), not only names and titles that contain the word; total is its headcount, by_status splits it`;
+    else if (!i.department_id && words.length) {
+      // A query word that is a department name, inside a longer query: say the match is on names and titles only.
+      const dep = deptRows.find((d) => words.some((w) => w.toLowerCase() === d.name.toLowerCase()));
+      if (dep) {
+        const n = (await tx.select({ id: workers.id }).from(workers).where(workerWhere(ctx.companyId, { departmentId: dep.id }))).length;
+        data.department_note = `Query matched names and titles only; the ${dep.name} department has ${n} people: pass department_id ${dep.id} for the department`;
+      }
+    }
     if (i.start_from || i.start_to) data.start_window = { from: i.start_from ?? null, to: i.start_to ?? null };
     if (i.limit !== undefined && i.limit !== limit) data.limit_note = `limit ${i.limit} is outside 1 to ${SEARCH_MAX}; used ${limit}`;
     if (truncated) data.truncated_note = `Returned ${list.length} of ${rows.length} matches; narrow with status, state, department_id or the start date window`;
     if (scope) data.access = searchAccess(scope, i, matched.length !== rows.length);
-    Object.assign(data, { by_state: byState, by_department: byDepartment, workers: list });
+    Object.assign(data, { by_state: byState, by_department: byDepartment, by_status: byStatus, workers: list });
     const window = data.start_window ? ` starting ${i.start_from ?? "any time"} to ${i.start_to ?? "any time"}` : "";
-    return { data, summary: `Found ${rows.length} ${rows.length === 1 ? "worker" : "workers"}${window}${truncated ? ` (showing ${list.length})` : ""}` };
+    const inDept = named ? ` in ${named.name}` : "";
+    return { data, summary: `Found ${rows.length} ${rows.length === 1 ? "worker" : "workers"}${inDept}${window}${truncated ? ` (showing ${list.length})` : ""}` };
   },
 });
 

@@ -164,6 +164,62 @@ describe("drafts and explanations", () => {
     const third = await exec("payroll.explain_flags", { run_id: "pay_2026_10_30", items: rest.map((p) => ({ paycheck_id: p.id })) });
     expect((third.data as { unexplained_flagged: number }).unexplained_flagged).toBe(0);
   });
+
+  it("explain_flags files one explanation per paycheck: repeated items are joined in order, never last write wins", async () => {
+    const rows = await db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
+    const multi = rows.find((p) => p.workerId === ids.caOct19)!;
+    const flags = (JSON.parse(multi.flagsJson) as { rule: string; severity: string }[]).filter((f) => f.severity !== "info");
+    expect(flags.map((f) => f.rule)).toContain("MISSING_BANK_ACCOUNT");
+    expect(flags.length).toBeGreaterThanOrEqual(2);
+    const other = rows.find((p) => p.workerId === ids.nyRaise)!;
+    // One item per flag for the multi-flag paycheck (the live slip), then one ordinary item.
+    const r = await exec("payroll.explain_flags", { run_id: "pay_2026_10_30", items: [
+      { paycheck_id: multi.id, explanation: "First paycheck in this schedule" },
+      { paycheck_id: multi.id, explanation: "No active bank account for direct deposit; paycheck is blocked." },
+      { paycheck_id: other.id, explanation: "Gross pay rose 18.0% after the raise took effect." },
+    ] });
+    const d = r.data as { saved: number; items: { paycheck_id: string; status: string; merged_items?: number; uncovered_flags?: string[] }[]; merged_note?: string };
+    expect(d.saved).toBe(2);
+    expect(d.items.map((x) => x.paycheck_id)).toEqual([multi.id, other.id]);
+    expect(d.items[0]).toMatchObject({ status: "saved", merged_items: 2 });
+    expect(d.merged_note).toContain("3 items named 2 paychecks");
+    expect(r.summary).toMatch(/: 2 agent, 0 template, 0 refused$/);
+    const saved = (await db.select().from(paychecks).where(eq(paychecks.id, multi.id)))[0]!;
+    // Both notes survive, in the order given; the earlier one is not overwritten.
+    expect(saved.explanation).toBe("First paycheck in this schedule. No active bank account for direct deposit; paycheck is blocked.");
+    // The joined text speaks to the new hire and the bank flags; any flag it misses is named back to the agent.
+    const missed = flags.map((f) => f.rule).filter((x) => x !== "NEW_IN_RUN" && x !== "MISSING_BANK_ACCOUNT");
+    expect(d.items[0]!.uncovered_flags ?? []).toEqual(missed.filter((x) => x !== "PRORATED" || !/day/.test(saved.explanation!)));
+  });
+
+  it("explain_flags refuses joined items past the length limit whole, never cut", async () => {
+    const rows = await db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
+    const multi = rows.find((p) => p.workerId === ids.caOct19)!;
+    const before = (await db.select().from(paychecks).where(eq(paychecks.id, multi.id)))[0]!.explanation;
+    const long = "No active bank account for direct deposit, so this paycheck waits. ".repeat(5).trim();
+    const r = await exec("payroll.explain_flags", { run_id: "pay_2026_10_30", items: [{ paycheck_id: multi.id, explanation: long }, { paycheck_id: multi.id, explanation: long }, { paycheck_id: multi.id, explanation: long }] });
+    expect(r.data).toMatchObject({ saved: 0, refused: 1, items: [{ status: "refused", code: "TOO_LONG", merged_items: 3 }] });
+    expect((await db.select().from(paychecks).where(eq(paychecks.id, multi.id)))[0]!.explanation).toBe(before);
+  });
+});
+
+describe("explanation coverage", () => {
+  it("names the review and block flags a text does not speak to, and every template covers its own flags", async () => {
+    const { uncoveredFlags, templateExplanation, FLAG_COVERAGE_WORDS } = await import("../../src/payroll/explain");
+    const flags = [
+      { rule: "NEW_IN_RUN", severity: "review", message: "", evidence: { start_date: "2026-10-19" } },
+      { rule: "MISSING_BANK_ACCOUNT", severity: "block", message: "", evidence: {} },
+      { rule: "TOTAL_CHANGE", severity: "info", message: "", evidence: { change_pct: "1.0" } },
+    ] as never;
+    expect(uncoveredFlags("No active bank account for direct deposit; paycheck is blocked.", flags)).toEqual(["NEW_IN_RUN"]);
+    expect(uncoveredFlags("First paycheck. No active bank account.", flags)).toEqual([]);
+    const rows = await db.select().from(paychecks).where(eq(paychecks.payrollRunId, "pay_2026_10_30"));
+    for (const p of rows) {
+      const f = JSON.parse(p.flagsJson) as never[];
+      const covered = (f as { rule: string }[]).every((x) => x.rule in FLAG_COVERAGE_WORDS);
+      if (f.length && covered) expect(uncoveredFlags(templateExplanation(f), f)).toEqual([]);
+    }
+  });
 });
 
 describe("submit_run", () => {

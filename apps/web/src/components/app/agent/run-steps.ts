@@ -54,7 +54,7 @@ const DECIDED: Record<Exclude<ProposalStatus, "pending">, { tone: StepTone; note
   denied: { tone: "declined", note: "denied" },
   dismissed: { tone: "declined", note: "dismissed" },
   expired: { tone: "declined", note: "expired before anyone decided" },
-  superseded: { tone: "declined", note: "replaced by a newer proposal" },
+  superseded: { tone: "declined", note: "withdrawn as out of date" },
 };
 
 /**

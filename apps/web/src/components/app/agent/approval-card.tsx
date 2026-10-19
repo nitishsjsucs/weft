@@ -25,7 +25,7 @@ const OUTCOME: Partial<Record<ProposalStatus, { text: string; tone: string }>> =
   denied: { text: "Denied", tone: "text-gray-11" },
   dismissed: { text: "Dismissed", tone: "text-gray-11" },
   expired: { text: "Expired before anyone decided", tone: "text-gray-11" },
-  superseded: { text: "Replaced by a newer proposal", tone: "text-gray-11" },
+  superseded: { text: "Withdrawn as out of date", tone: "text-gray-11" },
 };
 
 /**
