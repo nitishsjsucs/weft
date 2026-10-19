@@ -28,7 +28,8 @@ test("GP4: the weekly digest fires at 09:00 once, and a custom routine is drafte
     const rows = page.getByTestId(TID.routineRunRow);
     await expect(rows).toHaveCount(runsBefore + 1);
     await expect(rows.first()).toContainText(/done/i);
-    await expect(rows.first()).toContainText(/cron/i);
+    // The trigger reads as words: the schedule and the time it fired (the cron key is the cell title).
+    await expect(rows.first()).toContainText(/Scheduled, Mon, Oct 26, 9:00 AM PT/);
     const chat = await eventually(() => weft.chat("#people-ops"), (ms) => (ms.length > chatBefore ? ms : null), "a digest in #people-ops");
     expect(chat.length).toBe(chatBefore + 1);
     await openApp(page, "/app/simulators");

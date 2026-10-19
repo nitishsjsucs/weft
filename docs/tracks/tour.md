@@ -232,6 +232,8 @@ Three of round 3's set-asides are fixed in the engine, not by scoring:
   640 px, so the diff, the evidence and Approve fit above the bottom sheet.
 - Step 16 (portal) docks the card at the bottom of the content column under 1400 px (`dockBottomUnder`), so it never
   covers the checklist items' status.
+- Step 18 (routines) also docks in the panel's column (integration of round 1): with the gallery's last and next run
+  lines and two cards a row at 1280 docked, the gallery left no clear spot, and the geometry spec caught the card over it.
 - `scrollToView` keeps a target wider than its scroll box (a table row) at its inline start, so the tour never scrolls
   a table's first columns away. The rates table also fits a 600 px column now (state and code in one cell).
 

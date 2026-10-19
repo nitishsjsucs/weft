@@ -464,3 +464,27 @@ admin and cli keys on purpose, because their routes accept API keys.
   shows them as a Sources chip).
 - `pnpm demo:scenario` resets to the world's own profile (rich under `pnpm dev`) and counts the seed's waiting
   proposals as clean; `docs/demo-scenarios.md` figures were re-read on a scripted rich world.
+
+## Demo round 1, integration (dp/integration, 2026-10-19)
+
+The six round 1 branches merged into `dp/integration` (data-and-seed, privacy, tracing-and-mcp, copy-and-text,
+agent-runtime, layout-and-ui, in that order). Where two branches built the same thing, one was kept:
+
+- Panel following runs: `agent/follow.ts` (agent-runtime). The layout branch's `follow-run.ts` is gone; the Expenses
+  banner keeps its Open run link.
+- Chat answers: `AnswerView` (agent-runtime: safe Markdown, numbered source chips, each chip opens the cited step on the
+  run page). Routine summaries read through `routineSummaryText` (copy-and-text). The run page subtitle and Recent
+  answers use `answerPlain`.
+- Taint wording: `taintText` everywhere (panel, approval card, Inbox card, run page), with the raw ref as the title;
+  it now reads a comma list of sources. The notice drawer shows one held-back box; `instructionLines` also catches a
+  note addressed to the assistant.
+- Memory: the layout branch's `memoryText` (as of the date, from setup or the person record) plus copy-and-text's
+  timeline cleanup and the "Weft agent" commit author.
+- Reports: an explicit from stays as asked; with none, payroll cost opens on the first month with paid runs and a cut
+  short month reads "(to date)".
+- Card author: copy-and-text's proposer-named cards and its OF-01 re-pin stand. `eval:suite digests --split all`
+  reproduces 110 of 110 worlds after all six merges, so no further re-pin was needed.
+
+Fixed while integrating: GP4 now reads the run log trigger as words; the routines tour step docks in the panel's
+column; docs/demo-scenarios.md re-read on the merged rich world (4 pending items in the seed, 2 to 5 approvals after
+Mark accepted, 25 CA employees paid in 2026 on the rate card, scenario 8's rich ids prp_0020 and prp_0022).

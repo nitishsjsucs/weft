@@ -224,7 +224,9 @@ export const TOUR_STEPS: readonly TourStep[] = [
   },
   {
     // The gallery is taller than a phone screen: its head and first routine go at the top, the sheet at the bottom.
-    id: "routines", n: 18, route: { kind: "path", path: "/app/routines" }, target: '[data-tour~="routine-gallery"]', block: "start", sheet: "bottom",
+    // With the panel docked at 1280 the main column holds two cards a row and the gallery leaves no clear spot beside
+    // or under it, so the card sits in the panel's column.
+    id: "routines", n: 18, route: { kind: "path", path: "/app/routines" }, target: '[data-tour~="routine-gallery"]', block: "start", sheet: "bottom", dockPanel: true,
     title: "Work that runs itself",
     body: "Routines run on a schedule or an event. Cheap checks decide first whether a model is needed.",
     action: "next", seconds: 6,
