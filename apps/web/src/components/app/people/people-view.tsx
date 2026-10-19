@@ -7,10 +7,10 @@ import { Badge, Button, Card, Tabs, TabsContent, TabsList, TabsTrigger, TBody, T
 import { tid, W3_TIMEOFF_TID, type BenefitPlan, type Enrollment, type ItAccount, type Money, type Offer, type ToolOutcome, type Worker } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { useCan } from "@/lib/api/access";
-import { fmtDate, initials } from "../format";
+import { PAY_SCHEDULE, TASK_OWNER, WORKER_TYPE, fmtDate, initials, longDate, statusLabel, timeZoneName } from "../format";
 import { PageHeader } from "../page";
 import { DocumentLibrary } from "../documents/document-library";
-import { auditLabel } from "../copy";
+import { auditLabel, humanLine } from "../copy";
 import { PersonActions } from "../offboarding/person-actions";
 import { BalancesTab, RequestsTab } from "../time-off/time-off-view";
 
@@ -73,7 +73,7 @@ function OfferCard({ o }: { o: Offer }) {
       <div className="min-w-0 flex-1">
         <div className="text-3 font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
         <div className="text-[13px] text-gray-11">{o.title} · {deptName(o.departmentId)} · work state {o.workState}{base ? ` · ${base} a year` : ""} · starts {fmtDate(o.startDate, { month: "short", day: "numeric", year: "numeric" })}</div>
-        {out && !out.ok ? <div role="alert" className="mt-1 text-1 text-red-11">{out.refusal.code}: {out.refusal.message}</div> : null}
+        {out && !out.ok ? <div role="alert" title={out.refusal.code} className="mt-1 text-1 text-red-11">{out.refusal.message}</div> : null}
         {accept.error ? <div role="alert" className="mt-1 text-1 text-red-11">{errorText(accept.error)}</div> : null}
         {o.workerId ? <Link href={`/app/people/${o.workerId}`} className="mt-1 inline-block text-1 text-blue-11 hover:underline">Open onboarding</Link> : null}
       </div>
@@ -153,7 +153,7 @@ function PayTab({ d }: { d: Detail }) {
                   <TD className="h-10 capitalize">{r.kind}</TD>
                   <TD numeric className="h-10">{r.amount.display}{r.kind === "salary" ? " a year" : r.kind === "hourly" ? " an hour" : ""}</TD>
                   <TD className="h-10 whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? ` to ${fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}` : " onward"}</TD>
-                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>{auditLabel(r.createdActionSeq)}</Link> : <span className="text-gray-10">seed</span>}</TD>
+                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>{auditLabel(r.createdActionSeq)}</Link> : <span className="text-gray-10">On file at import</span>}</TD>
                 </TR>
               ))}
             </TBody>
@@ -163,13 +163,13 @@ function PayTab({ d }: { d: Detail }) {
       <div className="grid gap-6 tablet:grid-cols-2 [&>*]:min-w-0">
         <Card className="p-4">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Direct deposit</h2>
-          {d.bankAccount ? <Facts rows={[["Bank", d.bankAccount.bankName], ["Account", `ending ${d.bankAccount.last4}`], ["Status", d.bankAccount.status]]} />
+          {d.bankAccount ? <Facts rows={[["Bank", d.bankAccount.bankName], ["Account", `ending ${d.bankAccount.last4}`], ["Status", statusLabel(d.bankAccount.status)]]} />
             : d.worker.type === "contractor" ? <p className="text-[13px] text-gray-10">Paid monthly in {d.worker.currency} on the contractor payment rail, converted at the fixed FX table. See Contractors for payouts.</p>
             : <p className="text-[13px] text-amber-11">No bank account. Paychecks are blocked until direct deposit is set up.</p>}
         </Card>
         <Card className="p-4">
           <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Tax setup</h2>
-          {d.taxProfile ? <Facts rows={[["W-4", d.taxProfile.w4Version], ["Federal filing", human(d.taxProfile.filingStatus)], ["State filing", d.taxProfile.stateFilingStatus ? human(d.taxProfile.stateFilingStatus) : "-"], ["State allowances", d.taxProfile.stateAllowances === null ? "-" : String(d.taxProfile.stateAllowances)], ["Work state", d.worker.workState ?? "-"]]} /> : <p className="text-[13px] text-gray-10">{d.worker.type === "contractor" ? "No US withholding: a global contractor files a W-8BEN instead of a W-4." : "No tax profile yet."}</p>}
+          {d.taxProfile ? <Facts rows={[["W-4", d.taxProfile.w4Version], ["Federal filing", statusLabel(d.taxProfile.filingStatus)], ["State filing", d.taxProfile.stateFilingStatus ? statusLabel(d.taxProfile.stateFilingStatus) : "None"], ["State allowances", d.taxProfile.stateAllowances === null ? "None" : String(d.taxProfile.stateAllowances)], ["Work state", d.worker.workState ?? "None"]]} /> : <p className="text-[13px] text-gray-10">{d.worker.type === "contractor" ? "No US withholding: a global contractor files a W-8BEN instead of a W-4." : "No tax profile yet."}</p>}
         </Card>
       </div>
     </div>
@@ -232,7 +232,9 @@ function ItTab({ id }: { id: string }) {
 }
 
 const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace (sim)", chat: "Chat (sim)", github: "Code host (sim)" };
-const human = (s: string) => s.replace(/_/g, " ");
+/** Stored plan, tier and status codes as words ("hsa_cafeteria" is "HSA and cafeteria plan"). */
+const WORDS: Record<string, string> = { hsa_cafeteria: "HSA and cafeteria plan", fsa: "FSA", hsa: "HSA", employee_only: "Employee only", employee_spouse: "Employee and spouse", employee_children: "Employee and children" };
+const human = (s: string) => WORDS[s] ?? statusLabel(s);
 
 export function PersonView({ id }: { id: string }) {
   const w = useGet("/v1/workers/:id", { params: { id }, refreshMs: 5_000 });
@@ -268,7 +270,7 @@ export function PersonView({ id }: { id: string }) {
             <li key={t.id} data-testid={tid.onboardingTask(t.kind)} data-status={t.status} className="flex items-start gap-2 text-[13px]">
               {t.status === "done" ? <CircleCheck className="mt-0.5 size-4 shrink-0 text-green-11" /> : t.status === "blocked" ? <CircleSlash className="mt-0.5 size-4 shrink-0 text-amber-11" /> : <CircleDashed className="mt-0.5 size-4 shrink-0 text-gray-9" />}
               <div className="min-w-0 flex-1">
-                <div>{TASK_LABEL[t.kind] ?? t.kind} <span className="text-gray-10">· {t.status === "done" ? "Done" : t.status === "blocked" ? "Blocked" : "Pending"} · {t.owner}</span></div>
+                <div>{TASK_LABEL[t.kind] ?? t.kind} <span className="text-gray-10">· {t.status === "done" ? "Done" : t.status === "blocked" ? "Blocked" : "Pending"} · {TASK_OWNER[t.owner] ?? statusLabel(t.owner)}</span></div>
                 {t.blockedReason ? <div className="text-1 text-amber-11">{t.blockedReason}</div> : null}
               </div>
             </li>
@@ -294,7 +296,7 @@ export function PersonView({ id }: { id: string }) {
           <div className="grid gap-6 laptop:grid-cols-[1fr_1fr] [&>*]:min-w-0">
             <Card className="p-4">
               <h2 className="mb-3 text-1 font-medium text-gray-10 uppercase">Profile</h2>
-              <Facts rows={[["Employee number", p.employeeNumber ?? "-"], ["Work email", p.workEmail], ["Manager", d.manager ?? "-"], ["Work state", p.workState ?? "-"], ["Country", p.country], ["Type", p.workerType], ["Start date", p.startDate], ["End date", p.endDate ?? "-"], ["SSN", p.ssnMasked ?? "Not on file"], ["Pay schedule", p.payScheduleId ?? "-"], ["Time zone", p.timezone]]} />
+              <Facts rows={[["Employee number", p.employeeNumber ?? "None"], ["Work email", p.workEmail], ["Manager", d.manager ? humanLine(d.manager) : "None"], ["Work state", p.workState ?? "None"], ["Country", p.country], ["Type", WORKER_TYPE[p.workerType] ?? statusLabel(p.workerType)], ["Start date", p.startDate ? longDate(p.startDate) : "Not set"], ["End date", p.endDate ? longDate(p.endDate) : "None"], ["SSN", p.ssnMasked ?? "Not on file"], ["Pay schedule", p.payScheduleId ? PAY_SCHEDULE[p.payScheduleId] ?? statusLabel(p.payScheduleId.replace(/^ps_/, "")) : "None"], ["Time zone", timeZoneName(p.timezone)]]} />
             </Card>
             {onboarding}
           </div>

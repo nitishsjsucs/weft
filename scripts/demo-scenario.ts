@@ -1,6 +1,7 @@
 // `pnpm demo:scenario <name>`: puts the running dev world back to the seed for one live demo scenario and prints its
 // click path. It resets through POST /v1/sim/reset (the call the e2e fixture makes before every test), checks that the
-// world is clean (seed clock, no pending proposals) and warns when the clock is running. It never starts an agent run
+// world is clean (seed clock, and no pending proposal newer than the seed) and warns when the clock is running. The take
+// starts on the world's own seed profile (rich under pnpm dev, so it matches the tour); --profile base or rich forces one. It never starts an agent run
 // and never calls a model, so it spends nothing: the agent work happens when you click. `pnpm demo:scenario list`
 // prints the names.
 //
@@ -127,7 +128,8 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
 
 export type ApiCall = (method: "GET" | "POST", path: string, body?: unknown) => Promise<{ status: number; json: unknown }>;
 
-export interface Prepared { scenario: DemoScenario; clock: string; rate: number; pending: number; warnings: string[] }
+export type DemoProfile = "rich" | "base";
+export interface Prepared { scenario: DemoScenario; profile: DemoProfile; clock: string; rate: number; pending: number; warnings: string[] }
 
 export function findScenario(name: string): DemoScenario {
   const s = DEMO_SCENARIOS.find((x) => x.name === name);
@@ -135,20 +137,29 @@ export function findScenario(name: string): DemoScenario {
   return s;
 }
 
-/** Resets the world to the seed and checks it is clean. Throws when the reset fails or the world is not clean. */
-export async function prepareScenario(name: string, api: ApiCall): Promise<Prepared> {
+/**
+ * Resets the world to the seed and checks it is clean. Throws when the reset fails or the world is not clean. The take
+ * starts on the world's own seed profile (GET /v1/health seedProfile; rich under pnpm dev), so the presenter sees the
+ * world the tour and the dev server showed, unless `profile` names one. Clean means the seed clock and no pending
+ * proposal newer than the seed: the rich seed has its own waiting approvals and suggestions, the base seed none.
+ */
+export async function prepareScenario(name: string, api: ApiCall, opts: { profile?: DemoProfile } = {}): Promise<Prepared> {
   const scenario = findScenario(name);
-  // The live scenarios were checked on the base world, so the take always starts there: a rich dev world (the pnpm dev
-  // default) has history and waiting approvals that would crowd the Inbox. `pnpm dev --fresh` brings the rich one back.
-  const reset = await api("POST", "/v1/sim/reset", { profile: "base" });
+  let profile = opts.profile;
+  if (!profile) {
+    const seed = ((await api("GET", "/v1/health")).json as { seedProfile?: string } | null)?.seedProfile;
+    profile = seed === "base" ? "base" : "rich";
+  }
+  const reset = await api("POST", "/v1/sim/reset", { profile });
   if (reset.status !== 200 || (reset.json as { ok?: boolean } | null)?.ok !== true) throw new Error(`reset answered ${reset.status}: ${JSON.stringify(reset.json).slice(0, 200)}`);
   const clock = (await api("GET", "/v1/sim/clock")).json as { now: string; rate: number };
   if (clock.now !== SEED_CLOCK) throw new Error(`the clock reads ${clock.now} after the reset, not the seed time ${SEED_CLOCK}`);
-  const pending = (await api("GET", "/v1/proposals?status=pending&limit=100")).json as { data?: unknown[] };
-  const n = pending.data?.length ?? -1;
-  if (n !== 0) throw new Error(`${n} pending proposals after the reset`);
+  const pending = ((await api("GET", "/v1/proposals?status=pending&limit=100")).json as { data?: { id: string; createdAt?: string }[] } | null)?.data;
+  if (!pending) throw new Error("the pending proposals could not be read after the reset");
+  const fresh = pending.filter((p) => !p.createdAt || Date.parse(p.createdAt) > Date.parse(SEED_CLOCK));
+  if (fresh.length) throw new Error(`${fresh.length} pending proposals newer than the seed after the reset (${fresh.map((p) => p.id).join(", ")})`);
   const warnings = clock.rate === 0 ? [] : [`the simulated clock runs at ${clock.rate}x; start pnpm dev with WEFT_CLOCK_RATE=0 so no routine fires on its own during the demo`];
-  return { scenario, clock: clock.now, rate: clock.rate, pending: n, warnings };
+  return { scenario, profile, clock: clock.now, rate: clock.rate, pending: pending.length, warnings };
 }
 
 /** The HTTP client for a running API: the proxy secret from the data dir, a human principal, loopback only. */
@@ -193,7 +204,7 @@ export function resolveTarget(args: string[], env: Record<string, string | undef
   };
 }
 
-/** `pnpm demo:scenario <name> [--yes] [--api-port n] [--web-port n]`; returns the exit code. */
+/** `pnpm demo:scenario <name> [--yes] [--profile rich|base] [--api-port n] [--web-port n]`; returns the exit code. */
 export async function runCli(args: string[], io: CliIo): Promise<number> {
   const name = args.find((a, i) => !a.startsWith("--") && !(args[i - 1]?.startsWith("--") && args[i - 1] !== "--yes"));
   if (!name || name === "list") {
@@ -203,6 +214,9 @@ export async function runCli(args: string[], io: CliIo): Promise<number> {
     return name ? 0 : 2;
   }
   try { findScenario(name); } catch (e) { io.error(`demo:scenario: ${(e as Error).message}`); return 2; }
+  const pi = args.indexOf("--profile");
+  const profileArg = pi >= 0 ? args[pi + 1] : undefined;
+  if (profileArg !== undefined && profileArg !== "rich" && profileArg !== "base") { io.error(`demo:scenario: --profile is rich or base, not ${profileArg}`); return 2; }
   const target = resolveTarget(args, io.env, io.root);
   const url = `http://127.0.0.1:${target.apiPort}`;
   io.log(`demo:scenario ${name}: target API ${url}, data dir ${target.dataDir}`);
@@ -219,8 +233,8 @@ export async function runCli(args: string[], io: CliIo): Promise<number> {
   }
   try {
     const api = (io.api ?? ((t) => localApi(t)))(target);
-    const p = await prepareScenario(name, api);
-    io.log(`demo:scenario ${name}: world reset to the seed (clock ${p.clock}, rate ${p.rate}x, ${p.pending} pending proposals)`);
+    const p = await prepareScenario(name, api, { profile: profileArg as DemoProfile | undefined });
+    io.log(`demo:scenario ${name}: world reset to the ${p.profile} seed (clock ${p.clock}, rate ${p.rate}x, ${p.pending} pending ${p.pending === 1 ? "proposal" : "proposals"} from the seed)`);
     for (const w of p.warnings) io.log(`warning: ${w}`);
     io.log(describeScenario(p.scenario, target.webPort));
     return 0;

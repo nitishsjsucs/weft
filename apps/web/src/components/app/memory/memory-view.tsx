@@ -6,9 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, FileText, GitCommitHorizontal, Link2, Search } from "lucide-react";
 import { Badge, Card } from "@weft/ui/components";
 import { cn } from "@weft/ui";
-import { getPrincipal, rawFetch, usePrincipal } from "@/lib/api/hooks";
+import { getPrincipal, rawFetch, useGet, usePrincipal } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
-import { fmtDate, fmtDateTime } from "../format";
+import { fmtDate, fmtDateTime, humanDates, humanTimes } from "../format";
+import { auditLabel, humanLine } from "../copy";
 
 interface Frontmatter { id: string; type: string; aliases: string[]; links: string[]; sources: string[]; updated: string; taintedBy: string | null }
 interface Links { outgoing: { target: string; path: string; resolved: boolean }[]; backlinks: string[] }
@@ -56,6 +57,7 @@ function Line({ text, onOpen, resolved }: { text: string; onOpen: (path: string)
     last = at + m[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
+  for (let i = parts.length - 1; i >= 0; i--) if (typeof parts[i] === "string") parts.splice(i, 1, ...inline(parts[i] as string, i));
   if (text.startsWith("# ")) return <h2 className="mb-2 mt-1 text-4 font-semibold">{text.slice(2)}</h2>;
   if (text.startsWith("## ")) return <h3 className="mb-1 mt-4 text-2 font-semibold text-gray-12">{text.slice(3)}</h3>;
   if (text.trim() === "") return <div className="h-2" aria-hidden />;
@@ -66,10 +68,50 @@ function Line({ text, onOpen, resolved }: { text: string; onOpen: (path: string)
   return <div className="whitespace-pre-wrap break-words">{parts}</div>;
 }
 
+/** Where a fact came from ("src: seed", "src: action:1") in words. */
+function sourceWords(src: string): string {
+  const t = src.trim();
+  if (t === "seed") return "the seed";
+  const a = /^action:(\d+)$/.exec(t);
+  if (a) return auditLabel(Number(a[1]));
+  if (t.startsWith("worker:")) return "the person's record";
+  if (t.startsWith("notice:")) return "an agency notice";
+  if (t.startsWith("chat:")) return "a chat message";
+  return humanLine(t);
+}
+/**
+ * The inline parts of a body line: `code` as code, a fact's provenance suffix ("(2026-10-26, src: seed)") as a muted
+ * "from the seed, Oct 26", and dates and instants as words. The stored file keeps the raw form (the History diff).
+ */
+function inline(text: string, key: number): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  const re = /`([^`]+)`|\s*\((?:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z)?),\s*)?src:\s*([^)]+)\)/g;
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push(words(text.slice(last, at)));
+    if (m[1] !== undefined) out.push(<code key={`c${key}-${at}`} className="rounded bg-gray-3 px-1 py-px font-mono text-[12px]">{m[1]}</code>);
+    else out.push(<span key={`s${key}-${at}`} title={m[0].trim()} className="text-0 text-gray-10"> (from {sourceWords(m[3]!)}{m[2] ? `, ${fmtDate(m[2].slice(0, 10))}` : ""})</span>);
+    last = at + m[0].length;
+  }
+  if (last < text.length) out.push(words(text.slice(last)));
+  return out;
+}
+/** Timeline and fact text as words: instants and dates read as dates, the importer's [iN] marks and command names go. */
+function words(t: string): string {
+  return humanDates(humanTimes(t))
+    .replace(/\s*\[i\d+\]\s*/g, " ")
+    .replace(/\b[a-z_]+\.[a-z_]+: /g, "")
+    .replace(/\[amount\]/g, "an amount kept out of memory");
+}
+
 function Tree({ paths, current, onOpen }: { paths: string[]; current: string | null; onOpen: (p: string) => void }) {
   const [filter, setFilter] = useState("");
+  const people = usePeopleNames();
+  // A person's file is labeled by the person's name (the file name stays as secondary text), and the filter matches both.
+  const label = (p: string) => { const id = /\/(wrk_\w+)\.md$/.exec(p)?.[1]; return id ? people.get(id) ?? null : null; };
   const [open, setOpen] = useState<Record<string, boolean>>({ knowledge: true, entities: false, timeline: false, workstreams: true, comms: false });
-  const shown = paths.filter((p) => !filter || p.toLowerCase().includes(filter.toLowerCase()));
+  const shown = paths.filter((p) => !filter || `${p} ${label(p) ?? ""}`.toLowerCase().includes(filter.toLowerCase()));
   return (
     <Card className="p-3" data-testid="memory-tree">
       <label className="mb-3 flex items-center gap-2 rounded-md bg-gray-2 px-2 py-1.5 text-1">
@@ -90,8 +132,8 @@ function Tree({ paths, current, onOpen }: { paths: string[]; current: string | n
                 {files.map((p) => (
                   <li key={p}>
                     <button type="button" data-testid="memory-tree-file" data-tour="memory-tree-file" data-path={p} onClick={() => onOpen(p)}
-                      className={cn("w-full truncate rounded px-1 py-0.5 text-left font-mono text-[12px] hover:bg-gray-3", current === p && "bg-blue-3 text-blue-11")} title={p}>
-                      {p.slice(f.length + 1)}
+                      className={cn("w-full truncate rounded px-1 py-0.5 text-left text-[12px] hover:bg-gray-3", !label(p) && "font-mono", current === p && "bg-blue-3 text-blue-11")} title={p}>
+                      {label(p) ? <>{label(p)} <span className="font-mono text-0 text-gray-10">{p.split("/").pop()}</span></> : p.slice(f.length + 1)}
                     </button>
                   </li>
                 ))}
@@ -102,6 +144,12 @@ function Tree({ paths, current, onOpen }: { paths: string[]; current: string | n
       })}
     </Card>
   );
+}
+
+/** Worker names by id for labeling person files (one list read, cached by the client). */
+function usePeopleNames(): Map<string, string> {
+  const q = useGet("/v1/workers", { query: { limit: 100 } });
+  return useMemo(() => new Map((((q.data as { data?: { id: string; displayName?: string; name?: string }[] } | undefined)?.data) ?? []).map((w) => [w.id, w.displayName ?? w.name ?? w.id] as const)), [q.data]);
 }
 
 function History({ path }: { path: string }) {
@@ -116,7 +164,7 @@ function History({ path }: { path: string }) {
           <li key={c.commit} className="py-2">
             <button type="button" className="w-full text-left" onClick={() => setOpenSha((s) => (s === c.commit ? null : c.commit))} aria-expanded={openSha === c.commit} data-testid="memory-history-entry">
               <div className="truncate text-1 font-medium">{c.subject}</div>
-              <div className="text-0 text-gray-10"><code className="font-mono">{c.commit.slice(0, 10)}</code> by {c.author}, {fmtDateTime(c.date)}</div>
+              <div className="text-0 text-gray-10"><code className="font-mono">{c.commit.slice(0, 10)}</code> by {c.author === "Weft Agent" ? "Weft agent" : c.author}, {fmtDateTime(c.date)}</div>
             </button>
             {openSha === c.commit ? <pre className="mt-2 max-h-[320px] overflow-auto rounded-md bg-gray-2 p-2 font-mono text-[11px] leading-snug">{c.diff.split("\n").map((l, i) => (
               <div key={i} className={cn(l.startsWith("+") && !l.startsWith("+++") && "text-green-11", l.startsWith("-") && !l.startsWith("---") && "text-red-11")}>{l || " "}</div>

@@ -1,5 +1,5 @@
 import { ReportResult, type ProposalStatus, type RunStepRow } from "@weft/contracts";
-import { humanLine } from "../copy";
+import { stepLine } from "../copy";
 
 /** Tool names arrive in wire form (`payroll__explain_flags`); the UI shows the dotted command name. */
 export function toolLabel(name: string | null): string | null {
@@ -10,13 +10,13 @@ export function toolLabel(name: string | null): string | null {
  * Chip text for a step: the tool outcome's summary (or a proposal's title) when the tool returned one, else the tool
  * name (SPEC 9.6). The API stores tool results as `{ output, outcome }`; a bare `{ summary }` is accepted too. Times
  * in the text read in Pacific time ("settles Fri, Oct 30, 6:00 AM PT") and plain dates as days ("Nov 1, 2025 to Oct 26"),
- * never as raw ISO, and row ids read as words ("Drafted response 1 for the notice"), as humanLine does.
+ * never as raw ISO, and row ids read as words ("Drafted response 1 for the notice"), as stepLine does.
  */
 export function stepSummary(s: RunStepRow): string {
   const r = s.result as { summary?: unknown; outcome?: { summary?: unknown; title?: unknown; refusal?: { message?: unknown } } } | null;
   const o = r && typeof r === "object" ? r.outcome : undefined;
   for (const v of [o?.summary, o?.title, o?.refusal?.message, r && typeof r === "object" ? r.summary : undefined]) {
-    if (typeof v === "string" && v.trim()) return humanLine(v);
+    if (typeof v === "string" && v.trim()) return stepLine(v);
   }
   return toolLabel(s.toolName) ?? s.kind.replace("_", " ");
 }

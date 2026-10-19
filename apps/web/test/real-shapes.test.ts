@@ -39,7 +39,7 @@ describe("SSE frames from GET /v1/agent/runs/:id/events", () => {
 describe("step chips from the API's tool results", () => {
   it("reads { output, outcome } results: summary for done, title for a pending proposal, refusal message", () => {
     expect(stepSummary(step({ result: { output: "{}", outcome: { ok: true, status: "done", summary: "Explanations for pay_2026_10_30: 0 agent, 4 template, 0 refused" } } })))
-      .toBe("Explanations for the Oct 30 run: 0 agent, 4 template, 0 refused");
+      .toBe("Explained 4 flagged paychecks");
     expect(stepSummary(step({ outcome: "pending:prp_0001", result: { output: "{}", outcome: { ok: true, status: "pending_approval", proposalId: "prp_0001", title: "Submit payroll pay_2026_10_30" } } })))
       .toBe("Submit the Oct 30 run");
     expect(stepSummary(step({ outcome: "refused:NOT_PERMITTED", result: { outcome: { ok: false, refusal: { code: "NOT_PERMITTED", message: "Not allowed here" } } } }))).toBe("Not allowed here");
@@ -65,10 +65,12 @@ describe("simulator clock helpers", () => {
 
 describe("audit reasons", () => {
   it("does not double the phrase when the API's reason already says it", () => {
-    expect(notReversibleText("people.accept_offer is not reversible.")).toBe("people.accept_offer is not reversible.");
+    expect(notReversibleText("people.accept_offer is not reversible.")).toBe("Not reversible");
+    expect(notReversibleText("Not reversible: A sent message cannot be unsent.")).toBe("Not reversible: a sent message cannot be unsent");
+    expect(notReversibleText("Not reversible: IRS filings stay filed")).toBe("Not reversible: IRS filings stay filed");
     expect(notReversibleText("A funded payroll cannot be undone; run an off-cycle correction instead.")).toBe("A funded payroll cannot be undone; run an off-cycle correction instead.");
     expect(notReversibleText("filed with the agency simulator")).toBe("Not reversible: filed with the agency simulator");
-    expect(notReversibleText(null)).toBe("Not reversible: no reverse command");
+    expect(notReversibleText(null)).toBe("Not reversible");
   });
 });
 

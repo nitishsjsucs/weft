@@ -10,8 +10,7 @@ import { invalidate } from "@/lib/api/hooks";
 import { isChipStep, ranToolsLine, reportOf, stepState, stepSummary, toolLabel, type ReportRef } from "./run-steps";
 import { StepReport } from "./chart";
 import { ApprovalCard } from "./approval-card";
-import { humanDates, humanTimes } from "../format";
-import { humanLine } from "../copy";
+import { answerText, routineSummaryText, taintSource } from "../copy";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
 export function RunFeed({ runId, label, latest = true }: { runId: string; label?: string; latest?: boolean }) {
@@ -39,7 +38,7 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
     <div className="flex flex-col gap-1.5" data-tour="agent-run" data-run-id={runId} data-status={status ?? "starting"} data-stream-mode={w.mode}>
       {label ? <div className="text-1 text-gray-10">{label}</div> : null}
       {w.run?.tainted ? (
-        <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" />This run read untrusted content: {w.run.taintedBy ?? "unknown source"}</div>
+        <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" /><span title={w.run.taintedBy ?? undefined}>This run read untrusted content: {taintSource(w.run.taintedBy)}. Every write it asked for became a proposal.</span></div>
       ) : null}
       <ul className="flex flex-col gap-1" data-tour="agent-tool-lines">
         {chips.map((s) => {
@@ -62,11 +61,24 @@ export function RunFeed({ runId, label, latest = true }: { runId: string; label?
           : <span className="text-red-11">{status}{w.run?.terminalReason ? `: ${w.run.terminalReason}` : ""}</span>}
       </div>
       {/* A routine's summary is its tool outcomes joined (ids and action numbers); a chat answer is the model's own
-          words and keeps the result ids it cites. */}
-      {w.run?.summary && !working ? (
-        <p data-testid={TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{w.run.routineRunId ? humanLine(w.run.summary) : humanDates(humanTimes(w.run.summary))}</p>
-      ) : null}
+          words and keeps the result ids it cites in storage. Both read as copy here, and the cited ids sit in Sources. */}
+      {w.run?.summary && !working ? <RunAnswer runId={runId} summary={w.run.summary} routine={!!w.run.routineRunId} /> : null}
       <Link href={`/app/runs/${runId}`} className={cn("inline-flex w-fit items-center gap-1 text-1 text-gray-10 hover:text-foreground")}>Open run <ExternalLink className="size-3" /></Link>
     </div>
+  );
+}
+
+function RunAnswer({ runId, summary, routine }: { runId: string; summary: string; routine: boolean }) {
+  const a = routine ? { text: routineSummaryText(summary), sources: [] as string[] } : answerText(summary);
+  return (
+    <>
+      <p data-testid={TID.agentAnswer} title={summary} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{a.text}</p>
+      {a.sources.length ? (
+        <div className="flex flex-wrap items-center gap-1 text-0 text-gray-10" data-testid="agent-answer-sources">
+          <span>Sources</span>
+          {a.sources.map((id, i) => <Link key={id} href={`/app/runs/${runId}#${id}`} title={id} className="rounded-full bg-gray-3 px-1.5 py-px hover:bg-gray-4 hover:text-foreground">Result {i + 1}</Link>)}
+        </div>
+      ) : null}
+    </>
   );
 }

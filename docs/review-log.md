@@ -441,3 +441,26 @@ admin and cli keys on purpose, because their routes accept API keys.
 | Design | landing: no mobile menu, missing agent showcase and run log sections, hero mock reflows at 390, dark island density, stat tile spacing | New sections and responsive work; next design round. The heading line height and the API path in the Numbers heading are fixed |
 | Design | Bank batches raw headers, empty states without a next step, humanized enums and run id crumbs everywhere | Small but spread over many files; next design round |
 | Brand | research/ quotes reference marketing lines verbatim and they are in git history | The working files are paraphrased (w2-reliability, then polish/brand) and pass `pnpm brand:overlap`, which fails on any 8-word run shared with the saved reference pages. The history still holds the old lines. The repo is local only and never pushed. Before any publish, rewrite history |
+
+## Demo round 1, copy and text (dp/r1-copy-and-text, 2026-10-18)
+
+- The CA EDD reply letter (`responseTemplate`, `packages/core/src/notices/writes.ts`) is filed text. It no longer cites
+  the notice's row id or ISO dates ("Re: DE 2088 notice received October 26, 2026", "effective January 1, 2026"), and
+  the model's note is the letter's closing sentence with no "Note:" label. The tool description says the note is
+  addressed to the agency, never to the approver, and G3 now fails a trial whose drafted reply note talks to the
+  approver ("please review", "approve", "in the inbox"). Digests: no seed step and no eval world drafts a reply (every
+  seeded or world-built notice has `drafts_json` "[]"), so the letter moves neither the base digest nor any eval
+  world digest.
+- One eval digest re-pinned, on purpose: OF-01. Its world terminates Imani as Dana, which files the offboarding steps
+  as Dana's proposals with no run, and the proposal notifier now posts their chat cards as "Dana Whitfield (demo)"
+  instead of "Weft agent" (the Inbox already said "Proposed by Dana"). Only the cards' author column moves: with the
+  notifier change reverted the old digest reproduces. Re-pinned with `pnpm eval:suite digests --ids OF-01 --write`
+  (sha256:aa02e10c... to sha256:821ec9c5...); `pnpm eval:suite digests --split all` then reproduces 110 of 110.
+- Stored summaries the eval worlds never seed changed at the source where a number was missing: payroll.get_run gives
+  paychecks, need review and blocked; people.search says "1 worker"; the submit diff's Excluded row lists names; a
+  submit card is not "For" the person it excludes; channel posts drop a parenthesized row id; a person's proposal
+  card posts under their name. Everything else is display copy (`apps/web/src/components/app/copy.ts`): the stored
+  text stays as the engine wrote it, and the chat answer keeps the result ids GP5 and the graders read (the panel
+  shows them as a Sources chip).
+- `pnpm demo:scenario` resets to the world's own profile (rich under `pnpm dev`) and counts the seed's waiting
+  proposals as clean; `docs/demo-scenarios.md` figures were re-read on a scripted rich world.

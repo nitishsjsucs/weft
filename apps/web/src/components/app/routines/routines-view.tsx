@@ -5,7 +5,9 @@ import { CalendarClock, Hand, Play, Radio, Sparkles } from "lucide-react";
 import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { TID, tid, type RoutineDef, type RoutineRunDto, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDateTime, usd } from "../format";
+import { fmtDateTime, statusLabel, usd } from "../format";
+import { humanLine, routineSummaryText } from "../copy";
+import { EVENT_WORDS, triggerLabel } from "./schedule";
 import { PageHeader } from "../page";
 import { principalName } from "../refs";
 import { useAgent } from "../agent-context";
@@ -13,19 +15,7 @@ import { AUTONOMY_COPY, AutonomyControl } from "./autonomy-control";
 import { RoutineGallery, RunTimes, type RoutineRow } from "./gallery";
 import { RoutineDecisionCounts, RoutineGalleryW4 } from "./gallery/routine-gallery-w4";
 
-const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-/** Readable trigger: "Mondays 9:00 PT", "Weekdays 9:00 PT", "On notice.received". Falls back to the raw cron. */
-export function triggerLabel(t: RoutineDef["trigger"]): string {
-  if (t.type === "manual") return "Manual";
-  if (t.type === "event") return `On ${t.event}`;
-  const m = /^(\d+) (\d+) \* \* (\S+)$/.exec(t.cron);
-  if (!m) return `${t.cron} (${t.tz})`;
-  const time = `${m[2]}:${m[1]!.padStart(2, "0")}`;
-  const tz = t.tz === "America/Los_Angeles" ? "PT" : t.tz;
-  const dow = m[3]!;
-  const days = dow === "*" ? "Every day" : dow === "1-5" ? "Weekdays" : /^\d$/.test(dow) ? `${DAYS[Number(dow)]}s` : `days ${dow}`;
-  return `${days} ${time} ${tz}`;
-}
+export { triggerLabel } from "./schedule";
 function TriggerChip({ t }: { t: RoutineDef["trigger"] }) {
   const Icon = t.type === "cron" ? CalendarClock : t.type === "event" ? Radio : Hand;
   return <Badge tone="outline" size="md"><Icon />{triggerLabel(t)}</Badge>;
@@ -53,7 +43,7 @@ function DraftBox() {
         <Button data-testid={TID.routineDraftSubmit} variant="primary" disabled={!prompt.trim() || draft.pending} onClick={async () => setOut((await draft.run(prompt.trim())) ?? null)}>Create routine</Button>
       </div>
       {draft.error ? <p role="alert" className="mt-2 text-1 text-red-11">{errorText(draft.error)}</p> : null}
-      {out && !out.ok ? <p role="alert" className="mt-2 text-1 text-red-11">{out.refusal.code}: {out.refusal.message}</p> : null}
+      {out && !out.ok ? <p role="alert" title={out.refusal.code} className="mt-2 text-1 text-red-11">{out.refusal.message}</p> : null}
       {out && out.ok && out.status === "pending_approval" ? <p className="mt-2 text-1 text-amber-11">Created disabled. Enabling it waits in the <Link href="/app/inbox" className="underline">Inbox</Link>.</p> : null}
       {out && out.ok && out.status === "done" ? <p className="mt-2 text-1 text-green-11">{out.summary}</p> : null}
     </Card>
@@ -71,7 +61,7 @@ export function RoutinesView() {
       {list.error ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(list.error)}</div> : null}
       <div className="grid gap-4 tablet:grid-cols-2">
         {(list.data ?? []).map((r) => (
-          <Link key={r.id} href={`/app/routines/${r.id}`} data-testid={tid.routineCard(r.id)} data-enabled={String(r.enabled)} className="group">
+          <Link key={r.id} href={`/app/routines/${r.id}`} title={r.id} data-testid={tid.routineCard(r.id)} data-enabled={String(r.enabled)} className="group">
             <Card className="flex h-full flex-col gap-2 p-4 transition-shadow group-hover:shadow-[var(--shadow-medium)]">
               <div className="flex items-start gap-2">
                 <h3 className="min-w-0 flex-1 text-3 font-medium">{r.name}</h3>
@@ -84,7 +74,7 @@ export function RoutinesView() {
                 {r.autonomy !== "approve" ? <Badge tone="outline">{AUTONOMY_COPY[r.autonomy].label}</Badge> : null}
                 {r.source === "custom" ? <Badge tone="blue">Custom</Badge> : null}
                 {r.taintedBy ? <Badge tone="amber">Tainted draft</Badge> : null}
-                <span className="ml-auto font-mono text-0 text-gray-10">{r.id}</span>
+
               </div>
             </Card>
           </Link>
@@ -95,10 +85,31 @@ export function RoutinesView() {
 }
 
 function duration(r: RoutineRunDto): string {
-  if (!r.startedAt || !r.endedAt) return r.startedAt ? "running" : "-";
+  if (!r.startedAt || !r.endedAt) return r.status === "running" ? "Running" : "-";
   const ms = new Date(r.endedAt).getTime() - new Date(r.startedAt).getTime();
   return ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60_000)} min`;
 }
+
+const RUN_STATUS_WORDS: Partial<Record<RoutineRunDto["status"], string>> = { waiting_approval: "Waiting for approval", waiting_event: "Waiting for an event" };
+/**
+ * A routine run's trigger key as words: "manual:<instant>:<nonce>" is "Run now", "event:offer.accepted:wrk_0054" is
+ * "Offer accepted", "event:ntc_0001" is "Notice arrived", "cron:<instant>" is the scheduled time. The key is the title.
+ */
+function triggerRefWords(ref: string): string {
+  const [kind, ...rest] = ref.split(":");
+  if (kind === "manual") return "Run now";
+  if (kind === "cron" || kind === "schedule") { const at = rest.join(":"); return Number.isNaN(Date.parse(at)) ? "Scheduled" : `Scheduled, ${fmtDateTime(at)}`; }
+  if (kind === "event") {
+    const ev = rest[0] ?? "";
+    if (/^ntc_/.test(ev) || ev.startsWith("notice.")) return "Notice arrived";
+    if (/^evt_/.test(ev)) return "Event";
+    return EVENT_WORDS[ev]?.replace(/^When /, "").replace(/^./, (c) => c.toUpperCase()) ?? statusLabel(ev.replace(/[._]/g, " "));
+  }
+  if (/^evt_/.test(ref)) return "Event";
+  return humanLine(ref);
+}
+/** A routine run's "left for a person" item ("Approve payroll.submit_run (prp_0023)") as words. */
+const leftWords = (s: string) => humanLine(s.replace(/\b([a-z_]+)\.([a-z_]+)\b/g, (_m, _ns: string, verb: string) => verb.replaceAll("_", " ")));
 
 export function RoutineDetail({ id }: { id: string }) {
   const agent = useAgent();
@@ -149,13 +160,13 @@ export function RoutineDetail({ id }: { id: string }) {
           <TBody>
             {(runs.data?.data ?? []).map((x) => (
               <TR key={x.id} data-testid={TID.routineRunRow} data-status={x.status}>
-                <TD className="h-11 max-w-[220px]"><code className="font-mono text-1 break-all">{x.triggerRef}</code>{x.attended ? <Badge tone="blue" size="xs" className="ml-1.5">attended</Badge> : null}{x.overdue ? <Badge tone="red" size="xs" className="ml-1.5">overdue</Badge> : null}</TD>
-                <TD className="h-11"><Badge tone={RUN_TONE[x.status]}>{x.status.replace("_", " ")}</Badge></TD>
+                <TD className="h-11 max-w-[220px]"><span title={x.triggerRef} className="text-1 break-words">{triggerRefWords(x.triggerRef)}</span>{x.attended || x.overdue ? <span className="mt-0.5 flex flex-wrap gap-1">{x.attended ? <Badge tone="blue" size="xs">Attended</Badge> : null}{x.overdue ? <Badge tone="red" size="xs">Overdue</Badge> : null}</span> : null}</TD>
+                <TD className="h-11"><Badge tone={RUN_TONE[x.status]}>{RUN_STATUS_WORDS[x.status] ?? statusLabel(x.status)}</Badge></TD>
                 <TD className="h-11 whitespace-nowrap">{x.startedAt ? fmtDateTime(x.startedAt) : "-"}</TD>
                 <TD numeric className="h-11">{duration(x)}</TD>
                 <TD numeric className="h-11">{usd(x.costUsdMicros)}</TD>
-                <TD className="h-11 min-w-[280px] py-2">{x.leftForHuman.length ? x.leftForHuman.join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div className="text-1 text-gray-10">{x.summary}</div> : null}</TD>
-                <TD className="h-11">{x.agentRunId ? <Link href={`/app/runs/${x.agentRunId}`} className="font-mono text-0 text-blue-11 hover:underline">{x.agentRunId}</Link> : <span className="text-1 text-gray-10">precheck only</span>}</TD>
+                <TD className="h-11 min-w-[280px] py-2">{x.leftForHuman.length ? x.leftForHuman.map(leftWords).join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div title={x.summary} className="text-1 text-gray-10">{routineSummaryText(x.summary)}</div> : null}</TD>
+                <TD className="h-11">{x.agentRunId ? <Link href={`/app/runs/${x.agentRunId}`} title={x.agentRunId} className="text-1 text-blue-11 hover:underline">Open run</Link> : <span className="text-1 text-gray-10">Precheck only</span>}</TD>
               </TR>
             ))}
             {runs.data && runs.data.data.length === 0 ? <TR><TD colSpan={7} className="text-gray-10">No runs yet.</TD></TR> : null}

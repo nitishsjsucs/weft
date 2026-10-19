@@ -1,4 +1,5 @@
 "use client";
+import { longDate } from "../format";
 // Benefits, IT and Contractors page bodies (SPEC 11.3 product pages): views over the carrier, identity, device and
 // payment rail simulators. Wave 2 (w2-benefits-contractors) adds the Reconciliation and Open enrollment tabs and the
 // contractor payouts with rail status; those components live in components/app/benefits and components/app/contractors.
@@ -166,7 +167,7 @@ export function ContractorsView() {
                   <TD className="h-10">{w.title}</TD>
                   <TD className="h-10">{w.country}</TD>
                   <TD className="h-10 font-mono text-1">{w.currency}</TD>
-                  <TD className="h-10 whitespace-nowrap">{w.startDate}</TD>
+                  <TD className="h-10 whitespace-nowrap">{w.startDate ? longDate(w.startDate) : "Not set"}</TD>
                   <TD className="h-10 capitalize">{w.status}</TD>
                 </TR>
               ))}

@@ -21,7 +21,11 @@ test("GP5: a grounded answer, a refused approve-all, and an injected notice that
     const raise = (await weft.paychecks(SEED.draftRun)).flatMap((p) => p.flags).find((f) => f.rule === "GROSS_CHANGE" && JSON.stringify(f.evidence).includes("prt_"));
     expect(raise, "the seeded GROSS_CHANGE flag").toBeTruthy();
     const resultId = (raise!.evidence as Record<string, unknown>).resultId ?? (raise!.evidence as Record<string, unknown>).result_id;
-    if (typeof resultId === "string") await expect(page.getByTestId(TID.agentAnswer).last()).toContainText(resultId);
+    // The panel shows the cited result as a Sources chip (its title is the id); the stored answer keeps the id.
+    if (typeof resultId === "string") {
+      await expect(page.getByTestId("agent-answer-sources").last().locator(`[title="${resultId}"]`)).toBeVisible();
+      await expect(page.getByTestId(TID.agentAnswer).last()).not.toContainText(resultId);
+    }
   });
 
   await test.step("approve everything is refused and decides nothing", async () => {

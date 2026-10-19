@@ -72,7 +72,7 @@ export function AuditView() {
         }
       />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
-      {result && !result.ok ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{result.refusal.code}: {humanTimes(result.refusal.message)}</div> : null}
+      {result && !result.ok ? <div role="alert" title={result.refusal.code} className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{humanTimes(result.refusal.message)}</div> : null}
       {result && result.ok && result.status === "done" ? <div className="mb-4 text-1 text-green-11">{humanTimes(result.summary)}</div> : null}
       <Card className="overflow-hidden">
         <Table className="text-[13px]">
@@ -94,7 +94,7 @@ export function AuditView() {
                   <div className="text-1 text-gray-10">
                     {a.reversesSeq !== null ? <>Reverses <a href={`#audit-${a.reversesSeq}`} className="text-blue-11 hover:underline">#{a.reversesSeq}</a></> : null}
                     {a.reversedBySeq !== null ? <>Reversed by <a href={`#audit-${a.reversedBySeq}`} className="text-blue-11 hover:underline">#{a.reversedBySeq}</a></> : null}
-                    {a.reversible === "no" ? <span className="text-amber-11">{notReversible(a)}</span> : null}
+                    {a.reversible === "no" ? <span className="text-amber-11" title={a.notReversibleReason ?? undefined}>{notReversible(a)}</span> : null}
                     {a.proposalId ? <> · <span title={a.proposalId}>from an approved proposal</span></> : null}
                   </div>
                 </TD>

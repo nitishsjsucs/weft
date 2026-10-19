@@ -94,7 +94,7 @@ export const getRunCommand: WeftCommand<GetRunInput> = {
     const run = await getRun(deps.tx, i.run_id);
     const view = await concisePayrollRun(deps.tx, run, { flaggedOnly: i.flagged_only, workerId: i.worker_id, state: i.state, detailed: i.response_format === "detailed" });
     const data = { ...view, ...approvalOf(run, await approverNames(deps.tx, ctx.companyId, [run.approvedBy])) };
-    return { data, summary: `${run.id} ${run.status}: ${data.counts.needs_review} need review, ${data.counts.ready} ready` };
+    return { data, summary: `${run.id} (${run.status}): ${data.counts.paychecks} paychecks, ${data.counts.needs_review} need review, ${data.counts.blocked} blocked` };
   },
 };
 

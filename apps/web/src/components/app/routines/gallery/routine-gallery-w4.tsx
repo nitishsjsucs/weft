@@ -7,7 +7,8 @@ import Link from "next/link";
 import { Badge, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import type { RoutineGalleryRow } from "@weft/contracts";
 import { errorText, useGet } from "@/lib/api/hooks";
-import { fmtDateTime } from "../../format";
+import { fmtDateTime, statusLabel } from "../../format";
+import { scheduleWords } from "../schedule";
 import { W4_GALLERY_TID } from "./testids";
 
 /** GET /v1/routine-gallery rows: the RoutineGalleryRow contract plus display fields. */
@@ -24,13 +25,13 @@ function useGallery() {
 }
 
 const createdBy = (r: GalleryRow) => (r.source === "prebuilt" ? "Prebuilt" : r.createdByName ?? "Unknown");
-const nextRun = (r: GalleryRow) => (r.nextRunAt ? fmtDateTime(r.nextRunAt) : r.enabled ? (r.schedule.startsWith("on ") ? r.schedule : "Manual") : "Off while disabled");
+const nextRun = (r: GalleryRow) => (r.nextRunAt ? fmtDateTime(r.nextRunAt) : r.enabled ? (r.schedule.startsWith("on ") ? "On its event" : "Manual") : "Off while disabled");
 
 function LastRun({ r }: { r: GalleryRow }) {
   if (!r.lastRunAt) return <span className="text-gray-10">Never</span>;
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
-      {r.lastRunStatus ? <Badge tone={STATUS_TONE[r.lastRunStatus] ?? "gray"} size="xs">{r.lastRunStatus.replace("_", " ")}</Badge> : null}
+      {r.lastRunStatus ? <Badge tone={STATUS_TONE[r.lastRunStatus] ?? "gray"} size="xs">{r.lastRunStatus === "waiting_approval" ? "Waiting for approval" : statusLabel(r.lastRunStatus)}</Badge> : null}
       <span>{fmtDateTime(r.lastRunAt)}</span>
     </span>
   );
@@ -40,7 +41,7 @@ function Counts({ r }: { r: GalleryRow }) {
   return (
     <span className="inline-flex items-center gap-2 tabular-nums" title="Proposals from this routine's runs that people approved, and that they denied, edited or dismissed">
       <span data-count="approvals" className="text-green-11">{r.approvals} approved</span>
-      <span data-count="overrides" className={r.overrides ? "text-amber-11" : "text-gray-10"}>{r.overrides} overridden</span>
+      <span data-count="overrides" className={r.overrides ? "text-amber-11" : "text-gray-10"}>{r.overrides} denied or changed</span>
     </span>
   );
 }
@@ -60,9 +61,9 @@ export function RoutineGalleryW4() {
           <TBody>
             {rows.map((r) => (
               <TR key={r.routineId} data-testid={W4_GALLERY_TID.row(r.routineId)} data-next-run={r.nextRunAt ?? ""} data-last-run={r.lastRunAt ?? ""}>
-                <TD className="max-w-[240px]"><Link href={`/app/routines/${r.routineId}`} className="font-medium hover:underline">{r.name}</Link><div className="text-0 text-gray-10">{r.schedule}</div></TD>
+                <TD className="max-w-[240px]"><Link href={`/app/routines/${r.routineId}`} className="font-medium hover:underline">{r.name}</Link><div className="text-0 text-gray-10" title={r.schedule}>{scheduleWords(r.schedule)}</div></TD>
                 <TD className="whitespace-nowrap">{createdBy(r)}</TD>
-                <TD className="whitespace-nowrap">{r.enabled ? <>{r.enabledAt ? fmtDateTime(r.enabledAt) : "Yes"}</> : <Badge tone="gray" size="xs">Disabled</Badge>}</TD>
+                <TD className="whitespace-nowrap" title={r.enabled && r.enabledAt ? `Enabled ${fmtDateTime(r.enabledAt)}` : undefined}>{r.enabled ? "Yes" : <Badge tone="gray" size="xs">Disabled</Badge>}</TD>
                 <TD className="whitespace-nowrap"><LastRun r={r} /></TD>
                 <TD className="whitespace-nowrap">{nextRun(r)}</TD>
                 <TD className="whitespace-nowrap">{AUTONOMY_LABEL[r.autonomy]}</TD>
@@ -81,7 +82,6 @@ export function RoutineGalleryW4() {
             </div>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-gray-11">
               <dt>Created by</dt><dd className="break-words">{createdBy(r)}</dd>
-              {r.enabled && r.enabledAt ? <><dt>Enabled</dt><dd>{fmtDateTime(r.enabledAt)}</dd></> : null}
               <dt>Last run</dt><dd><LastRun r={r} /></dd>
               <dt>Next run</dt><dd className="break-words">{nextRun(r)}</dd>
               <dt>Autonomy</dt><dd>{AUTONOMY_LABEL[r.autonomy]}</dd>
@@ -104,7 +104,7 @@ export function RoutineDecisionCounts({ routineId }: { routineId: string }) {
       <h2 className="mb-2 text-1 font-medium text-gray-10 uppercase">History</h2>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-gray-11">
         <dt>Created by</dt><dd className="break-words">{createdBy(r)}</dd>
-        <dt>Enabled</dt><dd>{r.enabled ? (r.enabledAt ? fmtDateTime(r.enabledAt) : "Yes") : "Disabled"}</dd>
+        <dt>Enabled</dt><dd>{r.enabled ? "Yes" : "No"}</dd>
         <dt>Last run</dt><dd><LastRun r={r} /></dd>
         <dt>Next run</dt><dd className="break-words">{nextRun(r)}</dd>
         <dt>Approved</dt><dd className="tabular-nums" data-count="approvals">{r.approvals}</dd>

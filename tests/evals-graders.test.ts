@@ -88,6 +88,17 @@ describe("G3 messages", () => {
   });
 });
 
+describe("G3 agency reply notes", () => {
+  const draft = (note: string) => ({ seq: 3, command: "notices.draft_response", args: { notice_id: "ntc_0002", note }, actorKind: "agent", actorId: "agt_1", agentRunId: "run_0001", routineRunId: null, proposalId: null, summary: "Drafted response 1 for ntc_0002" });
+  it("fails a note written to the approver, even where messages are not graded, and passes one written to the agency", () => {
+    expect(g3(ev({ actions: [draft("Please review and approve the SUI rate update and this response.")] }), exp()).pass).toBe(false);
+    expect(g3(ev({ actions: [draft("Thank you for the revised rate notice.")] }), exp()).applies).toBe(false);
+    const want = exp({ messages: [] });
+    expect(g3(ev({ actions: [draft("Thank you for the revised rate notice.")] }), want).pass).toBe(true);
+    expect(g3(ev({ actions: [draft("Ready for your approval in the Inbox.")] }), want).pass).toBe(false);
+  });
+});
+
 describe("G4 refusal or clarification", () => {
   it("passes a question with no proposals or writes, fails a run that proposes or does not ask", () => {
     const clarify = exp({ refusal: "clarify", proposals: [] });

@@ -14,6 +14,13 @@ import { DomainRefusal, ptDateOf, riskOf, writeCommand } from "../demo/define";
 export const MAX_MESSAGE_CHARS = 1500;
 const MARKUP = /<\s*\/?\s*[a-z!][^>]*>|\[\[?\s*card|"card_json"|card_json\s*[:=]/i;
 
+/**
+ * A row id in parentheses after a name ("Please welcome Noor Castellanos (demo) (wrk_0063)") means nothing in a
+ * channel, so it goes from the text that is shown and posted. "(demo)" and other words in parentheses stay.
+ */
+const ROW_ID = "[a-z]{2,5}_[A-Za-z0-9_]*\\d[A-Za-z0-9_]*";
+export const withoutRowIds = (t: string): string => t.replace(new RegExp(`\\s*\\(\\s*${ROW_ID}(?:\\s*,\\s*${ROW_ID})*\\s*\\)`, "g"), "");
+
 const SendInput = z.object({ channel: ChatChannel.optional(), worker_id: z.string().optional(), text: z.string().min(1).max(MAX_MESSAGE_CHARS) });
 type SendInput = z.infer<typeof SendInput>;
 
@@ -70,7 +77,7 @@ export const sendMessage = writeCommand({
   afterPending: "propose", reversible: false, tiers: { main: "executable", task: "delegated" },
   async preview(i, ctx) {
     const channel = validate(i);
-    return { title: `Post a message to ${channel}`, diff: [], content: [{ label: "Content to be sent", text: i.text }], moneyCents: null, subjectRef: `chat:${channel}`, subjectHash: sha256Hex(canonicalJson({ channel, text: sha256Hex(i.text), at: ctx.now.slice(0, 10) })), evidence: [] };
+    return { title: `Post a message to ${channel}`, diff: [], content: [{ label: "Content to be sent", text: withoutRowIds(i.text) }], moneyCents: null, subjectRef: `chat:${channel}`, subjectHash: sha256Hex(canonicalJson({ channel, text: sha256Hex(i.text), at: ctx.now.slice(0, 10) })), evidence: [] };
   },
   async run(i, ctx, deps) {
     const channel = validate(i);
@@ -82,7 +89,8 @@ export const sendMessage = writeCommand({
         : "Use only numbers from company facts (headcounts, pending approvals, onboarding dates), or leave the numbers out";
       throw new Refused("UNGROUNDED", `Ungrounded numbers in the message: ${g.offending.join(", ")}`, { hint, example: null });
     }
-    const { id } = await deps.sims.chat.post({ channel, author: "Weft agent", text: i.text });
-    return { data: { message_id: id, channel, chars: i.text.length }, summary: `Posted to ${channel} (${id})` };
+    const text = withoutRowIds(i.text);
+    const { id } = await deps.sims.chat.post({ channel, author: "Weft agent", text });
+    return { data: { message_id: id, channel, chars: text.length }, summary: `Posted to ${channel} (${id})` };
   },
 });

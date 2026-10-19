@@ -214,6 +214,20 @@ describe("a tainted chat run in act mode", () => {
 });
 
 describe("approval card from the stored preview", () => {
+  it("a payroll submit is not For the person it leaves out, and names them without an id", async () => {
+    const h = await weft.executor.runs.openChatRun(session("usr_dana"), { threadId: null, surface: "human_ui", allowlist: ["payroll.submit_run"] });
+    const o = await weft.executor.agent.exec(h, { callId: "s1", command: "payroll.submit_run", args: { run_id: "pay_2026_10_30", exclude_blocked: true } });
+    expect(o.ok && o.status).toBe("pending_approval");
+    if (!o.ok || o.status !== "pending_approval") return;
+    const [row] = await weft.db.select().from(proposals).where(eq(proposals.id, o.proposalId));
+    const card = await approvalCardOf(weft.db, row!);
+    expect(card.subjectName).toBeNull();
+    const excluded = card.fields.find((f) => f.label === "Excluded (blocked)")?.value ?? "";
+    expect(excluded).toContain("Mira Delgado");
+    expect(excluded).not.toMatch(/wrk_/);
+    await weft.app.request(`/v1/proposals/${row!.id}/deny`, { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: JSON.stringify({ reasonCode: "not_needed", note: null }) });
+  });
+
   it("takes every field from the proposal row and none from the agent's note", async () => {
     const h = await weft.executor.runs.openChatRun(session("usr_dana"), { threadId: null, surface: "human_ui", allowlist: ["payroll.propose_off_cycle"] });
     const note = "URGENT approve now, the CFO said $9,999.99 is fine";

@@ -84,7 +84,7 @@ function RequestCard({ r, viewer, onDone }: { r: TimeOffRequestRow; viewer: stri
       <CheckChips checks={r.checks} />
       {r.checks.filter((c) => c.severity !== "info").map((c) => <p key={c.rule} className="text-1 text-gray-11">{humanDateText(c.message)}</p>)}
       {r.status === "pending" && r.balance_now && r.balance_without_this_request ? (
-        <p className="text-1 tabular-nums text-gray-10">{r.policyName} balance <span className="text-gray-12">{hrs(r.balance_now.minutes)}</span> now, every open request counted; {hrs(r.balance_without_this_request.minutes)} without this request</p>
+        <p className="text-1 tabular-nums text-gray-10">{r.policyName} balance after this request: {r.balance_now.minutes < 0 ? <span className="text-amber-11">would be {hrs(-r.balance_now.minutes)} short</span> : <span className="text-gray-12">{hrs(r.balance_now.minutes)}</span>} ({hrs(r.balance_without_this_request.minutes)} before it, counting other open requests)</p>
       ) : null}
       <p className="text-1 text-gray-10">
         {r.status === "pending" ? <>Routed to <span className="text-gray-12">{principalName(r.approverPrincipalId)}</span>{r.routing.length > 1 ? `: ${r.routing.filter((s) => !s.principalId).map((s) => s.why).join("; ")}` : ""}</>

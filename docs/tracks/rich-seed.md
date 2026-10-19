@@ -7,8 +7,9 @@ is empty, I want data everywhere", without moving a test, an e2e run, an eval wo
 
 - `WEFT_SEED_PROFILE=base|rich` (`packages/seed/src/profile.ts`). `seedWorldProfile(target, "base")` is exactly
   `seedWorld()`; `"rich"` runs `seedWorld()` and then the rich layer in `packages/seed/src/rich/`.
-- `pnpm dev` seeds rich by default (`--profile base` opts out). `pnpm dev --e2e`, `pnpm e2e`, `pnpm test`, `pnpm demo`,
-  `pnpm demo:scenario` and the eval worlds always use base. The seed CLI defaults to base.
+- `pnpm dev` seeds rich by default (`--profile base` opts out). `pnpm dev --e2e`, `pnpm e2e`, `pnpm test`, `pnpm demo`
+  and the eval worlds always use base. `pnpm demo:scenario` resets to the running world's own profile (rich under
+  `pnpm dev`; `--profile base` opts out). The seed CLI defaults to base.
 - A rich world carries a `seed.profile` settings row (base worlds carry none, so the base digest is unchanged).
   `POST /v1/sim/reset` rebuilds the world with the profile it was seeded with, or the one in `{ profile }`.
 - Base digest: unchanged (`950933e7ed6a...10d9`, checked by `packages/seed/test/profile.test.ts` and the eval suite's
@@ -47,9 +48,9 @@ Larkspur ran payroll on a previous provider until Aug 31, so Weft never ran them
 
 DE 2088 is not delivered, the October reconciliation is not run, the 8 expenses are still in review, Noor's offer is
 still Sent, Colorado is not registered (no registration is planted: accepting Noor's offer files both, per tax account),
-and the pay_2026_10_30 submit waits for Theo (its proposal has
-`subjectHash: null`, so approving it runs the submit fresh). `pnpm demo:scenario` resets to base, so its checks see no
-pending proposals; `pnpm dev --fresh` brings the rich world back.
+and the pay_2026_10_30 submit waits for Theo (its proposal has `subjectHash: null`, so approving it runs the submit
+fresh). `pnpm demo:scenario` resets to the world's own profile and counts these seeded pending proposals as clean; it
+refuses only a pending proposal newer than the seed.
 
 ## App changes that came with the data
 

@@ -72,17 +72,40 @@ describe("demo:scenario against a world", () => {
     expect(((await api("GET", "/v1/sim/clock")).json as { now: string }).now).not.toBe(SEED_CLOCK);
     const before = Number((await weft.db.all<{ n: number }>("SELECT COUNT(*) AS n FROM agent_runs" as never))[0]?.n ?? 0);
     const p = await prepareScenario("notice", api);
-    expect(p).toMatchObject({ clock: SEED_CLOCK, rate: 0, pending: 0, warnings: [] });
+    expect(p).toMatchObject({ profile: "base", clock: SEED_CLOCK, rate: 0, pending: 0, warnings: [] });
     expect(p.scenario.name).toBe("notice");
     const after = Number((await weft.db.all<{ n: number }>("SELECT COUNT(*) AS n FROM agent_runs" as never))[0]?.n ?? 0);
     expect(after).toBeLessThanOrEqual(before);
   });
 
-  it("starts every take on the base profile, even from a rich dev world", async () => {
+  it("starts a take on the world's own profile, or the one it is given", async () => {
     const bodies: unknown[] = [];
     const spy: ApiCall = async (method, path, body) => { if (path === "/v1/sim/reset") bodies.push(body); return api(method, path, body); };
     await prepareScenario("payroll", spy);
-    expect(bodies).toEqual([{ profile: "base" }]);
+    // A rich dev world (the pnpm dev default) resets to rich; the reset itself is not run here, the base world stays.
+    const rich: ApiCall = async (method, path, body) => {
+      if (path === "/v1/health") return { status: 200, json: { seedProfile: "rich" } };
+      if (path === "/v1/sim/reset") { bodies.push(body); return { status: 200, json: { ok: true } }; }
+      return api(method, path, body);
+    };
+    expect((await prepareScenario("payroll", rich)).profile).toBe("rich");
+    await prepareScenario("payroll", rich, { profile: "base" }).catch(() => undefined);
+    expect(bodies).toEqual([{ profile: "base" }, { profile: "rich" }, { profile: "base" }]);
+  });
+
+  it("accepts the seed's own waiting proposals and refuses one made after the seed", async () => {
+    const withSeeded: ApiCall = async (method, path, body) => {
+      const r = await api(method, path, body);
+      if (path.startsWith("/v1/proposals")) return { status: 200, json: { data: [{ id: "prp_0019", createdAt: "2026-10-26T15:00:00.000Z" }] } };
+      return r;
+    };
+    expect((await prepareScenario("notice", withSeeded)).pending).toBe(1);
+    const withNew: ApiCall = async (method, path, body) => {
+      const r = await api(method, path, body);
+      if (path.startsWith("/v1/proposals")) return { status: 200, json: { data: [{ id: "prp_0099", createdAt: "2026-10-26T16:00:00.000Z" }] } };
+      return r;
+    };
+    await expect(prepareScenario("notice", withNew)).rejects.toThrow(/newer than the seed.*prp_0099/);
   });
 
   it("refuses when the reset fails", async () => {
@@ -165,7 +188,8 @@ describe("demo:scenario CLI: target and confirmation before the reset", () => {
     const t = io({ isTTY: true, answer: "Y" });
     expect(await runCli(["time-off", "--web-port", "5863"], t.x)).toBe(0);
     expect(t.targets).toEqual([{ apiPort: 4070, webPort: 5863, dataDir: "/tmp/weft-demo-target" }]);
-    expect(calls[0]).toBe("POST /v1/sim/reset");
+    // The first write is the reset; before it, only the world's seed profile is read.
+    expect(calls.slice(0, 2)).toEqual(["GET /v1/health", "POST /v1/sim/reset"]);
     expect(await clock()).toBe(SEED_CLOCK);
     expect(t.out[0]).toMatch(/^demo:scenario time-off: target API http:\/\/127\.0\.0\.1:4070, data dir \/tmp\/weft-demo-target$/);
     expect(t.out.join("\n")).toContain("Open http://127.0.0.1:5863/app/time-off");
@@ -175,7 +199,8 @@ describe("demo:scenario CLI: target and confirmation before the reset", () => {
     const s = io();
     expect(await runCli(["--yes", "notice"], s.x)).toBe(0);
     expect(s.asked).toEqual([]);
-    expect(calls[0]).toBe("POST /v1/sim/reset");
+    expect(calls.slice(0, 2)).toEqual(["GET /v1/health", "POST /v1/sim/reset"]);
+    expect(await runCli(["--yes", "notice", "--profile", "medium"], io().x)).toBe(2);
     expect(await clock()).toBe(SEED_CLOCK);
   });
 

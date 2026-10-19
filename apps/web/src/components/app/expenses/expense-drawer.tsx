@@ -8,8 +8,11 @@ import { Badge, Button, Drawer } from "@weft/ui/components";
 import { W3_EXPENSES_TID as TID, type ExpenseDecision, type ExpenseDeclineReason, type ToolOutcome } from "@weft/contracts";
 import type { W3ExpensesDetail } from "../../../../../../packages/contracts/src/ext/w3-expenses";
 import { client, errorText, getPrincipal, rawFetch, useGet, useMutation } from "@/lib/api/hooks";
-import { fmtDate, fmtDateTime, humanTimes } from "../format";
-import { humanDateText } from "../copy";
+import { fmtDate, fmtDateTime, humanTimes, statusLabel } from "../format";
+import { humanDateText, humanLine } from "../copy";
+
+/** "pay_2026_10_30" reads "Oct 30 run". */
+const runLabel = (id: string) => humanLine(id).replace(/^the /, "").replace(/^./, (c) => c.toUpperCase());
 import { CATEGORY_LABEL, DECISION_LABEL, REASON_LABEL, RULE_LABEL, SEVERITY_TONE, STATUS_LABEL, STATUS_TONE, usd } from "./labels";
 
 function Section({ title, children, tour }: { title: string; children: React.ReactNode; tour?: string }) {
@@ -119,7 +122,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
           <Section title="Payment">
             <dl className="text-[13px]">
               <Row k="Status" v={<Badge tone={STATUS_TONE[live.status]}>{STATUS_LABEL[live.status]}</Badge>} />
-              <Row k="Pay run" v={live.payrollRunId ? <Link className="hover:underline" href={`/app/payroll/${live.payrollRunId}`}>{live.payrollRunId}{live.payrollRunStatus ? ` (${live.payrollRunStatus})` : ""}</Link> : live.status.startsWith("approved") ? "Next draft" : "-"} />
+              <Row k="Pay run" v={live.payrollRunId ? <Link className="hover:underline" href={`/app/payroll/${live.payrollRunId}`}>{runLabel(live.payrollRunId)}{live.payrollRunStatus ? ` (${statusLabel(live.payrollRunStatus).toLowerCase()})` : ""}</Link> : live.status.startsWith("approved") ? "Next draft" : "Not scheduled"} />
               {live.paycheckId ? <Row k="Paycheck" v={<span className="font-mono text-1">{live.paycheckId}</span>} /> : null}
               {live.decidedBy ? <Row k="Decided" v={`${live.decidedBy}${live.decidedAt ? `, ${fmtDateTime(live.decidedAt)}` : ""}`} /> : null}
               {live.decisionReasonCode ? <Row k="Reason" v={REASON_LABEL[live.decisionReasonCode]} /> : null}
