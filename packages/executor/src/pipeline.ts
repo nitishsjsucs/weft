@@ -25,6 +25,21 @@ import { offloadIfLarge } from "./workspace";
 export const LEASE_MS = 10 * 60_000;
 export const MAX_ISSUES = 5;
 
+/**
+ * A Zod issue's message as the caller should read it. nullToUndefined turns a null into a missing key, so for a
+ * required field the caller set to null Zod says "received undefined"; an MCP client that sent null deliberately
+ * then reads a message about a value it never sent. Name the null instead.
+ */
+export function issueMessage(issue: { code: string; path: readonly PropertyKey[]; message: string }, rawArgs: unknown): string {
+  if (issue.code !== "invalid_type" || !issue.path.length) return issue.message;
+  let v: unknown = rawArgs;
+  for (const k of issue.path) {
+    if (v === null || typeof v !== "object") return issue.message;
+    v = (v as Record<PropertyKey, unknown>)[k];
+  }
+  return v === null ? issue.message.replace(/received undefined$/, "received null") : issue.message;
+}
+
 /** Command deps bound to the executor's transaction. Simulators are built on first use (reads never need them). */
 export function makeDeps(e: Engine, tx: DbTx): CommandDeps {
   let sims: CommandDeps["sims"] | null = null;
@@ -143,7 +158,7 @@ async function runCall(e: Engine, tx: DbTx, scope: CallScope, command: string, r
   // Null mapping and Zod.
   const parsed = def.input.safeParse(nullToUndefined(rawArgs ?? {}));
   if (!parsed.success) {
-    const issues = parsed.error.issues.slice(0, MAX_ISSUES).map((i) => `${i.path.join(".") || "(input)"}: ${i.message}`);
+    const issues = parsed.error.issues.slice(0, MAX_ISSUES).map((i) => `${i.path.join(".") || "(input)"}: ${issueMessage(i, rawArgs)}`);
     return refuse("INVALID_INPUT", `Invalid input for ${def.name}: ${issues.join("; ")}`);
   }
   let input = parsed.data;

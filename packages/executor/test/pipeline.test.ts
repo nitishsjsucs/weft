@@ -53,6 +53,14 @@ describe("pipeline checks", () => {
     ok(await w.executor.agent.exec(h, { callId: "5", command: "people__search", args: { query: null, response_format: null } }));
   });
 
+  it("a required field sent as null is refused naming the null, not undefined (an MCP client sends null on purpose)", async () => {
+    const o = await w.executor.agent.exec(h, { callId: "n1", command: "tax__update_rate", args: { rate_id: null, rate: "0.015" } });
+    expect(code(o)).toBe("INVALID_INPUT");
+    expect(!o.ok && o.refusal.message).toContain("rate_id: Invalid input: expected string, received null");
+    const missing = await w.executor.agent.exec(h, { callId: "n2", command: "tax__update_rate", args: { rate: "0.015" } });
+    expect(!missing.ok && missing.refusal.message).toContain("rate_id: Invalid input: expected string, received undefined");
+  });
+
   it("UNKNOWN_REFERENCE names up to 3 closest ids in the company", async () => {
     const o = await w.executor.agent.exec(h, { callId: "1", command: "notices.get", args: { notice_id: "ntc_0002" } });
     expect(code(o)).toBe("UNKNOWN_REFERENCE");

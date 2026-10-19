@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestWeft, type TestWeft } from "./scenarios/helpers";
+import { clientConfig } from "../apps/mcp/src/main";
 import { DEMO_PHOENIX_PROJECT, DEMO_SCENARIOS, SEED_CLOCK, START_COMMAND, describeScenario, findScenario, prepareScenario, runCli, type ApiCall, type CliIo } from "../scripts/demo-scenario";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -18,6 +19,13 @@ describe("demo:scenario registry", () => {
       expect(s.minutes, s.name).toBeLessThanOrEqual(4);
       for (const text of [s.title, ...s.steps, ...s.prompts]) expect(text, s.name).not.toMatch(/[\u2013\u2014]/);
     }
+  });
+  it("the MCP step's client config in the doc is what pnpm mcp:config builds, and the helper names the command", () => {
+    expect(findScenario("trace-mcp").steps.join(" ")).toContain("pnpm mcp:config");
+    expect((JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts["mcp:config"]).toBe("tsx scripts/mcp-config.ts");
+    const doc = readFileSync(join(ROOT, "docs/demo-scenarios.md"), "utf8");
+    const block = doc.slice(doc.indexOf("## 8.")).match(/```json\n([\s\S]*?)\n```/)![1]!;
+    expect(JSON.parse(block)).toEqual(clientConfig({ root: "/Users/you/Developer/projects/weft", pnpm: "/opt/homebrew/bin/pnpm", pathDirs: ["/opt/homebrew/bin"] }));
   });
   it("names the scenarios when an unknown one is asked for", () => {
     expect(() => findScenario("nope")).toThrow(/unknown scenario "nope"; use one of: notice, payroll/);

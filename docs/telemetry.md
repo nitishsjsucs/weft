@@ -7,7 +7,8 @@ Phoenix can show what the agent read, called and answered, and where it went wro
 ## Turning it on
 
 ```bash
-pnpm phoenix:up                          # Phoenix 20.23.0 on 127.0.0.1:6206, data in ~/Developer/projects/weft-notes/phoenix
+pnpm phoenix:up                          # Phoenix 20.23.0 on 127.0.0.1:6206, data in ~/Developer/projects/weft-notes/phoenix,
+                                         # then Weft's model prices into it (see "Cost: Weft and Phoenix")
 WEFT_TRACE=phoenix pnpm dev              # the API registers the provider and exports OTLP over HTTP
 open http://127.0.0.1:6206               # browse projects, traces, sessions
 pnpm phoenix:down
@@ -23,7 +24,7 @@ A builder who needs a Phoenix for a smoke test starts a private one on its own p
 
 ```bash
 WEFT_PHOENIX_PORT=4900 WEFT_PHOENIX_GRPC_PORT=4901 WEFT_PHOENIX_DIR=$PWD/.scratch/<track>/phoenix npx tsx scripts/phoenix.ts up
-WEFT_PHOENIX_SMOKE_URL=http://127.0.0.1:4900 npx vitest run --project @weft/tests tests/telemetry-phoenix.test.ts
+WEFT_PHOENIX_SMOKE_URL=http://127.0.0.1:4900 npx vitest run --project @weft/tests tests/telemetry-phoenix.test.ts tests/phoenix-pricing.test.ts
 WEFT_PHOENIX_PORT=4900 WEFT_PHOENIX_GRPC_PORT=4901 WEFT_PHOENIX_DIR=$PWD/.scratch/<track>/phoenix npx tsx scripts/phoenix.ts down
 ```
 
@@ -151,10 +152,30 @@ for MCP calls). `tests/telemetry-phoenix.test.ts` reads the same spans back from
 
 LLM spans carry Weft's own figures: `llm.cost.total` is the ledger's `costUsdMicros / 1e6` and the split
 (`llm.cost.prompt`, `.prompt_details.input`, `.cache_read`, `.cache_write`, `llm.cost.completion`) follows `cost.ts`.
-Phoenix computes its own cost from `llm.model_name`, `llm.provider` and the token counts with its bundled price
-manifest. On the live gpt-5.6-luna run of 2026-10-16 (two model steps, 9,288 prompt tokens of which 3,999 cache reads
-and 5,283 cache writes, 365 completion tokens) the two agree on every token class except cache writes: Phoenix's
-manifest prices Luna cache writes at $0.25 per million, while `cost.ts` charges them at the input rate ($0.20, "OpenAI
-has no write surcharge"). Phoenix said $0.001840, Weft $0.001576; with cache writes at $0.20 Phoenix's per span
-numbers equal Weft's to the micro. Which rate OpenAI bills is for the `cost.ts` owner to settle; until then read
-Weft's `llm.cost.*` as the ledger and Phoenix's cost columns as an upper bound.
+Phoenix ignores those attributes and prices every span with an `llm.model_name` and token counts itself, from its
+model table. Its bundled manifest charges Luna cache writes at $0.25 per million, while `cost.ts` charges them at the
+input rate ($0.20, "OpenAI has no write surcharge"), so out of the box Phoenix read $0.001840 for a step Weft booked at
+$0.001576.
+
+**Phoenix prices like `cost.ts`.** `pnpm phoenix:up` (on start, and again when it finds Phoenix already running) and
+the eval runner's `--phoenix` setup call `scripts/phoenix-pricing.ts`, which upserts one custom model per
+`PRICES_BY_MODEL` entry through Phoenix's GraphQL API: `gpt-5.6-luna (weft cost.ts)` and `gpt-5.6-terra (weft
+cost.ts)`, provider `openai`, a name pattern anchored on the exact model id (`^gpt-5\.6-luna$`), and input,
+cache read, cache write, output and reasoning at the rates `cost.ts` charges. Phoenix ranks custom models above its
+built-in ones, so every span ingested after the sync is priced as the ledger prices it; spans already stored keep the
+price they were ingested with. The sync is idempotent (`kept ...` on a second run), touches no other custom model,
+and prints one warning line instead of failing when Phoenix cannot be reached. Which rate OpenAI bills for cache
+writes is still for the `cost.ts` owner to settle; Phoenix now follows whatever `cost.ts` says. Checked on
+2026-10-18 on a private Phoenix 20.23.0: a live DE 2088 routine run (two Luna steps, 9,811 tokens) cost $0.00115276 in
+Phoenix and 1,154 micros in the ledger, which rounds each step up to the micro.
+
+**Where Phoenix shows a project's cost.** The Stats panel on a project's Spans tab (Total Cost) adds up the cost of
+the spans its filter selects, and the tab opens with the filter `parent_id is None`: root spans only. A Weft root is
+`agent.run`, which carries no token counts (OpenInference puts tokens and cost on the LLM span; pricing the root too
+would count every run twice), so with that default filter Total Cost reads $0 however many runs the project holds.
+To read the project's cost:
+
+- Spans tab, filter `span_kind == 'LLM'`: Total Cost is then the sum over every model call in the time range.
+- Metrics tab: the Cost chart (prompt and completion per day) and Top models by cost.
+- One run: the trace header's Total Cost adds up every span in the trace; the exact figure for each call is on its
+  `llm.responses` span. Phoenix prints any amount under a cent as `<$0.01`.

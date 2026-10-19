@@ -46,8 +46,13 @@ curl -s -H "x-api-key: $KEY" "http://127.0.0.1:4070/v1/workers?limit=5"
 curl -s "http://127.0.0.1:4070/v1/stats"
 ```
 
-The MCP server uses the `mcp` key:
+The MCP server uses the `mcp` key, given as the key (`WEFT_API_KEY`) or as the file that holds it
+(`WEFT_API_KEY_FILE`, an absolute path: pnpm starts the server in `apps/mcp`):
 
 ```sh
-WEFT_API_URL=http://127.0.0.1:4070 WEFT_API_KEY=$(cat .data/demo-mcp-key.txt) pnpm --filter @weft/mcp start
+WEFT_API_URL=http://127.0.0.1:4070 WEFT_API_KEY_FILE=$PWD/.data/demo-mcp-key.txt pnpm --filter @weft/mcp start
 ```
+
+`pnpm mcp:config` prints a ready-to-paste client config for this checkout (the `mcpServers` shape Claude Desktop and
+the MCP Inspector read; `--api-port` and `--data-dir` for another world). `docs/demo-scenarios.md` scenario 8 has the
+call sequence.

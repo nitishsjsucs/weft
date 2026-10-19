@@ -4,7 +4,7 @@ Checked on 2026-10-18 at main `8e626f0` (plus the `pnpm demo:scenario` helper in
 
 ## Before you start
 
-1. Phoenix: `pnpm phoenix:up` (Phoenix 20.23.0 on http://127.0.0.1:6206).
+1. Phoenix: `pnpm phoenix:up` (Phoenix 20.23.0 on http://127.0.0.1:6206). It also prints `Phoenix model pricing from cost.ts: ...`: Phoenix then prices runs as Weft's ledger does.
 2. Start the world with a frozen clock, so no routine fires on its own mid-demo:
 
 ```sh
@@ -28,9 +28,9 @@ Other resets: `curl -s -X POST http://127.0.0.1:3070/api/v1/sim/reset -H 'x-weft
 | 5 | Expense review | 3 of 3 (L6) + browser 1 of 1 | 3 | 10.4 to 12.5 s | $0.0020 to $0.0024 |
 | 6 | Time off coverage conflict | question 3 of 3; routine 3 of 3 (L10); browser 1 of 1 | 2 to 3 | 5.6 to 9.3 s | $0.0011 to $0.0017 |
 | 7 | Chart and memory recall | chart 3 of 3 (L7); recall 3 of 3; browser 1 of 1 | 2 | 3.8 to 4.9 s | $0.0006 to $0.0008 |
-| 8 | Phoenix trace, MCP client | traces for every run; MCP smoke 3 of 3 functional | none | n/a | $0 |
+| 8 | Phoenix trace, MCP client | traces for every run; MCP client sequence 3 of 3 after the helper's reset plus 1 on a fresh rich world, from the printed config (2026-10-18); MCP smoke 3 of 3 | none | n/a | $0 |
 
-Flagged: the external MCP client step in 8 was not driven from a real MCP client in this check (rehearse once). Offboarding was dropped as a main scenario: it has no model step (3 of 3 scripted).
+Scenario 8's MCP steps were driven from a real MCP client (the official SDK over stdio) on 2026-10-18. Offboarding was dropped as a main scenario: it has no model step (3 of 3 scripted).
 
 ## 1. Tax notice to an approved rate change (3 min)
 
@@ -132,14 +132,46 @@ Say: "Every number must appear in a tool result or the answer is rejected and re
 
 ## 8. Phoenix trace and an external MCP client (3 min)
 
-Reset: `pnpm demo:scenario trace-mcp` (run one of 1 to 7 first).
+Reset: `pnpm demo:scenario trace-mcp`, then run scenario 1 up to the two Approval needed cards (Deliver CA EDD DE 2088). The MCP calls below read that notice and its card.
 
-1. Phoenix http://127.0.0.1:6206, Tracing, project weft-demo, filter parent_id is None, open the latest agent.run: admission, model (llm.responses with tokens), assemble (memory.recall), dispatch with one span per tool call. The traces are there only when the world was started with the command in Before you start (`WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=weft-demo`); without `WEFT_TRACE` nothing is exported, and without the project name the runs land in the default project `weft`.
-2. MCP: in any MCP client use the stdio server `WEFT_API_URL=http://127.0.0.1:4070 WEFT_API_KEY=$(cat .data/demo-mcp-key.txt) pnpm --filter @weft/mcp start`. List the tools (122), call actions__list, then tax__update_rate: it returns pending_approval and the card appears in the Inbox. Approve, deny, rollback, vault and settings are not exposed.
+Phoenix:
+1. http://127.0.0.1:6206, Tracing, project weft-demo, Traces tab: open the latest agent.run: admission, model (llm.responses with tokens and cost), assemble (memory.recall), dispatch with one span per tool call. The traces are there only when the world was started with the command in Before you start (`WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=weft-demo`); without `WEFT_TRACE` nothing is exported, and without the project name the runs land in the default project `weft`.
+2. Cost: on the Spans tab set the filter to `span_kind == 'LLM'`. The Stats panel's Total Cost is then the project's model spend. The tab opens filtered to root spans (`parent_id is None`), and a Weft root (agent.run) carries no tokens, so that default view reads $0. The Metrics tab charts the cost per day and by model. Phoenix prints any amount under a cent as `<$0.01`; one DE 2088 run is $0.0012 to $0.0013. `pnpm phoenix:up` loads Weft's prices into Phoenix, so its figures match the ledger (docs/telemetry.md).
 
-Say: "Every run is traced: what it was asked, what it recalled, each tool call, tokens and cost. Another agent can drive Weft over MCP with the same rules: a rate change from outside is a proposal waiting for a person."
+MCP client: `pnpm mcp:config` prints the config for your checkout with the paths filled in. Paste it into Claude Desktop (Settings, Developer, Edit Config, `claude_desktop_config.json`) or pass the file to the MCP Inspector (`--config`). It has this shape:
 
-Fallback: the pre-recorded traces of every scenario in Phoenix project weft-demo-2026-10-18, and `node_modules/.bin/tsx scripts/mcp-smoke.ts` with WEFT_SMOKE_PORT on a free port (it prints the tools and the pending_approval result; it exits 1 afterwards on a temp-dir cleanup race).
+```json
+{
+  "mcpServers": {
+    "weft": {
+      "command": "/opt/homebrew/bin/pnpm",
+      "args": ["--silent", "--dir", "/Users/you/Developer/projects/weft", "--filter", "@weft/mcp", "start"],
+      "env": {
+        "WEFT_API_URL": "http://127.0.0.1:4070",
+        "WEFT_API_KEY_FILE": "/Users/you/Developer/projects/weft/.data/demo-mcp-key.txt",
+        "PATH": "/opt/homebrew/bin:/usr/bin:/bin"
+      }
+    }
+  }
+}
+```
+
+The server reads the mcp key from the file, so the config holds no key, and PATH lets a desktop app with a short PATH find node. Calls in order, checked on 2026-10-18 with the official MCP SDK client over stdio, started from exactly the printed config: 3 of 3 after `pnpm demo:scenario trace-mcp` and scenario 1 (the helper resets to the base world), and once on a fresh rich world (`pnpm dev --fresh`, no reset). The ids differ between the two worlds; the table gives the reset world's, then the rich world's.
+
+| # | Tool | Arguments | Result |
+|---|---|---|---|
+| 1 | tools/list | none | 122 tools (121 read and propose tools plus agent_ask); no approve, deny, rollback, vault or settings tool |
+| 2 | `actions__list` | `{"limit":3,"before_seq":null,"run_id":null,"command":null,"response_format":null}` | the newest audit rows: notices.draft_response by the notice routine, then sim.deliver_notice by Dana |
+| 3 | `notices__list` | `{"status":"in_review","limit":null,"response_format":null}` | the DE 2088 notice: ntc_0002 (ntc_0005 on the rich world, listed after DE 428T). Use this id below |
+| 4 | `notices__get` | `{"notice_id":"ntc_0002","response_format":null}` | the extracted fields: account txa_0002, sui 0.034 to 0.015, effective 2026-01-01, and the pending proposals |
+| 5 | `tax__update_rate` | `{"tax_account_id":"txa_0002","code":"sui","rate":"0.015","effective_from":"2026-01-01","source_notice_id":"ntc_0002"}` | `pending_approval` with `existing: true` and the routine's proposal id, prp_0001 (prp_0021): the same change is already waiting, so no new proposal is filed and no new card appears |
+| 6 | `contractors__schedule_payouts` | `{"worker_ids":["wrk_0049","wrk_0050","wrk_0051"],"scheduled_for":"2026-10-30"}` | `pending_approval`, prp_0003 (prp_0023): a new Inbox card, Pay 3 contractors $19,094.00, with the untrusted content banner (every MCP call is untrusted). The amounts come from the contracts, never from the arguments |
+
+Wrong arguments are refused with a reason: rate `0.016` in step 5 gives DOMAIN_NOTICE_MISMATCH with the notice's own values, and `"source_notice_id": null` gives INVALID_INPUT, "expected string, received null".
+
+Say: "Every run is traced: what it was asked, what it recalled, each tool call, tokens and cost. Another agent can drive Weft over MCP with the same rules. It sees read and propose tools only; the rate change it asks for is the one already waiting, so nothing is filed twice; and the payout it proposes waits for a person."
+
+Fallback: the pre-recorded traces of every scenario in Phoenix project weft-demo-2026-10-18, and `WEFT_SMOKE_PORT=<free port> node_modules/.bin/tsx scripts/mcp-smoke.ts`: it seeds a scratch base world, connects from the same config, prints the tools, the rate change proposal and the null refusal, and exits 0.
 
 ## Demo orders
 
@@ -156,4 +188,3 @@ Fallback: the pre-recorded traces of every scenario in Phoenix project weft-demo
 - A @weft thread reply can end with stray punctuation where the result id is stripped.
 - The memory filter box did not match file names in this check.
 - The chart window shows 12 months but only two have paid runs.
-- Phoenix project stats show Total Cost $0; the per-trace header shows the real cost.

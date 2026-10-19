@@ -154,6 +154,8 @@ export async function main(argv: string[]): Promise<number> {
       const publicUrl = (await import("./judges/phoenix")).assertLocal(process.env[TRACE_ENV.url] ?? `http://${PHOENIX.host}:${process.env.WEFT_PHOENIX_PORT ?? PHOENIX.httpPort}`);
       const version = await ph.phoenixUp(publicUrl);
       if (!version) { console.error(`no Phoenix at ${publicUrl}; start one (pnpm phoenix:up) or drop --phoenix`); return 2; }
+      // Phoenix prices the trial spans the way cost.ts does (docs/telemetry.md, "Cost: Weft and Phoenix").
+      console.error(await (await import("../../scripts/phoenix-pricing")).syncModelPricingLine(publicUrl));
       capture = await ph.startOtlpCapture(publicUrl, Number(process.env.WEFT_EVAL_CAPTURE_PORT ?? 4922));
       opts.otlp = () => capture!.payloads;
       const combos = [...new Set(tasks.map((t) => t.split))].flatMap((split) => variants.map((variant) => ({ split, variant })))

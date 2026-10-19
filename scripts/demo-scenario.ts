@@ -108,9 +108,10 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   {
     name: "trace-mcp", title: "Phoenix trace of what the agent did, and an external MCP client", minutes: 3, start: "/app/inbox",
     steps: [
-      `Run any scenario above first, on a world started with WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT} (the start command \`pnpm demo:scenario list\` prints). Phoenix on 127.0.0.1:6206, project ${DEMO_PHOENIX_PROJECT}: open the latest agent.run.`,
-      "The tree shows admission, model (llm.responses with tokens), assemble (memory.recall) and dispatch with one span per tool call and its outcome.",
-      "MCP: give any MCP client the stdio server `WEFT_API_URL=http://127.0.0.1:4070 WEFT_API_KEY=$(cat .data/demo-mcp-key.txt) pnpm --filter @weft/mcp start`, list the tools and call tax__update_rate: it comes back pending_approval and lands in the Inbox.",
+      `Run scenario 1 up to its two Approval needed cards, on a world started with WEFT_TRACE=phoenix WEFT_PHOENIX_PROJECT=${DEMO_PHOENIX_PROJECT} (the start command \`pnpm demo:scenario list\` prints). Phoenix on 127.0.0.1:6206, project ${DEMO_PHOENIX_PROJECT}, Traces tab: open the latest agent.run.`,
+      "The tree shows admission, model (llm.responses with tokens and cost), assemble (memory.recall) and dispatch with one span per tool call and its outcome.",
+      "Cost: Spans tab, filter span_kind == 'LLM'; the Stats panel's Total Cost is the project's model spend (the default root-span filter reads $0: an agent.run root carries no tokens). The Metrics tab charts it.",
+      "MCP: `pnpm mcp:config` prints the client config; paste it into Claude Desktop or the MCP Inspector. Call notices__list (status in_review) for the DE 2088 id, notices__get for its fields, then tax__update_rate with them: pending_approval with existing true, the card the routine already filed. contractors__schedule_payouts (wrk_0049, wrk_0050, wrk_0051 on 2026-10-30) files a new card. docs/demo-scenarios.md has the exact arguments.",
     ],
     prompts: [],
   },

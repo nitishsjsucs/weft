@@ -1,6 +1,8 @@
 // MCP smoke (SPEC 9.8, owner t3-governance): seeds a scratch data dir, starts the API on 127.0.0.1:$WEFT_SMOKE_PORT
-// (default 4141, in its own process group), spawns apps/mcp over stdio with the seeded mcp key, lists the tools and
-// calls a read and a propose tool, then stops everything it started. Usage: pnpm exec tsx scripts/mcp-smoke.ts
+// (default 4141, in its own process group), spawns apps/mcp over stdio from exactly the client config
+// `pnpm mcp:config` prints (pnpm --dir <checkout> --filter @weft/mcp start, the key read from the data dir's file),
+// lists the tools and calls a read and a propose tool, then stops everything it started and waits for the API to
+// exit before it removes the scratch dir. Usage: pnpm exec tsx scripts/mcp-smoke.ts
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -8,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, StdioClientTransport } from "../apps/mcp/src/testing";
+import { configForThisCheckout } from "./mcp-config";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const port = Number(process.env.WEFT_SMOKE_PORT ?? 4141);
@@ -22,15 +25,20 @@ async function main(): Promise<void> {
   const seed = spawnSync(tsx, [join(root, "packages/seed/src/cli.ts"), "seed"], { env, encoding: "utf8" });
   if (seed.status !== 0) throw new Error(`seed failed: ${seed.stderr}`);
   const api = spawn(tsx, [join(root, "apps/api/src/main.ts")], { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-  const stop = () => { try { process.kill(-api.pid!, "SIGTERM"); } catch { /* already gone */ } };
+  const exited = new Promise<void>((ok) => api.once("exit", () => ok()));
+  // The API writes to the data dir until it exits: removing the dir first raced its shutdown and failed the smoke.
+  const stop = async () => {
+    try { process.kill(-api.pid!, "SIGTERM"); } catch { /* already gone */ }
+    await Promise.race([exited, new Promise((ok) => setTimeout(ok, 10_000))]);
+  };
   try {
     await new Promise<void>((ok, fail) => {
       const t = setTimeout(() => fail(new Error("API did not start in 20 s")), 20_000);
       api.stdout!.on("data", (b: Buffer) => { if (String(b).includes("listening")) { clearTimeout(t); ok(); } });
       api.once("exit", (code) => { clearTimeout(t); fail(new Error(`API exited with ${code}`)); });
     });
-    const key = readFileSync(join(dataDir, "demo-mcp-key.txt"), "utf8").trim();
-    const transport = new StdioClientTransport({ command: tsx, args: [join(root, "apps/mcp/src/main.ts")], env: { PATH: process.env.PATH ?? "", WEFT_API_URL: `http://127.0.0.1:${port}`, WEFT_API_KEY: key } });
+    const server = configForThisCheckout({ apiPort: port, dataDir }).mcpServers.weft;
+    const transport = new StdioClientTransport({ command: server.command, args: server.args, env: server.env });
     const client = new Client({ name: "weft-mcp-smoke", version: "0.0.0" });
     await client.connect(transport);
     const { tools } = await client.listTools();
@@ -57,12 +65,18 @@ async function main(): Promise<void> {
       const out = text(await client.callTool({ name: "tax__update_rate", arguments: args }));
       console.log(`tax__update_rate: ${JSON.stringify(out).slice(0, 200)}`);
       if (out.status !== "pending_approval") throw new Error("tax__update_rate over MCP must return a proposal");
+      // The notice routine may already have proposed the same change: then it is the same proposal (existing true).
+      console.log(out.existing ? `same change already pending as ${String(out.proposalId)}: no new card` : `new card ${String(out.proposalId)}`);
+      const nul = await client.callTool({ name: "tax__update_rate", arguments: { ...args, source_notice_id: null } });
+      const msg = (nul.content as { text: string }[])[0]!.text;
+      if (!nul.isError || !/source_notice_id: [^;"]*received null/.test(msg)) throw new Error(`a null source_notice_id must be refused naming the null: ${msg.slice(0, 240)}`);
+      console.log("tax__update_rate with source_notice_id null: refused INVALID_INPUT, received null");
     }
     await client.close();
     console.log("mcp smoke: ok");
   } finally {
-    stop();
-    rmSync(dataDir, { recursive: true, force: true });
+    await stop();
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 
