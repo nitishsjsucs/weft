@@ -48,6 +48,10 @@ export function plainAnswer(text: string): string {
   out = out.replace(new RegExp(`,?\\s+${LIST}(?=\\s*(?:[.;!?]|$))`, "gm"), "");
   // Markdown emphasis and code marks read as stray asterisks and backticks in plain text.
   out = out.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/__([^_\n]+)__/g, "$1").replace(/`([^`\n]+)`/g, "$1");
+  // A payroll run id reads as its payday: "The draft payroll pay_2026_10_30" is "The draft payroll for Oct 30".
+  const day = (mo: string, d: string) => `${MONTHS[Number(mo) - 1] ?? mo} ${Number(d)}`;
+  out = out.replace(/\b(payroll|run)\s+`?pay_(\d{4})_(\d{2})_(\d{2})`?/g, (_m, w: string, _y: string, mo: string, d: string) => `${w} for ${day(mo, d)}`)
+    .replace(/`?\bpay_(\d{4})_(\d{2})_(\d{2})\b`?/g, (_m, _y: string, mo: string, d: string) => `the ${day(mo, d)} run`);
   out = plainDates(out);
   return out
     // A pointer left with nothing to point at: "Mira Delgado. Source: ." and "Source: tor_0003, ." lose the pointer.

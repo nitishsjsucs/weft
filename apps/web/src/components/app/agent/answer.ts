@@ -41,12 +41,24 @@ function wordsOnly(text: string): string {
   return humanLine(humanDateText(text
     .replace(new RegExp(`\\s*\\(\\s*\`?${OTHER_ID}\`?(?:\\s*,\\s*\`?${OTHER_ID}\`?)*\\s*\\)`, "g"), "")
     .replace(new RegExp(`\`(${OTHER_ID}|pay_\\d{4}_\\d{2}_\\d{2}|\\d{4}-\\d{2}-\\d{2}(?:T[\\d:.]+(?:Z|[+-]\\d{2}:\\d{2})?)?|\\$?[\\d,]+(?:\\.\\d+)?%?)\``, "g"), "$1")
-    .replace(/\b(?:pay rate|rate) (?:prt_[A-Za-z0-9_]+)/g, "pay rate")
+    // A pay rate the sentence points at by its row id: "effective Oct 16, under pay rate record prt_0052" ends at the
+    // date; "recorded as pay rate prt_0052" keeps the noun.
+    .replace(/,?\s*\b(?:under|in|as|per|on|from|with)\s+(?:the\s+)?(?:new\s+)?pay rate(?:\s+(?:record|id))?\s+`?prt_[A-Za-z0-9_]+`?/g, "")
+    .replace(/\b(?:pay rate|rate)(?:\s+(?:record|id))?\s+`?prt_[A-Za-z0-9_]+`?/g, "pay rate")
     .replace(/\b(?:the )?(?:audit )?action (?:with )?(?:sequence|seq\.?)(?: number)? (?:\*\*)?(\d+)(?:\*\*)?/gi, "audit #$1")
     .replace(/\b(?:audit )?(?:sequence|seq\.?) (?:\*\*)?(\d+)(?:\*\*)?/gi, "audit #$1")
     .replace(/\baudit #(\d+)\s*\(audit #\1\)/g, "audit #$1")
     .replace(/(`?)\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b\1/g, (_m, _q: string, c: string) => CODE_WORDS[c] ?? c.toLowerCase().replaceAll("_", " "))))
     .replace(/\btor\b(?=[\s,.;])/g, "the time-off request");
+}
+
+/** Dashes as Weft's copy writes them: a day or number range reads "23 to 25", any other dash a comma. */
+function dashes(text: string): string {
+  return text.replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, "$1 to $2").replace(/\s*[\u2013\u2014]\s*/g, ", ");
+}
+/** "Ruth Okoro's (demo) vacation" keeps the name of record whole: "Ruth Okoro (demo)'s vacation". */
+function possessive(text: string): string {
+  return text.replace(/\b([A-Z][\w-]*(?: [A-Z][\w-]*){0,3})([\u2019'])s \(demo\)/g, "$1 (demo)$2s");
 }
 
 /** Leftover pointers once the ids are chips: "Source: [1]." keeps the chip; "Source: ." goes. */
@@ -87,7 +99,7 @@ const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
 /** The answer as blocks of spans; `cites` lists the cited ids in chip order (chip n is cites[n - 1]). */
 export function parseAnswer(raw: string): ParsedAnswer {
   const { text, cites } = extractCites(raw.replace(/\r\n/g, "\n"));
-  const lines = tidy(wordsOnly(text)).split("\n").map((l) => l.replace(/^\s{0,3}#{1,6}\s+/, "").trimEnd());
+  const lines = tidy(possessive(dashes(wordsOnly(text)))).split("\n").map((l) => l.replace(/^\s{0,3}#{1,6}\s+/, "").trimEnd());
   const blocks: AnswerBlock[] = [];
   for (const l of lines) {
     if (!l.trim()) { blocks.push({ kind: "p", items: [] }); continue; }

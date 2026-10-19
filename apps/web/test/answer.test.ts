@@ -27,6 +27,14 @@ describe("chat answers as copy", () => {
     expect(t).toContain("[1]");
     expect(t).toContain("[2]");
   });
+  it("a pay rate named by its row id reads without it (live take, demo check)", () => {
+    expect(flat(parseAnswer("The new annual pay rate is $139,240.00, effective October 16, under pay rate record prt_0052. The flag reflects the approved raise. [res_0231]")))
+      .toBe("The new annual pay rate is $139,240.00, effective October 16. The flag reflects the approved raise. [1]");
+  });
+  it("a day range reads with 'to', and a possessive keeps the name of record whole (live takes, demo check)", () => {
+    expect(flat(parseAnswer("The conflict is November 23\u201325 for Ruth Okoro\u2019s (demo) vacation \u2014 Grace is out. [res_0238]")))
+      .toBe("The conflict is November 23 to 25 for Ruth Okoro (demo)\u2019s vacation, Grace is out. [1]");
+  });
   it("payday in backticks and a parenthesized result read as a date and a chip", () => {
     const t = flat(parseAnswer("The payday `2026-10-30` is not approved (`res_0230`)."));
     expect(t).toBe("The payday Oct 30 is not approved [1].");

@@ -161,7 +161,8 @@ describe("plain answers for the portal and chat threads", () => {
     expect(plainAnswer("No balances yet (result `res_0008`).\n\nAsk the people team.")).toBe("No balances yet.\n\nAsk the people team.");
     // An id that is part of the sentence stays, and so do ids that are not result ids.
     expect(plainAnswer("res_0001 and res_0002 show it.")).toBe("res_0001 and res_0002 show it.");
-    expect(plainAnswer("The run pay_2026_10_30 pays on 2026-10-30... soon.")).toBe("The run pay_2026_10_30 pays on Oct 30... soon.");
+    expect(plainAnswer("The run pay_2026_10_30 pays on 2026-10-30... soon.")).toBe("The run for Oct 30 pays on Oct 30... soon.");
+    expect(plainAnswer("Submitting pay_2026_10_30 is for a person.")).toBe("Submitting the Oct 30 run is for a person.");
   });
   it("a thread reply never ends on a stripped id's punctuation, and names carry no row ids", () => {
     // Live replies in the demo check (docs/demo-scenarios.md, scenario 4 and 6).
@@ -219,7 +220,9 @@ describe("mentions", () => {
     expect(replies.length).toBe(1);
     const notices = await weft.db.select().from(runSteps).where(and(eq(runSteps.runId, r.json.runId), eq(runSteps.kind, "notice")));
     expect(notices.filter((n) => (n.resultJson ?? "").includes("UNGROUNDED"))).toEqual([]);
-    expect(replies[0]!.text).toMatch(/pays on \d{4}-\d{2}-\d{2}/);
+    // The thread reads the payday as a day, not as the stored ISO date.
+    expect(replies[0]!.text).toMatch(/pays on [A-Z][a-z]{2} \d{1,2}\b/);
+    expect(replies[0]!.text).not.toMatch(/\d{4}-\d{2}-\d{2}|pay_\d/);
     expect(replies[0]!.text).not.toMatch(/\bres_\w+/);
     expect(replies[0]!.inbound).toBe(false);
     const listed = await call("usr_dana", "GET", "/v1/agent/mentions?status=answered");
