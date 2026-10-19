@@ -310,3 +310,108 @@ test.describe("390x844, deliver notice", () => {
     await expect(page.locator("[data-tour-card]")).toHaveAttribute("data-target-found", "true");
   });
 });
+
+/** Every x-axis tick label of every chart on the page: no two intersect and none passes the svg's edges. */
+async function tickProblems(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const out: string[] = [];
+    for (const svg of document.querySelectorAll(".recharts-wrapper svg")) {
+      const sr = svg.getBoundingClientRect();
+      const all = [...svg.querySelectorAll(".recharts-cartesian-axis-tick-label text")].map((t) => ({ t: t.textContent ?? "", r: t.getBoundingClientRect() })).filter((x) => x.t);
+      const bottom = Math.max(...all.map((x) => x.r.top));
+      const ticks = all.filter((x) => Math.abs(x.r.top - bottom) < 2);
+      if (!ticks.length) out.push("no x ticks");
+      for (let i = 0; i < ticks.length; i++) {
+        const a = ticks[i]!;
+        if (a.r.right > sr.right + 0.5 || a.r.left < sr.left - 0.5) out.push(`"${a.t}" passes the chart edge`);
+        for (let j = i + 1; j < ticks.length; j++) {
+          const b = ticks[j]!;
+          if (a.r.right > b.r.left && b.r.right > a.r.left) out.push(`"${a.t}" overlaps "${b.t}"`);
+        }
+      }
+    }
+    return out;
+  });
+}
+
+/** Table scrollers (the Table's own edge-fading wrapper) whose content runs past their box, with their first header. */
+async function hiddenColumns(page: Page): Promise<string[]> {
+  return page.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-edge-fade]")]
+    .filter((el) => el.querySelector("table") && el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1)
+    .map((el) => `${(el.querySelector("th")?.textContent ?? "").trim()}: ${el.scrollWidth} in ${el.clientWidth}`));
+}
+
+// The chart answer (step 11, scenario 7): short tick labels ("Oct*" for the month to date), thinned when the panel's
+// band is narrower than a label, so none runs into its neighbour or past the chart.
+for (const [width, height] of [[1280, 800], [1366, 768], [1440, 900], [1512, 982], [390, 844]] as const) {
+  test.describe(`${width}x${height}, the chart answer's axis`, () => {
+    test.use({ viewport: { width, height } });
+    test("tick labels never overlap or clip, in the panel and on Reports", async ({ page, world }) => {
+      test.skip(!world.rich, "the chart reads the rich world's history");
+      await page.addInitScript(() => { try { localStorage.setItem("weft.agentOpen", "1"); } catch { /* blocked */ } });
+      await openStep(page, "ask-chart");
+      await readyCard(page, "ask-chart").locator("[data-tour-primary]").click();
+      await expect(page.locator('[data-tour~="agent-chart"]')).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator('[data-tour~="agent-chart"] .recharts-wrapper')).toBeVisible();
+      await page.waitForTimeout(300);
+      expect(await tickProblems(page), "panel chart ticks").toEqual([]);
+      await expect(page.getByTestId("chart-partial-note")).toContainText("Oct*");
+      await page.goto("/app/reports");
+      await expect(page.locator('[data-testid="reports-chart"] .recharts-wrapper')).toBeVisible({ timeout: 30_000 });
+      await page.waitForTimeout(300);
+      expect(await tickProblems(page), "Reports chart ticks").toEqual([]);
+    });
+  });
+}
+
+// Wide tables at the sizes the demo runs: the docked panel at 1280 and the phone. Every column shows without a
+// sideways scroll (a narrow column stacks the rows), except the permissions matrix on a phone, whose person column
+// stays pinned while it scrolls.
+for (const [width, height] of [[1280, 800], [390, 844]] as const) {
+  test.describe(`${width}x${height}, wide tables`, () => {
+    test.use({ viewport: { width, height } });
+    test("tables fit their column", async ({ page, world }) => {
+      test.skip(!world.rich, "the tables are filled on the rich world");
+      test.setTimeout(240_000);
+      await page.addInitScript(() => { try { localStorage.setItem("weft.agentOpen", "1"); localStorage.setItem("weft.tour.seen", "1"); } catch { /* blocked */ } });
+      const pages = ["/app/reports", "/app/simulators", "/app/routines", "/app/compliance", "/app/benefits", "/app/it", "/app/contractors", "/app/offboarding", ...(width > 600 ? ["/app/settings/permissions"] : [])];
+      for (const path of pages) {
+        await page.goto(path);
+        await expect(page.locator("table").first()).toBeVisible({ timeout: 30_000 });
+        await page.waitForTimeout(500);
+        expect(await hiddenColumns(page), `${path}: columns behind a sideways scroll`).toEqual([]);
+      }
+    });
+  });
+}
+
+test.describe("390x844, the new rate and the flags on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test("step 8: the ringed CA SUI row shows its tax, rate and source", async ({ page, world }) => {
+    test.skip(!world.rich, "the tour runs on the rich world");
+    await openStep(page, "rate-live");
+    const row = page.locator('[data-tour~="rate-row"][data-jurisdiction="CA"][data-code="sui"][data-current="true"]');
+    await expect(row).toBeVisible();
+    const seen = await row.evaluate((el) => {
+      const cells = [...el.querySelectorAll("td")];
+      const vw = document.documentElement.clientWidth;
+      return cells.map((c) => { const r = c.getBoundingClientRect(); return r.left >= -0.5 && r.right <= vw + 0.5; });
+    });
+    expect(seen, "every cell of the ringed row is inside the window").toEqual(seen.map(() => true));
+  });
+  test("step 10: Back and Next stay reachable with any flag's popover open", async ({ page, world }) => {
+    test.skip(!world.rich, "the flags are on the rich world's draft");
+    await openStep(page, "payroll-flags");
+    const chips = page.locator('[data-tour~="payroll-needs-review"] [data-tour~="payroll-flag"]');
+    const n = await chips.count();
+    expect(n, "flags in the Needs Review group").toBeGreaterThan(3);
+    for (let i = 0; i < n; i++) {
+      if (await page.locator("[data-radix-popper-content-wrapper]:not(:has([data-tour-card]))").count()) await page.keyboard.press("Escape");
+      await chips.nth(i).scrollIntoViewIfNeeded();
+      await chips.nth(i).evaluate((el) => (el as HTMLElement).click());
+      await page.waitForTimeout(350);
+      await expect(readyCard(page, "payroll-flags")).toBeVisible();
+      expect(await buttonsCovered(page), `flag ${i}: the card's buttons are covered`).toEqual([]);
+    }
+  });
+});

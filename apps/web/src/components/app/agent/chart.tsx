@@ -85,9 +85,9 @@ export function tickStep(labels: string[], plotWidth: number): number {
   return Math.max(even, Math.ceil(need / (plotWidth / n)));
 }
 /**
- * The table a narrow column (the agent panel) shows: the period, the first two series and their total when the series
- * add up (one unit, stacked), so every figure fits without a sideways scroll. The full table stays in the page for
- * screen readers, and the Reports page has every column.
+ * The columns a narrow column (the agent panel) shows: the first two series and their total when the series add up
+ * (one unit, stacked), so the figures fit without a sideways scroll. The other series stay in the table for screen
+ * readers (sr-only cells), and the Reports page shows every column.
  */
 export function compactColumns(spec: ChartSpec): { key: string; label: string; unit: Unit; sum?: string[] }[] {
   const cols: { key: string; label: string; unit: Unit; sum?: string[] }[] = spec.series.slice(0, 2).map((s) => ({ key: s.key, label: s.label, unit: s.unit }));
@@ -95,51 +95,33 @@ export function compactColumns(spec: ChartSpec): { key: string; label: string; u
   if (spec.series.length > 2 && spec.kind === "stacked_bar" && spec.series.every((s) => s.unit === unit)) cols.push({ key: "__total", label: "Total", unit: unit!, sum: spec.series.map((s) => s.key) });
   return cols;
 }
-function CompactTable({ spec, data, metric }: { spec: ChartSpec; data: (Row & { __x: string })[]; metric: string }) {
-  const cols = compactColumns(spec);
-  const more = spec.series.length > cols.filter((c) => !c.sum).length;
-  return (
-    <div data-testid="chart-compact-table" aria-hidden="true" className="flex flex-col gap-1.5">
-      <div className="max-h-56 overflow-auto">
-        <table className="w-full border-collapse text-1 tabular-nums">
-          <thead>
-            <tr className="text-left text-gray-10">
-              <th scope="col" className="py-1 pr-2 font-medium">{spec.x.label}</th>
-              {cols.map((c) => <th key={c.key} scope="col" className="py-1 pl-2 text-right align-bottom leading-tight font-medium">{c.label}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((r, i) => (
-              <tr key={i} className="border-t border-gray-a4 text-gray-12">
-                <th scope="row" className="py-1 pr-2 text-left font-normal whitespace-nowrap">{r.__x}</th>
-                {cols.map((c) => <td key={c.key} className="py-1 pl-2 text-right whitespace-nowrap">{formatValue(c.sum ? c.sum.reduce((a, k) => a + Number(r[k] ?? 0), 0) : r[c.key], c.unit)}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {more ? <Link href={`/app/reports?metric=${encodeURIComponent(metric)}`} className="text-1 text-gray-11 underline underline-offset-2 hover:text-gray-12">Every column is on the Reports page</Link> : null}
-    </div>
-  );
-}
 const Y_AXIS_W = 48;
 const PLOT_MARGIN = { top: 8, right: 12, bottom: 0, left: 0 };
 
-function DataTable({ spec, rows, partial = null }: { spec: ChartSpec; rows: Row[]; partial?: { key: string } | null }) {
+function DataTable({ spec, rows, ticks, partial = null }: { spec: ChartSpec; rows: Row[]; ticks: string[]; partial?: { key: string } | null }) {
+  // Every series plus their total when they add up; in a narrow column (under 27rem) only the first two and the total
+  // show, the rest stay for screen readers, and the period reads as its tick ("Oct*").
+  const total = compactColumns(spec).find((c) => c.sum);
+  const narrowHidden = (i: number) => (total && i >= 2 ? "@max-[27rem]:sr-only" : "");
   return (
     <table data-testid={W3_CHAT_TID.chartTable} className="w-full border-collapse text-1 tabular-nums">
       <caption className="sr-only">{spec.title}</caption>
       <thead>
         <tr className="text-left text-gray-10">
-          <th scope="col" className="py-1 pr-2 font-medium">{spec.x.label}</th>
-          {spec.series.map((s) => <th key={s.key} scope="col" className="py-1 pl-2 text-right font-medium">{s.label}</th>)}
+          <th scope="col" className="py-1 pr-2 align-bottom font-medium">{spec.x.label}</th>
+          {spec.series.map((s, i) => <th key={s.key} scope="col" className={`py-1 pl-2 text-right align-bottom leading-tight font-medium ${narrowHidden(i)}`}>{s.label}</th>)}
+          {total ? <th scope="col" className="py-1 pl-2 text-right align-bottom font-medium">Total</th> : null}
         </tr>
       </thead>
       <tbody>
         {rows.map((r, i) => (
           <tr key={i} className="border-t border-gray-a4 text-gray-12">
-            <th scope="row" className="py-1 pr-2 text-left font-normal">{periodLabel(spec, r, partial)}</th>
-            {spec.series.map((s) => <td key={s.key} className="py-1 pl-2 text-right">{formatValue(r[s.key], s.unit)}</td>)}
+            <th scope="row" className="py-1 pr-2 text-left font-normal whitespace-nowrap">
+              <span className={total ? "@max-[27rem]:sr-only" : ""}>{periodLabel(spec, r, partial)}</span>
+              {total ? <span aria-hidden="true" className="hidden @max-[27rem]:inline">{ticks[i]}</span> : null}
+            </th>
+            {spec.series.map((s, j) => <td key={s.key} className={`py-1 pl-2 text-right whitespace-nowrap ${narrowHidden(j)}`}>{formatValue(r[s.key], s.unit)}</td>)}
+            {total ? <td className="py-1 pl-2 text-right font-medium whitespace-nowrap">{formatValue(total.sum!.reduce((acc, k) => acc + Number(r[k] ?? 0), 0), total.unit)}</td> : null}
           </tr>
         ))}
       </tbody>
@@ -233,10 +215,10 @@ export function ReportChart({ report }: { report: ReportResult }) {
       ) : null}
       {partial ? <p data-testid="chart-partial-note" className="text-0 text-gray-10">{partialTick} counts {partial.label} to date, through {fmtDate(report.to)}.</p> : null}
       {chart && !table && zero.length > 0 ? <p className="text-0 text-gray-10">Zero in this range, so not drawn: {zero.map((s) => s.label).join(", ")}. The table lists them.</p> : null}
-      {/* The full table is always in the page for screen readers; the toggle shows it to everyone, or in a narrow
-          column (the agent panel) a compact table of the period, two series and the total. */}
-      <div className={table ? "max-h-56 overflow-auto @max-[27rem]:sr-only" : "sr-only"}><DataTable spec={spec} rows={rows} partial={partial} /></div>
-      {table && rows.length > 0 ? <div className="@min-[27rem]:hidden"><CompactTable spec={spec} data={data} metric={report.metric} /></div> : null}
+      {/* The table is always in the page for screen readers; the toggle shows it to everyone (in the agent panel, the
+          period, two series and the total; DataTable). */}
+      <div className={table ? "max-h-56 overflow-auto" : "sr-only"}><DataTable spec={spec} rows={rows} ticks={data.map((d) => d.__x)} partial={partial} /></div>
+      {table && compactColumns(spec).some((c) => c.sum) ? <Link href={`/app/reports?metric=${encodeURIComponent(report.metric)}`} className="text-1 text-gray-11 underline underline-offset-2 hover:text-gray-12 @min-[27rem]:hidden">Every column is on the Reports page</Link> : null}
     </figure>
   );
 }
