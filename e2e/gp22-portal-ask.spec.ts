@@ -55,16 +55,16 @@ test("GP22: a chat mention gets one read-only answer and an emailed receipt file
   await test.step("tagging @weft in #payroll gets one answer in the channel and changes nothing", async () => {
     const proposalsBefore = (await weft.proposals()).length;
     const chat = page.getByTestId("sim-inbound-chat");
-    await chat.getByLabel("As (principal id or email)").fill("usr_dana");
+    await chat.getByLabel("Post as").selectOption("usr_dana");
     await chat.getByTestId("sim-inbound-chat-text").fill("@weft what is the status of the draft payroll?");
     await chat.getByTestId("sim-inbound-chat-send").click();
-    await expect(page.getByText(/mention mnt_\w+ started a read-only run/)).toBeVisible();
+    await expect(page.getByText("Posted in #payroll. The agent is answering in the thread (read only).")).toBeVisible();
     const reply = await eventually(() => weft.chat("#payroll"), (ms) => ms.find((m) => m.author === "Weft agent"), "the agent's reply in #payroll");
     // The thread reads the run and its payday as days, never as the row id or the ISO date.
     expect(reply.text).toMatch(/payroll for Oct 30 pays on Oct 30/);
     expect(reply.text).not.toMatch(/pay_\d|\d{4}-\d{2}-\d{2}/);
     expect(reply.inbound).toBe(false);
-    await expect(chat.getByTestId("sim-mentions")).toContainText("answered");
+    await expect(chat.getByTestId("sim-mentions")).toContainText("Answered");
     expect((await weft.chat("#payroll")).filter((m) => m.author === "Weft agent").length).toBe(1);
     // Read only: the mention itself is recorded by the system, and the run behind the answer wrote and proposed nothing.
     const [mention] = await weft.get<{ status: string; runId: string | null }[]>("/v1/agent/mentions");
@@ -78,14 +78,14 @@ test("GP22: a chat mention gets one read-only answer and an emailed receipt file
     const mail = page.getByTestId("sim-inbound-email");
     await mail.getByTestId("sim-inbound-email-from").fill(worker!.workEmail);
     await mail.getByTestId("sim-inbound-email-send").click();
-    await expect(page.getByText(/Filed exp_\w+ from the email \(exi_\w+\)/)).toBeVisible();
+    await expect(page.getByText(/Filed an expense claim from the email/)).toBeVisible();
     const intake = await weft.get<{ status: string; expenseId: string | null; fromAddress: string }[]>("/v1/expense-intake");
     const created = intake.filter((x) => x.status === "created");
     expect(created.length).toBe(1);
     expect(created[0]!.fromAddress.toLowerCase()).toBe(worker!.workEmail.toLowerCase());
     const expense = await weft.get<{ source?: string; status: string; amountCents: number }>(`/v1/expenses/${created[0]!.expenseId}`);
     expect(expense).toMatchObject({ amountCents: 6420 });
-    await expect(mail.getByTestId("sim-intake")).toContainText("created");
+    await expect(mail.getByTestId("sim-intake")).toContainText("Created");
   });
 
   await test.step("the same receipt from an unknown sender bounces and files nothing", async () => {
@@ -93,7 +93,7 @@ test("GP22: a chat mention gets one read-only answer and an emailed receipt file
     await mail.getByTestId("sim-inbound-email-from").fill("someone@elsewhere.example");
     await mail.getByTestId("sim-inbound-email-send").click();
     await expect(page.getByText(/^Email exi_\w+: bounced unknown sender\.$/)).toBeVisible();
-    await expect(mail.getByTestId("sim-intake")).toContainText("bounced unknown sender");
+    await expect(mail.getByTestId("sim-intake")).toContainText("Bounced unknown sender");
     const intake = await weft.get<{ status: string }[]>("/v1/expense-intake");
     expect(intake.filter((x) => x.status === "created").length).toBe(1);
     expect(intake.filter((x) => x.status === "bounced_unknown_sender").length).toBe(1);

@@ -6,7 +6,8 @@ import { Badge, Card, ShimmerText, TBody, TD, TH, THead, TR, Table } from "@weft
 import { cn } from "@weft/ui";
 import { TID, type ProposalStatus, type RunStepRow } from "@weft/contracts";
 import { watchRun, type RunWatch } from "@/lib/api/sse";
-import { fmtDateTime, statusLabel, usd } from "../format";
+import { fmtDate, fmtDateTime, statusLabel, usd } from "../format";
+import { useRoutineNames } from "../routine-names";
 import { auditLabel, codeWords, humanLine, routineSummaryText, sentenceCase } from "../copy";
 import { answerPlain } from "../agent/answer";
 import { taintText } from "../agent/untrusted";
@@ -71,6 +72,7 @@ export function RunView({ id }: { id: string }) {
   const [w, setW] = useState<RunWatch>({ run: null, steps: [], trace: null, mode: "idle" });
   useEffect(() => watchRun(id, setW), [id]);
   const run = w.run;
+  const routineNames = useRoutineNames(run?.routineRunId ? [run.routineRunId] : []);
   if (!run && w.missing) {
     return (
       <div className="p-8 text-2 text-gray-10" data-testid="run-not-found">
@@ -87,7 +89,7 @@ export function RunView({ id }: { id: string }) {
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
-        title={<span className="font-mono text-5">{run.id}</span>}
+        title={<span data-testid="run-title">{runTitle(run, run.routineRunId ? routineNames[run.routineRunId] : undefined)}</span>}
         subtitle={run.summary ? (run.routineRunId ? routineSummaryText(run.summary) : answerPlain(run.summary)) : undefined}
         meta={
           <>
@@ -95,9 +97,11 @@ export function RunView({ id }: { id: string }) {
             {run.terminalReason && !/^(waiting_approval|done)$/i.test(run.terminalReason) && run.terminalReason.toLowerCase() !== run.status ? <span title={run.terminalReason} className="text-1 text-gray-10">{sentenceCase(codeWords(run.terminalReason))}</span> : null}
             <Badge data-testid="run-provider" data-live={live ? "true" : "false"} tone="outline" size="md">{providerLabel(run)}</Badge>
             <Badge tone={run.attended ? "blue" : "gray"} size="md">{run.attended ? "Attended" : "Unattended"}</Badge>
-            <span className="text-1 text-gray-11" title={run.trigger}>Trigger: {triggerWords(run.trigger)}</span>
+            <span className="text-1 text-gray-11">Trigger: {triggerWords(run.trigger)}</span>
             <span className="text-1 text-gray-11">Started {fmtDateTime(run.createdAt)}</span>
-            <span data-testid="run-feed-mode" className="text-1 text-gray-10">({w.mode === "sse" ? "streaming" : w.mode === "polling" ? "polling every 1 s" : "loaded"})</span>
+            {/* How the page follows the run matters only while it runs; a finished run is just loaded. */}
+            {working || run.status === "waiting" ? <span data-testid="run-feed-mode" className="text-1 text-gray-10">({w.mode === "sse" ? "streaming" : w.mode === "polling" ? "polling every 1 s" : "loaded"})</span> : null}
+            <span data-testid="run-id" className="font-mono text-0 text-gray-9 select-all">{run.id}</span>
           </>
         }
       />
@@ -109,7 +113,8 @@ export function RunView({ id }: { id: string }) {
       <Card className="@container mb-6">
         <div className="grid grid-cols-2 divide-[var(--app-border)] @min-[720px]:grid-cols-6 [&>*]:border-[var(--app-border)] [&>*:nth-child(n+3)]:border-t @min-[720px]:[&>*:nth-child(n+3)]:border-t-0 @min-[720px]:[&>*+*]:border-l">
           <Metric label="Model steps" value={`${run.stepsUsed} of ${run.budget.steps}`} />
-          <Metric label="Input tokens" value={int(run.tokens.input)} hint={`${int(run.tokens.cached)} cached`} />
+          {/* A scripted run calls no model: its token counts are the scripted provider's estimates, and say so. */}
+          <Metric label="Input tokens" value={int(run.tokens.input)} hint={run.provider === "scripted" ? "estimated, no model ran" : `${int(run.tokens.cached)} cached`} />
           <Metric label="Output tokens" value={int(run.tokens.output)} hint={run.tokens.reasoning ? `${int(run.tokens.reasoning)} reasoning` : undefined} />
           <Metric label="Cache-hit ratio" value={pct(run.tokens.cached, run.tokens.input)} />
           <Metric label="Cost" value={usd(run.costUsdMicros)} hint={`cap $${run.budget.usd.toFixed(2)}`} />
@@ -183,6 +188,13 @@ export function RunView({ id }: { id: string }) {
       ) : null}
     </div>
   );
+}
+
+/** The page title: what the run was, by its routine or its trigger, and the day it ran (the id sits in the meta line). */
+export function runTitle(run: { trigger: string; createdAt: string; routineRunId: string | null }, routineName?: string): string {
+  const when = fmtDate(run.createdAt, { month: "short", day: "numeric", year: "numeric" });
+  const what = routineName ?? (run.routineRunId ? "Routine run" : ({ chat: "Chat answer", mention: "Chat mention answer", portal: "Portal answer", mcp: "MCP client run", draft: "Routine draft", task: "Task run" } as Record<string, string>)[run.trigger.split(":")[0] ?? ""] ?? "Agent run");
+  return `${what}, ${when}`;
 }
 
 /** A run's trigger key as words ("routine:rtr_x" is "Routine"); the key itself is the title. */
