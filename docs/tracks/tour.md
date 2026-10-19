@@ -240,3 +240,25 @@ Three of round 3's set-asides are fixed in the engine, not by scoring:
 Shared pieces: `packages/ui/src/controls.css` draws every native select and date field with the app's chevron and
 calendar marks, and `useEdgeFade` fades the edge a wide table or tab strip runs past. The rich crawl fails on a
 control with `appearance: auto` or a table scroller that ends past the main pane.
+
+## Demo-perfect round 2, layout and UI (dp/r2-layout-and-ui, 2026-10-19)
+
+- Chart axis (step 11, scenario 7, Reports): ticks are short (`tickLabel`: the month name within a year, "Oct*" for
+  the month to date, which the footnote explains) and `tickStep` labels every tick the measured band can hold, counted
+  back from the last period so the partial month always shows. The tooltip and the table keep "Oct 2026 (to date)".
+  In the agent panel the Table view shows the period, two series and the total; the other series stay for screen
+  readers and a link opens the metric on Reports (`?metric=`).
+- Step 8 on a phone: the rates table stacks each rate (tax and rate on one line, then wage base, effective and source),
+  so nothing sits behind a sideways scroll. `STACK` (`apps/web/src/components/app/stack.ts`) is the shared pattern:
+  below 40rem of its card's width a table's rows become labelled lines, one table either way. Simulators, contractors,
+  payouts, benefit plans, devices, offboarding cases and agency registrations use it.
+- Step 10 on a phone: the flag popover's collision padding stops at the tour sheet's edge (`tourSheetPadding` in
+  `flag-chip.tsx`, read when the popover opens), so it opens downward or scrolls inside the free area and Back and Next
+  stay reachable for every flag.
+- Step 12: the person tab strip fits 631 px (tighter tab padding); on a phone every tab strip wraps to a second row.
+- Step 20: the permissions matrix fits the docked column at 1280 (tight cells, a wrapping person column, overrides
+  under the role); on a phone the person column stays pinned while the matrix scrolls.
+- Reports: the table puts the total first and stacks each period as a card below 54rem of content width; runs and
+  people counts sit in a second, small table.
+- `tour-layout.spec.ts` checks the chart ticks at all five sizes, the wide tables at 1280 docked and 390, the ringed
+  rate row's cells at 390, and Back and Next for every flag at 390.
