@@ -28,7 +28,7 @@ export function SimInboundControls() {
   const agent = useAgent();
   const mentions = useGet("/v1/agent/mentions", { refreshMs: 4_000 }) as unknown as { data: Mention[] | undefined };
   const intake = useGet("/v1/expense-intake", { refreshMs: 4_000 }) as unknown as { data: Intake[] | undefined };
-  const [chat, setChat] = useState({ channel: "#payroll" as (typeof CHANNELS)[number], from: "usr_theo", text: "@weft what is the status of the draft payroll?" });
+  const [chat, setChat] = useState({ channel: "#payroll" as (typeof CHANNELS)[number], from: "Theo Marsh (demo)", text: "@weft what is the status of the draft payroll?" });
   const [mail, setMail] = useState({ from: "", subject: "Client lunch", body: "Lunch with the pilot customer to plan the rollout.", fixture: "lunch_client" as string });
   const [note, setNote] = useState<string | null>(null);
 
@@ -58,7 +58,7 @@ export function SimInboundControls() {
           <form onSubmit={onChat} className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Channel"><select className={field} value={chat.channel} onChange={(e) => setChat({ ...chat, channel: e.target.value as (typeof CHANNELS)[number] })}>{CHANNELS.map((c) => <option key={c}>{c}</option>)}</select></Field>
-              <Field label="As (principal id or email)"><input className={field} value={chat.from} onChange={(e) => setChat({ ...chat, from: e.target.value })} /></Field>
+              <Field label="As (name or work email)"><input className={field} value={chat.from} onChange={(e) => setChat({ ...chat, from: e.target.value })} /></Field>
             </div>
             <Field label="Message (tag @weft to ask the agent)"><input data-testid="sim-inbound-chat-text" className={field} maxLength={4000} value={chat.text} onChange={(e) => setChat({ ...chat, text: e.target.value })} /></Field>
             <div><Button type="submit" size="sm" disabled={post.pending || !chat.text.trim()} data-testid="sim-inbound-chat-send">{post.pending ? "Posting..." : "Post message"}</Button></div>

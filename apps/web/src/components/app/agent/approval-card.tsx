@@ -14,6 +14,7 @@ import { cn } from "@weft/ui";
 import { errorText, useMutation } from "@/lib/api/hooks";
 import { decideProposal } from "../inbox/decide";
 import { RiskChip } from "../risk";
+import { ChangeValue, idleMoneyRow, splitChange } from "../card-rows";
 import { cardField, enumWords, humanLine } from "../copy";
 import { taintText } from "./untrusted";
 
@@ -43,12 +44,15 @@ export function ApprovalCard({ card, status, taintedBy = null, known = true, com
     if (r) { setResult(r); onDecided?.(r); }
   }
   const refusal = result && !result.ok ? result : null;
+  // A row that changes nothing a person decides on ("not scheduled" to "not paid") is left out.
+  const fields = card.fields.map((f) => cardField(f.label, f.value)).filter((c) => { const p = splitChange(c.value); return !(p && idleMoneyRow(p[0], p[1].replace(/^(?:to|→) /, ""))); });
 
   return (
     <div data-testid={W3_CHAT_TID.card(card.proposalId)} data-status={live} className={cn("flex flex-col gap-2 rounded-xl border border-gray-a4 bg-card p-3 shadow-[var(--shadow-xs)]", compact && "p-2.5")}>
       <div className="flex flex-wrap items-center gap-1.5">
         <span data-tour="proposal-risk" className="inline-flex"><RiskChip risk={card.risk as RiskClass} /></span>
-        {card.moneyCents !== null ? <span className="text-1 font-medium tabular-nums text-gray-12">{formatCents(card.moneyCents)}</span> : null}
+        {/* A return or a decline moves nothing: no "$0.00" chip beside the amount the headline names. */}
+        {card.moneyCents ? <span className="text-1 font-medium tabular-nums text-gray-12">{formatCents(card.moneyCents)}</span> : null}
         <span className="flex-1" />
         <span className="text-0 text-gray-10">{pending ? "Needs approval" : "Decided"}</span>
       </div>
@@ -64,14 +68,14 @@ export function ApprovalCard({ card, status, taintedBy = null, known = true, com
         {card.routineName ? <div className="flex gap-1.5"><dt className="text-gray-10">Routine</dt><dd className="min-w-0 break-words">{card.routineName}</dd></div> : null}
         {card.approverName ? <div className="flex gap-1.5"><dt className="text-gray-10">{pending ? "Asked by" : "Decided by"}</dt><dd className="min-w-0 break-words">{card.approverName}</dd></div> : null}
       </dl>
-      {card.fields.length > 0 ? (
+      {fields.length > 0 ? (
         <dl className="flex flex-col divide-y divide-gray-a3 rounded-lg bg-gray-2 px-2 py-1 text-1">
-          {card.fields.map((f, i) => { const c = cardField(f.label, f.value); return (
+          {fields.map((c, i) => (
             <div key={i} className="flex items-start justify-between gap-3 py-1">
               <dt className="min-w-0 break-words text-gray-11">{c.label}</dt>
-              <dd className="min-w-0 text-right font-medium tabular-nums break-words text-gray-12">{c.value}</dd>
+              <dd className="min-w-0 text-right font-medium tabular-nums break-words text-gray-12"><ChangeValue value={c.value} /></dd>
             </div>
-          ); })}
+          ))}
         </dl>
       ) : null}
       {outcome ? <p className={cn("text-1 font-medium", outcome.tone)}>{outcome.text}</p> : null}

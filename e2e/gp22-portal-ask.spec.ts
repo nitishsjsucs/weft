@@ -55,7 +55,7 @@ test("GP22: a chat mention gets one read-only answer and an emailed receipt file
   await test.step("tagging @weft in #payroll gets one answer in the channel and changes nothing", async () => {
     const proposalsBefore = (await weft.proposals()).length;
     const chat = page.getByTestId("sim-inbound-chat");
-    await chat.getByLabel("As (principal id or email)").fill("usr_dana");
+    await chat.getByLabel("As (name or work email)").fill("usr_dana");
     await chat.getByTestId("sim-inbound-chat-text").fill("@weft what is the status of the draft payroll?");
     await chat.getByTestId("sim-inbound-chat-send").click();
     await expect(page.getByText(/mention mnt_\w+ started a read-only run/)).toBeVisible();

@@ -8,6 +8,7 @@ import { client, errorText, invalidate, useGet, useMutation, useSimClock } from 
 import { ACCOUNT_TYPE, AGENCY, cents, fmtDateTime, nextCronSlot, relative, statusLabel } from "../format";
 import { answerText, humanLine } from "../copy";
 import { PageHeader } from "../page";
+import { STACK } from "../stack";
 import { useAgent } from "../agent-context";
 import { ApprovalCard } from "../agent/approval-card";
 import { HeldBack } from "../agent/held-back";
@@ -99,12 +100,13 @@ function SimTable({ kind, rows, empty, testid }: { kind: keyof typeof SIM_COLS; 
   if (!rows?.length) return <div data-testid={testid} className="px-4 py-4 text-[13px] text-gray-10">{empty}</div>;
   const cols = SIM_COLS[kind]!;
   return (
-    <div data-testid={testid} className="overflow-x-auto">
-      <Table className="text-[13px]">
-        <THead><TR>{cols.map((c) => <TH key={c.key}>{c.label}</TH>)}</TR></THead>
+    // In a column narrower than the table (the docked panel at 1280, a phone) each row stacks (STACK).
+    <div data-testid={testid} className={STACK.box}>
+      <Table className={cn("text-[13px]", STACK.table)}>
+        <THead className={STACK.head}><TR>{cols.map((c) => <TH key={c.key}>{c.label}</TH>)}</TR></THead>
         <TBody>{rows.map((r, i) => (
-          <TR key={i} title={[r.id, r.worker_id, r.related_notice_id, r.request_json].filter(Boolean).map(String).join(" · ")}>
-            {cols.map((c) => <TD key={c.key} className={cn("h-9 text-1 whitespace-nowrap", MONO.has(c.key) && "font-mono")}>{(c.fmt ?? str)(r[c.key], r) || "None"}</TD>)}
+          <TR key={i} className={STACK.row} title={[r.id, r.worker_id, r.related_notice_id, r.request_json].filter(Boolean).map(String).join(" · ")}>
+            {cols.map((c, j) => <TD key={c.key} data-label={c.label} className={cn("h-9 text-1 whitespace-nowrap", MONO.has(c.key) && "font-mono", j === 0 ? cn(STACK.lead, "@max-[40rem]:font-medium") : cn(STACK.cell, "@max-[40rem]:before:font-sans"))}>{(c.fmt ?? str)(r[c.key], r) || "None"}</TD>)}
           </TR>
         ))}</TBody>
       </Table>
@@ -214,7 +216,8 @@ export function SimulatorsView() {
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title={<span className="flex items-center gap-2">Simulators <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Demo controls. Agencies, the ACH bank, the identity provider, devices and chat are simulators in this repo; nothing here reaches a real system." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
-      <div className="grid grid-cols-1 gap-6 laptop:grid-cols-2 [&>section]:min-w-0">
+      {/* Two columns only when each half still holds a five-column table (about 1,100 px of content); else one. */}
+      <div className="@container"><div className="grid grid-cols-1 gap-6 @min-[68rem]:grid-cols-2 [&>section]:min-w-0">
         <section>
           <CardHeading icon={<CalendarClock />}>Sim clock</CardHeading>
           <Card className="p-4">
@@ -241,7 +244,7 @@ export function SimulatorsView() {
           {last ? <p className="mt-2 text-1 text-green-11">{last}</p> : null}
           {delivered ? <DeliveredHeldBack noticeId={delivered.noticeId} runId={delivered.runId} /> : null}
         </section>
-        <section className="laptop:col-span-2">
+        <section className="@min-[68rem]:col-span-2">
           <CardHeading icon={<Zap />}>Fault injection</CardHeading>
           <Card className="grid gap-px overflow-hidden bg-[var(--app-border)] tablet:grid-cols-2 laptop:grid-cols-3">
             {FAULT_TARGETS.map((t) => {
@@ -283,16 +286,16 @@ export function SimulatorsView() {
           <CardHeading icon={<Mail />}>Agency mail</CardHeading>
           <Card className="overflow-hidden"><SimTable kind="agencyMail" testid="sim-agency-mail" rows={s.agencyMail} empty="No mail from agencies yet." /></Card>
         </section>
-        <section className="min-w-0 laptop:col-span-2">
+        <section className="min-w-0 @min-[68rem]:col-span-2">
           <CardHeading icon={<FlaskConical />}>Device orders</CardHeading>
           <Card className="overflow-hidden"><SimTable kind="deviceOrders" testid="sim-device-orders" rows={s.deviceOrders} empty="No device orders." /></Card>
         </section>
         <SimInboundControls />
-        <section className="min-w-0 laptop:col-span-2">
+        <section className="min-w-0 @min-[68rem]:col-span-2">
           <CardHeading icon={<MessageSquare />}>Chat (simulated)</CardHeading>
           <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">{CHANNELS.map((c) => <ChatFeed key={c} channel={c} />)}</div>
         </section>
-      </div>
+      </div></div>
     </div>
   );
 }

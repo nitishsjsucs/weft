@@ -96,7 +96,11 @@ function OfferCard({ o }: { o: Offer }) {
       </div>
       <Badge tone={o.status === "accepted" ? "green" : o.status === "sent" ? "blue" : "gray"} size="md" data-status={o.status}>{o.status.charAt(0).toUpperCase() + o.status.slice(1)}</Badge>
       {o.status === "sent" && can("people", "edit") ? (
-        <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={() => void onAccept()} title="Demo action: records the candidate's acceptance">Mark accepted</Button>
+        <>
+          {/* The visible label is the accessible name (WCAG 2.5.3); the demo note is its description. */}
+          <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={() => void onAccept()} aria-describedby={`offer-accept-note-${o.id}`}>Mark accepted</Button>
+          <span id={`offer-accept-note-${o.id}`} className="sr-only">Demo action: records the candidate's acceptance</span>
+        </>
       ) : null}
     </Card>
   );

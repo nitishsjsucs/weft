@@ -14,6 +14,7 @@ import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
 import { decideProposal, type Decision } from "./decide";
 import { taintText } from "../agent/untrusted";
+import { idleMoneyRow } from "../card-rows";
 
 const SEVERITY_WORD: Record<Severity, string> = { block: "Blocks", review: "Review", info: "Note" };
 const APPROVE_REASONS = [{ code: "looks_right", label: "Looks right" }, { code: "verified_source", label: "Verified against the source" }] as const;
@@ -77,6 +78,8 @@ export function ProposalCard({ p }: { p: Proposal }) {
   const expired = new Date(p.expiresAt).getTime() <= new Date(now).getTime();
   const who = proposerOf(p);
   const diff = splitChecks(p.diff);
+  // A row that changes nothing a person decides on ("not scheduled" to "not paid" on a return) is left out.
+  const diffRows = diff.rows.filter((r) => !idleMoneyRow(String(r.before ?? ""), String(r.after ?? ""))).map((r) => ({ ...r, label: humanLine(r.label), before: valueText(r.before), after: valueText(r.after) }));
 
   return (
     <Card data-testid={tid.inboxCard(p.id)} data-tour="inbox-card" data-proposal-id={p.id} data-has-diff={p.diff.length ? "true" : "false"} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
@@ -103,7 +106,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
         <h3 className="text-3 font-medium leading-6 text-balance break-words">{humanLine(p.headline)}</h3>
         {/* On a phone the four facts read as one line, so the diff, the evidence and Approve fit above the tour's sheet. */}
         <p className="text-1 text-gray-11 mobile:hidden">
-          For {principalName(p.onBehalfOf)} · {p.moneyCents === null ? "moves no money" : <span className="tabular">moves {cents(p.moneyCents)}</span>} · {p.reversible ? "reversible" : <span className="text-red-11">not reversible</span>}
+          For {principalName(p.onBehalfOf)} · {!p.moneyCents ? "moves no money" : <span className="tabular">moves {cents(p.moneyCents)}</span>} · {p.reversible ? "reversible" : <span className="text-red-11">not reversible</span>}
         </p>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 max-mobile:hidden tablet:grid-cols-4">
           <Field label="On behalf of">{principalName(p.onBehalfOf)}</Field>
@@ -111,7 +114,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           <Field label="Reversible">{p.reversible ? "Yes, from the audit log" : <span className="text-red-11">No</span>}</Field>
           <Field label="Proposed by"><ProposedBy who={who} /></Field>
         </dl>
-        {diff.rows.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={diff.rows.map((r) => ({ ...r, label: humanLine(r.label), before: valueText(r.before), after: valueText(r.after) }))} /> : null}
+        {diffRows.length ? <DiffTable data-testid={TID.proposalDiff} data-tour="proposal-diff" rows={diffRows} /> : null}
         {diff.checks.length ? (
           <ul data-testid="proposal-checks" className="flex flex-col gap-1.5">
             {diff.checks.map((c, i) => (
