@@ -1,6 +1,6 @@
 // The whole guided tour on the scripted provider, as a person would take it: start from Home, read each card for
 // its planned seconds, click the real controls on the click steps, and finish within 180 s (owner: tour).
-import { card, expect, noHorizontalScroll, pressPrimary, readyStep, targetInfo, test, TOUR_STEPS } from "./tour-fixtures";
+import { card, expect, noHorizontalScroll, pressPrimary, readyCard, readyStep, targetInfo, test, TOUR_STEPS } from "./tour-fixtures";
 import { TOUR_CHART_PROMPT } from "../../apps/web/src/components/tour/steps";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";

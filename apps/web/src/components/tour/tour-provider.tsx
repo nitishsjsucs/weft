@@ -598,8 +598,10 @@ export function TourProvider({ children }: { children: ReactNode }) {
       if (described) { if (described.prev) described.el.setAttribute("aria-describedby", described.prev); else described.el.removeAttribute("aria-describedby"); }
       if (step.dock === "side") {
         // Close the popover or drawer the step opened, so it never lingers into the next step (or over the agent sheet).
-        document.querySelectorAll<HTMLElement>('[data-tour~="payroll-flag"][aria-expanded="true"]').forEach((el) => activate(el));
+        // A trigger still open after the outside press is toggled on the next task: clicking it inside React's commit
+        // phase would make Radix flush synchronously.
         closeAppLayers();
+        window.setTimeout(() => document.querySelectorAll<HTMLElement>('[data-tour~="payroll-flag"][aria-expanded="true"]').forEach((el) => activate(el)), 0);
       }
       resetDocScroll();
       if (step.nav) { const b = getBridge(); if (b && !b.laptop()) b.closeNav(); }

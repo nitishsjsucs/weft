@@ -39,7 +39,7 @@ test("screen readers: the card is a named dialog with a progressbar and named bu
 test.describe("phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test("the card is a sheet inside 16 px gutters, agent steps dock at the top, the nav drawer opens", async ({ page, world }) => {
+  test("the card is a sheet inside 16 px gutters, agent steps dock at the top, the run and the proposal keep their heads visible", async ({ page, world }) => {
     void world;
     await startTour(page);
     const check = async (stepId: string, top?: boolean) => {
@@ -59,13 +59,23 @@ test.describe("phone", () => {
     await (await check("env-pill")).locator("[data-tour-primary]").click();
     await (await check("agent-panel", true)).locator("[data-tour-primary]").click();
     await (await check("deliver-notice", true)).locator("[data-tour-primary]").click();
-    // agent-run auto-advances as soon as the run waits, so the next check is the Inbox.
-    await (await check("inbox-proposal")).locator("[data-tour-primary]").click({ timeout: 30_000 });
+    // The run step docks at the bottom on a phone (the tool lines it explains sit at the top of the panel) and waits
+    // for Next once the run is waiting.
+    const run = await check("agent-run");
+    await expect(run).toHaveAttribute("data-sheet", "bottom");
+    await expect(run.locator("[data-tour-primary]")).toBeEnabled({ timeout: 25_000 });
+    await run.locator("[data-tour-primary]").click();
+    const inbox = await check("inbox-proposal");
+    await expect(inbox).toHaveAttribute("data-sheet", "bottom");
+    await inbox.locator("[data-tour-primary]").click({ timeout: 30_000 });
     await check("approve");
     await page.goto("/app/payroll?tour=ask-chart");
-    await (await check("ask-chart", true)).locator("[data-tour-primary]").click();
-    await expect(readyCard(page, "products-nav")).toBeVisible({ timeout: 20_000 });
-    await check("products-nav");
-    await expect(page.locator('[data-tour~="nav-group"][data-group="Products"]')).toBeVisible();
+    const ask = await check("ask-chart", true);
+    await ask.locator("[data-tour-primary]").click();
+    // The chart stays up until Next.
+    await expect(ask.locator('[data-tour-status="done"], [data-tour-note]').first()).toBeVisible({ timeout: 20_000 });
+    await ask.locator("[data-tour-primary]").click();
+    await check("person");
+    await expect(page.locator('[data-tour~="person-tabs"]')).toBeVisible();
   });
 });
