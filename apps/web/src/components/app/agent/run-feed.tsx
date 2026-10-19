@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Check, CircleAlert, CircleSlash, Clock, ExternalLink, ShieldAlert } from "lucide-react";
+import { Check, CircleAlert, CircleSlash, Clock, ExternalLink, ShieldAlert, ShieldCheck } from "lucide-react";
 import { ShimmerText } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { TID, W3_CHAT_TID, type ApprovalCardW3, type Proposal, type ProposalStatus } from "@weft/contracts";
@@ -11,6 +11,8 @@ import { isChipStep, ranToolsLine, reportOf, stepState, stepSummary, toolLabel, 
 import { StepReport } from "./chart";
 import { ApprovalCard } from "./approval-card";
 import { AnswerView } from "./answer-view";
+import { routineIdOf } from "./follow";
+import { taintText } from "./untrusted";
 import { humanLine } from "../copy";
 
 /** One run in the agent panel: tool trace chips, a shimmer status while it works, then the answer. */
@@ -41,7 +43,7 @@ export function RunFeed({ runId, label, latest = true, background = false }: { r
     <div className="flex flex-col gap-1.5" data-tour="agent-run" data-run-id={runId} data-status={status ?? "starting"} data-stream-mode={w.mode}>
       {label ? <div className="text-1 text-gray-10">{label}{background ? <span className="text-gray-9"> (started on its own)</span> : null}</div> : null}
       {w.run?.tainted ? (
-        <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" />This run read untrusted content: {w.run.taintedBy ?? "unknown source"}</div>
+        <div className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" />This run read untrusted content: {taintText(w.run.taintedBy)}. It can only propose.</div>
       ) : null}
       <ul className="flex flex-col gap-1" data-tour="agent-tool-lines">
         {chips.map((s) => {
@@ -54,6 +56,11 @@ export function RunFeed({ runId, label, latest = true, background = false }: { r
           );
         })}
       </ul>
+      {/* An agency notice's text is untrusted; a run that stayed untainted never read it, which is worth saying when
+          the notice carried an injected line (scenario 4), and true for every notice run. */}
+      {w.run && !working && !w.run.tainted && routineIdOf(w.run) === "rt_agency_notice" ? (
+        <div data-testid="agent-notice-untrusted" className="flex items-start gap-1.5 text-[13px] leading-5 text-gray-11"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-green-11" />Worked from the notice&apos;s parsed fields; its text is untrusted and was never shown to the agent.</div>
+      ) : null}
       {reports.map((r) => <StepReport key={r.stepN} runId={runId} item={r} />)}
       {cards.map((c) => <ApprovalCard key={c.proposalId} card={c} status={proposalOf(c.proposalId)?.status} taintedBy={proposalOf(c.proposalId)?.taintedBy ?? null} onDecided={(r) => { if (r.ok) setDecided((d) => ({ ...d, [c.proposalId]: r.proposal.status })); invalidate(); }} />)}
       {ran ? <div data-testid={W3_CHAT_TID.ranTools} className="text-1 text-gray-10">{ran}</div> : null}

@@ -9,6 +9,7 @@ import { fmtDateTime, nextCronSlot, relative } from "../format";
 import { PageHeader } from "../page";
 import { useAgent } from "../agent-context";
 import { ApprovalCard } from "../agent/approval-card";
+import { HeldBack } from "../agent/held-back";
 import { SimInboundControls } from "./w4-inbound";   // wave 4 (w4-parity-agent): inbound chat mentions and emailed receipts
 
 /** A posted approval card with its live status (wave 3): the card JSON was built by the executor from the stored preview. */
@@ -95,12 +96,22 @@ async function findNewRun(before: Set<string>, hinted: string | undefined, tries
   return null;
 }
 
+/** The delivered notice's held-back lines, and whether the run it started read them (its taint, once it ends). */
+function DeliveredHeldBack({ noticeId, runId }: { noticeId: string; runId: string | null }) {
+  const n = useGet("/v1/notices/:id", { params: { id: noticeId } });
+  const run = useGet("/v1/agent/runs/:id", { params: { id: runId ?? "" }, enabled: !!runId, refreshMs: 2_000 });
+  const r = run.data as { status?: string; tainted?: boolean } | undefined;
+  const ended = !!r?.status && r.status !== "queued" && r.status !== "running";
+  return <div className="mt-2"><HeldBack text={(n.data as { bodyText?: string | null } | undefined)?.bodyText} runRead={r?.tainted ? true : ended ? false : null} /></div>;
+}
+
 export function SimulatorsView() {
   const agent = useAgent();
   const clock = useSimClock();
   const state = useGet("/v1/sim/state", { refreshMs: 4_000 });
   const s = (state.data ?? {}) as SimState;
   const [last, setLast] = useState<string | null>(null);
+  const [delivered, setDelivered] = useState<{ noticeId: string; runId: string | null } | null>(null);
   const advance = useMutation((body: Record<string, string>) => client.post("/v1/sim/clock/advance", { body }));
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const deliver = useMutation(async (scenario: string) => {
@@ -109,7 +120,10 @@ export function SimulatorsView() {
     const o = (await client.post("/v1/sim/notices/deliver", { body: { scenario } })) as ToolOutcome;
     setLast(o.ok && o.status === "done" ? o.summary : !o.ok ? `${o.refusal.code}: ${o.refusal.message}` : null);
     const hinted = o.ok && o.status === "done" ? (o.data as { agentRunId?: string } | null)?.agentRunId : undefined;
+    const noticeId = o.ok && o.status === "done" ? (o.data as { notice_id?: string } | null)?.notice_id ?? null : null;
+    setDelivered(noticeId ? { noticeId, runId: null } : null);
     const runId = o.ok ? await findNewRun(before, hinted, ROUTED.has(scenario) ? 12 : 3) : null;
+    if (noticeId && runId) setDelivered({ noticeId, runId });
     if (!runId && o.ok && o.status === "done") setLast(`${o.summary}. No routine started a run for this notice, so it waits on the Notices tab of Compliance.`);
     if (runId) agent.watch(runId, SCENARIOS[scenario as keyof typeof SCENARIOS]?.label.replace("Deliver ", "Agency notice: ") ?? scenario);
     return o;
@@ -165,6 +179,7 @@ export function SimulatorsView() {
             ))}
           </Card>
           {last ? <p className="mt-2 text-1 text-green-11">{last}</p> : null}
+          {delivered ? <DeliveredHeldBack noticeId={delivered.noticeId} runId={delivered.runId} /> : null}
         </section>
         <section className="laptop:col-span-2">
           <CardHeading icon={<Zap />}>Fault injection</CardHeading>

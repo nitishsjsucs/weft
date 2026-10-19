@@ -11,6 +11,7 @@ import { refHref } from "../refs";
 import { auditLabel, noticeName } from "../copy";
 import { CalendarPanel, FilingsPanel, HandoffsPanel } from "./w4-calendar";
 import { NoticeUpload, TrainingPanel } from "./w4-upload-training";
+import { HeldBack } from "../agent/held-back";
 
 const STATUS_TONE: Record<TaxAccount["status"], "green" | "amber" | "gray" | "red"> = { active: "green", awaiting_state: "amber", needs_info: "red", not_registered: "gray" };
 const NOTICE_TONE: Record<Notice["status"], "gray" | "blue" | "amber" | "green" | "red"> = { new: "blue", in_review: "blue", proposed: "amber", resolved: "green", escalated: "red" };
@@ -51,6 +52,7 @@ function NoticeDetail({ id, onClose }: { id: string | null; onClose: () => void 
         <div className="flex flex-col gap-5" data-testid="notice-detail">
           <div className="flex flex-wrap items-center gap-2"><Badge tone={NOTICE_TONE[d.status]} size="md">{human(d.status)}</Badge>{d.responseConfirmation ? <span className="text-1 text-gray-11">Confirmation <code className="font-mono">{d.responseConfirmation}</code></span> : null}</div>
           {escalationOf(d) ? <Escalation e={escalationOf(d)!} /> : null}
+          <HeldBack text={d.bodyText} />
           <section>
             <h3 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Original text ({d.fileName})</h3>
             <pre data-testid="notice-body" className="max-h-80 overflow-auto rounded-lg border border-[var(--app-border)] bg-gray-2 p-3 font-mono text-0 leading-4 break-words whitespace-pre-wrap">{d.bodyText ?? "(no text)"}</pre>

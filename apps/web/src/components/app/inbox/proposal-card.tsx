@@ -12,6 +12,7 @@ import { principalName, refHref } from "../refs";
 import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
 import { decideProposal, type Decision } from "./decide";
+import { taintText } from "../agent/untrusted";
 
 export const DENY_REASONS = [
   { code: "incorrect", label: "Incorrect or not grounded" },
@@ -73,7 +74,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
       {p.taintedBy ? (
         <div data-testid={TID.inboxTaintedBanner} role="alert" className="flex items-start gap-2 border-b border-amber-9/30 bg-amber-3 px-4 py-2 text-[13px] text-amber-11">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 break-words">This run read untrusted content: {p.taintedBy}</span>
+          <span className="min-w-0 break-words">This run read untrusted content: {taintText(p.taintedBy)}</span>
         </div>
       ) : null}
       <div className="flex flex-col gap-3 px-4 py-4">
