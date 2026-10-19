@@ -1,5 +1,42 @@
 # Review log
 
+## Tour and rich data review fixes (2026-10-18)
+
+Two lenses reviewed main at 3f35fd6: product design (two autoplay passes at 1440x900 and 390x844 plus a crawl of
+21 routes and their detail pages) and correctness and safety. Every finding was checked against the code before it
+was fixed. Fixed on branch fix/tour-review, merged into main:
+
+| Lens | Finding | Fix |
+|---|---|---|
+| Design (blocking) | the chart step sent a second, cut-off prompt ("Show p") that became the panel's newest answer | the ask step clicks Send once and retries only when the prompt is still in the composer; the autoplay spec asserts one chat run |
+| Design (blocking) | the notice run and the chart left after about 1.5 s, even with autoplay off | a finished result waits for Next; autoplay moves on after the step's seconds (at least 4 s, 5 s for the chart, within the budget) |
+| Safety | `?tour=approve&autoplay=1` approved any pending rate change as Dana | autoplay clicks Approve only for the proposal this session's own notice run made (`autoApproveAllowed`, unit tested); anything else waits for a person |
+| Design | Nov and Dec 2025 showed contractor payouts only | contractor payouts start in January with the imported pay history |
+| Design | imported paychecks had no benefits, so Reports showed $0 employer benefits for January to August | each imported paycheck lists its active enrollments; run totals carry the employer share; the profile test asserts every month with runs has benefits |
+| Design, correctness | the payroll flags popover had no explanation, showed `bank account id null` and stayed open into the next step | the Oct 30 review writes grounded explanations on the flagged paychecks (planted() compares every other column); null evidence is hidden; the popover closes on step exit |
+| Design | the routine favorites had never run | monthly exec report, weekly cost by state and the new-hire ready check have run history; the crawl checks their detail pages |
+| Design | coverage stopped at a sidebar list of names; cards paced up to 7 words a second; the finish was developer setup | a person page step and a Permissions step replace the nav highlight, the calendar folds into the Compliance stop, every card is at most about 4 words a second (unit tested), the finish is a takeaway. Still 21 steps, 161 s planned |
+| Design | rings on targets taller than the viewport; the phone card covered the lines it explains | rings on the first offer, the portal progress card and the first integration card; agent-run and inbox dock at the bottom on phones; the rate's Source cell scrolls into view |
+| Design | the document stayed scrolled by about 24 px; the portal hop cleared the agent thread | the document scroll resets on each step; the thread is kept in sessionStorage while a tour runs |
+| Design | Benefits reconciliation opened on an empty month | an unreconciled month shows the month before it (September now has three findings) |
+| Correctness | history mileage at 70 cents; hand-written checks, including a rule code the engine does not have | mileage from `mileageCents` at the date's rate; checks from `evaluateExpense`; meals have attendees and lodging is within the night rate; profile test asserts both |
+| Correctness | the Oct 26 approved requests had no use rows or decision; history used one row per request; the offset was dated Oct 15 | per-day use rows and a time_off.decide action; the offset is dated on the first use |
+| Correctness | the memory note said Q3 and a reply proposal that does not exist | renamed `workstreams/2026-agency-notices.md`, matches the February NY notice |
+| Correctness | the planted NY rate proposal was R3 with made-up args and not reversible | R2, the command's own input fields, reversible through tax.revert_rate |
+| Design (minor) | offboarding list title-cased the kind and was unsorted; "Money: None" above a money table | sentence case, open cases first then last day; the field reads "Moves money: No" |
+
+## Set aside from this review, with the reason
+
+| Lens | Finding | Why not now |
+|---|---|---|
+| Design | enable the favorite routines in the rich world | Left disabled on purpose: an enabled routine on a running dev clock would fire live model calls nobody asked for. They now show real past runs |
+| Safety | honour `autoplay=1` only when /v1/health reports test mode; preflight every deep link | `autoApproveAllowed` already stops the approval itself, which is the harm; deep links stay a docs and screenshot tool |
+| Design | audit table: Command nowrap, shorter Time, gray "Not reversible", routine names for run ids | Layout work across breakpoints; next design round (listed since wave 2) |
+| Design | raw ISO dates inside check messages and action summaries | The strings are written by the engine and stored; rendering them needs a display field from the API. Next design round |
+| Design | native select and date inputs on Reports, Expenses and Benefits; Reports table overflow with the panel docked; 401(k) row columns | Component work across four screens; next design round |
+| Design | /portal with no persona lists the demo personas | Needs a server-side profile flag the web app does not read yet; Hiring already links each persona |
+| Design | the scripted chart answer quotes the first two months | With payouts starting in January those are full months now |
+
 ## Review fix groups merged: manager privacy, notices and proposals, expense and time off, eval and demo tooling (2026-10-18)
 
 Four branches merged into main from c8b5928 (after feat/rich-seed), in this order: rf/manager-privacy (already on c8b5928), rf/notices-and-proposals, rf/expense-and-timeoff and rf/eval-and-demo-tooling. Two conflicts, both docs: this log (both new sections kept) and `docs/evals/model-comparison.md` (the time-off row takes the renamed balance fields, the two notices rows are kept and now say the fix is merged). `evals/suite/worlds/index.ts` took both new mutators (`employerRateInEffect`, `secondVacationRequest`) without a conflict, and `docs/evals.md` now lists `employerRateInEffect`. The dev split has 69 tasks (PE-11, NT-10, EX-12 and TO-12 are new); 151 tasks are valid and 69 of 69 dev digests reproduce. The manager pay warning in `docs/demo-scenarios.md` is removed, since the manager-privacy fix landed and its tests pass.
