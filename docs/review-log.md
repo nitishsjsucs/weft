@@ -510,3 +510,7 @@ Set aside: one headcount definition across `/v1/stats`, the weekly digest preche
 active, onboarding and offboarding as employees, 51 in the rich world, while Home shows 47 active and 3 onboarding).
 The digest's text and its grounding fact live in packages/routines and the comms grounding (agent-runtime), and the
 digest is in eval worlds, so it needs its own change with a deliberate digest re-pin.
+
+Also set aside: the Weekly people digest description's "9:00 PT" (no AM). The prebuilt routine rows are in every eval
+world, so the one-word fix moved all 110 world digests (checked: 0 of 110 reproduced with it, 110 of 110 without).
+It belongs with the next deliberate eval re-pin, or as display copy in the gallery.

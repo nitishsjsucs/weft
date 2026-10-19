@@ -68,7 +68,7 @@ export const RT_NEW_HIRE: RoutineDef = {
 
 export const RT_PEOPLE_DIGEST: RoutineDef = {
   id: "rt_people_digest", name: "Weekly people digest",
-  description: "Every Monday at 9:00 AM PT, post headcount, hires, departures and pending approvals to #people-ops.",
+  description: "Every Monday at 9:00 PT, post headcount, hires, departures and pending approvals to #people-ops.",
   ownerPrincipalId: OWNER, enabled: true, autonomy: "approve", trigger: { type: "cron", cron: "0 9 * * 1", tz: TZ }, filter: null,
   instructions: "Post the digest text from the derived arguments to #people-ops with comms.send_message. Counts come from the precheck. Then write a one-line final message.",
   tools: ["comms.send_message", "people.search"],

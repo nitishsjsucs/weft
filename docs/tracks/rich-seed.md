@@ -132,3 +132,5 @@ Run it on other ports with `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_
   stays as recorded (the memory timeline, the pay rate and the Oct 30 flag evidence all cite #1); the page lists by
   time (`GET /v1/actions?order=time`), shows each row's #, has Show older, and an `#audit-N` link pages back until
   that row has loaded.
+- Not done here: the Weekly people digest description still reads "9:00 PT"; the routine rows are in every eval world,
+  so that word moves all 110 eval digests and waits for a deliberate re-pin.
