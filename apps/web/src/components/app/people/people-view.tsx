@@ -9,6 +9,7 @@ import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate, initials } from "../format";
 import { PageHeader } from "../page";
 import { DocumentLibrary } from "../documents/document-library";
+import { auditLabel } from "../copy";
 import { PersonActions } from "../offboarding/person-actions";
 import { BalancesTab, RequestsTab } from "../time-off/time-off-view";
 
@@ -148,7 +149,7 @@ function PayTab({ d }: { d: Detail }) {
                   <TD className="h-10 capitalize">{r.kind}</TD>
                   <TD numeric className="h-10">{r.amount.display}{r.kind === "salary" ? " a year" : r.kind === "hourly" ? " an hour" : ""}</TD>
                   <TD className="h-10 whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? ` to ${fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}` : " onward"}</TD>
-                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>action #{r.createdActionSeq}</Link> : <span className="text-gray-10">seed</span>}</TD>
+                  <TD className="h-10">{r.createdActionSeq ? <Link className="text-blue-11 hover:underline" href={`/app/audit#audit-${r.createdActionSeq}`}>{auditLabel(r.createdActionSeq)}</Link> : <span className="text-gray-10">seed</span>}</TD>
                 </TR>
               ))}
             </TBody>

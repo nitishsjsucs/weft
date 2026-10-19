@@ -73,7 +73,8 @@ function value(k: string, v: unknown, year: number): string {
   if (k === "minutes_in_period" && typeof v === "number") return `${(v / 60).toFixed(2)} h`;
   if (k === "overtime_threshold_hours") return `${str(v)} h`;
   if (Array.isArray(v)) return v.map((x) => (typeof x === "string" ? humanCopy(CODE_WORDS[x] ?? x, year) : JSON.stringify(x))).join(", ");
-  if (typeof v === "string") return /^\d{4}-\d{2}-\d{2}$/.test(v) ? fmtDate(v, { month: "short", day: "numeric", year: "numeric" }) : humanCopy(v, year);
+  // A day in the period's year reads without one, as in the headline ("started Oct 19"); any other day keeps it.
+  if (typeof v === "string") return /^\d{4}-\d{2}-\d{2}$/.test(v) ? fmtDate(v, Number(v.slice(0, 4)) === year ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" }) : humanCopy(v, year);
   return typeof v === "number" ? String(v) : JSON.stringify(v);
 }
 

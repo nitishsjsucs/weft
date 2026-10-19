@@ -134,6 +134,8 @@ export const TOUR_STEPS: readonly TourStep[] = [
     target: '[data-tour~="rate-row"][data-jurisdiction="CA"][data-code="sui"][data-current="true"][data-source^="notice:"]',
     fallbacks: ['[data-tour~="rate-row"][data-jurisdiction="CA"][data-code="sui"][data-current="true"]'],
     secondary: ['[data-tour~="compliance-tab"][data-tab="calendar"]'],
+    // The other states' rows of the same table: the card goes below the table, not over the NY and TX rates.
+    avoid: ['[data-tour~="rate-row"]'],
     reveal: '[data-tour~="rate-source"]',
     title: "The new rate is live",
     body: "California SUI now reads 1.5% from January 1, sourced to the notice. The Calendar tab tracks every deposit and filing due.",

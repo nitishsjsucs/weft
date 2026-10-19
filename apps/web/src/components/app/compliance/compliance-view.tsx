@@ -8,6 +8,7 @@ import { errorText, useGet } from "@/lib/api/hooks";
 import { AGENCY, fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { refHref } from "../refs";
+import { auditLabel, noticeName } from "../copy";
 import { CalendarPanel, FilingsPanel, HandoffsPanel } from "./w4-calendar";
 import { NoticeUpload, TrainingPanel } from "./w4-upload-training";
 
@@ -89,7 +90,7 @@ export function ComplianceView() {
   const rates = useGet("/v1/tax/rates", { refreshMs: 5_000 });
   const notices = useGet("/v1/notices", { query: { limit: 100 }, refreshMs: 5_000 });
   // A rate sourced to a notice names the notice by its form ("DE 2088 notice"), not by its row id.
-  const noticeLabel = (id: string): string => { const n = notices.data?.data.find((x) => x.id === id); return n?.formCode ? `${n.formCode} notice` : "Agency notice"; };
+  const noticeLabel = (id: string): string => noticeName(notices.data?.data.find((x) => x.id === id)?.formCode);
   const [open, setOpen] = useState<string | null>(null);
   const [tab, setTab] = useState("registrations");
   useEffect(() => {
@@ -150,7 +151,7 @@ export function ComplianceView() {
                       <TD numeric>{ratePct(r.rate)}</TD>
                       <TD numeric>{r.wageBase.display}</TD>
                       <TD className="whitespace-nowrap">{fmtDate(r.effectiveFrom, { month: "short", day: "numeric", year: "numeric" })}{r.effectiveTo ? ` to ${fmtDate(r.effectiveTo, { month: "short", day: "numeric", year: "numeric" })}` : " onward"}</TD>
-                      <TD className={cn("text-1", !href && "font-mono")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">audit #{r.createdActionSeq}</Link> : null}</TD>
+                      <TD className={cn("text-1", !href && "font-mono")} data-tour="rate-source">{href ? <a href={href} title={r.source} onClick={(e) => { e.preventDefault(); setTab("notices"); setOpen(r.source.slice(7)); }} className="text-blue-11 hover:underline">{noticeLabel(r.source.slice(7))}</a> : r.source}{r.createdActionSeq !== null ? <Link href="/app/audit" className="ml-2 text-gray-10 hover:underline">{auditLabel(r.createdActionSeq)}</Link> : null}</TD>
                     </TR>
                   );
                 })}

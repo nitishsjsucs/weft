@@ -3,7 +3,7 @@
 // no row ids or enum values.
 import { describe, expect, it } from "vitest";
 import { humanDates } from "../src/components/app/format";
-import { enumWords, humanDateLists, humanDateText, humanLine } from "../src/components/app/copy";
+import { auditLabel, enumWords, humanDateLists, humanDateText, humanLine, noticeName } from "../src/components/app/copy";
 
 describe("humanDates before a colon", () => {
   it("formats a date followed by a colon and keeps the year on the other end of the range", () => {
@@ -50,5 +50,17 @@ describe("enumWords", () => {
     expect(enumWords("in_review to resolved")).toBe("in review to resolved");
     expect(enumWords("3.4% to 1.5%")).toBe("3.4% to 1.5%");
     expect(enumWords("Ada_Lovelace@x.example")).toBe("Ada_Lovelace@x.example");
+  });
+});
+
+describe("notice and audit labels", () => {
+  it("names a notice by its form, without doubling a form code that is already a phrase", () => {
+    expect(noticeName("DE 2088")).toBe("DE 2088 notice");
+    expect(noticeName("UI rate notice")).toBe("UI rate notice");
+    expect(noticeName("Rate Notice")).toBe("Rate Notice");
+    expect(noticeName(null)).toBe("Agency notice");
+  });
+  it("one label for an audit row everywhere", () => {
+    expect(auditLabel(229)).toBe("audit #229");
   });
 });

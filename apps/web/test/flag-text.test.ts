@@ -68,11 +68,11 @@ describe("flag popover copy", () => {
       { label: "Previous gross", value: "$4,916.67" },
       { label: "Gross", value: "$5,801.67" },
       { label: "Change", value: "+18.0%" },
-      { label: "Effective", value: "Oct 16, 2026" },
+      { label: "Effective", value: "Oct 16" },
       { label: "New pay rate", value: "$139,240.00" },
     ]);
     expect(flagEvidence(mira[2]!)).toEqual([]);
-    expect(flagEvidence(mira[0]!).map((r) => `${r.label}: ${plain(r.value)}`)).toEqual(["Previous run: Paid Oct 15", "Start date: Oct 19, 2026", "W-4 on file: Yes"]);
+    expect(flagEvidence(mira[0]!).map((r) => `${r.label}: ${plain(r.value)}`)).toEqual(["Previous run: Paid Oct 15", "Start date: Oct 19", "W-4 on file: Yes"]);
     for (const f of [...mira, lena]) for (const r of flagEvidence(f)) expect(`${r.label} ${r.value}`).not.toMatch(RAW);
   });
 });

@@ -77,3 +77,16 @@ export function humanLine(text: string): string {
 export function enumWords(value: string): string {
   return value.replace(/(^|\s)([a-z]+(?:_[a-z]+)+)(?=\s|$)/g, (_m, p: string, w: string) => `${p}${w.replaceAll("_", " ")}`);
 }
+
+/**
+ * A notice named by its form: "DE 2088" reads "DE 2088 notice". A form code that is already a phrase ending in
+ * "notice" (the NY "UI rate notice") stays as it is, so the word is never doubled.
+ */
+export function noticeName(formCode: string | null | undefined): string {
+  const f = (formCode ?? "").trim();
+  if (!f) return "Agency notice";
+  return /\bnotice$/i.test(f) ? f : `${f} notice`;
+}
+
+/** The one label for a row of the audit log, wherever a page links to it. */
+export const auditLabel = (seq: number): string => `audit #${seq}`;

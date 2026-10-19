@@ -7,7 +7,7 @@ import { cn } from "@weft/ui";
 import { TID, tid, type DecisionResult, type Proposal } from "@weft/contracts";
 import { errorText, useMutation, useSimClock } from "@/lib/api/hooks";
 import { cents, fmtDateTime, humanTimes, relative } from "../format";
-import { enumWords, humanLine } from "../copy";
+import { auditLabel, enumWords, humanLine } from "../copy";
 import { principalName, refHref } from "../refs";
 import { noteLabel, proposerOf, type Proposer } from "./proposer";
 import { RiskChip } from "../risk";
@@ -133,7 +133,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             {p.decidedBy ? <>Decided by {principalName(p.decidedBy)}{p.decidedAt ? ` on ${fmtDateTime(p.decidedAt)}` : ""}</> : null}
             {p.decisionCode ? <> · reason <code className="font-mono">{p.decisionCode}</code></> : null}
             {p.decisionNote ? <> · {p.decisionNote}</> : null}
-            {p.executedActionSeq !== null ? <> · <Link href="/app/audit" className="text-blue-11 hover:underline">action #{p.executedActionSeq}</Link></> : null}
+            {p.executedActionSeq !== null ? <> · <Link href="/app/audit" className="text-blue-11 hover:underline">{auditLabel(p.executedActionSeq)}</Link></> : null}
           </div>
         ) : null}
       </div>

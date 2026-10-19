@@ -6,6 +6,7 @@ import { Badge, Card, Tabs, TabsContent, TabsList, TabsTrigger } from "@weft/ui/
 import { W2_ONBOARDING_TID as T, type WorkerDocument } from "@weft/contracts";
 import { client, errorText, useGet } from "@/lib/api/hooks";
 import { fmtDate, fmtDateTime } from "../format";
+import { auditLabel } from "../copy";
 
 const TABS = [["signed", "Signed"], ["sent", "Sent"], ["pending", "Pending"]] as const;
 const tabOf = (d: WorkerDocument): "signed" | "sent" | "pending" => (d.status === "voided" ? (d.sentAt ? "sent" : "pending") : d.status === "signed" ? "signed" : d.status === "sent" ? "sent" : "pending");
@@ -49,7 +50,7 @@ export function DocumentLibrary({ workerId }: { workerId: string }) {
       {open ? (
         <div className="mt-4 rounded-lg border border-[var(--app-border)] p-3">
           <div className="mb-2 flex items-center gap-2"><span className="flex-1 text-2 font-medium">{open.title}</span><button type="button" className="text-1 text-gray-10 hover:underline" onClick={() => setOpen(null)}>Close</button></div>
-          {open.signature ? <p className="mb-2 text-1 text-gray-11">Signed by {open.signature.signerName} as "{open.signature.typedName}" at {fmtDateTime(open.signature.signedAt)}, sha256 <code className="font-mono">{open.signature.documentSha256.slice(0, 16)}</code>, action #{open.signature.actionSeq ?? "-"}</p> : null}
+          {open.signature ? <p className="mb-2 text-1 text-gray-11">Signed by {open.signature.signerName} as "{open.signature.typedName}" at {fmtDateTime(open.signature.signedAt)}, sha256 <code className="font-mono">{open.signature.documentSha256.slice(0, 16)}</code>, {open.signature.actionSeq != null ? auditLabel(open.signature.actionSeq) : "no audit row"}</p> : null}
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-1 text-gray-11">{open.bodyText}</pre>
         </div>
       ) : null}

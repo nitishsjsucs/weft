@@ -20,7 +20,16 @@ function usePortalPersonas(): { id: string; name: string }[] {
   const rows = (offers.data?.data ?? []) as unknown as W2OnboardingOfferDetail[];
   return rows
     .filter((o) => o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted"))
-    .map((o) => ({ id: o.personaPrincipalId!, name: `${o.candidateFirst} ${o.candidateLast}` }));
+    .map((o) => ({ id: o.personaPrincipalId!, name: demoName(`${o.candidateFirst} ${o.candidateLast}`) }));
+}
+
+/**
+ * A new hire's name as every other list shows it (the people list, hiring, the permissions matrix): the offer holds
+ * the candidate's bare name, and every demo person reads "(demo)" after it.
+ */
+export function demoName(name: string): string {
+  const n = name.trim();
+  return /\(demo\)$/.test(n) ? n : `${n} (demo)`;
 }
 
 /** The 20 px amber initials avatar: amber marks a demo affordance, as the mock-data banner does. */

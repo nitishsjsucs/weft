@@ -8,7 +8,7 @@ import { Badge, Card } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { getPrincipal, rawFetch, usePrincipal } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
-import { fmtDateTime } from "../format";
+import { fmtDate, fmtDateTime } from "../format";
 
 interface Frontmatter { id: string; type: string; aliases: string[]; links: string[]; sources: string[]; updated: string; taintedBy: string | null }
 interface Links { outgoing: { target: string; path: string; resolved: boolean }[]; backlinks: string[] }
@@ -164,7 +164,7 @@ export function MemoryView() {
                   <FileText className="size-4 text-gray-10" aria-hidden />
                   <code className="font-mono text-1">{f.path}</code>
                   <Badge tone="outline">{f.frontmatter.type}</Badge>
-                  {f.frontmatter.updated ? <Badge tone="gray">updated {f.frontmatter.updated}</Badge> : null}
+                  {f.frontmatter.updated ? <Badge tone="gray" title={f.frontmatter.updated}>updated {/^\d{4}-\d{2}-\d{2}$/.test(f.frontmatter.updated) ? fmtDate(f.frontmatter.updated) : f.frontmatter.updated}</Badge> : null}
                   {f.frontmatter.taintedBy ? <Badge tone="amber" data-testid="memory-tainted">untrusted: {f.frontmatter.taintedBy}</Badge> : null}
                 </div>
                 <div className="text-2 leading-relaxed">{content.map((l, i) => <Line key={i} text={l} onOpen={open} resolved={(p) => known.has(p)} />)}</div>
