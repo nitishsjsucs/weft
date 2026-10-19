@@ -64,12 +64,22 @@ Rounds 1 and 2, 2026-10-18. Branch `feat/tour` (worktree `weft-worktrees/tour`).
 
 ## Measured
 
-See `docs/tour.md` for the table. Round 2 numbers are on the rich world, scripted provider.
+See `docs/tour.md`. On the rich world, scripted: the whole tour read at its planned pace took 137 s and autoplay
+141 s, under the 180 s budget.
 
-## Left for the integrator
+## Merge state
 
-- `feat/tour` contains `feat/rich-seed` up to 389f157. Merge order does not matter; if rich-seed moves on, its later
-  commits merge on top. The two files both tracks touched in round 2 are `packages/seed/src/rich/index.ts` (one added
-  memory thread in `MEMORY_DOCS`) and `apps/web/src/components/portal/w4-people.tsx` (the `useMemo` fix).
+- Round 2 merged `feat/rich-seed` (389f157) and then main at c8b5928, which already contains rich-seed round 2. The
+  only conflict was Home's lucide import (the tour's Compass and rich-seed's UserRoundCheck). `feat/tour` now merges
+  into main with no conflict. It is not merged into main and not pushed.
+- Two files outside the tour that round 2 changed: `packages/seed/src/rich/index.ts` (one memory thread in
+  `MEMORY_DOCS`) and `apps/web/src/components/portal/w4-people.tsx` (the `useMemo` fix).
 - `packages/contracts/src/ext/tour.ts` (`SimResetBody`, `HealthSeedProfile`) can be folded into the frozen contracts
   (`.scratch/contract-requests/tour.md`).
+
+## Live
+
+Round 2 ran one opt-in live autoplay pass on the rich world (gpt-5.6-luna, `WEFT_LIVE_USD_CAP=0.05`, tracing off): 150 s,
+$0.0037, the notice run in 9.0 s and the chart step in 5.5 s, both inside their soft timeouts, so no fallback copy
+showed. With round 1's pass (base world, 142 s, $0.0038) that is two of two passes inside the soft timeouts, $0.0075
+of the $0.40 cap (`weft-notes/tour-spend.json`). A third pass was not run.
