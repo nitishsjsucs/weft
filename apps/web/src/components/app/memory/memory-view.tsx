@@ -6,9 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, FileText, GitCommitHorizontal, Link2, Search } from "lucide-react";
 import { Badge, Card } from "@weft/ui/components";
 import { cn } from "@weft/ui";
-import { getPrincipal, rawFetch, usePrincipal } from "@/lib/api/hooks";
+import { getPrincipal, rawFetch, useGet, usePrincipal } from "@/lib/api/hooks";
 import { PageHeader } from "../page";
 import { fmtDate, fmtDateTime } from "../format";
+import { humanDateText } from "../copy";
 
 interface Frontmatter { id: string; type: string; aliases: string[]; links: string[]; sources: string[]; updated: string; taintedBy: string | null }
 interface Links { outgoing: { target: string; path: string; resolved: boolean }[]; backlinks: string[] }
@@ -37,13 +38,33 @@ function useJson<T>(url: string | null): { data: T | null; error: string | null;
   return state;
 }
 
+/**
+ * A fact's provenance as words: "(2026-10-26, src: seed)" reads "(as of Oct 26, from setup)". Other plain dates in
+ * the line read as on every other screen ("2024-03-04" is "Mar 4, 2024"); the stored Markdown never changes.
+ */
+export function memoryText(text: string): string {
+  return humanDateText(
+    text
+      .replace(/\((\d{4}-\d{2}-\d{2}), src: seed\)/g, (_m, d: string) => `(as of ${d}, from setup)`)
+      .replace(/\((\d{4}-\d{2}-\d{2}), src: ([^)]+)\)/g, (_m, d: string, src: string) => `(as of ${d}, from ${src.replace(/_/g, " ")})`)
+      .replace(/^(- (?:Status|Type|Pay kind|Filing status) )([a-z]+(?:_[a-z]+)*)\b/, (_m, k: string, v: string) => `${k}${v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}`),
+    2026,
+  );
+}
+
+/** Plain text with `code` spans set in mono. */
+function Inline({ text }: { text: string }) {
+  const bits = memoryText(text).split(/(`[^`\n]+`)/g);
+  return <>{bits.map((b, i) => (b.length > 2 && b.startsWith("`") && b.endsWith("`") ? <code key={i} className="rounded bg-gray-3 px-1 py-px font-mono text-[0.92em]">{b.slice(1, -1)}</code> : b))}</>;
+}
+
 /** One body line with [[target|label]] rendered as buttons that open the target file. */
 function Line({ text, onOpen, resolved }: { text: string; onOpen: (path: string) => void; resolved: (path: string) => boolean }) {
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(LINK)) {
     const at = m.index ?? 0;
-    if (at > last) parts.push(text.slice(last, at));
+    if (at > last) parts.push(<Inline key={`t${last}`} text={text.slice(last, at)} />);
     const path = `${m[1]!.trim()}.md`;
     const ok = resolved(path);
     parts.push(
@@ -55,21 +76,27 @@ function Line({ text, onOpen, resolved }: { text: string; onOpen: (path: string)
     );
     last = at + m[0].length;
   }
-  if (last < text.length) parts.push(text.slice(last));
   if (text.startsWith("# ")) return <h2 className="mb-2 mt-1 text-4 font-semibold">{text.slice(2)}</h2>;
   if (text.startsWith("## ")) return <h3 className="mb-1 mt-4 text-2 font-semibold text-gray-12">{text.slice(3)}</h3>;
   if (text.trim() === "") return <div className="h-2" aria-hidden />;
   if (text.startsWith("- ")) {
-    if (typeof parts[0] === "string") parts[0] = parts[0].slice(2);
-    return <div className="relative whitespace-pre-wrap break-words pl-4 before:absolute before:left-1 before:top-[0.6em] before:size-1 before:rounded-full before:bg-gray-9">{parts}</div>;
+    // The bullet marker goes before the text is split, so a line that opens with a link or a code span keeps it.
+    const rest: React.ReactNode[] = [];
+    let at0 = 2;
+    for (const m of text.matchAll(LINK)) { const at = m.index ?? 0; if (at > at0) rest.push(<Inline key={`r${at0}`} text={text.slice(at0, at)} />); rest.push(parts.find((p) => (p as { key?: string }).key === String(at))); at0 = at + m[0].length; }
+    if (at0 < text.length) rest.push(<Inline key={`r${at0}`} text={text.slice(at0)} />);
+    return <div className="relative whitespace-pre-wrap break-words pl-4 before:absolute before:left-1 before:top-[0.6em] before:size-1 before:rounded-full before:bg-gray-9">{rest}</div>;
   }
+  if (last < text.length) parts.push(<Inline key={`t${last}`} text={text.slice(last)} />);
   return <div className="whitespace-pre-wrap break-words">{parts}</div>;
 }
 
-function Tree({ paths, current, onOpen }: { paths: string[]; current: string | null; onOpen: (p: string) => void }) {
+function Tree({ paths, current, onOpen, titles }: { paths: string[]; current: string | null; onOpen: (p: string) => void; titles: Record<string, string> }) {
   const [filter, setFilter] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({ knowledge: true, entities: false, timeline: false, workstreams: true, comms: false });
-  const shown = paths.filter((p) => !filter || p.toLowerCase().includes(filter.toLowerCase()));
+  // The filter matches a file's path and its title (a person's dossier is named by id; "Lena" finds it by name).
+  const q = filter.trim().toLowerCase();
+  const shown = paths.filter((p) => !q || p.toLowerCase().includes(q) || (titles[p] ?? "").toLowerCase().includes(q));
   return (
     <Card className="p-3" data-testid="memory-tree">
       <label className="mb-3 flex items-center gap-2 rounded-md bg-gray-2 px-2 py-1.5 text-1">
@@ -78,6 +105,7 @@ function Tree({ paths, current, onOpen }: { paths: string[]; current: string | n
       </label>
       {FOLDERS.map((f) => {
         const files = shown.filter((p) => p.startsWith(`${f}/`));
+        if (q && files.length === 0) return null;
         const expanded = (open[f] ?? false) || (filter !== "" && files.length > 0) || (current?.startsWith(`${f}/`) ?? false);
         return (
           <div key={f} className="mb-1">
@@ -90,8 +118,8 @@ function Tree({ paths, current, onOpen }: { paths: string[]; current: string | n
                 {files.map((p) => (
                   <li key={p}>
                     <button type="button" data-testid="memory-tree-file" data-tour="memory-tree-file" data-path={p} onClick={() => onOpen(p)}
-                      className={cn("w-full truncate rounded px-1 py-0.5 text-left font-mono text-[12px] hover:bg-gray-3", current === p && "bg-blue-3 text-blue-11")} title={p}>
-                      {p.slice(f.length + 1)}
+                      className={cn("w-full truncate rounded px-1 py-0.5 text-left font-mono text-[12px] hover:bg-gray-3", current === p && "bg-blue-3 text-blue-11")} title={titles[p] ? `${titles[p]}: ${p}` : p}>
+                      {p.slice(f.length + 1)}{titles[p] ? <span className="ml-1.5 font-sans text-gray-10">{titles[p]}</span> : null}
                     </button>
                   </li>
                 ))}
@@ -144,6 +172,9 @@ export function MemoryView() {
   const open = (p: string) => { setCurrent(p); try { window.history.replaceState(null, "", `#${encodeURIComponent(p)}`); } catch { /* ignore */ } };
   const file = useJson<MemoryFile>(current ? `/v1/memory/file?path=${encodeURIComponent(current)}` : null);
   const known = useMemo(() => new Set(tree.data ?? []), [tree.data]);
+  // People's dossiers are files named by id: their names, for the tree and its filter.
+  const workers = useGet("/v1/workers", { query: { limit: 100 } });
+  const titles = useMemo(() => Object.fromEntries((workers.data?.data ?? []).map((w) => [`entities/people/${w.id}.md`, w.displayName])), [workers.data]);
   const f = file.data;
   const body = f ? f.body.split("\n") : [];
   const backlinkAt = body.indexOf("## Backlinks");
@@ -153,7 +184,7 @@ export function MemoryView() {
       <PageHeader title="Memory" subtitle="The company memory the agent reads: Markdown in a git repo, facts in entities and knowledge, events in the timeline. Read-only here; the executor is the only writer." />
       {tree.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{tree.error}</div> : null}
       <div className="grid gap-4 laptop:grid-cols-[300px_minmax(0,1fr)]">
-        <Tree paths={tree.data ?? []} current={current} onOpen={open} />
+        <Tree paths={tree.data ?? []} current={current} onOpen={open} titles={titles} />
         <div className="flex min-w-0 flex-col gap-4">
           <Card className="p-4" data-testid="memory-file" data-tour="memory-file" data-path={current ?? ""}>
             {file.error ? <div className="text-1 text-red-11">{file.error}</div> : null}
