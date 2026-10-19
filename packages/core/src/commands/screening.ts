@@ -9,7 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { formatCents, type ScreeningStatus } from "@weft/contracts";
-import { screeningOrders, screeningPackages } from "@weft/db";
+import { offers, screeningOrders, screeningPackages, type DbTx } from "@weft/db";
 import { W3EsignApplyInput, W3ScreeningApplyInput } from "../../../contracts/src/ext/w3-integrations-screening-esign";
 import { esignEnvelopes } from "@weft/db";
 import { applyEnvelope, envelopeOfOffer } from "../esign/envelopes";
@@ -24,11 +24,23 @@ import {
   orderViews, packageRow, screeningVendor, syncBackgroundTask, workLocationOf, type OrderRow,
 } from "../screening/orders";
 import type { ExecContext } from "@weft/contracts";
+import { inScope, hiringManagerInScope, outsideReports, readScopeOf, reportsAccess, type ReadScope } from "../people/scope";
 
 const CONSENT_LINE = "The screening company presents the disclosure and the summary of rights and collects the candidate's consent.";
 const statusEvent = (r: OrderRow, status: string) => ({ type: "screening.status_changed", subjectRef: r.id, payload: { order_id: r.id, status } });
 
 // ---- reads (R0, every surface): status, result, ETA and timestamps only --------------------------------------
+
+/**
+ * Which orders the person behind a call may read: every order for the People and payroll roles, else an order about
+ * the viewer or a report, or for an offer whose hiring manager is the viewer or a report (a candidate has no worker
+ * record yet).
+ */
+export async function screeningVisible(tx: DbTx, companyId: string, scope: ReadScope | null): Promise<(r: { workerId: string | null; offerId: string }) => boolean> {
+  if (!scope) return () => true;
+  const managers = new Map((await tx.select({ id: offers.id, managerId: offers.managerId }).from(offers).where(eq(offers.companyId, companyId))).map((o) => [o.id, o.managerId]));
+  return (r) => inScope(scope, r.workerId) || hiringManagerInScope(scope, managers.get(r.offerId));
+}
 export const listPackages = readCommand({
   name: "screening.list_packages", summary: "List background check packages and prices.",
   description: "List the background check packages for the configured screening company: slug, name, price (cents and display), the screenings included and the phase (full, or NYC non_criminal then criminal). Prices come from the package catalog in the database.",
@@ -46,12 +58,18 @@ export const getStatus = readCommand({
   description: "Background check orders for offer_id, worker_id or order_id: status, result (clear or consider), adjudication stage, ETA date and timestamps. Never includes record details; a consider result reads review_required and only a person can open the report.",
   input: StatusInput, domain: "people",
   async run(i, ctx, deps) {
-    const rows = (await deps.tx.select().from(screeningOrders).where(eq(screeningOrders.companyId, ctx.companyId)))
+    const matched = (await deps.tx.select().from(screeningOrders).where(eq(screeningOrders.companyId, ctx.companyId)))
       .filter((r) => (!i.offer_id || r.offerId === i.offer_id) && (!i.worker_id || r.workerId === i.worker_id) && (!i.order_id || r.id === i.order_id))
       .sort((a, b) => (a.id < b.id ? -1 : 1));
+    const viewer = await readScopeOf(deps.tx, ctx);
+    const rows = matched.filter(await screeningVisible(deps.tx, ctx.companyId, viewer));
+    const withheld = matched.length - rows.length;
+    const scope = withheld ? viewer : null;
+    if (scope && rows.length === 0 && (i.offer_id || i.worker_id || i.order_id)) throw outsideReports(scope, "background checks");
     const views = await orderViews(deps.tx, rows);
     const orders = views.map((v) => ({ order_id: v.id, offer_id: v.offerId, worker_id: v.workerId, vendor: v.vendor, mode: v.mode, package: v.packageName, price_cents: v.priceCents, phase: v.phase, status: v.status, result: v.result, adjudication: v.adjudication, review_required: v.reviewRequired, eta_on: v.etaOn, created_at: v.createdAt, completed_at: v.completedAt }));
-    return { data: { orders }, summary: orders.length ? orders.map((o) => `${o.order_id} ${o.status}${o.eta_on ? ` (ETA ${o.eta_on})` : ""}`).join("; ") : "No background check orders" };
+    const access = scope ? { access: reportsAccess(scope, "background checks", withheld) } : {};
+    return { data: { orders, ...access }, summary: orders.length ? orders.map((o) => `${o.order_id} ${o.status}${o.eta_on ? ` (ETA ${o.eta_on})` : ""}`).join("; ") : "No background check orders" };
   },
 });
 

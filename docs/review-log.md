@@ -1,5 +1,57 @@
 # Review log
 
+## Demo fix round 1, privacy: a manager's reads stop at her reports on every route (2026-10-18)
+
+Found by the demo audit, viewing as Imani Ferreira (demo) (role manager, payroll: none, it: none): the scope helper
+from the manager-privacy fix group below was wired into the worker, audit and proposal reads only. The payroll routes
+read the database directly, so she saw all 48 paychecks of the Oct 30 draft with gross and net, the run totals and the
+Run review now and Submit controls; offers carried every candidate's salary; and time off, offboarding, background
+checks, sync items, IT, training, documents and onboarding tasks were company wide. The agent panel's Recent answers
+also listed Dana's chat answers, whose traces carry tool results. Branch `dp/r1-privacy`.
+
+**Root cause and fix.** Reads that run a command now narrow inside the command (so chat, MCP and routine runs get the
+same answer), and the routes that read the database directly call `apps/api/src/http/scope.ts` (`viewerScope`,
+`needDomain`). `packages/core/src/people/scope.ts` gains the list helpers: `splitByScope` keeps the rows about the
+viewer's own record and reports, `reportsAccess` is the access block that says how many rows were left out and why,
+`outsideReports` is the refusal for one record (`DOMAIN_OUTSIDE_REPORTS`, worded so it never says whether the record
+exists), and `subjectInScope`, `offerIdInScope` and `offerPayReason` cover records about an offer.
+
+| Read | What a manager gets now |
+|---|---|
+| `GET /v1/payrolls`, `/v1/payrolls/:id`, `/v1/payrolls/:id/paychecks`, `/v1/paychecks/:id` | 403 `NOT_PERMITTED` without payroll view, as `payroll.*` already refused on the agent surfaces |
+| `GET /v1/offers`, `/v1/offers/:id` | Every offer still lists (the persona menu reads it); `base` and `baseCents` are null with an `access` block unless she or a report is the hiring manager |
+| `time_off.list_requests`, `time_off.get_balance` (and their routes, the ledger included) | Requests of her reports and requests routed to her; balances of her reports; one outsider's balance or request is `DOMAIN_OUTSIDE_REPORTS`; the summary counts what was withheld |
+| `offboarding.list_cases`, `offboarding.get_case`, `GET /v1/offboarding`, `/v1/offboarding/:id` | Her reports' cases only (no kind for anyone else); an outsider's case is a 404 or the refusal |
+| `screening.get_status`, `GET /v1/screening/orders`, `/v1/screening/orders/:id` | Checks about her reports or for offers whose hiring manager is her or a report |
+| `GET /v1/sync-items`, `GET /v1/integrations/workday/imported` | The route now follows `integrations.list_sync_items`: field and label only for an outsider; imported leave of her reports only |
+| `GET /v1/it/accounts`, `/v1/it/devices` | 403 `NOT_PERMITTED` (it: none), as `it.list_*` refuse |
+| `training.list_assignments`, `GET /v1/training/assignments` | Her reports' assignments and needs |
+| `documents.list`, `onboarding.get_checklist`, `onboarding.ready_check`, `GET /v1/workers/:id/documents`, `/v1/documents/:id`, `/v1/workers/:id/onboarding` | Her reports only; the lists are empty and one document is a 404 for anyone else |
+| `GET /v1/agent/runs`, `/v1/agent/runs/:id`, `/trace`, `/events` | Only the runs that acted for her (executor run row or seeded agent run row); anyone else's is a 404 |
+
+The web app hides what the API refuses: `apps/web/src/lib/api/access.ts` reads the viewer's grants from
+`/v1/settings/permissions`; the sidebar and command menu drop Payroll, Benefits and IT when the grant is none; the
+payroll pages say pay is not shared with her role (no Run review now, no Submit); Home drops the payroll widget; Mark
+accepted, Send, Void and Terminate need people edit, Off-cycle pay needs payroll edit; an offer without pay drops the
+salary from its line; an outsider's person page shows the directory record and a note instead of tabs that read "not
+on file" (its Pay tab threw on the null pay rates before).
+
+**Tests.** `apps/api/test/manager-privacy-routes.test.ts` (12, on the rich world: every row above, as Imani over the
+routes and her chat run, plus Dana, Sam and Theo still reading everything). `e2e/rich-data.spec.ts` gains a crawl as
+Imani of Payroll (list, Oct 30 and Oct 15), an outsider's person page, People, Hiring, Time Off and Offboarding that
+fails on any foreign gross or net figure, offer salary, leave request or balance row, or offboarding name taken from
+Dana's reads, on the payroll nav item, and on Run review now, Submit or Mark accepted. `apps/api/test/agent.test.ts`
+now seeds its session's person, since an unknown principal reads only its own runs (fail closed).
+
+Verification on the branch (ports 6380 to 6385): `pnpm test` 1510 passed and 6 skipped before the agent route test
+was given its person, then that file 4 of 4 and the API, core, executor and scenario projects green; typecheck 16 of
+16; `pnpm e2e` 52 passed and 1 skipped; `pnpm e2e:rich` 4 of 4; `pnpm e2e:tour` 21 of 21 (autoplay 2.7 min, the
+whole tour 2.5 min); `pnpm eval:ci` gate passed, 72 of 128 trials, and the five tasks that act as Imani (PE-01, PE-11,
+CP-04, CQ-63, PE-61) score as on main; lint:prose, lint:brand and brand:overlap ok. No seed or world digest changes.
+
+Left: the sidebar's workspace line reads "Demo workspace, Admin" for every persona (copy); the scope keeps its
+"full record roles" rule, so Theo (payroll_admin, it: none) still reads the IT routes, though his sidebar hides IT.
+
 ## Tour and rich data review fixes (2026-10-18)
 
 Two lenses reviewed main at 3f35fd6: product design (two autoplay passes at 1440x900 and 390x844 plus a crawl of

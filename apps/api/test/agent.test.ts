@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HumanSession, RunTrace, SimClock } from "@weft/contracts";
-import { closeDb, migrate, openDb, type Db } from "@weft/db";
+import { closeDb, companies, migrate, openDb, principals, type Db } from "@weft/db";
 import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, scriptedProvider, type TraceSummary, type WeftAgentRuntime } from "@weft/agent";
 import { createFakeExecutor } from "../../../packages/agent/test/fake-executor";
 import type { Weft, WeftEnv } from "../src/http/context";
@@ -25,6 +25,9 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "weft-agent-routes-"));
   db = openDb({ dataDir: dir });
   await migrate(db);
+  // The session's person must exist: the run reads narrow an unknown principal to its own runs (fail closed).
+  await db.insert(companies).values({ id: "cmp_larkspur", legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01", createdAt: clock.now() });
+  await db.insert(principals).values({ id: "usr_dana", companyId: "cmp_larkspur", kind: "human", workerId: null, display: "Dana Whitfield (demo)", email: "dana.whitfield@larkspur.example", role: "admin", grantsJson: "{}" });
   const fake = createFakeExecutor([
     ...CHAT_TOOLS.map((name) => ({ name, effect: "read" as const })),
     { name: "payroll.get_run", effect: "read" as const, handler: () => ({ ok: true as const, status: "done" as const, resultId: "res_0200", data: { flagged: [{ result_id: "res_0041", after_cents: 432000 }] }, summary: "Read pay_2026_10_30 flagged rows", actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" as const }) },

@@ -9,6 +9,7 @@ import { Button, Drawer } from "@weft/ui/components";
 import { W2_OFFBOARDING_TID, type OffboardingCase, type Proposal, type TerminationKind } from "@weft/contracts";
 import { ProposalCard } from "../inbox/proposal-card";
 import { client, errorText, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
+import { useCan } from "@/lib/api/access";
 
 const KINDS: { value: TerminationKind; label: string }[] = [
   { value: "voluntary", label: "Voluntary (resignation)" }, { value: "involuntary", label: "Involuntary" },
@@ -24,6 +25,8 @@ export function PersonActions({ workerId, status }: { workerId: string; status: 
   const type = ((detail.data as { worker?: { type?: string } } | undefined)?.worker?.type) ?? null;
   const cases = useGet("/v1/offboarding", { enabled: status === "offboarding" || status === "inactive" });
   const mine = ((cases.data ?? []) as OffboardingCase[]).filter((c) => c.workerId === workerId).at(-1);
+  // Off-cycle pay is a payroll proposal and Terminate a people change: a manager (people view, payroll none) gets neither.
+  const can = useCan();
   if (mine) {
     return <Link data-testid={W2_OFFBOARDING_TID.personCaseLink} href={`/app/offboarding/${mine.id}`} className="text-2 text-accent-11 underline-offset-2 hover:underline">Offboarding case ({mine.status})</Link>;
   }
@@ -31,8 +34,8 @@ export function PersonActions({ workerId, status }: { workerId: string; status: 
   if (type !== null && type !== "employee") return null;   // contractors end through their contract
   return (
     <>
-      {status === "active" ? <Button data-testid={W2_OFFBOARDING_TID.personOffCycle} size="xs" onClick={() => setOffCycle(true)}>Off-cycle pay</Button> : null}
-      <Button data-testid={W2_OFFBOARDING_TID.personTerminate} variant="danger" size="xs" onClick={() => setOpen(true)}>Terminate</Button>
+      {status === "active" && can("payroll", "edit") ? <Button data-testid={W2_OFFBOARDING_TID.personOffCycle} size="xs" onClick={() => setOffCycle(true)}>Off-cycle pay</Button> : null}
+      {can("people", "edit") ? <Button data-testid={W2_OFFBOARDING_TID.personTerminate} variant="danger" size="xs" onClick={() => setOpen(true)}>Terminate</Button> : null}
       {open ? <TerminateDrawer workerId={workerId} onClose={() => setOpen(false)} /> : null}
       {offCycle ? <OffCycleDrawer workerId={workerId} onClose={() => setOffCycle(false)} /> : null}
     </>

@@ -4,7 +4,8 @@ import { Hono, type Context } from "hono";
 import { and, eq } from "drizzle-orm";
 import { OFFER_TRANSITIONS, Unauthorized, NotFound, type OfferLifecycle, type ToolOutcome, type W2OnboardingOfferDetail } from "@weft/contracts";
 import { offers } from "@weft/db";
-import { pageById, personaOfOffer, toOfferDto } from "@weft/core";
+import { hiringManagerInScope, pageById, personaOfOffer, offerPayReason, toOfferDto, type ReadScope } from "@weft/core";
+import { viewerScope } from "../http/scope";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
@@ -29,15 +30,25 @@ export function outcomeJson(c: Context<WeftEnv>, out: ToolOutcome) {
 
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 
+/**
+ * An offer as a narrowed person (a manager) may read it: in full when she or one of her reports is the hiring manager,
+ * else everything but the pay (base and baseCents null), with an access block that says why.
+ */
+export function narrowOffer<T extends { managerId: string | null; candidateFirst: string; candidateLast: string }>(scope: ReadScope | null, o: T): T {
+  if (!scope || hiringManagerInScope(scope, o.managerId)) return o;
+  return { ...o, base: null, baseCents: null, access: { scope: "directory", withheld: ["pay"], reason: offerPayReason(scope, `${o.candidateFirst} ${o.candidateLast}`) } };
+}
+
 export function offersRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
   r.get("/v1/offers", async (c) => {
     const page = parsePage(c);
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
     const rows = await weft.db.select().from(offers).where(eq(offers.companyId, companyId));
+    const scope = await viewerScope(weft, c);
     // Wave 1 Offer fields plus the wave 2 lifecycle columns (additive).
     const out = [];
-    for (const o of pageById(rows, page)) out.push({ ...toOfferDto(o), ...(await offerDetail(weft, o)), base: toOfferDto(o).base });
+    for (const o of pageById(rows, page)) out.push(narrowOffer(scope, { ...toOfferDto(o), ...(await offerDetail(weft, o)), base: toOfferDto(o).base }));
     return c.json(toPage(out, page.limit));
   });
   // Demo control "Mark accepted": a human mutation through the executor, then a scheduler kick (SPEC 10).
@@ -63,7 +74,7 @@ export function offersRoutes(weft: Weft): Hono<WeftEnv> {
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
     const [o] = await weft.db.select().from(offers).where(and(eq(offers.companyId, companyId), eq(offers.id, c.req.param("id")))).limit(1);
     if (!o) throw new NotFound(`No offer ${c.req.param("id")}`);
-    return c.json(await offerDetail(weft, o));
+    return c.json(narrowOffer(await viewerScope(weft, c), await offerDetail(weft, o)));
   });
   for (const [path, command] of [["/v1/offers/:id/send", "documents.send_offer"], ["/v1/offers/:id/void", "documents.void_offer"]] as const) {
     r.post(path, async (c) => {

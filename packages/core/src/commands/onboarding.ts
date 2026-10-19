@@ -4,6 +4,7 @@ import type { WeftCommand } from "../shared/deps";
 import { notFound, readCommand, responseFormatField } from "../demo/define";
 import { getWorker } from "../people/queries";
 import { nameRef } from "../people/names";
+import { inScope, outsideReports, readScopeOf } from "../people/scope";
 import { listTasks } from "../onboarding/queries";
 import { completeTask } from "../onboarding/writes";
 
@@ -25,6 +26,8 @@ const getChecklist = readCommand({
   async run(i: ChecklistInput, ctx, deps) {
     const w = await getWorker(deps.tx, ctx.companyId, i.worker_id);
     if (!w) throw notFound("worker", i.worker_id);
+    const scope = await readScopeOf(deps.tx, ctx);
+    if (!inScope(scope, w.id)) throw outsideReports(scope!, "onboarding checklists");
     const tasks = (await listTasks(deps.tx, w.id)).map((t) => ({ id: t.id, kind: t.kind, label: taskLabel(t.kind), status: t.status, owner: t.owner, due_on: t.dueOn, done_at: t.doneAt, blocked_reason: t.blockedReason }));
     const open = tasks.filter((t) => t.status !== "done").length;
     return {

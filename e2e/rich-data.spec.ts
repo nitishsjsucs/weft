@@ -123,3 +123,67 @@ test("a manager's Home shows the team, and each portal persona sees its own reco
   await expect(page.getByTestId("portal-training")).not.toContainText("California harassment prevention for supervisors");
   await expect(page.locator("body")).not.toContainText("No expenses yet.");
 });
+
+// Manager privacy (docs/review-log.md): viewing as Imani Ferreira (demo), a manager with payroll: none, no screen shows
+// a pay figure, leave request, offboarding case or offer salary about anyone outside her reporting chain. The foreign
+// figures and names come from Dana's API reads, so the crawl fails on any of them appearing in Imani's screens.
+test("a manager's screens show nothing private about people outside her reports", async ({ page, request }) => {
+  const dana = { headers: { "x-weft-principal": "usr_dana" } };
+  const imani = { headers: { "x-weft-principal": "usr_imani" } };
+  const get = async <T>(path: string, h = dana) => (await (await request.get(`/api${path}`, h)).json()) as T;
+  const ws = (await get<{ data: { id: string; managerId: string | null; displayName: string }[] }>("/v1/workers?limit=100")).data;
+  const imaniId = ws.find((w) => w.displayName.startsWith("Imani Ferreira"))!.id;
+  const mine = new Set([imaniId]);
+  for (let grew = true; grew;) { grew = false; for (const w of ws) if (w.managerId && mine.has(w.managerId) && !mine.has(w.id)) { mine.add(w.id); grew = true; } }
+  const nameOf = new Map(ws.map((w) => [w.id, w.displayName]));
+
+  // Every figure the API would have leaked: foreign gross and net pay, foreign offer salaries.
+  const pcs = (await get<{ data: { workerId: string; gross: { display: string }; net: { display: string } }[] }>("/v1/payrolls/pay_2026_10_30/paychecks?limit=100")).data;
+  const payFigures = pcs.filter((p) => !mine.has(p.workerId)).flatMap((p) => [p.gross.display, p.net.display]);
+  expect(payFigures.length, "foreign paychecks in the Oct 30 draft").toBeGreaterThan(20);
+  const offers = (await get<{ data: { managerId: string | null; base: { display: string } | null; candidateFirst: string; candidateLast: string }[] }>("/v1/offers?limit=100")).data;
+  const offerPay = offers.filter((o) => !o.managerId || !mine.has(o.managerId)).map((o) => o.base!.display);
+  expect(offerPay.length, "offers outside her chain").toBeGreaterThan(0);
+  // Leave shows as request rows and balance rows; a name alone is no signal (an approver's name is on her reports' rows).
+  const leave = (await get<{ data: { id: string; workerId: string; approverPrincipalId: string | null }[] }>("/v1/time-off/requests?limit=100")).data;
+  const foreignLeave = leave.filter((r) => !mine.has(r.workerId) && r.approverPrincipalId !== "usr_imani");
+  const cases = await get<{ workerId: string; kind: string }[]>("/v1/offboarding");
+  const caseNames = cases.filter((x) => !mine.has(x.workerId)).map((x) => nameOf.get(x.workerId)!);
+  expect(foreignLeave.length && caseNames.length, "leave and offboarding outside her chain").toBeTruthy();
+  expect((await request.get("/api/v1/payrolls/pay_2026_10_30/paychecks?limit=100", imani)).status(), "paychecks as Imani").toBe(403);
+
+  await page.addInitScript(() => { try { window.localStorage.setItem("weft.viewingAs", "usr_imani"); } catch { /* storage blocked */ } });
+  const failures: string[] = [];
+  const crawl = async (path: string, banned: string[], label: string) => {
+    await page.goto(path);
+    await expect(page.locator("body")).not.toContainText("Application error");
+    const ids = () => page.locator("[data-testid]").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid") ?? ""));
+    const texts = [await settled(page)];
+    const testids = await ids();
+    const tabs = page.locator("[role=tab]:not([role=tabpanel] [role=tab])");
+    for (let i = 0; i < await tabs.count(); i++) { await tabs.nth(i).click().catch(() => {}); texts.push(await settled(page)); testids.push(...await ids()); }
+    const all = texts.join(" | ");
+    for (const b of banned) if (all.includes(b)) failures.push(`${path}: shows ${label} ${b}`);
+    return { all, testids };
+  };
+  await expect(page.getByTestId("nav-payroll")).toHaveCount(0);
+  for (const path of ["/app/payroll", "/app/payroll/pay_2026_10_30", "/app/payroll/pay_2026_10_15"]) {
+    const { all } = await crawl(path, payFigures, "foreign pay");
+    if (!all.includes("not shared with your role")) failures.push(`${path}: no access note`);
+    for (const control of ["Run review now", "Submit"]) if (all.includes(control)) failures.push(`${path}: shows ${control}`);
+  }
+  // An outsider's person page: the directory record and a note, never the pay, bank or tax tabs.
+  const outsider = pcs.find((p) => !mine.has(p.workerId))!;
+  const own = pcs.filter((p) => p.workerId === outsider.workerId).flatMap((p) => [p.gross.display, p.net.display]);
+  const person = await crawl(`/app/people/${outsider.workerId}`, own, "their pay");
+  if (!person.all.includes("shared only for your own record")) failures.push(`/app/people/${outsider.workerId}: no directory note`);
+  await crawl("/app/people", offerPay, "offer salary");
+  if (await page.getByText("Mark accepted").count()) failures.push("/app/people: shows Mark accepted");
+  await crawl("/app/hiring", offerPay, "offer salary");
+  const timeOff = await crawl("/app/time-off", [], "leave");
+  for (const r of foreignLeave) if (timeOff.testids.includes(`time-off-request-${r.id}`)) failures.push(`/app/time-off: shows ${nameOf.get(r.workerId)}'s request ${r.id}`);
+  const foreignBalance = timeOff.testids.filter((t) => t.startsWith("time-off-balance-") && !mine.has(t.slice("time-off-balance-".length).split("-")[0]!));
+  if (foreignBalance.length) failures.push(`/app/time-off: shows ${foreignBalance.length} balances outside her reports`);
+  await crawl("/app/offboarding", [...caseNames, "Involuntary"], "offboarding of");
+  expect(failures, failures.join("\n")).toEqual([]);
+});

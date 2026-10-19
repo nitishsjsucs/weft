@@ -8,7 +8,7 @@ import { IntegrationVendor, VENDOR_CATEGORY, type AtsHire } from "@weft/contract
 import { departments, extLinks, integrationDeliveries, offers, payRates, syncItems, timeOffRequests, workers, workplaces } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { DomainRefusal, notFound, readCommand, riskOf, writeCommand } from "../demo/define";
-import { inScope, readScopeOf, withheldReason, type ReadScope } from "../people/scope";
+import { inScope, offerIdInScope, readScopeOf, subjectInScope, withheldReason, withheldSyncDetail, type ReadScope } from "../people/scope";
 import type { DbTx } from "@weft/db";
 import { sha256Hex } from "../shared/hash";
 import { canonicalJson } from "../shared/canonical-json";
@@ -39,23 +39,6 @@ const status = readCommand({
 });
 
 const ListSyncInput = z.object({ status: z.enum(["open", "resolved", "dismissed", "all"]).optional(), vendor: IntegrationVendor.optional(), subject_ref: z.string().optional() });
-/** A sync item's subject is a worker or an offer; anything else (an unmatched vendor record) names no Weft person. */
-async function subjectInScope(tx: DbTx, companyId: string, scope: ReadScope, subjectRef: string): Promise<boolean> {
-  if (subjectRef.startsWith("wrk_")) return inScope(scope, subjectRef);
-  if (subjectRef.startsWith("offr_")) return offerInScope(tx, companyId, scope, subjectRef);
-  return true;
-}
-
-/** An offer is in a narrowed viewer's scope when its hiring manager is the viewer or one of their reports. */
-async function offerInScope(tx: DbTx, companyId: string, scope: ReadScope, offerId: string | null | undefined): Promise<boolean> {
-  if (!offerId) return false;
-  const [o] = await tx.select({ managerId: offers.managerId }).from(offers).where(and(eq(offers.id, offerId), eq(offers.companyId, companyId))).limit(1);
-  return !!o && inScope(scope, o.managerId);
-}
-
-function withheldDetail(scope: ReadScope, detail: Record<string, unknown>, subject: string) {
-  return { field: detail.field ?? null, label: detail.label ?? null, withheld: ["weft_value", "vendor_value"], reason: withheldReason(scope, subject) };
-}
 
 const listSync = readCommand({
   name: "integrations.list_sync_items", domain: "people",
@@ -70,7 +53,7 @@ const listSync = readCommand({
     for (const s of rows.map(toSyncItem)) {
       // A narrowed viewer sees the values of an item only for a worker or offer in their reports (pay conflicts carry pay).
       const open = !viewer || (await subjectInScope(deps.tx, ctx.companyId, viewer, s.subjectRef));
-      const detail = open ? s.detail : withheldDetail(viewer, s.detail as Record<string, unknown>, s.subjectRef);
+      const detail = open ? s.detail : withheldSyncDetail(viewer, s.detail as Record<string, unknown>, s.subjectRef);
       items.push({ id: s.id, vendor: s.vendor, kind: s.kind, subject_ref: s.subjectRef, status: s.status, detail, created_at: s.createdAt });
     }
     // What the list covers (round 1 R5): the rows come from syncs, so a vendor that never synced has none to list.
@@ -102,7 +85,7 @@ const getHire = readCommand({
     const hire = hireDto(h);
     // A narrowed viewer sees the salary only for an offer they or one of their reports manage.
     const scope = await readScopeOf(deps.tx, ctx);
-    if (scope && !(await offerInScope(deps.tx, ctx.companyId, scope, link?.weftId))) {
+    if (scope && !(await offerIdInScope(deps.tx, ctx.companyId, scope, link?.weftId))) {
       const data: Record<string, unknown> = { hire: { ...hire, salary_cents: null, salary_currency: null }, weft_offer_id: link?.weftId ?? null, linked_version: link?.extVersion ?? null, access: { withheld: ["salary"], reason: withheldReason(scope, `this hire (application ${h.applicationId})`) } };
       return { data, summary: `Greenhouse application ${h.applicationId}, offer version ${h.offerVersion}; salary withheld` };
     }

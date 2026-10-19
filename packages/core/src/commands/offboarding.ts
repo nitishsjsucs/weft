@@ -24,6 +24,7 @@ import {
   accountsHash, accountsOf, clearAllGroups, cobraNotice, COBRA_FROM, endOfMonth, finalPayDiff, finalPayPlan,
   lockableDevices, lockDevices, suspendAccounts, terminateEnrollments,
 } from "../offboarding/steps";
+import { inScope, outsideReports, readScopeOf, reportsAccess, splitByScope } from "../people/scope";
 
 const CaseId = z.string().startsWith("ofb_");
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -48,10 +49,12 @@ const listCases = readCommand({
   description: "List offboarding cases (worker, termination kind, last day, status open or complete) with each step in order: final_pay, directory_suspend, sso_deactivate, group_removal, app_removal, device_lock, cobra_notice, benefits_terminate, and its status and proposal id.",
   input: ListInput,
   async run(i: ListInput, ctx, deps) {
-    const rows = (await listCaseRows(deps.tx, ctx.companyId)).filter((c) => !i.status || c.status === i.status);
+    const scope = await readScopeOf(deps.tx, ctx);
+    const { shown: rows, withheld } = splitByScope(scope, (await listCaseRows(deps.tx, ctx.companyId)).filter((c) => !i.status || c.status === i.status), (c) => c.workerId);
     const cases = [];
     for (const c of rows.slice(0, 40)) cases.push(await caseDto(deps.tx, c));
-    return { data: { total: rows.length, count: cases.length, cases }, summary: `Listed ${rows.length} offboarding cases` };
+    const access = scope && withheld ? { access: reportsAccess(scope, "offboarding cases", withheld) } : {};
+    return { data: { total: rows.length, count: cases.length, cases, ...access }, summary: `Listed ${rows.length} offboarding cases${withheld ? `; ${withheld} outside your reports withheld` : ""}` };
   },
 });
 
@@ -64,6 +67,8 @@ const getCase = readCommand({
   input: GetInput,
   async run(i: GetInput, ctx, deps) {
     const c = await requireCase(deps.tx, ctx.companyId, i.case_id);
+    const scope = await readScopeOf(deps.tx, ctx);
+    if (!inScope(scope, c.workerId)) throw outsideReports(scope!, "offboarding cases");
     const dto = await caseDto(deps.tx, c);
     return { data: dto, summary: `Case ${c.id} is ${c.status}: ${dto.steps.filter((s) => s.status === "done" || s.status === "skipped").length} of ${dto.steps.length} steps finished` };
   },

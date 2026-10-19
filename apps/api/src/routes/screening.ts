@@ -2,7 +2,7 @@
 // Every route answers 501 until the owner registers real handlers before stubRoutes and lists them in `except`.
 // Reads return status, result, ETA and timestamps only; record detail is a human-only command (screening.review),
 // and every adjudication step runs a human_only command through the HumanExecutor, which writes the action row.
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { and, eq } from "drizzle-orm";
 import { NotFound, Unauthorized, ValidationError, formatCents } from "@weft/contracts";
 import { esignEnvelopes, screeningOrders, screeningPackages } from "@weft/db";
@@ -15,8 +15,12 @@ import { deliverSimWebhooks } from "../integrations/poll-screening";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { outcomeJson } from "./offers";
+import { screeningVisible } from "../../../../packages/core/src/commands/screening";
+import { viewerScope } from "../http/scope";
 
 const companyOf = (s: { companyId: string } | null) => s?.companyId ?? "cmp_larkspur";
+/** Which orders the session's person may read (a manager: her own and her reports' hires). */
+const visibleTo = async (weft: Weft, c: Context<WeftEnv>) => screeningVisible(weft.db, companyOf(c.var.session), await viewerScope(weft, c));
 const VENDOR_LABEL = { checkr: "Checkr", hireright: "HireRight" } as const;
 
 export function screeningRoutes(weft: Weft): Hono<WeftEnv> {
@@ -28,14 +32,16 @@ export function screeningRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/screening/orders", async (c) => {
     const offerId = c.req.query("offerId"), status = c.req.query("status");
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 25) || 25, 1), 100), afterId = c.req.query("afterId");
+    // A manager reads the background checks of her own hires and her reports' hires only (screeningVisible).
+    const visible = await visibleTo(weft, c);
     const rows = (await weft.db.select().from(screeningOrders).where(eq(screeningOrders.companyId, companyOf(c.var.session))))
-      .filter((x) => (!offerId || x.offerId === offerId) && (!status || x.status === status) && (!afterId || x.id > afterId)).sort((a, b) => (a.id < b.id ? -1 : 1));
+      .filter((x) => visible(x) && (!offerId || x.offerId === offerId) && (!status || x.status === status) && (!afterId || x.id > afterId)).sort((a, b) => (a.id < b.id ? -1 : 1));
     const data = await orderViews(weft.db, rows.slice(0, limit));
     return c.json({ hasMore: rows.length > limit, count: data.length, data });
   });
   r.get("/v1/screening/orders/:id", async (c) => {
     const [row] = await weft.db.select().from(screeningOrders).where(and(eq(screeningOrders.companyId, companyOf(c.var.session)), eq(screeningOrders.id, c.req.param("id")))).limit(1);
-    if (!row) throw new NotFound(`No screening order ${c.req.param("id")}`);
+    if (!row || !(await visibleTo(weft, c))(row)) throw new NotFound(`No screening order ${c.req.param("id")}`);
     const [view] = await orderViews(weft.db, [row]);
     // ?detail=items is the human-only record view: it runs screening.review through the HumanExecutor (audited).
     if (c.req.query("detail") === "items") {

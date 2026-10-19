@@ -14,6 +14,7 @@ import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import type { CommandDeps, WeftCommand } from "../shared/deps";
 import { DomainRefusal, isDetailed, notFound, ptDateOf, readCommand, responseFormatField, riskOf, writeCommand } from "../demo/define";
+import { readScopeOf, reportsAccess, splitByScope } from "../people/scope";
 import { AGENCY_LABELS } from "../tax/queries";
 import { ratesAlreadyInEffect } from "../tax/writes";
 import { parseExtract } from "../notices/queries";
@@ -526,11 +527,13 @@ const listTrainingCmd = readCommand({
   input: ListTrainingInput,
   async run(i: ListTrainingInput, ctx, deps) {
     const today = ptDateOf(ctx.now);
-    const rows = await listAssignments(deps.tx, ctx.companyId, today, { workerId: i.worker_id, status: i.status, courseCode: i.course_code });
-    const missing = i.worker_id || i.status || i.course_code ? [] : await missingAssignments(deps.tx, ctx.companyId, today);
+    const scope = await readScopeOf(deps.tx, ctx);
+    const { shown: rows, withheld } = splitByScope(scope, await listAssignments(deps.tx, ctx.companyId, today, { workerId: i.worker_id, status: i.status, courseCode: i.course_code }), (a) => a.workerId);
+    const missing = splitByScope(scope, i.worker_id || i.status || i.course_code ? [] : await missingAssignments(deps.tx, ctx.companyId, today), (m) => m.worker_id).shown;
     const items = rows.map((a) => ({ id: a.id, worker_id: a.workerId, worker: a.workerName, course_code: a.courseCode, due_on: a.dueOn, days_left: a.daysLeft, status: a.status,
       ...(isDetailed(i) ? { course: a.courseTitle, minutes: a.minutes, reminded_at: a.remindedAt, completed_at: a.completedAt, certificate_upload_id: a.certificateUploadId, source_url: a.sourceUrl } : {}) }));
-    return { data: { as_of: today, count: items.length, assignments: items, needs_assignment: missing }, summary: `Listed ${items.length} training assignments; ${missing.length} people need one` };
+    const access = scope && withheld ? { access: reportsAccess(scope, "training assignments", withheld) } : {};
+    return { data: { as_of: today, count: items.length, assignments: items, needs_assignment: missing, ...access }, summary: `Listed ${items.length} training assignments; ${missing.length} people need one` };
   },
 });
 

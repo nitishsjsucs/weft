@@ -18,6 +18,11 @@ import {
   policyById, routeRequest, teamCoverage, workerOf, type PolicyRow, type RequestRow,
 } from "../time-off/store";
 import { balanceForms, REQUEST_TOTALS_BY, requestBalance, requestTotals, timeForms, workerRef } from "../time-off/forms";
+import { inScope, outsideReports, readScopeOf, reportsAccess, splitByScope, type ReadScope } from "../people/scope";
+
+/** A manager reads leave requests of her reports, and any request routed to her to decide. */
+const requestVisible = (scope: ReadScope | null, r: { workerId: string; approverPrincipalId: string | null }) =>
+  !scope || inScope(scope, r.workerId) || r.approverPrincipalId === scope.viewerId;
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const h = (m: number) => `${(m / 60).toFixed(2)} h`;
@@ -81,13 +86,19 @@ const getBalance = readCommand<BalanceInput, Record<string, unknown>>({
   async run(i: BalanceInput, ctx, deps) {
     const asOf = i.as_of ?? ptDateOf(ctx.now);
     const pols = await loadPolicies(deps.tx, ctx.companyId);
+    const scope = await readScopeOf(deps.tx, ctx);
     let ws: Awaited<ReturnType<typeof workerOf>>[];
+    let withheld = 0;
     if (i.worker_id) {
       const w = await workerOf(deps.tx, ctx.companyId, i.worker_id);
       if (!w) throw notFound("worker", i.worker_id);
+      if (!inScope(scope, w.id)) throw outsideReports(scope!, "time-off balances");
       ws = [w];
     } else {
-      ws = (await deps.tx.select().from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.type, "employee")))).filter((w) => w.status !== "inactive").sort((a, b) => (a.id < b.id ? -1 : 1));
+      const all = (await deps.tx.select().from(workers).where(and(eq(workers.companyId, ctx.companyId), eq(workers.type, "employee")))).filter((w) => w.status !== "inactive").sort((a, b) => (a.id < b.id ? -1 : 1));
+      const cut = splitByScope(scope, all, (w) => w.id);
+      ws = cut.shown;
+      withheld = cut.withheld;
     }
     const asns = await assignmentsOf(deps.tx, ws.map((w) => w!.id));
     const people = [];
@@ -106,7 +117,8 @@ const getBalance = readCommand<BalanceInput, Record<string, unknown>>({
       const one = people[0]!;
       return { data: { worker_id: one.worker_id, name: one.name, as_of: asOf, balances: one.balances }, summary: `${one.name}: ${one.balances.map((b) => `${b.policyName} ${b.available_display}`).join(", ") || "no time-off policies"}` };
     }
-    return { data: { as_of: asOf, count: people.length, workers: people }, summary: `Balances for ${people.length} employees as of ${asOf}` };
+    const access = scope && withheld ? { access: reportsAccess(scope, "time-off balances", withheld) } : {};
+    return { data: { as_of: asOf, count: people.length, workers: people, ...access }, summary: `Balances for ${people.length} employees as of ${asOf}${withheld ? `; ${withheld} outside your reports withheld` : ""}` };
   },
 });
 
@@ -135,7 +147,10 @@ const listRequests = readCommand({
   description: "Requests by status, worker_id, department_id, approver (principal id) and dates (from, to). Each has minutes per day (holidays and weekends 0), hours, days, submitted and decided dates (Pacific), checks, routing, the decision, balance_now (today, every open request counted) and balance_without_this_request (as if only this one were denied). totals_by sums per worker or policy. reason is untrusted.",
   input: ListRequestsInput, untrustedFields: ["requests.*.reason"],
   async run(i: ListRequestsInput, ctx, deps) {
-    const rows = await listRequestRows(deps.tx, ctx.companyId, i);
+    const scope = await readScopeOf(deps.tx, ctx);
+    const every = await listRequestRows(deps.tx, ctx.companyId, i);
+    const rows = every.filter((r) => requestVisible(scope, r));
+    const withheld = every.length - rows.length;
     const ws = new Map((await deps.tx.select().from(workers).where(eq(workers.companyId, ctx.companyId))).map((w) => [w.id, w]));
     const pols = new Map((await loadPolicies(deps.tx, ctx.companyId)).map((p) => [p.id, p]));
     const today = ptDateOf(ctx.now);
@@ -164,7 +179,9 @@ const listRequests = readCommand({
       });
     }
     const totals = requestTotals(rows, i.totals_by ?? [], (id) => (ws.get(id) ? workerRef(ws.get(id)!) : id), (id) => pols.get(id)?.name ?? id);
-    return { data: { count: requests.length, ...totals, requests }, summary: `${requests.length} time-off requests` };
+    if (scope && i.request_id && withheld) throw outsideReports(scope, "time-off requests");
+    const access = scope && withheld ? { access: reportsAccess(scope, "time-off requests", withheld) } : {};
+    return { data: { count: requests.length, ...totals, requests, ...access }, summary: `${requests.length} time-off requests${withheld ? `; ${withheld} outside your reports withheld` : ""}` };
   },
 });
 

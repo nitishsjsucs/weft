@@ -5,6 +5,7 @@ import { DocumentStatus } from "@weft/contracts";
 import { onboardingTasks, simChatMessages, workers } from "@weft/db";
 import type { WeftCommand } from "../shared/deps";
 import { displayName } from "../people/names";
+import { inScope, outsideReports, readScopeOf } from "../people/scope";
 import { PORTAL_TASK_TITLES } from "../portal/view";
 import { notFound, ptDateOf, readCommand } from "../demo/define";
 import { getDocument, listWorkerDocuments, signatureOf, toDocumentDto } from "../documents/queries";
@@ -18,6 +19,8 @@ const listDocuments = readCommand({
   description: "List a worker's documents: kind (offer_letter, confidentiality_agreement, w4, state_withholding, i9, direct_deposit_auth, benefits_election and others), title, status (pending, sent, signed, voided), sha256 and sent and signed times. Optional status filter. Bodies are not returned.",
   input: ListInput,
   async run(i, ctx, deps) {
+    const scope = await readScopeOf(deps.tx, ctx);
+    if (!inScope(scope, i.worker_id)) throw outsideReports(scope!, "documents");
     const rows = await listWorkerDocuments(deps.tx, ctx.companyId, i.worker_id, i.status);
     return { data: { worker_id: i.worker_id, documents: rows.map(toDocumentDto) }, summary: `${rows.length} document(s) for ${i.worker_id}` };
   },

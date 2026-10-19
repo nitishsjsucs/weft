@@ -4,11 +4,11 @@
 // the run's proposals from the executor's table.
 import { readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type Proposal, type RunStepRow } from "@weft/contracts";
-import { execRuns, notices, payrollRuns, principals, proposals, runArtifacts, workers, type Db } from "@weft/db";
+import { agentRuns, execRuns, notices, payrollRuns, principals, proposals, runArtifacts, workers, type Db } from "@weft/db";
 import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
 import { approvalCardOf } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
@@ -16,6 +16,7 @@ import { chooseChatTools } from "../agent/chat-allowlist";
 import { sse } from "../http/sse";
 import { stubRoutes } from "../http/stub";
 import { createMemoryRecall } from "../memory/recall";
+import { viewerScope } from "../http/scope";
 
 // Steps carry raw model call args, so the trace and the SSE stream go through the executor's redactor (harness 9).
 // Route tests that pass a fake executor without a redactor get the value unchanged.
@@ -77,10 +78,25 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
   const r = new Hono<WeftEnv>();
   const store = createRunStore(weft.db);
   const runtime = weft.agent as Partial<WeftAgentRuntime>;
-  const getRun = async (id: string) => {
+  const getRun = async (id: string, c?: Context<WeftEnv>) => {
     const run = await store.getRun(id);
     if (!run) throw new NotFound(`No agent run ${id}`);
+    if (c) { const mine = await ownRuns(c); if (mine && !mine.has(run.id)) throw new NotFound(`No agent run ${id}`); }
     return run;
+  };
+  /**
+   * The runs a narrowed person (a manager) may read: the ones that acted for her. Anyone else's chat, routine and
+   * MCP runs carry their tool results (pay, leave, terminations) and summaries, so they are not hers to read. Null
+   * for the People and payroll roles, who read every run.
+   */
+  const ownRuns = async (c: Context<WeftEnv>): Promise<Set<string> | null> => {
+    const scope = await viewerScope(weft, c);
+    if (!scope) return null;
+    // A live run records its person on the executor's run row; a seeded history run on the agent run row.
+    const companyId = c.var.session?.companyId ?? "cmp_larkspur";
+    const live = await weft.db.select({ id: execRuns.id }).from(execRuns).where(and(eq(execRuns.companyId, companyId), eq(execRuns.onBehalfOf, scope.viewerId)));
+    const seeded = await weft.db.select({ id: agentRuns.id }).from(agentRuns).where(and(eq(agentRuns.companyId, companyId), eq(agentRuns.onBehalfOf, scope.viewerId)));
+    return new Set([...live, ...seeded].map((x) => x.id));
   };
 
   r.post("/v1/agent/runs", async (c) => {
@@ -99,15 +115,18 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/agent/runs", async (c) => {
     const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 25) || 25));
     const session = c.get("session");
-    const rows = await store.listRuns({ companyId: session?.companyId, limit: limit + 1 });
+    const mine = await ownRuns(c);
+    const rows = mine
+      ? (await store.listRuns({ companyId: session?.companyId, limit: 100_000 })).filter((x) => mine.has(x.id)).slice(0, limit + 1)
+      : await store.listRuns({ companyId: session?.companyId, limit: limit + 1 });
     return c.json({ hasMore: rows.length > limit, count: Math.min(rows.length, limit), data: rows.slice(0, limit) });
   });
 
-  r.get("/v1/agent/runs/:id", async (c) => c.json(await getRun(c.req.param("id"))));
+  r.get("/v1/agent/runs/:id", async (c) => c.json(await getRun(c.req.param("id"), c)));
 
   r.get("/v1/agent/runs/:id/trace", async (c) => {
     const id = c.req.param("id");
-    const run = await getRun(id);
+    const run = await getRun(id, c);
     const steps = await store.steps(id);
     const propRows = await weft.db.select().from(proposals).where(eq(proposals.proposerRunId, id)).orderBy(desc(proposals.createdAt));
     const props = propRows.map(toProposal);
@@ -123,7 +142,7 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
 
   r.get("/v1/agent/runs/:id/events", async (c) => {
     const id = c.req.param("id");
-    await getRun(id);
+    await getRun(id, c);
     return sse<RunStepRow | { status: string }>(c, (send, close) => {
       let live = true;
       let finished = false;
