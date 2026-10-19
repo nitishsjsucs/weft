@@ -160,7 +160,7 @@ const ExplainInput = z.object({
   })).min(1).max(60),
 });
 type ExplainInput = z.infer<typeof ExplainInput>;
-type ExplainItemResult = { paycheck_id: string; status: "saved" | "refused"; source: "agent" | "template" | null; code: string | null; offending: string[]; explanation: string | null; merged_items?: number; uncovered_flags?: string[] };
+type ExplainItemResult = { paycheck_id: string; status: "saved" | "refused"; source: "agent" | "template" | null; code: string | null; offending: string[]; explanation: string | null; merged_items?: number; uncovered_flags?: string[]; hint?: string };
 
 /**
  * The call's items by paycheck, in first-seen order. A paycheck named more than once (one item per flag) becomes one
@@ -184,10 +184,7 @@ export const explainFlagsCommand: WeftCommand<ExplainInput> = {
   compactDescription: "Save grounded explanations for flagged paychecks (batch, one item per paycheck covering all its flags).",
   input: ExplainInput, needs: "edit", effect: "draft", risk: () => "R1", approval: "never",
   tiers: { main: "executable", task: "executable" }, mcp: "hidden",
-  errorHints: {
-    UNGROUNDED: { hint: "Use only numbers from that paycheck's flag evidence (cents as dollars, percents, dates, hours).", example: { run_id: "pay_2026_10_30", items: [{ paycheck_id: "pyc_0150", explanation: "Gross pay changed 18.0% from $5,000.00 to $5,900.00 after the raise took effect 2026-10-16." }] } },
-    TOO_LONG: { hint: `One explanation per paycheck, covering all of its flags in at most ${MAX_EXPLANATION_CHARS} characters: one short line per flag.`, example: { run_id: "pay_2026_10_30", items: [{ paycheck_id: "pyc_0159", explanation: "First paycheck in this schedule. No active bank account, so this paycheck is blocked." }] } },
-  },
+  errorHints: { UNGROUNDED: { hint: "Use only numbers from that paycheck's flag evidence (cents as dollars, percents, dates, hours).", example: { run_id: "pay_2026_10_30", items: [{ paycheck_id: "pyc_0150", explanation: "Gross pay changed 18.0% from $5,000.00 to $5,900.00 after the raise took effect 2026-10-16." }] } } },
   async run(i, ctx, deps) {
     const run = await getRun(deps.tx, i.run_id);
     const rows = await deps.tx.select().from(paychecks).where(eq(paychecks.payrollRunId, run.id));
@@ -212,7 +209,7 @@ export const explainFlagsCommand: WeftCommand<ExplainInput> = {
       }
       if (text.length > MAX_EXPLANATION_CHARS) {
         // Joined items that run past the limit are refused whole, never cut: one shorter explanation is the repair.
-        results.push({ paycheck_id: p.id, status: "refused", source: null, code: "TOO_LONG", offending: [], explanation: null, ...merged });
+        results.push({ paycheck_id: p.id, status: "refused", source: null, code: "TOO_LONG", offending: [], explanation: null, ...merged, hint: `The joined text is ${text.length} characters; send one item for this paycheck of at most ${MAX_EXPLANATION_CHARS}, one short line per flag` });
         continue;
       }
       const g = groundExplanation(text, flags, { gross_cents: p.grossCents, net_cents: p.netCents, hours_x100: p.hoursX100 });
