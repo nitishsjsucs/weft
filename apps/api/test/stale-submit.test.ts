@@ -27,9 +27,13 @@ describe("a draft refresh withdraws the stale submit card", () => {
     const preview = await weft.app.request(`/v1/payrolls/${RUN}/preview`, { method: "POST", headers: weft.uiHeaders("usr_dana") });
     expect(preview.status).toBe(200);
     expect((await row(id)).status).toBe("pending");
+    // The rich world seeds its submit card without a hash: an unchanged total keeps it pending too.
+    await weft.db.update(proposals).set({ subjectHash: null }).where(eq(proposals.id, id));
+    await weft.app.request(`/v1/payrolls/${RUN}/preview`, { method: "POST", headers: weft.uiHeaders("usr_dana") });
+    expect((await row(id)).status).toBe("pending");
   });
 
-  it("approving the CA SUI rate change supersedes the card filed on the old total, and the new card files the new total", async () => {
+  it("approving the CA SUI rate change supersedes the card filed on the old total (here the hashless one), and the new card files the new total", async () => {
     const pending = (await weft.db.select().from(proposals).where(eq(proposals.status, "pending"))).filter((p) => p.command === "payroll.submit_run");
     expect(pending).toHaveLength(1);
     const before = pending[0]!;

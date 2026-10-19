@@ -125,7 +125,8 @@ export const STALE_SUBMIT_NOTE = "The draft's numbers changed after this was pro
  * A pending payroll.submit_run proposal on a draft whose numbers just changed (a rate update, a dismissal or a time-off
  * decision re-previews it) is withdrawn: superseded with decision code STALE_SUBJECT, so no card or banner keeps the
  * old total. Its stored preview and subject hash are never rewritten (approval still checks the hash it was shown
- * with); a proposal whose subject still matches stays pending.
+ * with); a proposal whose subject still matches stays pending. A proposal stored without a hash is compared by the
+ * total it shows.
  */
 export async function supersedeStaleSubmits(tx: DbTx, runId: string, now: string): Promise<string[]> {
   const pending = await tx.select().from(proposals)
@@ -133,8 +134,10 @@ export async function supersedeStaleSubmits(tx: DbTx, runId: string, now: string
   const out: string[] = [];
   for (const p of pending) {
     const args = (p.argsJson ? JSON.parse(p.argsJson) : {}) as { exclude_blocked?: boolean };
-    const { hash } = await runSubjectHash(tx, runId, args.exclude_blocked ?? false);
-    if (hash === p.subjectHash) continue;
+    const { hash, material } = await runSubjectHash(tx, runId, args.exclude_blocked ?? false);
+    // A card stored without a hash (the rich world's seeded one) is out of date when its total no longer matches.
+    const current = p.subjectHash !== null ? hash === p.subjectHash : p.moneyCents === material.totals.totalCost;
+    if (current) continue;
     await tx.update(proposals).set({ status: "superseded", decidedAt: now, decisionCode: "STALE_SUBJECT", decisionNote: STALE_SUBMIT_NOTE })
       .where(and(eq(proposals.id, p.id), eq(proposals.status, "pending")));
     out.push(p.id);
