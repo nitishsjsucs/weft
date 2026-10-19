@@ -74,6 +74,7 @@ function sourceWords(src: string): string {
   if (t === "seed") return "the seed";
   const a = /^action:(\d+)$/.exec(t);
   if (a) return auditLabel(Number(a[1]));
+  if (t.startsWith("worker:")) return "the person's record";
   if (t.startsWith("notice:")) return "an agency notice";
   if (t.startsWith("chat:")) return "a chat message";
   return humanLine(t);

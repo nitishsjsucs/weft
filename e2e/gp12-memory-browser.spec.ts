@@ -27,7 +27,9 @@ test("GP12: the memory digest's dossiers and one-pager show in the memory browse
     await page.goto("/app/memory#entities%2Fpeople%2Fwrk_0026.md");
     const file = page.getByTestId("memory-file");
     await expect(file).toHaveAttribute("data-path", "entities/people/wrk_0026.md");
-    await expect(file).toContainText("src: worker:wrk_0026");
+    // A fact's provenance reads as words ("from the person's record"); the stored suffix is its title.
+    await expect(file).toContainText("from the person's record");
+    await expect(file.locator('[title*="src: worker:wrk_0026"]').first()).toBeVisible();
     await expect(page.getByTestId("memory-backlinks")).toContainText("timeline/daily/2026-10-09");
   });
 
