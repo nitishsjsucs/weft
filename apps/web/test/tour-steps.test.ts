@@ -27,14 +27,27 @@ const DASH = new RegExp(`[${String.fromCharCode(0x2013)}${String.fromCharCode(0x
 const sentences = (t: string) => t.split(/(?<=[.!?])\s+/).filter(Boolean).length;
 
 describe("tour steps", () => {
-  it("has 21 steps with unique ids in order", () => {
-    expect(TOUR_STEPS).toHaveLength(21);
+  it("has 20 steps with unique ids in order, Permissions then the finish at the end", () => {
+    expect(TOUR_STEPS).toHaveLength(20);
     expect(new Set(TOUR_STEPS.map((s) => s.id)).size).toBe(TOUR_STEPS.length);
     TOUR_STEPS.forEach((s, i) => expect(s.n).toBe(i + 1));
+    expect(TOUR_STEPS.slice(-3).map((s) => [s.n, s.id])).toEqual([[18, "routines"], [19, "permissions"], [20, "finish"]]);
+    // The Integrations stop is gone from the lap.
+    expect(TOUR_STEPS.map((s) => s.id)).not.toContain("integrations");
+    expect(TOUR_STEPS.some((s) => s.route.kind === "path" && s.route.path.startsWith("/app/integrations"))).toBe(false);
   });
 
-  it("plans at most 165 s, and at most 180 s with every hard timeout spent in full", () => {
+  it("introduces the demo controls as the clock and Viewing as, with no model in the pill", () => {
+    const pill = TOUR_STEPS.find((s) => s.id === "env-pill")!;
+    expect(pill.n).toBe(2);
+    expect(pill.body).toMatch(/simulated clock/);
+    expect(pill.body).toMatch(/viewing as/i);
+    expect(pill.body).not.toMatch(/model/i);
+  });
+
+  it("plans 155 s (at most 165 s), and at most 180 s with every hard timeout spent in full", () => {
     const planned = TOUR_STEPS.reduce((t, s) => t + s.seconds, 0);
+    expect(planned).toBe(155);
     expect(planned).toBeLessThanOrEqual(165);
     const worst = planned + TOUR_STEPS.reduce((t, s) => t + (s.hardMs ? s.hardMs / 1000 - s.seconds : 0), 0);
     expect(worst).toBeLessThanOrEqual(180);

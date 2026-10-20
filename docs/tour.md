@@ -1,6 +1,6 @@
 # The guided tour
 
-A three-minute walkthrough inside the app (21 steps, 161 s planned, 180 s hard budget) that shows the agent work a
+A three-minute walkthrough inside the app (20 steps, 155 s planned, 180 s hard budget) that shows the agent work a
 California DE 2088 rate notice end to end and then takes a fast lap of the rest of the product. It is a custom
 build on the app's own Radix primitives, with no new dependency.
 
@@ -19,7 +19,7 @@ There is no auto-start and no first-visit popup, so `pnpm e2e` and `pnpm screens
 
 | File | What it holds |
 |---|---|
-| `steps.ts` | The 21 steps as pure data (route, target, fallbacks, copy, action, seconds, timeouts) and the budget math |
+| `steps.ts` | The 20 steps as pure data (route, target, fallbacks, copy, action, seconds, timeouts) and the budget math |
 | `engine.ts` | The state machine (idle, preflight, reset, resume, running, done), sessionStorage persistence, preflight |
 | `tour-provider.tsx` | Runs each step: navigate, locate (MutationObserver plus rAF, 5 s), ring, then the action |
 | `shell-bridge.tsx`, `bridge.ts` | The agent panel and nav drawer controls the app shell hands to the tour |
@@ -76,6 +76,8 @@ reset offer, a skipped portal stop, unanchored cards where data is missing).
 | tour-complete, scripted, reading each card for its seconds | rich (final gate, main accef12) | 138 s | all 21 steps, with a screenshot at every step |
 | tour-autoplay, scripted | rich (final gate, main accef12) | 158 s | 21 steps |
 | tour-autoplay, live gpt-5.6-luna | rich (final gate, main accef12) | 159 s | the run step 12.6 s and the chart step 11.5 s on screen; no timeout or fallback; one chat run; $0.0034 |
+| tour-complete, scripted, reading each card for its seconds | rich (20 steps, Integrations removed, 2026-10-20) | 133 s | all 20 steps on their own targets, with a screenshot at every step |
+| tour-autoplay, scripted | rich (20 steps, Integrations removed, 2026-10-20) | 150 s | 20 steps |
 
 Round 2, scripted on the rich world: Deliver ready to the run step 1.9 s, the run step 1.6 s, Approve 1.8 s, the chart
 answer 3.0 s including the typed prompt. The slowest step to get ready is the payroll flags (about 1 s: the page
@@ -88,4 +90,4 @@ and status line a card showed, so a soft timeout ("Still working") or a fallback
 ## Screenshots
 
 `TOUR_SHOTS=1 pnpm e2e:tour tour-complete` saves the screen at every step, once its card is ready, to
-`docs/screenshots/tour/` (or `SHOTS_DIR`), named by step number and id (`01-welcome.png` to `21-finish.png`).
+`docs/screenshots/tour/` (or `SHOTS_DIR`), named by step number and id (`01-welcome.png` to `20-finish.png`).

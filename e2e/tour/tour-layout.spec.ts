@@ -124,7 +124,7 @@ for (const [width, height] of [[1280, 800], [1440, 900]] as const) {
       test.skip(!world.rich, "geometry is checked on the rich world the tour runs on");
       test.setTimeout(240_000);
       await page.addInitScript(() => { try { localStorage.setItem("weft.agentOpen", "1"); } catch { /* blocked */ } });
-      for (const id of ["env-pill", "agent-panel", "deliver-notice", "inbox-proposal", "rate-live", "audit", "payroll-flags", "ask-chart", "person", "expenses", "time-off", "hiring", "memory", "routines", "integrations", "permissions"]) {
+      for (const id of ["env-pill", "agent-panel", "deliver-notice", "inbox-proposal", "rate-live", "audit", "payroll-flags", "ask-chart", "person", "expenses", "time-off", "hiring", "memory", "routines", "permissions"]) {
         await openStep(page, id);
         const s = await scene(page);
         expect(s.agent, `${id}: agent panel docked`).not.toBeNull();
@@ -194,7 +194,7 @@ for (const [width, height] of [[1280, 800], [1440, 900]] as const) {
   test.describe(`${width}x${height}, after the chart answer`, () => {
     test.use({ viewport: { width, height } });
 
-    test("the document never scrolls on steps 12 to 20, and the ring is placed on the settled page", async ({ page, world }) => {
+    test("the document never scrolls on steps 12 to 19, and the ring is placed on the settled page", async ({ page, world }) => {
       test.skip(!world.rich, "the tour runs on the rich world");
       test.setTimeout(240_000);
       await page.addInitScript(() => { try { localStorage.setItem("weft.agentOpen", "1"); } catch { /* blocked */ } });
@@ -244,7 +244,7 @@ for (const [width, height] of [[1280, 800], [1440, 900]] as const) {
       });
       await probe();
       await readyCard(page, "ask-chart").locator("[data-tour-primary]").click();
-      for (const id of ["person", "expenses", "time-off", "hiring", "portal", "memory", "routines", "integrations", "permissions"]) {
+      for (const id of ["person", "expenses", "time-off", "hiring", "portal", "memory", "routines", "permissions"]) {
         await expect(readyCard(page, id)).toBeVisible({ timeout: 30_000 });
         await page.waitForTimeout(900);
         const p = await probe();

@@ -1,9 +1,9 @@
 // GP19. A coherent top bar (docs/wave3.md 5; research/wave3/topbar-design.md). Owner: w3-topbar-shell.
 // At 1440 and 1280 with the agent docked, at 1024 and at 390 the header never overflows; every bar control is 32 px
-// tall and every pill segment 28 px; no badge wash appears in the bar (the only fill colors are the model dot and the
-// amber persona avatar). Tab shows the same blue ring on every header control. The persona menu switches personas,
-// the clock popover advances time, the model popover shows spend, search lives in the sidebar, and detail pages put
-// the record's name in the breadcrumb instead of its id.
+// tall and every pill segment 28 px; the pill holds the simulated clock and Viewing as, with no model chip; no badge
+// wash appears in the bar (the only fill color is the amber persona avatar). Tab shows the same blue ring on every
+// header control. The persona menu switches personas, the clock popover advances time, search lives in the sidebar,
+// and detail pages put the record's name in the breadcrumb instead of its id.
 import type { Page } from "@playwright/test";
 import { expect, openApp, test, TID, viewAs } from "./fixtures";
 import { W3_SHELL_TID as S } from "../packages/contracts/src/w3/testids-shell";
@@ -38,17 +38,18 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
         const controls = [...h.querySelectorAll(":scope > button, [data-testid=env-pill]")].map((e) => ({ name: e.getAttribute("aria-label") ?? e.getAttribute("data-testid"), h: box(e).height }));
         const segments = [...h.querySelectorAll("[data-seg]")].map((e) => ({ name: e.getAttribute("data-testid"), h: box(e).height }));
         const fills = [...h.querySelectorAll("*")].map((e) => ({ bg: getComputedStyle(e).backgroundColor, avatar: e.hasAttribute("data-avatar") }));
-        const model = h.querySelector("[data-testid=provider-badge]")!;
-        return { scroll: h.scrollWidth, client: h.clientWidth, controls, segments, fills, modelBg: getComputedStyle(model).backgroundColor };
+        const model = h.querySelectorAll("[data-testid=provider-badge], [data-model-state], [data-state-dot]").length;
+        return { scroll: h.scrollWidth, client: h.clientWidth, controls, segments, fills, model, text: h.textContent ?? "" };
       });
       expect(m.scroll, `${l.name}: header scrollWidth ${m.scroll} within clientWidth ${m.client}`).toBeLessThanOrEqual(m.client);
       expect(m.controls.length).toBeGreaterThanOrEqual(3);
       for (const c of m.controls) expect(c.h, `${l.name}: ${c.name} is 32 px`).toBe(32);
-      expect(m.segments.map((s) => s.name)).toEqual([TID.providerBadge, TID.simClock, TID.viewingAs]);
+      expect(m.segments.map((s) => s.name)).toEqual([TID.simClock, TID.viewingAs]);
       for (const s of m.segments) expect(s.h, `${l.name}: segment ${s.name} is 28 px`).toBe(28);
       expect(m.fills.filter((f) => f.bg === GREEN_3), "no green-3 wash in the bar").toEqual([]);
       expect(m.fills.filter((f) => f.bg === AMBER_3 && !f.avatar), "amber only on the persona avatar").toEqual([]);
-      expect(m.modelBg, "the model segment is not a status badge").toBe("rgba(0, 0, 0, 0)");
+      expect(m.model, `${l.name}: no model chip in the bar`).toBe(0);
+      expect(m.text, `${l.name}: the bar names no model`).not.toMatch(/Scripted|gpt-|Model/);
     });
   }
 
@@ -63,7 +64,7 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await openApp(page, "/app/people/wrk_0001");
     // Reach the bar from the keyboard: Tab until focus lands in the header, then walk it.
     const seen = await tabThroughHeader(page);
-    expect(seen).toEqual(["Toggle sidebar", "People", TID.providerBadge, TID.simClock, TID.viewingAs, S.agentToggle]);
+    expect(seen).toEqual(["Toggle sidebar", "People", TID.simClock, TID.viewingAs, S.agentToggle]);
   });
 
   await test.step("the persona menu is a radio menu grouped under the demo control label", async () => {
@@ -80,7 +81,7 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await viewAs(page, "dana");
   });
 
-  await test.step("the clock popover advances simulated time; the model popover shows spend", async () => {
+  await test.step("the clock popover advances simulated time", async () => {
     await page.getByTestId(TID.simClock).click();
     const clock = page.getByTestId(S.clockPopover);
     await expect(clock).toContainText("Simulated time");
@@ -89,11 +90,9 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await clock.getByRole("button", { name: "+1 hour" }).click();
     await expect(page.getByTestId(TID.simClock)).toContainText(/9:30/);
     await page.keyboard.press("Escape");
-    await page.getByTestId(TID.providerBadge).click();
-    const model = page.getByTestId(S.modelPopover);
-    await expect(model).toContainText("Scripted, no model calls");
-    await expect(model).toContainText(/Spent today\s*\$\d+\.\d{2}/);
-    await page.keyboard.press("Escape");
+    await expect(clock).toBeHidden();
+    await expect(page.getByTestId(TID.providerBadge)).toHaveCount(0);
+    await expect(page.getByTestId(S.modelPopover)).toHaveCount(0);
   });
 
   await test.step("search sits in the sidebar; Cmd or Ctrl+K opens it anywhere; hiding the sidebar puts it in the bar", async () => {
@@ -146,7 +145,6 @@ const shown = { useInnerText: true } as const;
 test("GP19: the tiers, the keyboard and both drawers behave on every layout", async ({ page }) => {
   const persona = page.getByTestId(TID.viewingAs);
   const clock = page.getByTestId(TID.simClock);
-  const model = page.getByTestId(TID.providerBadge);
   const toggleAgent = page.getByTestId(S.agentToggle);
   const panel = page.locator(`#${DOM.agentPanel}`);
 
@@ -155,8 +153,7 @@ test("GP19: the tiers, the keyboard and both drawers behave on every layout", as
     await openApp(page, "/app/inbox");
     await expect(persona).toHaveText(/Viewing as\s*Dana/, shown);
     await expect(clock).toHaveText(/Mon, Oct 26, 8:30\sAM/, shown);
-    await expect(model).toHaveText("Scripted", shown);
-    await expect(model).toHaveAttribute("aria-label", "Model: Scripted, no model calls");
+    await expect(page.getByTestId(TID.providerBadge)).toHaveCount(0);
     await expect(panel).toBeVisible();
     await expect(panel.getByRole("button", { name: "Close agent panel" })).toHaveCount(0);
   });
@@ -166,7 +163,6 @@ test("GP19: the tiers, the keyboard and both drawers behave on every layout", as
     await expect(persona).not.toHaveText(/Viewing as/, shown);
     await expect(persona).toHaveText(/Dana/, shown);
     await expect(clock).toHaveText(/^Mon 8:30\sAM$/, shown);
-    await expect(model).toHaveText("Scripted", shown);
   });
 
   await test.step("keyboard: Enter opens the persona menu on an item, arrows move, Esc returns focus to the trigger", async () => {
@@ -212,13 +208,12 @@ test("GP19: the tiers, the keyboard and both drawers behave on every layout", as
     await expect(toggleAgent).toHaveAttribute("aria-pressed", "false");
   });
 
-  await test.step("390 is Mini: the dot alone, the short clock, and the same ring on the bar's search icon", async () => {
+  await test.step("390 is Mini: the short clock, the avatar, and the same ring on the bar's search icon", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openApp(page, "/app/inbox");
-    await expect(model).toHaveText("", shown);
     await expect(clock).toHaveText(/^Mon 8:30\sAM$/, shown);
     const seen = await tabThroughHeader(page);
-    expect(seen).toEqual(["Toggle sidebar", "Search pages, people and payroll runs", TID.providerBadge, TID.simClock, TID.viewingAs, S.agentToggle]);
+    expect(seen).toEqual(["Toggle sidebar", "Search pages, people and payroll runs", TID.simClock, TID.viewingAs, S.agentToggle]);
   });
 
   await test.step("390: the sidebar toggle opens the drawer, which has the same search at its top", async () => {

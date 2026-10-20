@@ -1,8 +1,9 @@
 // Pure helpers for the top bar's environment pill (research/wave3/topbar-design.md 5.3 to 5.7). Owner: w3-topbar-shell.
-// No React here, so the unit tests can read every label the bar shows.
+// No React here, so the unit tests can read every label the bar shows. The pill no longer has a model segment; the
+// model helpers (modelState, MODE_LABEL, modelLabel, modelAria, fmtUsd) stay here, unit tested, for a model readout.
 import { W3_TOPBAR_SHELL_TIERS } from "@weft/contracts";
 
-/** Model status as the bar shows it: the dot color and the Mode row of the model popover come from this. */
+/** Model status read from the health check: hosted live, local, scripted, offline or still loading. */
 export type ModelState = "live" | "local" | "scripted" | "offline" | "loading";
 
 export interface ProviderInfo { id: string; model: string; label: string; live: boolean }
@@ -27,7 +28,7 @@ export const MODE_LABEL: Record<ModelState, string> = {
   loading: "Checking",
 };
 
-/** Label for the model segment: the full provider label in Full, the bare model id in Compact. */
+/** Model label: the full provider label in Full, the bare model id in Compact. */
 export function modelLabel(provider: ProviderInfo | undefined, state: ModelState, tier: "full" | "compact"): string {
   if (state === "offline") return "API offline";
   if (!provider) return "";
@@ -35,7 +36,7 @@ export function modelLabel(provider: ProviderInfo | undefined, state: ModelState
   return tier === "full" ? provider.label : provider.model || provider.label;
 }
 
-/** Accessible name for the model segment; carries the meaning that narrow tiers drop from the visible text. */
+/** Accessible name for a model readout; carries the meaning that narrow tiers drop from the visible text. */
 export function modelAria(provider: ProviderInfo | undefined, state: ModelState): string {
   if (state === "offline") return "Model: API offline";
   if (state === "loading" || !provider) return "Model: checking";
@@ -45,7 +46,7 @@ export function modelAria(provider: ProviderInfo | undefined, state: ModelState)
   return `Model: ${provider.label}, ${how}`;
 }
 
-/** Spend for the model popover: cents precision, or four decimals under a cent so a small live call still shows. */
+/** Model spend: cents precision, or four decimals under a cent so a small live call still shows. */
 export function fmtUsd(usd: number): string {
   if (usd > 0 && usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;

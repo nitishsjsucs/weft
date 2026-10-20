@@ -102,7 +102,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "env-pill", n: 2, route: { kind: "path", path: "/app" }, target: '[data-tour~="env-pill"]',
     title: "Your demo controls",
-    body: "The agent's model, the simulated clock every date reads, and who you are viewing as. The tour leaves the clock alone.",
+    body: "The simulated clock every date reads, and who you are viewing as. The tour leaves the clock alone.",
     action: "next", seconds: 6,
   },
   {
@@ -232,21 +232,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     action: "next", seconds: 6,
   },
   {
-    // The card's title and badges name which integration is ringed: on a phone they go at the top, the sheet below.
-    id: "integrations", n: 19, route: { kind: "path", path: "/app/integrations" }, target: '[data-tour~="integration-card"]', fallbacks: ['[data-tour~="integrations-list"]'], block: "start", sheet: "bottom",
-    title: "Plugs into your tools",
-    body: "Greenhouse, Workday, Checkr, HireRight and DocuSign run as simulators until you add credentials.",
-    action: "next", seconds: 6,
-  },
-  {
-    id: "permissions", n: 20, route: { kind: "path", path: "/app/settings/permissions" }, target: '[data-tour~="permissions-agent-row"]', fallbacks: ['[data-tour~="permissions-matrix"]'],
+    id: "permissions", n: 19, route: { kind: "path", path: "/app/settings/permissions" }, target: '[data-tour~="permissions-agent-row"]', fallbacks: ['[data-tour~="permissions-matrix"]'],
     avoid: ['[data-tour~="permissions-matrix"]'],
     title: "Who can do what",
     body: "View, Edit and Approve per person. The agent never exceeds the person it acts for, and never approves.",
     action: "next", seconds: 6,
   },
   {
-    id: "finish", n: 21, route: { kind: "same" }, target: null,
+    id: "finish", n: 20, route: { kind: "same" }, target: null,
     title: "Yours to run",
     body: "Ask the agent anything from the panel, or replay the tour. Weft is Apache-2.0 and runs on a laptop.",
     action: "finish", seconds: 8,

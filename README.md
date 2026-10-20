@@ -33,12 +33,12 @@ every audited screen and tab on a fresh rich world and fails on an empty state.
 
 ### The guided tour
 
-A three-minute walkthrough inside the app: 21 steps, about 2.5 minutes at its planned pace, with a hard budget of 180
+A three-minute walkthrough inside the app: 20 steps, about 2.5 minutes at its planned pace, with a hard budget of 180
 seconds. It starts with the agent working a California DE 2088 rate notice end to end (the notice arrives, the run
 reads it, the rate change waits in the Inbox, you approve it, the 1.5% SUI rate is live in Taxes and Compliance next
 to the compliance calendar, and the audit chain records it), then opens the flagged paychecks on the Oct 30 draft, asks
-the agent for payroll cost by month as a chart, and takes a fast lap of Expenses, Time Off, Hiring, the new-hire
-portal, Memory, Routines and Integrations.
+the agent for payroll cost by month as a chart, and takes a fast lap of a person's record, Expenses, Time Off, Hiring,
+the new-hire portal, Memory, Routines and Permissions.
 
 Start it from any of these:
 
@@ -295,9 +295,9 @@ world, as Dana), every main route. `pnpm screenshots` still writes base versions
   pre-payroll review with its runs), `10-audit`, `17-memory`, `24-integrations`, `03-simulators`, `36-settings`,
   `37-permissions`, `39-run-view` (a recorded agent run with its steps) and `40-portal-persona` (a new hire at 5 of 7).
 
-The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`, retaken in the
-final guided tour gate), in
-[docs/screenshots/tour/](docs/screenshots/tour): `01-welcome` to `21-finish`, named by step.
+The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`, retaken on
+2026-10-20 after the Integrations stop left the tour), in
+[docs/screenshots/tour/](docs/screenshots/tour): `01-welcome` to `20-finish`, named by step.
 
 Flows on the base world, retaken in the final wave 3 gate with `pnpm screenshots` (`e2e/screens/capture.screens.ts`:
 the e2e dev runner and a fresh world for each group):
@@ -307,8 +307,9 @@ the e2e dev runner and a fresh world for each group):
 - `13-hiring`, `14-portal` (0 of 7), `15-offboarding-case`, `16-benefits-reconciliation`,
   `18-open-enrollment`, `19-contractor-payouts` and `20-off-cycle-proposal`.
 - New in wave 3:
-  - `21-topbar`: the top bar as one strip (sidebar toggle, breadcrumb, the environment pill with model, simulated
-    clock and Viewing as, then the agent toggle), with search and New thread at the top of the sidebar.
+  - `21-topbar`: the top bar as one strip (sidebar toggle, breadcrumb, the environment pill with the simulated clock
+    and Viewing as, then the agent toggle), with search and New thread at the top of the sidebar. The four top bar
+    shots were retaken on 2026-10-20, when the model chip left the pill; other screens taken before that still show it.
   - `21b-topbar-persona-menu` (the Viewing as menu grouped into Admins and Managers), `21c-topbar-clock` (the clock
     popover with +1 hour, +1 day and Next routine) and `21d-topbar-mobile` (390 wide: search icon, compact pill,
     avatar).

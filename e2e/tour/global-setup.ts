@@ -2,7 +2,7 @@
 // A cold first visit is logged, not asserted. Owner: tour.
 import type { FullConfig } from "@playwright/test";
 
-const ROUTES = ["/app", "/app/simulators", "/app/inbox", "/app/compliance", "/app/audit", "/app/payroll", "/app/payroll/pay_2026_10_30", "/app/expenses", "/app/time-off", "/app/hiring", "/portal", "/app/memory", "/app/routines", "/app/integrations", "/app/reports"];
+const ROUTES = ["/app", "/app/simulators", "/app/inbox", "/app/compliance", "/app/audit", "/app/payroll", "/app/payroll/pay_2026_10_30", "/app/expenses", "/app/time-off", "/app/hiring", "/portal", "/app/memory", "/app/routines", "/app/settings/permissions", "/app/reports"];
 
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const base = config.projects[0]?.use.baseURL;

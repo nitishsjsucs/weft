@@ -21,7 +21,7 @@ test("keyboard: arrows and Enter move, focus lands on the title, Esc exits", asy
   await expect(title).toHaveText("Welcome to Weft");
   await page.keyboard.press("ArrowRight");
   await expect(readyCard(page, "env-pill")).toBeVisible();
-  await expect(page.locator("[data-tour-live]")).toContainText("Step 2 of 21");
+  await expect(page.locator("[data-tour-live]")).toContainText("Step 2 of 20");
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest("[data-tour-card]") !== null)).toBe(true);
   await page.keyboard.press("Enter");
   await expect(readyCard(page, "agent-panel")).toBeVisible();
@@ -43,7 +43,7 @@ test("a reload mid-tour offers to resume at the same step", async ({ page, world
   await startTour(page, "inbox-proposal");
   await expect(readyCard(page, "inbox-proposal")).toBeVisible();
   await page.reload();
-  await expect(page.locator("[data-tour-resume]")).toContainText("Resume tour (step 6 of 21)");
+  await expect(page.locator("[data-tour-resume]")).toContainText("Resume tour (step 6 of 20)");
   await page.locator("[data-tour-resume-go]").click();
   await expect(readyCard(page, "inbox-proposal")).toBeVisible();
 });
@@ -87,7 +87,7 @@ test("a missing target shows the unanchored card and Next still works", async ({
   await expect(c).toHaveAttribute("data-target-found", "false", { timeout: 10_000 });
   await expect(c.locator("[data-tour-note]")).toHaveText("This part of the demo data is missing on this world.");
   await c.locator("[data-tour-primary]").click();
-  await expect(readyCard(page, "integrations")).toBeVisible();
+  await expect(readyCard(page, "permissions")).toBeVisible();
 });
 
 test("the new-hire portal settles, and the tour leaves it for the app in one hop", async ({ page, weft, world }) => {

@@ -134,3 +134,19 @@ agent panel fixes. What is left:
   Those page files belong to other owners.
 - **Dark mode tokens** (design 5.9) wait for an app dark mode.
 - **Clock advance permissions**: the API accepts any principal (design 9, flagged only).
+
+## Model segment removed (2026-10-20)
+
+The environment pill now holds two segments, the simulated clock and then Viewing as, with one divider between them.
+`ModelSegment`, its status dot, its popover (`W3_SHELL_TID.modelPopover`) and its polite live region are gone from
+`env-pill.tsx`, so the bar shows no provider name, model id or spend, and its only fill color is the amber persona
+avatar. The tables above describe the bar as this track built it.
+
+- `TID.providerBadge` and `W3_SHELL_TID.modelPopover` stay in the contracts (frozen ids) but no control in the bar
+  carries them. The model helpers in `env.ts` (`modelState`, `MODE_LABEL`, `modelLabel`, `modelAria`, `fmtUsd`) stay
+  and keep their unit tests in `w3-topbar-shell.test.tsx`.
+- `w3-topbar-shell.render.test.tsx` checks the pill order (clock, Viewing as), one divider, one polite live region (the
+  persona switch), no status dot and no provider badge, model state, "Scripted" or "Model:" text in the bar.
+- GP19 (`e2e/site-topbar.spec.ts`) expects the segments clock then persona at every width, no model chip or model
+  text in the bar, and the Tab order sidebar toggle, the People crumb (or the search icon at 390), clock, persona and
+  agent toggle.

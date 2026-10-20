@@ -1,5 +1,6 @@
-// The top bar's labels and rules (research/wave3/topbar-design.md 5.3 to 5.8; owner w3-topbar-shell): model state and
-// its dot, the three width tiers, the clock popover rows, persona grouping and the breadcrumb titles.
+// The top bar's labels and rules (research/wave3/topbar-design.md 5.3 to 5.8; owner w3-topbar-shell): the three width
+// tiers, the clock popover rows, persona grouping and the breadcrumb titles. The model labels in env.ts are checked
+// too, though the bar no longer shows a model segment.
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shortcutLabel } from "@weft/ui/components";
@@ -19,7 +20,7 @@ const LOCAL = { id: "openai_compat", model: "mlx-community/Qwen3.6-27B", label: 
 const SCRIPTED = { id: "scripted", model: "scripted", label: "Scripted, no model", live: false };
 const SEED_NOW = "2026-10-26T15:30:00.000Z"; // Monday 8:30 AM PT
 
-describe("model segment", () => {
+describe("model labels (env.ts; not shown in the top bar)", () => {
   it("reads hosted, local, scripted, offline and loading from the health check", () => {
     expect(modelState(OPENAI, false)).toBe("live");
     expect(modelState(LOCAL, false)).toBe("local");

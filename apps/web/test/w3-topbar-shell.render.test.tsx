@@ -1,6 +1,7 @@
 // The top bar, sidebar head and agent panel header as they render (research/wave3/topbar-design.md 5.3 to 5.8 and 7;
 // owner w3-topbar-shell). A static render with the data hooks stubbed: the scripted provider, the seeded clock
 // (Monday 8:30 AM PT, paused) and Dana as the signed-in human. The e2e spec (GP19) measures the same bar in a browser.
+// The pill holds the simulated clock and Viewing as; the model segment (TID.providerBadge) is no longer in the bar.
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -40,14 +41,19 @@ const tagsWith = (html: string, attr: string) => [...html.matchAll(new RegExp(`<
 const attrOf = (tag: string, name: string) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
 
 describe("the top bar", () => {
-  it("orders the pill model, clock, Viewing as, and keeps the wave 1 test ids on those controls", () => {
+  it("orders the pill clock, then Viewing as, keeps the wave 1 test ids on those controls, and shows no model", () => {
     const html = bar();
     const segs = tagsWith(html, "data-seg");
-    expect(segs.map((t) => attrOf(t, "data-testid"))).toEqual([TID.providerBadge, TID.simClock, TID.viewingAs]);
+    expect(segs.map((t) => attrOf(t, "data-testid"))).toEqual([TID.simClock, TID.viewingAs]);
     expect(html).toContain(`role="group" aria-label="Demo environment" data-testid="${W3_SHELL_TID.envPill}"`);
-    // Exactly two dividers, both hidden from screen readers.
+    // Exactly one divider, hidden from screen readers.
     expect(tagsWith(html, "data-divider").every((t) => attrOf(t, "aria-hidden") === "true")).toBe(true);
-    expect(tagsWith(html, "data-divider")).toHaveLength(2);
+    expect(tagsWith(html, "data-divider")).toHaveLength(1);
+    // No model chip: no provider badge, no model popover, and neither the provider label nor its model id.
+    expect(html).not.toContain(`data-testid="${TID.providerBadge}"`);
+    expect(html).not.toContain("data-model-state");
+    expect(html).not.toMatch(/>Scripted</);
+    expect(html).not.toContain("Model:");
   });
 
   it("gives every segment the 28 px, radius 6 shape and the inset blue ring", () => {
@@ -91,22 +97,19 @@ describe("the top bar", () => {
   it("carries the full meaning in accessible names and has no title tooltips", () => {
     const html = bar();
     const label = (testid: string) => attrOf(tagsWith(html, "data-testid").find((t) => attrOf(t, "data-testid") === testid)!, "aria-label");
-    expect(label(TID.providerBadge)).toBe("Model: Scripted, no model calls");
     expect(label(TID.simClock)?.replace(/[  ]/g, " ")).toBe("Simulated time: Monday, October 26, 8:30 AM Pacific");
     expect(label(TID.viewingAs)).toBe("Viewing as Dana Whitfield (demo). Demo control: switches the signed-in human, dev auth only");
     expect(html).not.toMatch(/\stitle="/);
-    // Two polite live regions: model state changes and persona switches.
-    expect(html.match(/aria-live="polite"/g)).toHaveLength(2);
+    // One polite live region, for persona switches.
+    expect(html.match(/aria-live="polite"/g)).toHaveLength(1);
   });
 
-  it("uses color only on the status dot and the amber avatar: no badge washes, no accent", () => {
+  it("uses color only on the amber avatar: no status dot, no badge washes, no accent", () => {
     const html = bar();
     expect(html).not.toMatch(/bg-(green|amber|blue|red)-3\b/);
     expect(html).not.toContain("accent-9");
-    expect(html).toContain('data-state-dot="scripted"');
+    expect(html).not.toContain("data-state-dot");
     expect(tagsWith(html, "data-avatar").map((t) => attrOf(t, "class"))).toEqual([expect.stringContaining("bg-[var(--demo-bg)]")]);
-    const model = tagsWith(html, "data-testid").find((t) => attrOf(t, "data-testid") === TID.providerBadge)!;
-    expect(attrOf(model, "data-model-state")).toBe("scripted");
   });
 
   it("tiers by the header's container, not the window: the @container sits on a wrapper", () => {

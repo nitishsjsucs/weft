@@ -262,3 +262,22 @@ control with `appearance: auto` or a table scroller that ends past the main pane
   people counts sit in a second, small table.
 - `tour-layout.spec.ts` checks the chart ticks at all five sizes, the wide tables at 1280 docked and 390, the ringed
   rate row's cells at 390, and Back and Next for every flag at 390.
+
+## The Integrations stop removed (2026-10-20)
+
+The tour is 20 steps (155 s planned; 174 s with every hard timeout spent in full, under the 180 s budget). Step 19,
+Integrations ("Plugs into your tools"), is gone: Permissions is now step 19 and the finish step 20. Step 2 (the
+environment pill) names the simulated clock and Viewing as only, because the pill no longer shows the model. Where
+the sections above say step 20 (Permissions) or steps 12 to 20, they count the 21-step tour of those rounds.
+
+- `tour-steps.test.ts` checks 20 steps, routines, Permissions and the finish as steps 18 to 20, no Integrations step or
+  route, step 2's copy without the model, and 155 s planned.
+- `tour-controls.spec.ts` reads "Step 2 of 20" and "Resume tour (step 6 of 20)", and Next on the unanchored routines
+  card lands on Permissions. `tour-layout.spec.ts` drops Integrations from its geometry and scroll checks (now steps 12
+  to 19). The tour's warmup (`e2e/tour/global-setup.ts`) warms `/app/settings/permissions` instead of
+  `/app/integrations`.
+- The `integration-card` and `integrations-list` `data-tour` tokens stay on the Integrations page; no step targets
+  them.
+- Verified locally on a scratch clone (ports 6952 and 6953, its own `.data-e2e-tour`): `pnpm e2e:tour` 31 of 31 in
+  8.8 min; the tour read at its planned pace took 133 s with a screenshot at every step and autoplay 150 s, both over
+  20 steps. `docs/screenshots/tour/` was retaken from that run (`01-welcome` to `20-finish`).
