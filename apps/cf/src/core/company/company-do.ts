@@ -260,7 +260,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         return null;
       case "slot":
         if (c.gen !== stamp.gen) return ended();
-        if (path === DO_PATHS.mcp) return null;   // MCP keys carry no visitor; the generation and the key hash gate them
+        // MCP keys carry no visitor: the generation, the key hash and a live lease gate them. endLease clears the
+        // stamp's visitor, so a key stops working the moment its lease ends, even while the world is not yet reset.
+        if (path === DO_PATHS.mcp) return stamp.visitor ? null : ended();
         if (!c.visitor || c.visitor !== stamp.visitor) return ended();
         return null;
       case "smoke":

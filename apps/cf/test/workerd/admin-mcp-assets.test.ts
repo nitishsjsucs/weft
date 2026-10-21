@@ -1,7 +1,7 @@
 // Design 9.2, 6.3, 6.4, 3.5 and 4.6: the admin routes need the HMAC signature; provisioning is idempotent and the
 // conformance route runs on its scratch object and wipes it; /mcp routes by the key prefix and dies with the lease
-// generation, agent_ask at most 5 per key per day; the [id] shell fallback; ReseedWorkflow's restore steps are
-// idempotent; and the Rate Limiting bindings answer 429.
+// generation and stops the moment its lease ends, agent_ask at most 5 per key per day; the [id] shell fallback;
+// ReseedWorkflow's restore steps are idempotent; and the Rate Limiting bindings answer 429.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DO_NAMES, MCP_AGENT_ASK_PER_KEY_DAY } from "../../src/shared/contracts";
 import { signAdmin } from "../../src/shared/tokens";
@@ -81,6 +81,23 @@ describe("remote MCP routing", () => {
     for (let i = 0; i < MCP_AGENT_ASK_PER_KEY_DAY + 1; i++) asks.push((await call(key, "agent_ask")).status);
     expect(asks.filter((s) => s === 200)).toHaveLength(MCP_AGENT_ASK_PER_KEY_DAY);
     expect(asks.at(-1)).toBe(429);
+  });
+
+  it("stops the key the moment its lease ends, before the world is reset", async () => {
+    const env = await h.coreEnv();
+    const v = h.visitor("198.51.100.242");
+    const l = await v.lease();
+    const { key } = await (await v.fetch("/api/_hosted/mcp-key", { method: "POST" })).json() as { key: string };
+    const call = () => h.fetch("/mcp", { method: "POST", body: "{}", headers: { authorization: `Bearer ${key}` } }, { origin: null });
+    expect((await call()).status).toBe(200);
+    // The slot's own end of the lease (the Lobby's release calls it before the reset): same generation, no visitor.
+    await env.COMPANY.get(env.COMPANY.idFromName(l.slot!)).endLease({ gen: l.gen!, reason: "test" });
+    expect((await h.ops()).lobby.slots.find((s) => s.name === l.slot)!.gen).toBe(l.gen);
+    const r = await call();
+    expect(r.status).toBe(409);
+    expect(await r.json()).toMatchObject({ code: "LEASE_ENDED" });
+    await env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby)).release({ slot: l.slot!, reason: "test" });
+    expect((await call()).status).toBe(409);
   });
 
   it("kills the key with its lease generation", async () => {
