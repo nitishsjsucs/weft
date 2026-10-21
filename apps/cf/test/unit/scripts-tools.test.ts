@@ -179,6 +179,19 @@ describe("pnpm cf:build", () => {
     expect(r.reachable).toEqual([{ module: "node:fs", chain: ["src/core/index.ts", "src/core/lazy.ts", "../api/assemble.ts"] }]);
     expect(r.inputs).toBe(3);
   });
+
+  it("lets through only the named third-party reach: puppeteer's guarded dynamic fs/promises, never a static one or Weft's", () => {
+    const util = "../../node_modules/.pnpm/@cloudflare+puppeteer@1.4.0/node_modules/@cloudflare/puppeteer/lib/esm/puppeteer/common/util.js";
+    const meta = (kind: string, importer = util) => ({
+      inputs: {
+        "src/core/index.ts": { imports: [{ path: importer, kind: "dynamic-import" }] },
+        [importer]: { imports: [{ path: "fs/promises", kind, external: true }] },
+      },
+    });
+    expect(scanImports(meta("dynamic-import"), (p) => p === "src/core/index.ts").reachable).toEqual([]);
+    expect(scanImports(meta("import-statement"), (p) => p === "src/core/index.ts").reachable.map((x) => x.module)).toEqual(["fs/promises"]);
+    expect(scanImports(meta("dynamic-import", "../../packages/cf-extras/src/pdf.ts"), (p) => p === "src/core/index.ts").reachable.map((x) => x.module)).toEqual(["fs/promises"]);
+  });
 });
 
 describe("pnpm cf:deploy", () => {
