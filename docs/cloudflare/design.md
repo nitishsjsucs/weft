@@ -18,6 +18,13 @@ These are Nitish's and are not revisited here:
 - **Hostname.** `weft.nitish-ratakonda.workers.dev`. No custom domain, so no Email Routing.
 - **Workers Free only.** Never upgrade, never add a payment method, never create accounts, never accept terms on his behalf. A product that needs Workers Paid is recorded as left out with its source (section 7.2).
 - **Node stays the reference runtime.** The local app, `pnpm test`, the e2e suites and the evals keep running on Node with today's defaults.
+- **Settings Nitish chose on 2026-10-20** (these override any other value in this design or in tracks.md):
+  - No cumulative live cap on the hosted demo: hosted `WEFT_LIVE_USD_CAP` is off (no lifetime or monthly ceiling). Nitish is the only intended user.
+  - The per-run cap (0.10) and the day cap (2.00) stay as backstops because the URL is public. Visitor and IP-hash caps equal the day cap. Every cap is read from KV `weft-config`, so it changes without a redeploy.
+  - Pool: `WEFT_POOL_SIZE` 2 (plus the showcase and slot-smoke), so the whole pool seeds on the first UTC day.
+  - Leases: 30 minutes idle and 3 hours total, 20 leases per IP hash per day, so a long demo is never cut off.
+  - AI Search Help: kept, capped at 30 queries a day.
+  - The OpenAI key stays a `weft-core` Worker secret (phase 1); Analytics Engine stays undeclared until Nitish enables it.
 
 ## 1. How this design was formed
 
