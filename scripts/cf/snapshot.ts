@@ -104,9 +104,11 @@ async function main(argv: string[]): Promise<void> {
   const { key, fingerprint } = vaultKey(deploy);
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
+  // WEFT_PREBUILT_HASH=1: the boot stores the prebuilt routines' hash in kv_state, so a restored world's first GET
+  // /v1/routines (and its first tick) compares nothing and writes no row (design 4.4; cf2 contract request 4).
   const env = {
     ...process.env, WEFT_DATA_DIR: DATA_DIR, WEFT_SEED_PROFILE: "rich", WEFT_MEMORY: "sqlite", WEFT_BLOBS: "sqlite", WEFT_CLOCK_RATE: "0",
-    WEFT_VAULT_KEY: key, WEFT_REQUIRE_VAULT_KEY: "1", WEFT_LLM: "scripted", WEFT_EPHEMERAL_READ_IDS: "1",
+    WEFT_VAULT_KEY: key, WEFT_REQUIRE_VAULT_KEY: "1", WEFT_LLM: "scripted", WEFT_EPHEMERAL_READ_IDS: "1", WEFT_PREBUILT_HASH: "1",
   };
   const tsx = join(REPO_ROOT, "node_modules/.bin/tsx");
   const run = (args: string[]) => execFileSync(tsx, args, { cwd: REPO_ROOT, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 << 20 });

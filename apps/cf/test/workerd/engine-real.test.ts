@@ -265,6 +265,18 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     }
   });
 
+  it("runs the design 11.3 conformance cases on the scratch conformance object (the deployed route), which wipes itself", async () => {
+    const r = await h.admin("POST", "/api/_admin/conformance", {});
+    expect(r.status).toBe(200);
+    const out = (await r.json()) as { passed: number; failed: number; skipped: number; cases: { name: string; ok: boolean; skipped?: boolean; detail?: string }[] };
+    expect(out.cases.filter((c) => !c.ok)).toEqual([]);
+    // Only the hang-and-reset case is left out: it resets the object it runs on (Miniflare and the emulator cover it).
+    expect(out.cases.filter((c) => c.skipped).map((c) => c.name)).toEqual(["raw linear begin and commit hangs and resets"]);
+    expect(out.passed).toBe(out.cases.length - 1);
+    const sql = await h.core.getDurableObjectStorage("CompanyDO", { name: DO_NAMES.conformance });
+    expect(await sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_cf_%'")).toEqual([]);
+  }, 120_000);
+
   it("reaches no node:fs, node:child_process or node:net from the weft-core entry", () => {
     const out = mkdtempSync(join(tmpdir(), "weft-core-meta-"));
     try {
