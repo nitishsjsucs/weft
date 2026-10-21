@@ -2,17 +2,31 @@
 // cf4-worker's) with their state under .scratch/cf4-worker/cf-dev/, then provisions the pool so the guided tour runs
 // against it. The configs are the deploy configs made local (scripts/cf/lib/configs.ts): the scripted provider,
 // Turnstile's always-pass test secret, local random secrets in .dev.vars (mode 600, never printed), the bindings
-// Miniflare does not emulate swapped for the fakes worker, the web export from apps/web/out when it exists.
+// Miniflare does not emulate swapped for the fakes worker, the web export from apps/web/out when it exists, with the
+// snapshot's stats.json copied beside it (the hosted landing fetches /stats.json).
 //
-//   pnpm cf:dev [--port 5780] [--pool 2] [--dir .scratch/<track>/cf-dev] [--fake] [--detach]     pnpm cf:dev stop [--dir ...]
+//   pnpm cf:dev [--port 5780] [--pool 2] [--dir .scratch/<track>/cf-dev] [--fake] [--detach]
+//               [--turnstile-verify-url http://127.0.0.1:<port>/siteverify]                       pnpm cf:dev stop [--dir ...]
+//
+// --turnstile-verify-url (or WEFT_CF_DEV_TURNSTILE_VERIFY_URL) points the front Worker's siteverify at a local stand-in
+// with Cloudflare's published test-secret answers: workerd does not use an HTTPS proxy, so where the internet is
+// reachable only through one (a cloud container) the real siteverify is out of reach. The deploy configs never set it.
+// The pool must fit one day's restore budget (the showcase and slot-smoke plus --pool slots, each a full restore):
+// cf:dev refuses a larger pool at once, and stops waiting when the Lobby defers a restore (state kept from earlier
+// runs under --dir can have used today's budget; start from a fresh --dir).
+//
+// PDFs stay pending locally: the fakes worker's FakeBrowser answers Browser Run's session request with 501, since
+// @cloudflare/puppeteer needs a real browser session over a DevTools WebSocket that Miniflare does not emulate. The
+// render job fails, is retried and ends in weft-dlq; the deployed smoke checks PDFs end to end.
 //
 // The weft-ops D1 schema (apps/cf/d1) is applied to the local state first (wrangler d1 migrations apply --local),
 // since Miniflare creates the database empty.
 // --fake runs the Miniflare suite's fake world engine (no snapshot needed); otherwise run pnpm cf:snapshot first.
 // --detach returns once the pool is ready and leaves the server running (its pid is in .scratch/cf4-worker/cf-dev).
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { defaultBudget, emptyUsage, restoresLeft, type BudgetConfig } from "../../apps/cf/src/core/lobby/policy";
 import { signAdmin } from "../../apps/cf/src/shared/tokens";
 import { APPS_CF, writeLocalConfigs } from "./lib/configs";
 import { ensureEnvValue, hex, REPO_ROOT } from "./lib/env-file";
@@ -48,6 +62,32 @@ export function devVars(dir: string): Record<string, string> {
   return v;
 }
 
+/** Why the pool cannot be provisioned in one day (null when it can): the showcase, slot-smoke and every pool slot are
+ * one full restore each, and the Lobby starts only as many as fit the provisioning ceiling. */
+export function poolRestoreProblem(pool: number, budget: BudgetConfig = defaultBudget()): string | null {
+  if (!Number.isInteger(pool) || pool < 1) return `--pool ${pool} is not a whole number of slots (1 or more)`;
+  const fit = restoresLeft(emptyUsage(), budget);
+  const worlds = pool + 2;
+  if (worlds <= fit) return null;
+  return `--pool ${pool} needs ${worlds} full restores (the showcase, slot-smoke and ${pool} slots, ${budget.fullRestoreRows.toLocaleString("en-US")} rows each), `
+    + `but one day's restore budget (${Math.max(budget.provisionRowsCeiling, budget.rowsWrittenShare).toLocaleString("en-US")} rows written) fits ${fit}: use --pool ${Math.max(1, fit - 2)} or less`;
+}
+
+/** The siteverify URL for a local run (--turnstile-verify-url, else WEFT_CF_DEV_TURNSTILE_VERIFY_URL), or null. */
+export function turnstileVerifyUrl(argv: string[], env: NodeJS.ProcessEnv = process.env): string | null {
+  const i = argv.indexOf("--turnstile-verify-url");
+  const v = (i >= 0 ? argv[i + 1] : undefined) ?? env.WEFT_CF_DEV_TURNSTILE_VERIFY_URL ?? "";
+  if (!v) return null;
+  let u: URL;
+  try { u = new URL(v); } catch { throw new Error(`--turnstile-verify-url ${v} is not a URL`); }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error(`--turnstile-verify-url ${v} is not an http(s) URL`);
+  return u.toString();
+}
+
+/** Worlds the Lobby left unrestored for today's budget ("restore deferred"), as the ops readout lists them. */
+export const deferredWorlds = (slots: readonly { name: string; state: string; error?: string | null }[]): string[] =>
+  slots.filter((s) => s.state !== "ready" && /restore deferred/.test(s.error ?? "")).map((s) => s.name);
+
 async function waitFor(url: string, ms: number): Promise<void> {
   const t0 = Date.now();
   for (;;) {
@@ -77,6 +117,10 @@ async function main(argv: string[]): Promise<void> {
   const arg = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] ?? null : null; };
   const port = Number(arg("--port") ?? DEFAULT_PORT);
   const fake = argv.includes("--fake");
+  const pool = Number(arg("--pool") ?? 2);
+  const poolProblem = poolRestoreProblem(pool);
+  if (poolProblem) throw new Error(poolProblem);
+  const verifyUrl = turnstileVerifyUrl(argv);
   if (portInUse(port)) throw new Error(`port ${port} is in use; pick another with --port`);
   if (!fake && !existsSync(join(APPS_CF, "generated/manifest.json"))) throw new Error("no snapshot in apps/cf/generated: run pnpm cf:snapshot first (or pass --fake)");
   mkdirSync(DEV_DIR, { recursive: true });
@@ -89,7 +133,14 @@ async function main(argv: string[]): Promise<void> {
     writeFileSync(join(assetsDir, "index.html"), "<!doctype html><title>Weft (cf:dev)</title><p>No static export yet: run WEFT_STATIC_EXPORT=1 NEXT_PUBLIC_WEFT_HOSTED=1 pnpm --filter @weft/web build.</p>\n");
     console.log("cf:dev: apps/web/out has no static export; serving a placeholder page (the API works)");
   }
-  const paths = writeLocalConfigs({ dir: DEV_DIR, engine: fake ? "fake" : "real", origin, poolSize: Number(arg("--pool") ?? 2), assetsDir, configMemoMs: 1000 });
+  // The landing's numbers (pnpm cf:build does the same for the deploy). The assets manifest is read at start.
+  const stats = join(APPS_CF, "generated/stats.json");
+  if (existsSync(stats)) copyFileSync(stats, join(assetsDir, "stats.json"));
+  const paths = writeLocalConfigs({
+    dir: DEV_DIR, engine: fake ? "fake" : "real", origin, poolSize: pool, assetsDir, configMemoMs: 1000,
+    ...(verifyUrl ? { frontVars: { TURNSTILE_VERIFY_URL: verifyUrl } } : {}),
+  });
+  if (verifyUrl) console.log(`cf:dev: siteverify goes to ${verifyUrl}`);
   const vars = devVars(DEV_DIR);
   writeFileSync(join(DEV_DIR, ".dev.vars"), Object.entries(vars).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 0o600 });
 
@@ -110,8 +161,10 @@ async function main(argv: string[]): Promise<void> {
     if (r.status !== 200) throw new Error(`provision answered ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const t0 = Date.now();
     for (;;) {
-      const ops = (await (await admin(origin, vars.WEFT_ADMIN_TOKEN!, "GET", "/api/_admin/ops")).json()) as { lobby: { slots: { name: string; state: string }[] } };
+      const ops = (await (await admin(origin, vars.WEFT_ADMIN_TOKEN!, "GET", "/api/_admin/ops")).json()) as { lobby: { slots: { name: string; state: string; error: string | null }[] } };
       if (ops.lobby.slots.every((s) => s.state === "ready")) break;
+      const deferred = deferredWorlds(ops.lobby.slots);
+      if (deferred.length) throw new Error(`the Lobby deferred ${deferred.join(", ")}: today's restore budget is used (state from earlier runs is kept under ${DEV_DIR.replace(REPO_ROOT + "/", "")}; use a fresh --dir, or wait for 00:00 UTC)`);
       if (ops.lobby.slots.some((s) => s.state === "failed")) throw new Error(`a world failed to restore: ${JSON.stringify(ops.lobby.slots)}`);
       if (Date.now() - t0 > 300_000) throw new Error("the pool was not ready within 5 minutes");
       await new Promise((res) => setTimeout(res, 1000));

@@ -10,12 +10,14 @@ import { deployConfigs, PLACEHOLDER_IDS, readResources, usesMcpPlaceholder, writ
 import { MCP_ENTRY, MCP_PLACEHOLDER, mcpAlias, mergedTracks, TRACK_FILES } from "../../../../scripts/cf/lib/tracks";
 import { readEnvValue } from "../../../../scripts/cf/lib/env-file";
 import { scanImports } from "../../../../scripts/cf/lib/import-scan";
+import { SNAPSHOT_STAND_INS, withSnapshotStandIns } from "../../../../scripts/cf/lib/core-scan";
 import { ensureResources, NAMES } from "../../../../scripts/cf/resources";
-import { buildDeployable, parseUploadSize, sizeProblems, type BuildRecord } from "../../../../scripts/cf/build";
+import { buildDeployable, DEPLOY_ORIGIN, filesWithTestSitekey, parseUploadSize, sizeProblems, TURNSTILE_TEST_SITEKEY, webBuildEnv, type BuildRecord } from "../../../../scripts/cf/build";
+import { TURNSTILE_TEST_SITEKEY as WEB_TEST_SITEKEY } from "../../../web/src/lib/hosted/flags";
 import { deployRefusals } from "../../../../scripts/cf/deploy";
 import { summarize, type BudgetData } from "../../../../scripts/cf/budget";
-import { snapshotId, snapshotMemoryProblem, vaultFingerprint } from "../../../../scripts/cf/snapshot";
-import { devVars, portInUse } from "../../../../scripts/cf/dev";
+import { snapshotId, snapshotMemoryProblem, unrevokedSeedKeys, vaultFingerprint } from "../../../../scripts/cf/snapshot";
+import { deferredWorlds, devVars, poolRestoreProblem, portInUse, turnstileVerifyUrl } from "../../../../scripts/cf/dev";
 import { REPO } from "../support/config-files";
 
 const dir = mkdtempSync(join(tmpdir(), "weft-cf-tools-"));
@@ -166,6 +168,27 @@ describe("pnpm cf:build", () => {
     expect(sizeProblems({ front: { uploadKiB: 1024, gzipKiB: 1 }, core: { uploadKiB: 16 * 1024, gzipKiB: 1 } })).toHaveLength(2);
   });
 
+  it("builds the web export with the resources' sitekey and the deployed origin, and finds the test sitekey in an export", () => {
+    const resources = { version: 1 as const, kv: { CONFIG: "k" }, d1: { OPS: "d" }, turnstile: { sitekey: "0x4AAAAAAAweftsitekey" }, updatedAt: "t" };
+    const withKey = webBuildEnv({ PATH: "/bin" }, { resources, publicOrigin: DEPLOY_ORIGIN });
+    expect(withKey).toMatchObject({ PATH: "/bin", WEFT_STATIC_EXPORT: "1", NEXT_PUBLIC_WEFT_HOSTED: "1", WEFT_PUBLIC_ORIGIN: "https://weft.nitish-ratakonda.workers.dev", NEXT_PUBLIC_WEFT_TURNSTILE_SITEKEY: "0x4AAAAAAAweftsitekey" });
+    // Without resources the sitekey never comes from the shell: the export falls back to the test sitekey.
+    const without = webBuildEnv({ NEXT_PUBLIC_WEFT_TURNSTILE_SITEKEY: "from-the-shell" }, { resources: null, publicOrigin: DEPLOY_ORIGIN });
+    expect(without).not.toHaveProperty("NEXT_PUBLIC_WEFT_TURNSTILE_SITEKEY");
+    expect(without.WEFT_PUBLIC_ORIGIN).toBe(DEPLOY_ORIGIN);
+    // The shell's fallback is the key the scan looks for.
+    expect(TURNSTILE_TEST_SITEKEY).toBe(WEB_TEST_SITEKEY);
+    const out = join(dir, "export");
+    mkdirSync(join(out, "_next/static/chunks"), { recursive: true });
+    writeFileSync(join(out, "index.html"), "<!doctype html><p>Weft</p>");
+    writeFileSync(join(out, "_next/static/chunks/a.js"), `const k="0x4AAAAAAAweftsitekey";`);
+    writeFileSync(join(out, "favicon.png"), TURNSTILE_TEST_SITEKEY);
+    expect(filesWithTestSitekey(out)).toEqual([]);
+    writeFileSync(join(out, "_next/static/chunks/b.js"), `const k="${TURNSTILE_TEST_SITEKEY}";`);
+    expect(filesWithTestSitekey(out)).toEqual(["_next/static/chunks/b.js"]);
+    expect(filesWithTestSitekey(join(dir, "no-export"))).toEqual([]);
+  });
+
   it("finds node:fs and friends reachable from the entry, through dynamic imports, with the chain", () => {
     const meta = {
       inputs: {
@@ -178,6 +201,20 @@ describe("pnpm cf:build", () => {
     const r = scanImports(meta, (p) => p === "src/core/index.ts");
     expect(r.reachable).toEqual([{ module: "node:fs", chain: ["src/core/index.ts", "src/core/lazy.ts", "../api/assemble.ts"] }]);
     expect(r.inputs).toBe(3);
+  });
+
+  it("bundles for the scan without a snapshot: stand-ins only for the missing files, removed afterwards", () => {
+    const gen = join(dir, "generated");
+    mkdirSync(gen, { recursive: true });
+    writeFileSync(join(gen, "manifest.json"), "{\"real\":true}\n");
+    const seen = withSnapshotStandIns(gen, () => Object.keys(SNAPSHOT_STAND_INS).filter((f) => existsSync(join(gen, f))));
+    expect(seen.sort()).toEqual(["manifest.json", "seed-rows.json.gz", "snapshot-rich.sql.gz"]);
+    expect(existsSync(join(gen, "snapshot-rich.sql.gz"))).toBe(false);
+    expect(existsSync(join(gen, "seed-rows.json.gz"))).toBe(false);
+    expect(readFileSync(join(gen, "manifest.json"), "utf8")).toBe("{\"real\":true}\n");
+    // Removed on a throw as well.
+    expect(() => withSnapshotStandIns(gen, () => { throw new Error("dry run failed"); })).toThrow(/dry run failed/);
+    expect(existsSync(join(gen, "seed-rows.json.gz"))).toBe(false);
   });
 
   it("lets through only the named third-party reach: puppeteer's guarded dynamic fs/promises, never a static one or Weft's", () => {
@@ -197,20 +234,29 @@ describe("pnpm cf:build", () => {
 describe("pnpm cf:deploy", () => {
   const key = "a".repeat(64);
   const good: BuildRecord = {
-    sha: "f".repeat(40), dirty: false, dir: "/x", createdAt: "t", placeholders: { snapshot: false, web: false, resources: false, mcp: false },
+    sha: "f".repeat(40), dirty: false, dir: "/x", createdAt: "t", placeholders: { snapshot: false, web: false, resources: false, mcp: false, sitekey: false },
     sizes: { front: { uploadKiB: 40, gzipKiB: 12 }, core: { uploadKiB: 7000, gzipKiB: 1400 } }, importScan: { reachable: [], inputs: 1 },
     snapshot: { id: "snap", vaultKeyFingerprint: vaultFingerprint(key), memoryHead: "a".repeat(40) }, deployable: true,
   };
   it("deploys only a complete build sealed with the deploy vault key", () => {
     expect(deployRefusals(good, key)).toEqual([]);
     expect(buildDeployable(good)).toBe(true);
-    expect(deployRefusals({ ...good, placeholders: { snapshot: true, web: true, resources: true, mcp: true } }, key)).toHaveLength(4);
-    // A build record from before the MCP placeholder existed is refused too.
-    expect(deployRefusals({ ...good, placeholders: { snapshot: false, web: false, resources: false } as BuildRecord["placeholders"] }, key)).toHaveLength(1);
+    expect(deployRefusals({ ...good, placeholders: { snapshot: true, web: true, resources: true, mcp: true, sitekey: true } }, key)).toHaveLength(5);
+    // A build record from before the MCP and sitekey placeholders existed is refused for both.
+    const old = deployRefusals({ ...good, placeholders: { snapshot: false, web: false, resources: false } as BuildRecord["placeholders"] }, key);
+    expect(old).toHaveLength(2);
+    expect(old.join("\n")).toMatch(/@weft\/mcp placeholder[\s\S]*always-pass test sitekey/);
+    expect(buildDeployable({ ...good, placeholders: { snapshot: false, web: false, resources: false, mcp: false } as BuildRecord["placeholders"] })).toBe(false);
     expect(deployRefusals({ ...good, dirty: true }, key)).toHaveLength(1);
     expect(deployRefusals(good, "b".repeat(64))).toEqual(["the snapshot was sealed with another vault key (pnpm cf:build --deploy-snapshot)"]);
     expect(deployRefusals({ ...good, snapshot: { ...good.snapshot, id: "s", vaultKeyFingerprint: "local:" + vaultFingerprint(key) } }, key)).toHaveLength(1);
     expect(deployRefusals(good, null)).toHaveLength(1);
+  });
+
+  it("refuses a build whose web export carries Turnstile's always-pass test sitekey", () => {
+    const testKey = { ...good, placeholders: { ...good.placeholders, sitekey: true } };
+    expect(buildDeployable(testKey)).toBe(false);
+    expect(deployRefusals(testKey, key)).toEqual(["the web export carries Turnstile's always-pass test sitekey, which the deployed widget's secret rejects (pnpm cf:resources, then pnpm cf:build)"]);
   });
 
   it("refuses a build whose import scan reached node:fs, node:child_process or node:net (design 6.4)", () => {
@@ -227,6 +273,16 @@ describe("pnpm cf:deploy", () => {
     expect(snapshotMemoryProblem({ memoryHead: null, memory: { objects: 0, commits: 0, refs: 0 } })).toMatch(/no company memory/);
     expect(snapshotMemoryProblem({ memoryHead: "a".repeat(40), memory: { objects: 0, commits: 0, refs: 1 } })).toMatch(/mem_objects 0/);
     expect(snapshotMemoryProblem({ memoryHead: "a".repeat(40) })).toMatch(/no company memory/);
+  });
+
+  it("refuses a snapshot whose seed rows hold an API key that is not revoked", () => {
+    const columns = ["id", "company_id", "principal_id", "prefix", "hash", "label", "scope", "surface", "created_at", "revoked_at"];
+    const row = (rowid: number, id: string, revoked: string | null) => [rowid, id, "cmp_larkspur", "usr_dana", "wk_x", "h", "demo", "admin", "api", "2026-10-26T15:30:00.000Z", revoked];
+    expect(unrevokedSeedKeys({ api_keys: { columns, rowid: true, rows: [row(1, "key_0001", "2026-10-26T15:30:00.000Z"), row(2, "key_0002", "2026-10-26T15:30:00.000Z")] } })).toEqual([]);
+    expect(unrevokedSeedKeys({ api_keys: { columns, rowid: true, rows: [row(1, "key_0001", "2026-10-26T15:30:00.000Z"), row(2, "key_0002", null)] } })).toEqual(["key_0002"]);
+    expect(unrevokedSeedKeys({ api_keys: { columns, rowid: false, rows: [row(1, "key_0001", null).slice(1)] } })).toEqual(["key_0001"]);
+    expect(unrevokedSeedKeys({ workers: { columns: ["id"], rowid: true, rows: [] } })).toEqual([]);
+    expect(() => unrevokedSeedKeys({ api_keys: { columns: ["id"], rowid: true, rows: [] } })).toThrow(/revoked_at/);
   });
 
   it("fingerprints the vault key exactly as the vault does", () => {
@@ -269,5 +325,30 @@ describe("pnpm cf:dev helpers", () => {
     expect(a.WEFT_VAULT_KEY).toMatch(/^[0-9a-f]{64}$/);
     expect(a.TURNSTILE_SECRET).toBe("1x0000000000000000000000000000000AA");
     expect(portInUse(5799)).toBe(false);
+  });
+
+  it("refuses a pool one day's restore budget cannot provision, before starting anything", () => {
+    // 90,000 rows written / 20,556 per full restore: 4 worlds, so the showcase, slot-smoke and 2 slots.
+    expect(poolRestoreProblem(1)).toBeNull();
+    expect(poolRestoreProblem(2)).toBeNull();
+    expect(poolRestoreProblem(3)).toBe("--pool 3 needs 5 full restores (the showcase, slot-smoke and 3 slots, 20,556 rows each), but one day's restore budget (90,000 rows written) fits 4: use --pool 2 or less");
+    expect(poolRestoreProblem(4, { rowsWrittenShare: 60_000, provisionRowsCeiling: 400_000, fullRestoreRows: 20_556 })).toBeNull();
+    expect(poolRestoreProblem(0)).toMatch(/not a whole number/);
+    expect(poolRestoreProblem(Number.NaN)).toMatch(/not a whole number/);
+    expect(deferredWorlds([
+      { name: "showcase", state: "ready", error: null },
+      { name: "slot-2", state: "new", error: "restore deferred (first)" },
+      { name: "slot-1", state: "failed", error: "restore deferred (verify)" },
+      { name: "slot-3", state: "failed", error: "workflow create failed" },
+    ])).toEqual(["slot-2", "slot-1"]);
+  });
+
+  it("points siteverify at a local stand-in only when asked", () => {
+    expect(turnstileVerifyUrl([], {})).toBeNull();
+    expect(turnstileVerifyUrl(["--turnstile-verify-url", "http://127.0.0.1:5809/siteverify"], {})).toBe("http://127.0.0.1:5809/siteverify");
+    expect(turnstileVerifyUrl([], { WEFT_CF_DEV_TURNSTILE_VERIFY_URL: "http://127.0.0.1:5809/x" })).toBe("http://127.0.0.1:5809/x");
+    expect(turnstileVerifyUrl(["--turnstile-verify-url", "http://127.0.0.1:1/a"], { WEFT_CF_DEV_TURNSTILE_VERIFY_URL: "http://127.0.0.1:2/b" })).toBe("http://127.0.0.1:1/a");
+    expect(() => turnstileVerifyUrl(["--turnstile-verify-url", "nope"], {})).toThrow(/not a URL/);
+    expect(() => turnstileVerifyUrl([], { WEFT_CF_DEV_TURNSTILE_VERIFY_URL: "file:///etc/passwd" })).toThrow(/not an http/);
   });
 });

@@ -6,9 +6,10 @@
 //                                         secret with put-secret.sh (names only are printed)
 //   with-cf.sh pnpm cf:deploy             deploy the last pnpm cf:build: D1 migrations, weft-core, then weft, then
 //                                         KV snapshot.version; it refuses a build with placeholders, without
-//                                         resources, with uncommitted changes, with node:fs, node:child_process or
-//                                         node:net reachable from weft-core, with a snapshot that has no company
-//                                         memory, or sealed with another vault key
+//                                         resources, with the test sitekey in its web export, with uncommitted
+//                                         changes, with node:fs, node:child_process or node:net reachable from
+//                                         weft-core, with a snapshot that has no company memory, or sealed with
+//                                         another vault key
 //   with-cf.sh pnpm cf:deploy rollback <core version> <front version>
 //
 // After a deploy the first step is the transaction conformance run (POST /api/_admin/conformance); any failure means
@@ -30,6 +31,7 @@ export function deployRefusals(b: BuildRecord, deployVaultKey: string | null): s
   if (b.placeholders.web) out.push("the build used placeholder assets (no static export in that commit)");
   if (b.placeholders.resources) out.push("the build has placeholder resource ids (run pnpm cf:resources, then pnpm cf:build)");
   if (b.placeholders.mcp !== false) out.push("the build used the @weft/mcp placeholder (no cf3-agent apps/mcp/src/index.ts in that commit), so no world could boot");
+  if (b.placeholders.sitekey !== false) out.push("the web export carries Turnstile's always-pass test sitekey, which the deployed widget's secret rejects (pnpm cf:resources, then pnpm cf:build)");
   for (const r of b.importScan?.reachable ?? []) out.push(`the import scan reached ${r.module} from the weft-core entry (design 6.4) via ${r.chain.join(" -> ")}`);
   if (!b.snapshot.memoryHead) out.push("the snapshot has no company memory HEAD (pnpm cf:snapshot refuses that; rebuild with the current scripts)");
   if (b.dirty) out.push("the build was made with uncommitted changes in the checkout");
