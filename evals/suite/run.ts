@@ -2,11 +2,14 @@
 //   pnpm eval:suite validate                         load and validate every task file
 //   pnpm eval:suite digests [--write]                rebuild every world, compare (or pin) the digests
 //   pnpm eval:suite [--split dev|test|retired-r1|all] [--variant default|chat_can_propose] [--k n] [--ids RT-01,CQ-01] [--legacy]
-//                   [--provider scripted|live] [--cap 0.15] [--stage w4-eval-suite --stage-cap 0.10] [--phoenix] [--gate]
+//                   [--provider scripted|live|workers_ai] [--cap 0.15] [--stage w4-eval-suite --stage-cap 0.10] [--phoenix] [--gate]
 //                   [--experiment baseline]   the Phoenix experiment name (one split and variant; else -<split>-<variant> is added)
 // --gate (CI: `pnpm eval:ci`, the scripted provider over both splits and both variants, no network) exits 1 on any unsafe
 // action, taint miss, canary hit or harness error. Task success is reported, never gated: the scripted model cannot branch.
-// Live runs are opt-in (WEFT_LIVE_OPENAI=1 WEFT_LLM=openai, the key only from WEFT_SECRETS_FILE). WEFT_TRACE=phoenix or
+// Live runs are opt-in (WEFT_LIVE_OPENAI=1 WEFT_LLM=openai, the key only from WEFT_SECRETS_FILE). --provider workers_ai is
+// the hosted switch's offline side by side (docs/models.md, "Hosted"): the same opt-in with WEFT_LLM=workers_ai, the
+// gateway's Workers AI REST path (WEFT_AIG_ACCOUNT_ID, WEFT_AIG_GATEWAY) and WEFT_WORKERS_AI_TOKEN; eval:ci and the
+// tests never select it. WEFT_TRACE=phoenix or
 // --phoenix records every trial as a Phoenix experiment run on the local Phoenix (WEFT_PHOENIX_URL, default
 // http://127.0.0.1:6206). Results: evals/results/<date>-<sha>-suite.json (gitignored) and the Markdown report beside it.
 import { execSync } from "node:child_process";
@@ -20,12 +23,19 @@ import { ACTIVE_SPLITS, ALL_SPLITS } from "./splits";
 import { finalCanaryScan, newState, planTrials, runPlain, runTrial, settleTrial, SuiteStop, type RunnerOptions } from "./runner";
 import { metrics, renderReport, type SuiteResultFile } from "./report";
 import { buildWorld, worldDigest, worldKey } from "./worlds/index";
-import { effortOverrideFromEnv } from "../../packages/agent/src/providers/factory";
+import { WORKERS_AI_MODEL, WORKERS_AI_PROVIDER_ID } from "../../packages/contracts/src/ext/cf-agent";
+import { effortOverrideFromEnv, WORKERS_AI_TOKEN_ENV } from "../../packages/agent/src/providers/factory";
+import { aiGatewayFromEnv } from "../../packages/agent/src/providers/gateway";
+import { loadSecret } from "../../packages/agent/src/secrets";
 import { runCapScaleFor } from "../../packages/agent/src/cost";
+
+/** What --provider accepts: scripted (eval:ci, $0), live (OpenAI) or workers_ai (the hosted switch over REST). */
+export const SUITE_PROVIDERS = ["scripted", "live", WORKERS_AI_PROVIDER_ID] as const;
+export type SuiteProvider = (typeof SUITE_PROVIDERS)[number];
 
 export interface CliArgs {
   cmd: "run" | "validate" | "digests"; write: boolean; gate: boolean; splits: EvalSplit[]; variants: EvalVariant[] | null; k: number; ids: string[] | null; legacy: boolean;
-  provider: "scripted" | "live"; cap: number; stage: string; stageCap: number | null; phoenix: boolean; outDir: string; experiment: string | null;
+  provider: SuiteProvider; cap: number; stage: string; stageCap: number | null; phoenix: boolean; outDir: string; experiment: string | null;
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliArgs {
@@ -40,7 +50,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     else if (f === "--k") { a.k = Number(val(f)); if (!Number.isInteger(a.k) || a.k < 1 || a.k > 8) throw new Error("--k is 1 to 8"); }
     else if (f === "--ids") a.ids = val(f).split(",").map((s) => s.trim()).filter(Boolean);
     else if (f === "--legacy") a.legacy = true;
-    else if (f === "--provider") { const v = val(f); if (v !== "scripted" && v !== "live") throw new Error(`--provider ${v}`); a.provider = v; }
+    else if (f === "--provider") { const v = val(f); if (!(SUITE_PROVIDERS as readonly string[]).includes(v)) throw new Error(`--provider ${v}`); a.provider = v as SuiteProvider; }
     else if (f === "--cap") { a.cap = Number(val(f)); if (!(a.cap >= 0 && a.cap <= 3)) throw new Error("--cap is $0 to $3"); }
     else if (f === "--stage") a.stage = val(f);
     else if (f === "--stage-cap") a.stageCap = Number(val(f));
@@ -69,13 +79,33 @@ const fullSha = () => { try { return execSync("git rev-parse HEAD", { cwd: REPO_
  * What a run records about its model setup (experiment metadata and the result file): the model (WEFT_MODEL, default
  * Luna), the reasoning effort (WEFT_EFFORT when set, else the per-stage default "low"), whether unattended routine runs
  * call the model (WEFT_BACKGROUND_LLM=1) and the cost factor on each task's worst case. A bad WEFT_EFFORT throws here,
- * before any world is built or any money is spent.
+ * before any world is built or any money is spent. workers_ai always runs gpt-oss-120b at the per-stage effort (the
+ * provider reads neither WEFT_MODEL nor WEFT_EFFORT), and its factor is the one its run cap and G8 use.
  */
 export function runSetup(provider: CliArgs["provider"], env: NodeJS.ProcessEnv = process.env): { model: string; effort: string; effortSource: "WEFT_EFFORT" | "default"; backgroundLlm: boolean; costScale: number } {
-  if (provider !== "live") return { model: "scripted", effort: "low", effortSource: "default", backgroundLlm: false, costScale: 1 };
+  if (provider === "scripted") return { model: "scripted", effort: "low", effortSource: "default", backgroundLlm: false, costScale: 1 };
+  if (provider === WORKERS_AI_PROVIDER_ID) {
+    return { model: WORKERS_AI_MODEL, effort: "low", effortSource: "default", backgroundLlm: env.WEFT_BACKGROUND_LLM === "1", costScale: runCapScaleFor(WORKERS_AI_PROVIDER_ID, WORKERS_AI_MODEL) };
+  }
   const model = (env.WEFT_MODEL ?? "").trim() || "gpt-5.6-luna";
   const override = effortOverrideFromEnv(env);
   return { model, effort: override ?? "low", effortSource: override ? "WEFT_EFFORT" : "default", backgroundLlm: env.WEFT_BACKGROUND_LLM === "1", costScale: runCapScaleFor("openai", model) };
+}
+
+/**
+ * Why a run with a model may not start, or null. Both live providers are opt-in (WEFT_LIVE_OPENAI=1 and WEFT_LLM
+ * naming the provider, which the trial worlds then build); workers_ai also needs the gateway (WEFT_AIG_ACCOUNT_ID,
+ * WEFT_AIG_GATEWAY) and WEFT_WORKERS_AI_TOKEN from the environment or WEFT_SECRETS_FILE. Checked before any world is
+ * built; names only, never a value.
+ */
+export function liveRefusal(provider: CliArgs["provider"], env: NodeJS.ProcessEnv = process.env): string | null {
+  if (provider === "scripted") return null;
+  const optedIn = (llm: string) => env.WEFT_LIVE_OPENAI === "1" && env.WEFT_LLM === llm;
+  if (provider === "live") return optedIn("openai") ? null : "a live suite run is opt-in: set WEFT_LIVE_OPENAI=1 and WEFT_LLM=openai (docs/evals.md)";
+  if (!optedIn(WORKERS_AI_PROVIDER_ID)) return "a workers_ai suite run is opt-in: set WEFT_LIVE_OPENAI=1 and WEFT_LLM=workers_ai (docs/models.md)";
+  if (!aiGatewayFromEnv(env)) return "--provider workers_ai needs WEFT_AIG_ACCOUNT_ID and WEFT_AIG_GATEWAY (the gateway's Workers AI REST path, docs/models.md)";
+  if (!loadSecret(WORKERS_AI_TOKEN_ENV, env)) return `--provider workers_ai needs ${WORKERS_AI_TOKEN_ENV} in the environment or in WEFT_SECRETS_FILE (docs/models.md)`;
+  return null;
 }
 
 /** Rebuilds each distinct world once and compares (or, with --write, pins) every task's digest. */
@@ -126,8 +156,10 @@ export async function main(argv: string[]): Promise<number> {
     return bad.length && !args.write ? 1 : 0;
   }
 
-  if (args.provider === "live") {
-    if (process.env.WEFT_LIVE_OPENAI !== "1" || process.env.WEFT_LLM !== "openai") { console.error("a live suite run is opt-in: set WEFT_LIVE_OPENAI=1 and WEFT_LLM=openai (docs/evals.md)"); return 2; }
+  const live = args.provider !== "scripted";
+  if (live) {
+    const refusal = liveRefusal(args.provider);
+    if (refusal) { console.error(refusal); return 2; }
     process.env.WEFT_DEV_AUTH = "1";
     process.env.WEFT_LIVE_USD_CAP ??= String(args.cap);
   }
@@ -136,9 +168,9 @@ export async function main(argv: string[]): Promise<number> {
   const harnessSha = sha();
   const harnessCommit = fullSha();
   const setup = runSetup(args.provider);
-  if (args.provider === "live") console.error(`model ${setup.model}, effort ${setup.effort} (${setup.effortSource}), WEFT_BACKGROUND_LLM ${setup.backgroundLlm ? "1" : "unset"}, commit ${harnessCommit}`);
+  if (live) console.error(`model ${setup.model}, effort ${setup.effort} (${setup.effortSource}), WEFT_BACKGROUND_LLM ${setup.backgroundLlm ? "1" : "unset"}, commit ${harnessCommit}`);
   const opts: RunnerOptions = {
-    mode: args.provider, baseDir, suiteCapUsd: args.cap, harnessSha, requireDigest: true, costScale: setup.costScale,
+    mode: live ? "live" : "scripted", baseDir, suiteCapUsd: args.cap, harnessSha, requireDigest: true, costScale: setup.costScale,
     wave: { stage: args.stage, stageCapUsd: args.stageCap ?? args.cap },
     log: (l) => console.error(l),
   };
@@ -193,7 +225,7 @@ export async function main(argv: string[]): Promise<number> {
     suiteCapUsd: args.cap, spentUsd: state.spentUsd, stoppedEarly: state.stoppedEarly, trials: state.trials, variants, canaryHitsWholeRun: wholeRun,
   };
   mkdirSync(args.outDir, { recursive: true });
-  const stem = join(args.outDir, `${startedAt.slice(0, 10)}-${harnessSha}${args.provider === "scripted" ? "-scripted" : ""}${process.env.WEFT_EVAL_TAG ? `-${process.env.WEFT_EVAL_TAG}` : ""}-suite`);
+  const stem = join(args.outDir, `${startedAt.slice(0, 10)}-${harnessSha}${args.provider === "live" ? "" : `-${args.provider}`}${process.env.WEFT_EVAL_TAG ? `-${process.env.WEFT_EVAL_TAG}` : ""}-suite`);
   const prev = previousResult(args.outDir, `${stem}.json`);
   writeFileSync(`${stem}.json`, `${JSON.stringify(result, null, 2)}\n`);
   writeFileSync(`${stem}.md`, renderReport(result, prev));
