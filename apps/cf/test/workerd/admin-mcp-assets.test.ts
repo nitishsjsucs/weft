@@ -52,6 +52,14 @@ describe("admin routes", () => {
     expect(tables).toEqual([]);
   });
 
+  it("runs the seed memory index only with the signature, and says why it cannot run without Workers AI and Vectorize", async () => {
+    expect((await h.fetch("/api/_admin/seed-index", { method: "POST", body: "{}" }, { origin: null })).status).toBe(401);
+    // The fake engine has no extras bindings, as a deployment without AI or MEMVEC: the showcase refuses the step.
+    const r = await h.admin("POST", "/api/_admin/seed-index", {});
+    expect(r.status).toBe(503);
+    expect(await r.json()).toMatchObject({ code: "SEED_INDEX_FAILED", message: expect.stringMatching(/SEED_INDEX_DISABLED/) });
+  });
+
   it("keeps visitor ids and IP hashes out of the ops readout", async () => {
     const v = h.visitor("198.51.100.250");
     await v.lease();
