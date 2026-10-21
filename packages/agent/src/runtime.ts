@@ -1,6 +1,11 @@
 // The agent runtime (SPEC 9.0 AgentRuntime): opens agent_runs rows that reuse the executor's run id, renders the
 // context pack once, queues runLoop, requeues on decisions (capped at 2), cancels, streams steps and applies the
 // boot rule PROCESS_RESTART. The brain holds only opaque run handles and an AgentExecutor.
+//
+// Hosted additions (docs/cloudflare/design.md 3.3 and 5.2), all optional so Node runs as before: a RunHost decides
+// when a queued job starts (Node at once; CompanyDO from its alarm, one live run per invocation); a ProviderPool
+// chooses the provider once at run creation and the run row pins it; scripts come from a ScriptSource, so a hosted
+// world reads no file. Portable: index.ts gives Node its scenarios directory.
 import type {
   AgentExecutor, AgentRunRow, AgentRuntime, ModelProvider, NoticeKind, PrecheckResult, RoutineDef, RoutineRun, RunHandle, RunStepRow,
   RunTrace, SimClock, SpendLedger, WeftEvent,
@@ -15,11 +20,13 @@ import { PORTAL_PAGE_MARKER, ROLE_PORTAL, portalPack } from "./prompts/portal";
 import { concurrencyFor, createRunQueue, type RunQueue } from "./queue";
 import { createRunStore, type RunStore } from "./store";
 import { buildTrace } from "./trace";
-import { DEFAULT_SCRIPTS_DIR, effortOverrideFromEnv } from "./providers/factory";
-import { parseContext, scriptedProvider } from "./providers/scripted";
+import { effortOverrideFromEnv } from "./providers/factory-core";
+import type { ProviderPool } from "./providers/hosted";
+import { parseContext, scriptedProviderFrom } from "./providers/scripted-core";
 import { noteRunRecall, traceRoutineRunSpan, type RecallNote, type RoutineRunSpan } from "./otel";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { immediateRunHost } from "./run-host";
+import type { ScriptSource } from "./script-source";
+import type { RunHost } from "../../contracts/src/ext/cf-agent";
 
 export { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
 import { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
@@ -122,11 +129,11 @@ export function withRecalledProcedures(derived: Record<string, unknown> | null, 
  * rt_agency_notice.file_return); otherwise the routine's own script and the composition root's variant hook apply as
  * before. Only the request handed to the stand-in changes; the run row and a live provider never see this.
  */
-function planScripted(p: ModelProvider, scriptsDir: string): ModelProvider {
+function planScripted(p: ModelProvider, scripts: ScriptSource): ModelProvider {
   if (p.id !== "scripted") return p;
   const exists = new Map<string, boolean>();
   const has = (name: string) => {
-    if (!exists.has(name)) exists.set(name, existsSync(join(scriptsDir, `${name}.json`)));
+    if (!exists.has(name)) exists.set(name, scripts.get(name) !== null);
     return exists.get(name)!;
   };
   return {
@@ -169,6 +176,12 @@ export interface CreateAgentRuntimeOptions {
   modelTimeoutMs?: number;
   /** Persists run handles so waiting runs survive a restart (compose.ts passes fileRunHandleStore). */
   handleStore?: RunHandleStore;
+  /** Scripts for the deterministic templates and plan variants (index.ts defaults to the scenarios directory). */
+  scriptSource?: ScriptSource;
+  /** When a queued job starts. Default: at once (Node). CompanyDO passes alarmRunHost (run-host.ts). */
+  runHost?: RunHost;
+  /** Hosted: the provider for each new run, pinned on its row. Default: `provider` for every run (Node). */
+  providers?: ProviderPool;
 }
 
 export interface WeftAgentRuntime extends AgentRuntime {
@@ -185,17 +198,37 @@ export interface WeftAgentRuntime extends AgentRuntime {
   traceRoutineRun(t: RoutineRunSpan): void;
 }
 
-export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRuntime {
+export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSource: ScriptSource }): WeftAgentRuntime {
   const env = opts.env ?? process.env;
-  const prices: Prices = opts.provider.live ? pricesFor(opts.provider.id, env, opts.provider.model) : LUNA;
+  const pricesOf = (p: ModelProvider): Prices => (p.live ? pricesFor(p.id, env, p.model) : LUNA);
+  const prices: Prices = pricesOf(opts.provider);
   // WEFT_EFFORT (experiments only): the OpenAI provider sends it on every call, so the runs it serves record it too
   // (run row, prefix hash, trace). Unset keeps the per-stage default below.
-  const effortOverride = opts.provider.id === "openai" ? effortOverrideFromEnv(env) : null;
+  const effortOverride = opts.provider.id === "openai" || opts.providers ? effortOverrideFromEnv(env) : null;
   const listeners = new Map<string, Set<(s: RunStepRow) => void>>();
   const store = createRunStore(opts.db, {
     onStep: (s) => { for (const cb of listeners.get(s.runId) ?? []) { try { cb(s); } catch { /* a listener never breaks a run */ } } },
   });
   const queue = createRunQueue(concurrencyFor(opts.provider.id));
+  const host: RunHost = opts.runHost ?? immediateRunHost();
+  /** Run ids the host has started into the queue and that have not finished (running or waiting there). */
+  const inQueue = new Set<string>();
+  /** The queue as the API reads it: a job the host has not started yet stands behind every job waiting in the queue
+   * (with the immediate host nothing is ever pending, so positions are the queue's own). */
+  const visibleQueue: RunQueue = {
+    concurrency: queue.concurrency,
+    push: (id, job) => queue.push(id, job),
+    idle: () => queue.idle(),
+    position(id) {
+      const p = queue.position(id);
+      if (p !== null) return p;
+      const i = host.pending().indexOf(id);
+      if (i < 0) return null;
+      let waiting = 0;
+      for (const q of inQueue) if ((queue.position(q) ?? 0) > 0) waiting++;
+      return waiting + i + 1;
+    },
+  };
   const handles = new Map<string, RunHandle>();
   const cancelled = new Set<string>();
   const aborts = new Map<string, AbortController>();
@@ -254,11 +287,26 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
   }
 
   /** Unattended runs under a live provider use the deterministic templates unless WEFT_BACKGROUND_LLM=1 (SPEC 9.6). */
-  const scriptsDir = env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR;
-  const templateProvider: ModelProvider = planScripted({ ...scriptedProvider({ scriptsDir }), model: "template", label: "Template, no model" }, scriptsDir);
-  const mainProvider = planScripted(opts.provider, scriptsDir);
-  const useTemplates = (attended: boolean) => opts.provider.live && !attended && env.WEFT_BACKGROUND_LLM !== "1";
-  const providerFor = (run: { provider: string; model: string }) => (run.model === "template" ? templateProvider : mainProvider);
+  const scripts = opts.scriptSource;
+  const templateProvider: ModelProvider = planScripted({ ...scriptedProviderFrom({ source: scripts }), model: "template", label: "Template, no model" }, scripts);
+  const mainProvider = planScripted(opts.provider, scripts);
+  /** Pool providers, each wrapped for plan variants once, as the main provider is. */
+  const wrappedPool = new Map<ModelProvider, ModelProvider>();
+  const wrap = (p: ModelProvider): ModelProvider => {
+    if (p === opts.provider) return mainProvider;
+    if (!wrappedPool.has(p)) wrappedPool.set(p, planScripted(p, scripts));
+    return wrappedPool.get(p)!;
+  };
+  const useTemplates = (p: ModelProvider, attended: boolean) => p.live && !attended && env.WEFT_BACKGROUND_LLM !== "1";
+  /** The provider a run continues on: the one its row pins (the pool's by id on hosted, else the main provider). */
+  const providerFor = (run: { provider: string; model: string }): ModelProvider => {
+    if (run.model === "template") return templateProvider;
+    const p = opts.providers?.byId(run.provider, run.model);
+    return p ? wrap(p) : mainProvider;
+  };
+  /** The provider a new run is created on: chosen once (hosted pool) and pinned on its row. */
+  const chooseProvider = async (kind: PromptKind, attended: boolean): Promise<ModelProvider> => (opts.providers ? opts.providers.choose({ kind, attended }) : opts.provider);
+  const effortFor = (p: ModelProvider): AgentRunRow["effort"] => (effortOverride && (p === opts.provider || (opts.providers !== undefined && p.id === "openai")) ? effortOverride : "low");
 
   /**
    * The run-start recall, with the reason when it adds nothing (wave 4 round 1, FM11): the tracer shows an empty
@@ -293,20 +341,25 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     for (const w of ws) w(row);
   };
 
-  function enqueue(runId: string, restored?: RunHandle) {
+  /**
+   * Hands the run's job to the host (Node: into the queue at once). `live` says whether it makes model fetches: the
+   * alarm host starts at most one live run per invocation.
+   */
+  function enqueue(runId: string, live: boolean, restored?: RunHandle) {
     const handle = restored ?? handles.get(runId);
     if (!handle) throw new Error(`no run handle for ${runId}`);
     aborts.set(runId, new AbortController());
-    void queue.push(runId, async () => {
+    const job = async () => {
       try {
         const current = await store.getRun(runId);
-        const row = await runLoop({ ...loopDeps, provider: current ? providerFor(current) : mainProvider }, handle);
+        const used = current ? providerFor(current) : mainProvider;
+        const row = await runLoop({ ...loopDeps, provider: used, prices: opts.providers ? pricesOf(used) : prices }, handle);
         // Template fallback (SPEC 9.6): a routine whose real model failed (live, or a local server that is down)
         // finishes on the deterministic templates. The scripted provider never falls back, so scenarios stay exact.
-        if (row.trigger.startsWith("routine:") && row.model !== "template" && (opts.provider.live || opts.provider.id === "openai_compat") && row.status === "failed"
+        if (row.trigger.startsWith("routine:") && row.model !== "template" && (used.live || used.id === "openai_compat") && row.status === "failed"
           && (row.terminalReason === "PROVIDER_DOWN" || row.terminalReason === "MODEL_INCOMPLETE")) {
           await store.updateRun(runId, { provider: templateProvider.id, model: templateProvider.model, status: "queued", terminalReason: null, endedAt: null });
-          enqueue(runId);
+          enqueue(runId, false);
           return;
         }
         notifySettled(row);
@@ -317,15 +370,22 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         const row = await store.getRun(runId);
         if (row) notifySettled(row);
       }
-    }).catch(() => undefined);
+    };
+    host.submit({
+      runId, live,
+      start: () => {
+        inQueue.add(runId);
+        return queue.push(runId, job).catch(() => undefined).finally(() => { if (queue.position(runId) === null) inQueue.delete(runId); });
+      },
+    });
   }
 
-  function baseRow(handle: RunHandle, p: { trigger: string; attended: boolean; routineRunId: string | null; routineId: string | null; kind: PromptKind; budget?: { steps: number; usd: number; minutes: number } }): AgentRunRow {
+  function baseRow(handle: RunHandle, p: { trigger: string; attended: boolean; routineRunId: string | null; routineId: string | null; kind: PromptKind; provider: ModelProvider; budget?: { steps: number; usd: number; minutes: number } }): AgentRunRow {
     const b = p.budget ?? BUDGETS[p.kind];
-    const provider = p.kind === "routine" && useTemplates(p.attended) ? templateProvider : opts.provider;
+    const provider = p.kind === "routine" && useTemplates(p.provider, p.attended) ? templateProvider : p.provider;
     return {
       id: handle.runId, companyId, kind: "main", parentRunId: null, threadId: null, routineRunId: p.routineRunId, trigger: p.trigger, attended: p.attended,
-      provider: provider.id, model: provider.model, effort: provider === opts.provider && effortOverride ? effortOverride : "low", cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
+      provider: provider.id, model: provider.model, effort: effortFor(provider), cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
       status: "queued", terminalReason: null, tainted: false, taintedBy: null, checklist: null, budget: { steps: b.steps, usd: b.usd, minutes: b.minutes },
       stepsUsed: 0, requeues: 0, consecutiveErrors: 0, costUsdMicros: 0, tokens: { ...ZERO_USAGE }, createdAt: opts.clock.now(), endedAt: null, summary: null,
     };
@@ -337,7 +397,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
 
   const runtime: WeftAgentRuntime = {
     store,
-    queue,
+    queue: visibleQueue,
     async boot() {
       // Running and queued runs both belonged to the previous process: nothing would ever pick a queued run up again
       // (its handle and queue slot are gone), so it fails visibly with PROCESS_RESTART instead of sitting queued.
@@ -356,7 +416,8 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
     async startChat(handle, input) {
       await remember(handle);
       const kind: PromptKind = input.recipe === "routine_draft" ? "routine_draft" : "chat";
-      await store.createRun(baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind }));
+      const row = baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind, provider: opts.providers ? await chooseProvider(kind, true) : opts.provider });
+      await store.createRun(row);
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
       let text: string;
       let principal: string | null = null;
@@ -377,14 +438,18 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         text = routineDraftPack({ nonce, now: opts.clock.now(), actingFor: "the person in this chat", request: input.text, channels, tools: [...CHAT_TOOLS, "comms.send_message"] });
       }
       await writeContext(handle.runId, { promptKind: kind, allowlist: kind === "chat" ? [...(input.allowlist ?? CHAT_TOOLS)] : [...DRAFT_TOOLS], nonce, routineId: null, text, pack: true, principal });
-      enqueue(handle.runId);
+      enqueue(handle.runId, providerFor(row).live);
     },
     async startRoutineRun(handle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }) {
       await remember(handle);
       if (input.precheck.action !== "run") throw new Error("startRoutineRun needs a precheck with action run");
       const trigger: Record<string, unknown> = input.trigger ? { event: input.trigger.type, event_id: input.trigger.id, subject_ref: input.trigger.subjectRef, ...input.trigger.payload } : { trigger_ref: input.routineRun.triggerRef, attended: input.routineRun.attended };
       triggers.set(handle.runId, { routine: input.routine, trigger });
-      await store.createRun(baseRow(handle, { trigger: `routine:${input.routineRun.id}`, attended: input.routineRun.attended, routineRunId: input.routineRun.id, routineId: input.routine.id, kind: "routine", budget: input.routine.budget }));
+      const row = baseRow(handle, {
+        trigger: `routine:${input.routineRun.id}`, attended: input.routineRun.attended, routineRunId: input.routineRun.id, routineId: input.routine.id, kind: "routine",
+        provider: opts.providers ? await chooseProvider("routine", input.routineRun.attended) : opts.provider, budget: input.routine.budget,
+      });
+      await store.createRun(row);
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
       // Recall first (wave 4 round 2): a recalled procedure is listed in the derived arguments and cited by them.
       const recall = await recallFor(handle.runId, { kind: "routine", query: routineRecallQuery(input.routine.name, input.precheck.findings), subjectRefs: input.precheck.subjectRefs ?? [] });
@@ -395,7 +460,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
       });
       const text = withRecall(packed, recall);
       await writeContext(handle.runId, { promptKind: "routine", allowlist: [...input.routine.tools], nonce, routineId: input.routine.id, text, pack: true, trigger, principal: input.routine.ownerPrincipalId ?? null });
-      enqueue(handle.runId);
+      enqueue(handle.runId, providerFor(row).live);
     },
     async requeue(runId, notice) {
       const run = await store.getRun(runId);
@@ -416,7 +481,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRu
         notifySettled((await store.getRun(runId))!);
         return;
       }
-      enqueue(runId, handle);
+      enqueue(runId, providerFor(run).live, handle);
     },
     async wake(runId, notice) {
       const run = await store.getRun(runId);

@@ -1,5 +1,6 @@
 // Cost accounting (harness 10). Prices per provider (USD per million tokens); WEFT_PRICES_JSON overrides them.
 import type { ProviderId, Usage } from "@weft/contracts";
+import { USD_PER_1K_NEURONS, WORKERS_AI_NEURONS_PER_M, type HostedProviderId } from "../../contracts/src/ext/cf-agent";
 
 /** cacheWritePerM is optional: absent means cache writes cost the input rate (OpenAI has no write surcharge). */
 export interface Prices { inPerM: number; cachedPerM: number; outPerM: number; cacheWritePerM?: number }
@@ -10,7 +11,24 @@ export const CLAUDE_OPUS_5_5: Prices = { inPerM: 4, cachedPerM: 0.2, outPerM: 20
 /** gpt-5.6-terra from the official OpenAI pricing page: $2.00 input, $0.20 cached input, $12.00 output. */
 export const TERRA: Prices = { inPerM: 2, cachedPerM: 0.2, outPerM: 12 } as const;
 export const ZERO_PRICES: Prices = { inPerM: 0, cachedPerM: 0, outPerM: 0 } as const;
-export const PRICES_BY_PROVIDER: Record<ProviderId, Prices> = { openai: LUNA, claude: CLAUDE_OPUS_5_5, openai_compat: ZERO_PRICES, scripted: LUNA };
+/**
+ * Workers AI `@cf/openai/gpt-oss-120b` in USD equivalents of neurons (docs/cloudflare/design.md 5.2): 31,818 neurons
+ * per million input tokens and 68,182 per million output tokens at $0.011 per 1,000 neurons, about $0.35 and $0.75.
+ * Workers AI has no cached-input discount, so cached tokens cost the input rate.
+ */
+export const NEURONS_PER_M = WORKERS_AI_NEURONS_PER_M;
+export const WORKERS_AI_GPT_OSS: Prices = {
+  inPerM: (WORKERS_AI_NEURONS_PER_M.input / 1000) * USD_PER_1K_NEURONS,
+  cachedPerM: (WORKERS_AI_NEURONS_PER_M.input / 1000) * USD_PER_1K_NEURONS,
+  outPerM: (WORKERS_AI_NEURONS_PER_M.output / 1000) * USD_PER_1K_NEURONS,
+} as const;
+/** Per provider; `workers_ai` is the hosted switch (an ext addition until the frozen ProviderId gains it). */
+export const PRICES_BY_PROVIDER: Record<HostedProviderId, Prices> = { openai: LUNA, claude: CLAUDE_OPUS_5_5, openai_compat: ZERO_PRICES, scripted: LUNA, workers_ai: WORKERS_AI_GPT_OSS };
+
+/** Neurons for one Workers AI attempt's usage (what the account's neuron allocation is charged). */
+export function stepNeurons(u: Usage): number {
+  return Math.ceil((u.input * WORKERS_AI_NEURONS_PER_M.input + u.output * WORKERS_AI_NEURONS_PER_M.output) / 1e6);
+}
 
 /** Per-model prices that win over the provider's table, so a WEFT_MODEL other than Luna is never priced as Luna. */
 export const PRICES_BY_MODEL: Record<string, Prices> = { "gpt-5.6-luna": LUNA, "gpt-5.6-terra": TERRA };
@@ -28,7 +46,7 @@ export function pricesFromEnv(env: Record<string, string | undefined>, base: Pri
 }
 
 /** The price table for one provider (and model, when PRICES_BY_MODEL knows it), still overridable by WEFT_PRICES_JSON. */
-export function pricesFor(provider: ProviderId, env: Record<string, string | undefined>, model?: string): Prices {
+export function pricesFor(provider: ProviderId | HostedProviderId, env: Record<string, string | undefined>, model?: string): Prices {
   const byModel = model !== undefined && Object.hasOwn(PRICES_BY_MODEL, model) ? PRICES_BY_MODEL[model] : undefined;
   return pricesFromEnv(env, byModel ?? PRICES_BY_PROVIDER[provider] ?? LUNA);
 }
@@ -44,9 +62,9 @@ export const RUN_CAP_SCALE: Partial<Record<ProviderId, number>> = { claude: 6 };
 /** Run cap factor per model, ahead of the provider's: gpt-5.6-terra is priced 10x Luna on every token class. */
 export const RUN_CAP_SCALE_BY_MODEL: Record<string, number> = { "gpt-5.6-terra": 10 };
 
-export function runCapScaleFor(provider: ProviderId, model?: string): number {
+export function runCapScaleFor(provider: ProviderId | HostedProviderId, model?: string): number {
   if (model !== undefined && Object.hasOwn(RUN_CAP_SCALE_BY_MODEL, model)) return RUN_CAP_SCALE_BY_MODEL[model]!;
-  return RUN_CAP_SCALE[provider] ?? 1;
+  return RUN_CAP_SCALE[provider as ProviderId] ?? 1;
 }
 
 export function usdToMicros(usd: number): number {

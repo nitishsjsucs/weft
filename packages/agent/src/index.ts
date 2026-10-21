@@ -1,19 +1,23 @@
 // The brain (SPEC 9.1, 9.5 to 9.10, harness 4, 7, 10, 11). Owner: t4-agent.
 // Imports only @weft/contracts, @weft/grounding, its own run store tables and its providers (tests/boundaries.test.ts).
-export { createSpendLedger, capsFromEnv, SpendLockTimeout, type LedgerEntry, type SpendLedgerOptions, type SpendCaps, type WeftSpendLedger } from "./spend";
+// The Node entry: shared.ts plus the parts that read files (the JSONL spend ledger, WEFT_SECRETS_FILE, scenarios/).
+// A Worker bundle resolves portable.ts instead (package.json `workerd` condition), with the same export names.
+import type { ScriptSource } from "./script-source";
+import { DEFAULT_SCRIPTS_DIR } from "./providers/factory";
+import { dirScriptSource } from "./providers/scripts-dir";
+import { createAgentRuntime as createRuntime, type CreateAgentRuntimeOptions, type WeftAgentRuntime } from "./runtime";
+
+export * from "./shared";
+export { createFileSpendStore, createSpendLedger, SpendLockTimeout, type FileSpendStoreOptions, type SpendLedgerOptions, type WeftSpendLedger } from "./spend";
 export type { SpendLedgerOptions as CreateSpendLedgerOptions } from "./spend";
-export { createProvider, isTestEnv, ProviderError, DEFAULT_MODEL, DEFAULT_SCRIPTS_DIR, EFFORT_OVERRIDES, effortOverrideFromEnv, openaiSettingsFromEnv, type CreateProviderOptions } from "./providers/factory";
-export { openaiProvider, createOpenAIClient, buildResponsesRequest, handleResponse, historyToInput, mapUsage, renderNotice, OPENAI_FIXED, OPENAI_ERRORS, type OpenAIProviderOptions } from "./providers/openai";
-export { scriptedProvider, applyTemplates, parseContext, SCRIPTED_LABEL, ScriptExpectationError, type Script, type ScriptStep, type ScriptOutput, type ScriptedProviderOptions } from "./providers/scripted";
-export { createAgentRuntime, CHAT_TOOLS, DRAFT_TOOLS, DEFAULT_COMPANY_ID, type CreateAgentRuntimeOptions, type RoutinesView, type ChatContextSource, type WeftAgentRuntime } from "./runtime";
-export { runLoop, historyFromSteps, renderPlan, outputFor, BUDGETS, MAX_OUTPUT_TOKENS, MAX_TOOLS, assertToolCap, RETRY_OUTPUT_TOKENS, MAX_REQUEUES, type ChecklistState, type LoopDeps, type RunSetup } from "./loop";
-export { createRunStore, type RunStore } from "./store";
-export { buildTrace, summarize, stageLabel, type TraceSummary, type StageRow } from "./trace";
-export { createRunQueue, concurrencyFor, type RunQueue } from "./queue";
-export { routinePack, chatPack, routineDraftPack, approxTokens, ROUTINE_BUDGET_TOKENS, CHAT_BUDGET_TOKENS, type OpenLoop } from "./context";
-export { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
-export { LUNA, CLAUDE_OPUS_5_5, TERRA, PRICES_BY_PROVIDER, PRICES_BY_MODEL, RUN_CAP_SCALE_BY_MODEL, runCapScaleFor, stepCostUsd, reserveUsd, usdToMicros, pricesFromEnv, pricesFor, type Prices } from "./cost";
-export { loadSecret, parseSecretsFile } from "./secrets";
-export { canonicalJson, sha256, newNonce, escapeTagText } from "./canonical";
-export { lockedWrite, isBusy } from "./busy";
-export { setTraceRedactor, traceRedact, runTraceTags, traceMcpCall, type McpCallInfo } from "./otel";   // wave 4 telemetry seam (w4-telemetry)
+export { createNamedProvider, createProvider, DEFAULT_SCRIPTS_DIR, nodeProviderPorts } from "./providers/factory";
+export { scriptedProvider } from "./providers/scripted";
+export { dirScriptSource } from "./providers/scripts-dir";
+export { loadSecret } from "./secrets";
+
+/** Node: the deterministic templates read scenarios/ (or WEFT_SCRIPTS_DIR) unless the caller passes a script source. */
+export function createAgentRuntime(opts: CreateAgentRuntimeOptions): WeftAgentRuntime {
+  const env = opts.env ?? process.env;
+  const scriptSource: ScriptSource = opts.scriptSource ?? dirScriptSource(env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR);
+  return createRuntime({ ...opts, scriptSource });
+}
