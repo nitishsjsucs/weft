@@ -1,13 +1,17 @@
 // Recall at run start (harness 9.5 and 18 item 4) through createMemoryRecall: within RECALL_BUDGET, the one-pager
 // first once the digest wrote it (and dossiers and hits before that, wave 4), logged in memory_recalls, once per
-// run, and a tainted hit taints the run through the executor's taint path. Owner: w2-memory.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+// run, and a tainted hit taints the run through the executor's taint path. Owner: w2-memory. The semantic recall
+// block at the end is cf6-extras (design 5.4).
+import { execFileSync } from "node:child_process";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { RECALL_BUDGET } from "@weft/contracts";
 import { memoryRecalls, runTaint } from "@weft/db";
 import { createTestWeft, type TestWeft } from "../src/testing";
-import { memoryBinding } from "../src/memory/binding";
+import { attachSemanticRecall, memoryBinding } from "../src/memory/binding";
 import { createMemoryRecall } from "../src/memory/recall";
+import { RECALL_NOTE_TEXT } from "../src/memory/semantic";
+import type { RecallCandidate, RecallQuery, RecallSource } from "../../../packages/contracts/src/ext/cf-extras";
 
 let weft: TestWeft;
 const approxTokens = (s: string) => Math.ceil(s.length / 4);
@@ -98,5 +102,114 @@ describe("memory browser routes (w2-memory)", () => {
     expect(hist.at(-1)!.subject).toBe("memory: initialise");
     expect((await get("/v1/memory/history?path=../x.md")).status).toBe(400);
     expect((await weft.app.request("/v1/memory/history?path=a.md")).status).toBe(401);
+  });
+});
+
+// Hybrid recall (cf6-extras, design 5.4): semantic candidates join the lexical block only when a platform attached a
+// source and its flag is on, and only after re-verification at HEAD: the file must exist there and be byte-identical
+// to the file at the indexed commit, so recall never cites a path or commit missing at HEAD.
+describe("semantic recall (cf6-extras)", () => {
+  const C_MISSING = "0123456789abcdef0123456789abcdef01234567";
+  const note = (title: string, line: string, tainted: string | null = null) =>
+    `---\nid: ${JSON.stringify(title.toLowerCase().replace(/\W+/g, "-"))}\ntype: "fact"\naliases: []\nlinks: []\nsources: ["meeting"]\nstatus: null\nupdated: "2026-10-26"\ntainted_by: ${JSON.stringify(tainted)}\n---\n# ${title}\n\n- ${line} (2026-10-26, src: meeting)\n`;
+  const git = (args: string[]) => {
+    try { return execFileSync("git", args, { cwd: memory().root()!, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; }
+  };
+  const memory = () => weft.executor.memory as unknown as { root(): string | null; head(): Promise<string>; seedFiles(f: { path: string; text: string }[], msg: string): Promise<{ commit: string }> };
+  const readText = async (path: string, at?: string) => git(["show", `${at ?? "HEAD"}:${path}`]);
+  const source = (cands: RecallCandidate[] | (() => Promise<RecallCandidate[]>)): RecallSource & { queries: RecallQuery[] } => {
+    const queries: RecallQuery[] = [];
+    return { queries, async candidates(q) { queries.push(q); return typeof cands === "function" ? cands() : cands; } };
+  };
+  const cand = (path: string, commit: string, o: Partial<RecallCandidate> = {}): RecallCandidate => ({ path, commit, score: 0.8, tainted: false, kind: "knowledge", namespace: "slot-1", ...o });
+  const world = () => ({ slot: "slot-1", gen: 3, snapshot: "snap1" });
+  const recallFor = async (kind: "chat" | "routine", query: string) => {
+    const runId = await open();
+    return { runId, block: await createMemoryRecall(weft.db)({ companyId: "cmp_larkspur", runId, kind, query, subjectRefs: [] }) };
+  };
+  let c1 = "", c2 = "";
+  // Queries share no five-letter word with the notes, so lexical recall cannot find them and only the source can.
+  const Q = "When do salaries get paid early?";
+
+  beforeAll(async () => {
+    c1 = (await memory().seedFiles([
+      { path: "knowledge/facts/holiday-payday.md", text: note("Holiday payday", "Payday moves a business day earlier when it lands on a bank holiday") },
+      { path: "knowledge/facts/changing-note.md", text: note("Changing note", "First version of a note about bonus timing") },
+      { path: "knowledge/facts/vendor-claim.md", text: note("Vendor claim", "The vendor said payday moves for holidays", "notice:ntc_0001") },
+    ], "test: semantic notes")).commit;
+    c2 = (await memory().seedFiles([{ path: "knowledge/facts/changing-note.md", text: note("Changing note", "Second version of a note about bonus timing") }], "test: change a note")).commit;
+  });
+  afterEach(() => { attachSemanticRecall(weft.db, null); });
+
+  it("is off unless attached and enabled: the block is the lexical block, byte for byte", async () => {
+    const lexical = (await recallFor("chat", "What about Lena Brooks?")).block;
+    expect(lexical.startsWith(`<recall note="${RECALL_NOTE_TEXT}">`)).toBe(true);
+    const src = source([cand("knowledge/facts/holiday-payday.md", c1)]);
+    expect(attachSemanticRecall(weft.db, { source: src, enabled: () => false, world, readText })).toBe(true);
+    expect((await recallFor("chat", "What about Lena Brooks?")).block).toBe(lexical);
+    expect(src.queries).toHaveLength(0);
+    // A source that fails leaves the lexical block exactly as it was.
+    attachSemanticRecall(weft.db, { source: source(async () => { throw new Error("Vectorize down"); }), enabled: () => true, world, readText });
+    expect((await recallFor("chat", "What about Lena Brooks?")).block).toBe(lexical);
+  });
+
+  it("adds a verified note with its path#L<line> citation, and logs it", async () => {
+    const src = source([cand("knowledge/facts/holiday-payday.md", c1)]);
+    attachSemanticRecall(weft.db, { source: src, enabled: async () => true, world, readText });
+    const { runId, block } = await recallFor("chat", Q);
+    const line = block.split("\n").find((l) => l.includes("knowledge/facts/holiday-payday.md#L"))!;
+    expect(line).toMatch(/^- knowledge\/facts\/holiday-payday\.md#L(\d+) \(semantic, as of 2026-10-26\): - Payday moves a business day earlier/);
+    const n = Number(/#L(\d+)/.exec(line)![1]);
+    expect((await readText("knowledge/facts/holiday-payday.md"))!.split("\n")[n - 1]).toContain("Payday moves a business day earlier");
+    expect(src.queries[0]).toEqual({ text: Q, slot: "slot-1", gen: 3, snapshot: "snap1", k: 3, trustedOnly: false });
+    expect(approxTokens(block)).toBeLessThanOrEqual(RECALL_BUDGET.maxTokens);
+    const rows = await weft.db.select().from(memoryRecalls).where(eq(memoryRecalls.runId, runId));
+    expect(JSON.parse(String(rows[0]!.pathsJson))).toContain(`knowledge/facts/holiday-payday.md#L${n}`);
+    expect((await tainted(runId))?.tainted ?? false).toBe(false);
+  });
+
+  it("never cites a path or commit missing at HEAD, or a note that changed since it was indexed", async () => {
+    const src = source([
+      cand("knowledge/facts/deleted-note.md", c1),
+      cand("knowledge/facts/holiday-payday.md", C_MISSING),
+      cand("knowledge/facts/changing-note.md", c1),
+      cand("knowledge/facts/changing-note.md", c2, { score: 0.7 }),
+      cand("../outside.md", c1),
+    ]);
+    attachSemanticRecall(weft.db, { source: src, enabled: () => true, world, readText });
+    const { block } = await recallFor("chat", "When are incentive payouts scheduled?");
+    expect(block).not.toContain("deleted-note");
+    expect(block).not.toContain("holiday-payday");
+    expect(block).not.toContain("outside");
+    expect(block).not.toContain("First version");
+    expect(block).toContain("Second version of a note about bonus timing");
+    const cites = [...block.matchAll(/- (\S+)#L(\d+) \(semantic/g)];
+    expect(cites).toHaveLength(1);
+    for (const [, path, line] of cites) expect((await readText(path!))?.split("\n")[Number(line) - 1]).toBeTruthy();
+  });
+
+  it("an untrusted note is labeled and taints a chat run, and a routine never sees it", async () => {
+    const src = source([cand("knowledge/facts/vendor-claim.md", c1, { tainted: true })]);
+    attachSemanticRecall(weft.db, { source: src, enabled: () => true, world, readText });
+    const chat = await recallFor("chat", "Did the supplier mention schedule shifts?");
+    expect(chat.block).toMatch(/knowledge\/facts\/vendor-claim\.md#L\d+ \(semantic, as of 2026-10-26, untrusted\)/);
+    expect(await tainted(chat.runId)).toMatchObject({ tainted: true, taintedBy: "memory:knowledge/facts/vendor-claim.md" });
+    const routine = await recallFor("routine", "Did the supplier mention schedule shifts?");
+    expect(routine.block).not.toContain("vendor-claim");
+    expect(src.queries.at(-1)!.trustedOnly).toBe(true);
+  });
+
+  it("stays within the recall budget however many candidates arrive, and skips what lexical recall already holds", async () => {
+    const many = Array.from({ length: 40 }, () => cand("knowledge/facts/holiday-payday.md", c1));
+    const files = Array.from({ length: 30 }, (_, i) => ({ path: `knowledge/facts/semantic-bulk-${i}.md`, text: note(`Bulk ${i}`, `${"Long filler about calendar rules for the demo ".repeat(8)}${i}`) }));
+    const cb = (await memory().seedFiles(files, "test: bulk notes")).commit;
+    attachSemanticRecall(weft.db, { source: source([...many, ...files.map((f) => cand(f.path, cb))]), enabled: () => true, world, readText, k: 50 });
+    const { block } = await recallFor("chat", "What about Lena Brooks and incentive payouts?");
+    expect(approxTokens(block)).toBeLessThanOrEqual(RECALL_BUDGET.maxTokens);
+    expect(block.match(/holiday-payday\.md#L/g)).toHaveLength(1);
+    expect(block.match(/\(semantic, /g)!.length).toBeGreaterThan(1);
+    expect(block.match(/\(semantic, /g)!.length).toBeLessThan(31);
+    expect(block).toContain("entities/people/wrk_0026.md");
+    expect(block.endsWith("</recall>")).toBe(true);
   });
 });

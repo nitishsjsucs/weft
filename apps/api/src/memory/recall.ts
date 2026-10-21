@@ -6,9 +6,11 @@
 // dossiers and term hits, so a world that never ran the digest is not silently without memory. Worlds that must keep
 // wave 1 packs byte-identical switch recall off with recallEnabled.
 // Every non-empty recall is logged in memory_recalls; a tainted hit taints the run through the executor's path.
+// On hosted, semantic candidates may join the block (semantic.ts, off by default).
 import { eq } from "drizzle-orm";
 import { memoryRecalls, type Db } from "@weft/db";
 import { memoryBinding } from "./binding";
+import { withSemanticRecall } from "./semantic";
 
 export interface RecallInput { companyId: string; runId: string; kind: "chat" | "routine"; query: string; subjectRefs: string[] }
 
@@ -22,7 +24,11 @@ export function createMemoryRecall(db: Db): (input: RecallInput) => Promise<stri
     // depend on the run staying untainted, so it gets trusted candidates only. Chat runs are read-only and may be
     // tainted by what they recall.
     const trustedOnly = input.kind === "routine";
-    const out = await b.memory.recall({ request: input.query, subjectRefs: input.subjectRefs, trustedOnly }).catch(() => null);
+    const lexical = await b.memory.recall({ request: input.query, subjectRefs: input.subjectRefs, trustedOnly }).catch(() => null);
+    // Hybrid recall (cf6-extras): semantic candidates, re-verified at HEAD, join the block only where a platform
+    // attached a source and its flag is on; otherwise this is the lexical outcome itself. A failing source never
+    // costs the run its lexical recall.
+    const out = b.semantic ? await withSemanticRecall(b.semantic, input, lexical, trustedOnly).catch(() => lexical) : lexical;
     if (!out || !out.block) return "";
     // Taint first: if the run cannot be marked, the untrusted text never reaches the pack.
     const tainted = out.items.find((i) => i.taintedBy);
