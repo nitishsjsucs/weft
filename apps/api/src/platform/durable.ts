@@ -9,7 +9,7 @@ import type { Db } from "@weft/db";
 import * as weftExecutor from "@weft/executor";
 import { hostedServiceCommands } from "@weft/executor";
 import type { DurableDbHandle, DurableStorageLike, TxGuard } from "../../../../packages/contracts/src/ext/cf-db";
-import type { HostedSpendLedger } from "../../../../packages/contracts/src/ext/cf-agent";
+import { FROZEN_CAP, type HostedReserveRefusal, type HostedSpendLedger } from "../../../../packages/contracts/src/ext/cf-agent";
 import { HOSTED_SETTINGS, hostedWorldId, type HostedWorldRef } from "../../../../packages/contracts/src/ext/cf-hosted";
 import type { MemoryRepo } from "../../../../packages/contracts/src/ext/cf-memory";
 import { SMALL_STATE_KEYS, type DurablePlatformInput, type DurableWeftPlatform, type FixtureSource, type PlatformDb, type SmallState } from "../../../../packages/contracts/src/ext/cf-platform";
@@ -69,15 +69,25 @@ export function defaultDurableDriver(): DurableDbDriver {
 export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWorldRef; state: () => SmallState | null; guard: () => TxGuard | null }): SpendLedger {
   const worldId = hostedWorldId(o.world);
   const io = (what: string) => { o.guard()?.assertNotInTx(what); markUncachable(what); };
-  const lease = () => {
-    const s = o.state();
-    const read = (k: string) => { try { return s?.get(k) ?? null; } catch { return null; } };
-    return { visitor: read(SMALL_STATE_KEYS.leaseVisitor), ipHash: read(SMALL_STATE_KEYS.leaseIpHash) };
+  /** The lease's visitor and IP hash, or null when either cannot be read or was never stored. */
+  const lease = (): { visitor: string; ipHash: string } | null => {
+    try {
+      const s = o.state();
+      const visitor = s?.get(SMALL_STATE_KEYS.leaseVisitor) ?? null, ipHash = s?.get(SMALL_STATE_KEYS.leaseIpHash) ?? null;
+      return visitor && ipHash ? { visitor, ipHash } : null;
+    } catch { return null; }
   };
   return {
     async reserve(input) {
       io("SpendDO.reserve");
-      return spend.reserve({ ...input, world: worldId, ...lease() });
+      const who = lease();
+      // Fails closed: a reservation that could spend money is never made without the lease's visitor and IP hash, so
+      // no run escapes the visitor and IP caps (a slot between leases, or kv_state unreadable). A non-live attempt (the
+      // scripted provider reserves and settles at zero, as slot-smoke does) needs no lease.
+      if (!who && (input.live || input.usdMicros > 0)) {
+        return { ok: false, code: "BUDGET_EXCEEDED", cap: FROZEN_CAP.visitor, hostedCap: "visitor", spentMicros: 0, capMicros: 0 } satisfies HostedReserveRefusal;
+      }
+      return spend.reserve({ ...input, world: worldId, visitor: who?.visitor ?? null, ipHash: who?.ipHash ?? null });
     },
     async settle(reservationId, actualUsdMicros) { io("SpendDO.settle"); await spend.settle(reservationId, actualUsdMicros); },
     async release(reservationId) { io("SpendDO.release"); await spend.release(reservationId); },

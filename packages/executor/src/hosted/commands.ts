@@ -75,7 +75,7 @@ const attachScanExtract = writeCommand<AttachScanExtractArgs>({
     const x = i.extract ?? null;
     const next = { ...prior, ocr: { formCode: x?.formCode ?? null, period: x?.period ?? null, effectiveFrom: x?.effectiveFrom ?? null, accountNumber: x?.accountNumber ?? null, confidence: x?.confidence ?? 0, readable: !!x, model: i.model, job_id: i.job_id } };
     const body = n.bodyText.trim() === "" && x ? x.text.slice(0, MAX_SCAN_TEXT) : n.bodyText;
-    await deps.tx.update(notices).set({ extractedJson: JSON.stringify(next), bodyText: body }).where(eq(notices.id, n.id));
+    await deps.tx.update(notices).set({ extractedJson: JSON.stringify(next), bodyText: body }).where(and(eq(notices.id, n.id), eq(notices.companyId, ctx.companyId)));
     return {
       data: { notice_id: n.id, upload_id: i.upload_id, readable: !!x, body_filled: body !== n.bodyText },
       summary: x ? `Read the scan of ${n.id}` : `The scan of ${n.id} could not be read`,

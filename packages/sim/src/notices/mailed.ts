@@ -23,7 +23,10 @@ export interface UploadExtract {
 
 export interface MailedSample { name: string; fileName: string; path: string; sha256: string; text: string; extract: UploadExtract }
 
-const DIR = fileURLToPath(new URL("./mailed/", import.meta.url));
+// The samples directory on Node, resolved when first read, never at module evaluation: in workerd (the hosted entry
+// imports this module) import.meta.url is null, and only Node reads the repo files.
+let dir: string | null = null;
+const mailedDir = (): string => (dir ??= fileURLToPath(new URL("./mailed/", import.meta.url)));
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -56,6 +59,7 @@ function sampleFiles(): { f: string; path: string; bytes: Buffer; sidecar: () =>
       return { f, path, bytes: Buffer.from(src.bytes(path) ?? new Uint8Array()), sidecar: () => src.text(`${path.slice(0, -4)}.json`) ?? "" };
     });
   }
+  const DIR = mailedDir();
   return readdirSync(DIR).filter((x) => x.endsWith(".txt")).sort().map((f) => ({
     f, path: join(DIR, f), bytes: readFileSync(join(DIR, f)), sidecar: () => readFileSync(join(DIR, `${f.slice(0, -4)}.json`), "utf8"),
   }));

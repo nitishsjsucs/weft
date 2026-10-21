@@ -30,6 +30,8 @@ export interface EmuStorage extends DurableStorageLike {
   /** Tables the last exec read and wrote (from the authorizer). */
   lastTables(): { read: string[]; written: string[] };
   inTransaction(): boolean;
+  /** Every statement this storage ran and the rows they wrote, whoever ran them (the facade, small state, migrations). */
+  stats(): EmuStats;
   /** Waits while a transaction opened by another async context is still open (workerd's input gate). */
   gate(): Promise<void>;
   onCommit(fn: (tables: string[]) => void): void;
@@ -84,6 +86,7 @@ export function createEmuStorage(path = ":memory:"): EmuStorage {
   let waiters: (() => void)[] = [];
   const commitListeners: ((tables: string[]) => void)[] = [];
   let last = { read: [] as string[], written: [] as string[] };
+  const totals: EmuStats = { statements: 0, rowsWritten: 0, rowsRead: 0 };
   const release = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const inOther = () => !!open && txScope.getStore()?.id !== open.id;
   const gate = async () => { while (inOther()) await new Promise<void>((r) => waiters.push(r)); };
@@ -106,6 +109,9 @@ export function createEmuStorage(path = ":memory:"): EmuStorage {
     // INSERT ... RETURNING reads like a query; changes() still counts what it wrote.
     if (info.reader && info.written.size) written = Number((db.prepare("SELECT changes() AS c").get() as { c: number }).c);
     last = { read: [...info.read], written: [...info.written] };
+    totals.statements++;
+    totals.rowsRead += rows.length;
+    if (info.written.size) totals.rowsWritten += written;
     // A statement that changed rows wrote its tables (and, through triggers, theirs); one that changed none wrote nothing.
     if (written > 0 && info.written.size) {
       if (open) for (const t of info.written) open.written.add(t);
@@ -182,6 +188,7 @@ export function createEmuStorage(path = ":memory:"): EmuStorage {
       cache.clear();
     },
     lastTables: () => last,
+    stats: () => ({ ...totals }),
     inTransaction: () => !!open && open.id !== -1 && txScope.getStore()?.id === open.id,
     gate,
     onCommit: (fn) => { commitListeners.push(fn); },

@@ -1,21 +1,33 @@
 // Reads that write nothing (docs/cloudflare/design.md 4.4; track cf2-platform acceptance):
 // - with ephemeral read ids, a sweep of every GET route writes 0 rows (the design counted 67 GET routes when it was
-//   measured; the route table holds more now, and the sweep covers all of them but the event streams);
+//   measured; the route table holds more now, and the sweep covers all of them but the event streams). It runs on the
+//   rich world, the hosted profile, where every swept route answers 200 but the one SWEEP_NOT_FOUND names, so the
+//   claim covers each route's whole read path;
 // - reads outside a run return res_e_ ids, run reads keep counter ids, and no table holds a res_e_ id after the
 //   scenario flows (deliver, routine run, approve, Undo, chat, MCP-style tool reads);
-// - a second boot (a cold start of the same Durable Object) writes 0 rows on its first tick;
+// - a cold start on the restored snapshot and its first tick write 0 rows, and so do a second boot and its first tick;
 // - the read-only showcase: a cold start plus a GET sweep writes 0 rows, and every mutation is refused.
+// Rows are counted at the emulated storage, so writes outside the drizzle facade (small state, migrations) count too.
 // Node keeps counter ids unless WEFT_EPHEMERAL_READ_IDS=1.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { EPHEMERAL_READ_ID } from "@weft/executor";
 import { createTestWeft } from "../src/testing";
 import { buildSeededWorld, openDurableWorld, type DurableTestWorld, type SeededWorld } from "./support/durable-world";
-import { getSweepPaths, SWEPT_GET_ROUTES } from "./support/sweep";
+import { addSweepArtifact, getSweep, getSweepPaths, SWEEP_NOT_FOUND, SWEPT_GET_ROUTES } from "./support/sweep";
 
 let seed: SeededWorld;
-beforeAll(async () => { seed = await buildSeededWorld(); }, 180_000);
-afterAll(() => { seed?.dispose(); });
+let rich: SeededWorld;
+beforeAll(async () => { seed = await buildSeededWorld(); rich = await buildSeededWorld("rich"); }, 180_000);
+afterAll(() => { seed?.dispose(); rich?.dispose(); });
+
+/** Rows written at the storage, by anyone, while `fn` runs. */
+async function storageWrites(w: Pick<DurableTestWorld, "storage">, fn: () => Promise<unknown>): Promise<number> {
+  const before = w.storage.stats().rowsWritten;
+  await fn();
+  return w.storage.stats().rowsWritten - before;
+}
+
 
 const json = async (res: Response) => JSON.parse(await res.text()) as any;
 const req = (w: DurableTestWorld, method: string, path: string, body?: unknown, who = "usr_dana") =>
@@ -40,23 +52,33 @@ function ephemeralIdsInTables(w: DurableTestWorld): string[] {
   return hits;
 }
 
+describe("the GET sweep on the rich world", () => {
+  let r: DurableTestWorld;
+  beforeAll(async () => { r = await openDurableWorld(rich, { copy: true }); await addSweepArtifact(r); }, 120_000);
+  afterAll(async () => { await r?.close(); });
+
+  it("every swept route answers 200 (but the listed not-found), and the whole sweep writes 0 rows", async () => {
+    const sweep = await getSweep(r);
+    expect(SWEPT_GET_ROUTES.length).toBeGreaterThanOrEqual(67);
+    expect(sweep.map((x) => x.route)).toEqual(SWEPT_GET_ROUTES.map((x) => x.path));
+    r.meter.reset();
+    const statuses: Record<string, number> = {};
+    const written = await storageWrites(r, async () => {
+      for (const x of sweep) statuses[x.route] = (await req(r, "GET", x.path, undefined, x.who)).status;
+    });
+    const expected = Object.fromEntries(sweep.map((x) => [x.route, SWEEP_NOT_FOUND[x.route] ? 404 : 200]));
+    expect(statuses).toEqual(expected);
+    expect(Object.keys(SWEEP_NOT_FOUND).every((route) => route in statuses)).toBe(true);
+    const t = r.meter.totals();
+    expect(t.statements).toBeGreaterThan(sweep.length);
+    expect({ rowsWritten: t.rowsWritten, tablesWritten: t.tablesWritten, storageRowsWritten: written }).toEqual({ rowsWritten: 0, tablesWritten: [], storageRowsWritten: 0 });
+  });
+});
+
 describe("reads on the durable platform", () => {
   let w: DurableTestWorld;
   beforeAll(async () => { w = await openDurableWorld(seed, { copy: true }); }, 120_000);
   afterAll(async () => { await w?.close(); });
-
-  it("a sweep of every GET route writes 0 rows", async () => {
-    const paths = await getSweepPaths(w);
-    expect(SWEPT_GET_ROUTES.length).toBeGreaterThanOrEqual(67);
-    expect(paths).toHaveLength(SWEPT_GET_ROUTES.length);
-    w.meter.reset();
-    const statuses: Record<string, number> = {};
-    for (const p of paths) statuses[p] = (await req(w, "GET", p)).status;
-    expect(Object.entries(statuses).filter(([, s]) => s >= 500), JSON.stringify(statuses)).toEqual([]);
-    const t = w.meter.totals();
-    expect(t.statements).toBeGreaterThan(paths.length);
-    expect({ rowsWritten: t.rowsWritten, tablesWritten: t.tablesWritten }).toEqual({ rowsWritten: 0, tablesWritten: [] });
-  });
 
   it("a read outside a run returns a res_e_ id and mints nothing; run reads keep counter ids", async () => {
     const counter = () => Number(w.storage.sql.exec("SELECT next FROM id_counters WHERE prefix = 'res_'").toArray()[0]?.next ?? 0);
@@ -93,35 +115,47 @@ describe("reads on the durable platform", () => {
 });
 
 describe("cold starts", () => {
-  it("a second boot writes 0 rows on its first tick", async () => {
-    const first = await openDurableWorld(seed, { copy: true });
+  it("a cold start on the restored snapshot and its first tick write 0 rows, and so do a second boot and its first tick", async () => {
+    // The first boot of the seeded file is the first cold start of a slot restored from the snapshot.
+    const first = await openDurableWorld(rich, { copy: true });
     let second: DurableTestWorld | null = null;
     try {
-      await first.weft.scheduler.tick();
-      second = await first.reboot();
-      second.meter.reset();
-      await second.weft.scheduler.tick();
-      const t = second.meter.totals();
+      expect(first.storage.stats().rowsWritten).toBe(0);
+      expect(await storageWrites(first, () => first.weft.scheduler.tick())).toBe(0);
+      let t = { statements: 0, rowsWritten: 0, tablesWritten: [] as string[], tablesRead: [] as string[] };
+      const written = await storageWrites(first, async () => {
+        second = await first.reboot();
+        second.meter.reset();
+        await second.weft.scheduler.tick();
+        t = second.meter.totals();
+      });
       expect(t.statements).toBeGreaterThan(0);
-      expect({ rowsWritten: t.rowsWritten, tablesWritten: t.tablesWritten }).toEqual({ rowsWritten: 0, tablesWritten: [] });
+      expect({ rowsWritten: t.rowsWritten, tablesWritten: t.tablesWritten, storageRowsWritten: written }).toEqual({ rowsWritten: 0, tablesWritten: [], storageRowsWritten: 0 });
       // The prebuilt hash gate skipped the comparison: the routine rows were never loaded to compare.
       expect(t.tablesRead).toContain("kv_state");
-    } finally { await (second ?? first).close(); }
+    } finally { await ((second as DurableTestWorld | null) ?? first).close(); }
   });
 
   it("the read-only showcase: a cold start and a GET sweep write 0 rows, and every mutation is refused", async () => {
-    const show = await openDurableWorld(seed, { copy: true, world: { slot: "showcase", gen: 1, mode: "showcase" } });
+    const show = await openDurableWorld(rich, { copy: true, world: { slot: "showcase", gen: 1, mode: "showcase" } });
+    let again: DurableTestWorld | null = null;
     try {
-      const again = await show.reboot();
-      again.meter.reset();
-      for (const p of await getSweepPaths(again)) await req(again, "GET", p);
-      expect(again.meter.totals().rowsWritten).toBe(0);
-      const res = await req(again, "POST", "/v1/sim/clock/advance", { by: "PT1H" });
-      expect(res.status).toBe(409);
-      expect(await json(res)).toMatchObject({ code: "WORLD_READ_ONLY" });
-      expect(again.meter.totals().rowsWritten).toBe(0);
-      await again.close();
-    } catch (e) { await show.close().catch(() => undefined); throw e; }
+      expect(show.storage.stats().rowsWritten).toBe(0);
+      // Nothing is reset between the cold start and the sweep: the boot's own writes are counted.
+      const written = await storageWrites(show, async () => {
+        again = await show.reboot();
+        for (const x of await getSweep(again)) await req(again, "GET", x.path, undefined, x.who);
+      });
+      expect(written).toBe(0);
+      const w2 = again as unknown as DurableTestWorld;
+      expect(w2.meter.totals().rowsWritten).toBe(0);
+      const refused = await storageWrites(w2, async () => {
+        const res = await req(w2, "POST", "/v1/sim/clock/advance", { by: "PT1H" });
+        expect(res.status).toBe(409);
+        expect(await json(res)).toMatchObject({ code: "WORLD_READ_ONLY" });
+      });
+      expect(refused).toBe(0);
+    } finally { await ((again as DurableTestWorld | null) ?? show).close().catch(() => undefined); }
   });
 });
 

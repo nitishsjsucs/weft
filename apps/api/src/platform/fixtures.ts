@@ -14,14 +14,28 @@ export const FIXTURE_PATHS = {
   mailedNotices: "packages/sim/src/notices/mailed",
 } as const;
 
-export const REPO_ROOT = resolve(import.meta.dirname, "..", "..", "..", "..");
+/**
+ * The repo root on Node, computed when first asked, never at module evaluation: in workerd (the hosted entry imports
+ * this module through assemble.ts) import.meta.dirname is undefined and import.meta.url is null, and only Node reads
+ * the repo.
+ */
+let root: string | null = null;
+export function repoRoot(): string {
+  if (root === null) {
+    const dir = (import.meta as { dirname?: string }).dirname;
+    if (typeof dir !== "string") throw new Error("the repo fixtures are read on Node only; the durable platform passes its bundled FixtureSource");
+    root = resolve(dir, "..", "..", "..", "..");
+  }
+  return root;
+}
 
 const norm = (p: string) => p.replace(/^\.?\/+/, "").replace(/\/+$/, "");
 const SAFE = (p: string) => !p.split("/").some((s) => s === ".." || s === "") && !p.includes("\\") && !p.includes("\0");
 
 /** Node: the repository files themselves. */
-export function repoFixtures(root: string = REPO_ROOT): FixtureSource {
-  const abs = (p: string) => { const n = norm(p); if (!SAFE(n)) throw new Error(`bad fixture path ${JSON.stringify(p).slice(0, 60)}`); return join(root, n); };
+export function repoFixtures(at?: string): FixtureSource {
+  let base: string | null = at ?? null;
+  const abs = (p: string) => { const n = norm(p); if (!SAFE(n)) throw new Error(`bad fixture path ${JSON.stringify(p).slice(0, 60)}`); return join((base ??= repoRoot()), n); };
   return {
     text(path) { try { return readFileSync(abs(path), "utf8"); } catch { return null; } },
     bytes(path) { try { return new Uint8Array(readFileSync(abs(path))); } catch { return null; } },
@@ -49,8 +63,8 @@ export function mapFixtures(files: Readonly<Record<string, string | Uint8Array>>
 }
 
 /** Reads every file under FIXTURE_PATHS from the repo into a map (what the generated module holds; tests use it). */
-export function bundleFixtures(root: string = REPO_ROOT): Record<string, string> {
-  const src = repoFixtures(root);
+export function bundleFixtures(at?: string): Record<string, string> {
+  const src = repoFixtures(at);
   const out: Record<string, string> = {};
   for (const dir of [FIXTURE_PATHS.migrations, `${FIXTURE_PATHS.migrations}/meta`, FIXTURE_PATHS.noticeScenarios, FIXTURE_PATHS.mailedNotices]) {
     for (const f of src.list(dir)) out[f] = src.text(f)!;

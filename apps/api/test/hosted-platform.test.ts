@@ -9,7 +9,7 @@
 // - every part (uploads, small state, run handles, run files, fixtures, the SpendDO ledger, the scheduler host, the
 //   hidden OCR write-backs, the outbox, the read-only guard, hosted origins, the reset hook, the long poll) works on
 //   the durable platform and stays off on Node.
-import { mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -18,18 +18,20 @@ import { expenses, kvState, outbox, runFiles, runHandles, runSteps, uploads } fr
 import { executorInternals, jobsFor, JOBS_PRINCIPAL } from "@weft/executor";
 import { traceRedact } from "@weft/agent";
 import { createWeft } from "../src/compose";
+import { createTestWeft } from "../src/testing";
 import { assembleWeft, PlatformSecretMissing } from "../src/assemble";
 import { durablePlatform, hostedSpendLedger } from "../src/platform/durable";
 import { bundleFixtures, FIXTURE_PATHS, mapFixtures, repoFixtures } from "../src/platform/fixtures";
 import { BlobTooLarge, sqlBlobStore, sqlRunFileStore, sqlRunHandleStore, RUN_FILE_PART_CHARS } from "../src/platform/sql";
 import { sqlSmallState } from "../src/platform/state";
 import { authWindows } from "../src/http/auth";
+import { worldReadOnly } from "../src/http/hosted";
 import { bindMemory, memoryBinding } from "../src/memory/binding";
 import { webhookReceivers } from "../src/integrations/poll";
 import { createEmuStorage } from "./support/durable-emu";
 import { buildSeededWorld, fakeSpend, immediateRunHost, openDurableWorld, recordingSchedulerHost, testFixtures, type DurableTestWorld, type SeededWorld } from "./support/durable-world";
-import { describeCalls, installFsGuard, ownerOf, type FsGuard } from "./support/fs-guard";
-import { getSweepPaths } from "./support/sweep";
+import { describeCalls, installFsGuard, ownerOf, REPO, type FsGuard } from "./support/fs-guard";
+import { addSweepArtifact, getSweep, SWEEP_NOT_FOUND } from "./support/sweep";
 import { fileBlobStore } from "../src/platform/node";
 import { SMALL_STATE_KEYS } from "../../../packages/contracts/src/ext/cf-platform";
 import { HIDDEN_SERVICE_COMMANDS, type HostedJob } from "../../../packages/contracts/src/ext/cf-extras";
@@ -78,15 +80,21 @@ describe("the fs guard on the durable path", () => {
     expect(w.weft.platform.kind).toBe("durable");
   });
 
-  it("a sweep of every GET route makes no call from Weft code outside the memory repo (cf1-db)", async () => {
-    const paths = (await getSweepPaths(w)).filter((p) => !p.startsWith("/v1/memory/"));
-    const guard = installFsGuard();
-    const statuses: Record<string, number> = {};
-    try { for (const p of paths) statuses[p] = (await get(w, p)).status; } finally { guard.restore(); }
-    expect(Object.values(statuses).filter((s) => s >= 500), JSON.stringify(statuses)).toEqual([]);
-    expect(describeCalls(guard.calls.filter((c) => !PENDING_OTHER_TRACKS.has(c.file ?? "")))).toEqual([]);
-    expect(describeCalls(guard.byOwner("cf2-platform"))).toEqual([]);
-  });
+  it("a sweep of every GET route on the rich world, each answering 200, makes no call from Weft code outside the memory repo (cf1-db)", async () => {
+    // The rich world (the hosted profile) has a row for every swept id, so each route runs its whole read path.
+    const rich = await buildSeededWorld("rich");
+    const r = await openDurableWorld(rich, { copy: true });
+    try {
+      await addSweepArtifact(r);
+      const sweep = (await getSweep(r)).filter((x) => !x.route.startsWith("/v1/memory/"));
+      const guard = installFsGuard();
+      const statuses: Record<string, number> = {};
+      try { for (const x of sweep) statuses[x.route] = (await get(r, x.path, x.who)).status; } finally { guard.restore(); }
+      expect(statuses).toEqual(Object.fromEntries(sweep.map((x) => [x.route, SWEEP_NOT_FOUND[x.route] ? 404 : 200])));
+      expect(describeCalls(guard.calls.filter((c) => !PENDING_OTHER_TRACKS.has(c.file ?? "")))).toEqual([]);
+      expect(describeCalls(guard.byOwner("cf2-platform"))).toEqual([]);
+    } finally { await r.close(); rich.dispose(); }
+  }, 120_000);
 
   it("the visitor flows (deliver, routine run, approve, uploads, chat, artifacts, clock, reset) make no call from this track's code", async () => {
     let guard: FsGuard | null = installFsGuard();
@@ -123,6 +131,49 @@ describe("the fs guard on the durable path", () => {
       expect(describeCalls(g.calls.filter((c) => !PENDING_OTHER_TRACKS.has(c.file ?? ""))), "a call outside the pending other-track modules").toEqual([]);
       if (process.env.WEFT_FS_GUARD_LIST === "1") console.info(`fs guard, pending other tracks:\n${describeCalls(g.calls).join("\n")}`);
     } finally { guard?.restore(); }
+  });
+});
+
+/**
+ * Module-level import.meta paths in modules the hosted entry imports, still in other tracks' code (the hosted bundle
+ * defines import.meta for them until they compute lazily; .scratch/contract-requests/cf2-platform.md). Script entries
+ * the hosted entry never imports are not scanned.
+ */
+const MODULE_LEVEL_IMPORT_META_PENDING = new Set(["packages/db/src/migrate.ts", "packages/agent/src/providers/factory.ts"]);
+const ENTRY_SCRIPTS = new Set(["apps/api/src/demo.ts", "packages/seed/src/cli.ts"]);
+
+/** Top-level statements that read import.meta while the module evaluates (outside any function body). */
+function moduleLevelImportMeta(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(join(REPO, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) { if (e.name !== "node_modules") walk(rel); continue; }
+      if (!/\.ts$/.test(e.name) || ENTRY_SCRIPTS.has(rel)) continue;
+      const lines = readFileSync(join(REPO, rel), "utf8").split("\n");
+      lines.forEach((line, i) => {
+        if (/^[A-Za-z]/.test(line) && line.includes("import.meta") && !/=>|function\b/.test(line.slice(0, line.indexOf("import.meta")))) out.push(`${rel}:${i + 1}`);
+      });
+    }
+  };
+  walk(root);
+  return out;
+}
+
+describe("module evaluation on workerd", () => {
+  it("no module the hosted entry imports reads import.meta at module level, but the listed other-track ones", () => {
+    // In workerd import.meta.dirname is undefined and import.meta.url is null, so a path built while the module
+    // evaluates throws before the world exists; cf2's modules resolve theirs lazily, on Node only.
+    const found = ["apps/api/src", "packages"].flatMap(moduleLevelImportMeta).filter((x) => /\/src\//.test(x));
+    expect(found.filter((x) => ownerOf(x.split(":")[0]!) === "cf2-platform"), "cf2-platform").toEqual([]);
+    expect(new Set(found.map((x) => x.split(":")[0]!))).toEqual(MODULE_LEVEL_IMPORT_META_PENDING);
+  });
+
+  it("the fixtures module resolves the repo only when Node asks for repo files", async () => {
+    const src = readFileSync(join(REPO, "apps/api/src/platform/fixtures.ts"), "utf8");
+    expect(src).not.toMatch(/^export const REPO_ROOT/m);
+    expect(repoFixtures().text(FIXTURE_PATHS.journal)).toContain("entries");
+    expect(mapFixtures({ "a/b.txt": "x" }).list("a")).toEqual(["a/b.txt"]);
   });
 });
 
@@ -315,6 +366,18 @@ describe("platform parts", () => {
     await ledger.settle((r as { reservationId: string }).reservationId, 4_000);
     expect(await ledger.spent({ runId: "run_0001" })).toBe(4_000);
     await expect(w.weft.db.transaction(async () => ledger.reserve({ runId: null, usdMicros: 1, model: "m", live: true }))).rejects.toMatchObject({ code: "IO_IN_TX" });
+    state.delete(SMALL_STATE_KEYS.leaseVisitor);
+    // Fails closed: without the lease's visitor (or IP hash), or with kv_state unreadable, nothing that could spend is
+    // reserved, so no run escapes the visitor and IP caps; a scripted attempt at zero still reserves.
+    const n = spend.reserves.length;
+    expect(await ledger.reserve({ runId: "run_0002", usdMicros: 5_000, model: "gpt-5.6-luna", live: true })).toMatchObject({ ok: false, code: "BUDGET_EXCEEDED", cap: "day", hostedCap: "visitor" });
+    state.set(SMALL_STATE_KEYS.leaseVisitor, "vis_abc"); state.delete(SMALL_STATE_KEYS.leaseIpHash);
+    expect(await ledger.reserve({ runId: "run_0002", usdMicros: 5_000, model: "gpt-5.6-luna", live: true })).toMatchObject({ ok: false, hostedCap: "visitor" });
+    const broken = hostedSpendLedger(spend, { world: { slot: "slot-1", gen: 7, mode: "slot" }, state: () => ({ ...state, get: () => { throw new Error("kv_state unreadable"); } }), guard: () => null });
+    expect(await broken.reserve({ runId: "run_0003", usdMicros: 1, model: "gpt-5.6-luna", live: true })).toMatchObject({ ok: false, hostedCap: "visitor" });
+    expect(spend.reserves.length).toBe(n);
+    expect(await broken.reserve({ runId: "run_0003", usdMicros: 0, model: "scripted", live: false })).toMatchObject({ ok: true });
+    expect(spend.reserves.at(-1)).toMatchObject({ runId: "run_0003", world: "slot-1:gen-7", visitor: null, ipHash: null, live: false });
     state.delete(SMALL_STATE_KEYS.leaseVisitor); state.delete(SMALL_STATE_KEYS.leaseIpHash);
     // The world's own ledger is that adapter.
     expect(w.weft.ledger).not.toBe(w.spend);
@@ -335,20 +398,41 @@ describe("platform parts", () => {
     expect(h).toMatchObject({ ok: true, runtime: "cloudflare", world: { slot: "slot-1", gen: 1, mode: "slot" }, seedProfile: "base" });
   });
 
-  it("saves a chat run's handle in run_handles (never in run_steps) and answers the long poll once the run settles", async () => {
-    const res = await post(w, "/v1/agent/runs", { text: "How many people work here?" });
-    expect(res.status).toBe(202);
-    const { runId } = await json(res) as { runId: string };
-    expect((await get(w, `/v1/agent/runs/${runId}?wait=0`)).status).toBe(400);
-    expect((await get(w, `/v1/agent/runs/${runId}?wait=26`)).status).toBe(400);
-    const t0 = Date.now();
-    const run = await json(await get(w, `/v1/agent/runs/${runId}?wait=10`));
-    expect(["done", "waiting", "held", "failed", "refused", "escalated"]).toContain(run.status);
-    expect(Date.now() - t0).toBeLessThan(10_000);
-    const steps = await w.weft.db.select().from(runSteps).where(eq(runSteps.runId, runId));
-    expect(JSON.stringify(steps)).not.toMatch(/tok_|"token"/);
-    // Handles are dropped once a run ends; an open one lives in run_handles while the run is open.
-    expect(Array.isArray(await w.weft.db.select().from(runHandles))).toBe(true);
+  it("keeps an open chat run's handle in run_handles (never in run_steps), long-polls until the run settles, then drops the handle", async () => {
+    // The model step waits for the test, so the run stays open for as long as the test says.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const base = w.weft.provider;
+    const slow = new Proxy(base, { get: (t, k) => (k === "step" ? async (req: Parameters<typeof base.step>[0]) => { await gate; return t.step(req); } : Reflect.get(t, k, t)) });
+    const d = await openDurableWorld(seed, { copy: true, provider: slow });
+    try {
+      const res = await post(d, "/v1/agent/runs", { text: "How many people work here?" });
+      expect(res.status).toBe(202);
+      const { runId } = await json(res) as { runId: string };
+      expect((await get(d, `/v1/agent/runs/${runId}?wait=0`)).status).toBe(400);
+      expect((await get(d, `/v1/agent/runs/${runId}?wait=26`)).status).toBe(400);
+      const handle = () => d.weft.db.select().from(runHandles).where(eq(runHandles.runId, runId));
+      expect(await handle()).toEqual([expect.objectContaining({ runId, token: expect.any(String) })]);
+      // An open run: the long poll waits the whole second, then answers the run as it is.
+      let t0 = Date.now();
+      const open = await json(await get(d, `/v1/agent/runs/${runId}?wait=1`));
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(950);
+      expect(["queued", "running"]).toContain(open.status);
+      // The run settles 300 ms into a 10 s poll: the poll answers then, not at its deadline.
+      t0 = Date.now();
+      const settling = get(d, `/v1/agent/runs/${runId}?wait=10`);
+      setTimeout(release, 300);
+      const run = await json(await settling);
+      const took = Date.now() - t0;
+      expect(["done", "waiting", "held", "failed", "refused", "escalated"]).toContain(run.status);
+      expect(took).toBeGreaterThanOrEqual(250);
+      expect(took).toBeLessThan(5_000);
+      const steps = await d.weft.db.select().from(runSteps).where(eq(runSteps.runId, runId));
+      expect(JSON.stringify(steps)).not.toMatch(/tok_|"token"/);
+      // A run that ended drops its handle; one that waits or is held keeps it for the next decision.
+      for (let i = 0; i < 50 && (await handle()).length && !["waiting", "held"].includes(run.status); i++) await new Promise((r) => setTimeout(r, 20));
+      expect((await handle()).length).toBe(["waiting", "held"].includes(run.status) ? 1 : 0);
+    } finally { release(); await d.close(); }
   });
 
   it("refuses a hosted reset to the base profile, and resets the rich profile through the platform hook", async () => {
@@ -388,6 +472,9 @@ describe("hosted origins, the read-only guard and the hidden write-backs", () =>
       expect((await get(w, "/v1/company")).status).toBe(200);
     } finally { w.weft.platform.state.delete(SMALL_STATE_KEYS.readOnly); }
     expect((await post(w, "/v1/sim/clock/advance", { by: "PT1M" })).status).toBe(200);
+    // Fails closed: a flag that cannot be read refuses the mutation.
+    expect(worldReadOnly({ platform: { ...w.weft.platform, state: { ...w.weft.platform.state, get: () => { throw new Error("kv_state unreadable"); } } } })).toBe(true);
+    expect(worldReadOnly(w.weft)).toBe(false);
   });
 
   it("registers the hidden OCR write-backs on the durable platform only, never on MCP or an agent surface", async () => {
@@ -488,26 +575,69 @@ describe("hosted origins, the read-only guard and the hidden write-backs", () =>
 
 describe("Node keeps today's parts", () => {
   it("files for uploads, run files and run handles; no hosted table is written by a Node world's flows", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "weft-node-parts-"));
-    const prev = process.env.WEFT_BLOBS;
+    const prev = { blobs: process.env.WEFT_BLOBS, hash: process.env.WEFT_PREBUILT_HASH };
     delete process.env.WEFT_BLOBS;
-    const w = await createWeft({ dataDir: dir, testMode: true });
+    delete process.env.WEFT_PREBUILT_HASH;
+    const w = await createTestWeft();
+    const dir = w.dataDir;
+    const call = (method: string, path: string, body?: unknown) =>
+      w.app.request(path, { method, headers: { ...w.uiHeaders("usr_dana"), ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
     try {
       expect(w.platform).toMatchObject({ kind: "node", world: null, publicOrigin: null, meter: null, guard: null, reset: null });
       expect(w.blobs.kind).toBe("file");
-      const up = await w.blobs.put(new Uint8Array([1, 2, 3]));
-      expect(up.storagePath).toMatch(/^uploads\/[0-9a-f]{64}\.bin$/);
-      expect(readdirSync(join(dir, "uploads"))).toContain(`${up.sha256}.bin`);
+      // The visitor flows, on Node: deliver, the routine run and its proposals, approve, a claim with a receipt, a notice
+      // scan, a chat run, the clock, the scheduler's ticks (the first runs ensurePrebuilt).
+      expect((await call("POST", "/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" })).status).toBe(200);
+      await w.scheduler.tick();
+      await (w.agent as unknown as { idle(): Promise<void> }).idle();
+      await (w.routines as unknown as { drain(ms?: number): Promise<boolean> }).drain(10_000);
+      const pending = (await json(await call("GET", "/v1/proposals?status=pending&limit=100"))).data as { id: string }[];
+      expect(pending.length).toBeGreaterThan(0);
+      for (const p of pending) expect((await call("POST", `/v1/proposals/${p.id}/approve`, {})).status).toBeLessThan(500);
+      const form = new FormData();
+      for (const [k, v] of Object.entries({ workerId: "wrk_0025", category: "meals", merchant: "Harbor Noodle (demo)", amountCents: "4250", transactionDate: "2026-10-22", businessPurpose: "Lunch with a candidate" })) form.set(k, v);
+      form.set("receipt", new Blob([new Uint8Array(PNG)], { type: "image/png" }), "lunch.png");
+      const filed = await w.app.request("/v1/expenses", { method: "POST", headers: w.uiHeaders("usr_dana"), body: form });
+      expect(filed.status, await filed.clone().text()).toBe(200);
+      const scan = new FormData();
+      scan.set("file", new File([new Uint8Array(Buffer.from("Unknown agency letter (demo)"))], "letter.txt", { type: "text/plain" }));
+      expect((await w.app.request("/v1/notices/upload", { method: "POST", headers: w.uiHeaders("usr_dana"), body: scan })).status).toBe(200);
+      const chat = await json(await call("POST", "/v1/agent/runs", { text: "Show payroll cost by month" }));
+      expect((await call("GET", `/v1/agent/runs/${chat.runId}?wait=5`)).status).toBe(200);
+      expect((await call("POST", "/v1/sim/clock/advance", { by: "PT1H" })).status).toBe(200);
+      await w.scheduler.tick();
+      await (w.agent as unknown as { idle(): Promise<void> }).idle();
+      // The uploads went to files under the data dir, as before.
+      const paths = (await w.db.select({ p: uploads.storagePath }).from(uploads)).map((r) => r.p);
+      expect(paths.filter((p) => /^uploads\/[0-9a-f]{64}\.bin$/.test(p)).length).toBeGreaterThanOrEqual(2);
+      expect(paths.filter((p) => p.startsWith("blob:"))).toEqual([]);
+      for (const p of paths) expect(existsSync(join(dir, p)), p).toBe(true);
       await w.runFiles.write("companies/cmp_larkspur/runs/run_0001/code/1.js", "return 1;");
       expect(existsSync(join(dir, "companies/cmp_larkspur/runs/run_0001/code/1.js"))).toBe(true);
-      for (const t of ["blobs", "run_files", "run_handles", "outbox"]) expect(Number((await w.db.all<{ n: number }>(sql.raw(`SELECT count(*) AS n FROM ${t}`)))[0]!.n), t).toBe(0);
+      expect(readdirSync(join(dir, "uploads")).length).toBeGreaterThanOrEqual(2);
+      // No hosted table holds a row: no blobs, run files, run handles or outbox jobs, and no kv_state (the prebuilt hash
+      // gate is the durable platform's and the snapshot build's only).
+      for (const t of ["blobs", "run_files", "run_handles", "outbox", "kv_state"]) expect(Number((await w.db.all<{ n: number }>(sql.raw(`SELECT count(*) AS n FROM ${t}`)))[0]!.n), t).toBe(0);
       expect((await w.db.select().from(kvState)).length).toBe(0);
       expect(w.app.constructor.name).toBe("Hono");
       expect((w.app as unknown as { hostedStats?: unknown }).hostedStats).toBeUndefined();
     } finally {
       await w.close();
-      if (prev !== undefined) process.env.WEFT_BLOBS = prev;
-      rmSync(dir, { recursive: true, force: true });
+      if (prev.blobs !== undefined) process.env.WEFT_BLOBS = prev.blobs;
+      if (prev.hash !== undefined) process.env.WEFT_PREBUILT_HASH = prev.hash;
+    }
+  });
+
+  it("the hosted snapshot build (WEFT_PREBUILT_HASH=1) keeps the prebuilt hash in kv_state, so a restored slot's first tick skips the comparison", async () => {
+    const prev = process.env.WEFT_PREBUILT_HASH;
+    process.env.WEFT_PREBUILT_HASH = "1";
+    const w = await createTestWeft();
+    try {
+      await w.scheduler.tick();
+      expect((await w.db.select().from(kvState)).map((r) => r.key)).toEqual(["routines.prebuilt_hash"]);
+    } finally {
+      await w.close();
+      if (prev === undefined) delete process.env.WEFT_PREBUILT_HASH; else process.env.WEFT_PREBUILT_HASH = prev;
     }
   });
 

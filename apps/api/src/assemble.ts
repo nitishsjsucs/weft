@@ -213,9 +213,14 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
     ...(durable ? { env: secretEnv, fixtures } : {}),
   };
   const agent = await tolerate<AgentRuntime>("agent", () => createAgentRuntime(agentOptions), () => stubOf("agent"));
-  // Design 4.4: the prebuilt hash gate, so a second boot (a restored snapshot booted once) writes nothing on its first tick.
+  // Design 4.4: the prebuilt hash gate, so a second boot (a restored snapshot booted once) writes nothing on its first
+  // tick. Always on the durable platform; on Node only for the hosted snapshot build (WEFT_PREBUILT_HASH=1, so the
+  // snapshot carries the hash), and otherwise off: a Node world compares the rows on every boot and writes no kv_state
+  // row, exactly as before.
+  const prebuiltGate = durable || env.WEFT_PREBUILT_HASH === "1";
   const routines = await tolerate<RoutinesEngine>("routines", () => createRoutines({
-    db, clock, agent, runs: executor.runs, readOnly: executor.readOnly, events: createRoutinesEventSource(db), prebuiltHash: kvRow(db, PREBUILT_HASH_KEY),
+    db, clock, agent, runs: executor.runs, readOnly: executor.readOnly, events: createRoutinesEventSource(db),
+    ...(prebuiltGate ? { prebuiltHash: kvRow(db, PREBUILT_HASH_KEY) } : {}),
   }), () => stubOf("routines"));
   routinesRef.current = routines;
   const scheduler = createScheduler({ db, clock, sims, executor, handlers, routines, log: testMode ? () => undefined : undefined, ...(platform.schedulerHost ? { host: platform.schedulerHost } : {}) });

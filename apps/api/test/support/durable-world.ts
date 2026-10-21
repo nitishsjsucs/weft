@@ -1,8 +1,8 @@
 // Durable test worlds (track cf2-platform): a seeded world built on Node the way the hosted snapshot is (WEFT_BLOBS=
-// sqlite, booted once so the prebuilt routine rows match the code), then opened as a Durable Object slot through the
-// durable platform over the node:sqlite storage stand-in (./durable-emu.ts), with fake SpendDO, RunHost and
-// SchedulerHost bindings. Everything that touches the disk happens in buildSeededWorld() and openDurableWorld()'s
-// setup, before a test turns its fs guard on.
+// sqlite and WEFT_PREBUILT_HASH=1, booted and ticked once so the prebuilt routine rows and their hash match the code),
+// then opened as a Durable Object slot through the durable platform over the node:sqlite storage stand-in
+// (./durable-emu.ts), with fake SpendDO, RunHost and SchedulerHost bindings. Everything that touches the disk happens
+// in buildSeededWorld() and openDurableWorld()'s setup, before a test turns its fs guard on.
 import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import { seedWorld } from "@weft/seed";
 import { seedWorldProfile } from "@weft/seed/profile";
 import { createWeft } from "../../src/compose";
 import { assembleWeft } from "../../src/assemble";
+import type { ModelProvider } from "@weft/contracts";
 import type { Weft } from "../../src/http/context";
 import { durablePlatform, type HostedPlatformInput, type WeftDurablePlatform } from "../../src/platform/durable";
 import { bundleFixtures, mapFixtures } from "../../src/platform/fixtures";
@@ -21,19 +22,27 @@ import { createEmuStorage, testDurableDriver, type EmuStorage, type TestMeter } 
 
 export interface SeededWorld { dir: string; vaultKey: string; profile: "base" | "rich"; dispose(): void }
 
-/** Seeds a world on Node as the snapshot builder does (blobs in SQL, frozen clock, one ensurePrebuilt) and closes it. */
+/** What the hosted snapshot build sets on Node: blobs in SQL and the prebuilt hash gate (so the snapshot carries the hash). */
+export const SNAPSHOT_BUILD_ENV = { WEFT_BLOBS: "sqlite", WEFT_PREBUILT_HASH: "1" } as const;
+
+/**
+ * Seeds a world on Node as the snapshot builder does (blobs in SQL, the prebuilt hash gate, frozen clock) and boots it
+ * once: ensurePrebuilt plus one scheduler tick, which consumes the seed's pending event and sets the handlers cursor
+ * (2 rows a restored slot would otherwise write on its first tick). Then it closes the world.
+ */
 export async function buildSeededWorld(profile: "base" | "rich" = "base"): Promise<SeededWorld> {
   const dir = mkdtempSync(join(tmpdir(), "weft-durable-seed-"));
-  const prev = process.env.WEFT_BLOBS;
-  process.env.WEFT_BLOBS = "sqlite";
+  const prev = Object.fromEntries(Object.keys(SNAPSHOT_BUILD_ENV).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, SNAPSHOT_BUILD_ENV);
   try {
     const w = await createWeft({ dataDir: dir, testMode: true });
     if (profile === "rich") await seedWorldProfile(w, "rich"); else await seedWorld(w);
     await w.clock.set("2026-10-26T15:30:00.000Z", 0);
     await (w.routines as unknown as { ensurePrebuilt(): Promise<void> }).ensurePrebuilt();
+    await w.scheduler.tick();
     await w.close();
   } finally {
-    if (prev === undefined) delete process.env.WEFT_BLOBS; else process.env.WEFT_BLOBS = prev;
+    for (const [k, v] of Object.entries(prev)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
   const vaultKey = readFileSync(join(dir, "run", "vault.key"), "utf8").trim();
   return { dir, vaultKey, profile, dispose: () => rmSync(dir, { recursive: true, force: true }) };
@@ -110,6 +119,8 @@ export interface OpenDurableOptions {
   /** Copy the seeded data dir first, so this world shares nothing on disk with another (the git memory repo). */
   copy?: boolean;
   extra?: Partial<HostedPlatformInput>;
+  /** The model provider (the scripted one by default, as in every test). */
+  provider?: ModelProvider;
 }
 
 /** Opens a seeded world as a durable slot. */
@@ -140,7 +151,7 @@ export async function openDurableWorld(seed: SeededWorld, opts: OpenDurableOptio
       reset: async ({ profile }) => { resets.push({ profile }); return { gen: world.gen + 1 }; },
       ...opts.extra,
     }, { driver });
-    const weft = await assembleWeft(platform, { dataDir, testMode: true });
+    const weft = await assembleWeft(platform, { dataDir, testMode: true, ...(opts.provider ? { provider: opts.provider } : {}) });
     const meter = driver.handles[0]!.meter as TestMeter;
     const t: DurableTestWorld = {
       weft, storage, meter, platform, spend, runHost, schedulerHost, outboxFlushes, resets, env, dataDir,
