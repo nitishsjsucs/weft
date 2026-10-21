@@ -1,9 +1,12 @@
 // The hosted request layer (docs/cloudflare/design.md 4.5 and 6.1, track cf2-platform). It wraps the frozen app only
 // when the platform has a facade meter (the durable platform), so Node's app is exactly buildApp(weft):
 // - x-weft-tables: every GET response lists the tables it read (sorted, comma-separated);
-// - ETag/304: a polled GET's ETag is W/"<gen>.<hash(route, query, principal, clock, versions of the tables it read)>",
-//   and a request whose If-None-Match matches a remembered ETag whose tables have not been written since gets 304
-//   without running the route, auth included, so it reads 0 rows. The remembered entry was made by a request with
+// - ETag/304: a polled GET's ETag is W/"<gen>.<hash(boot epoch, route, query, principal, clock, versions of the tables
+//   it read)>", and a request whose If-None-Match matches a remembered ETag whose tables have not been written since
+//   gets 304 without running the route, auth included, so it reads 0 rows. Table versions live in memory and restart
+//   at 0 on every cold start (an eviction, a hibernation, a deploy) while gen changes only on a reset, so the hash
+//   mixes in a random epoch minted once per boot: an ETag from an earlier boot never matches one minted in this one,
+//   and the first poll after a restart is computed (design 4.5). The remembered entry was made by a request with
 //   the same identity material that passed auth and read the auth tables, so an unchanged principals or api_keys
 //   version is what keeps that identity valid. A route whose handler touched a source outside the company SQL
 //   (SpendDO, KV, the environment) marks itself uncachable through markUncachable();
@@ -44,6 +47,8 @@ interface Remembered { etag: string; tables: string[]; versions: Record<string, 
 export const ETAG_MEMO_MAX = 512;
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+/** 16 random hex digits, from Web Crypto (Node and workerd alike). Minted inside a request, never at module scope. */
+const randomEpoch = (): string => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function hostedError(code: keyof typeof HOSTED_ERRORS, message: string): Response {
@@ -51,10 +56,13 @@ function hostedError(code: keyof typeof HOSTED_ERRORS, message: string): Respons
   return new Response(JSON.stringify({ _tag: e.tag, code, message }), { status: e.status, headers: { "content-type": "application/json" } });
 }
 
-/** True when this world refuses every mutation: the showcase, or the kv_state flag. */
-export function worldReadOnly(weft: Weft): boolean {
+/**
+ * True when this world refuses every mutation: the showcase, or the kv_state flag. Fails closed: a flag that cannot
+ * be read refuses the mutation rather than letting it through.
+ */
+export function worldReadOnly(weft: Pick<Weft, "platform">): boolean {
   if (weft.platform.readOnly) return true;
-  try { return weft.platform.state.get(SMALL_STATE_KEYS.readOnly) === "1"; } catch { return false; }
+  try { return weft.platform.state.get(SMALL_STATE_KEYS.readOnly) === "1"; } catch { return true; }
 }
 
 /** The identity and clock a remembered response depends on, besides the tables it read. */
@@ -81,6 +89,9 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
   let commitSeq = 0;
   meter?.onCommit((c) => { commitSeq = c.seq; });
   const gen = () => weft.platform.world?.gen ?? 0;
+  // One epoch per boot (hostedApp runs once per assembled world), minted lazily at the first remembered response.
+  let epoch: string | null = null;
+  const bootEpoch = () => (epoch ??= randomEpoch());
 
   outer.all("*", async (c) => {
     const req = c.req.raw;
@@ -113,12 +124,14 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
     // rows could predate it), and that touched nothing outside the company SQL.
     if (key && res.status === 200 && !scope.uncachable && commitSeq === before && usage.tablesWritten.length === 0 && usage.tablesRead.length > 0) {
       const versions = meter.versions(usage.tablesRead);
-      const etag = hostedEtag(gen(), sha(JSON.stringify([key, versions])).slice(0, 32));
+      const etag = hostedEtag(gen(), sha(JSON.stringify([bootEpoch(), key, versions])).slice(0, 32));
       memo.delete(key);
       memo.set(key, { etag, tables: [...usage.tablesRead], versions });
       while (memo.size > ETAG_MEMO_MAX) memo.delete(memo.keys().next().value!);
       stats.remembered++;
       headers.set("etag", etag);
+      // Only an ETag minted in this boot can match here (the epoch is in its hash), so an unchanged computed poll
+      // still answers 304 without its body.
       if (etagMatches(req.headers.get("if-none-match"), etag)) {
         stats.notModified++;
         return new Response(null, { status: 304, headers: { etag, [TABLES_HEADER]: usage.tablesRead.join(",") } });

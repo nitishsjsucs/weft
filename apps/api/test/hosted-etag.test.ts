@@ -99,6 +99,36 @@ describe("ETag/304 on the polled GET routes", () => {
     if (run) expect((await get(`/v1/agent/runs/${run}?wait=1`)).headers.get("etag")).toBeNull();
   });
 
+  it("never answers 304 to an ETag from an earlier boot: table versions restart at 0 on every cold start", async () => {
+    // The reviewer's case: a poll's ETag, then a write the poll would show, then a cold start (a DO eviction, a
+    // hibernation, a deploy). The new boot's versions are back at 0, so only a per-boot epoch tells the two apart.
+    const path = "/v1/time-off/requests?limit=100";
+    w = await w.reboot();   // fresh versions, as on any cold start, so the first poll hashes versions of 0
+    const before = await get(path);
+    expect(before.status).toBe(200);
+    const old = before.headers.get("etag")!;
+    expect(old).toMatch(/^W\/"1\.[0-9a-f]{32}"$/);
+    const submitted = await post("/v1/time-off/requests?workerId=wrk_0026", { policyId: "top_vac_us", startDate: "2026-12-21", endDate: "2026-12-22", partialDayMinutes: null, reason: "Dentist visit" });
+    expect(submitted.status, await submitted.clone().text()).toBe(200);
+    w = await w.reboot();
+    const stale = await cost(() => get(path, { etag: old }));
+    expect(stale.value.status).toBe(200);
+    expect(stale.statements).toBeGreaterThan(0);
+    const fresh = stale.value.headers.get("etag")!;
+    expect(fresh).toMatch(/^W\/"1\.[0-9a-f]{32}"$/);
+    expect(fresh).not.toBe(old);
+    expect(await stale.value.text()).toContain("Dentist visit");
+    // Within the new boot the new ETag is remembered as usual: 304, 0 rows read.
+    const again = await cost(() => get(path, { etag: fresh }));
+    expect([again.value.status, again.statements, again.rowsRead]).toEqual([304, 0, 0]);
+    // An unchanged world across a second cold start: the old boot's ETag is still computed, never trusted.
+    w = await w.reboot();
+    const quiet = await cost(() => get(path, { etag: fresh }));
+    expect(quiet.value.status).toBe(200);
+    expect(quiet.statements).toBeGreaterThan(0);
+    expect(quiet.value.headers.get("etag")).not.toBe(fresh);
+  });
+
   it("never remembers a response that read outside the company SQL, read no table, wrote rows, or overlapped a commit", async () => {
     const inner = new Hono<WeftEnv>();
     inner.get("/v1/workers", async (c) => { markUncachable("SpendDO.spent"); await w.weft.db.all(sql`SELECT id FROM workers LIMIT 1`); return c.json({ ok: 1 }); });
