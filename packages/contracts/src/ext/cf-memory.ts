@@ -53,7 +53,7 @@ export interface MemoryLogQuery {
 export interface MemoryLogEntry {
   commit: string;
   parent: string | null;
-  /** Committer date in git's strict ISO form (`%cI`), for example 2026-10-26T15:30:00+00:00. */
+  /** Committer date in git's strict ISO form (`%cI` as git 2.45.0 and later print it), for example 2026-10-26T15:30:00Z. */
   date: string;
   author: string;
   subject: string;

@@ -12,7 +12,7 @@ import type { MemoryFrontmatter, SimClock } from "@weft/contracts";
 import { closeDb, migrate, openDb, withWriteLock, type Db } from "@weft/db";
 import { createWeft } from "../../../../apps/api/src/compose";
 import { seedWorldProfile } from "../../../seed/src/profile";
-import { blob, cleanupMessage, commit as commitObject, EMPTY_BLOB_SHA, parseCommit, tree, FILE_MODE, TREE_MODE } from "../../src/memory/gitobj";
+import { blob, cleanupMessage, commit as commitObject, EMPTY_BLOB_SHA, parseCommit, strictIso, tree, FILE_MODE, TREE_MODE } from "../../src/memory/gitobj";
 import { GitRepo } from "../../src/memory/repo-git";
 import { SqlRepo } from "../../src/memory/repo-sql";
 import { createMemoryStore, memoryRepoFactory, type LocalMemory } from "../../src/memory/store";
@@ -59,6 +59,22 @@ describe("gitobj", () => {
     expect(c.sha).toBe(git(root, ["rev-parse", "HEAD"]).trim());
     expect(cleanupMessage("a  \n\n\n\nb\n\n")).toBe("a\n\nb\n");
     expect(parseCommit(c.body).message).toBe(git(root, ["log", "-1", "--format=%B"]).replace(/\n$/, ""));
+  });
+
+  it("GitRepo prints dates as SqlRepo does on every git version: Z for a zero offset, +hh:mm for any other", async () => {
+    const root = tmp("weft-gitdates-");
+    const repo = new GitRepo(root);
+    const first = await repo.init([{ path: "a.md", text: "a\n" }], { message: "init", date: "2026-10-26T15:30:00.000Z" });
+    // git 2.45.0 and later print a zero offset in %cI as "Z", older git as "+00:00"; GitRepo prints "Z" on both.
+    expect(await repo.commitDate(first)).toBe("2026-10-26T15:30:00Z");
+    // A commit made in another zone (Weft's own commits are always +0000) keeps git's own %cI text.
+    writeFileSync(join(root, "b.md"), "b\n");
+    git(root, ["add", "-A"]);
+    execFileSync("git", [...GIT_FLAGS, "-C", root, "commit", "-q", "-m", "zoned"], { env: { ...gitEnv(), GIT_AUTHOR_DATE: "@1792857600 -0700", GIT_COMMITTER_DATE: "@1792857600 -0700" } });
+    const zoned = git(root, ["log", "-1", "--format=%cI"]).trim();
+    expect(zoned).toBe("2026-10-24T09:00:00-07:00");
+    expect((await repo.log({ n: 2 })).map((e) => e.date)).toEqual([zoned, "2026-10-26T15:30:00Z"]);
+    expect(strictIso(1792857600, "-0700")).toBe(zoned);
   });
 });
 
