@@ -99,7 +99,7 @@ describe("ETag/304 on the polled GET routes", () => {
     if (run) expect((await get(`/v1/agent/runs/${run}?wait=1`)).headers.get("etag")).toBeNull();
   });
 
-  it("never remembers a response that read outside the company SQL, wrote rows, or overlapped a commit", async () => {
+  it("never remembers a response that read outside the company SQL, read no table, wrote rows, or overlapped a commit", async () => {
     const inner = new Hono<WeftEnv>();
     inner.get("/v1/workers", async (c) => { markUncachable("SpendDO.spent"); await w.weft.db.all(sql`SELECT id FROM workers LIMIT 1`); return c.json({ ok: 1 }); });
     inner.get("/v1/offers", async (c) => { await w.weft.db.run(sql`INSERT INTO kv_state (key, value) VALUES ('test.etag', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`); return c.json({ ok: 2 }); });
@@ -109,9 +109,10 @@ describe("ETag/304 on the polled GET routes", () => {
       return c.json({ ok: 3 });
     });
     inner.get("/v1/expenses", async (c) => { await w.weft.db.all(sql`SELECT id FROM expenses LIMIT 1`); return c.json({ ok: 4 }); });
+    inner.get("/v1/routines", (c) => c.json({ fromMemoryOnly: true }));
     const app = hostedApp(inner, w.weft, w.meter);
     const h = { host: "localhost" };
-    for (const p of ["/v1/workers", "/v1/offers", "/v1/notices"]) {
+    for (const p of ["/v1/workers", "/v1/offers", "/v1/notices", "/v1/routines"]) {
       const res = await app.request(p, { headers: h });
       expect(res.status, p).toBe(200);
       expect(res.headers.get("etag"), p).toBeNull();

@@ -109,9 +109,9 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
     stats.computed++;
     const headers = new Headers(res.headers);
     headers.set(TABLES_HEADER, usage.tablesRead.join(","));
-    // Remember only a clean read: a 200 that wrote nothing, during which no commit landed (its rows could predate it),
-    // and that touched nothing outside the company SQL.
-    if (key && res.status === 200 && !scope.uncachable && commitSeq === before && usage.tablesWritten.length === 0) {
+    // Remember only a clean read: a 200 that read company tables and wrote nothing, during which no commit landed (its
+    // rows could predate it), and that touched nothing outside the company SQL.
+    if (key && res.status === 200 && !scope.uncachable && commitSeq === before && usage.tablesWritten.length === 0 && usage.tablesRead.length > 0) {
       const versions = meter.versions(usage.tablesRead);
       const etag = hostedEtag(gen(), sha(JSON.stringify([key, versions])).slice(0, 32));
       memo.delete(key);
