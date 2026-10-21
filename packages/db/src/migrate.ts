@@ -5,8 +5,14 @@ import { durableHandleOf } from "./durable";
 import { migrateDurable } from "./migrate-durable";
 import { readMigrationsFromDir, type MigrationEntry } from "./migrations";
 
-/** packages/db/drizzle on Node; empty where modules have no file URL (a bundled Worker passes its migrations in). */
-export const MIGRATIONS_DIR = typeof import.meta.url === "string" && import.meta.url.startsWith("file:") ? fileURLToPath(new URL("../drizzle", import.meta.url)) : "";
+/**
+ * packages/db/drizzle on Node; empty where modules have no file URL (a bundled Worker passes its migrations in).
+ * Resolved on call, never while the module evaluates: this module is on the hosted import graph
+ * (docs/cloudflare/design.md 6.4), and workerd has no file URL for it.
+ */
+export function migrationsDir(): string {
+  return typeof import.meta.url === "string" && import.meta.url.startsWith("file:") ? fileURLToPath(new URL("../drizzle", import.meta.url)) : "";
+}
 
 /**
  * Applies drizzle/0000 (generated schema), 0001_triggers.sql (custom abort triggers) and the later entries.
@@ -16,7 +22,7 @@ export const MIGRATIONS_DIR = typeof import.meta.url === "string" && import.meta
  */
 export async function migrate(db: Db, migrations?: readonly MigrationEntry[]): Promise<void> {
   await ready(db);
-  const entries = migrations ?? readMigrationsFromDir(MIGRATIONS_DIR);
+  const entries = migrations ?? readMigrationsFromDir(migrationsDir());
   const durable = durableHandleOf(db);
   if (durable) {
     migrateDurable(durable.storage, entries);

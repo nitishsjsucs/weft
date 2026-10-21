@@ -12,7 +12,7 @@ import { createWeft } from "../../../apps/api/src/compose";
 import { seedWorldProfile } from "../../seed/src/profile";
 import { emulatorOf } from "../src/client";
 import { DurableEmulator, type RecordedWrite } from "../src/emu";
-import { MIGRATIONS_DIR } from "../src/migrate";
+import { migrationsDir } from "../src/migrate";
 import { journalHash, readMigrationsFromDir, type MigrationEntry } from "../src/migrations";
 import { buildSnapshot, deltaReset, restoreSnapshot, verifyAgainstManifest, type DeltaResetOutcome, type RestoreOutcome, type Snapshot } from "../src/snapshot";
 
@@ -109,7 +109,7 @@ export async function recordRichSession(rounds = 2): Promise<RecordedSession> {
   process.env.WEFT_DB = "durable-emu";
   const dir = mkdtempSync(join(tmpdir(), "weft-flows-"));
   try {
-    const migrations = readMigrationsFromDir(MIGRATIONS_DIR);
+    const migrations = readMigrationsFromDir(migrationsDir());
     const jh = journalHash(migrations);
     // Seed the rich world, then boot it once so its routine rows match the code (design 9.2).
     let weft = await createWeft({ dataDir: dir, testMode: true });

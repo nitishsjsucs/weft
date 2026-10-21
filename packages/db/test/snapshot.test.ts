@@ -7,14 +7,14 @@ import { sql } from "drizzle-orm";
 import { DIRTY_TABLE } from "../../contracts/src/ext/cf-db";
 import { DurableEmulator } from "../src/emu";
 import { openDurableDb } from "../src/durable";
-import { migrate, MIGRATIONS_DIR } from "../src/migrate";
+import { migrate, migrationsDir } from "../src/migrate";
 import { journalHash, readMigrationsFromDir } from "../src/migrations";
 import {
   armDirtyTracking, buildSnapshot, decodeSnapshot, deltaReset, dirtyKeys, encodeSnapshot, MAX_CHUNK_BYTES, restoreChunks, restoreSnapshot, snapshotTables,
   verifyAgainstManifest, beginRestore, finishRestore, type Snapshot,
 } from "../src/snapshot";
 
-const migrations = readMigrationsFromDir(MIGRATIONS_DIR);
+const migrations = readMigrationsFromDir(migrationsDir());
 const JH = journalHash(migrations);
 
 /** Inserts one row, filling every NOT NULL column without a default from its type unless `values` names it. */
