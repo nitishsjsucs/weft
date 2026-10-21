@@ -63,6 +63,8 @@ export interface DurableSchedulerHost extends SchedulerHost {
   tick(): Promise<boolean>;
   /** Re-arms after a request when the clock started running (a Simulators rate change). */
   poke(): void;
+  /** One tick whatever the clock rate (the measured-tick RPC; design 4.4: a warm tick writes 0 rows). */
+  forceTick(): Promise<boolean>;
   readonly started: boolean;
   readonly intervalMs: number;
 }
@@ -100,6 +102,11 @@ export function durableSchedulerHost(opts: { arm: (at: number) => void | Promise
       return true;
     },
     poke: schedule,
+    async forceTick() {
+      if (!input) return false;
+      await input.tick();
+      return true;
+    },
   };
 }
 

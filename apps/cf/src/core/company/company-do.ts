@@ -58,6 +58,12 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     void ctx.blockConcurrencyWhile(() => this.boot());
   }
 
+  /** The object's own name (idFromName), where the runtime reports it: an RPC naming another world is refused. */
+  private assertName(slot: string): void {
+    const name = (this.ctx.id as { name?: string }).name;
+    if (name && name !== slot) throw new Error(`this object is ${name}, not ${slot}`);
+  }
+
   private get storage(): DurableStorageLike {
     return this.ctx.storage as unknown as DurableStorageLike;
   }
@@ -344,6 +350,21 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     await this.alarms.sync();
   }
 
+  /** Runs the alarm's work now, as a retried (at-least-once) alarm invocation would: queued runs, a due tick, the
+   * outbox. Alarms are at-least-once, so this must never execute a call twice (exec_calls dedupe, design 4.3). */
+  async runAlarmNow(): Promise<void> {
+    await this.alarms.arm("runs");
+    await this.alarm();
+  }
+
+  /** One scheduler tick, measured (design 4.4 and 8.2: a warm idle tick reads about 274 rows and writes 0). */
+  async measureTick(): Promise<{ ran: boolean; rowsRead: number; rowsWritten: number; statements: number }> {
+    const engine = this.engine;
+    if (!engine) return { ran: false, rowsRead: 0, rowsWritten: 0, statements: 0 };
+    const { value, usage } = await engine.meter.measure(() => engine.inScope(() => this.scheduler.forceTick()));
+    return { ran: value, rowsRead: usage.rowsRead, rowsWritten: usage.rowsWritten, statements: usage.statements };
+  }
+
   /** Fetches made by the last alarm invocation (tests assert at most MAX_FETCHES_PER_ALARM). */
   async alarmFetches(): Promise<{ count: number; peak: number; max: number }> {
     return { count: this.counter.count, peak: this.counter.peak, max: this.counter.max };
@@ -369,6 +390,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   /** The Lobby stamps a generation and the lease's visitor (lease start, or a clean slot's next generation). */
   async applyStamp(s: WorldStamp): Promise<{ ok: true; gen: number }> {
+    this.assertName(s.slot);
     if (!hasKvState(this.ctx.storage.sql)) throw new Error(`${s.slot} is not provisioned`);
     if (modeOf(s.slot) !== s.mode) throw new Error(`stamp mode ${s.mode} does not match ${s.slot}`);
     const prev = this.stamp;
@@ -446,6 +468,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   // ReseedWorkflow RPC: a full restore in short steps (design 4.6 and 9.2) ----------------------------------------
 
   async restoreBegin(input: RestoreBeginInput): Promise<{ ok: true }> {
+    this.assertName(input.slot);
     if (modeOf(input.slot) !== input.mode) throw new Error(`restore mode ${input.mode} does not match ${input.slot}`);
     await this.stopEngine();
     this.closeSockets({ type: "lease", state: "ended", gen: input.gen }, null);
@@ -535,8 +558,26 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     return { slot: p.slot, gen: p.gen, snapshot: a.version, bookmark: input.bookmark, rowsWritten: p.rowsWritten };
   }
 
+  /** The weekly full verify of a clean, unleased world against the manifest (design 4.6); a dirty world is skipped. */
+  async verifyWorld(): Promise<{ ok: boolean; skipped: boolean; mismatches: string[]; rows: number }> {
+    if (!this.stamp || this.ctx.storage.kv.get(RESTORE_KEY)) return { ok: true, skipped: true, mismatches: [], rows: 0 };
+    const mod = this.module ?? (this.module = await loadEngine());
+    if (!mod.store.isClean(this.storage) || this.stamp.visitor) return { ok: true, skipped: true, mismatches: [], rows: 0 };
+    const v = mod.store.verify(this.storage, await mod.artifacts(), { full: true });
+    return { ok: v.ok && v.chainValid, skipped: false, mismatches: v.mismatches.slice(0, 20), rows: v.rows };
+  }
+
+  /** A fresh point-in-time bookmark of a clean world (bookmarks cover 30 days); null when unavailable or dirty. */
+  async takeBookmark(): Promise<string | null> {
+    if (!this.stamp || this.stamp.visitor || !this.storage.getCurrentBookmark) return null;
+    const mod = this.module ?? (this.module = await loadEngine());
+    if (!mod.store.isClean(this.storage)) return null;
+    try { return await this.storage.getCurrentBookmark(); } catch { return null; }
+  }
+
   /** The deployed transaction conformance run on the scratch `conformance` object; it wipes itself afterwards. */
   async runConformance(): Promise<{ passed: number; failed: number; cases: { name: string; ok: boolean; detail?: string }[] }> {
+    this.assertName(DO_NAMES.conformance);
     if (this.stamp && this.stamp.mode !== "conformance") throw new Error("conformance runs only on the conformance object");
     const mod = this.module ?? (this.module = await loadEngine());
     if (!mod.store.conformance) throw new Error("this build has no conformance cases");

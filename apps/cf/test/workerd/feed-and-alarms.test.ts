@@ -7,7 +7,7 @@ import { Harness, type Visitor } from "../support/harness";
 
 let h: Harness;
 beforeAll(async () => {
-  h = await Harness.start({ poolSize: 6 });
+  h = await Harness.start({ poolSize: 10 });
   await h.provision();
 });
 afterAll(async () => { await h?.close(); });
@@ -115,6 +115,21 @@ describe("alarm-driven runs", () => {
     const stopped = await ticks();
     await new Promise((r) => setTimeout(r, 400));
     expect(await ticks()).toBeLessThanOrEqual(stopped + 1);
+  });
+
+  it("measures a forced tick and replays the alarm without running a finished job again", async () => {
+    const v = h.visitor();
+    const l = await v.lease();
+    const env = await h.coreEnv();
+    const co = env.COMPANY.get(env.COMPANY.idFromName(l.slot!));
+    const t = await co.measureTick();
+    expect(t.ran).toBe(true);
+    expect(t.rowsWritten).toBeGreaterThan(0);   // the fake's tick writes a row; the real engine's warm tick writes none
+    const r = await v.json<{ runId: string }>("/api/v1/agent/runs", { method: "POST", body: JSON.stringify({ live: false, fetches: 1 }) });
+    await until(async () => (await v.json<{ status: string }>(`/api/v1/agent/runs/${r.body.runId}`)).body.status, (st) => st === "done");
+    await co.runAlarmNow();
+    await co.runAlarmNow();
+    expect((await v.json<{ fetches: number; status: string }>(`/api/v1/agent/runs/${r.body.runId}`)).body).toMatchObject({ status: "done", fetches: 1 });
   });
 
   it("applies RL_RUN per visitor to model admissions (6 per 60 s)", async () => {

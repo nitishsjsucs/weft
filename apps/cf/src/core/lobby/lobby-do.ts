@@ -24,7 +24,8 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS lobby_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS slots (
      name TEXT PRIMARY KEY, mode TEXT NOT NULL, gen INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL,
-     snapshot TEXT, bookmark TEXT, workflow TEXT, restored_at INTEGER, error TEXT, updated_at INTEGER NOT NULL)`,
+     snapshot TEXT, bookmark TEXT, workflow TEXT, restored_at INTEGER, error TEXT, updated_at INTEGER NOT NULL,
+     bookmark_at INTEGER, verified_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS leases (
      slot TEXT PRIMARY KEY, visitor TEXT NOT NULL UNIQUE, ip_hash TEXT NOT NULL, gen INTEGER NOT NULL,
      started_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, resets INTEGER NOT NULL DEFAULT 0)`,
@@ -35,7 +36,7 @@ const SCHEMA = [
 
 /** Slot states. A leased slot is a ready slot with a row in `leases`. */
 export type SlotState = "new" | "restoring" | "ready" | "resetting" | "failed";
-interface SlotRow { name: string; mode: WorldMode; gen: number; state: SlotState; snapshot: string | null; bookmark: string | null; workflow: string | null; restored_at: number | null; error: string | null }
+interface SlotRow { name: string; mode: WorldMode; gen: number; state: SlotState; snapshot: string | null; bookmark: string | null; workflow: string | null; restored_at: number | null; error: string | null; bookmark_at?: number | null; verified_at?: number | null }
 interface LeaseRow { slot: string; visitor: string; ip_hash: string; gen: number; started_at: number; last_seen: number; resets: number }
 
 export interface LobbyStatus {
@@ -59,6 +60,8 @@ export interface LobbyReadout {
 }
 
 type ResetError = { error: HostedErrorCode; message: string };
+/** World upkeep periods (design 4.6: the full verify runs weekly; bookmarks cover 30 days). */
+export const MAINTAIN = { verifyEveryMs: 7 * 86_400_000, bookmarkEveryMs: 25 * 86_400_000 } as const;
 const COUNTER = {
   visitorRows: "rows_written", restoreRows: "restore_rows", restores: "restores", rowsRead: "rows_read",
   doRequests: "do_requests", workersRequests: "workers_requests",
@@ -331,14 +334,14 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   }
 
   /** The smoke's and the admin's reset of a world nobody leases (slot-smoke, the showcase): the same reset path. */
-  async resetWorld(input: { slot: string; now?: number }): Promise<HostedResetResult | ResetError> {
+  async resetWorld(input: { slot: string; now?: number }): Promise<(HostedResetResult & { method: ResetOutcome["method"]; rowsWritten: number }) | ResetError> {
     const now = input.now ?? Date.now();
     const s = this.slot(input.slot);
     if (!s) return { error: "LEASE_REQUIRED", message: `No world named ${input.slot}` };
     if (this.one(`SELECT 1 FROM leases WHERE slot = ?`, input.slot)) return { error: "LEASE_REQUIRED", message: `${input.slot} is leased; it resets when its lease ends` };
     const out = await this.resetSlot(input.slot, null, now);
     if (!out || !out.ok) return { error: "LEASE_ENDED", message: `${input.slot} is being rebuilt` };
-    return { ok: true, gen: out.gen, resetsLeft: HOSTED_SETTINGS.resetsPerLease };
+    return { ok: true, gen: out.gen, resetsLeft: HOSTED_SETTINGS.resetsPerLease, method: out.method, rowsWritten: out.rowsWritten };
   }
 
   /**
@@ -442,8 +445,8 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const b = this.budget(await this.config());
     this.ctx.storage.transactionSync(() => {
       if (input.ok) {
-        this.sql.exec(`UPDATE slots SET state = 'ready', gen = ?, snapshot = ?, bookmark = ?, restored_at = ?, workflow = NULL, error = NULL, updated_at = ? WHERE name = ?`,
-          input.gen, input.snapshot, input.bookmark, now, now, input.slot);
+        this.sql.exec(`UPDATE slots SET state = 'ready', gen = ?, snapshot = ?, bookmark = ?, restored_at = ?, bookmark_at = ?, verified_at = ?, workflow = NULL, error = NULL, updated_at = ? WHERE name = ?`,
+          input.gen, input.snapshot, input.bookmark, now, input.bookmark ? now : null, now, now, input.slot);
         if (input.rowsWritten > 0) this.bump(COUNTER.restoreRows, input.rowsWritten - b.fullRestoreRows);
       } else {
         this.sql.exec(`UPDATE slots SET state = 'failed', workflow = NULL, error = ?, updated_at = ? WHERE name = ?`, (input.error ?? "restore failed").slice(0, 200), now, input.slot);
@@ -545,6 +548,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
         if (step.action === "deferred") break;
       }
     }
+    if (this.meta("provision.requested") === "1") restores.push(...(await this.maintain(now)));
     this.sql.exec(`DELETE FROM waitlist WHERE seen < ?`, now - WAITLIST_TTL_MS);
     this.sql.exec(`DELETE FROM counters WHERE day < ?`, utcDay(now - 8 * 86_400_000));
     this.levelMemo = null;
@@ -553,6 +557,51 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     this.setMeta("sweep.at", new Date(now).toISOString());
     logEvent("lobby.sweep", { outcome: "ok", released, orphans, restores: restores.length, level });
     return { released, orphans, restores, level };
+  }
+
+  /**
+   * Upkeep of the worlds nobody leases (design 4.6): a world restored from another snapshot (a deploy changed it,
+   * KV snapshot.version) gets a full restore; once a week a full verify of every table (about 8k rows read) checks a
+   * clean world against the manifest and a mismatch gets a full restore; a point-in-time bookmark older than 25 days
+   * (they cover 30) is taken again from a clean world. One restore at a time, within today's restore budget.
+   */
+  private async maintain(now: number): Promise<ProvisionStep[]> {
+    const out: ProvisionStep[] = [];
+    const snapshot = (await this.config()).get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? null;
+    const idle = this.all<SlotRow>(`SELECT name, mode, gen, state, snapshot, bookmark, workflow, restored_at, error, bookmark_at, verified_at FROM slots WHERE state = 'ready' ORDER BY name`)
+      .filter((s) => !this.one(`SELECT 1 FROM leases WHERE slot = ?`, s.name));
+    for (const s of idle) {
+      if (snapshot && s.snapshot && s.snapshot !== snapshot) {
+        const step = await this.startRestore(s.name, now, "stale");
+        out.push(step);
+        if (step.action === "deferred") break;
+        continue;
+      }
+      const verifyDue = now - (s.verified_at ?? s.restored_at ?? 0) > MAINTAIN.verifyEveryMs;
+      const bookmarkDue = !!s.bookmark && now - (s.bookmark_at ?? s.restored_at ?? 0) > MAINTAIN.bookmarkEveryMs;
+      if (!verifyDue && !bookmarkDue) continue;
+      try {
+        const co = this.company(s.name);
+        if (verifyDue) {
+          const v = await co.verifyWorld();
+          if (v.skipped) continue;
+          this.sql.exec(`UPDATE slots SET verified_at = ? WHERE name = ?`, now, s.name);
+          this.bump(COUNTER.rowsRead, v.rows);
+          if (!v.ok) {
+            logEvent("reset.verify.mismatch", { slot: s.name, gen: s.gen, outcome: v.mismatches.slice(0, 5).join(",") });
+            out.push(await this.startRestore(s.name, now, "verify"));
+            continue;
+          }
+        }
+        if (bookmarkDue) {
+          const bm = await co.takeBookmark();
+          if (bm) this.sql.exec(`UPDATE slots SET bookmark = ?, bookmark_at = ? WHERE name = ?`, bm, now, s.name);
+        }
+      } catch (e) {
+        logError("lobby.maintain", e, { slot: s.name });
+      }
+    }
+    return out;
   }
 
   /** The daily budget rows in D1 weft-ops, one per share (best effort: the table belongs to apps/cf/d1). */

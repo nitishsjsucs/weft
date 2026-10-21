@@ -37,6 +37,16 @@ describe("outbox and queues", () => {
     expect(await env.CONFIG.get(keys[0]!)).toBe("1");
   });
 
+  it("sends a PDF job to weft-render (its own queue, concurrency 1)", async () => {
+    const env = await h.coreEnv();
+    const before = (await env.CONFIG.list({ prefix: "test.job:" })).keys.length;
+    const v = h.visitor();
+    await v.lease();
+    expect((await v.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "with a pdf", job: "render.pdf" }) })).status).toBe(201);
+    await until(async () => (await env.CONFIG.list({ prefix: "test.job:" })).keys.length, (n) => n > before);
+    expect(h.server.getLogs().some((l) => /"evt":"job.done","kind":"render.pdf"/.test(l.message ?? ""))).toBe(true);
+  });
+
   it("retries a failing job and records it once it is dead", async () => {
     const env = await h.coreEnv();
     await env.JOBS.send(job("obx_fail000000000001", "upl_fail"), { contentType: "json" });

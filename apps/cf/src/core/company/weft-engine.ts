@@ -17,6 +17,8 @@ import {
   type DurableStorageLike, type DurableWeftPlatform, type PlatformDb, type SqlMeter, type TxGuard,
 } from "../../shared/contracts";
 import { randomAlnum } from "../../shared/crypto";
+import { hostedError } from "../../shared/http";
+import { isModelAdmission } from "../../shared/routes";
 import { bundledFixtures } from "../fixtures";
 import { weftDeps, type MigrationEntryLike, type SnapshotLike } from "./deps";
 import type { EngineModule, SnapshotArtifacts, SnapshotExtra, WorldBootInput, WorldEngine, WorldStore } from "./engine";
@@ -72,9 +74,14 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
   const origin = (input.env.WEFT_PUBLIC_ORIGIN ?? "https://weft.invalid").replace(/\/$/, "");
   const appFetch = async (req: Request): Promise<Response> => inScope(() => weft.app.fetch(req));
   /** The MCP tools' in-process fetch: only the path and query of the URL they build are kept. */
-  const toolFetch = (url: string, init?: RequestInit): Promise<Response> => {
+  const toolFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     const u = new URL(url, origin);
-    return appFetch(new Request(`${origin}${u.pathname}${u.search}`, init));
+    const req = new Request(`${origin}${u.pathname}${u.search}`, init);
+    // agent_ask is a model-calling admission: the kill switch (KV agent.enabled=false) answers it as the front does.
+    if (req.method === "POST" && isModelAdmission(req.method, u.pathname) && (input.env.WEFT_AGENT_ENABLED ?? "").toLowerCase() === "false") {
+      return hostedError("AGENT_PAUSED", "The agent is paused on this demo right now", { retryAfterS: 300 });
+    }
+    return appFetch(req);
   };
   const mcp = d.createRemoteMcpHandler({
     apiUrl: origin,

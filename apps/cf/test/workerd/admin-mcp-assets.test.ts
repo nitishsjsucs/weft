@@ -142,3 +142,23 @@ describe("rate limits", () => {
     expect(statuses.filter((s) => s === 200).length).toBeLessThanOrEqual(120);
   });
 });
+
+describe("world upkeep in the cron sweep", () => {
+  it("verifies clean idle worlds weekly and restores idle worlds of another snapshot", async () => {
+    const env = await h.coreEnv();
+    const lobby = env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
+    const week = await lobby.sweep({ now: Date.now() + 8 * 86_400_000 });
+    expect(week.restores.filter((s) => s.action === "restore")).toEqual([]);
+    await env.CONFIG.put("snapshot.version", "another-snapshot");
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      const stale = await lobby.sweep();
+      expect(stale.restores.filter((s) => s.action === "restore").length).toBeGreaterThan(0);
+    } finally {
+      await env.CONFIG.delete("snapshot.version");
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    const slots = await h.waitReady(60_000);
+    expect(slots.every((s) => s.snapshot === FAKE_SNAPSHOT_VERSION)).toBe(true);
+  });
+});
