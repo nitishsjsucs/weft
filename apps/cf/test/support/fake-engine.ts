@@ -6,6 +6,10 @@ import { WORLD_MODEL_SETTING, type DurableStorageLike, type SqlCommit, type SqlM
 import type { EngineModule, SnapshotArtifacts, WorldBootInput, WorldEngine, WorldStore } from "../../src/core/company/engine";
 
 const SEED = ["Larkspur Robotics (demo) handbook", "Payroll runs on Fridays", "Benefits renew in January"];
+/** What a run's counted fetches ask for: the discard port on loopback, refused at once with no DNS lookup and no
+ * proxy (loopback is in every NO_PROXY), so 40 of them take milliseconds on any machine. A name that does not
+ * resolve would go through an HTTPS proxy where one is set and take about 0.3 s each. */
+const UNREACHABLE_URL = "http://127.0.0.1:9/";
 
 export const FAKE_SNAPSHOT_VERSION = "fake-snapshot-1";
 /** A note with this text makes the fake delta reset report a digest mismatch and change nothing (cf1's deltaReset
@@ -120,7 +124,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
           let made = 0;
           const cfg = runs.get(id);
           for (let i = 0; i < (cfg?.fetches ?? 0); i++) {
-            try { await (cfg?.global ? globalThis.fetch : input.fetch)("https://fetch-count.invalid/"); } catch { /* unreachable on purpose */ }
+            try { await (cfg?.global ? globalThis.fetch : input.fetch)(UNREACHABLE_URL); } catch { /* unreachable on purpose */ }
             made += 1;
           }
           exec(`UPDATE runs SET status = 'done', fetches = ? WHERE id = ?`, made, id);

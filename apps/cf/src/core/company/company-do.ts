@@ -10,7 +10,7 @@
 // (engine.ts) and is imported lazily inside blockConcurrencyWhile, so an unprovisioned object never evaluates it.
 import { DurableObject } from "cloudflare:workers";
 import {
-  HOSTED_SETTINGS, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
+  HOSTED_SETTINGS, LIVE_PING, LIVE_PONG, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
   DO_NAMES, WORLD_MODEL_SETTING, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
 } from "../../shared/contracts";
 import { envConfig } from "../../shared/config";
@@ -72,7 +72,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.alarms = new AlarmPlan({ setAlarm: (t) => ctx.storage.setAlarm(t), getAlarm: () => ctx.storage.getAlarm() });
     this.runHost = this.newRunHost();
     this.scheduler = this.newScheduler();
-    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    // The tab's keepalive: answered by the runtime without waking a hibernated object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(LIVE_PING, LIVE_PONG));
     void ctx.blockConcurrencyWhile(() => this.boot());
   }
 

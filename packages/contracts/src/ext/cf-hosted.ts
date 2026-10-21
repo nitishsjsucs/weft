@@ -189,6 +189,10 @@ export type LiveMessage =
   | { type: "lease"; state: "ended" | "reset"; gen: number };
 /** With the socket connected, polling drops to this safety net. */
 export const LIVE_POLL_FALLBACK_MS = 60_000;
+/** The client's keepalive text frame on /api/_live and the slot's answer. CompanyDO answers it with the hibernation
+ * auto-response (setWebSocketAutoResponse), so a ping never wakes the object; neither is a LiveMessage. */
+export const LIVE_PING = "ping";
+export const LIVE_PONG = "pong";
 
 // Errors --------------------------------------------------------------------------------------------------------
 
