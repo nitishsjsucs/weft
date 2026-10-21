@@ -4,6 +4,7 @@ import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { Outcome } from "./cases";
+import { snapshotFromJson, snapshotToJson } from "../src/snapshot";
 
 export const COMPATIBILITY_DATE = "2026-10-01";
 
@@ -21,6 +22,8 @@ export interface ConformanceWorker {
   /** Runs a case in its own object; a runtime reset (or any non-JSON answer) becomes { ok: false, error }. */
   run(name: string, object?: string): Promise<Outcome>;
   after(name: string, object?: string): Promise<Outcome>;
+  /** One recorded-session step (worker.ts `session`) on the "session" object; bodies travel as snapshot JSON. */
+  session(step: string, body: unknown): Promise<Outcome>;
   dispose(): Promise<void>;
 }
 
@@ -43,6 +46,11 @@ export async function startConformanceWorker(): Promise<ConformanceWorker> {
   return {
     run: (name, object = name) => call("case", name, object),
     after: (name, object = name) => call("after", name, object),
+    session: async (step, body) => {
+      const res = await mf.dispatchFetch(`http://conformance/session/${step}?object=session`, { method: "POST", body: snapshotToJson(body) });
+      const text = await res.text();
+      try { return snapshotFromJson<Outcome>(text); } catch { return { ok: false, error: text.split("\n")[0]!.replace(/^Error: /, "") }; }
+    },
     dispose: () => mf.dispose(),
   };
 }

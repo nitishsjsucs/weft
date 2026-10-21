@@ -95,6 +95,8 @@ export class EmulatedSqlError extends Error {
 }
 
 interface ForeignWrite { sql: string; args: unknown[]; ctxLevel: number }
+/** One committed user write, as record() returns it: replaying these in order reproduces the session's writes. */
+export interface RecordedWrite { sql: string; args: unknown[] }
 interface Frame {
   kind: "async" | "sync";
   level: number;
@@ -102,6 +104,8 @@ interface Frame {
   open: boolean;
   parent: Frame | null;
   foreign: ForeignWrite[];
+  /** User writes issued in this frame, for record(); they move down on commit and are dropped on rollback. */
+  recorded: RecordedWrite[];
   /** Nested async transactions of this frame waiting for a sibling's savepoint to close. */
   waiters: Array<() => void>;
   rollbackRequested: boolean;
@@ -203,6 +207,8 @@ export class DurableEmulator implements DurableStorageLike {
   private internal = 0;
   private deadReason: string | null = null;
   private implicitOpen = false;
+  private recording: RecordedWrite[] | null = null;
+  private implicitRecorded: RecordedWrite[] = [];
   private seq = 0;
   private schemaCache = new Map<string, { indexes: IndexInfo[]; triggerTargets: string[] }>();
   /** Concurrent writes the emulator could not replay after a rollback (a divergence worth a test failure). */
@@ -296,7 +302,9 @@ export class DurableEmulator implements DurableStorageLike {
   private commitImplicit(): void {
     if (!this.implicitOpen) return;
     this.implicitOpen = false;
-    try { this.exp("COMMIT"); } catch (e) {
+    const recorded = this.implicitRecorded;
+    this.implicitRecorded = [];
+    try { this.exp("COMMIT"); this.recording?.push(...recorded); } catch (e) {
       try { this.exp("ROLLBACK"); } catch { /* already rolled back */ }
       this.resetObject(`${WORKERD_MESSAGES.constraintReset}: ${(e as Error).message}${workerdSuffix((e as { errcode?: number }).errcode ?? 787)}`);
     }
@@ -446,6 +454,7 @@ export class DurableEmulator implements DurableStorageLike {
       }
     }
     if (!replay && writes) this.trackConcurrent(stmtSql, original);
+    if (this.recording && writes) (this.stack.length ? this.stack[this.stack.length - 1]!.recorded : this.implicitRecorded).push({ sql: stmtSql, args: original });
     return new EmulatedCursor<T>(arrays, columns.map((c) => c.name), rowsRead, rowsWritten);
   }
 
@@ -462,7 +471,7 @@ export class DurableEmulator implements DurableStorageLike {
 
   private openFrame(kind: Frame["kind"], parent: Frame | null): Frame {
     const level = this.stack.length + 1;
-    const frame: Frame = { kind, level, name: `_emu_sp_${level}_${this.seq++}`, open: true, parent, foreign: [], waiters: [], rollbackRequested: false };
+    const frame: Frame = { kind, level, name: `_emu_sp_${level}_${this.seq++}`, open: true, parent, foreign: [], recorded: [], waiters: [], rollbackRequested: false };
     this.exp(`SAVEPOINT ${frame.name}`);
     this.stack.push(frame);
     return frame;
@@ -485,6 +494,7 @@ export class DurableEmulator implements DurableStorageLike {
     frame.open = false;
     this.stack.pop();
     this.schemaCache.clear();
+    if (commit && !failure && this.recording) (below ? below.recorded : this.implicitOpen ? this.implicitRecorded : this.recording).push(...frame.recorded);
     const carried: ForeignWrite[] = commit && !failure ? frame.foreign : [];
     if (!(commit && !failure) && frame.kind === "async") {
       for (const w of frame.foreign) {
@@ -504,6 +514,7 @@ export class DurableEmulator implements DurableStorageLike {
     this.deadReason = reason;
     try { if (this.db.isOpen && this.db.isTransaction) this.exp("ROLLBACK"); } catch { /* nothing open */ }
     this.implicitOpen = false;
+    this.implicitRecorded = [];
     for (const f of this.stack) f.open = false;
     // Writes from outside the transaction were never part of it: they stay, as they do in workerd.
     const concurrent = this.stack.flatMap((f) => f.foreign);
@@ -643,6 +654,15 @@ export class DurableEmulator implements DurableStorageLike {
     const inside = this.contextFrame() !== null;
     await new Promise((r) => setTimeout(r, ms));
     if (!inside && this.gateBusy) { await this.acquireGate(); this.releaseGate(); }
+  }
+
+  /**
+   * Records every committed user write (statement text and bindings, in commit order) from now until stop(). A
+   * session recorded on the emulator can be replayed on workerd to measure what the same writes cost there.
+   */
+  record(): { stop(): RecordedWrite[] } {
+    this.recording = [];
+    return { stop: () => { const out = this.recording ?? []; this.recording = null; return out; } };
   }
 
   /** True while an async transaction holds (or has reserved) the gate. */

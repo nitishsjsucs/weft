@@ -377,6 +377,9 @@ export function deltaReset(storage: DurableStorageLike, snap: Pick<Snapshot, "ma
       const seedByKey = new Map<string, SqlStorageValue[]>();
       for (const row of seed.rows) seedByKey.set(canonicalKey(keyIndex.map((i) => row[i])), row);
       const ins = `INSERT INTO ${q(name)} (${insertColumns(t)}) VALUES (${[...(t.rowid ? ["?"] : []), ...t.columns.map(() => "?")].join(", ")})`;
+      // Delete every dirty key first, then reinsert: a key can move (an UPDATE of the primary key keeps the rowid),
+      // so a seed row's rowid may still be held by a row that is deleted later in the list.
+      const back: SqlStorageValue[][] = [];
       for (const k of keys) {
         const values = JSON.parse(k) as unknown[];
         const res = storage.sql.exec(`DELETE FROM ${q(name)} WHERE ${where}`, ...values);
@@ -384,8 +387,9 @@ export function deltaReset(storage: DurableStorageLike, snap: Pick<Snapshot, "ma
         m.statements++; m.rowsRead += res.rowsRead; m.rowsWritten += res.rowsWritten;
         deleted += Number(m.exec("SELECT changes() AS c")[0]!.c);
         const row = seedByKey.get(canonicalKey(values));
-        if (row) { m.exec(ins, ...row); reinserted++; }
+        if (row) back.push(row);
       }
+      for (const row of back) { m.exec(ins, ...row); reinserted++; }
       for (const tr of blocking) m.exec(tr.sql);
     }
     const seqs = sequences(storage);

@@ -7,7 +7,7 @@ export { openDurableDb, durableHandleOf, DurableSession, DurableTransaction, Dur
 export { createSqlMeter, type SqlMeterControl, type StatementUsage } from "./meter";
 export { createTxGuard, type TxGuardControl } from "./tx-guard";
 export { worldScope, keyedWithReset } from "./scope";
-export { DurableEmulator, openDurableEmulator, EmulatedSqlError, ALLOWED_PRAGMAS, WORKERD_MESSAGES, type DurableEmulatorOptions } from "./emu";
+export { DurableEmulator, openDurableEmulator, EmulatedSqlError, ALLOWED_PRAGMAS, WORKERD_MESSAGES, type DurableEmulatorOptions, type RecordedWrite } from "./emu";
 export { migrateDurable, MIGRATIONS_TABLE, type DurableMigrationOutcome } from "./migrate-durable";
 export { migrationEntries, journalHash, readMigrationsFromDir, type MigrationEntry, type MigrationJournal } from "./migrations";
 export { splitStatements, tokenize, statementKind, tablesOf, targetTable, parameterCount } from "./sqltext";
