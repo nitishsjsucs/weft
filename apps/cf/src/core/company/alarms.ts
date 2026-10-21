@@ -60,7 +60,14 @@ export class AlarmPlan {
     if (this.armedAt !== null && this.armedAt <= want) return;
     this.armedAt = want;
     this.setAlarms += 1;
-    await this.storage.setAlarm(want);
+    try {
+      await this.storage.setAlarm(want);
+    } catch (e) {
+      // Not armed after all: forget what the storage holds, so the next arm or sync reads it and sets it again.
+      this.armedAt = null;
+      this.known = false;
+      throw e;
+    }
   }
 
   /** Forget everything (a reset or restore rebuilt the world; deleteAll also cleared the storage alarm). */

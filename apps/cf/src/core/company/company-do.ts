@@ -87,7 +87,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   }
 
   private newRunHost(): DurableRunHost {
-    return durableRunHost({ arm: () => this.alarms.arm("runs"), counter: this.counter });
+    return durableRunHost({
+      arm: () => this.alarms.arm("runs"), counter: this.counter,
+      onArmError: (e) => logError("alarm.arm", e, { slot: this.stamp?.slot, gen: this.stamp?.gen }),
+    });
   }
   private newScheduler(): DurableSchedulerHost {
     return durableSchedulerHost({ arm: (at) => this.alarms.arm("tick", at), cancel: () => this.alarms.cancel("tick") });
@@ -212,6 +215,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       return await this.serveApp(request, url, stamp);
     } finally {
       if (counted) this.leave();
+      this.runHost.poke();
       this.scheduler.poke();
       this.maybePushUsage();
     }

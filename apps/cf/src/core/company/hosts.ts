@@ -15,19 +15,35 @@ export interface DurableRunHost extends RunHost {
   readonly kind: "alarm";
   drain(): Promise<DrainResult>;
   readonly draining: boolean;
+  /** Asks for the alarm again when the last ask failed and jobs still wait (CompanyDO calls it after each request). */
+  poke(): void;
+  /** The last ask for an alarm failed and no ask has succeeded since. */
+  readonly armFailed: boolean;
 }
 
-export function durableRunHost(opts: { arm: () => void | Promise<void>; counter?: FetchCounter; maxRounds?: number }): DurableRunHost {
+export function durableRunHost(opts: { arm: () => void | Promise<void>; counter?: FetchCounter; maxRounds?: number; onArmError?: (e: unknown) => void }): DurableRunHost {
   const fifo: RunHostJob[] = [];
   const maxRounds = opts.maxRounds ?? 16;
   let draining = false;
-  const arm = () => { void Promise.resolve().then(opts.arm).catch(() => undefined); };
+  let armFailed = false;
+  // A failed ask (setAlarm threw) would leave the jobs waiting for an alarm that never comes: it is reported, and the
+  // next request's poke asks again.
+  const arm = () => {
+    void Promise.resolve().then(opts.arm).then(() => { armFailed = false; }, (e: unknown) => {
+      armFailed = true;
+      try { opts.onArmError?.(e); } catch { /* reporting never throws into the host */ }
+    });
+  };
   return {
     kind: "alarm",
     get draining() { return draining; },
+    get armFailed() { return armFailed; },
     submit(job) {
       fifo.push(job);
       if (!draining) arm();
+    },
+    poke() {
+      if (armFailed && !draining && fifo.length > 0) arm();
     },
     pending: () => fifo.map((j) => j.runId),
     async drain() {

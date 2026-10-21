@@ -22,7 +22,11 @@ export const CONFIG_KEYS: readonly string[] = [...Object.values(HOSTED_CONFIG_KE
 type Memo = { at: number; values: Map<string, string | null> };
 const memos = new WeakMap<KVNamespace, Memo>();
 
-/** All config keys, at most memoMs old. A failed KV read keeps the previous values (or none). */
+/**
+ * All config keys, at most memoMs old. A failed KV read keeps the previous values. With none to keep (a cold isolate
+ * while KV fails) the kill switch reads as on (agent.enabled=false) and nothing else is set, so model-calling
+ * admissions fail closed until KV answers; the failure is not memoized, so the next call reads KV again.
+ */
 export async function readConfig(kv: KVNamespace | undefined, now = Date.now(), memoMs: number = HOSTED_SETTINGS.configMemoMs): Promise<Map<string, string | null>> {
   if (!kv) return new Map();
   const memo = memos.get(kv);
@@ -36,7 +40,7 @@ export async function readConfig(kv: KVNamespace | undefined, now = Date.now(), 
     try {
       await Promise.all(CONFIG_KEYS.map(async (k) => values.set(k, await kv.get(k))));
     } catch {
-      return memo?.values ?? new Map();
+      return memo?.values ?? new Map<string, string | null>([[HOSTED_CONFIG_KEYS.agentEnabled, "false"]]);
     }
   }
   memos.set(kv, { at: now, values });
