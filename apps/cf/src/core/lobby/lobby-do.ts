@@ -222,11 +222,16 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     // visitor that got here first wins, and this one returns its lease.
     const raced = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
     if (raced) return { status: "leased", ...this.leaseInfo(raced) };
-    this.ctx.storage.transactionSync(() => {
+    // The IP-hash cap is checked again in the step that takes the lease: the awaits above (KV, the reclaim's
+    // heartbeats) let concurrent starts from one IP hash all pass the first check.
+    const reserved = this.ctx.storage.transactionSync(() => {
+      if (this.count(`ip:${input.ipHash}`, day) >= HOSTED_SETTINGS.leasesPerIpHashPerDay) return false;
       this.sql.exec(`INSERT INTO leases (slot, visitor, ip_hash, gen, started_at, last_seen, resets) VALUES (?, ?, ?, ?, ?, ?, 0)`, free!.name, input.visitor, input.ipHash, free!.gen, now, now);
       this.sql.exec(`DELETE FROM waitlist WHERE visitor = ?`, input.visitor);
       this.bump(`ip:${input.ipHash}`, 1, day);
+      return true;
     });
+    if (!reserved) return { status: "ip_limit", reopensAt: nextUtcMidnight(now) };
     try {
       await this.company(free.name).applyStamp({ slot: free.name, gen: free.gen, mode: "slot", visitor: input.visitor, ipHash: input.ipHash });
     } catch (e) {
