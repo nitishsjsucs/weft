@@ -7,3 +7,6 @@ generated/stats.json
 .wrangler/
 dist/
 .dev.vars
+# Rendered deploy and dry-run configs (scripts/cf/lib/configs.ts)
+wrangler.*.deploy.json
+wrangler.*.dryrun.json

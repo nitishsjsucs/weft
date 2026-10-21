@@ -2,9 +2,10 @@
 // Loaded lazily by CompanyDO (src/core/index.ts wires it), so the @weft/* modules evaluate only inside
 // blockConcurrencyWhile and never in the Lobby, SpendDO, cron or queue consumers.
 //
-//   storage --cf1 openDurableDb (via cf2's platform.openDb)--> Db, SqlMeter, TxGuard
+//   storage --cf2 durablePlatform.openDb (cf1 openDurableDb)--> Db, SqlMeter, TxGuard
 //   DurablePlatformInput --cf2 durablePlatform--> WeftPlatform --assembleWeft--> Weft (Hono app, agent, routines)
 //   /mcp --cf3 createRemoteMcpHandler--> tools that call the same Hono app in process
+//   restore and reset steps --cf1 snapshot.ts--> chunks, triggers, dirty tracking, digests
 //
 // The parts come from deps.ts by name; until a track has exported its part the boot fails with a message naming it.
 import { createHash } from "node:crypto";
@@ -12,15 +13,14 @@ import { eq } from "drizzle-orm";
 import { apiKeys, principals, settings, type Db, type DbTx } from "@weft/db";
 import { newId } from "@weft/core";
 import {
-  formatHostedMcpKey, hostedWorldId, WORLD_MODEL_SETTING,
-  type DurableWeftPlatform, type PlatformDb, type SqlMeter, type TxGuard,
+  formatHostedMcpKey, hostedWorldId, MCP_AGENT_ASK_PER_KEY_DAY, WORLD_MODEL_SETTING,
+  type DurableStorageLike, type DurableWeftPlatform, type PlatformDb, type SqlMeter, type TxGuard,
 } from "../../shared/contracts";
 import { randomAlnum } from "../../shared/crypto";
-import { json } from "../../shared/http";
 import { bundledFixtures } from "../fixtures";
-import { weftDeps } from "./deps";
-import type { EngineModule, WorldBootInput, WorldEngine, WorldStore } from "./engine";
-import { snapshotArtifacts } from "./snapshot-assets";
+import { weftDeps, type MigrationEntryLike, type SnapshotLike } from "./deps";
+import type { EngineModule, SnapshotArtifacts, SnapshotExtra, WorldBootInput, WorldEngine, WorldStore } from "./engine";
+import { bundledSnapshotFiles } from "./snapshot-assets";
 
 type Session = { principalId: string; companyId: string; via: "ui"; keyScope: null };
 
@@ -30,6 +30,20 @@ async function adminSession(db: Db, principalId: string | null): Promise<Session
   const [p] = await db.select().from(principals).where(eq(principals.id, id)).limit(1);
   if (!p || p.kind !== "human") throw Object.assign(new Error(`Unknown human principal ${id}`), { status: 401 });
   return { principalId: p.id, companyId: p.companyId, via: "ui", keyScope: null };
+}
+
+let migrations: MigrationEntryLike[] | null = null;
+/** The migrations from the bundled fixtures, read exactly as drizzle reads the folder (cf1 migrations.ts). */
+export function bundledMigrations(): MigrationEntryLike[] {
+  if (migrations) return migrations;
+  const journal = bundledFixtures.text("packages/db/drizzle/meta/_journal.json");
+  if (!journal) throw new Error("the bundled fixtures have no migration journal (pnpm cf:fixtures)");
+  migrations = weftDeps().migrationEntries(JSON.parse(journal) as never, (tag) => {
+    const t = bundledFixtures.text(`packages/db/drizzle/${tag}.sql`);
+    if (t === null) throw new Error(`the bundled fixtures have no migration ${tag}`);
+    return t;
+  });
+  return migrations;
 }
 
 async function boot(input: WorldBootInput): Promise<WorldEngine> {
@@ -56,25 +70,23 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
   const guard: TxGuard = db.guard;
   const internals = d.executorInternals(weft.executor);
   const origin = (input.env.WEFT_PUBLIC_ORIGIN ?? "https://weft.invalid").replace(/\/$/, "");
-
   const appFetch = async (req: Request): Promise<Response> => inScope(() => weft.app.fetch(req));
+  /** The MCP tools' in-process fetch: only the path and query of the URL they build are kept. */
+  const toolFetch = (url: string, init?: RequestInit): Promise<Response> => {
+    const u = new URL(url, origin);
+    return appFetch(new Request(`${origin}${u.pathname}${u.search}`, init));
+  };
+  const mcp = d.createRemoteMcpHandler({
+    apiUrl: origin,
+    allowedOrigins: [origin],
+    askLimiter: { take: async (apiKey) => ((await input.mcpAskAllowed(apiKey)) ? { ok: true } : { ok: false, limit: MCP_AGENT_ASK_PER_KEY_DAY }) },
+  }, toolFetch);
 
   return {
     meter,
     guard,
     fetch: appFetch,
-    async mcp(req, call) {
-      const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
-        const u = new URL(url, origin);
-        const inner = new Request(`${origin}${u.pathname}${u.search}`, init);
-        if (inner.method === "POST" && u.pathname === "/v1/agent/runs" && !(await call.allowAgentAsk())) {
-          return json({ _tag: "RateLimitExceeded", code: "MCP_AGENT_ASK_LIMIT", message: "agent_ask is limited per MCP key per day" }, { status: 429 });
-        }
-        return appFetch(inner);
-      };
-      const handler = d.createRemoteMcpHandler({ apiUrl: origin, apiKey: call.apiKey }, fetchImpl);
-      return inScope(() => handler(req));
-    },
+    mcp: (req) => inScope(() => mcp(req)),
     inScope: (fn) => inScope(fn),
     clockRate: () => weft.clock.rate(),
     async mintMcpKey(m) {
@@ -108,20 +120,53 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
   };
 }
 
+const snap = (a: SnapshotArtifacts) => a.snapshot as SnapshotLike;
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** The action chain head as the snapshot recorded it, against this storage's. */
+function chainHeadMatches(storage: DurableStorageLike, a: SnapshotArtifacts): boolean {
+  const want = a.manifest.extra?.chainHead ?? null;
+  let head: string | null = null;
+  try { head = (storage.sql.exec(`SELECT hash FROM actions ORDER BY seq DESC LIMIT 1`).toArray()[0]?.hash as string | undefined) ?? null; } catch { head = null; }
+  return want === head;
+}
+
 const store: WorldStore = {
-  async migrate(storage) {
-    const r = await weftDeps().migrateDurable(storage);
-    return { applied: typeof r === "number" ? r : (r as { applied?: number } | undefined)?.applied ?? 0 };
+  beginRestore(storage, a) {
+    const migs = bundledMigrations();
+    const d = weftDeps();
+    const r = d.beginRestore(storage, snap(a), migs, d.journalHash(migs));
+    return { applied: migs.length, triggers: r.triggers.map((t) => ({ name: t.name, sql: t.sql })) };
   },
-  isClean: (storage) => weftDeps().snapshot.isWorldClean(storage),
-  chunkCount: (a) => weftDeps().snapshot.snapshotChunkCount(a.snapshotSql),
+  chunkCount: (a) => snap(a).chunks.length,
   restoreChunk(storage, a, index) {
-    const r = weftDeps().snapshot.restoreSnapshotChunk(storage, a.snapshotSql, index);
-    return { rowsWritten: typeof r === "number" ? r : (r as { rowsWritten?: number } | undefined)?.rowsWritten ?? 0 };
+    return { rowsWritten: weftDeps().restoreChunks(storage, snap(a).chunks, index, index + 1).rowsWritten };
   },
-  armDirty: (storage) => weftDeps().snapshot.armDirtyTracking(storage),
-  verify: (storage, a, opts) => weftDeps().snapshot.verifySnapshot(storage, { manifest: a.manifest.dump, full: opts.full }),
-  deltaReset: (storage, a) => weftDeps().snapshot.deltaReset(storage, { seedRows: a.seedRows, manifest: a.manifest.dump }),
+  finishRestore(storage, a, triggers) {
+    try {
+      const r = weftDeps().finishRestore(storage, snap(a), triggers, { arm: true });
+      return { ok: true, mismatches: [], rowsWritten: r.rowsWritten };
+    } catch (e) {
+      return { ok: false, mismatches: [message(e)], rowsWritten: 0 };
+    }
+  },
+  verify(storage, a, opts) {
+    const v = weftDeps().verifyAgainstManifest(storage, snap(a).manifest, opts.full ? undefined : []);
+    const rows = Object.values(v.digests).reduce((n, t) => n + t.rows, 0);
+    return { ok: v.mismatched.length === 0, mismatches: v.mismatched, rows, chainValid: chainHeadMatches(storage, a) };
+  },
+  isClean(storage) {
+    for (const t of weftDeps().dirtyKeys(storage).keys()) if (t !== "kv_state") return false;
+    return true;
+  },
+  deltaReset(storage, a) {
+    try {
+      const r = weftDeps().deltaReset(storage, snap(a));
+      return { ok: true, rowsWritten: r.rowsWritten, mismatches: [] };
+    } catch (e) {
+      return { ok: false, rowsWritten: 0, mismatches: [message(e)] };
+    }
+  },
   async conformance(storage) {
     const run = weftDeps().runConformance;
     if (!run) throw new Error("cf1-db: @weft/db does not export runConformance yet");
@@ -129,4 +174,18 @@ const store: WorldStore = {
   },
 };
 
-export const weftEngineModule: EngineModule = { boot, store, artifacts: snapshotArtifacts };
+let artifacts: Promise<SnapshotArtifacts> | null = null;
+function loadArtifacts(): Promise<SnapshotArtifacts> {
+  artifacts ??= (async () => {
+    const decoded = await weftDeps().decodeSnapshot(bundledSnapshotFiles());
+    const extra = decoded.manifest.extra as SnapshotExtra | undefined;
+    return {
+      version: extra?.snapshotId ?? decoded.manifest.digest.slice(0, 16),
+      manifest: { journalHash: decoded.manifest.journalHash, digest: decoded.manifest.digest, chunks: decoded.manifest.chunks, rows: decoded.manifest.rows, ...(extra ? { extra } : {}) },
+      snapshot: decoded,
+    };
+  })().catch((e: unknown) => { artifacts = null; throw e; });
+  return artifacts;
+}
+
+export const weftEngineModule: EngineModule = { boot, store, artifacts: loadArtifacts };

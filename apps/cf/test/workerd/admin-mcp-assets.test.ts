@@ -114,10 +114,11 @@ describe("restore steps", () => {
     expect(n).toBe(3);
     expect(await co.restoreChunks({ from: 0, to: 2 })).toEqual({ next: 2, rowsWritten: 2 });
     expect(await co.restoreChunks({ from: 0, to: 3 })).toEqual({ next: 3, rowsWritten: 3 });
-    await co.restoreArm();
+    expect(await co.restoreArm()).toEqual({ ok: true, mismatches: [] });
     expect(await co.restoreVerify()).toMatchObject({ ok: true, rows: 3 });
     const done = await co.restoreFinish({ bookmark: null });
-    expect(done).toMatchObject({ slot: "slot-6", gen: 50, snapshot: FAKE_SNAPSHOT_VERSION, rowsWritten: 3 });
+    // Three chunk rows plus what arming wrote (the fake's two).
+    expect(done).toMatchObject({ slot: "slot-6", gen: 50, snapshot: FAKE_SNAPSHOT_VERSION, rowsWritten: 5 });
     const hb = await co.heartbeat();
     expect(hb).toMatchObject({ stamped: { slot: "slot-6", gen: 50, mode: "slot" }, clean: true, snapshot: FAKE_SNAPSHOT_VERSION });
   });

@@ -151,13 +151,14 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     meter,
     guard,
     fetch: app,
-    async mcp(req, call) {
+    async mcp(req) {
       const body = (await req.json().catch(() => ({}))) as { method?: string };
+      const key = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") ?? "")?.[1] ?? req.headers.get("x-api-key") ?? "";
       if (body.method === "agent_ask") {
-        const allowed = await call.allowAgentAsk();
+        const allowed = await input.mcpAskAllowed(key);
         return json({ allowed }, allowed ? 200 : 429);
       }
-      return json({ mcp: true, method: body.method ?? null, key: call.apiKey.slice(0, 7), world: input.world });
+      return json({ mcp: true, method: body.method ?? null, key: key.slice(0, 7), world: input.world });
     },
     inScope: (fn) => fn(),
     clockRate: () => rate,
@@ -174,9 +175,9 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
 }
 
 const store: WorldStore = {
-  async migrate(storage) {
+  beginRestore(storage) {
     storage.transactionSync(() => { for (const q of SCHEMA) storage.sql.exec(q); });
-    return { applied: SCHEMA.length };
+    return { applied: SCHEMA.length, triggers: [] };
   },
   isClean(storage) {
     const t = storage.sql.exec(`SELECT 1 AS x FROM sqlite_master WHERE name = '_weft_dirty'`).toArray();
@@ -187,13 +188,15 @@ const store: WorldStore = {
     storage.sql.exec(`INSERT INTO notes (id, text) VALUES (?, ?)`, index + 1, SEED[index]!);
     return { rowsWritten: 1 };
   },
-  armDirty(storage) {
+  finishRestore(storage) {
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS _weft_dirty (tbl TEXT NOT NULL, pk TEXT NOT NULL)`);
     for (const op of ["INSERT", "UPDATE", "DELETE"]) {
       const ref = op === "DELETE" ? "OLD" : "NEW";
       storage.sql.exec(`CREATE TRIGGER IF NOT EXISTS notes_dirty_${op.toLowerCase()} AFTER ${op} ON notes BEGIN
         INSERT INTO _weft_dirty (tbl, pk) SELECT 'notes', ${ref}.id WHERE NOT EXISTS (SELECT 1 FROM _weft_dirty WHERE tbl = 'notes' AND pk = ${ref}.id); END`);
     }
+    const n = storage.sql.exec(`SELECT COUNT(*) AS n FROM notes`).one().n as number;
+    return { ok: n === SEED.length, mismatches: n === SEED.length ? [] : [`notes ${n} != ${SEED.length}`], rowsWritten: 2 };
   },
   verify(storage) {
     const n = storage.sql.exec(`SELECT COUNT(*) AS n FROM notes`).one().n as number;
@@ -221,9 +224,9 @@ const store: WorldStore = {
 };
 
 const artifacts: SnapshotArtifacts = {
-  manifest: { version: FAKE_SNAPSHOT_VERSION, createdAt: "2026-10-20T00:00:00.000Z", profile: "rich", journalHash: "fake", worldDigest: "fake", chainHead: null, memoryHead: null, chunks: SEED.length, vaultKeyFingerprint: "fake", dump: {}, stats: {} },
-  snapshotSql: "",
-  seedRows: {},
+  version: FAKE_SNAPSHOT_VERSION,
+  manifest: { journalHash: "fake", digest: "fake", chunks: SEED.length, rows: SEED.length },
+  snapshot: {},
 };
 
 export const fakeEngineModule: EngineModule = { boot, store, artifacts: async () => artifacts };

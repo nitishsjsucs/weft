@@ -9,7 +9,8 @@ import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createTestHarness, type TestHarness, type WorkerHandle } from "wrangler";
 import { signAdmin, signSmoke } from "../../src/shared/tokens";
-import { CF_DIR, readConfig, REPO } from "./config-files";
+import { CF_DIR, REPO } from "./config-files";
+import { writeLocalConfigs } from "../../../../scripts/cf/lib/configs";
 import type { CoreEnv } from "../../src/shared/env";
 
 export { CF_DIR, REPO };
@@ -73,37 +74,18 @@ export class Harness {
     const assets = o.assets ?? { "index.html": "<!doctype html><title>Weft</title>home", "app/people/_/index.html": "people shell", "app/people/_/index.txt": "people rsc", "404.html": "not found" };
     for (const [p, body] of Object.entries(assets)) { mkdirSync(dirname(join(dir, "assets", p)), { recursive: true }); writeFileSync(join(dir, "assets", p), body); }
 
-    const core = readConfig("core");
-    delete core.$schema; delete core.observability; delete core.ai; delete core.vectorize; delete core.browser;
-    core.main = o.engine === "real" ? join(CF_DIR, "src/core/index.ts") : join(CF_DIR, "test/support/core-entry.ts");
-    core.services = [
-      { binding: "AI", service: "weft-fakes", entrypoint: "FakeAi" },
-      { binding: "MEMVEC", service: "weft-fakes", entrypoint: "FakeVectorize" },
-      { binding: "BROWSER", service: "weft-fakes", entrypoint: "FakeBrowser" },
-    ];
-    (core.d1_databases as { migrations_dir?: string }[])[0]!.migrations_dir = join(CF_DIR, "d1");
-    core.vars = { ...(core.vars as Record<string, string>), WEFT_LLM: "scripted", WEFT_PUBLIC_ORIGIN: ORIGIN, WEFT_POOL_SIZE: String(o.poolSize ?? 2), WEFT_CONFIG_MEMO_MS: "200", ...o.coreVars };
-
-    const front = readConfig("front");
-    delete front.$schema; delete front.observability;
-    front.main = join(CF_DIR, "src/front/index.ts");
-    const fa = front.assets as { directory: string; run_worker_first: string[] };
-    fa.directory = join(dir, "assets");
-    fa.run_worker_first = [...fa.run_worker_first, ...(o.runWorkerFirst ?? [])];
-    front.vars = { ...(front.vars as Record<string, string>), TURNSTILE_SITEKEY: TURNSTILE.passSitekey, WEFT_PUBLIC_ORIGIN: ORIGIN, WEFT_POOL_SIZE: String(o.poolSize ?? 2), WEFT_CONFIG_MEMO_MS: "200", ...o.frontVars };
-
-    const fakes = { name: "weft-fakes", main: join(CF_DIR, "test/support/fakes-worker.ts"), compatibility_date: core.compatibility_date, compatibility_flags: core.compatibility_flags };
-    writeFileSync(join(dir, "core.jsonc"), JSON.stringify(core, null, 1));
-    writeFileSync(join(dir, "front.jsonc"), JSON.stringify(front, null, 1));
-    writeFileSync(join(dir, "fakes.jsonc"), JSON.stringify(fakes, null, 1));
+    const paths = writeLocalConfigs({
+      dir, engine: o.engine ?? "fake", origin: ORIGIN, poolSize: o.poolSize, assetsDir: join(dir, "assets"),
+      runWorkerFirst: o.runWorkerFirst, coreVars: o.coreVars, frontVars: o.frontVars, configMemoMs: 200,
+    });
 
     const shared = { WEFT_SESSION_SECRET: secrets.session, WEFT_CTX_SECRET: secrets.ctx, WEFT_PROXY_SECRET: secrets.proxy };
     const server = createTestHarness({
       root: dir,
       workers: [
-        { configPath: join(dir, "front.jsonc"), secrets: { ...shared, TURNSTILE_SECRET: o.turnstileSecret ?? TURNSTILE.passSecret, WEFT_SMOKE_TOKEN: secrets.smoke, WEFT_ADMIN_TOKEN: secrets.admin } },
-        { configPath: join(dir, "core.jsonc"), secrets: { ...shared, WEFT_VAULT_KEY: secrets.vault } },
-        { configPath: join(dir, "fakes.jsonc") },
+        { configPath: paths.front, secrets: { ...shared, TURNSTILE_SECRET: o.turnstileSecret ?? TURNSTILE.passSecret, WEFT_SMOKE_TOKEN: secrets.smoke, WEFT_ADMIN_TOKEN: secrets.admin } },
+        { configPath: paths.core, secrets: { ...shared, WEFT_VAULT_KEY: secrets.vault } },
+        { configPath: paths.fakes },
       ],
     });
     await server.listen();

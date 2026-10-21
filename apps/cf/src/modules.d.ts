@@ -5,6 +5,6 @@ declare module "*.gz" {
   export default data;
 }
 declare module "*/generated/manifest.json" {
-  const manifest: { version: string; [key: string]: unknown };
+  const manifest: Record<string, unknown>;
   export default manifest;
 }

@@ -22,7 +22,7 @@ import { DO_PATHS, HEALTH_PATH, isModelAdmission, LEASE_HEADER, SIM_RESET_PATH }
 import { configEnv, liveEnv } from "./company-do-env";
 import { spendClient } from "../spend/client";
 import { AlarmPlan } from "./alarms";
-import { loadEngine, type EngineModule, type WorldEngine } from "./engine";
+import { loadEngine, type EngineModule, type RestoreTrigger, type WorldEngine } from "./engine";
 import { durableRunHost, durableSchedulerHost, fetchCounter, type DurableRunHost, type DurableSchedulerHost } from "./hosts";
 import { zeroUsage, type ResetOutcome, type RestoreBeginInput, type RestoreFinish, type RestoreVerify, type SlotHeartbeat, type UsageDelta, type WorldStamp } from "./rpc";
 import { addLeaseKey, hasKvState, leaseKeys, modeOf, readStamp, writeStamp } from "./world-state";
@@ -32,7 +32,7 @@ const PUSH_AT = { rowsWritten: 1_000, rowsRead: 100_000, requests: 500 } as cons
 const RESTORE_KEY = "weft.restore";
 const SNAPSHOT_KEY = "weft.snapshot";
 
-interface RestoreProgress { slot: string; gen: number; mode: WorldMode; next: number; rowsWritten: number }
+interface RestoreProgress { slot: string; gen: number; mode: WorldMode; next: number; rowsWritten: number; triggers: RestoreTrigger[] }
 
 export class CompanyDO extends DurableObject<CoreEnv> {
   private stamp: WorldStamp | null = null;
@@ -101,6 +101,11 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         onOutbox: () => queueMicrotask(() => void this.flushOutbox()),
         readOnly: stamp.mode === "showcase",
         fetch: this.counter.wrap(globalThis.fetch.bind(globalThis)),
+        mcpAskAllowed: async (apiKey) => {
+          const keyId = await mcpKeyId(apiKey);
+          const r = await this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby)).take({ key: `mcp_ask:${keyId}`, limit: MCP_AGENT_ASK_PER_KEY_DAY });
+          return r.ok;
+        },
       });
       this.engine = engine;
       this.bootError = null;
@@ -237,14 +242,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const key = /^Bearer\s+(\S+)$/i.exec(auth)?.[1] ?? request.headers.get("x-api-key") ?? "";
     if (!key) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "An MCP key is required");
     const engine = this.engine!;
-    const keyId = await mcpKeyId(key);
-    const { value: res, usage } = await engine.meter.measure(() => engine.mcp(request, {
-      apiKey: key,
-      allowAgentAsk: async () => {
-        const r = await this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby)).take({ key: `mcp_ask:${keyId}`, limit: MCP_AGENT_ASK_PER_KEY_DAY });
-        return r.ok;
-      },
-    }));
+    const { value: res, usage } = await engine.meter.measure(() => engine.mcp(request));
     this.usage.rowsRead += usage.rowsRead;
     this.usage.rowsWritten += usage.rowsWritten;
     return res;
@@ -454,7 +452,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.alarms.clear();
     this.stamp = null;
     await this.ctx.storage.deleteAll();
-    this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { slot: input.slot, gen: input.gen, mode: input.mode, next: 0, rowsWritten: 0 });
+    this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { slot: input.slot, gen: input.gen, mode: input.mode, next: 0, rowsWritten: 0, triggers: [] });
     return { ok: true };
   }
 
@@ -464,10 +462,18 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     return p;
   }
 
+  /** Migrations, and the schema's triggers set aside until restoreArm (they persist with the progress). */
   async restoreMigrate(): Promise<{ applied: number }> {
-    this.progress();
+    const p = this.progress();
     const mod = this.module ?? (this.module = await loadEngine());
-    return mod.store.migrate(this.storage);
+    const a = await mod.artifacts();
+    // One transaction: the triggers it drops and the record of them commit together. A retried step finds them
+    // already dropped and keeps the ones the first run set aside.
+    return this.ctx.storage.transactionSync(() => {
+      const r = mod.store.beginRestore(this.storage, a);
+      this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { ...p, triggers: r.triggers.length ? r.triggers : p.triggers });
+      return { applied: r.applied };
+    });
   }
 
   async restoreChunkCount(): Promise<number> {
@@ -492,10 +498,13 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     return { next: p.next, rowsWritten: p.rowsWritten };
   }
 
-  async restoreArm(): Promise<{ ok: true }> {
-    this.progress();
-    (this.module ?? (this.module = await loadEngine())).store.armDirty(this.storage);
-    return { ok: true };
+  /** Triggers back, sequences, dirty tracking armed, and cf1's digest check of every table. */
+  async restoreArm(): Promise<{ ok: boolean; mismatches: string[] }> {
+    const p = this.progress();
+    const mod = this.module ?? (this.module = await loadEngine());
+    const r = mod.store.finishRestore(this.storage, await mod.artifacts(), p.triggers);
+    if (r.ok) this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { ...p, rowsWritten: p.rowsWritten + r.rowsWritten });
+    return { ok: r.ok, mismatches: r.mismatches.slice(0, 20) };
   }
 
   async restoreVerify(): Promise<RestoreVerify> {
@@ -517,13 +526,13 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const s: WorldStamp = { slot: p.slot, gen: p.gen, mode: p.mode, visitor: null, ipHash: null };
     this.ctx.storage.transactionSync(() => {
       writeStamp(this.ctx.storage.sql, s);
-      this.ctx.storage.kv.put(SNAPSHOT_KEY, a.manifest.version);
+      this.ctx.storage.kv.put(SNAPSHOT_KEY, a.version);
       this.ctx.storage.kv.delete(RESTORE_KEY);
     });
     this.stamp = s;
     await this.startEngine();
     if (!this.engine) throw new Error(`restored ${p.slot} but the world did not boot: ${this.bootError ?? "unknown"}`);
-    return { slot: p.slot, gen: p.gen, snapshot: a.manifest.version, bookmark: input.bookmark, rowsWritten: p.rowsWritten };
+    return { slot: p.slot, gen: p.gen, snapshot: a.version, bookmark: input.bookmark, rowsWritten: p.rowsWritten };
   }
 
   /** The deployed transaction conformance run on the scratch `conformance` object; it wipes itself afterwards. */

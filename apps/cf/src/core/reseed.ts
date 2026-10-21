@@ -35,7 +35,8 @@ export class ReseedWorkflow extends WorkflowEntrypoint<CoreEnv, ReseedParams> {
         const to = Math.min(chunks, from + CHUNKS_PER_STEP);
         rowsWritten = await step.do(`chunks ${from}-${to}`, RETRY, async () => (await company().restoreChunks({ from, to })).rowsWritten);
       }
-      await step.do("arm", RETRY, async () => { await company().restoreArm(); return true; });
+      const armed = await step.do("arm", RETRY, async () => { const r = await company().restoreArm(); return { ok: r.ok, mismatches: [...r.mismatches] }; });
+      if (!armed.ok) throw new NonRetryableError(`restore of ${slot} does not match the manifest: ${armed.mismatches.slice(0, 3).join("; ")}`);
       const v = await step.do("verify", RETRY, async () => {
         const r = await company().restoreVerify();
         return { ok: r.ok, chainValid: r.chainValid, mismatches: [...r.mismatches], rows: r.rows };
