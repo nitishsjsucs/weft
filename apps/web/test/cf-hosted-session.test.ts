@@ -1,13 +1,14 @@
 // The hosted visitor session (track cf5-web; docs/cloudflare/design.md 6.2): the showcase and slot worlds, the feed
 // started for a lease, the lease-ended screen, lease attempts that do not lease, and the human grant waiters. The
 // fetch, the WebSocket and the window are fakes.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LeaseResult, SessionStatus } from "../../../packages/contracts/src/ext/cf-hosted";
 import { PollScheduler, setScheduler, type Timers } from "../src/lib/api/poll";
 import { readLeaseHint } from "../src/lib/hosted/hint";
 import {
   bootSession, dismissEnded, ensureHumanGrant, fmtLeft, grantFailed, hostedStore, leaseDeadline, markEnded, refreshSession, requestStart, resetHostedSession, startLease, verifyGrant,
 } from "../src/lib/hosted/session";
+import { HUMAN_CHECK_WAIT_MS } from "../src/lib/hosted/flags";
 
 const timers: Timers = { now: () => Date.now(), set: () => 0, clear: () => {} };
 const lease = { slot: "slot-1", gen: 3, expiresAt: new Date(Date.now() + 3 * 3600_000).toISOString(), idleExpiresAt: new Date(Date.now() + 1800_000).toISOString(), resetsLeft: 3 };
@@ -118,6 +119,30 @@ describe("leases", () => {
     }
   });
 
+  it("ignores a second Start request while a lease request is out, and takes one again after", async () => {
+    let answer: (v: { status: number; body: unknown }) => void = () => {};
+    answers["GET /api/_session"] = () => ({ status: 200, body: status() });
+    const g = globalThis as Record<string, unknown>;
+    const plain = g.fetch as (path: string, init?: RequestInit) => Promise<Response>;
+    g.fetch = (path: string, init: RequestInit = {}) => path === "/api/_session/lease"
+      ? new Promise<Response>((ok) => { answer = (v) => ok(new Response(JSON.stringify(v.body), { status: v.status })); })
+      : plain(path, init);
+    requestStart("button");
+    const asked = hostedStore.get().startAsk;
+    const out = startLease("tok");
+    requestStart("mutation");   // a showcase mutation's LEASE_REQUIRED while the lease request is out
+    expect(hostedStore.get()).toMatchObject({ startAsk: asked, startReason: "button" });
+    answer({ status: 200, body: { status: "waitlist", position: 1, poolSize: 2, etaMinutes: 6 } });
+    expect((await out).status).toBe("waitlist");
+    requestStart("mutation");
+    expect(hostedStore.get()).toMatchObject({ startAsk: asked + 1, startReason: "mutation", blocked: null });
+    // A lease request that throws ends the wait too.
+    g.fetch = async () => { throw new Error("offline"); };
+    await expect(startLease("tok")).rejects.toThrow("offline");
+    requestStart("button");
+    expect(hostedStore.get().startAsk).toBe(asked + 2);
+  });
+
   it("throws the gate code when the check fails", async () => {
     answers["POST /api/_session/lease"] = () => ({ status: 403, body: { _tag: "Forbidden", code: "TURNSTILE_FAILED", message: "nope" } });
     await expect(startLease("bad")).rejects.toMatchObject({ status: 403, code: "TURNSTILE_FAILED" });
@@ -151,6 +176,38 @@ describe("the human grant", () => {
     grantFailed("cancelled");
     await expect(a).rejects.toThrow("cancelled");
     expect(hostedStore.get().grantAsk).toBeNull();
+  });
+
+  it("a check still open after HUMAN_CHECK_WAIT_MS fails, so the waiting requests get their 428", async () => {
+    vi.useFakeTimers();
+    try {
+      answers["POST /api/_session/verify"] = () => ({ status: 500, body: { message: "verify is down" } });
+      const a = ensureHumanGrant();
+      const failed = expect(a).rejects.toThrow("The human check took too long. Try again.");
+      await expect(verifyGrant("tok")).rejects.toThrow("verify is down");   // the widget shows Try again; the request waits
+      vi.advanceTimersByTime(HUMAN_CHECK_WAIT_MS - 1);
+      expect(hostedStore.get().grantAsk).not.toBeNull();
+      const b = ensureHumanGrant();   // joins the open check and its deadline
+      vi.advanceTimersByTime(1);
+      await failed;
+      await expect(b).rejects.toThrow("took too long");
+      expect(hostedStore.get().grantAsk).toBeNull();
+      // A check that passes in time clears its deadline: a later check gets a full wait of its own.
+      answers["POST /api/_session/verify"] = () => ({ status: 200, body: { ok: true, grantExpiresAt: "2026-10-26T16:00:00.000Z" } });
+      const c = ensureHumanGrant();
+      vi.advanceTimersByTime(HUMAN_CHECK_WAIT_MS / 2);
+      await verifyGrant("tok");
+      await c;
+      const d = ensureHumanGrant();
+      let settled = false;
+      d.then(() => { settled = true; }, () => { settled = true; });
+      vi.advanceTimersByTime(HUMAN_CHECK_WAIT_MS / 2 + 1);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      grantFailed("cancelled");
+      await expect(d).rejects.toThrow("cancelled");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
 });
 

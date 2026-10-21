@@ -2,7 +2,7 @@
 // the scheduler (hidden tabs, idle backoff, the change feed, commit frames by x-weft-tables, the 60 s safety net) and
 // the visibility and idle trackers, all on a fake clock.
 import { afterEach, describe, expect, it } from "vitest";
-import { clearTables, COMMIT_DEBOUNCE_MS, installTrackers, pollInterval, PollScheduler, recordTables, safetyNetMs, tablesFor, touches, urlKey, type PollEnv, type Timers } from "../src/lib/api/poll";
+import { clearTables, COMMIT_DEBOUNCE_MS, installTrackers, pollInterval, PollScheduler, recordTables, safetyNetMs, TABLES_MAX_URLS, tablesFor, touches, urlKey, type PollEnv, type Timers } from "../src/lib/api/poll";
 
 class FakeTimers implements Timers {
   t = 0;
@@ -78,6 +78,24 @@ describe("x-weft-tables", () => {
     expect(touches("/api/v1/never-fetched", ["x"])).toBe(true);
     expect(touches(null, ["x"])).toBe(true);
     expect(urlKey("https://weft.example/api/v1/x?y=1")).toBe("/api/v1/x?y=1");
+  });
+
+  it("keeps the most recently fetched TABLES_MAX_URLS URLs; a dropped one reads as unknown", () => {
+    expect(TABLES_MAX_URLS).toBe(256);
+    recordTables("/api/v1/proposals", "proposals");
+    for (let i = 0; i < TABLES_MAX_URLS - 1; i++) recordTables(`/api/v1/workers?page=${i}`, "workers");
+    recordTables("/api/v1/proposals", "proposals");   // fetched again: now the most recent
+    recordTables("/api/v1/workers?page=last", "workers");
+    expect(tablesFor("/api/v1/workers?page=0")).toBeUndefined();
+    expect(touches("/api/v1/workers?page=0", ["proposals"])).toBe(true);
+    expect([...(tablesFor("/api/v1/proposals") ?? [])]).toEqual(["proposals"]);
+    expect(touches("/api/v1/proposals", ["workers"])).toBe(false);
+    expect(tablesFor("/api/v1/workers?page=1")).toEqual(new Set(["workers"]));
+    expect(tablesFor("/api/v1/workers?page=last")).toEqual(new Set(["workers"]));
+    for (let i = 0; i < 1_000; i++) recordTables(`/api/v1/runs?cursor=${i}`, null);
+    expect(tablesFor("/api/v1/runs?cursor=999")).toBeNull();
+    expect(tablesFor("/api/v1/runs?cursor=743")).toBeUndefined();
+    expect(tablesFor("/api/v1/runs?cursor=744")).toBeNull();
   });
 });
 

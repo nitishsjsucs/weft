@@ -45,8 +45,12 @@ export function safetyNetMs(env: PollEnv): number | null {
 
 // ---- tables per URL (x-weft-tables) --------------------------------------------------------------------------
 
-/** `x-weft-tables` from the last GET of each URL: a sorted set, or null when the response did not list them. */
+/** `x-weft-tables` from the last GET of each URL: a sorted set, or null when the response did not list them. Only the
+ * hosted fetch records them, so on Node the map stays empty. */
 const tablesByUrl = new Map<string, Set<string> | null>();
+/** The URLs kept, most recently fetched last: a long session reads many distinct URLs (a query string per filter or
+ * page). A URL dropped here reads as unknown, which every commit matches, so it costs at most one extra refetch. */
+export const TABLES_MAX_URLS = 256;
 
 /** The cache key for a request URL: path and query, without the origin. */
 export function urlKey(url: string): string {
@@ -56,7 +60,10 @@ export function urlKey(url: string): string {
 
 export function recordTables(url: string, header: string | null): void {
   const set = header === null ? null : new Set(header.split(",").map((t) => t.trim()).filter(Boolean));
-  tablesByUrl.set(urlKey(url), set);
+  const key = urlKey(url);
+  tablesByUrl.delete(key);
+  tablesByUrl.set(key, set);
+  while (tablesByUrl.size > TABLES_MAX_URLS) tablesByUrl.delete(tablesByUrl.keys().next().value!);
 }
 /** The tables a URL read last time; undefined when it was never fetched, null when the response did not say. */
 export function tablesFor(url: string): Set<string> | null | undefined {
