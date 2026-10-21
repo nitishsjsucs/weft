@@ -16,6 +16,7 @@ import type { Weft, WeftEnv } from "../http/context";
 import { viewerScope } from "../http/scope";
 import { SimResetBody } from "../../../../packages/contracts/src/ext/tour";
 import { HOSTED_ERRORS } from "../../../../packages/contracts/src/ext/cf-hosted";
+import { RESERVED_TABLE_PREFIX } from "../../../../packages/contracts/src/ext/cf-db";
 
 /** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
  * 6.4), where only Node's code paths call it. */
@@ -129,7 +130,8 @@ async function rebuild(weft: Weft, want?: SeedProfile): Promise<{ ms: number; pr
     await withWriteLock(async () => {
       await weft.db.run(sql`PRAGMA foreign_keys=OFF`);
       try {
-        const tables = await weft.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`);
+        // workerd's own tables (_cf_*) are never Weft's to drop; Node worlds have none.
+        const tables = await weft.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND substr(name, 1, ${RESERVED_TABLE_PREFIX.length}) <> ${RESERVED_TABLE_PREFIX}`);
         for (const { name } of tables) await weft.db.run(sql.raw(`DROP TABLE IF EXISTS "${name.replace(/"/g, "")}"`));
       } finally { await weft.db.run(sql`PRAGMA foreign_keys=ON`); }
       await migrate(weft.db);
