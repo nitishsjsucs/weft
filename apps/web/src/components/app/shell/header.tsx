@@ -4,7 +4,7 @@
 // control is 32 px at radius 8; the pill's segments are 28 px at radius 6. The bar collapses in three tiers by its own
 // container width (Full from 760, Compact from 480, Mini below), so docking the agent changes the tier, not the window.
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useAppPathname } from "@/lib/pathname";
 import { ChevronRight, PanelLeft, PanelRight, Search } from "lucide-react";
 import { Button } from "@weft/ui/components";
 import { cn } from "@weft/ui";
@@ -19,7 +19,7 @@ export const SIDEBAR_ID = W3_TOPBAR_SHELL_DOM.sidebar;
 export const AGENT_PANEL_ID = W3_TOPBAR_SHELL_DOM.agentPanel;
 
 function Breadcrumb() {
-  const pathname = usePathname();
+  const pathname = useAppPathname();
   const trail = crumbs(pathname, useCrumbTitle());
   return (
     <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center">

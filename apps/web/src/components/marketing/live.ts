@@ -3,7 +3,8 @@
 import type { Health, Stats } from "@weft/contracts";
 
 export interface LandingStats {
-  source: "live" | "fallback";
+  /** live: GET /v1/stats answered; snapshot: the hosted build's stats.json from the seeded world; fallback: the seed's numbers. */
+  source: "live" | "fallback" | "snapshot";
   employees: number;
   simulatedAgencies: number;
   runsLogged: number;
@@ -26,9 +27,9 @@ async function getJson<T>(path: string, ms = 1200): Promise<T | null> {
   }
 }
 
-export function toLandingStats(s: Partial<Stats> | null): LandingStats {
+export function toLandingStats(s: Partial<Stats> | null, source: "live" | "snapshot" = "live"): LandingStats {
   if (!s || typeof s.employees !== "number" || typeof s.simulatedAgencies !== "number" || typeof s.runsLogged !== "number") return FALLBACK_STATS;
-  return { source: "live", employees: s.employees, simulatedAgencies: s.simulatedAgencies, runsLogged: s.runsLogged, realAgenciesContacted: 0 };
+  return { source, employees: s.employees, simulatedAgencies: s.simulatedAgencies, runsLogged: s.runsLogged, realAgenciesContacted: 0 };
 }
 
 export async function loadLanding(): Promise<{ stats: LandingStats; clock: { now: string; rate: number }; live: boolean }> {

@@ -65,14 +65,15 @@ export function Nav() {
 
 // ---- hero ------------------------------------------------------------------------------------------------------
 
-export function Hero({ clock }: { clock: { now: string; rate: number } }) {
+/** `clockSlot` replaces the ticker (the hosted landing passes a client clock that a leased visitor refreshes). */
+export function Hero({ clock, clockSlot }: { clock: { now: string; rate: number }; clockSlot?: ReactNode }) {
   return (
     <section className="relative overflow-hidden">
       <LoomCanvas className={`pointer-events-none absolute top-0 right-0 hidden h-[620px] w-[62%] laptop:block ${css.loomFade}`} />
       <Container className="relative flex flex-col gap-8 pt-14 pb-12 tablet:gap-11 tablet:pt-20">
         <p className="flex flex-wrap items-center gap-x-2 text-[13px] leading-5 font-medium text-gray-10">
           <span>Simulated clock at Larkspur Robotics (demo):</span>
-          <span className="text-gray-12"><SimClockTicker now={clock.now} rate={clock.rate} /></span>
+          <span className="text-gray-12">{clockSlot ?? <SimClockTicker now={clock.now} rate={clock.rate} />}</span>
         </p>
         <div className="flex max-w-[900px] flex-col gap-5">
           <h1 className="text-[32px] leading-[1.1] font-medium tracking-[-0.01em] text-gray-12 tablet:text-[40px] laptop:text-hero">
@@ -309,6 +310,13 @@ export function AgentIsland() {
 
 // ---- stats ----------------------------------------------------------------------------------------------------------
 
+/** The line under the stats heading for each source. */
+export function statsNote(source: LandingStats["source"]): string {
+  if (source === "live") return "Counted from the demo database as it runs.";
+  if (source === "snapshot") return "Counted from the demo company's seeded database.";
+  return "The API is not reachable, so these are the seed's numbers.";
+}
+
 export function StatsTiles({ stats }: { stats: LandingStats }) {
   const fmt = new Intl.NumberFormat("en-US");
   const tiles = [
@@ -320,7 +328,7 @@ export function StatsTiles({ stats }: { stats: LandingStats }) {
   return (
     <section className="pb-12 tablet:pb-16 laptop:pb-24">
       <Container className="flex flex-col gap-12">
-        <SectionHeading id="numbers" lead="Numbers from this running demo." rest={stats.source === "live" ? "Counted from the demo database as it runs." : "The API is not reachable, so these are the seed's numbers."} />
+        <SectionHeading id="numbers" lead="Numbers from this running demo." rest={statsNote(stats.source)} />
         <dl data-testid="marketing-stats" data-source={stats.source} className="grid grid-cols-2 border-t border-l border-border laptop:grid-cols-4">
           {tiles.map((t) => (
             <div key={t.label} className="flex min-h-[132px] flex-col justify-between gap-6 border-r border-b border-border p-4 tablet:min-h-[176px] tablet:p-6">
