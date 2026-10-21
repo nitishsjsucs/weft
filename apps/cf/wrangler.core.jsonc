@@ -1,0 +1,68 @@
+// weft-core (docs/cloudflare/design.md 3.1 and 9.4, with the section 0 settings Nitish chose on 2026-10-20: pool 2, no
+// cumulative live cap, visitor and IP-hash caps equal to the day cap). No public route: workers_dev and preview_urls
+// are off, and the front Worker reaches it through Durable Object bindings and the CORE service binding.
+// Resource ids are placeholders: scripts/cf/config.ts renders the deploy config from apps/cf/resources.json
+// (written by pnpm cf:resources). Secrets (design 9.3) are installed with scripts/cf/put-secret.sh, never here.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "weft-core",
+  "main": "src/core/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      { "name": "COMPANY", "class_name": "CompanyDO" },
+      { "name": "LOBBY", "class_name": "LobbyDO" },
+      { "name": "SPEND", "class_name": "SpendDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CompanyDO", "LobbyDO", "SpendDO"] }],
+  "workflows": [{ "name": "weft-reseed", "binding": "RESEED", "class_name": "ReseedWorkflow" }],
+  "ai": { "binding": "AI" },
+  "browser": { "binding": "BROWSER" },
+  "images": { "binding": "IMAGES" },
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
+  "d1_databases": [{ "binding": "OPS", "database_name": "weft-ops", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "d1" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "weft-files" }],
+  "vectorize": [{ "binding": "MEMVEC", "index_name": "weft-memory" }],
+  "queues": {
+    "producers": [
+      { "binding": "JOBS", "queue": "weft-jobs" },
+      { "binding": "RENDER", "queue": "weft-render" }
+    ],
+    "consumers": [
+      { "queue": "weft-jobs", "max_batch_size": 5, "max_batch_timeout": 2, "max_retries": 5, "dead_letter_queue": "weft-dlq" },
+      { "queue": "weft-render", "max_batch_size": 1, "max_concurrency": 1, "max_retries": 5, "retry_delay": 20, "dead_letter_queue": "weft-dlq" },
+      { "queue": "weft-dlq", "max_batch_size": 10 }
+    ]
+  },
+  "ratelimits": [{ "name": "RL_RUN", "namespace_id": "4103", "simple": { "limit": 6, "period": 60 } }],
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "rules": [
+    { "type": "Text", "globs": ["**/*.sql", "**/*.txt"], "fallthrough": true },
+    { "type": "Data", "globs": ["**/*.gz"], "fallthrough": true }
+  ],
+  "vars": {
+    "WEFT_RUNTIME": "cloudflare",
+    "WEFT_LLM": "openai",
+    "WEFT_MODEL": "gpt-5.6-luna",
+    "WEFT_BACKGROUND_LLM": "1",
+    "WEFT_CLOCK_RATE": "0",
+    "WEFT_SANDBOX": "off",
+    "WEFT_DEV_AUTH": "1",
+    "WEFT_REQUIRE_VAULT_KEY": "1",
+    "WEFT_SEMANTIC_RECALL": "0",
+    "WEFT_EPHEMERAL_READ_IDS": "1",
+    "WEFT_MEMORY": "sqlite",
+    "WEFT_BLOBS": "sqlite",
+    "WEFT_RUN_USD_CAP": "0.10",
+    "WEFT_DAY_USD_CAP": "2.00",
+    "WEFT_LIVE_USD_CAP": "off",
+    "WEFT_NEURON_DAY_CAP": "5000",
+    "WEFT_POOL_SIZE": "2",
+    "WEFT_PUBLIC_ORIGIN": "https://weft.nitish-ratakonda.workers.dev"
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 0.5, "traces": { "enabled": true, "head_sampling_rate": 0.05 } }
+}

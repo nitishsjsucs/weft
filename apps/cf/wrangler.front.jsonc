@@ -1,0 +1,40 @@
+// weft, the front Worker (docs/cloudflare/design.md 3.1, 3.4, 3.5 and 9.4): weft.nitish-ratakonda.workers.dev. Pages are
+// the Next static export served as assets with no Worker invocation; the Worker runs first only for /api/* and /mcp.
+// Resource ids and the Turnstile sitekey are placeholders that scripts/cf/config.ts renders from
+// apps/cf/resources.json (pnpm cf:resources). Secrets (design 9.3) go in with scripts/cf/put-secret.sh, never here.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "weft",
+  "main": "src/front/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "../web/out",
+    "binding": "ASSETS",
+    "html_handling": "force-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*", "/mcp", "/mcp/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "COMPANY", "class_name": "CompanyDO", "script_name": "weft-core" },
+      { "name": "LOBBY", "class_name": "LobbyDO", "script_name": "weft-core" },
+      { "name": "SPEND", "class_name": "SpendDO", "script_name": "weft-core" }
+    ]
+  },
+  "services": [{ "binding": "CORE", "service": "weft-core", "entrypoint": "HostedExtras" }],
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
+  "ratelimits": [
+    { "name": "RL_API", "namespace_id": "4101", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_MUTATE", "namespace_id": "4102", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_MCP", "namespace_id": "4104", "simple": { "limit": 60, "period": 60 } }
+  ],
+  "vars": {
+    "TURNSTILE_SITEKEY": "set-by-cf-resources",
+    "WEFT_PUBLIC_ORIGIN": "https://weft.nitish-ratakonda.workers.dev",
+    "WEFT_POOL_SIZE": "2"
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 0.2 }
+}
