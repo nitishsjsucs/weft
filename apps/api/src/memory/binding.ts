@@ -7,15 +7,21 @@ import type { SimClock } from "@weft/contracts";
 import { executorInternals } from "@weft/executor";
 import type { Weft } from "../http/context";
 import { runMemoryDigest, type MemoryW2 } from "./digest";
+import type { SemanticRecallOptions } from "./semantic";
 
 export interface MemoryBinding {
   db: Db; clock: SimClock; memory: MemoryW2;
   /** The executor's taint path (run_taint plus the agent_runs mirror); never the brain. */
   taintRun(runId: string, by: string): Promise<void>;
+  /** The executor's redactor, which lexical recall applies to every excerpt; semantic lines go through it too. */
+  redact(text: string): string;
   /** Digest hook used by the precheck and by tests. */
   digest(input: { companyId: string; now: string }): Promise<Awaited<ReturnType<typeof runMemoryDigest>>>;
   /** Tests that must keep wave 1 transcripts byte-identical can switch recall off for one world. */
   recallEnabled: boolean;
+  /** Semantic candidates added to the lexical block (cf6-extras, design 5.4); absent everywhere but a hosted world
+   * whose platform attached a source, and inert there until its flag is on. */
+  semantic?: SemanticRecallOptions | null;
 }
 
 const bindings = new WeakMap<Db, MemoryBinding>();
@@ -32,6 +38,7 @@ export function bindMemory(weft: Weft): MemoryBinding | null {
   const b: MemoryBinding = {
     db: weft.db, clock: weft.clock, memory, recallEnabled: true,
     taintRun: (runId, by) => internals.taintRun(runId, by),
+    redact: (text) => weft.executor.redact(text),
     digest: (input) => runMemoryDigest(b, input),
   };
   bindings.set(weft.db, b);
@@ -44,4 +51,16 @@ export function bindMemory(weft: Weft): MemoryBinding | null {
 
 export function memoryBinding(db: Db): MemoryBinding | null {
   return bindings.get(db) ?? null;
+}
+
+/**
+ * Attaches a semantic recall source to a composed world (cf6-extras). CompanyDO calls it once after assembleWeft with
+ * the Vectorize source, the memoized flag and its MemoryRepo's read; `null` detaches it. Returns false when the world
+ * has no memory binding (no memory store), in which case recall stays lexical only.
+ */
+export function attachSemanticRecall(db: Db, opts: SemanticRecallOptions | null): boolean {
+  const b = bindings.get(db);
+  if (!b) return false;
+  b.semantic = opts;
+  return true;
 }
