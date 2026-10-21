@@ -3,11 +3,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { CHAT_TOOLS_W3, PORTAL_TOOLS } from "@weft/contracts";
-import { existsSync, readFileSync } from "node:fs";
 import type { WeftAgentRuntime } from "@weft/agent";
 import type { WeftRoutinesEngine } from "@weft/routines";
 import { emitEvent } from "@weft/core";
-import { join } from "node:path";
 import { actions, agentMentions, agentRuns, events, execRuns, expenseIntake, expenses, handoffCases, proposals, routineWaits, routines as routinesTable, devices as devicesTable, runSteps, runTaint, simChatMessages, uploads, workers } from "@weft/db";
 import { createTestWeft, type TestWeft } from "../src/testing";
 import { MENTION_AUTHOR, MENTION_TOOLS, mentionAnswered } from "../src/routes/agent-surfaces";
@@ -259,8 +257,9 @@ describe("email expense intake", () => {
     expect(e!.decidedBy).toBeNull();
     const [u] = await weft.db.select().from(uploads).where(eq(uploads.id, e!.receiptUploadId!));
     expect(u).toMatchObject({ workerId: w.id, purpose: "receipt" });
-    expect(existsSync(join(weft.dataDir, u!.storagePath))).toBe(true);
-    expect(readFileSync(join(weft.dataDir, u!.storagePath), "latin1").startsWith("%PDF-1.4")).toBe(true);
+    // Stored through the world's BlobStore (a file on Node, a blobs row with WEFT_BLOBS=sqlite).
+    expect(await weft.blobs.has(u!.storagePath)).toBe(true);
+    expect(Buffer.from((await weft.blobs.get(u!.storagePath))!).toString("latin1").startsWith("%PDF-1.4")).toBe(true);
     expect(await count()).toBe(before + 1);
 
     const again = await send(email);

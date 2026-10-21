@@ -2,9 +2,6 @@
 // Every route answers 501 until the owner registers real handlers before stubRoutes and lists them in `except`.
 // Reads come from the calendar and filing read models; preparing runs tax.prepare_filing as the signed-in person, and
 // filing always files the person's request as a pending tax.file_return proposal (R4), never a direct filing.
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { ComplianceItemKind, ComplianceItemStatus, FilingForm, NoticeUploadBody, NotFound, Unauthorized, type ToolOutcome } from "@weft/contracts";
@@ -18,6 +15,7 @@ import type { Weft, WeftEnv } from "../http/context";
 import { viewerScope } from "../http/scope";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
+import { storeUpload, uploadLimitResponse } from "../http/uploads";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 const CalendarQuery = z.object({ from: date, to: date, kind: ComplianceItemKind.optional(), status: ComplianceItemStatus.optional() });
@@ -82,7 +80,7 @@ export function complianceRoutes(weft: Weft): Hono<WeftEnv> {
   });
   r.post("/v1/filings/:id/prepare", (c) => outcome(c, weft, "tax.prepare_filing", { filing_id: c.req.param("id") }, "exec"));
   r.post("/v1/filings/:id/file", (c) => outcome(c, weft, "tax.file_return", { filing_id: c.req.param("id") }, "propose"));
-  // Notice upload (T4): multipart with `file` (and an optional agencyHint), stored like receipts as uploads/<sha256>.bin,
+  // Notice upload (T4): multipart with `file` (and an optional agencyHint), stored like receipts through the BlobStore,
   // or JSON NoticeUploadBody naming an upload already made. Extraction runs after, from the scan's sidecar.
   r.post("/v1/notices/upload", async (c) => {
     if (!c.var.session) throw new Unauthorized();
@@ -92,16 +90,11 @@ export function complianceRoutes(weft: Weft): Hono<WeftEnv> {
       const f = body?.file;
       if (!(f instanceof File) || f.size === 0 || f.size > MAX_NOTICE_BYTES) return c.json({ _tag: "Refused", code: "INVALID_INPUT", message: "file: attach the scanned notice (1 byte to 5 MB)", hint: null, example: null }, 422);
       if (!NOTICE_TYPES.has(f.type || "application/octet-stream")) return c.json({ _tag: "Refused", code: "INVALID_INPUT", message: "file: use a PDF, PNG, JPEG or text scan", hint: null, example: null }, 422);
-      const bytes = Buffer.from(await f.arrayBuffer());
-      const sha = createHash("sha256").update(bytes).digest("hex");
-      const rel = `uploads/${sha}.bin`;
-      const abs = join(weft.dataDir, rel);
-      const fresh = !existsSync(abs);
-      mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
-      if (fresh) writeFileSync(abs, bytes, { mode: 0o600 });
+      let up: Awaited<ReturnType<typeof storeUpload>>;
+      try { up = await storeUpload(weft, new Uint8Array(await f.arrayBuffer())); } catch (e) { const res = uploadLimitResponse(c, e); if (res) return res; throw e; }
       const hint = typeof body?.agencyHint === "string" && body.agencyHint ? body.agencyHint.slice(0, 40) : null;
-      const res = await outcome(c, weft, "notices.upload", { file_name: f.name || "notice", bytes: bytes.length, sha256: sha, storage_path: rel, agency_hint: hint }, "exec");
-      if (res.status !== 200 && fresh) { try { unlinkSync(abs); } catch { /* already gone */ } }
+      const res = await outcome(c, weft, "notices.upload", { file_name: f.name || "notice", bytes: up.bytes, sha256: up.sha256, storage_path: up.storagePath, agency_hint: hint }, "exec");
+      if (res.status !== 200) await up.undo();
       return res;
     }
     const b = NoticeUploadBody.parse(await c.req.json().catch(() => ({})));

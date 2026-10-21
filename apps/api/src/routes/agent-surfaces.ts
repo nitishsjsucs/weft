@@ -7,14 +7,12 @@
 // run settles, because the employee persona reaches only /v1/portal/* and cannot follow /v1/agent/runs.
 // Mentions (Q6): an inbound simulated chat message that names MENTION_HANDLE is recorded (agent.record_mention, system),
 // and a run opens tainted from its first step with read tools only; code posts its final answer once in the thread.
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { Hono } from "hono";
 import { z } from "zod";
 import { and, asc, eq, or } from "drizzle-orm";
 import { ChatChannel, Forbidden, PORTAL_TOOLS, PortalAskBody, SimInboundEmail, Unauthorized, ValidationError, CHAT_TOOLS_W3, type HumanSession, type ToolOutcome } from "@weft/contracts";
 import { principals, routineWaits } from "@weft/db";
+import { storeUpload } from "../http/uploads";
 import type { WeftAgentRuntime } from "@weft/agent";
 import { executorInternals } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
@@ -162,13 +160,9 @@ export function agentSurfacesRoutes(weft: Weft): Hono<WeftEnv> {
     const fixture = receiptFixtureOf(m);
     let receipt: Record<string, unknown> | undefined;
     if (fixture) {
-      const bytes = receiptPdf(fixture);
-      const sha = createHash("sha256").update(bytes).digest("hex");
-      const rel = `uploads/${sha}.bin`;
-      mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
-      if (!existsSync(join(weft.dataDir, rel))) writeFileSync(join(weft.dataDir, rel), bytes, { mode: 0o600 });
+      const up = await storeUpload(weft, new Uint8Array(receiptPdf(fixture)));
       const name = (m.attachment?.fileName || `${fixture.fixture}.pdf`).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
-      receipt = { file_name: `${name.slice(0, 2)}***${/\.[A-Za-z0-9]{1,5}$/.exec(name)?.[0] ?? ".pdf"}`, fixture: fixture.fixture, bytes: bytes.length, sha256: sha, storage_path: rel,
+      receipt = { file_name: `${name.slice(0, 2)}***${/\.[A-Za-z0-9]{1,5}$/.exec(name)?.[0] ?? ".pdf"}`, fixture: fixture.fixture, bytes: up.bytes, sha256: up.sha256, storage_path: up.storagePath,
         merchant: fixture.merchant, category: fixture.category, amount_cents: fixture.amountCents, transaction_date: fixture.date };
     }
     const out = (await weft.executor.system.exec("svc_sim", "expenses.intake_email", {

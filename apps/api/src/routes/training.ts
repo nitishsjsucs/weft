@@ -1,10 +1,7 @@
 // /v1 required training routes (wave 4, docs/wave4.md). Owner: w4-parity-compliance. Paths come from packages/contracts/src/api.ts.
 // Admins read courses and every assignment; the portal reads the caller's own. Completion runs training.complete
 // (human only) as the signed-in person; without a certificate upload Weft issues a completion certificate, stored like
-// a receipt (uploads/<sha256>.bin under the data dir).
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+// a receipt through the world's BlobStore (uploads/<sha256>.bin on Node).
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { TrainingAssignmentStatus, TrainingCourseCode, Unauthorized, type ToolOutcome } from "@weft/contracts";
@@ -13,6 +10,7 @@ import { principals, trainingCourses } from "@weft/db";
 import { eq } from "drizzle-orm";
 import { COURSE_RULES, getAssignment, listAssignments } from "../../../../packages/core/src/compliance/training";
 import type { Weft, WeftEnv } from "../http/context";
+import { storeUpload } from "../http/uploads";
 import { stubRoutes } from "../http/stub";
 import { parsePage, toPage } from "../http/paging";
 import { viewerScope } from "../http/scope";
@@ -38,12 +36,8 @@ export function trainingRoutes(weft: Weft): Hono<WeftEnv> {
     if (!body.certificateUploadId && a) {
       const now = weft.clock.now();
       const text = `Certificate of completion (demo)\n\nAssignment ${a.id}\nWorker ${a.workerId}\nCompleted ${now}\nIssued by Weft for Larkspur Robotics (demo). Not a real certificate.\n`;
-      const bytes = Buffer.from(text, "utf8");
-      const sha = createHash("sha256").update(bytes).digest("hex");
-      const rel = `uploads/${sha}.bin`;
-      mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
-      if (!existsSync(join(weft.dataDir, rel))) writeFileSync(join(weft.dataDir, rel), bytes, { mode: 0o600 });
-      certificate = { file_name: `certificate-${a.id}.txt`, bytes: bytes.length, sha256: sha, storage_path: rel };
+      const up = await storeUpload(weft, new TextEncoder().encode(text));
+      certificate = { file_name: `certificate-${a.id}.txt`, bytes: up.bytes, sha256: up.sha256, storage_path: up.storagePath };
     }
     const out: ToolOutcome = await weft.executor.human.exec(s, "training.complete", { assignment_id: id, ...(body.certificateUploadId ? { certificate_upload_id: body.certificateUploadId } : {}), ...(certificate ? { certificate } : {}) });
     await weft.scheduler.kick();

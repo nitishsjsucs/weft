@@ -12,6 +12,7 @@ import { syncContractorRail } from "./routes/contractors";
 import { pollIntegrations } from "./integrations/poll";
 import { timeOffYearEnd } from "./time-off/year-end";
 import { sweepEnrollmentWindows } from "./routes/life-events";
+import type { SchedulerHost } from "../../../packages/contracts/src/ext/cf-platform";
 
 export const HANDLER_CURSOR_KEY = "scheduler.handlers_cursor";
 const MAX_HANDLER_PASSES = 5;
@@ -19,6 +20,9 @@ const MAX_HANDLER_PASSES = 5;
 export interface CreateSchedulerOptions {
   db: Db; clock: SimClock; sims: Simulators; executor: ExecutorBundle; handlers: EventHandler[]; routines: RoutinesEngine;
   intervalMs?: number; log?: (line: string) => void;
+  /** Weft on Cloudflare (docs/cloudflare/design.md 3.3): where periodic ticks come from. Absent on Node: setInterval
+   * as before. The durable platform's host ticks from the Durable Object alarm, only while the clock rate is above 0. */
+  host?: SchedulerHost;
 }
 
 const isStub = (e: unknown) => isWeftError(e) && e._tag === "NotImplemented";
@@ -103,10 +107,16 @@ export function createScheduler(o: CreateSchedulerOptions): WeftScheduler {
     kick: tick,
     exclusive,
     start() {
+      if (o.host) { o.host.start({ tick, intervalMs: o.intervalMs ?? 5_000, clockRate: () => o.clock.rate() }); return; }
       if (timer) return;
       timer = setInterval(() => { void tick(); }, o.intervalMs ?? 5_000);
       timer.unref?.();
     },
-    async stop() { if (timer) clearInterval(timer); timer = null; await inflight.catch(() => undefined); },
+    async stop() {
+      if (o.host) await o.host.stop();
+      if (timer) clearInterval(timer);
+      timer = null;
+      await inflight.catch(() => undefined);
+    },
   };
 }

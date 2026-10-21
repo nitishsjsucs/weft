@@ -7,12 +7,31 @@ import { and, eq, isNull } from "drizzle-orm";
 import { Forbidden, RateLimitExceeded, ROUTES, Unauthorized, type HumanSession, type RouteDef } from "@weft/contracts";
 import { apiKeys, principals } from "@weft/db";
 import { executorInternals } from "@weft/executor";
-import type { WeftEnv } from "./context";
+import type { Weft, WeftEnv } from "./context";
 
 export function allowedHosts(ports: { api: number; web: number }, testMode: boolean): Set<string> {
   const s = new Set<string>();
   for (const h of ["127.0.0.1", "localhost"]) for (const p of [ports.api, ports.web]) s.add(`${h}:${p}`);
   if (testMode) s.add("localhost");
+  return s;
+}
+
+/**
+ * The hosts (and mutation origins) a world accepts. On hosted (WEFT_PUBLIC_ORIGIN set by the durable platform) the
+ * only one is the public origin's host, for example weft.nitish-ratakonda.workers.dev; Node keeps its ports.
+ */
+const hostsCache = new WeakMap<Weft, Set<string>>();
+export function allowedHostsFor(weft: Weft): Set<string> {
+  let s = hostsCache.get(weft);
+  if (s) return s;
+  const origin = weft.platform?.publicOrigin ?? null;
+  if (origin) {
+    s = new Set<string>([new URL(origin).host]);
+    if (weft.testMode) s.add("localhost");
+  } else {
+    s = allowedHosts(weft.ports, weft.testMode);
+  }
+  hostsCache.set(weft, s);
   return s;
 }
 
@@ -28,7 +47,7 @@ function safeEqual(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-class Window {
+export class Window {
   private hits = new Map<string, { start: number; n: number }>();
   constructor(private readonly limit: number, private readonly ms = 60_000) {}
   take(key: string, now = Date.now()): boolean {
@@ -39,20 +58,36 @@ class Window {
   }
 }
 
-export function auth(): MiddlewareHandler<WeftEnv> {
-  const keyLimit = new Window(60);
+/**
+ * The fixed-window limiters of one world (docs/cloudflare/design.md 6.4): keyed by the Weft, so worlds that share an
+ * isolate (Durable Object slots) never share a window; usr_dana exists in every world. Per minute: 60 for an API key,
+ * 1,200 for a UI principal (WEFT_RATE_KEY_PER_MIN and WEFT_RATE_UI_PER_MIN override them for one world).
+ */
+export interface AuthWindows { key: Window; ui: Window }
+const windows = new WeakMap<Weft, AuthWindows>();
+export function authWindows(weft: Weft): AuthWindows {
+  let w = windows.get(weft);
+  if (w) return w;
+  const env = weft.platform?.env ?? process.env;
+  const n = (v: string | undefined, d: number) => (v && /^\d{1,7}$/.test(v) ? Number(v) : d);
   // The Playwright runner (WEFT_E2E=1) drives one principal through every golden path spec in a few minutes, and the
   // app shell polls; with the wave 3 specs the suite sat at 1,200 a minute and failed with 429. Real use keeps 1,200.
-  const uiLimit = new Window(process.env.WEFT_E2E === "1" ? 6000 : 1200);
+  w = { key: new Window(n(env.WEFT_RATE_KEY_PER_MIN, 60)), ui: new Window(n(env.WEFT_RATE_UI_PER_MIN, env.WEFT_E2E === "1" ? 6000 : 1200)) };
+  windows.set(weft, w);
+  return w;
+}
+
+export function auth(): MiddlewareHandler<WeftEnv> {
   const primed = new WeakSet<object>();
   return async (c, next) => {
     const weft = c.var.weft;
+    const { key: keyLimit, ui: uiLimit } = authWindows(weft);
     // The redactor learns the proxy secret once per executor, and every API key plaintext it sees (harness 6.4).
     const internals = (() => { try { return executorInternals(weft.executor); } catch { return null; } })();
     if (internals && !primed.has(weft.executor)) { internals.addSecret(weft.proxySecret); primed.add(weft.executor); }
     const url = new URL(c.req.url);
     const host = c.req.header("host") ?? url.host;
-    const hosts = allowedHosts(weft.ports, weft.testMode);
+    const hosts = allowedHostsFor(weft);
     if (!hosts.has(host)) throw new Forbidden("Host not allowed");
     // The web proxy rewrites Host to the API's own address; the browser's Host arrives as x-forwarded-host and must
     // pass the same allowlist, or a DNS-rebound page could read the API through the proxy (SPEC 10).
@@ -79,7 +114,7 @@ export function auth(): MiddlewareHandler<WeftEnv> {
     } else {
       const principalId = c.req.header("x-weft-principal");
       const proxy = c.req.header("x-weft-proxy");
-      const devAuth = process.env.WEFT_DEV_AUTH === "1" || weft.testMode;
+      const devAuth = (weft.platform?.env ?? process.env).WEFT_DEV_AUTH === "1" || weft.testMode;
       if (principalId && devAuth) {
         if (!proxy || !safeEqual(proxy, weft.proxySecret)) throw new Unauthorized("x-weft-principal requires a valid x-weft-proxy");
         const [p] = await weft.db.select().from(principals).where(eq(principals.id, principalId)).limit(1);

@@ -2,15 +2,14 @@
 // Runs execute in the background: POST returns { runId } at once; the UI follows GET .../events (SSE) and falls back
 // to polling GET .../trace every second. The trace adds the stage summary (timings, tokens, cache-hit ratio, USD) and
 // the run's proposals from the executor's table.
-import { readFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type Proposal, type RunStepRow } from "@weft/contracts";
 import { agentRuns, execRuns, notices, payrollRuns, principals, proposals, runArtifacts, workers, type Db } from "@weft/db";
 import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
-import { approvalCardOf } from "@weft/executor";
+import { approvalCardOf, fileRunFiles } from "@weft/executor";
+import { RUN_LONG_POLL_MAX_S } from "../../../../packages/contracts/src/ext/cf-agent";
 import type { Weft, WeftEnv } from "../http/context";
 import { chooseChatTools } from "../agent/chat-allowlist";
 import { sse } from "../http/sse";
@@ -122,7 +121,29 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     return c.json({ hasMore: rows.length > limit, count: Math.min(rows.length, limit), data: rows.slice(0, limit) });
   });
 
-  r.get("/v1/agent/runs/:id", async (c) => c.json(await getRun(c.req.param("id"), c)));
+  // Additive long poll (docs/cloudflare/design.md 5.3, remote MCP agent_ask): ?wait=N (1 to 25 seconds) answers when the
+  // run reaches a settled status (waiting, held, done or another end state) or when N seconds pass, whichever comes
+  // first, so a hosted MCP client asks at most 3 times per question. Without wait the route answers at once, as before.
+  r.get("/v1/agent/runs/:id", async (c) => {
+    const id = c.req.param("id");
+    const first = await getRun(id, c);
+    const raw = c.req.query("wait");
+    if (raw === undefined) return c.json(first);
+    if (!/^\d{1,2}$/.test(raw) || Number(raw) < 1 || Number(raw) > RUN_LONG_POLL_MAX_S) throw new ValidationError(`wait is a whole number of seconds from 1 to ${RUN_LONG_POLL_MAX_S}`);
+    if (TERMINAL.has(first.status)) return c.json(first);
+    (weft.platform?.guard)?.assertNotInTx("long poll");
+    const deadline = Date.now() + Number(raw) * 1000;
+    let wake: () => void = () => undefined;
+    const stop = weft.agent.subscribe(id, (s) => { if (s.stage === "terminal") wake(); });
+    try {
+      while (Date.now() < deadline) {
+        await new Promise<void>((r) => { wake = r; const t = setTimeout(r, Math.min(1_000, Math.max(0, deadline - Date.now()))); (t as { unref?: () => void }).unref?.(); });
+        const row = await store.getRun(id);
+        if (row && TERMINAL.has(row.status)) return c.json(row);
+      }
+    } finally { stop(); }
+    return c.json(await getRun(id));
+  });
 
   r.get("/v1/agent/runs/:id/trace", async (c) => {
     const id = c.req.param("id");
@@ -200,11 +221,11 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     const [me] = await weft.db.select({ grantsJson: principals.grantsJson }).from(principals).where(and(eq(principals.id, s.principalId), eq(principals.companyId, s.companyId))).limit(1);
     const grants = parse<Record<string, string>>(me?.grantsJson ?? null, {});
     if (!grants[a.domain] || grants[a.domain] === "none") throw new Forbidden(`Artifact ${ref} needs view access to ${a.domain}`, { code: "NOT_PERMITTED" });
-    const root = resolve(weft.dataDir);
-    const file = resolve(join(root, a.path));
-    if (!file.startsWith(root + sep)) throw new NotFound(`No artifact ${ref} in run ${id}`);
+    // The body comes from the world's RunFileStore by the row's own path (files under the data dir on Node, run_files on
+    // hosted); a path that would climb out of the run workspace is refused by the store.
+    const body = await (weft.runFiles ?? fileRunFiles(weft.dataDir)).read(a.path);
     let data: unknown;
-    try { data = JSON.parse(readFileSync(file, "utf8")); } catch { throw new NotFound(`Artifact ${ref} has no readable file`); }
+    try { data = JSON.parse(body ?? ""); } catch { throw new NotFound(`Artifact ${ref} has no readable file`); }
     const chart = ReportResult.safeParse(data);
     return c.json(redactSafe(weft, {
       ref: a.id, runId: a.runId, stepN: a.stepN, kind: chart.success ? "chart" : "rows", summary: a.summary, domain: a.domain, bytes: a.bytes, sha256: a.sha256,

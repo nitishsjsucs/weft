@@ -2,9 +2,6 @@
 // Reads come straight from the expense read model; every write goes through the executor as the signed-in person
 // (expenses.submit, expenses.resubmit, expenses.decide with exactly one id, expenses.reopen). The receipt route serves admins
 // only. /v1/portal/expenses* serve the caller's own claims to the new hire persona, which reaches only /v1/portal/*.
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, asc, eq, inArray, like, or } from "drizzle-orm";
@@ -15,9 +12,11 @@ import type { W3ExpensesDetail, W3ExpensesPage, W3ExpensesPortalPage, W3Expenses
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { parsePage } from "../http/paging";
+import { blobsOf, storeUpload, uploadLimitResponse } from "../http/uploads";
 
 const ADMIN_ROLES = new Set(["admin", "payroll_admin"]);
-/** Receipts reuse the I-9 upload path and limits (routes/portal.ts): 5 MB, PNG, JPEG, WebP or PDF, stored as uploads/<sha256>.bin. */
+/** Receipts reuse the I-9 upload path and limits (routes/portal.ts): 5 MB, PNG, JPEG, WebP or PDF, stored through the
+ * world's BlobStore (uploads/<sha256>.bin on Node, blob:<sha256> with WEFT_BLOBS=sqlite and on hosted). */
 const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
 const RECEIPT_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "application/pdf"]);
 const maskName = (n: string) => `${n.slice(0, 2)}***${/\.[A-Za-z0-9]{1,5}$/.exec(n)?.[0] ?? ""}`;
@@ -45,17 +44,9 @@ async function readClaim(c: Context<WeftEnv>): Promise<Claim> {
 }
 
 /** Validates and stores a receipt file; returns the command's receipt argument and a cleanup for a refused claim. */
-function storeReceipt(weft: Weft, f: File, bytes: Buffer): { arg: { file_name: string; bytes: number; sha256: string; storage_path: string }; undo: () => void } {
-  const sha = createHash("sha256").update(bytes).digest("hex");
-  const rel = `uploads/${sha}.bin`;
-  const abs = join(weft.dataDir, rel);
-  const fresh = !existsSync(abs);
-  mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
-  if (fresh) writeFileSync(abs, bytes, { mode: 0o600 });
-  return {
-    arg: { file_name: maskName(f.name || "receipt"), bytes: bytes.length, sha256: sha, storage_path: rel },
-    undo: () => { if (fresh) { try { unlinkSync(abs); } catch { /* already gone */ } } },
-  };
+async function storeReceipt(weft: Weft, f: File, bytes: Uint8Array): Promise<{ arg: { file_name: string; bytes: number; sha256: string; storage_path: string }; undo: () => Promise<void> }> {
+  const up = await storeUpload(weft, bytes);
+  return { arg: { file_name: maskName(f.name || "receipt"), bytes: up.bytes, sha256: up.sha256, storage_path: up.storagePath }, undo: up.undo };
 }
 
 const refusal = (c: Context<WeftEnv>, code: string, message: string) => c.json({ _tag: "Refused", code, message, hint: null, example: null }, 422);
@@ -150,21 +141,22 @@ export function expensesRoutes(weft: Weft): Hono<WeftEnv> {
     if (!row?.receiptUploadId) throw new NotFound(`No receipt for ${c.req.param("id")}`);
     const [u] = await weft.db.select().from(uploads).where(eq(uploads.id, row.receiptUploadId));
     if (!u || u.purpose !== "receipt") throw new NotFound(`No receipt for ${row.id}`);
-    const bytes = readFileSync(join(weft.dataDir, u.storagePath));
+    const bytes = await blobsOf(weft).get(u.storagePath);
+    if (!bytes) throw new NotFound(`The receipt file for ${row.id} is missing`);
     const type = u.fileName.endsWith(".pdf") ? "application/pdf" : u.fileName.endsWith(".jpg") || u.fileName.endsWith(".jpeg") ? "image/jpeg" : u.fileName.endsWith(".webp") ? "image/webp" : "image/png";
-    return new Response(bytes, { headers: { "content-type": type, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
+    return new Response(Buffer.from(bytes), { headers: { "content-type": type, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
   });
 
   /** Submits (or, with expenseId, resubmits) one claim through the executor; a receipt is stored first and removed if refused. */
   const fileClaim = async (c: Context<WeftEnv>, claim: Claim, target: { workerId: string } | { expenseId: string }): Promise<Response> => {
     const body = ExpenseSubmission.safeParse(claim.submission);
     if (!body.success) throw bad("Body must be an ExpenseSubmission", body.error.issues);
-    let receipt: ReturnType<typeof storeReceipt> | null = null;
+    let receipt: Awaited<ReturnType<typeof storeReceipt>> | null = null;
     if (claim.receipt) {
       const f = claim.receipt;
       if (f.size > MAX_RECEIPT_BYTES) return refusal(c, "INVALID_INPUT", "receipt: the file must be 5 MB or smaller");
       if (!RECEIPT_TYPES.has(f.type)) return refusal(c, "INVALID_INPUT", "receipt: use a PNG, JPEG, WebP or PDF file");
-      receipt = storeReceipt(weft, f, Buffer.from(await f.arrayBuffer()));
+      try { receipt = await storeReceipt(weft, f, new Uint8Array(await f.arrayBuffer())); } catch (e) { const r = uploadLimitResponse(c, e); if (r) return r; throw e; }
     }
     const b = body.data;
     const args = {
@@ -174,7 +166,7 @@ export function expensesRoutes(weft: Weft): Hono<WeftEnv> {
       ...(receipt ? { receipt: receipt.arg } : {}),
     };
     const res = await outcome(c, weft, "workerId" in target ? "expenses.submit" : "expenses.resubmit", args);
-    if (res.status !== 200) receipt?.undo();
+    if (res.status !== 200) await receipt?.undo();
     return res;
   };
 
