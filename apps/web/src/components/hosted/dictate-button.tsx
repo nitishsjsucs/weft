@@ -1,17 +1,41 @@
 "use client";
 // The Dictate button in the agent composer (docs/cloudflare/design.md 5.4): records at most 30 s in the browser,
-// sends the clip to /api/_hosted/dictate (Workers AI whisper-large-v3-turbo) and puts the text in the composer. The
-// text is never sent on its own. Dictation counts as a mutation at the edge, so it goes through the hosted fetch.
+// converts the clip to 16 kHz mono 16-bit PCM WAV (the one format hosted dictation accepts, because its length is known
+// before anything is paid for), sends it to /api/_hosted/dictate (Workers AI whisper-large-v3-turbo) and puts the text
+// in the composer. The text is never sent on its own. Dictation counts as a mutation at the edge, so it goes through
+// the hosted fetch.
 import { Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@weft/ui";
 import { HOSTED_PATHS } from "../../../../../packages/contracts/src/ext/cf-hosted";
 import { DICTATION_MAX_SECONDS, type DictationResult } from "../../../../../packages/contracts/src/ext/cf-extras";
+import { DICTATION_SAMPLE_RATE, encodePcm16Wav } from "../../../../../packages/cf-extras/src/wav";
 import { apiFetch } from "@/lib/api/client";
 
-/** POST the clip; the text, or an error line. Exported for tests. */
+/** Makes an OfflineAudioContext (the browser's; a fake in tests). */
+export type OfflineAudio = (channels: number, frames: number, sampleRate: number) => OfflineAudioContext;
+const browserOfflineAudio: OfflineAudio = (channels, frames, sampleRate) => new OfflineAudioContext(channels, frames, sampleRate);
+
+/**
+ * The recorder's clip (WebM, Ogg or MP4, whatever MediaRecorder made) as 16 kHz mono 16-bit PCM WAV: decoded at
+ * 16 kHz, rendered through a one-channel context (which downmixes), cut at DICTATION_MAX_SECONDS (a recorder stops a
+ * little late) and encoded with encodePcm16Wav. Exported for tests.
+ */
+export async function toDictationWav(clip: Blob, audio: OfflineAudio = browserOfflineAudio): Promise<Blob> {
+  const decoded = await audio(1, 1, DICTATION_SAMPLE_RATE).decodeAudioData(await clip.arrayBuffer());
+  const frames = Math.max(1, Math.min(Math.ceil(decoded.duration * DICTATION_SAMPLE_RATE), DICTATION_MAX_SECONDS * DICTATION_SAMPLE_RATE));
+  const ctx = audio(1, frames, DICTATION_SAMPLE_RATE);
+  const source = ctx.createBufferSource();
+  source.buffer = decoded;
+  source.connect(ctx.destination);
+  source.start();
+  const mono = await ctx.startRendering();
+  return new Blob([encodePcm16Wav(mono.getChannelData(0), DICTATION_SAMPLE_RATE) as Uint8Array<ArrayBuffer>], { type: "audio/wav" });
+}
+
+/** POST the WAV clip; the text, or an error line. Exported for tests. */
 export async function transcribe(audio: Blob, f: typeof fetch = apiFetch): Promise<string> {
-  const res = await f(HOSTED_PATHS.dictate, { method: "POST", headers: { accept: "application/json", "content-type": audio.type || "audio/webm" }, body: audio });
+  const res = await f(HOSTED_PATHS.dictate, { method: "POST", headers: { accept: "application/json", "content-type": audio.type || "audio/wav" }, body: audio });
   const j = (await res.json().catch(() => null)) as (DictationResult & { message?: string }) | null;
   if (!res.ok || !j) throw new Error(j?.message ?? `Dictation failed (${res.status}).`);
   if (!j.ok) throw new Error(j.message);
@@ -43,9 +67,13 @@ export function DictateButton({ onText }: { onText: (text: string) => void }) {
       r.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         if (stopTimer.current) { clearTimeout(stopTimer.current); stopTimer.current = null; }
-        const blob = new Blob(chunks, { type: r.mimeType || "audio/webm" });
+        const clip = new Blob(chunks, { type: r.mimeType || "audio/webm" });
         setState("sending");
-        void transcribe(blob).then(onText, (e: unknown) => setError(e instanceof Error ? e.message : String(e))).finally(() => setState("idle"));
+        void toDictationWav(clip)
+          .catch(() => { throw new Error("The recording could not be read. Try again."); })
+          .then((wav) => transcribe(wav))
+          .then(onText, (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+          .finally(() => setState("idle"));
       };
       r.start();
       setState("recording");

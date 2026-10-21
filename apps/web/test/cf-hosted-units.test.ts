@@ -12,10 +12,14 @@ import { readLeaseHint, writeLeaseHint } from "../src/lib/hosted/hint";
 import { blockedText, hostedResetError, levelText, providerLabel, providerNote, resetNote, usd, usdMicros } from "../src/components/hosted/copy";
 import { helpPath, helpSummary, searchHelp } from "../src/components/hosted/help-search";
 import { mcpClientConfig, mintMcpKey } from "../src/components/hosted/mcp-connect";
-import { downloadPdf, pdfPath } from "../src/components/hosted/pdf-button";
-import { appendDictation, transcribe } from "../src/components/hosted/dictate-button";
+import { downloadPdf, PDF_WAIT_MAX_MS, pdfPath, pdfRetryMs } from "../src/components/hosted/pdf-button";
+import { appendDictation, toDictationWav, transcribe, type OfflineAudio } from "../src/components/hosted/dictate-button";
 import { latencyText, outcomesText, rateText } from "../src/components/hosted/models-view";
-import { shareLine } from "../src/components/hosted/platform-view";
+import { SHARE_LABEL, shareLine } from "../src/components/hosted/platform-view";
+import { offerPdfs } from "../src/components/app/hiring/hiring-view";
+import { pcmWavInfo } from "../../../packages/cf-extras/src/wav";
+import { buildPlatformReadout } from "../../../packages/cf-extras/src/platform";
+import { SHARES } from "../../cf/src/core/lobby/policy";
 import { MODEL_CHOICES, switchModel } from "../src/components/hosted/model-switch";
 import { traceDelayMs } from "../src/lib/api/sse";
 import { FALLBACK_STATS, toLandingStats } from "../src/components/marketing/live";
@@ -156,21 +160,128 @@ describe("hosted requests", () => {
     await expect(mintMcpKey(fakeFetch(() => json(409, { message: "Start your demo company first" })).f)).rejects.toThrow("Start your demo company first");
   });
 
+  const pdfBody = () => new Response(new Uint8Array([37, 80, 68, 70]), { status: 200, headers: { "content-type": "application/pdf" } });
+  /** The route's 202 while a render runs: `{ status: "rendering", retryAfterS }` and a Retry-After header. */
+  const rendering = (retryAfterS: number | null, header: string | null = null) => new Response(
+    JSON.stringify({ status: "rendering", ...(retryAfterS === null ? {} : { retryAfterS }) }),
+    { status: 202, headers: { "content-type": "application/json", ...(header === null ? {} : { "retry-after": header }) } },
+  );
+
   it("PDF: fetches the kind and subject and saves it under a readable name", async () => {
     expect(pdfPath("pay_stub", "pck 1")).toBe("/api/_hosted/pdf/pay_stub/pck%201");
-    const f = fakeFetch(() => new Response(new Uint8Array([37, 80, 68, 70]), { status: 200, headers: { "content-type": "application/pdf" } }));
+    const f = fakeFetch(() => pdfBody());
     const saved: { name: string; size: number }[] = [];
-    await downloadPdf("offer_letter", "ofr_0003", f.f, (b, name) => saved.push({ name, size: b.size }));
-    expect(saved).toEqual([{ name: "offer-letter-ofr_0003.pdf", size: 4 }]);
-    await expect(downloadPdf("pay_stub", "x", fakeFetch(() => json(503, { message: "Browser Run is busy" })).f, () => {})).rejects.toThrow("Browser Run is busy");
+    await downloadPdf("offer_letter", "doc_0229", f.f, (b, name) => saved.push({ name, size: b.size }));
+    expect(saved).toEqual([{ name: "offer-letter-doc_0229.pdf", size: 4 }]);
+    expect(f.calls).toHaveLength(1);
   });
 
-  it("dictation: posts the clip, fills the composer and never sends", async () => {
+  it("PDF: polls while the render runs (the wait the 202 asks for), then saves the PDF", async () => {
+    const answers = [rendering(5, "5"), rendering(null, "3"), pdfBody()];
+    const f = fakeFetch(() => answers.shift()!);
+    const waits: number[] = [];
+    const saved: string[] = [];
+    await downloadPdf("offer_letter", "doc_0229", f.f, (_b, name) => saved.push(name), async (ms) => { waits.push(ms); });
+    expect(waits).toEqual([5_000, 3_000]);
+    expect(f.calls.map((c) => c.url)).toEqual(Array(3).fill("/api/_hosted/pdf/offer_letter/doc_0229"));
+    expect(saved).toEqual(["offer-letter-doc_0229.pdf"]);
+  });
+
+  it("PDF: the wait is bounded, each one and in all", async () => {
+    expect([pdfRetryMs({ retryAfterS: 5 }, null), pdfRetryMs(null, "2"), pdfRetryMs({ retryAfterS: 600 }, "600"), pdfRetryMs({ retryAfterS: 0 }, null)]).toEqual([5_000, 2_000, 15_000, 5_000]);
+    expect([pdfRetryMs(null, null), pdfRetryMs(null, "Wed, 21 Oct 2026 07:28:00 GMT"), pdfRetryMs({ retryAfterS: 0.2 }, null)]).toEqual([5_000, 5_000, 1_000]);
+    const f = fakeFetch(() => rendering(5, "5"));
+    const waits: number[] = [];
+    const saved: string[] = [];
+    await expect(downloadPdf("pay_stub", "pyc_0001", f.f, (_b, n) => saved.push(n), async (ms) => { waits.push(ms); })).rejects.toThrow("The PDF is still being made. Try again in a minute.");
+    expect(waits.reduce((a, b) => a + b, 0)).toBe(PDF_WAIT_MAX_MS);
+    expect(f.calls).toHaveLength(PDF_WAIT_MAX_MS / 5_000 + 1);
+    expect(saved).toEqual([]);
+  });
+
+  it("PDF: a refusal ends the wait with its message, and only a PDF is saved", async () => {
+    for (const [status, message] of [[413, "This document is too large to render as a PDF"], [503, "This document could not be rendered; try again in a few minutes"], [404, "No document offr_0003"]] as const) {
+      const answers = [rendering(5), json(status, { _tag: "Refused", code: "X", message })];
+      const f = fakeFetch(() => answers.shift()!);
+      const saved: string[] = [];
+      await expect(downloadPdf("offer_letter", "doc_0229", f.f, (_b, n) => saved.push(n), async () => {})).rejects.toThrow(message);
+      expect(f.calls).toHaveLength(2);
+      expect(saved).toEqual([]);
+    }
+    const saved: string[] = [];
+    await expect(downloadPdf("offer_letter", "doc_0229", fakeFetch(() => json(200, { status: "rendering" })).f, (_b, n) => saved.push(n), async () => {})).rejects.toThrow("The answer was not a PDF.");
+    await expect(downloadPdf("pay_stub", "x", fakeFetch(() => json(503, {})).f, (_b, n) => saved.push(n))).rejects.toThrow("The PDF could not be made (503).");
+    expect(saved).toEqual([]);
+    const typed = fakeFetch(() => new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf; charset=binary" } }));
+    await downloadPdf("pay_stub", "pyc_0001", typed.f, (_b, n) => saved.push(n));
+    expect(saved).toEqual(["pay-stub-pyc_0001.pdf"]);
+  });
+
+  it("PDF: an offer's buttons name its document, not the offer, and an offer without one shows none", () => {
+    expect(offerPdfs({ status: "accepted", documentId: "doc_0229" })).toEqual([{ kind: "offer_letter", subjectId: "doc_0229" }, { kind: "signed_agreement", subjectId: "doc_0229" }]);
+    expect(offerPdfs({ status: "sent", documentId: "doc_0230" })).toEqual([{ kind: "offer_letter", subjectId: "doc_0230" }]);
+    expect(offerPdfs({ status: "viewed", documentId: "doc_0230" })).toEqual([{ kind: "offer_letter", subjectId: "doc_0230" }]);
+    expect(offerPdfs({ status: "sent", documentId: null })).toEqual([]);
+    expect(offerPdfs({ status: "accepted", documentId: null })).toEqual([]);
+    expect(offerPdfs({ status: "draft", documentId: null })).toEqual([]);
+    expect(offerPdfs({ status: "voided", documentId: "doc_0231" })).toEqual([]);
+  });
+
+  /** An OfflineAudioContext stand-in: decodes to `decoded` and renders `rendered`, recording how it was used. */
+  function fakeAudio(decoded: { duration: number }, rendered: Float32Array) {
+    const made: [number, number, number][] = [];
+    const log: string[] = [];
+    const audio: OfflineAudio = (channels, frames, sampleRate) => {
+      made.push([channels, frames, sampleRate]);
+      return {
+        decodeAudioData: async (b: ArrayBuffer) => { log.push(`decode ${b.byteLength}`); return decoded; },
+        destination: "destination",
+        createBufferSource: () => ({ buffer: null, connect: (to: unknown) => log.push(`connect ${String(to)}`), start: () => log.push("start") }),
+        startRendering: async () => { log.push("render"); return { getChannelData: (c: number) => { log.push(`channel ${c}`); return rendered; } }; },
+      } as unknown as OfflineAudioContext;
+    };
+    return { audio, made, log };
+  }
+
+  it("dictation: the recorder's clip becomes 16 kHz mono 16-bit PCM WAV, cut at 30 s", async () => {
+    const samples = new Float32Array([0, 0.5, -0.5, 1, -1]);
+    const a = fakeAudio({ duration: 2.5 }, samples);
+    const wav = await toDictationWav(new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 9])], { type: "audio/webm;codecs=opus" }), a.audio);
+    expect(wav.type).toBe("audio/wav");
+    expect(a.made).toEqual([[1, 1, 16_000], [1, 40_000, 16_000]]);
+    expect(a.log).toEqual(["decode 5", "connect destination", "start", "render", "channel 0"]);
+    const bytes = new Uint8Array(await wav.arrayBuffer());
+    expect(pcmWavInfo(bytes)).toEqual({ format: "pcm", sampleRate: 16_000, channels: 1, bitsPerSample: 16, dataOffset: 44, seconds: 5 / 16_000 });
+    expect([...new Int16Array(bytes.buffer.slice(44))]).toEqual([0, 16_384, -16_384, 32_767, -32_768]);
+    const long = fakeAudio({ duration: 31.2 }, new Float32Array(1));
+    await toDictationWav(new Blob([new Uint8Array(1)]), long.audio);
+    expect(long.made[1]).toEqual([1, 30 * 16_000, 16_000]);
+    const failing: OfflineAudio = () => ({ decodeAudioData: async () => { throw new DOMException("Unable to decode audio data", "EncodingError"); } }) as unknown as OfflineAudioContext;
+    await expect(toDictationWav(new Blob([]), failing)).rejects.toThrow("Unable to decode audio data");
+  });
+
+  it("dictation: posts the WAV clip, fills the composer and never sends", async () => {
     const f = fakeFetch(() => json(200, { ok: true, text: " when do we pay salaries ", seconds: 3, neurons: 2.3 }));
-    expect(await transcribe(new Blob([new Uint8Array([1, 2])], { type: "audio/webm" }), f.f)).toBe("when do we pay salaries");
-    expect(f.calls[0]).toMatchObject({ url: "/api/_hosted/dictate", init: { method: "POST", headers: { "content-type": "audio/webm" } } });
+    const wav = await toDictationWav(new Blob([new Uint8Array(4)]), fakeAudio({ duration: 0.001 }, new Float32Array(16)).audio);
+    expect(await transcribe(wav, f.f)).toBe("when do we pay salaries");
+    expect(f.calls[0]).toMatchObject({ url: "/api/_hosted/dictate", init: { method: "POST", headers: { "content-type": "audio/wav" }, body: wav } });
+    await transcribe(new Blob([new Uint8Array(2)]), f.f);
+    expect(f.calls[1]).toMatchObject({ init: { headers: { "content-type": "audio/wav" } } });
     await expect(transcribe(new Blob([]), fakeFetch(() => json(200, { ok: false, code: "DICTATION_BUDGET", message: "Today's dictation is used up." })).f)).rejects.toThrow("Today's dictation is used up.");
     expect([appendDictation("", "hi"), appendDictation("Show payroll  ", "by month"), appendDictation("x", "")]).toEqual(["hi", "Show payroll by month", "x"]);
+  });
+
+  it("Platform: every share key the readout carries has a label (the Lobby's shares and the extras' counters)", async () => {
+    const readout = await buildPlatformReadout({
+      lobby: async () => ({ day: "2026-10-26", level: 0, restoresLeft: 3, leases: { active: 0, pool: 2, waitlist: 0 }, lastSweepAt: null, shares: Object.fromEntries(Object.entries(SHARES).map(([k, share]) => [k, { used: 0, share }])) }),
+      spend: { status: async () => ({ spentMicros: { day: 0 }, caps: { dayUsd: 2, runUsd: 0.1, neuronsDay: 5_000 }, neurons: { used: 0 } }) as never },
+      counters: { peek: async () => 0, take: async () => ({ ok: true, used: 0, left: 0 }), add: async () => 0 },
+      now: () => new Date("2026-10-26T12:00:00.000Z"),
+    });
+    const keys = Object.keys(readout.shares).sort();
+    expect(keys).toEqual(["doRequests", "doRowsRead", "doRowsWritten", "help.queries", "pdf.browser_seconds", "workersRequests"]);
+    expect(keys.filter((k) => !SHARE_LABEL[k])).toEqual([]);
+    expect(Object.keys(SHARE_LABEL).sort()).toEqual(keys);
   });
 
   it("model switch: PUTs the provider for this world", async () => {
