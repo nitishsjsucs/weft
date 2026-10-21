@@ -63,6 +63,21 @@ function vaultKey(deploy: boolean): { key: string; fingerprint: string } {
   return { key, fingerprint: LOCAL_FINGERPRINT_PREFIX + vaultFingerprint(key) };
 }
 
+/** What scripts/cf/lib/snapshot-boot.ts prints. */
+export interface BootedWorld { worldDigest: string; chainHead: string | null; memoryHead: string | null; memory?: { objects: number; commits: number; refs: number }; stats: unknown }
+
+/**
+ * Why the booted world cannot ship (null when it can): every world restores the company memory from the snapshot
+ * (the seed's files and commits in mem_objects, mem_refs and mem_log), so a snapshot without a memory HEAD or with an
+ * empty SQL repo would deploy worlds with no memory. WEFT_MEMORY=sqlite has to reach the SQL repo on Node.
+ */
+export function snapshotMemoryProblem(b: Pick<BootedWorld, "memoryHead" | "memory">): string | null {
+  const m = b.memory ?? { objects: 0, commits: 0, refs: 0 };
+  if (b.memoryHead && m.objects > 0 && m.commits > 0) return null;
+  return `the seeded world has no company memory in SQL (memory HEAD ${b.memoryHead ?? "none"}, mem_objects ${m.objects}, mem_log ${m.commits}, mem_refs ${m.refs}): `
+    + "WEFT_MEMORY=sqlite did not reach the SQL memory repo (createExecutor's memory options, contract request cf2 item 6), so the snapshot is refused";
+}
+
 /** cf1-db's exports this script needs; `--check-deps` exits 3 when one is missing (pnpm cf:build reads it). */
 export const SNAPSHOT_DEPS = ["openDurableEmulator", "buildSnapshot", "encodeSnapshot", "readMigrationsFromDir", "journalHash", "migrationEntries"] as const;
 export const missingSnapshotDeps = (): string[] => SNAPSHOT_DEPS.filter((n) => (weftDb as Db)[n] === undefined);
@@ -98,7 +113,9 @@ async function main(argv: string[]): Promise<void> {
   const t0 = Date.now();
   run(["packages/seed/src/cli.ts", "reset"]);
   run(["packages/seed/src/cli.ts", "seed"]);
-  const booted = JSON.parse(run(["scripts/cf/lib/snapshot-boot.ts"]).trim().split("\n").at(-1)!) as { worldDigest: string; chainHead: string | null; memoryHead: string | null; stats: unknown };
+  const booted = JSON.parse(run(["scripts/cf/lib/snapshot-boot.ts"]).trim().split("\n").at(-1)!) as BootedWorld;
+  const memoryProblem = snapshotMemoryProblem(booted);
+  if (memoryProblem) throw new Error(memoryProblem);
 
   const storage = openDurableEmulator({ path: join(DATA_DIR, "weft.db") });
   const snap = buildSnapshot(storage, { journalHash: bundled });
@@ -115,7 +132,7 @@ async function main(argv: string[]): Promise<void> {
   writeFileSync(join(OUT_DIR, "stats.json"), JSON.stringify(booted.stats, null, 2) + "\n");
   const kib = (b: Uint8Array) => (b.byteLength / 1024).toFixed(1);
   console.log(`cf:snapshot ${id}: ${snap.manifest.chunks} chunks, ${snap.manifest.rows} rows, chunks ${kib(files.chunks)} KiB gz, seed rows ${kib(files.seed)} KiB gz, ${Math.round((Date.now() - t0) / 1000)} s`);
-  console.log(`  world digest ${booted.worldDigest.slice(0, 12)}..., chain head ${booted.chainHead?.slice(0, 12) ?? "none"}..., memory HEAD ${booted.memoryHead?.slice(0, 12) ?? "none"}, vault ${fingerprint}${deploy ? "" : " (local key: not deployable)"}`);
+  console.log(`  world digest ${booted.worldDigest.slice(0, 12)}..., chain head ${booted.chainHead?.slice(0, 12) ?? "none"}..., memory HEAD ${booted.memoryHead?.slice(0, 12) ?? "none"} (${booted.memory?.objects ?? 0} objects, ${booted.memory?.commits ?? 0} commits), vault ${fingerprint}${deploy ? "" : " (local key: not deployable)"}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

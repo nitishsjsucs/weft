@@ -1,7 +1,7 @@
 // Design 11.4 with the real Weft stack in workerd (scripted provider): weft-core's real entry, cf1's facade and
-// snapshot code, cf2's durable platform and cf3's agent and MCP handler. These cases run once those three tracks are
-// merged (deps.ts reports what is missing) and pnpm cf:snapshot has built apps/cf/generated; until then the gate case
-// below names the missing parts and the rest are skipped. With the parts present, a missing snapshot fails the gate.
+// snapshot code, cf2's durable platform and cf3's agent and MCP handler. The cases are skipped only in a checkout
+// with none of those three tracks merged (test/support/real-engine.ts). Once they are merged the cases always run,
+// and the gate case fails on any part deps.ts reports missing, a partial merge, or no snapshot from pnpm cf:snapshot.
 //
 // Covered here: full restore matches the manifest; the delta reset returns the digest to the manifest twice; GP1
 // (deliver DE 2088, two proposals, approve, Undo, chain valid); double approve gives one execution; GP5 taint; an
@@ -10,7 +10,7 @@
 // counter stays at or under 40; /mcp lists 122 tools and refuses approve, rollback and vault; 4 slots in one isolate
 // stay under 100 MB (engine-memory.test.ts); no node:fs, node:child_process or node:net is reachable from the weft-core entry.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -18,22 +18,18 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ROUTES } from "../../../../packages/contracts/src/api";
 import { DO_NAMES, MAX_FETCHES_PER_ALARM } from "../../src/shared/contracts";
-import { missingDeps } from "../../src/core/company/deps";
 import { scanImports, type Metafile } from "../../../../scripts/cf/lib/import-scan";
 import { CF_DIR, Harness, ORIGIN } from "../support/harness";
-
-const missing = missingDeps();
-const manifestFile = join(CF_DIR, "generated/manifest.json");
-const ready = missing.length === 0;
+import { MANIFEST_FILE as manifestFile, realEngine, realEngineProblems, skipReason } from "../support/real-engine";
 
 describe("real engine gate", () => {
-  it(ready ? "has the snapshot the real engine restores" : `waits for ${missing.length} parts from cf1, cf2 and cf3`, () => {
-    if (!ready) {
-      console.log(`real-engine cases skipped until merged:\n  ${missing.join("\n  ")}`);
-      expect(missing.length).toBeGreaterThan(0);
+  it("runs the real engine once cf1, cf2 and cf3 are merged, with every part they export and the snapshot", () => {
+    const skip = skipReason();
+    if (skip) {
+      console.log(`real-engine cases skipped: ${skip}`);
       return;
     }
-    expect(existsSync(manifestFile), "run pnpm cf:snapshot first").toBe(true);
+    expect(realEngineProblems()).toEqual([]);
   });
 });
 
@@ -49,7 +45,7 @@ async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 60_000
   }
 }
 
-describe.skipIf(!ready)("real engine in workerd", () => {
+describe.skipIf(!realEngine.run)("real engine in workerd", () => {
   let h: Harness;
   let manifest: { digests: Record<string, { rows: number }>; extra?: { chainHead: string | null; snapshotId: string } };
   beforeAll(async () => {

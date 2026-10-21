@@ -1,20 +1,22 @@
 // The cf scripts' logic without the network (design 9.1 to 9.4 and 10): config rendering, idempotent resources with a
 // read-only billing check, the build's size limits and import scan, the deploy refusals, and the budget findings.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { fingerprint } from "../../../../packages/executor/src/vault/vault";
 import { CfApiError, type CfApi } from "../../../../scripts/cf/lib/cf-api";
-import { deployConfigs, PLACEHOLDER_IDS, readResources, writeLocalConfigs } from "../../../../scripts/cf/lib/configs";
+import { deployConfigs, PLACEHOLDER_IDS, readResources, usesMcpPlaceholder, writeLocalConfigs } from "../../../../scripts/cf/lib/configs";
+import { MCP_ENTRY, MCP_PLACEHOLDER, mcpAlias, mergedTracks, TRACK_FILES } from "../../../../scripts/cf/lib/tracks";
 import { readEnvValue } from "../../../../scripts/cf/lib/env-file";
 import { scanImports } from "../../../../scripts/cf/lib/import-scan";
 import { ensureResources, NAMES } from "../../../../scripts/cf/resources";
-import { parseUploadSize, sizeProblems, type BuildRecord } from "../../../../scripts/cf/build";
+import { buildDeployable, parseUploadSize, sizeProblems, type BuildRecord } from "../../../../scripts/cf/build";
 import { deployRefusals } from "../../../../scripts/cf/deploy";
 import { summarize, type BudgetData } from "../../../../scripts/cf/budget";
-import { snapshotId, vaultFingerprint } from "../../../../scripts/cf/snapshot";
+import { snapshotId, snapshotMemoryProblem, vaultFingerprint } from "../../../../scripts/cf/snapshot";
 import { devVars, portInUse } from "../../../../scripts/cf/dev";
+import { REPO } from "../support/config-files";
 
 const dir = mkdtempSync(join(tmpdir(), "weft-cf-tools-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -56,6 +58,22 @@ describe("config rendering", () => {
     expect((front.vars as Record<string, string>).TURNSTILE_SITEKEY).toBe("1x00000000000000000000AA");
     const real = writeLocalConfigs({ dir: join(dir, "local2"), engine: "real", origin: "http://x", assetsDir: "/tmp/a" });
     expect((JSON.parse(readFileSync(real.core, "utf8")) as { main: string }).main).toMatch(/src\/core\/index\.ts$/);
+  });
+
+  it("stands the @weft/mcp placeholder in only while cf3-agent's entry is absent", () => {
+    const root = mkdtempSync(join(tmpdir(), "weft-cf-tracks-"));
+    try {
+      expect(mergedTracks(root)).toEqual({ merged: [], missing: ["cf1-db", "cf2-platform", "cf3-agent"] });
+      expect(mcpAlias(root)).toEqual({ "@weft/mcp": join(root, MCP_PLACEHOLDER) });
+      for (const f of Object.values(TRACK_FILES)) { mkdirSync(dirname(join(root, f)), { recursive: true }); writeFileSync(join(root, f), ""); }
+      expect(mergedTracks(root)).toEqual({ merged: ["cf1-db", "cf2-platform", "cf3-agent"], missing: [] });
+      expect(mcpAlias(root)).toEqual({});
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+    // This checkout's own configs follow its apps/mcp.
+    const core = deployConfigs({ resources: null }).core;
+    expect(usesMcpPlaceholder(core)).toBe(!existsSync(join(REPO, MCP_ENTRY)));
   });
 });
 
@@ -166,17 +184,36 @@ describe("pnpm cf:build", () => {
 describe("pnpm cf:deploy", () => {
   const key = "a".repeat(64);
   const good: BuildRecord = {
-    sha: "f".repeat(40), dirty: false, dir: "/x", createdAt: "t", placeholders: { snapshot: false, web: false, resources: false },
+    sha: "f".repeat(40), dirty: false, dir: "/x", createdAt: "t", placeholders: { snapshot: false, web: false, resources: false, mcp: false },
     sizes: { front: { uploadKiB: 40, gzipKiB: 12 }, core: { uploadKiB: 7000, gzipKiB: 1400 } }, importScan: { reachable: [], inputs: 1 },
-    snapshot: { id: "snap", vaultKeyFingerprint: vaultFingerprint(key) }, deployable: true,
+    snapshot: { id: "snap", vaultKeyFingerprint: vaultFingerprint(key), memoryHead: "a".repeat(40) }, deployable: true,
   };
   it("deploys only a complete build sealed with the deploy vault key", () => {
     expect(deployRefusals(good, key)).toEqual([]);
-    expect(deployRefusals({ ...good, placeholders: { snapshot: true, web: true, resources: true } }, key)).toHaveLength(3);
+    expect(buildDeployable(good)).toBe(true);
+    expect(deployRefusals({ ...good, placeholders: { snapshot: true, web: true, resources: true, mcp: true } }, key)).toHaveLength(4);
+    // A build record from before the MCP placeholder existed is refused too.
+    expect(deployRefusals({ ...good, placeholders: { snapshot: false, web: false, resources: false } as BuildRecord["placeholders"] }, key)).toHaveLength(1);
     expect(deployRefusals({ ...good, dirty: true }, key)).toHaveLength(1);
     expect(deployRefusals(good, "b".repeat(64))).toEqual(["the snapshot was sealed with another vault key (pnpm cf:build --deploy-snapshot)"]);
-    expect(deployRefusals({ ...good, snapshot: { id: "s", vaultKeyFingerprint: "local:" + vaultFingerprint(key) } }, key)).toHaveLength(1);
+    expect(deployRefusals({ ...good, snapshot: { ...good.snapshot, id: "s", vaultKeyFingerprint: "local:" + vaultFingerprint(key) } }, key)).toHaveLength(1);
     expect(deployRefusals(good, null)).toHaveLength(1);
+  });
+
+  it("refuses a build whose import scan reached node:fs, node:child_process or node:net (design 6.4)", () => {
+    const scanned = { ...good, importScan: { reachable: [{ module: "node:fs", chain: ["src/core/index.ts", "../../packages/executor/src/index.ts"] }], inputs: 9 } };
+    expect(buildDeployable(scanned)).toBe(false);
+    expect(deployRefusals(scanned, key)).toEqual(["the import scan reached node:fs from the weft-core entry (design 6.4) via src/core/index.ts -> ../../packages/executor/src/index.ts"]);
+  });
+
+  it("refuses a snapshot without company memory, and the snapshot script refuses to write one", () => {
+    const empty = { ...good, snapshot: { ...good.snapshot, memoryHead: null } };
+    expect(buildDeployable(empty)).toBe(false);
+    expect(deployRefusals(empty, key)).toHaveLength(1);
+    expect(snapshotMemoryProblem({ memoryHead: "a".repeat(40), memory: { objects: 150, commits: 36, refs: 1 } })).toBeNull();
+    expect(snapshotMemoryProblem({ memoryHead: null, memory: { objects: 0, commits: 0, refs: 0 } })).toMatch(/no company memory/);
+    expect(snapshotMemoryProblem({ memoryHead: "a".repeat(40), memory: { objects: 0, commits: 0, refs: 1 } })).toMatch(/mem_objects 0/);
+    expect(snapshotMemoryProblem({ memoryHead: "a".repeat(40) })).toMatch(/no company memory/);
   });
 
   it("fingerprints the vault key exactly as the vault does", () => {

@@ -8,16 +8,19 @@
 //   4. WEFT_STATIC_EXPORT=1 NEXT_PUBLIC_WEFT_HOSTED=1 pnpm --filter @weft/web build; stats.json into the export
 //   5. the deploy configs rendered from apps/cf/resources.json (placeholders before pnpm cf:resources)
 //   6. wrangler deploy --dry-run for both configs: the size and binding check (front under 1 MiB, core under 16 MiB),
-//      and the import scan of weft-core (node:fs, node:child_process, node:net reachable from the entry)
+//      and the import scan of weft-core (design 6.4: it fails when node:fs, node:child_process or node:net is
+//      reachable from the entry)
 //
-// A commit without cf1-db's snapshot code or cf5-web's static export still bundles: the missing part is replaced by
-// a placeholder, said so loudly, and recorded in the build record, and pnpm cf:deploy refuses such a build.
+// A commit without cf1-db's snapshot code, cf3-agent's @weft/mcp entry or cf5-web's static export still bundles: the
+// missing part is replaced by a placeholder, said so loudly, and recorded in the build record. Such a build, a
+// failed import scan and a snapshot without company memory make the build not deployable, and pnpm cf:deploy
+// refuses it.
 // Output: <build dir>/apps/cf/dist/build.json, and .scratch/cf-build/last.json in this checkout pointing at it.
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deployConfigs, readResources, writeDeployConfigs } from "./lib/configs";
+import { deployConfigs, readResources, usesMcpPlaceholder, writeDeployConfigs } from "./lib/configs";
 import { REPO_ROOT } from "./lib/env-file";
 import { scanImports, type Metafile } from "./lib/import-scan";
 
@@ -29,10 +32,11 @@ export interface BuildRecord {
   dirty: boolean;
   dir: string;
   createdAt: string;
-  placeholders: { snapshot: boolean; web: boolean; resources: boolean };
+  /** mcp: @weft/mcp was the placeholder (cf3-agent not merged), so the real engine cannot boot. */
+  placeholders: { snapshot: boolean; web: boolean; resources: boolean; mcp: boolean };
   sizes: Record<"core" | "front", { uploadKiB: number; gzipKiB: number }>;
   importScan: { reachable: { module: string; chain: string[] }[]; inputs: number };
-  snapshot: { id: string | null; vaultKeyFingerprint: string | null };
+  snapshot: { id: string | null; vaultKeyFingerprint: string | null; memoryHead: string | null };
   deployable: boolean;
 }
 
@@ -42,6 +46,13 @@ export function parseUploadSize(out: string): { uploadKiB: number; gzipKiB: numb
   if (!m) return null;
   const kib = (n: string, u: string) => Number(n) * (u === "MiB" ? 1024 : 1);
   return { uploadKiB: kib(m[1]!, m[2]!), gzipKiB: kib(m[3]!, m[4]!) };
+}
+
+/** A build may ship only with no placeholder, its sizes under the limits, a clean import scan, a snapshot with company
+ * memory, and no uncommitted changes (pnpm cf:deploy checks the same through deployRefusals). */
+export function buildDeployable(b: Pick<BuildRecord, "placeholders" | "sizes" | "importScan" | "snapshot" | "dirty">): boolean {
+  const p = b.placeholders;
+  return !p.snapshot && !p.web && !p.resources && !p.mcp && sizeProblems(b.sizes).length === 0 && b.importScan.reachable.length === 0 && !!b.snapshot.memoryHead && !b.dirty;
 }
 
 export function sizeProblems(sizes: BuildRecord["sizes"]): string[] {
@@ -135,6 +146,8 @@ async function main(argv: string[]): Promise<void> {
   const cfgs = deployConfigs({ resources, accountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? null, assetsDir, appsCf: join(dir, "apps/cf") });
   const paths = writeDeployConfigs(cfgs, "deploy", join(dir, "apps/cf"));
   if (!resources) say("resource ids are placeholders (run pnpm cf:resources before pnpm cf:deploy)");
+  const placeholderMcp = usesMcpPlaceholder(cfgs.core);
+  if (placeholderMcp) say("PLACEHOLDER @weft/mcp: this commit has no cf3-agent apps/mcp/src/index.ts, so the real engine cannot boot (not deployable)");
 
   // 6. Dry runs and the import scan.
   const sizes = {} as BuildRecord["sizes"];
@@ -151,21 +164,22 @@ async function main(argv: string[]): Promise<void> {
     }
   }
   const problems = sizeProblems(sizes);
-  const manifest = JSON.parse(readFileSync(join(gen, "manifest.json"), "utf8")) as { extra?: { snapshotId?: string; vaultKeyFingerprint?: string } };
+  const manifest = JSON.parse(readFileSync(join(gen, "manifest.json"), "utf8")) as { extra?: { snapshotId?: string; vaultKeyFingerprint?: string; memoryHead?: string | null } };
+  const placeholders = { snapshot: placeholderSnapshot, web: placeholderWeb, resources: !resources, mcp: placeholderMcp };
+  const snapshot = { id: manifest.extra?.snapshotId ?? null, vaultKeyFingerprint: manifest.extra?.vaultKeyFingerprint ?? null, memoryHead: manifest.extra?.memoryHead ?? null };
   const record: BuildRecord = {
-    sha, dirty, dir, createdAt: new Date().toISOString(),
-    placeholders: { snapshot: placeholderSnapshot, web: placeholderWeb, resources: !resources },
-    sizes, importScan: scan,
-    snapshot: { id: manifest.extra?.snapshotId ?? null, vaultKeyFingerprint: manifest.extra?.vaultKeyFingerprint ?? null },
-    deployable: !placeholderSnapshot && !placeholderWeb && !!resources && problems.length === 0 && !dirty,
+    sha, dirty, dir, createdAt: new Date().toISOString(), placeholders, sizes, importScan: scan, snapshot,
+    deployable: buildDeployable({ placeholders, sizes, importScan: scan, snapshot, dirty }),
   };
   writeFileSync(join(dir, "apps/cf/dist/build.json"), JSON.stringify(record, null, 2) + "\n");
   writeFileSync(join(LOG_DIR, "last.json"), JSON.stringify(record, null, 2) + "\n");
 
   say(`weft-core: ${sizes.core.uploadKiB.toFixed(1)} KiB, gzip ${sizes.core.gzipKiB.toFixed(1)} KiB (limit 16 MiB)`);
   say(`weft:      ${sizes.front.uploadKiB.toFixed(1)} KiB, gzip ${sizes.front.gzipKiB.toFixed(1)} KiB (limit 1 MiB)`);
-  say(`import scan: ${scan.reachable.length ? scan.reachable.map((r) => `${r.module} via ${r.chain.at(-1)}`).join("; ") : "no node:fs, node:child_process or node:net"} (${scan.inputs} modules)`);
-  say(`wrangler deploy --dry-run succeeded for both configs; ${record.deployable ? "deployable" : "not deployable (placeholders, resources, size or uncommitted changes)"}`);
+  say(scan.reachable.length
+    ? `import scan FAILED (design 6.4): ${scan.reachable.map((r) => `${r.module} via ${r.chain.join(" -> ")}`).join("; ")} (${scan.inputs} modules)`
+    : `import scan: no node:fs, node:child_process or node:net (${scan.inputs} modules)`);
+  say(`wrangler deploy --dry-run succeeded for both configs; ${record.deployable ? "deployable" : "not deployable (placeholders, resources, size, the import scan, no memory HEAD or uncommitted changes)"}`);
   if (problems.length) {
     console.error(`cf:build: ${problems.join("; ")}`);
     process.exit(1);

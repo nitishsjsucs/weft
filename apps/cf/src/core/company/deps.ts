@@ -7,9 +7,11 @@ import * as dbModule from "@weft/db";
 import * as assembleModule from "@weft/api/assemble";
 import * as agentModule from "@weft/agent";
 import * as executorModule from "@weft/executor";
-// cf3 exports createRemoteMcpHandler from apps/mcp/src/index.ts (`@weft/mcp`), which this branch does not have yet;
-// main.ts is the module that exists on every branch. Integrate: import it from "@weft/mcp".
-import * as mcpModule from "../../../../mcp/src/main";
+// cf3-agent's portable entry (apps/mcp/src/index.ts, no node: imports); apps/mcp/src/main.ts is the Node stdio entry
+// and reaches node:fs. Before cf3-agent is merged the entry does not exist: the bundlers alias @weft/mcp to an empty
+// placeholder (scripts/cf/lib/tracks.ts), and the comment below keeps tsc quiet about the absent file only then.
+// @ts-ignore TS2307 until cf3-agent's apps/mcp/src/index.ts is merged; resolved and typed once it is.
+import * as mcpModule from "@weft/mcp";
 import type { DurablePlatformInput, DurableStorageLike, DurableWeftPlatform, FetchCounter, RemoteMcpHandler, WorldScope } from "../../shared/contracts";
 
 /** cf1-db's MigrationEntry (migrations.ts). */

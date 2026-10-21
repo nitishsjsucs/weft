@@ -2,17 +2,16 @@
 // under wrangler's startWorker (its V8 inspector reachable), with the real engine and a test entry
 // (test/support/core-entry-real.ts); the heap of its isolate is read over CDP (Runtime.getHeapUsage, after a forced
 // garbage collection) with the Lobby and SpendDO up and no world booted, then with slot-1 to slot-4 restored and
-// booted. Runs once cf1, cf2 and cf3 are merged and pnpm cf:snapshot has built apps/cf/generated.
+// booted. Runs whenever the real-engine cases do (test/support/real-engine.ts): once cf1, cf2 and cf3 are merged it
+// runs and must pass, and a missing part or snapshot fails it.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";
 import { writeLocalConfigs } from "../../../../scripts/cf/lib/configs";
-import { missingDeps } from "../../src/core/company/deps";
 import { CF_DIR, REPO } from "../support/config-files";
-
-const ready = missingDeps().length === 0 && existsSync(join(CF_DIR, "generated/manifest.json"));
+import { MANIFEST_FILE, realEngine } from "../support/real-engine";
 
 /** Heap used by every isolate the inspector lists, in MB, after asking for a full GC. */
 async function heapMb(inspector: URL): Promise<{ title: string; mb: number }[]> {
@@ -39,10 +38,11 @@ async function heapMb(inspector: URL): Promise<{ title: string; mb: number }[]> 
   return out;
 }
 
-describe.skipIf(!ready)("isolate memory with the real engine", () => {
+describe.skipIf(!realEngine.run)("isolate memory with the real engine", () => {
   const dir = join(REPO, ".scratch", "cf4-worker", "harness", `memory-${process.pid}`);
   let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
   beforeAll(async () => {
+    if (!existsSync(MANIFEST_FILE)) throw new Error("no snapshot in apps/cf/generated (run pnpm cf:snapshot)");
     mkdirSync(join(dir, "assets"), { recursive: true });
     const paths = writeLocalConfigs({ dir, engine: "real", origin: "http://weft.test", poolSize: 4, assetsDir: join(dir, "assets"), configMemoMs: 200 });
     // weft-core runs alone here: drop the service bindings to the fakes worker (nothing in this case calls them).

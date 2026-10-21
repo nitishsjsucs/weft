@@ -8,9 +8,10 @@
 //   bindings to a fakes worker, the origin and pool size are local, and the KV memo is short. Everything else is the
 //   deploy config unchanged.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseJsonc } from "./jsonc";
 import { REPO_ROOT } from "./env-file";
+import { mcpAlias } from "./tracks";
 
 export const APPS_CF = join(REPO_ROOT, "apps/cf");
 export const RESOURCES_FILE = join(APPS_CF, "resources.json");
@@ -53,8 +54,13 @@ export function deployConfigs(o: { resources: CfResources | null; accountId?: st
   (front.vars as Record<string, string>).TURNSTILE_SITEKEY = r?.turnstile.sitekey ?? PLACEHOLDER_IDS.sitekey;
   if (o.accountId) (core.vars as Record<string, string>).WEFT_AIG_ACCOUNT_ID = o.accountId;
   if (o.assetsDir) (front.assets as { directory: string }).directory = o.assetsDir;
+  const alias = mcpAlias(dirname(dirname(o.appsCf ?? APPS_CF)));
+  if (Object.keys(alias).length) core.alias = { ...(core.alias as Record<string, string> | undefined), ...alias };
   return { core, front };
 }
+
+/** True when the core config stands @weft/mcp in for its placeholder (cf3-agent not merged): never deployable. */
+export const usesMcpPlaceholder = (core: Record<string, unknown>): boolean => !!(core.alias as Record<string, string> | undefined)?.["@weft/mcp"];
 
 /** Writes the deploy configs next to the originals (wrangler.<name>.deploy.json, gitignored) and returns their paths. */
 export function writeDeployConfigs(cfgs: Record<WorkerName, Record<string, unknown>>, suffix = "deploy", appsCf = APPS_CF): Record<WorkerName, string> {
