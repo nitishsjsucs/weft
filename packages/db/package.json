@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "test:workerd": "vitest run --config vitest.workerd.config.ts"
   },
   "dependencies": {
     "@weft/contracts": "workspace:*",
