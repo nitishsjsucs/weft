@@ -1,12 +1,17 @@
-// The memory repo (SPEC 9.4, harness 9 and 6.7): Markdown with frontmatter in a per-company git repo. The executor
-// is the only git caller. Dates come from the sim clock, so commit SHAs are reproducible.
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync, appendFileSync, unlinkSync } from "node:fs";
+// The memory repo (SPEC 9.4, harness 9 and 6.7): Markdown with frontmatter in a per-company repository. The
+// executor is the only writer. Dates come from the sim clock, so commit SHAs are reproducible. Every path rule, the PII
+// and secret refusals, the tainted-run refusal and the Weft-Chain-Head trailers live here, above the MemoryRepo port
+// (docs/cloudflare/design.md 4.3): GitRepo is today's git CLI repository, SqlRepo the same git objects in SQL
+// (WEFT_MEMORY=sqlite on Node, always on the durable platform). Both give the same commit ids and the same output.
 import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
-import { dirname, join, posix, sep } from "node:path";
+import { join, posix } from "node:path";
 import type { MemoryFolder, MemoryFrontmatter, MemoryHit, MemoryStore, MemoryWrite, SimClock } from "@weft/contracts";
+import { withWriteLock, type Db } from "@weft/db";
+import { WEFT_MEMORY_SQLITE, type MemoryRepo } from "../../../contracts/src/ext/cf-memory";
 import type { Redactor } from "../vault/redact";
-import { COMMITTER, git, serialGit } from "./git";
+import { COMMITTER, serialGit } from "./git";
+import { GitRepo, MemoryPathError } from "./repo-git";
+import { SqlRepo } from "./repo-sql";
 import { digestKey, planCoarsen } from "./coarsen";
 import { renderDossiers, type DigestSources } from "./dossiers";
 import { companyDay } from "./time";
@@ -122,51 +127,80 @@ export const maskAmounts = (s: string) => s.replace(/\$\s?\d[\d,]*(\.\d+)?/g, "[
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const ENTITY_ID_RE = /^(wrk|ntc|txa|bpl|cmp)_[A-Za-z0-9_]+$/;
 
-export function createMemoryStore(opts: { dataDir: string; clock: SimClock; redactor: Redactor; defaultCompanyId: () => Promise<string | null>;
-  initialFiles?: (companyId: string, now: string) => Promise<{ path: string; text: string }[]> }): LocalMemory {
+/** What the store needs from a repository beyond the port: the date of any commit (both repos implement it). */
+type StoreRepo = MemoryRepo & { commitDate?(sha: string): Promise<string> };
+
+export interface CreateMemoryStoreOptions {
+  dataDir: string; clock: SimClock; redactor: Redactor; defaultCompanyId: () => Promise<string | null>;
+  initialFiles?: (companyId: string, now: string) => Promise<{ path: string; text: string }[]>;
+  /** The repository for a company's memory (the platform's memoryRepo). Absent: see `db` and WEFT_MEMORY. */
+  repo?: (root: string, companyId: string) => MemoryRepo;
+  /** With WEFT_MEMORY=sqlite and no `repo`, the SQL repository over this Db; otherwise the git repository. */
+  db?: Db;
+  env?: Readonly<Record<string, string | undefined>>;
+}
+
+/** The default repository choice (design 4.1): WEFT_MEMORY=sqlite and a Db give SqlRepo, anything else GitRepo. */
+export function memoryRepoFactory(opts: Pick<CreateMemoryStoreOptions, "repo" | "db" | "env">): (root: string, companyId: string) => MemoryRepo {
+  if (opts.repo) return opts.repo;
+  const env = opts.env ?? process.env;
+  if (env.WEFT_MEMORY === WEFT_MEMORY_SQLITE && opts.db) {
+    const db = opts.db;
+    return () => new SqlRepo(db);
+  }
+  return (root) => new GitRepo(root);
+}
+
+const NOTHING_TO_COMMIT = "nothing to commit: the memory files are unchanged";
+
+export function createMemoryStore(opts: CreateMemoryStoreOptions): LocalMemory {
+  const makeRepo = memoryRepoFactory(opts);
+  const repos = new Map<string, StoreRepo>();
   let root: string | null = null;
+  let repo: StoreRepo | null = null;
   let headSeq: number | null = null;
   let linkCache: LinkContext | null = null;
   let aliasCache: { head: string; entries: AliasEntry[] } | null = null;
+  const repoFor = (companyId: string): StoreRepo => {
+    let r = repos.get(companyId);
+    if (!r) { r = makeRepo(join(opts.dataDir, "companies", companyId, "memory"), companyId); repos.set(companyId, r); }
+    return r;
+  };
+  const repoKind = makeRepo(join(opts.dataDir, "companies", "_", "memory"), "_").kind;
+  /** One operation at a time: the git queue for the git repo; the world's write lock for the SQL repo, which a
+   * command transaction already holds when it writes a note (re-entrant), so the two can never wait on each other. */
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => (repoKind === "sql" ? withWriteLock(fn) : serialGit(fn));
   const titleOf = (body: string) => /^# (.+)$/m.exec(body)?.[1]?.trim() ?? null;
-  /** People names and state codes from the working tree, for linking event bullets. Rebuilt after any write. */
-  const linkContext = (r: string): LinkContext => {
+  /** Path errors from the repository surface as the store's own INVALID_INPUT. */
+  const guard = async <T>(p: Promise<T>): Promise<T> => {
+    try { return await p; } catch (e) { if (e instanceof MemoryPathError) throw new MemoryError("INVALID_INPUT", e.message); throw e; }
+  };
+  /** People names and state codes from the tree, for linking event bullets. Rebuilt after any write. */
+  const linkContext = async (r: StoreRepo): Promise<LinkContext> => {
     if (linkCache) return linkCache;
     const people = new Map<string, string>();
     const states = new Set<string>();
-    const list = (dir: string) => { try { return readdirSync(join(r, ...dir.split("/"))).filter((f) => f.endsWith(".md") && !f.startsWith(".")); } catch { return []; } };
-    for (const f of list("entities/people")) {
-      const t = titleOf(parseDoc(readFileSync(join(r, "entities", "people", f), "utf8")).body);
+    const direct = (all: string[], dir: string) => all.filter((p) => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes("/")).map((p) => p.slice(dir.length + 1)).filter((f) => f.endsWith(".md") && !f.startsWith("."));
+    const all = await r.list();
+    for (const f of direct(all, "entities/people")) {
+      const t = titleOf(parseDoc((await r.read(`entities/people/${f}`)) ?? "").body);
       if (t) people.set(f.slice(0, -3), t.replace(/[[\]|]/g, ""));
     }
-    for (const f of list("entities/states")) states.add(f.slice(0, -3));
+    for (const f of direct(all, "entities/states")) states.add(f.slice(0, -3));
     linkCache = { people, states };
     return linkCache;
   };
-  const ensureRoot = async (): Promise<string> => {
-    if (root) return root;
+  const ensureRoot = async (): Promise<StoreRepo> => {
+    if (root && repo) return repo;
     const cmp = await opts.defaultCompanyId();
-    const r = cmp ? join(opts.dataDir, "companies", cmp, "memory") : null;
-    if (!r || !existsSync(join(r, ".git"))) throw new MemoryError("NOT_PERMITTED", "the memory repo is not initialised");
+    const r = cmp ? repoFor(cmp) : null;
+    if (!r || !(await r.exists())) throw new MemoryError("NOT_PERMITTED", "the memory repo is not initialised");
     // A process that did not seed (the API after a restart) finds the repo here: read its chain head too, or
     // verifyChain would report a git lag of the whole log once anything touches memory.
     headSeq = await readHeadSeq(r);
-    root = r;
+    root = join(opts.dataDir, "companies", cmp!, "memory");
+    repo = r;
     return r;
-  };
-  const resolveInside = (r: string, rel: string): string => {
-    const abs = join(r, ...rel.split("/"));
-    let dir = dirname(abs);
-    while (!existsSync(dir)) dir = dirname(dir);
-    const real = realpathSync(dir);
-    const realRoot = realpathSync(r);
-    if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new MemoryError("INVALID_INPUT", "path resolves outside the memory root");
-    if (real === join(realRoot, ".git") || real.startsWith(join(realRoot, ".git") + sep)) throw new MemoryError("INVALID_INPUT", "path resolves inside .git");
-    if (existsSync(abs)) {
-      const rf = realpathSync(abs);
-      if (!rf.startsWith(realRoot + sep) || rf.startsWith(join(realRoot, ".git") + sep)) throw new MemoryError("INVALID_INPUT", "path resolves outside the memory root");
-    }
-    return abs;
   };
   const checkContent = (text: string) => {
     if (opts.redactor.hasSecret(text)) throw new MemoryError("SECRET_IN_MEMORY", "memory may not hold a secret");
@@ -174,50 +208,50 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
     if (COMP.test(text)) throw new MemoryError("PII_IN_MEMORY", "memory may not hold compensation amounts");
     if (BENEFIT.test(text)) throw new MemoryError("PII_IN_MEMORY", "memory may not hold benefit election details");
   };
-  const head = async (r: string) => (await git(r, ["rev-parse", "HEAD"])).trim();
-  const readHeadSeq = async (r: string) => {
-    const out = await git(r, ["log", "-n", "1", "--grep", "Weft-Chain-Head:", "--format=%B"]).catch(() => "");
+  const readHeadSeq = async (r: StoreRepo) => {
+    const out = (await r.log({ n: 1, grep: "Weft-Chain-Head:" }).catch(() => []))[0]?.body ?? "";
     const m = /Weft-Chain-Head: (\d+) [0-9a-f]+/.exec(out);
     return m ? Number(m[1]) : null;
+  };
+  const commitDate = async (r: StoreRepo, sha: string) => {
+    if (r.commitDate) return r.commitDate(sha);
+    const entry = (await r.log({ n: 1_000_000 })).find((e) => e.commit === sha);
+    return entry?.date ?? "";
   };
 
   return {
     root: () => root,
     chainHeadSeq: () => headSeq,
     async init(companyId) {
-      return serialGit(async () => {
-        const r = join(opts.dataDir, "companies", companyId, "memory");
-        root = r;
+      return serial(async () => {
+        const r = repoFor(companyId);
+        root = join(opts.dataDir, "companies", companyId, "memory");
+        repo = r;
         linkCache = null; aliasCache = null;
-        if (existsSync(join(r, ".git"))) { headSeq = await readHeadSeq(r); return; }
+        if (await r.exists()) { headSeq = await readHeadSeq(r); return; }
         headSeq = null;   // a fresh repo (first seed or after a reset) has no chain head yet
-        mkdirSync(r, { recursive: true });
-        for (const f of MEMORY_FOLDERS) mkdirSync(join(r, f), { recursive: true });
-        writeFileSync(join(r, "README.md"), "# Weft memory (demo)\n\nMarkdown memory for a fictional company. Facts live in entities/ and knowledge/, events in timeline/ and comms/. Written only by the Weft executor.\n");
-        for (const f of MEMORY_FOLDERS) writeFileSync(join(r, f, ".keep.md"), "");
+        const files = new Map<string, string>();
+        files.set("README.md", "# Weft memory (demo)\n\nMarkdown memory for a fictional company. Facts live in entities/ and knowledge/, events in timeline/ and comms/. Written only by the Weft executor.\n");
+        for (const f of MEMORY_FOLDERS) files.set(`${f}/.keep.md`, "");
         for (const f of (await opts.initialFiles?.(companyId, opts.clock.now())) ?? []) {
           const rel = normalizeMemoryPath(f.path);
           checkContent(f.text);
-          mkdirSync(dirname(join(r, rel)), { recursive: true });
-          writeFileSync(join(r, rel), f.text);
+          files.set(rel, f.text);
         }
-        await git(r, ["init", "-q"]);
-        await git(r, ["add", "-A"]);
-        await git(r, ["commit", "-q", "-m", "memory: initialise"], { date: opts.clock.now() });
+        await guard(r.init([...files].map(([path, text]) => ({ path, text })), { message: "memory: initialise", date: opts.clock.now() }));
       });
     },
-    async head() { const r = await ensureRoot(); return serialGit(() => head(r)); },
+    async head() { const r = await ensureRoot(); return serial(() => r.head()); },
     async read(path, at) {
       const r = await ensureRoot();
       const rel = normalizeMemoryPath(path);
       if (at !== undefined && at !== null) {
         if (!SHA_RE.test(at)) throw new MemoryError("INVALID_INPUT", "at must be a 40-character hex commit");
-        const text = await serialGit(() => git(r, ["show", `${at}:${rel}`])).catch(() => null);
+        const text = await serial(() => r.read(rel, at)).catch(() => null);
         return text === null ? null : parseDoc(text);
       }
-      const abs = resolveInside(r, rel);
-      if (!existsSync(abs)) return null;
-      return parseDoc(readFileSync(abs, "utf8"));
+      const text = await guard(r.read(rel));
+      return text === null ? null : parseDoc(text);
     },
     async search(q) {
       const r = await ensureRoot();
@@ -238,21 +272,16 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
         ? words.map((w) => [w.stem, ...(w.raw.length >= 4 ? expandQuery(w.raw, index) : [])]) : [];
       const terms = [...new Map([...phraseTerms, ...wordTerms.flat()].map((t) => [t.toLowerCase(), t])).values()];
       const multi = terms.length > 1;
-      return serialGit(async () => {
-        const commit = q.at ?? (await head(r));
-        const args = ["grep", "-n", "-i", "--fixed-strings", ...terms.flatMap((t) => ["-e", t]), ...(q.at ? [q.at] : []), "--", ...folders];
-        const out = await git(r, args).catch((e: { exitCode?: number | null }) => { if (e.exitCode === 1) return ""; throw e; });
-        const date = (await git(r, ["log", "-1", "--format=%cI", commit])).trim();
+      return serial(async () => {
+        const commit = q.at ?? (await r.head());
+        const lines = await r.grep({ terms, folders, ...(q.at ? { at: q.at } : {}), ignoreCase: true });
+        const date = await commitDate(r, commit);
         const all: (SearchHit & { score: number; rank: number })[] = [];
-        for (const line of out.split("\n")) {
-          if (!line) continue;
-          const rest = q.at && line.startsWith(`${q.at}:`) ? line.slice(q.at.length + 1) : line;
-          const m = /^([^:]+):(\d+):(.*)$/.exec(rest);
-          if (!m) continue;
-          const hit = matchLine(m[3]!, phraseTerms, wordTerms);
+        for (const l of lines) {
+          const hit = matchLine(l.text, phraseTerms, wordTerms);
           // Frontmatter lines (id, aliases, links) count for a phrase or an entity, never for a loose word match.
-          if (!hit || (hit.tier !== "phrase" && (m[3] === "---" || /^[a-z_]+: /.test(m[3]!)))) continue;
-          all.push({ path: m[1]!, line: Number(m[2]), snippet: opts.redactor.redact(m[3]!.slice(0, 240)), commit, date, cite: `${m[1]}#L${m[2]}`, taintedBy: null, match: hit.tier, score: hit.score, rank: words.length > 1 ? folderRank(m[1]!) : 0 });
+          if (!hit || (hit.tier !== "phrase" && (l.text === "---" || /^[a-z_]+: /.test(l.text)))) continue;
+          all.push({ path: l.path, line: l.line, snippet: opts.redactor.redact(l.text.slice(0, 240)), commit, date, cite: `${l.path}#L${l.line}`, taintedBy: null, match: hit.tier, score: hit.score, rank: words.length > 1 ? folderRank(l.path) : 0 });
         }
         // One term keeps git grep order (wave 1). Otherwise: phrase hits, then all words, then some words; within a
         // tier, more matched concepts first; for a multi-word query, notes before entities before the timeline.
@@ -261,7 +290,7 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
           : all;
         const hits: SearchHit[] = ranked.slice(0, limit).map(({ score: _s, rank: _r, ...h }) => h);
         for (const h of hits) {
-          const text = await git(r, ["show", `${commit}:${h.path}`]).catch(() => "");
+          const text = (await r.read(h.path, commit).catch(() => null)) ?? "";
           h.taintedBy = parseDoc(text).frontmatter.taintedBy ?? null;
         }
         return hits;
@@ -276,72 +305,68 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
         throw new MemoryError("MISSING_SOURCE", "every fact bullet needs a date and a source: (YYYY-MM-DD, src: ...)");
       }
       if (rel.startsWith("knowledge/procedures/") && w.frontmatter.sources.length === 0) throw new MemoryError("MISSING_SOURCE", "a procedure needs at least one source");
-      return serialGit(async () => {
-        const abs = resolveInside(r, rel);
-        mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, text);
-        await git(r, ["add", "--", rel]);
-        await git(r, ["commit", "-q", "-m", opts.redactor.redact(w.message).slice(0, 200)], { author: w.author, date: opts.clock.now() });
-        return { commit: await head(r) };
+      return serial(async () => {
+        const commit = await guard(r.commit({ changes: [{ path: rel, text }], message: opts.redactor.redact(w.message).slice(0, 200), author: w.author, date: opts.clock.now() }));
+        if (!commit) throw new Error(NOTHING_TO_COMMIT);
+        return { commit };
       });
     },
     async appendTimeline(b) {
       const r = await ensureRoot();
       const day = b.at.slice(0, 10);
       const rel = `timeline/raw/${day}.md`;
-      return serialGit(async () => {
+      return serial(async () => {
         // Memory never holds pay amounts (harness 9.2): money in an action summary is masked on the way in.
-        const line = opts.redactor.redact(`- ${b.at} [i${b.importance}] ${b.command}: ${maskAmounts(linkify(b.text.replace(/\s+/g, " "), linkContext(r)))} (src: ${b.source})`);
-        const abs = join(r, "timeline", "raw", `${day}.md`);
-        mkdirSync(dirname(abs), { recursive: true });
-        if (!existsSync(abs)) writeFileSync(abs, `${renderDoc({ id: `timeline-${day}`, type: "timeline_raw", aliases: [], links: [], sources: [], status: null, updated: day, taintedBy: null }, `# ${day}\n`)}`);
-        appendFileSync(abs, line + "\n");
-        await git(r, ["add", "--", rel]);
-        await git(r, ["commit", "-q", "-m", `timeline: ${b.command}\n\nWeft-Chain-Head: ${b.chainHead.seq} ${b.chainHead.hash}`], { date: b.at });
+        const line = opts.redactor.redact(`- ${b.at} [i${b.importance}] ${b.command}: ${maskAmounts(linkify(b.text.replace(/\s+/g, " "), await linkContext(r)))} (src: ${b.source})`);
+        const existing = await guard(r.read(rel));
+        const before = existing ?? renderDoc({ id: `timeline-${day}`, type: "timeline_raw", aliases: [], links: [], sources: [], status: null, updated: day, taintedBy: null }, `# ${day}\n`);
+        const commit = await guard(r.commit({ changes: [{ path: rel, text: `${before}${line}\n` }], message: `timeline: ${b.command}\n\nWeft-Chain-Head: ${b.chainHead.seq} ${b.chainHead.hash}`, date: b.at }));
+        if (!commit) throw new Error(NOTHING_TO_COMMIT);
         headSeq = b.chainHead.seq;
-        return { commit: await head(r) };
+        return { commit };
       });
     },
     async remove() { throw new MemoryError("NOT_PERMITTED", "memory.forget is P1 (human only)"); },
     async tree(prefix) {
       const r = await ensureRoot();
-      const out = await serialGit(() => git(r, ["ls-files"]));
-      return out.split("\n").filter((p) => p && !p.endsWith(".keep.md") && (!prefix || p.startsWith(prefix))).sort();
+      const all = await serial(() => r.list());
+      return all.filter((p) => p && !p.endsWith(".keep.md") && (!prefix || p.startsWith(prefix))).sort();
     },
     async seedFiles(files, message) {
       const r = await ensureRoot();
-      return serialGit(async () => {
+      return serial(async () => {
+        const changes: { path: string; text: string }[] = [];
         for (const f of files) {
           const rel = normalizeMemoryPath(f.path);
           checkContent(f.text);
-          const abs = resolveInside(r, rel);
-          mkdirSync(dirname(abs), { recursive: true });
-          writeFileSync(abs, f.text);
+          changes.push({ path: rel, text: f.text });
         }
-        await git(r, ["add", "-A"]);
-        await git(r, ["commit", "-q", "-m", message], { date: opts.clock.now() });
+        const commit = await guard(r.commit({ changes, message, date: opts.clock.now() }));
         linkCache = null; aliasCache = null;
-        return { commit: await head(r) };
+        if (!commit) throw new Error(NOTHING_TO_COMMIT);
+        return { commit };
       });
     },
     async digest(input) {
       const r = await ensureRoot();
-      return serialGit(() => runDigest(r, input));
+      return serial(() => runDigest(r, input));
     },
     async links(path) {
       const r = await ensureRoot();
       const rel = normalizeMemoryPath(path);
-      const abs = resolveInside(r, rel);
-      if (!existsSync(abs)) throw new MemoryError("INVALID_INPUT", `No memory file ${rel}`);
-      const doc = parseDoc(readFileSync(abs, "utf8"));
-      const outgoing = extractLinks(bodyWithoutBacklinks(doc.body)).map((target) => ({ target, path: linkPath(target), resolved: existsSync(join(r, ...linkPath(target).split("/"))) }));
+      const text = await guard(r.read(rel));
+      if (text === null) throw new MemoryError("INVALID_INPUT", `No memory file ${rel}`);
+      const doc = parseDoc(text);
+      const tracked = new Set(await r.list());
+      const outgoing = extractLinks(bodyWithoutBacklinks(doc.body)).map((target) => ({ target, path: linkPath(target), resolved: tracked.has(posix.normalize(linkPath(target))) }));
       const target = `[[${rel.replace(/\.md$/, "")}`;
-      const out = await serialGit(() => git(r, ["grep", "-l", "--fixed-strings", "-e", target, "--", ...MEMORY_FOLDERS]).catch((e: { exitCode?: number | null }) => { if (e.exitCode === 1) return ""; throw e; }));
-      const backlinks = out.split("\n").filter((p) => p && p !== rel).filter((p) => {
-        const d = parseDoc(readFileSync(join(r, ...p.split("/")), "utf8"));
-        return extractLinks(bodyWithoutBacklinks(d.body)).some((t) => linkPath(t) === rel);
-      }).sort();
-      return { outgoing, backlinks };
+      const hits = await serial(() => r.grep({ terms: [target], folders: MEMORY_FOLDERS, filesOnly: true }));
+      const backlinks: string[] = [];
+      for (const p of hits.map((h) => h.path).filter((p) => p && p !== rel)) {
+        const d = parseDoc((await r.read(p)) ?? "");
+        if (extractLinks(bodyWithoutBacklinks(d.body)).some((t) => linkPath(t) === rel)) backlinks.push(p);
+      }
+      return { outgoing, backlinks: backlinks.sort() };
     },
     async recall(input) {
       // Wave 4 (FM4): the one-pager leads when the digest has written it; without it, recall still builds a block
@@ -401,27 +426,25 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
       const r = await ensureRoot();
       const rel = normalizeMemoryPath(path);
       const n = Math.max(1, Math.min(50, Math.floor(limit)));
-      return serialGit(async () => {
-        const out = await git(r, ["log", `-n${n}`, "--format=%x1e%H%x1f%cI%x1f%an%x1f%s", "-p", "--no-color", "--no-ext-diff", "--", rel]).catch(() => "");
-        return out.split("\x1e").filter((c) => c.trim()).map((chunk) => {
-          const nl = chunk.indexOf("\n");
-          const [commit, date, author, subject] = (nl >= 0 ? chunk.slice(0, nl) : chunk).split("\x1f");
-          const diff = nl >= 0 ? chunk.slice(nl + 1).trim() : "";
-          return { commit: commit!, date: date!, author: author!, subject: opts.redactor.redact(subject ?? ""), diff: opts.redactor.redact(diff.length > 8000 ? `${diff.slice(0, 8000)}\n[diff clipped]` : diff) };
+      return serial(async () => {
+        const entries = await r.log({ n, path: rel, patch: true }).catch(() => []);
+        return entries.map((e) => {
+          const diff = (e.diff ?? "").trim();
+          return { commit: e.commit, date: e.date, author: e.author, subject: opts.redactor.redact(e.subject ?? ""), diff: opts.redactor.redact(diff.length > 8000 ? `${diff.slice(0, 8000)}\n[diff clipped]` : diff) };
         });
       });
     },
     async aliasIndex() {
       const r = await ensureRoot();
-      return serialGit(async () => {
-        const h = await head(r);
+      return serial(async () => {
+        const h = await r.head();
         if (aliasCache && aliasCache.head === h) return aliasCache.entries;
-        const files = (await git(r, ["ls-files", "--", "entities", "knowledge"])).split("\n").filter((p) => p.endsWith(".md") && !p.endsWith(".keep.md"));
+        const files = (await r.list()).filter((p) => (p.startsWith("entities/") || p.startsWith("knowledge/")) && p.endsWith(".md") && !p.endsWith(".keep.md"));
         const entries: AliasEntry[] = [];
         for (const p of files.sort()) {
-          const abs = join(r, ...p.split("/"));
-          if (!existsSync(abs)) continue;
-          const d = parseDoc(readFileSync(abs, "utf8"));
+          const text = await r.read(p);
+          if (text === null) continue;
+          const d = parseDoc(text);
           const t = titleOf(d.body);
           const aliases = [...new Set([...(d.frontmatter.aliases ?? []), ...(t && p.startsWith("entities/people/") ? [t.replace(/ \(demo\)$/, "")] : [])])];
           entries.push({ path: p, id: d.frontmatter.id || p.replace(/\.md$/, ""), aliases });
@@ -433,10 +456,12 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
   };
 
   /** One digest commit: coarsened timeline, refreshed dossiers and one-pager, then the backlinks pass. */
-  async function runDigest(r: string, input: { now: string; sources: DigestSources; companyRef: string; windowDays?: number }): Promise<DigestOutcome> {
-    const before = await head(r);
-    const tracked = (await git(r, ["ls-files"])).split("\n").filter((p) => p.endsWith(".md") && !p.endsWith(".keep.md"));
-    const readText = (p: string) => { const abs = join(r, ...p.split("/")); return existsSync(abs) ? readFileSync(abs, "utf8") : null; };
+  async function runDigest(r: StoreRepo, input: { now: string; sources: DigestSources; companyRef: string; windowDays?: number }): Promise<DigestOutcome> {
+    const before = await r.head();
+    const tracked = (await r.list()).filter((p) => p.endsWith(".md") && !p.endsWith(".keep.md"));
+    const texts = new Map<string, string>();
+    for (const p of tracked) { const t = await r.read(p); if (t !== null) texts.set(p, t); }
+    const readText = (p: string) => texts.get(p) ?? null;
     const raw = tracked.filter((p) => /^timeline\/raw\/\d{4}-\d{2}-\d{2}\.md$/.test(p)).map((p) => ({ path: p, text: readText(p) ?? "" }));
     const daily = tracked.filter((p) => p.startsWith("timeline/daily/")).map((p) => ({ path: p, body: parseDoc(readText(p) ?? "").body }));
     const plan = planCoarsen({ now: input.now, raw, daily, windowDays: input.windowDays, rawCommit: before });
@@ -446,7 +471,7 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
     // agency and notice row passed in, and the one-pager. Links use every known person and state.
     const mentioned = new Set(raw.flatMap((f) => [...f.text.matchAll(/\bwrk_\d{4}\b/g)].map((m) => m[0])));
     const sources: DigestSources = { ...input.sources, people: input.sources.people.filter((p) => mentioned.has(p.id) || !tracked.includes(`entities/people/${p.id}.md`)) };
-    const ctx = linkContext(r);
+    const ctx = await linkContext(r);
     const lctx: LinkContext = { people: new Map([...ctx.people, ...input.sources.people.map((p) => [p.id, `${p.name} (demo)`] as [string, string])]), states: new Set([...ctx.states, ...input.sources.states.map((x) => x.code)]) };
     const docs = renderDossiers(sources, day, input.companyRef);
     const skipped: DigestOutcome["skipped"] = [];
@@ -484,29 +509,22 @@ export function createMemoryStore(opts: { dataDir: string; clock: SimClock; reda
     }
 
     const written: string[] = [];
+    const changes: { path: string; text: string | null }[] = [];
     for (const [p, text] of [...next.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       const rel = normalizeMemoryPath(p);
-      const abs = resolveInside(r, rel);
-      if (existsSync(abs) && readFileSync(abs, "utf8") === text) continue;
-      mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, text);
-      await git(r, ["add", "--", rel]);
+      if (readText(rel) === text) continue;
+      changes.push({ path: rel, text });
       written.push(rel);
     }
-    for (const p of plan.removes) {
-      const abs = resolveInside(r, normalizeMemoryPath(p));
-      if (existsSync(abs)) unlinkSync(abs);
-      await git(r, ["rm", "-q", "--cached", "--ignore-unmatch", "--", p]);
-    }
+    for (const p of plan.removes) changes.push({ path: normalizeMemoryPath(p), text: null });
     const key = digestKey(plan.periods);
     const dossiers = docs.filter((d) => d.subjectRef && ENTITY_ID_RE.test(d.subjectRef) && next.has(d.path)).map((d) => ({ subjectRef: d.subjectRef!, path: d.path, sourceDigest: sha(next.get(d.path)!) }));
-    const staged = (await git(r, ["diff", "--cached", "--name-only"])).trim();
     const periods = plan.periods.map((p) => `${p.level}:${p.key}`);
     linkCache = null; aliasCache = null;
-    if (!staged) return { commit: null, key, periods, removed: [], written: [], dossiers, skipped };
     const named = plan.periods.length ? plan.periods.filter((p) => p.level !== "hourly").map((p) => `${p.level} ${p.key}`).join(", ") || `hourly through ${plan.periods.at(-1)!.key}` : `dossiers as of ${day}`;
-    await git(r, ["commit", "-q", "-m", `memory digest: ${named}\n\nWeft-Digest: ${key || `dossiers:${day}`}`], { date: input.now });
-    return { commit: await head(r), key, periods, removed: plan.removes, written, dossiers, skipped };
+    const commit = changes.length ? await guard(r.commit({ changes, message: `memory digest: ${named}\n\nWeft-Digest: ${key || `dossiers:${day}`}`, date: input.now })) : null;
+    if (!commit) return { commit: null, key, periods, removed: [], written: [], dossiers, skipped };
+    return { commit, key, periods, removed: plan.removes, written, dossiers, skipped };
   }
 }
 
