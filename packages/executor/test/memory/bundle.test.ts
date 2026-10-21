@@ -10,7 +10,8 @@ import { bundleMemory, restoreMemory, verifyBundle } from "../../src/memory/bund
 const worlds: World[] = [];
 afterEach(async () => { for (const w of worlds.splice(0)) await w.close(); });
 
-describe("memory bundles", () => {
+// The git repository's bundles; with WEFT_MEMORY=sqlite the world's memory is the SQL repo (bundle-sql.test.ts).
+describe.skipIf(process.env.WEFT_MEMORY === "sqlite")("memory bundles", () => {
   it("round-trips: bundle, change the repo, restore the bundle", async () => {
     const w = await makeWorld();
     worlds.push(w);

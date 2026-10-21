@@ -1,10 +1,17 @@
 // GitRepo: the MemoryRepo port over today's hardened git CLI (harness 6.7; git.ts). The working tree always equals
 // HEAD (every write commits at once), so a read without `at` reads the file, behind the same realpath checks the store
 // used before the port. This is the reference the SQL repo is compared against byte for byte.
-import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import type { MemoryCommitInput, MemoryGrepLine, MemoryGrepQuery, MemoryLogEntry, MemoryLogQuery, MemoryRepo } from "../../../contracts/src/ext/cf-memory";
-import { COMMITTER, git } from "./git";
+import { childProcess, COMMITTER, git, GIT_FLAGS, gitEnv, nodeFs } from "./git";
+
+// node:fs on first use (git.ts explains why): these wrappers keep the code below reading as before.
+const existsSync = (p: string) => nodeFs().existsSync(p);
+const mkdirSync = (p: string, o: { recursive: true }) => nodeFs().mkdirSync(p, o);
+const readFileSync = (p: string, enc: "utf8") => nodeFs().readFileSync(p, enc);
+const realpathSync = (p: string) => nodeFs().realpathSync(p);
+const unlinkSync = (p: string) => nodeFs().unlinkSync(p);
+const writeFileSync = (p: string, data: string) => nodeFs().writeFileSync(p, data);
 
 export class MemoryPathError extends Error {
   readonly code = "INVALID_INPUT" as const;
@@ -127,10 +134,8 @@ export class GitRepo implements MemoryRepo {
 
 /** git with raw bytes on stdout (fast-export streams binary-safe data). */
 async function gitBytes(root: string, args: string[]): Promise<Uint8Array> {
-  const { execFile } = await import("node:child_process");
-  const { GIT_FLAGS, gitEnv } = await import("./git");
   return new Promise((resolve, reject) => {
-    execFile("git", [...GIT_FLAGS, "-C", root, ...args], { env: gitEnv(), maxBuffer: 64 << 20, timeout: 30_000, encoding: "buffer" }, (err, stdout, stderr) => {
+    childProcess().execFile("git", [...GIT_FLAGS, "-C", root, ...args], { env: gitEnv(), maxBuffer: 64 << 20, timeout: 30_000, encoding: "buffer" }, (err, stdout, stderr) => {
       if (err) reject(new Error(`git ${args[0]} failed: ${String(stderr).trim() || err.message}`));
       else resolve(new Uint8Array(stdout));
     });

@@ -159,8 +159,13 @@ describe("the rich world's memory on SqlRepo", () => {
   let sqlRepo: SqlRepo;
   beforeAll(async () => {
     richDir = tmp("weft-rich-mem-");
-    const weft = await createWeft({ dataDir: richDir, testMode: true });
-    try { await seedWorldProfile(weft, "rich"); } finally { await weft.close(); }
+    // The reference history comes from the git repository, whatever WEFT_MEMORY says for the rest of the run.
+    const memoryEnv = process.env.WEFT_MEMORY;
+    delete process.env.WEFT_MEMORY;
+    try {
+      const weft = await createWeft({ dataDir: richDir, testMode: true });
+      try { await seedWorldProfile(weft, "rich"); } finally { await weft.close(); }
+    } finally { if (memoryEnv !== undefined) process.env.WEFT_MEMORY = memoryEnv; }
     gitRoot = join(richDir, "companies", CMP, "memory");
     commits = git(gitRoot, ["rev-list", "--reverse", "HEAD"]).trim().split("\n");
     // Replay every commit through the port: the same files, message, author and date.
