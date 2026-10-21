@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { browserUse } from "./e2e/browser";
 
 // E2E golden paths (SPEC 12, 13). Owner: t6-site.
 // `pnpm e2e` starts scripts/dev.ts --e2e (fresh seed into .data-e2e, scripted provider, clock rate 0) on web 3170
@@ -23,7 +24,7 @@ export default defineConfig({
   outputDir: "test-results",
   use: {
     baseURL: `http://127.0.0.1:${WEB}`,
-    channel: "chrome",
+    ...browserUse,
     actionTimeout: 30_000,
     navigationTimeout: 30_000,
     trace: "retain-on-failure",

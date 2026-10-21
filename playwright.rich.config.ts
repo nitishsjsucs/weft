@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { browserUse } from "./e2e/browser";
 
 // The rich-data crawl (e2e/rich-data.spec.ts): `pnpm e2e:rich` seeds the rich profile fresh into .data-rich with the
 // scripted provider and a frozen clock, then visits every audited screen and fails on an empty state that the rich
@@ -16,7 +17,7 @@ export default defineConfig({
   expect: { timeout: 30_000 },
   reporter: [["list"]],
   outputDir: "test-results/rich",
-  use: { baseURL: `http://127.0.0.1:${WEB}`, channel: "chrome", actionTimeout: 30_000, navigationTimeout: 90_000, viewport: { width: 1440, height: 900 } },
+  use: { baseURL: `http://127.0.0.1:${WEB}`, ...browserUse, actionTimeout: 30_000, navigationTimeout: 90_000, viewport: { width: 1440, height: 900 } },
   webServer: {
     command: `node_modules/.bin/tsx scripts/dev.ts --fresh --profile rich --web-port ${WEB} --api-port ${API}`,
     url: `http://127.0.0.1:${WEB}/api/v1/health`,

@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
+import { browserUse } from "./e2e/browser";
 
 // The guided tour's browser specs (owner: tour), separate from `pnpm e2e`: the main config's testMatch
 // (gp\d+|site) never picks up e2e/tour, so its base seed and digests are untouched. `pnpm e2e:tour` starts
@@ -37,7 +38,7 @@ export default defineConfig({
   outputDir: "test-results/tour",
   use: {
     baseURL: `http://127.0.0.1:${WEB}`,
-    channel: "chrome",
+    ...browserUse,
     actionTimeout: 30_000,
     navigationTimeout: 60_000,
     trace: "retain-on-failure",
