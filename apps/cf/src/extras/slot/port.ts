@@ -9,6 +9,7 @@ import { HIDDEN_SERVICE_COMMANDS } from "@weft/cf-extras";
 import type { ToolOutcome } from "@weft/contracts";
 import type { HiddenWriteBack, SlotExport, SlotExtrasPort, SlotWorldInfo, WriteBackOutcome } from "../ports";
 import { RETRYABLE_WRITE_BACK_CODES } from "./commands";
+import { RESERVED_TABLE_PREFIX } from "../../../../../packages/contracts/src/ext/cf-db";
 
 /** The system principal the write-backs run as (HostedSystemPrincipal in cf-platform.ts). */
 export const SVC_JOBS = "svc_jobs";
@@ -95,6 +96,7 @@ export const WORLD_EXPORT_SKIP: readonly string[] = ["mem_objects", "mem_refs", 
 export async function worldExportJson(db: Db, meta: { slot: string; gen: number; exportedAt: string }): Promise<Uint8Array> {
   const dump = await dumpDb(db);
   for (const t of WORLD_EXPORT_SKIP) delete dump[t];
-  const [{ n } = { n: 0 }] = await db.all<{ n: number }>(sql`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'`);
+  // workerd's own tables (_cf_KV and any other _cf_*) are not the world's.
+  const [{ n } = { n: 0 }] = await db.all<{ n: number }>(sql`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND substr(name, 1, ${RESERVED_TABLE_PREFIX.length}) <> ${RESERVED_TABLE_PREFIX}`);
   return new TextEncoder().encode(JSON.stringify({ format: "weft-world-export", version: 1, demo: "fictional company, simulated data", ...meta, tableCount: n, tables: dump }));
 }

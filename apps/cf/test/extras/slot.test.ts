@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createTestWeft, type TestWeft } from "@weft/api";
 import { DomainRefusal } from "@weft/core";
 import { expenses, notices, runTaint, uploads } from "@weft/db";
@@ -226,5 +226,21 @@ describe("slot port", () => {
     for (const k of doc.tables.api_keys ?? []) { expect(k).not.toHaveProperty("hash"); expect(k).not.toHaveProperty("prefix"); }
     for (const v of doc.tables.vault_secrets ?? []) expect(v).not.toHaveProperty("ciphertext");
     expect((await slotPort().extrasExport("memory")).contentType).toBe("application/octet-stream");
+  });
+
+  it("counts the world's tables in an export, never workerd's reserved _cf_ tables", async () => {
+    const count = async () => (JSON.parse(new TextDecoder().decode((await slotPort().extrasExport("world")).bytes)) as { tableCount: number; tables: Record<string, unknown> }).tableCount;
+    const before = await count();
+    expect(before).toBeGreaterThan(90);
+    // As workerd lists its _cf_KV in sqlite_master (Node has none, so one stands in here).
+    await w.db.run(sql`CREATE TABLE "_cf_probe" (k TEXT)`);
+    try {
+      expect(await count()).toBe(before);
+      await w.db.run(sql`CREATE TABLE "cf_probe_world" (k TEXT)`);
+      expect(await count()).toBe(before + 1);
+    } finally {
+      await w.db.run(sql`DROP TABLE IF EXISTS "_cf_probe"`);
+      await w.db.run(sql`DROP TABLE IF EXISTS "cf_probe_world"`);
+    }
   });
 });

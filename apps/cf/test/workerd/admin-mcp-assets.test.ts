@@ -121,6 +121,14 @@ describe("assets", () => {
   });
 });
 
+describe("Browser Run locally", () => {
+  it("refuses a browser session at once with the reason, so a local PDF render fails fast instead of on a reply that is not JSON", async () => {
+    const env = await h.coreEnv() as unknown as { BROWSER: unknown };
+    const { puppeteerLauncher } = await import("@weft/cf-extras");
+    await expect(puppeteerLauncher(env.BROWSER)()).rejects.toThrow(/code: 501[\s\S]*not emulated locally/);
+  });
+});
+
 describe("restore steps", () => {
   it("skip chunks a retried step already applied", async () => {
     const env = await h.coreEnv();
