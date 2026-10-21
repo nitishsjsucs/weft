@@ -3,7 +3,7 @@
 // paths and commits (never text), and indexing is idempotent with deterministic vector ids.
 import { describe, expect, it } from "vitest";
 import { EMBEDDING_MODEL, seedNamespace } from "../../contracts/src/ext/cf-extras";
-import { memoryNeuronBudget } from "../src/neurons";
+import { embeddingNeurons, embeddingTokenBound, memoryNeuronBudget } from "../src/neurons";
 import { chunkNote, createRecallSource, deleteVectors, embedTexts, indexNotes, isUntrustedNote, noteKindOfPath, vectorIdOf } from "../src/recall";
 import { embeddingHandler, fakeAi, fakeVectorize } from "./fakes";
 
@@ -68,13 +68,43 @@ describe("RecallSource", () => {
     expect(vectors.vectors.has(r.ids[0]!)).toBe(false);
   });
 
+  it("a large index stops at the embeddings share and resumes from the chunk it reached", async () => {
+    const ai = fakeAi({ [EMBEDDING_MODEL]: embeddingHandler });
+    const vectors = fakeVectorize();
+    const notes = Array.from({ length: 120 }, (_, i) => ({ path: `knowledge/facts/n${i}.md`, commit: C1, tainted: false, kind: "knowledge", text: doc(`Note ${i}`, `Fact number ${i}. ${"word ".repeat(200)}`) }));
+    // Each chunk is 512 tokens at most, so a batch of 50 reserves 156 neurons.
+    expect(embeddingNeurons(new Array(50).fill("x".repeat(1100)))).toBe(156);
+    const day1 = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 200, dictation: 0 });
+    const first = await indexNotes({ ai, vectors, neurons: day1 }, { namespace: "seed-snap1", gen: 0, notes, stopOnBudget: true });
+    expect(first).toMatchObject({ chunks: 120, notes: 120, nextChunk: 50 });
+    expect(vectors.vectors.size).toBe(50);
+    expect(day1.used("embeddings")).toBe(156);
+    const day2 = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 400, dictation: 0 });
+    const second = await indexNotes({ ai, vectors, neurons: day2 }, { namespace: "seed-snap1", gen: 0, notes, fromChunk: first.nextChunk!, stopOnBudget: true });
+    expect(second.nextChunk).toBeNull();
+    expect(vectors.vectors.size).toBe(120);
+    expect(ai.calls).toHaveLength(3);
+    // Without stopOnBudget a refusal throws, so a slot job never half-indexes in silence.
+    await expect(indexNotes({ ai, vectors, neurons: memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 1, dictation: 0 }) }, { namespace: "slot-1", gen: 1, notes })).rejects.toMatchObject({ code: "EMBED_BUDGET" });
+  });
+
   it("embeddings reserve from the embeddings share and check the model's shape", async () => {
     const ai = fakeAi({ [EMBEDDING_MODEL]: embeddingHandler });
     const neurons = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 2, dictation: 0 });
     await embedTexts({ ai, neurons }, ["a short note"]);
     expect(neurons.used("embeddings")).toBe(1);
     await embedTexts({ ai, neurons }, ["another"]);
-    await expect(embedTexts({ ai, neurons }, ["one too many"])).rejects.toMatchObject({ code: "RECALL_UNAVAILABLE" });
+    await expect(embedTexts({ ai, neurons }, ["one too many"])).rejects.toMatchObject({ code: "EMBED_BUDGET" });
+    expect(ai.calls).toHaveLength(2);
+    // The bound is every byte a token plus [CLS] and [SEP], at most 512 tokens a text: a 1,200-character chunk is
+    // 512 tokens (3.1 neurons), however it tokenizes.
+    expect([embeddingTokenBound("a short note"), embeddingTokenBound("x".repeat(1200)), embeddingTokenBound("\u00e9".repeat(100))]).toEqual([14, 512, 202]);
+    expect(embeddingNeurons(new Array(50).fill("x".repeat(1200)))).toBe(Math.ceil((50 * 512 * 6058) / 1e6));
+    // A reply that reports its token count settles that instead of the bound.
+    const counted = fakeAi({ [EMBEDDING_MODEL]: (i) => ({ ...embeddingHandler(i), usage: { prompt_tokens: 600 } }) });
+    const b2 = memoryNeuronBudget();
+    await embedTexts({ ai: counted, neurons: b2 }, new Array(4).fill("x".repeat(1200)));
+    expect(b2.used("embeddings")).toBe(4);
     const bad = fakeAi({ [EMBEDDING_MODEL]: () => ({ data: [[1, 2, 3]] }) });
     await expect(embedTexts({ ai: bad }, ["x"])).rejects.toMatchObject({ code: "RECALL_UNAVAILABLE", retryable: true });
     await expect(embedTexts({ ai }, new Array(51).fill("x"))).rejects.toThrow(/at most 50/);

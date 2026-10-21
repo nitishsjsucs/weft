@@ -7,7 +7,7 @@ import { pdfObjectKey } from "../../contracts/src/ext/cf-extras";
 import { sha256Hex } from "../src/bytes";
 import { COUNTERS, memoryDailyCounters } from "../src/counters";
 import { ExtrasError } from "../src/errors";
-import { cachedPdf, createDocumentRenderer, MAX_PDF_HTML_BYTES } from "../src/pdf";
+import { cachedPdf, createDocumentRenderer, MAX_PDF_HTML_BYTES, pdfBrowserReserveMs } from "../src/pdf";
 import { PDF_DEMO_BANNER, pdfFileName, renderPdfHtml, usd, type DocumentPdfData, type PayStubPdfData } from "../src/templates";
 import { fakeBrowser, memoryR2 } from "./fakes";
 
@@ -104,6 +104,30 @@ describe("DocumentRenderer", () => {
     expect(f.browser.log.closed).toBe(1);
     expect(await f.counters.peek(COUNTERS.browserMs)).toBe(3300);
     expect(f.files.objects.size).toBe(0);
+  });
+
+  it("reserves a render's worst case before the browser starts, so the share is never overshot", async () => {
+    expect(pdfBrowserReserveMs()).toBe(35_000);
+    const s = await setup();
+    // 265.1 s used: one more render could take 35 s, past the 300 s share, so it never starts.
+    await s.counters.add(COUNTERS.browserMs, 265_001);
+    const html = renderPdfHtml(stub);
+    const key = { scope: "world" as const, slot: "slot-2", gen: 1, sha256: await sha256Hex(html) };
+    await expect(s.renderer.render({ kind: "pay_stub", html, key })).rejects.toMatchObject({ code: "PDF_BUDGET" });
+    expect(s.browser.log.launches).toBe(0);
+    // At 265 s it starts; while it runs the counter holds the full 35 s, and the unused time comes back after.
+    const t = await setup();
+    await t.counters.add(COUNTERS.browserMs, 265_000);
+    let during = 0;
+    const r = createDocumentRenderer({ files: t.files, counters: t.counters, enabled: () => true, now: () => t.clock.t, launch: async () => { during = await t.counters.peek(COUNTERS.browserMs); return t.browser.launch(); } });
+    expect(await r.render({ kind: "pay_stub", html, key })).toMatchObject({ cached: false, browserMs: 3300 });
+    expect(during).toBe(300_000);
+    expect(await t.counters.peek(COUNTERS.browserMs)).toBe(268_300);
+    // A launch that throws still gives its reservation back down to the time it took.
+    const u = await setup();
+    const failing = createDocumentRenderer({ files: u.files, counters: u.counters, enabled: () => true, now: () => u.clock.t, launch: async () => { u.clock.t += 700; throw new Error("browser quota"); } });
+    await expect(failing.render({ kind: "pay_stub", html, key })).rejects.toMatchObject({ code: "PDF_RENDER_FAILED", retryable: true });
+    expect(await u.counters.peek(COUNTERS.browserMs)).toBe(700);
   });
 
   it("is off behind its kill flag but still serves what is cached; refuses oversize HTML", async () => {

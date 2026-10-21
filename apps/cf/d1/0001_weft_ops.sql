@@ -35,15 +35,20 @@ CREATE TABLE budget_daily (
 );
 
 -- The job ledger: what each after-commit job has done, so a redelivered message never repeats a model call or a write.
+-- Keyed by job id alone across every slot and generation, so job ids are globally unique (random obx_<16 hex>).
+-- A job a daily share refused is `deferred` until not_before with its body in result_json, and `requeued` once the
+-- cron has sent it again.
 CREATE TABLE jobs (
   job_id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('read', 'done', 'failed')),
+  state TEXT NOT NULL CHECK (state IN ('read', 'done', 'failed', 'deferred', 'requeued')),
   outcome TEXT NOT NULL DEFAULT '',
   result_json TEXT,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  not_before TEXT
 );
 CREATE INDEX jobs_updated ON jobs (updated_at);
+CREATE INDEX jobs_due ON jobs (state, not_before);
 
 -- Jobs that failed for good (bad input, a refused write-back) and dead letters from weft-dlq.
 CREATE TABLE failed_jobs (

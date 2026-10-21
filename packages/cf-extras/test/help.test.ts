@@ -59,8 +59,15 @@ describe("HelpSearch", () => {
     expect(await createHelpSearch({ search: fakeAiSearch(chunks), counters, enabled: async () => false }).search("tour")).toMatchObject({ ok: false, code: "HELP_DISABLED" });
     expect(await createHelpSearch({ search: null, counters, enabled: () => true }).search("tour")).toMatchObject({ ok: false, code: "HELP_DISABLED" });
     expect(await counters.peek(COUNTERS.help)).toBe(0);
+    const errors: unknown[] = [];
     const broken = { async search() { throw new Error("7011: instance not found"); } };
-    expect(await createHelpSearch({ search: broken, counters, enabled: () => true }).search("tour")).toMatchObject({ ok: false, code: "HELP_DISABLED", message: "Help search is unavailable right now" });
+    expect(await createHelpSearch({ search: broken, counters, enabled: () => true, onError: (e) => errors.push(e) }).search("tour")).toMatchObject({ ok: false, code: "HELP_DISABLED", message: "Help search is unavailable right now" });
+    // A reply in another shape is an error too, never "no matches".
+    const shapeless = { async search() { return { search_query: "tour", data: [] } as never; } };
+    expect(await createHelpSearch({ search: shapeless, counters, enabled: () => true, onError: (e) => errors.push(e) }).search("tour")).toMatchObject({ ok: false, code: "HELP_DISABLED" });
+    expect(errors.map((e) => (e as Error).message)).toEqual(["7011: instance not found", "AI Search replied without a chunks list"]);
+    // Each failed call kept its count: AI Search may have counted it against the month.
+    expect(await counters.peek(COUNTERS.help)).toBe(2);
   });
 });
 

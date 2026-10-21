@@ -9,29 +9,36 @@ import { EMBEDDING_DIMS, EMBEDDING_MODEL, seedNamespace, type MemoryVectorMetada
 import type { AiGatewayOption, VectorizeLike, VectorizeMatchLike, VectorizeVectorLike, WorkersAiBindingLike } from "./bindings";
 import { sha256Hex } from "./bytes";
 import { ExtrasError } from "./errors";
-import { embeddingNeurons, type NeuronBudget } from "./neurons";
+import { EMBEDDING_NEURONS_PER_M_TOKENS, embeddingNeurons, type NeuronBudget } from "./neurons";
 
 export interface EmbedDeps {
   ai: WorkersAiBindingLike;
   gateway?: AiGatewayOption | null;
-  /** The embeddings share (200 neurons a day); absent means unmetered (tests, the seed index on deploy). */
+  /** The embeddings share (200 neurons a day); absent means unmetered (unit tests only). */
   neurons?: NeuronBudget | null;
   charge?: { world?: string | null; visitor?: string | null; ipHash?: string | null };
 }
 
-/** Embeds texts in one call (at most EMBED_BATCH). */
+/**
+ * Embeds texts in one call (at most EMBED_BATCH). The call reserves the most it can cost (embeddingNeurons, an
+ * upper bound) and settles that, or the reply's own token count when it reports one. Refused by the share, it throws
+ * EMBED_BUDGET before any call.
+ */
 export async function embedTexts(deps: EmbedDeps, texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   if (texts.length > EMBED_BATCH) throw new Error(`embed at most ${EMBED_BATCH} texts per call`);
   const neurons = embeddingNeurons(texts);
   const rsv = deps.neurons ? await deps.neurons.reserve({ product: "embeddings", neurons, model: EMBEDDING_MODEL, ...deps.charge }) : null;
-  if (rsv && !rsv.ok) throw new ExtrasError("RECALL_UNAVAILABLE", "today's embedding budget is used up");
+  if (rsv && !rsv.ok) throw new ExtrasError("EMBED_BUDGET", "today's embedding budget is used up");
   let out: unknown;
   try {
     out = await deps.ai.run(EMBEDDING_MODEL, { text: texts }, deps.gateway ? { gateway: deps.gateway } : undefined);
-  } finally {
+  } catch (e) {
     if (rsv?.ok) await deps.neurons!.settle(rsv.reservationId, neurons);
+    throw e;
   }
+  const reported = Number((out as { usage?: { prompt_tokens?: unknown } } | null)?.usage?.prompt_tokens);
+  if (rsv?.ok) await deps.neurons!.settle(rsv.reservationId, Number.isFinite(reported) && reported > 0 ? Math.max(1, Math.ceil((reported * EMBEDDING_NEURONS_PER_M_TOKENS) / 1_000_000)) : neurons);
   const data = (out as { data?: unknown } | null)?.data;
   if (!Array.isArray(data) || data.length !== texts.length || !data.every((v) => Array.isArray(v) && v.length === EMBEDDING_DIMS)) {
     throw new ExtrasError("RECALL_UNAVAILABLE", "the embedding model returned an unexpected shape", true);
@@ -126,10 +133,22 @@ export async function vectorIdOf(namespace: string, path: string, commit: string
   return `m_${(await sha256Hex(`${namespace}\n${path}\n${commit}\n${chunk}`)).slice(0, 40)}`;
 }
 
-export interface IndexResult { ids: string[]; chunks: number; notes: number }
+export interface IndexResult {
+  /** Every vector id of the notes, indexed in this call or before it. */
+  ids: string[];
+  chunks: number;
+  notes: number;
+  /** The first chunk not indexed yet when the embeddings share stopped the call (`stopOnBudget`), else null. */
+  nextChunk: number | null;
+}
 
-/** Embeds and upserts notes into one namespace with their generation; returns the vector ids for the Lobby. */
-export async function indexNotes(deps: EmbedDeps & { vectors: VectorizeLike }, input: { namespace: string; gen: number; notes: NoteToIndex[] }): Promise<IndexResult> {
+/**
+ * Embeds and upserts notes into one namespace with their generation; returns the vector ids for the Lobby. With
+ * `fromChunk` it starts part way (an earlier call indexed the chunks before it), and with `stopOnBudget` a refusal
+ * by the embeddings share ends the call with `nextChunk` instead of throwing, so a large index can finish over
+ * several UTC days inside the share.
+ */
+export async function indexNotes(deps: EmbedDeps & { vectors: VectorizeLike }, input: { namespace: string; gen: number; notes: NoteToIndex[]; fromChunk?: number; stopOnBudget?: boolean }): Promise<IndexResult> {
   const items: { id: string; text: string; md: MemoryVectorMetadata }[] = [];
   for (const n of input.notes) {
     const title = /^# (.+)$/m.exec(n.text)?.[1]?.trim() ?? n.path;
@@ -138,13 +157,19 @@ export async function indexNotes(deps: EmbedDeps & { vectors: VectorizeLike }, i
       items.push({ id: await vectorIdOf(input.namespace, n.path, n.commit, i), text: `${title}\n${c}`, md: { path: n.path, commit: n.commit, gen: input.gen, tainted: n.tainted, kind: n.kind } });
     }
   }
-  for (let i = 0; i < items.length; i += EMBED_BATCH) {
+  for (let i = Math.max(0, input.fromChunk ?? 0); i < items.length; i += EMBED_BATCH) {
     const batch = items.slice(i, i + EMBED_BATCH);
-    const vecs = await embedTexts(deps, batch.map((b) => b.text));
+    let vecs: number[][];
+    try {
+      vecs = await embedTexts(deps, batch.map((b) => b.text));
+    } catch (e) {
+      if (input.stopOnBudget && e instanceof ExtrasError && e.code === "EMBED_BUDGET") return { ids: items.map((x) => x.id), chunks: items.length, notes: input.notes.length, nextChunk: i };
+      throw e;
+    }
     const vectors: VectorizeVectorLike[] = batch.map((b, j) => ({ id: b.id, values: vecs[j]!, namespace: input.namespace, metadata: { ...b.md } }));
     await deps.vectors.upsert(vectors);
   }
-  return { ids: items.map((x) => x.id), chunks: items.length, notes: input.notes.length };
+  return { ids: items.map((x) => x.id), chunks: items.length, notes: input.notes.length, nextChunk: null };
 }
 
 /** Deletes a previous generation's slot vectors by id (ids recorded in the Lobby at upsert; design 4.6). */

@@ -4,7 +4,7 @@
 export type ExtrasErrorCode =
   | "PDF_DISABLED" | "PDF_BUDGET" | "PDF_KEY_MISMATCH" | "PDF_TOO_LARGE" | "PDF_RENDER_FAILED"
   | "JOB_INVALID" | "JOB_STALE" | "BLOB_MISSING" | "BLOB_MISMATCH" | "WRITE_BACK_REFUSED" | "RECALL_UNAVAILABLE"
-  | "EXPORT_FAILED" | "BINDING_MISSING" | "DEAD_LETTER";
+  | "EMBED_BUDGET" | "BUDGET_WAIT" | "EXPORT_FAILED" | "BINDING_MISSING" | "DEAD_LETTER";
 
 export class ExtrasError extends Error {
   constructor(readonly code: ExtrasErrorCode, message: string, readonly retryable = false) {

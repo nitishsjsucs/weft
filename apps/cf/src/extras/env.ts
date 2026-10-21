@@ -3,7 +3,7 @@
 // enabled), and the factories that turn them into the queue consumers' and HostedExtras' dependencies. A binding
 // that is absent switches its extra off instead of failing the Worker. Track cf6-extras.
 import {
-  buildPlatformReadout, createFlagReader, createHelpSearch, createRunCatalog, d1JobLedger, gatewayOption, lobbyCounters, neuronBudgetFromLedger, puppeteerLauncher,
+  buildPlatformReadout, createFlagReader, createHelpSearch, createRunCatalog, d1JobLedger, gatewayOption, lobbyCounters, messageOf, neuronBudgetFromLedger, puppeteerLauncher,
   selectMetricsSink,
   type AiSearchLike, type AnalyticsEngineLike, type D1Like, type ExtrasFlags, type ImagesLike, type KvLike, type R2BucketLike, type VectorizeLike, type WorkersAiBindingLike,
 } from "@weft/cf-extras";
@@ -29,6 +29,9 @@ export interface ExtrasEnv {
   WEFT_SEMANTIC_RECALL?: string;
 }
 export interface ExecutionContextLike { waitUntil(p: Promise<unknown>): void }
+export type ExtrasLog = (evt: Record<string, unknown>) => void;
+/** One JSON line per event in Workers Logs; events carry codes and clipped messages, never bodies or visitor data. */
+export const consoleLog: ExtrasLog = (evt) => console.log(JSON.stringify(evt));
 
 const readers = new WeakMap<object, () => Promise<ExtrasFlags>>();
 /** One memoized flag reader per KV binding (per isolate), so a busy isolate reads KV once a minute. */
@@ -42,7 +45,7 @@ export function flagsFor(env: Pick<ExtrasEnv, "CONFIG" | "WEFT_SEMANTIC_RECALL">
 const lobby = (env: ExtrasEnv) => env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
 const spend = (env: ExtrasEnv) => env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend));
 
-export function jobDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike, log?: (evt: Record<string, unknown>) => void): ExtrasJobDeps {
+export function jobDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike, log: ExtrasLog = consoleLog): ExtrasJobDeps {
   return {
     ai: env.AI ?? null,
     images: env.IMAGES ?? null,
@@ -55,24 +58,24 @@ export function jobDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike, log?: 
     flags: flagsFor(env),
     slots: (slot) => env.COMPANY.get(env.COMPANY.idFromName(slot)),
     recordVectorIds: (slot, gen, ids) => lobby(env).extrasRecordVectors(slot, gen, ids),
-    metrics: selectMetricsSink(env, { waitUntil: (p) => ctx.waitUntil(p) }),
+    metrics: selectMetricsSink(env, { waitUntil: (p) => ctx.waitUntil(p), onError: (e) => log({ evt: "extras.metrics", outcome: "flush_failed", message: messageOf(e) }) }),
     gatewayFor: (meta) => gatewayOption(env as unknown as Record<string, unknown>, meta),
     log,
   };
 }
 
-export function hostedDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike): HostedExtrasDeps {
+export function hostedDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike, log: ExtrasLog = consoleLog): HostedExtrasDeps {
   const flags = flagsFor(env);
   const counters = lobbyCounters(lobby(env));
   return {
-    help: createHelpSearch({ search: env.HELP ?? null, counters, enabled: async () => (await flags()).help }),
+    help: createHelpSearch({ search: env.HELP ?? null, counters, enabled: async () => (await flags()).help, onError: (e) => log({ evt: "extras.help", outcome: "search_failed", message: messageOf(e) }) }),
     ai: env.AI ?? null,
     neurons: neuronBudgetFromLedger(spend(env)),
     dictationEnabled: async () => (await flags()).dictation,
     catalog: createRunCatalog(env.OPS),
     platform: () => buildPlatformReadout({ lobby: () => lobby(env).extrasReadout(), spend: spend(env), ops: env.OPS, counters }),
     files: env.FILES,
-    metrics: selectMetricsSink(env, { waitUntil: (p) => ctx.waitUntil(p) }),
+    metrics: selectMetricsSink(env, { waitUntil: (p) => ctx.waitUntil(p), onError: (e) => log({ evt: "extras.metrics", outcome: "flush_failed", message: messageOf(e) }) }),
     gatewayFor: (meta) => gatewayOption(env as unknown as Record<string, unknown>, meta),
   };
 }

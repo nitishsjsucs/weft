@@ -4,8 +4,8 @@
 // mutation-class action: never on the showcase, only with a fresh human grant, within the daily browser share.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestWeft, type TestWeft } from "@weft/api";
-import { memoryDailyCounters, parseJob, pdfObjectKey, sha256Hex, type ExtrasFlags, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
-import { handleHostedPdf, parsePdfPath, type PdfRouteDeps } from "../../src/extras/slot/pdf-route";
+import { memoryDailyCounters, parseJob, PDF_FAILURE_TTL_MS, pdfFailureKey, pdfObjectKey, sha256Hex, type ExtrasFlags, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
+import { handleHostedPdf, parsePdfPath, PDF_REENQUEUE_MS, type PdfRouteDeps } from "../../src/extras/slot/pdf-route";
 import { handleExtrasBatch } from "../../src/extras/queues";
 import { batch, fakeBrowser, fakeSlot, FLAGS_ON, jobDeps, memoryR2, message } from "./helpers";
 
@@ -134,7 +134,56 @@ describe("hosted PDF route", () => {
     const r3 = await handleHostedPdf(path, spent.deps);
     expect(r3.status).toBe(503);
     expect(await r3.json()).toMatchObject({ code: "PDF_BUDGET", retryAfterS: 30_600 });
-    expect(off.sent.length + spent.sent.length + noGrant.sent.length + showcase.sent.length).toBe(0);
+    // A render reserves 35 s, so 265.1 s used is already too much to start one.
+    const almost = setup({ browserMsUsed: async () => 265_001 });
+    expect(await (await handleHostedPdf(path, almost.deps)).json()).toMatchObject({ code: "PDF_BUDGET" });
+    expect(off.sent.length + spent.sent.length + almost.sent.length + noGrant.sent.length + showcase.sent.length).toBe(0);
+  });
+
+  it("ends the polling when a render failed for good, and lets a new request try again after the marker's time", async () => {
+    let t = Date.parse("2026-10-26T15:30:00Z");
+    const s = setup({ now: () => t });
+    const path = `/api/_hosted/pdf/offer_letter/${letterId}`;
+    expect((await handleHostedPdf(path, s.deps)).status).toBe(202);
+    const job = s.sent[0] as Extract<HostedJob, { kind: "render.pdf" }>;
+    // The render fails for good (here: the browser share ran out in the consumer), and the consumer leaves its marker.
+    const counters = memoryDailyCounters();
+    await counters.add("pdf.browser_ms", 300_000);
+    const deps = jobDeps({ "slot-1": fakeSlot({ gen: 3 }) }, { files: s.files, launch: fakeBrowser().launch, counters, now: () => new Date(t) });
+    await handleExtrasBatch(batch("weft-render", [message(job)]) as MessageBatchLike<unknown>, deps);
+    const key = pdfObjectKey({ scope: "world", slot: "slot-1", gen: 3, sha256: job.sha256 });
+    expect(s.files.objects.has(pdfFailureKey(key))).toBe(true);
+    t += 5_000;
+    const r = await handleHostedPdf(path, s.deps);
+    expect(r.status).toBe(503);
+    expect(await r.json()).toMatchObject({ code: "PDF_BUDGET" });
+    // Any other permanent failure answers PDF_RENDER_FAILED, with the marker's remaining time as retry-after.
+    await s.files.put(pdfFailureKey(key), "{}", { customMetadata: { code: "PDF_RENDER_FAILED", at: new Date(t).toISOString() } });
+    t += 60_000;
+    const failed = await handleHostedPdf(path, s.deps);
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toMatchObject({ code: "PDF_RENDER_FAILED", retryAfterS: (PDF_FAILURE_TTL_MS - 60_000) / 1000 });
+    expect(s.sent).toHaveLength(1);
+    // Once the marker is old, the next request queues a fresh render.
+    t += PDF_FAILURE_TTL_MS;
+    expect((await handleHostedPdf(path, s.deps)).status).toBe(202);
+    expect(s.sent).toHaveLength(2);
+    // A pending render is queued again only after PDF_REENQUEUE_MS, in case its job was lost.
+    t += PDF_REENQUEUE_MS - 1;
+    await handleHostedPdf(path, s.deps);
+    expect(s.sent).toHaveLength(2);
+    t += 2;
+    await handleHostedPdf(path, s.deps);
+    expect(s.sent).toHaveLength(3);
+  });
+
+  it("refuses a document too large to render before it is queued", async () => {
+    const big = { id: "doc_0900", kind: "offer_letter", title: "Offer letter", status: "sent", sha256: "a".repeat(64), sentAt: null, bodyText: "Long clause. ".repeat(9_000), signature: null };
+    const s = setup({ app: async (p) => Response.json(p === "/v1/company" ? { company: { legalName: "Larkspur Labs (demo)" } } : big) });
+    const r = await handleHostedPdf("/api/_hosted/pdf/offer_letter/doc_0900", s.deps);
+    expect(r.status).toBe(413);
+    expect(await r.json()).toMatchObject({ code: "PDF_TOO_LARGE" });
+    expect(s.sent).toHaveLength(0);
   });
 
   it("the render job honours the daily browser share", async () => {

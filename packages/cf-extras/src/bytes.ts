@@ -70,6 +70,49 @@ function isLikelyText(bytes: Uint8Array): boolean {
   try { new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, n)); return true; } catch { return n === 4096; }
 }
 
+/**
+ * Width and height of a JPEG (from its first start-of-frame segment) or a PNG (from IHDR); null for any other kind or
+ * when the header cannot be read. OCR uses it to bound what an image costs before the model sees it.
+ */
+export function imageSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const u16 = (i: number) => (bytes[i]! << 8) | bytes[i + 1]!;
+  const u32 = (i: number) => ((bytes[i]! << 24) >>> 0) + (bytes[i + 1]! << 16) + (bytes[i + 2]! << 8) + bytes[i + 3]!;
+  const kind = sniff(bytes);
+  if (kind === "png") {
+    if (bytes.length < 24 || String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return null;
+    const width = u32(16), height = u32(20);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+  if (kind !== "jpeg") return null;
+  let i = 2;
+  while (i + 4 <= bytes.length) {
+    if (bytes[i] !== 0xff) return null;
+    const marker = bytes[i + 1]!;
+    if (marker === 0xff) { i++; continue; }
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
+    if (marker === 0xd9 || marker === 0xda) return null;
+    const len = u16(i + 2);
+    if (len < 2) return null;
+    const sof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (sof) {
+      if (i + 9 > bytes.length) return null;
+      const height = u16(i + 5), width = u16(i + 7);
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    i += 2 + len;
+  }
+  return null;
+}
+
+/** Clips a string to at most `maxBytes` of UTF-8, never inside a character. */
+export function clipUtf8(s: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(s);
+  if (bytes.length <= maxBytes) return s;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+  return new TextDecoder().decode(bytes.subarray(0, end));
+}
+
 export const IMAGE_KINDS: readonly SniffedKind[] = ["jpeg", "png", "gif", "webp"];
 export const MIME_OF: Partial<Record<SniffedKind, string>> = {
   jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", pdf: "application/pdf", text: "text/plain",

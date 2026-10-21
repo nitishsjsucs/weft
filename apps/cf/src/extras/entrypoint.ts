@@ -22,5 +22,5 @@ export class HostedExtras extends WorkerEntrypoint<ExtrasEnv> implements HostedE
 
 /** The queue() body for the extras' queues. Logs one redacted JSON line per job (no bodies, no visitor data). */
 export async function extrasQueue(batch: MessageBatchLike<unknown>, env: ExtrasEnv, ctx: ExecutionContextLike): Promise<void> {
-  await handleExtrasBatch(batch, jobDepsFromEnv(env, ctx, (evt) => console.log(JSON.stringify(evt))));
+  await handleExtrasBatch(batch, jobDepsFromEnv(env, ctx));
 }

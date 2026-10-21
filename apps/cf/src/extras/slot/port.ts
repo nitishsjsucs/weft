@@ -17,7 +17,8 @@ export interface SlotExtrasDeps {
   world(): SlotWorldInfo | Promise<SlotWorldInfo>;
   /** The platform's BlobStore (SQL on the durable platform). */
   blobs: { get(storagePath: string): Promise<Uint8Array | null> };
-  /** MemoryRepo.read at a commit (cf1's SqlRepo on the durable platform). */
+  /** MemoryRepo.read at a commit (cf1's SqlRepo on the durable platform): null when the note is not there; throws
+   * when the read itself fails. */
   memoryText(path: string, commit: string): Promise<string | null>;
   /** MemoryRepo.exportFastImport. */
   exportMemory(): Promise<Uint8Array>;
@@ -31,6 +32,18 @@ const ALLOWED = new Set<string>(Object.values(HIDDEN_SERVICE_COMMANDS));
 const SHA_PATH = /^(blob:|uploads\/)[0-9a-f]{64}(\.bin)?$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 
+/**
+ * Refusals that mean the write-back has nothing left to do. The commands here report a repeat or a changed subject as
+ * `already` or `skipped`; cf2-platform's versions of the same commands refuse them with these codes instead, so the
+ * queue handler finishes the job either way, whichever definition integration keeps.
+ */
+export const SETTLED_WRITE_BACK_REFUSALS: Readonly<Record<string, { status: "already" | "skipped"; reason: string | null }>> = {
+  DOMAIN_ALREADY_APPLIED: { status: "already", reason: null },
+  DOMAIN_STALE_RECEIPT: { status: "skipped", reason: "receipt_replaced" },
+  DOMAIN_STALE_UPLOAD: { status: "skipped", reason: "upload_mismatch" },
+  DOMAIN_EXTRACT_PRESENT: { status: "skipped", reason: "has_extract" },
+};
+
 /** A ToolOutcome as the queue handler needs it. */
 export function writeBackOutcome(o: ToolOutcome): WriteBackOutcome {
   if (o.ok && o.status === "done") {
@@ -39,6 +52,8 @@ export function writeBackOutcome(o: ToolOutcome): WriteBackOutcome {
     return { ok: true, status, reason: typeof d.reason === "string" ? d.reason : null };
   }
   if (o.ok) return { ok: false, code: "UNEXPECTED_PROPOSAL", message: "a write-back must never become a proposal", retryable: false };
+  const settled = SETTLED_WRITE_BACK_REFUSALS[o.refusal.code];
+  if (settled) return { ok: true, ...settled };
   return { ok: false, code: o.refusal.code, message: o.refusal.message, retryable: RETRYABLE_WRITE_BACK_CODES.has(o.refusal.code) };
 }
 
@@ -59,7 +74,8 @@ export function createSlotExtras(deps: SlotExtrasDeps): SlotExtrasPort {
     },
     async extrasMemoryText(path, commit) {
       if (!COMMIT.test(commit) || path.includes("..") || path.startsWith("/") || !path.endsWith(".md")) return null;
-      return deps.memoryText(path, commit).catch(() => null);
+      // null means the note is not at that commit; a read that fails throws, so the embedding job retries.
+      return deps.memoryText(path, commit);
     },
     async extrasExport(what): Promise<SlotExport> {
       return what === "memory"

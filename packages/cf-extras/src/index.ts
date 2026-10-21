@@ -20,4 +20,5 @@ export * from "./pdf";
 export * from "./platform";
 export * from "./recall";
 export * from "./templates";
+export * from "./wav";
 export * from "../../contracts/src/ext/cf-extras";

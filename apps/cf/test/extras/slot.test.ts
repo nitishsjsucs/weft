@@ -15,10 +15,10 @@ import { expenses, notices, runTaint, uploads } from "@weft/db";
 import { OCR_MODEL, parseJob, sha256Hex, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
 import type { ToolOutcome } from "@weft/contracts";
 import { EXTRAS_COMMANDS, SVC_JOBS_ALLOWLIST, attachReceiptExtractCmd, attachScanExtractCmd } from "../../src/extras/slot/commands";
-import { createSlotExtras, worldExportJson, writeBackOutcome } from "../../src/extras/slot/port";
+import { createSlotExtras, worldExportJson, writeBackOutcome, type SlotExtrasDeps } from "../../src/extras/slot/port";
 import { extrasOutboxJobs } from "../../src/extras/slot/outbox";
 import { handleExtrasBatch } from "../../src/extras/queues";
-import { batch, fakeAi, jobDeps, message } from "./helpers";
+import { batch, fakeAi, jobDeps, jpegOf, message } from "./helpers";
 
 let w: TestWeft;
 beforeAll(async () => { w = await createTestWeft(); await w.scheduler.tick(); });
@@ -46,7 +46,7 @@ async function runHidden(command: string, args: unknown): Promise<ToolOutcome> {
 }
 
 const memRoot = () => (w.executor.memory as unknown as { root(): string | null }).root()!;
-const slotPort = (lease = { visitor: "v_test", ipHash: "ip_test" }) => createSlotExtras({
+const slotDeps = (lease = { visitor: "v_test", ipHash: "ip_test" }): SlotExtrasDeps => ({
   world: () => ({ slot: "slot-1", gen: 1, mode: "slot", snapshot: "snap1", lease }),
   blobs: { async get(p) { const abs = join(w.dataDir, p); return existsSync(abs) ? new Uint8Array(readFileSync(abs)) : null; } },
   memoryText: async (path, commit) => { try { return execFileSync("git", ["show", `${commit}:${path}`], { cwd: memRoot(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } },
@@ -54,10 +54,11 @@ const slotPort = (lease = { visitor: "v_test", ipHash: "ip_test" }) => createSlo
   exportWorld: () => worldExportJson(w.db, { slot: "slot-1", gen: 1, exportedAt: "2026-10-26T15:30:00.000Z" }),
   exec: runHidden,
 });
+const slotPort = (lease = { visitor: "v_test", ipHash: "ip_test" }) => createSlotExtras(slotDeps(lease));
 let ids = 0;
 const newJobId = () => `obx_${String(++ids).padStart(4, "0")}`;
 
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48, 0xff, 0xd9]);
+const JPEG = jpegOf(640, 480);
 async function fileClaim(amountCents: number, bytes = JPEG) {
   const f = new FormData();
   for (const [k, v] of Object.entries({ category: "meals", merchant: "Harbor Noodle (demo)", amountCents: String(amountCents), transactionDate: "2026-10-22", businessPurpose: "Team lunch", attendees: "Sam Okafor (demo), Dana (demo)" })) f.set(k, v);
@@ -200,6 +201,19 @@ describe("slot port", () => {
     expect(await port.extrasMemoryText("entities/people/wrk_0026.md", "HEAD")).toBeNull();
     expect(await port.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
     expect((await port.extrasWorld()).lease).toEqual({ visitor: "v_test", ipHash: "ip_test" });
+    // A note missing at the commit is null; a read that fails is an error the embedding job retries on.
+    const failing = createSlotExtras({ ...slotDeps(), memoryText: async () => { throw new Error("SQLITE_BUSY"); } });
+    await expect(failing.extrasMemoryText("entities/people/wrk_0026.md", head)).rejects.toThrow(/SQLITE_BUSY/);
+  });
+
+  it("finishes a job whichever write-back definition integration keeps: repeat and stale refusals are settled", () => {
+    const refusal = (code: string): ToolOutcome => ({ ok: false, refusal: { code: code as never, message: code, hint: null, example: null }, tainted: false });
+    expect(writeBackOutcome(refusal("DOMAIN_ALREADY_APPLIED"))).toEqual({ ok: true, status: "already", reason: null });
+    expect(writeBackOutcome(refusal("DOMAIN_STALE_RECEIPT"))).toEqual({ ok: true, status: "skipped", reason: "receipt_replaced" });
+    expect(writeBackOutcome(refusal("DOMAIN_STALE_UPLOAD"))).toEqual({ ok: true, status: "skipped", reason: "upload_mismatch" });
+    expect(writeBackOutcome(refusal("DOMAIN_EXTRACT_PRESENT"))).toEqual({ ok: true, status: "skipped", reason: "has_extract" });
+    expect(writeBackOutcome(refusal("DOMAIN_NOT_READ_YET"))).toMatchObject({ ok: false, retryable: true });
+    expect(writeBackOutcome(refusal("DOMAIN_NOT_FOUND"))).toMatchObject({ ok: false, retryable: false });
   });
 
   it("exports the world's tables without key material, memory or stored uploads", async () => {

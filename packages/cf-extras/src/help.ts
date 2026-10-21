@@ -31,6 +31,8 @@ export interface HelpDeps {
   /** The `extras.help` kill flag. */
   enabled: () => boolean | Promise<boolean>;
   perDay?: number;
+  /** Told about a failed or malformed AI Search reply (the visitor sees HELP_DISABLED). */
+  onError?: (e: unknown) => void;
 }
 
 const snippetOf = (t: string) => {
@@ -45,6 +47,8 @@ export function createHelpSearch(deps: HelpDeps): HelpSearch {
       if (!deps.search || !(await deps.enabled())) return { ok: false, code: "HELP_DISABLED", message: "Help search is switched off" };
       const q = query.replace(/\s+/g, " ").trim().slice(0, HELP_QUERY_MAX);
       if (!q) return { ok: true, hits: [], leftToday: Math.max(0, cap - (await deps.counters.peek(COUNTERS.help))) };
+      // The query is counted before the call, and a failed call keeps its count: AI Search may have counted it
+      // against the month's included queries, which this daily cap protects, so the count errs toward the cap.
       const t = await deps.counters.take(COUNTERS.help, 1, cap);
       if (!t.ok) return { ok: false, code: "HELP_DAILY_CAP", message: `Help search answers ${cap} questions a day; it is back after 00:00 UTC` };
       let res: Awaited<ReturnType<AiSearchLike["search"]>>;
@@ -53,11 +57,19 @@ export function createHelpSearch(deps: HelpDeps): HelpSearch {
           query: q,
           ai_search_options: { retrieval: { max_num_results: HELP_MAX_RESULTS * 2, match_threshold: 0.35, return_on_failure: true }, query_rewrite: { enabled: false }, reranking: { enabled: false } },
         });
-      } catch {
+      } catch (e) {
+        deps.onError?.(e);
+        return { ok: false, code: "HELP_DISABLED", message: "Help search is unavailable right now" };
+      }
+      // A reply without a chunks list is not AI Search's shape (the binding's shape is checked on the first deploy):
+      // say so instead of answering that nothing matched.
+      if (!res || !Array.isArray((res as { chunks?: unknown }).chunks)) {
+        deps.onError?.(new Error("AI Search replied without a chunks list"));
         return { ok: false, code: "HELP_DISABLED", message: "Help search is unavailable right now" };
       }
       const byKey = new Map<string, HelpHit>();
-      for (const c of res.chunks ?? []) {
+      for (const c of res.chunks) {
+        if (!c || typeof c !== "object" || typeof c.score !== "number") continue;
         const key = c.item?.key ?? "";
         if (!key.startsWith(R2_PREFIXES.help)) continue;
         const prev = byKey.get(key);

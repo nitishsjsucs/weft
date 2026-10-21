@@ -58,6 +58,16 @@ describe("HostedExtras", () => {
     expect(await deps({ ai: null }).api.dictate({ audio: wav(1), contentType: "audio/wav", slot: null, gen: null, visitor: null, ipHash: null })).toMatchObject({ ok: false, code: "DICTATION_DISABLED" });
   });
 
+  it("refuses a compressed clip before any model call, since its length cannot be checked first", async () => {
+    const ai = fakeAi({ [DICTATION_MODEL]: () => ({ text: "four minutes of speech", transcription_info: { duration: 240 } }) });
+    const neurons = memoryNeuronBudget();
+    const { api } = deps({ ai, neurons });
+    const webm = new Uint8Array(1_000_000); webm.set([0x1a, 0x45, 0xdf, 0xa3]);
+    expect(await api.dictate({ audio: webm, contentType: "audio/webm", slot: "slot-1", gen: 3, visitor: "v_1", ipHash: "ip_1" })).toMatchObject({ ok: false, code: "DICTATION_UNREADABLE" });
+    expect(ai.calls).toHaveLength(0);
+    expect(neurons.used("dictation") + neurons.open()).toBe(0);
+  });
+
   it("records run outcomes and compares models from D1", async () => {
     const { api, db, metrics } = deps();
     await api.recordRun({ runId: "run_0001", slot: "slot-1", gen: 3, provider: "openai", model: "gpt-5.6-luna", trigger: "chat", steps: 3, grounded: true, costUsdMicros: 3100, neurons: 0, latencyMs: 4100, status: "done", terminalReason: "DONE", endedAt: new Date().toISOString() });

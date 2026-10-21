@@ -5,8 +5,9 @@
 // candidate is re-read from the world's memory repo at HEAD and kept only when the file exists there and is
 // byte-identical to the file at the commit that was indexed, so every citation is `path#L<line>` of a note as it is
 // now, at a real commit. Untrusted notes (tainted_by, or a human decision note) keep their label and taint the run;
-// a trustedOnly (routine) recall never gets them. memory.search stays a fixed-strings grep. The source sees only the
-// request text; no recalled text ever reaches it.
+// a trustedOnly (routine) recall never gets them. Each excerpt goes through the executor's redactor, as every
+// lexical hit does, so a secret the redactor learned after a note was written never reaches a prompt. memory.search
+// stays a fixed-strings grep. The source sees only the request text; no recalled text ever reaches it.
 import { RECALL_BUDGET } from "@weft/contracts";
 import type { RecallCandidate, RecallSource } from "../../../../packages/contracts/src/ext/cf-extras";
 
@@ -19,6 +20,8 @@ export interface SemanticRecallOptions {
   readText: (path: string, at?: string) => Promise<string | null>;
   /** Candidates asked for per recall (default 3). */
   k?: number;
+  /** Told when the source or a re-read fails; recall then stays lexical for that run. Absent: a redacted warning. */
+  onError?: (e: unknown) => void;
 }
 
 export interface RecallItemOut { path: string; kind: string; taintedBy: string | null }
@@ -64,8 +67,8 @@ export function citeLine(text: string, request: string): { line: number; text: s
   return best ? { line: best.line, text: best.text } : { line: fm.lines + 1, text: "" };
 }
 
-/** Re-verifies each candidate at HEAD and renders the ones that hold as recall lines. */
-export async function verifiedSemanticLines(opts: SemanticRecallOptions, request: string, candidates: RecallCandidate[], exclude: ReadonlySet<string>, trustedOnly: boolean): Promise<{ line: string; item: RecallItemOut }[]> {
+/** Re-verifies each candidate at HEAD and renders the ones that hold as recall lines, each excerpt redacted. */
+export async function verifiedSemanticLines(opts: SemanticRecallOptions, request: string, candidates: RecallCandidate[], exclude: ReadonlySet<string>, trustedOnly: boolean, redact: (s: string) => string = (s) => s): Promise<{ line: string; item: RecallItemOut }[]> {
   const out: { line: string; item: RecallItemOut }[] = [];
   const seen = new Set(exclude);
   for (const c of candidates) {
@@ -80,7 +83,7 @@ export async function verifiedSemanticLines(opts: SemanticRecallOptions, request
     const cite = citeLine(atHead, request);
     if (!cite.text) continue;
     const limit = SEMANTIC_MAX_TOKENS * 4;
-    const raw = maskAmounts(cite.text.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1"));
+    const raw = maskAmounts(redact(cite.text).replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1"));
     const excerpt = raw.length > limit ? `${raw.slice(0, limit - 12)} [clipped]` : raw;
     const path = `${c.path}#L${cite.line}`;
     out.push({ line: `- ${escapeData(path)} (semantic, as of ${(fm.updated || "").slice(0, 10)}${taintedBy ? ", untrusted" : ""}): ${escapeData(excerpt)}`, item: { path, kind: "semantic", taintedBy } });
@@ -93,13 +96,13 @@ export async function verifiedSemanticLines(opts: SemanticRecallOptions, request
  * The lexical outcome with verified semantic lines appended within RECALL_BUDGET. Returns `lexical` itself (the very
  * same object) when the hook is off or adds nothing, so recall without semantic candidates is byte-identical.
  */
-export async function withSemanticRecall(opts: SemanticRecallOptions | null | undefined, input: { query: string }, lexical: RecallOut | null, trustedOnly: boolean): Promise<RecallOut | null> {
+export async function withSemanticRecall(opts: SemanticRecallOptions | null | undefined, input: { query: string }, lexical: RecallOut | null, trustedOnly: boolean, redact?: (s: string) => string): Promise<RecallOut | null> {
   if (!opts || !(await opts.enabled())) return lexical;
   const w = opts.world();
   const candidates = await opts.source.candidates({ text: input.query, slot: w.slot, gen: w.gen, snapshot: w.snapshot, k: opts.k ?? 3, trustedOnly });
   if (candidates.length === 0) return lexical;
   const exclude = new Set((lexical?.items ?? []).map((i) => i.path.split("#")[0]!));
-  const lines = await verifiedSemanticLines(opts, input.query, candidates, exclude, trustedOnly);
+  const lines = await verifiedSemanticLines(opts, input.query, candidates, exclude, trustedOnly, redact);
   if (lines.length === 0) return lexical;
   const base = lexical?.block ? lexical.block.slice(0, lexical.block.length - CLOSE.length).replace(/\n$/, "") : OPEN;
   let block = base;

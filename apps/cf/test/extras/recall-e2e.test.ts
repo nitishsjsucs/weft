@@ -7,8 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestWeft, type TestWeft } from "@weft/api";
 import { attachSemanticRecall } from "../../../api/src/memory/binding";
 import { createMemoryRecall } from "../../../api/src/memory/recall";
-import { chunkNote, createRecallSource, EMBEDDING_MODEL, embeddingNeurons, seedNamespace } from "@weft/cf-extras";
-import { indexSeedMemory, memoryNotesAtHead } from "../../src/extras/slot/seed-index";
+import { chunkNote, createRecallSource, EMBEDDING_MODEL, embeddingNeurons, memoryNeuronBudget, seedNamespace } from "@weft/cf-extras";
+import { NEURON_SHARES } from "../../../../packages/contracts/src/ext/cf-agent";
+import { indexSeedMemory, memoryNotesAtHead, type SeedIndexResult } from "../../src/extras/slot/seed-index";
 import { embeddingHandler, fakeAi, fakeVectorize } from "./helpers";
 
 let w: TestWeft;
@@ -37,16 +38,31 @@ describe("seed index and semantic recall", () => {
     expect(notes.every((n) => /^(entities|comms|timeline|workstreams|knowledge)\//.test(n.path) && !n.path.endsWith(".keep.md"))).toBe(true);
     const head = await repo.head();
     expect(notes.every((n) => n.commit === head)).toBe(true);
-    const r = await indexSeedMemory({ ai, vectors }, repo, "snap1");
-    expect(r).toMatchObject({ namespace: seedNamespace("snap1"), notes: notes.length });
+    // Every batch is metered by the embeddings share (200 neurons a day) and recorded; a seed larger than a day's
+    // share resumes on the next day from the chunk it reached, until it is complete.
+    const days: { used: number; nextChunk: number | null }[] = [];
+    let r: SeedIndexResult | null = null;
+    for (let from = 0; days.length < 20; ) {
+      const day = memoryNeuronBudget();
+      r = await indexSeedMemory({ ai, vectors, neurons: day }, repo, "snap1", { fromChunk: from });
+      days.push({ used: day.used("embeddings"), nextChunk: r.nextChunk });
+      expect(day.used("embeddings")).toBeLessThanOrEqual(NEURON_SHARES.embeddings);
+      expect(day.open()).toBe(0);
+      if (r.nextChunk === null) break;
+      expect(r.nextChunk).toBeGreaterThan(from);
+      from = r.nextChunk;
+    }
+    r = r!;
+    expect(r).toMatchObject({ namespace: seedNamespace("snap1"), notes: notes.length, nextChunk: null });
     expect(vectors.vectors.size).toBe(r.chunks);
     expect([...vectors.vectors.values()].every((v) => v.namespace === "seed-snap1" && v.metadata!.gen === 0)).toBe(true);
-    // A second run upserts the same ids.
-    await indexSeedMemory({ ai, vectors }, repo, "snap1");
+    // What the days recorded is the upper bound of the whole seed's embeddings, each chunk paid for once.
+    const texts = notes.flatMap((n) => { const title = /^# (.+)$/m.exec(n.text)?.[1]?.trim() ?? n.path; return chunkNote(n.text).map((c) => `${title}\n${c}`); });
+    expect(texts).toHaveLength(r.chunks);
+    expect(days.reduce((a, d) => a + d.used, 0)).toBeGreaterThanOrEqual(embeddingNeurons(texts));
+    // A second full run upserts the same ids.
+    await indexSeedMemory({ ai, vectors, neurons: memoryNeuronBudget({ ...NEURON_SHARES, embeddings: 1_000_000 }) }, repo, "snap1");
     expect(vectors.vectors.size).toBe(r.chunks);
-    // The embedding cost of the whole seed, at the conservative 4 characters a token.
-    const texts = notes.flatMap((n) => chunkNote(n.text));
-    expect(embeddingNeurons(texts)).toBeLessThan(1000);
   }, 60_000);
 
   it("finds seed notes by meaning, verified at HEAD, only while the flag is on", async () => {

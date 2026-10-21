@@ -1,13 +1,16 @@
 // The extras' queue consumers (design 3.4 and 5.4): every handler is idempotent on redelivery, a job for an older
 // generation is dropped, failures a retry cannot fix are recorded at once, transient ones retry with backoff, and
-// weft-dlq records what ran out of retries. The slot is faked behind the CompanyDO seam here; slot.test.ts runs the
-// same jobs against a real world.
+// weft-dlq records what ran out of retries. A job a daily share refuses retries briefly, is parked until the next UTC
+// day and sent again by the cron; a render that fails for good leaves the marker the PDF route reads. The slot is
+// faked behind the CompanyDO seam here; slot.test.ts runs the same jobs against a real world.
 import { describe, expect, it } from "vitest";
-import { EMBEDDING_MODEL, OCR_MODEL, renderPdfHtml, sha256Hex, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
-import { exportObjectKey, handleExtrasBatch, retryDelaySeconds } from "../../src/extras/queues";
+import { d1JobLedger, EMBEDDING_MODEL, memoryNeuronBudget, OCR_MODEL, pdfFailureKey, pdfObjectKey, renderPdfHtml, sha256Hex, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
+import { extrasCron } from "../../src/extras/cron";
+import { BUDGET_RETRIES, exportObjectKey, handleExtrasBatch, retryDelaySeconds } from "../../src/extras/queues";
 import { batch, embeddingHandler, fakeAi, fakeBrowser, fakeImages, fakeSlot, fakeVectorize, FLAGS_ON, jobDeps, memoryR2, message, TINY_JPEG } from "./helpers";
 
-const ocrReply = () => ({ response: JSON.stringify({ merchant: "Corner Deli (demo)", date: "2026-10-22", total: "41.38", currency: "USD", confidence: 0.91 }) });
+// 290 prompt and 41 completion tokens: ceil(290 x 0.031876 + 41 x 0.050488) = 12 neurons.
+const ocrReply = () => ({ response: JSON.stringify({ merchant: "Corner Deli (demo)", date: "2026-10-22", total: "41.38", currency: "USD", confidence: 0.91 }), usage: { prompt_tokens: 290, completion_tokens: 41 } });
 async function receiptJob(o: Partial<Extract<HostedJob, { kind: "ocr.receipt" }>> = {}) {
   const sha = await sha256Hex(TINY_JPEG);
   return { v: 1 as const, kind: "ocr.receipt" as const, jobId: "obx_0001", slot: "slot-1", gen: 3, uploadId: "upl_0042", expenseId: "exp_0201", sha256: sha, storagePath: `blob:${sha}`, contentType: "image/jpeg", ...o };
@@ -25,7 +28,7 @@ describe("OCR jobs", () => {
     const first = message(job);
     await run(deps, "weft-jobs", first);
     expect(first.acked).toBe(1);
-    expect(slot.writeBacks).toEqual([{ command: "expenses.attach_receipt_extract", args: { job_id: "obx_0001", expense_id: "exp_0201", upload_id: "upl_0042", extract: { merchant: "Corner Deli (demo)", date: "2026-10-22", totalCents: 4138, currency: "USD", confidence: 0.91 }, model: OCR_MODEL, neurons: 11 } }]);
+    expect(slot.writeBacks).toEqual([{ command: "expenses.attach_receipt_extract", args: { job_id: "obx_0001", expense_id: "exp_0201", upload_id: "upl_0042", extract: { merchant: "Corner Deli (demo)", date: "2026-10-22", totalCents: 4138, currency: "USD", confidence: 0.91 }, model: OCR_MODEL, neurons: 12 } }]);
     const again = message(job, 1);
     await run(deps, "weft-jobs", again);
     expect(again.acked).toBe(1);
@@ -59,7 +62,7 @@ describe("OCR jobs", () => {
     expect(deps.db.rows("jobs")).toMatchObject([{ state: "done", result_json: null }]);
   });
 
-  it("an unreadable or unsupported upload writes back a null extract; the budget or the kill flag skips it", async () => {
+  it("an unreadable or unsupported upload writes back a null extract; the kill flag skips it", async () => {
     const slot = fakeSlot();
     const pdfBytes = new TextEncoder().encode("%PDF-1.7 a scanned receipt");
     const pdfJob = await receiptJob({ jobId: "obx_pdf", sha256: await sha256Hex(pdfBytes), storagePath: `blob:${await sha256Hex(pdfBytes)}` });
@@ -109,10 +112,69 @@ describe("OCR jobs", () => {
     const slot = fakeSlot();
     const sha = await sha256Hex(TINY_JPEG);
     slot.blobs.set(`blob:${sha}`, TINY_JPEG);
+    // No usage in the reply: the read settles at its worst case, a 2,500-token reply included.
     const ai = fakeAi({ [OCR_MODEL]: () => ({ response: JSON.stringify({ formCode: "DE 2088", period: "2026", effectiveFrom: "2027-01-01", accountNumber: "123-4567-8", confidence: 0.9, text: "Rate notice" }) }) });
     const deps = jobDeps({ "slot-1": slot }, { ai });
     await run(deps, "weft-jobs", message({ v: 1, kind: "ocr.notice", jobId: "obx_n1", slot: "slot-1", gen: 3, uploadId: "upl_0009", noticeId: "ntc_0011", sha256: sha, storagePath: `blob:${sha}`, contentType: "image/jpeg" }));
-    expect(slot.writeBacks).toEqual([{ command: "notices.attach_scan_extract", args: { job_id: "obx_n1", notice_id: "ntc_0011", upload_id: "upl_0009", extract: { formCode: "DE 2088", period: "2026", effectiveFrom: "2027-01-01", accountNumber: "123-4567-8", confidence: 0.9, text: "Rate notice" }, model: OCR_MODEL, neurons: 11 } }]);
+    expect(slot.writeBacks).toEqual([{ command: "notices.attach_scan_extract", args: { job_id: "obx_n1", notice_id: "ntc_0011", upload_id: "upl_0009", extract: { formCode: "DE 2088", period: "2026", effectiveFrom: "2027-01-01", accountNumber: "123-4567-8", confidence: 0.9, text: "Rate notice" }, model: OCR_MODEL, neurons: 162 } }]);
+  });
+
+  it("a read the OCR share refuses retries briefly, then waits for the next UTC day, when the cron sends it again", async () => {
+    const slot = fakeSlot();
+    const job = await receiptJob({ jobId: "obx_budget" });
+    slot.blobs.set(job.storagePath, TINY_JPEG);
+    const ai = fakeAi({ [OCR_MODEL]: ocrReply });
+    let now = new Date("2026-10-26T15:30:00Z");
+    const spent = memoryNeuronBudget({ agent: 4000, ocr: 20, embeddings: 200, dictation: 300 });
+    const deps = jobDeps({ "slot-1": slot }, { ai, neurons: spent, now: () => now });
+    // The first deliveries retry shortly: an open reservation may settle in seconds.
+    for (let a = 1; a < BUDGET_RETRIES; a++) {
+      const m = message(job, a);
+      await run(deps, "weft-jobs", m);
+      expect(m.retried).toEqual([{ delaySeconds: retryDelaySeconds(a) }]);
+    }
+    const parked = message(job, BUDGET_RETRIES);
+    await run(deps, "weft-jobs", parked);
+    expect(parked.acked).toBe(1);
+    expect(deps.db.rows("jobs")).toMatchObject([{ job_id: "obx_budget", state: "deferred", outcome: "deferred:OCR_BUDGET", not_before: "2026-10-27T00:01:00.000Z" }]);
+    expect(ai.calls).toHaveLength(0);
+    expect(deps.db.rows("failed_jobs")).toHaveLength(0);
+    // A redelivery before then does nothing, and the cron sends nothing yet.
+    const early = message(job, 1);
+    await run(deps, "weft-jobs", early);
+    expect(early.acked).toBe(1);
+    expect(deps.metrics.points.at(-1)!.tags!.outcome).toBe("repeat:deferred");
+    const sent: HostedJob[] = [];
+    const queue = { async send(b: HostedJob) { sent.push(b); } };
+    expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toEqual({ requeued: 0, pruned: false });
+    // After 00:00 UTC the share is new: the cron sends the job again once, and it reads and writes back.
+    now = new Date("2026-10-27T00:05:00Z");
+    expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toEqual({ requeued: 1, pruned: true });
+    expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toMatchObject({ requeued: 0 });
+    expect(sent).toEqual([job]);
+    expect(deps.db.rows("jobs")[0]).toMatchObject({ state: "requeued" });
+    const fresh = jobDeps({ "slot-1": slot }, { db: deps.db, ai, now: () => now });
+    const again = message(sent[0], 1);
+    await run(fresh, "weft-jobs", again);
+    expect(again.acked).toBe(1);
+    expect(ai.calls).toHaveLength(1);
+    expect(slot.writeBacks).toHaveLength(1);
+    expect(fresh.db.rows("jobs")[0]).toMatchObject({ state: "done", outcome: "attached", result_json: null, not_before: null });
+  });
+
+  it("a requeued job whose send was lost is sent again an hour later, and a done job never is", async () => {
+    const deps = jobDeps({});
+    const job = await receiptJob({ jobId: "obx_lost" });
+    const t0 = new Date("2026-10-27T00:15:00Z");
+    const ledger = d1JobLedger(deps.db, () => t0);
+    await ledger.defer(job, "2026-10-27T00:01:00.000Z", "deferred:OCR_BUDGET");
+    await ledger.requeued(job.jobId);
+    expect(await ledger.due(new Date("2026-10-27T00:45:00Z"), 10)).toEqual([]);
+    expect(await ledger.due(new Date("2026-10-27T01:16:00Z"), 10)).toEqual([job]);
+    await ledger.done(job.jobId, job.kind, "attached");
+    await ledger.defer(job, "2026-10-27T00:01:00.000Z", "deferred:OCR_BUDGET");
+    expect(await ledger.due(new Date("2026-10-28T00:00:00Z"), 10)).toEqual([]);
+    expect(deps.db.rows("jobs")[0]).toMatchObject({ state: "done" });
   });
 
   it("retries a transient model failure with backoff", async () => {
@@ -130,6 +192,24 @@ describe("OCR jobs", () => {
 
 describe("embedding, export and render jobs", () => {
   const C = "c".repeat(40);
+  it("a memory read that fails retries instead of finishing empty, and a note's own frontmatter decides its trust", async () => {
+    const slot = fakeSlot();
+    const vectors = fakeVectorize();
+    const ai = fakeAi({ [EMBEDDING_MODEL]: embeddingHandler });
+    const deps = jobDeps({ "slot-1": slot }, { ai, vectors });
+    const job = { v: 1, kind: "embed.memory", jobId: "obx_e9", slot: "slot-1", gen: 3, namespace: "slot-1", notes: [{ path: "knowledge/facts/b.md", commit: C, tainted: false, kind: "knowledge" }] };
+    const read = slot.extrasMemoryText;
+    slot.extrasMemoryText = async () => { throw new Error("the object is resetting"); };
+    const m1 = message(job, 1);
+    await run(deps, "weft-jobs", m1);
+    expect(m1.retried).toHaveLength(1);
+    expect(deps.db.rows("jobs")).toHaveLength(0);
+    slot.extrasMemoryText = read;
+    slot.memory.set(`${C}:knowledge/facts/b.md`, "---\nid: \"b\"\ntainted_by: \"notice:ntc_0001\"\n---\n# Vendor claim\n\nThe vendor says payday moved.\n");
+    await run(deps, "weft-jobs", message(job, 2));
+    expect([...vectors.vectors.values()][0]!.metadata).toMatchObject({ path: "knowledge/facts/b.md", tainted: true });
+  });
+
   it("embeds into the slot's own namespace with deterministic ids, records them for the reset, and repeats nothing", async () => {
     const slot = fakeSlot();
     slot.memory.set(`${C}:knowledge/facts/a.md`, "---\nid: \"a\"\n---\n# Payday rule\n\nPayday moves earlier before a bank holiday.\n");
@@ -183,6 +263,10 @@ describe("embedding, export and render jobs", () => {
     const tampered = message({ ...job, jobId: "obx_p3", sha256: "f".repeat(64) });
     await run(deps, "weft-render", tampered);
     expect(deps.db.rows("failed_jobs")).toMatchObject([{ job_id: "obx_p3", code: "PDF_KEY_MISMATCH" }]);
+    // A render that failed for good leaves the marker the PDF route answers with.
+    const marker = files.objects.get(pdfFailureKey(pdfObjectKey({ scope: "world", slot: "slot-1", gen: 3, sha256: "f".repeat(64) })))!;
+    expect(marker.meta).toMatchObject({ code: "PDF_KEY_MISMATCH" });
+    expect(JSON.parse(new TextDecoder().decode(marker.bytes))).toMatchObject({ code: "PDF_KEY_MISMATCH", jobId: "obx_p3" });
   });
 });
 
@@ -192,5 +276,14 @@ describe("dead letters", () => {
     const body = await receiptJob({ jobId: "obx_dead" });
     await run(deps, "weft-dlq", message(body, 6), message(body, 6), message("not json", 6, "msg_x"));
     expect(deps.db.rows("failed_jobs").map((r) => [r.job_id, r.code, r.queue, r.attempts])).toEqual([["obx_dead", "DEAD_LETTER", "weft-dlq", 6], ["msg:msg_x", "DEAD_LETTER", "weft-dlq", 6]]);
+  });
+
+  it("a render that ran out of retries marks its PDF key as failed", async () => {
+    const files = memoryR2();
+    const deps = jobDeps({}, { files });
+    const html = "<!doctype html><p>stub</p>";
+    const job = { v: 1, kind: "render.pdf", jobId: "obx_pdead", slot: "slot-1", gen: 3, pdf: "pay_stub", subjectId: "pyc_0001", sha256: await sha256Hex(html), html };
+    await run(deps, "weft-dlq", message(job, 6));
+    expect(files.objects.get(pdfFailureKey(pdfObjectKey({ scope: "world", slot: "slot-1", gen: 3, sha256: job.sha256 })))!.meta).toMatchObject({ code: "DEAD_LETTER" });
   });
 });

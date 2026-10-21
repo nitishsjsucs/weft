@@ -9,8 +9,17 @@
 // On hosted, semantic candidates may join the block (semantic.ts, off by default).
 import { eq } from "drizzle-orm";
 import { memoryRecalls, type Db } from "@weft/db";
-import { memoryBinding } from "./binding";
+import { memoryBinding, type MemoryBinding } from "./binding";
 import { withSemanticRecall } from "./semantic";
+
+/** A failed semantic source costs the run nothing but its semantic lines; it is reported, never silent. */
+function semanticFailed(b: MemoryBinding, e: unknown): void {
+  try {
+    if (b.semantic?.onError) { b.semantic.onError(e); return; }
+    const msg = b.redact(e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 200);
+    console.warn(`memory recall: semantic candidates failed, recall stayed lexical: ${msg}`);
+  } catch { /* reporting never fails a run */ }
+}
 
 export interface RecallInput { companyId: string; runId: string; kind: "chat" | "routine"; query: string; subjectRefs: string[] }
 
@@ -28,7 +37,7 @@ export function createMemoryRecall(db: Db): (input: RecallInput) => Promise<stri
     // Hybrid recall (cf6-extras): semantic candidates, re-verified at HEAD, join the block only where a platform
     // attached a source and its flag is on; otherwise this is the lexical outcome itself. A failing source never
     // costs the run its lexical recall.
-    const out = b.semantic ? await withSemanticRecall(b.semantic, input, lexical, trustedOnly).catch(() => lexical) : lexical;
+    const out = b.semantic ? await withSemanticRecall(b.semantic, input, lexical, trustedOnly, b.redact).catch((e: unknown) => { semanticFailed(b, e); return lexical; }) : lexical;
     if (!out || !out.block) return "";
     // Taint first: if the run cannot be marked, the untrusted text never reaches the pack.
     const tainted = out.items.find((i) => i.taintedBy);

@@ -13,6 +13,8 @@ export interface MemoryBinding {
   db: Db; clock: SimClock; memory: MemoryW2;
   /** The executor's taint path (run_taint plus the agent_runs mirror); never the brain. */
   taintRun(runId: string, by: string): Promise<void>;
+  /** The executor's redactor, which lexical recall applies to every excerpt; semantic lines go through it too. */
+  redact(text: string): string;
   /** Digest hook used by the precheck and by tests. */
   digest(input: { companyId: string; now: string }): Promise<Awaited<ReturnType<typeof runMemoryDigest>>>;
   /** Tests that must keep wave 1 transcripts byte-identical can switch recall off for one world. */
@@ -36,6 +38,7 @@ export function bindMemory(weft: Weft): MemoryBinding | null {
   const b: MemoryBinding = {
     db: weft.db, clock: weft.clock, memory, recallEnabled: true,
     taintRun: (runId, by) => internals.taintRun(runId, by),
+    redact: (text) => weft.executor.redact(text),
     digest: (input) => runMemoryDigest(b, input),
   };
   bindings.set(weft.db, b);

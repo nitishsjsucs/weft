@@ -3,9 +3,12 @@
 // with the visitor's principal (so persona scope and 404s are exactly the app's), and is rendered from Weft's
 // templates. A PDF already in R2 is served at once; a miss is a mutation-class action (a lease and a fresh human
 // grant, never on the read-only showcase) that enqueues one render job on weft-render and answers 202. Concurrent
-// misses for the same document enqueue once. Track cf6-extras.
+// misses for the same document enqueue once, and a lost job is enqueued again after PDF_REENQUEUE_MS. Every state
+// the client polls through ends: a document too large to render is refused before it is queued, and a render that
+// failed for good (the consumer leaves a marker beside the PDF key) answers 503 PDF_RENDER_FAILED or PDF_BUDGET, so
+// the client stops polling. Track cf6-extras.
 import {
-  pdfFileName, pdfObjectKey, renderPdfHtml, sha256Hex, isPdfKind, BROWSER_SECONDS_PER_DAY,
+  pdfBrowserReserveMs, pdfFailureKey, pdfFileName, pdfObjectKey, renderPdfHtml, sha256Hex, isPdfKind, BROWSER_SECONDS_PER_DAY, MAX_PDF_HTML_BYTES, PDF_FAILURE_TTL_MS,
   type DocumentPdfData, type ExtrasFlags, type HostedJob, type PayStubPdfData, type PdfData, type PdfKey, type PdfKind, type QueueLike, type R2BucketLike,
 } from "@weft/cf-extras";
 import { HOSTED_ERRORS, type HostedErrorCode, type WorldMode } from "../../../../../packages/contracts/src/ext/cf-hosted";
@@ -38,6 +41,14 @@ export function parsePdfPath(path: string): { kind: PdfKind; subjectId: string }
   const m = /\/_hosted\/pdf\/([a-z_]+)\/([A-Za-z0-9_]{3,64})\/?$/.exec(path.split("?")[0]!);
   return m && isPdfKind(m[1]!) ? { kind: m[1]!, subjectId: m[2]! } : null;
 }
+
+/** A render still pending after this long is enqueued again (its job may have been lost); retries end well before. */
+export const PDF_REENQUEUE_MS = 5 * 60_000;
+
+const secondsToUtcMidnight = (t: number) => {
+  const d = new Date(t);
+  return Math.ceil((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - t) / 1000);
+};
 
 class Upstream extends Error { constructor(readonly res: Response) { super(`upstream ${res.status}`); } }
 async function getJson<T>(deps: PdfRouteDeps, path: string): Promise<T> {
@@ -107,15 +118,23 @@ export async function handleHostedPdf(path: string, deps: PdfRouteDeps): Promise
   if (deps.world.mode === "showcase") return hostedError("LEASE_REQUIRED", "Start your own demo company to render documents");
   if (!deps.ctx.human && !deps.ctx.smoke) return hostedError("TURNSTILE_REQUIRED", "Confirm you are human to render this document");
   if (!(await deps.flags()).pdf || !deps.render) return refused(503, "PDF_DISABLED", "PDF rendering is switched off");
+  // The consumer refuses a document over MAX_PDF_HTML_BYTES, so it is refused here, before it is queued.
+  if (new TextEncoder().encode(html).length > MAX_PDF_HTML_BYTES) return refused(413, "PDF_TOO_LARGE", "This document is too large to render as a PDF");
   const now = deps.now ?? Date.now;
-  if (deps.browserMsUsed && (await deps.browserMsUsed()) >= BROWSER_SECONDS_PER_DAY * 1000) {
-    const t = new Date(now());
-    const midnight = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + 1);
-    return refused(503, "PDF_BUDGET", "Today's PDF rendering time is used up; try again after 00:00 UTC", Math.ceil((midnight - now()) / 1000));
-  }
+  const budgetSpent = () => refused(503, "PDF_BUDGET", "Today's PDF rendering time is used up; try again after 00:00 UTC", secondsToUtcMidnight(now()));
+  // A render reserves its worst case, so a day with less than that left cannot start one.
+  if (deps.browserMsUsed && (await deps.browserMsUsed()) + pdfBrowserReserveMs() > BROWSER_SECONDS_PER_DAY * 1000) return budgetSpent();
   const pending = deps.pending;
+  // A render that failed for good: answer with its failure until the marker is PDF_FAILURE_TTL_MS old.
+  const marker = await deps.files.head(pdfFailureKey(objectKey));
+  const markedAt = marker?.customMetadata?.at ? Date.parse(marker.customMetadata.at) : NaN;
+  if (marker && Number.isFinite(markedAt) && now() - markedAt < PDF_FAILURE_TTL_MS) {
+    pending?.delete(objectKey);
+    if (marker.customMetadata?.code === "PDF_BUDGET") return budgetSpent();
+    return refused(503, "PDF_RENDER_FAILED", "This document could not be rendered; try again in a few minutes", Math.ceil((PDF_FAILURE_TTL_MS - (now() - markedAt)) / 1000));
+  }
   const since = pending?.get(objectKey);
-  if (since === undefined || now() - since > 60_000) {
+  if (since === undefined || now() - since > PDF_REENQUEUE_MS || (Number.isFinite(markedAt) && markedAt >= since)) {
     if (deps.world.mode !== "slot" && deps.world.mode !== "smoke") return hostedError("WORLD_READ_ONLY", "This world cannot render documents");
     await deps.render.send({ v: 1, kind: "render.pdf", jobId: deps.newJobId(), slot: deps.world.slot, gen: deps.world.gen, pdf: parsed.kind, subjectId: parsed.subjectId, sha256, html }, { contentType: "json" });
     pending?.set(objectKey, now());

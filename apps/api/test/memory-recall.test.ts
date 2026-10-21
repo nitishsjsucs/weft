@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { RECALL_BUDGET } from "@weft/contracts";
 import { memoryRecalls, runTaint } from "@weft/db";
+import { executorInternals } from "@weft/executor";
 import { createTestWeft, type TestWeft } from "../src/testing";
 import { attachSemanticRecall, memoryBinding } from "../src/memory/binding";
 import { createMemoryRecall } from "../src/memory/recall";
@@ -148,9 +149,23 @@ describe("semantic recall (cf6-extras)", () => {
     expect(attachSemanticRecall(weft.db, { source: src, enabled: () => false, world, readText })).toBe(true);
     expect((await recallFor("chat", "What about Lena Brooks?")).block).toBe(lexical);
     expect(src.queries).toHaveLength(0);
-    // A source that fails leaves the lexical block exactly as it was.
-    attachSemanticRecall(weft.db, { source: source(async () => { throw new Error("Vectorize down"); }), enabled: () => true, world, readText });
+    // A source that fails leaves the lexical block exactly as it was, and says so.
+    const told: unknown[] = [];
+    attachSemanticRecall(weft.db, { source: source(async () => { throw new Error("Vectorize down"); }), enabled: () => true, world, readText, onError: (e) => told.push(e) });
     expect((await recallFor("chat", "What about Lena Brooks?")).block).toBe(lexical);
+    expect(told.map((e) => (e as Error).message)).toEqual(["Vectorize down"]);
+  });
+
+  it("redacts a semantic line as lexical recall does, including a secret the redactor learned after the note was written", async () => {
+    const secret = "wft-portal-7f3a9c2e5b1d";
+    const cs = (await memory().seedFiles([{ path: "knowledge/facts/portal-login.md", text: note("Portal login", `The vendor portal passphrase is ${secret} for the demo`) }], "test: a note that holds a value learned later")).commit;
+    executorInternals(weft.executor)!.addSecret(secret);
+    attachSemanticRecall(weft.db, { source: source([cand("knowledge/facts/portal-login.md", cs)]), enabled: () => true, world, readText });
+    const { block } = await recallFor("chat", Q);
+    const line = block.split("\n").find((l) => l.includes("knowledge/facts/portal-login.md#L"))!;
+    expect(line).toMatch(/^- knowledge\/facts\/portal-login\.md#L\d+ \(semantic, /);
+    expect(line).toContain("passphrase is [redacted] for the demo");
+    expect(block).not.toContain(secret);
   });
 
   it("adds a verified note with its path#L<line> citation, and logs it", async () => {
