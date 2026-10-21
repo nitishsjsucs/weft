@@ -36,7 +36,17 @@
     "phoenix:status": "tsx scripts/phoenix.ts status",
     "wave:ledger": "tsx scripts/wave-ledger.ts",
     "memory:bundle": "tsx scripts/memory-bundle.ts",
-    "memory:restore": "tsx scripts/memory-restore.ts"
+    "memory:restore": "tsx scripts/memory-restore.ts",
+    "cf:fixtures": "test -f scripts/cf/fixtures.ts || { echo 'cf:fixtures: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/fixtures.ts",
+    "cf:snapshot": "test -f scripts/cf/snapshot.ts || { echo 'cf:snapshot: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/snapshot.ts",
+    "cf:test": "test -f apps/cf/vitest.workerd.config.ts || { echo 'cf:test: not built yet (track cf4-worker)'; exit 1; } && vitest run --config apps/cf/vitest.workerd.config.ts",
+    "cf:build": "test -f scripts/cf/build.ts || { echo 'cf:build: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/build.ts",
+    "cf:dev": "test -f scripts/cf/dev.ts || { echo 'cf:dev: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/dev.ts",
+    "cf:resources": "test -f scripts/cf/resources.ts || { echo 'cf:resources: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/resources.ts",
+    "cf:deploy": "test -f scripts/cf/deploy.ts || { echo 'cf:deploy: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/deploy.ts",
+    "cf:budget": "test -f scripts/cf/budget.ts || { echo 'cf:budget: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/budget.ts",
+    "cf:help-corpus": "test -f scripts/cf/help-corpus.ts || { echo 'cf:help-corpus: not built yet (track cf6-extras)'; exit 1; } && tsx scripts/cf/help-corpus.ts",
+    "cf:smoke": "test -f scripts/cf/smoke.ts || { echo 'cf:smoke: not built yet (track cf7-integrate)'; exit 1; } && tsx scripts/cf/smoke.ts"
   },
   "devDependencies": {
     "@arizeai/phoenix-client": "7.16.1",
@@ -46,6 +56,7 @@
     "tsx": "4.23.15",
     "turbo": "2.11.7",
     "typescript": "7.0.2",
-    "vitest": "5.0.4"
+    "vitest": "5.0.4",
+    "wrangler": "4.151.3"
   }
 }

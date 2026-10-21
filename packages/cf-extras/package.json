@@ -1,0 +1,26 @@
+{
+  "name": "@weft/cf-extras",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "if [ -d src ] || [ -d test ]; then tsc --noEmit -p .; else echo '@weft/cf-extras: no sources yet (track cf6-extras)'; fi",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
+    "@weft/contracts": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261019.1",
+    "@types/node": "26.6.5",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261019.1-beta",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}

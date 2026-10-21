@@ -4,10 +4,21 @@ packages:
   - tests
 allowBuilds:
   esbuild: true
+  # workerd's postinstall only checks the platform binary and hard-links it over the JS launcher; the binary itself
+  # comes from the optional @cloudflare/workerd-<platform> package, so Miniflare and wrangler work without the script.
+  workerd: false
+# The Cloudflare toolchain pins in docs/cloudflare/design.md 9.4 (wrangler 4.151.3 and the miniflare it bundles) were
+# published on 2026-10-20, inside the minimum release age; they are exact pins chosen in the design, so they are excluded.
+minimumReleaseAgeExclude:
+  - miniflare@5.20261019.1-beta
+  - wrangler@4.151.3
 # drizzle-orm lists @opentelemetry/api as an optional peer; once the agent depends on the OTel API (wave 4
 # telemetry) pnpm would build a second drizzle variant for it, and the two copies' types do not mix with @weft/db.
 # Making it a plain dependency keeps one drizzle instance for the whole workspace. drizzle never loads it at runtime.
+# @cloudflare/workers-types is the same kind of optional peer: packages/db, apps/cf and packages/cf-extras list it, the
+# others do not, so it is a plain dependency too (types only; drizzle never loads it at runtime).
 packageExtensions:
   drizzle-orm@0.45.4:
     dependencies:
       "@opentelemetry/api": 1.9.1
+      "@cloudflare/workers-types": 5.20261019.1
