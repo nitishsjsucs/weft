@@ -11,7 +11,7 @@ import { migrate, MIGRATIONS_DIR } from "../src/migrate";
 import { journalHash, readMigrationsFromDir } from "../src/migrations";
 import {
   armDirtyTracking, buildSnapshot, decodeSnapshot, deltaReset, dirtyKeys, encodeSnapshot, MAX_CHUNK_BYTES, restoreChunks, restoreSnapshot, snapshotTables,
-  verifyAgainstManifest, beginRestore, finishRestore, type Snapshot,
+  verifyAgainstManifest, verifiedTables, beginRestore, finishRestore, UNTRACKED_TABLES, type Snapshot,
 } from "../src/snapshot";
 
 const migrations = readMigrationsFromDir(MIGRATIONS_DIR);
@@ -30,7 +30,8 @@ async function fill(db: ReturnType<typeof openDurableDb>["db"], table: string, v
 }
 
 /** A small world on the real schema: a company and its workers (a foreign key), an append-only log, an AUTOINCREMENT
- * table with a deleted last row, a table without a primary key, and a blob too large to inline. */
+ * table with a deleted last row, a table without a primary key, a blob too large to inline, and kv_state's one seed
+ * row (restored, never tracked). */
 async function sourceWorld(): Promise<{ emu: DurableEmulator; snap: Snapshot }> {
   const emu = new DurableEmulator();
   const { db } = openDurableDb(emu);
@@ -38,9 +39,10 @@ async function sourceWorld(): Promise<{ emu: DurableEmulator; snap: Snapshot }> 
   await fill(db, "companies", { id: "cmp_larkspur" });
   for (let i = 1; i <= 12; i++) await fill(db, "workers", { id: `wrk_${String(i).padStart(4, "0")}`, company_id: "cmp_larkspur" });
   for (let i = 1; i <= 40; i++) {
-    await db.run(sql`INSERT INTO kv_state (key, value) VALUES (${`k${i}`}, ${`v${i}`.repeat(i)})`);
+    await db.run(sql`INSERT INTO settings (key, value_json) VALUES (${`k${i}`}, ${`v${i}`.repeat(i)})`);
     await db.run(sql`INSERT INTO outbox (id, kind, body, created_at) VALUES (${`obx_${i}`}, 'ocr', ${JSON.stringify({ i, text: "x".repeat(3000) })}, '2026-10-26T15:30:00Z')`);
   }
+  await db.run(sql`INSERT INTO kv_state (key, value) VALUES ('routines.prebuilt_hash', 'h1')`);
   for (let i = 1; i <= 3; i++) await fill(db, "exec_calls", { run_id: "run_1", call_id: `c${i}` });
   await db.run(sql`INSERT INTO blobs (key, idx, bytes) VALUES ('big', 0, ${new Uint8Array(200_000).map((_, i) => i % 251)})`);
   await db.run(sql`INSERT INTO mem_objects (sha, type, body) VALUES (${"a".repeat(40)}, 'blob', ${new Uint8Array([1, 2, 3])})`);
@@ -132,22 +134,22 @@ describe("delta reset", () => {
     const { db } = openDurableDb(emu);
     for (let round = 0; round < 2; round++) {
       await db.transaction(async (tx) => {
-        await tx.run(sql`INSERT INTO kv_state (key, value) VALUES ('new', 'x') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
-        await tx.run(sql`UPDATE kv_state SET value = 'changed' WHERE key = 'k3'`);
-        await tx.run(sql`UPDATE kv_state SET value = 'changed again' WHERE key = 'k3'`);
+        await tx.run(sql`INSERT INTO settings (key, value_json) VALUES ('new', 'x') ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json`);
+        await tx.run(sql`UPDATE settings SET value_json = 'changed' WHERE key = 'k3'`);
+        await tx.run(sql`UPDATE settings SET value_json = 'changed again' WHERE key = 'k3'`);
         await tx.run(sql`DELETE FROM outbox WHERE id = 'obx_7'`);
-        await tx.run(sql`UPDATE kv_state SET key = 'k4-renamed' WHERE key = 'k4'`);
+        await tx.run(sql`UPDATE settings SET key = 'k4-renamed' WHERE key = 'k4'`);
       });
       await fill(db, "actions", { seq: 6, action_id: "act_6" });
       await fill(db, "run_steps", { run_id: "run_2", n: 9 });
       await db.run(sql`DELETE FROM exec_calls WHERE call_id = 'c2'`);
       await new Promise((r) => setImmediate(r));
       const keys = dirtyKeys(emu);
-      expect([...keys.keys()].sort()).toEqual(["actions", "exec_calls", "kv_state", "outbox", "run_steps"]);
-      expect(keys.get("kv_state")!.sort()).toEqual(['["k3"]', '["k4"]', '["k4-renamed"]', '["new"]']);
+      expect([...keys.keys()].sort()).toEqual(["actions", "exec_calls", "outbox", "run_steps", "settings"]);
+      expect(keys.get("settings")!.sort()).toEqual(['["k3"]', '["k4"]', '["k4-renamed"]', '["new"]']);
       const out = deltaReset(emu, snap);
-      expect(out.tables).toEqual(["actions", "exec_calls", "kv_state", "outbox", "run_steps"]);
-      // kv_state k3, k4, k4-renamed and new; outbox obx_7; actions 6; one run step; exec_calls c2.
+      expect(out.tables).toEqual(["actions", "exec_calls", "outbox", "run_steps", "settings"]);
+      // settings k3, k4, k4-renamed and new; outbox obx_7; actions 6; one run step; exec_calls c2.
       expect(out.keys).toBe(8);
       // Rows present to delete: k3, k4-renamed, new, action 6 and the run step (k4, obx_7 and c2 were already gone).
       expect(out.deleted).toBe(5);
@@ -165,16 +167,46 @@ describe("delta reset", () => {
 
   it("throws and rolls back when the reset would not reach the manifest", async () => {
     const { emu, snap } = await restored();
-    emu.sql.exec("UPDATE kv_state SET value = 'touched' WHERE key = 'k1'");
+    emu.sql.exec("UPDATE settings SET value_json = 'touched' WHERE key = 'k1'");
     // A row changed behind the triggers' back: drop them, change it, re-arm.
-    for (const t of emu.sql.exec("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_weft_dirty_kv_state%'").toArray()) emu.sql.exec(`DROP TRIGGER "${t.name}"`);
-    emu.sql.exec("UPDATE kv_state SET value = 'untracked' WHERE key = 'k2'");
+    for (const t of emu.sql.exec("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_weft_dirty_settings%'").toArray()) emu.sql.exec(`DROP TRIGGER "${t.name}"`);
+    emu.sql.exec("UPDATE settings SET value_json = 'untracked' WHERE key = 'k2'");
     armDirtyTracking(emu, snap.manifest.tables);
     await new Promise((r) => setImmediate(r));
-    expect(() => deltaReset(emu, snap)).toThrow(/kv_state do not match the manifest/);
+    expect(() => deltaReset(emu, snap)).toThrow(/settings do not match the manifest/);
     // Nothing moved: k1 is still touched and still dirty.
-    expect(emu.sql.exec("SELECT value FROM kv_state WHERE key = 'k1'").one().value).toBe("touched");
-    expect(dirtyKeys(emu).get("kv_state")).toEqual(['["k1"]']);
+    expect(emu.sql.exec("SELECT value_json FROM settings WHERE key = 'k1'").one().value_json).toBe("touched");
+    expect(dirtyKeys(emu).get("settings")).toEqual(['["k1"]']);
+    emu.close();
+  });
+
+  it("restores kv_state with the seed and checks it then, but never tracks it: a stamped world stays clean and verified", async () => {
+    const { emu, snap } = await restored();
+    expect(UNTRACKED_TABLES).toEqual(["kv_state"]);
+    expect(snap.manifest.tables.map((t) => t.name)).toContain("kv_state");
+    expect(emu.sql.exec("SELECT value FROM kv_state WHERE key = 'routines.prebuilt_hash'").one().value).toBe("h1");
+    expect(emu.sql.exec("SELECT count(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_weft_dirty_kv_state%'").one().n).toBe(0);
+    // A hosted world stamps itself after the restore and after every reset.
+    const { db } = openDurableDb(emu);
+    await db.run(sql`INSERT INTO kv_state (key, value) VALUES ('world.id', 'slot-1:gen-2'), ('lease.visitor', 'v_1')`);
+    await new Promise((r) => setImmediate(r));
+    expect([...dirtyKeys(emu).keys()]).toEqual([]);
+    // The standing verify leaves kv_state out and passes; the restore's check of every table would not, after a stamp.
+    expect(verifiedTables(snap.manifest)).toEqual(snap.manifest.tables.map((t) => t.name).filter((n) => n !== "kv_state"));
+    expect(verifyAgainstManifest(emu, snap.manifest, verifiedTables(snap.manifest)).mismatched).toEqual([]);
+    expect(verifyAgainstManifest(emu, snap.manifest).mismatched).toEqual(["kv_state"]);
+    // A session's writes reset as before; the stamp is left for its owner to rewrite.
+    await db.run(sql`UPDATE settings SET value_json = 'x' WHERE key = 'k5'`);
+    await new Promise((r) => setImmediate(r));
+    expect(deltaReset(emu, snap).tables).toEqual(["settings"]);
+    expect(emu.sql.exec("SELECT value FROM kv_state WHERE key = 'world.id'").one().value).toBe("slot-1:gen-2");
+    expect(verifyAgainstManifest(emu, snap.manifest, verifiedTables(snap.manifest)).mismatched).toEqual([]);
+    // Arming again drops kv_state triggers an earlier build left, and keeps every other table's.
+    const lit = "INSERT INTO _weft_dirty (tbl, pk) SELECT 'kv_state', json_array(NEW.key) WHERE 1";
+    emu.sql.exec(`CREATE TRIGGER "_weft_dirty_kv_state_i" AFTER INSERT ON kv_state BEGIN ${lit}; END`);
+    armDirtyTracking(emu, snap.manifest.tables);
+    expect(emu.sql.exec("SELECT count(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_weft_dirty_kv_state%'").one().n).toBe(0);
+    expect(emu.sql.exec("SELECT count(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name = '_weft_dirty_settings_u'").one().n).toBe(1);
     emu.close();
   });
 });

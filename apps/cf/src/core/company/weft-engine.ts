@@ -10,7 +10,7 @@
 // The parts come from deps.ts by name; until a track has exported its part the boot fails with a message naming it.
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { apiKeys, principals, settings, type Db, type DbTx } from "@weft/db";
+import { apiKeys, principals, settings, UNTRACKED_TABLES, verifiedTables, type Db, type DbTx } from "@weft/db";
 import { newId } from "@weft/core";
 import { SqlRepo } from "@weft/executor";
 import { createRecallSource } from "@weft/cf-extras";
@@ -219,12 +219,16 @@ const store: WorldStore = {
     }
   },
   verify(storage, a, opts) {
-    const v = weftDeps().verifyAgainstManifest(storage, snap(a).manifest, opts.full ? undefined : []);
+    // The full verify leaves out kv_state, which holds the world's own stamp (cf1's UNTRACKED_TABLES): every stamped
+    // world differs from the seed there, so checking it would fail every clean world and restore it for nothing.
+    const m = snap(a).manifest;
+    const v = weftDeps().verifyAgainstManifest(storage, m, opts.full ? verifiedTables(m) : []);
     const rows = Object.values(v.digests).reduce((n, t) => n + t.rows, 0);
     return { ok: v.mismatched.length === 0, mismatches: v.mismatched, rows, chainValid: chainHeadMatches(storage, a) };
   },
   isClean(storage) {
-    for (const t of weftDeps().dirtyKeys(storage).keys()) if (t !== "kv_state") return false;
+    // kv_state is never tracked now; a world armed by an earlier build may still list it, and it is not world content.
+    for (const t of weftDeps().dirtyKeys(storage).keys()) if (!UNTRACKED_TABLES.includes(t)) return false;
     return true;
   },
   deltaReset(storage, a) {

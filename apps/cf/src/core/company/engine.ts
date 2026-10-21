@@ -127,9 +127,9 @@ export interface WorldStore {
   restoreChunk(storage: DurableStorageLike, a: SnapshotArtifacts, index: number): { rowsWritten: number };
   /** Triggers back, sequences as the source had them, the dirty-tracking triggers armed, then a full digest check. */
   finishRestore(storage: DurableStorageLike, a: SnapshotArtifacts, triggers: readonly RestoreTrigger[]): { ok: boolean; mismatches: string[]; rowsWritten: number };
-  /** Counts, digests and chain head against the manifest; `full` digests every table. */
+  /** Counts, digests and chain head against the manifest; `full` digests every table but kv_state (the world's stamp). */
   verify(storage: DurableStorageLike, a: SnapshotArtifacts, opts: { full: boolean }): VerifyResult;
-  /** True when no domain row was written since the last reset (the dirty-key table holds nothing but kv_state). */
+  /** True when no domain row was written since the last reset (no dirty key outside kv_state, which is never tracked). */
   isClean(storage: DurableStorageLike): boolean;
   deltaReset(storage: DurableStorageLike, a: SnapshotArtifacts): DeltaResetResult;
   /** The design 11.3 conformance cases on this object's storage (the deployed `conformance` scratch object); `deliver`
