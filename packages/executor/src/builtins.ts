@@ -1,7 +1,5 @@
 // Executor-owned commands (SPEC 9.2, T3): comms.post_update, actions.list, actions.get_run, agent.read_artifact,
 // and code.run (wave 2, harness 3). actions.list summaries are built from structured fields only.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_CODE_LIMITS, Refused, type Preview } from "@weft/contracts";
@@ -134,7 +132,9 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       for (const c of await deps.tx.select({ id: execRuns.id }).from(execRuns).where(eq(execRuns.parentRunId, ctx.run.id))) family.push(c.id);
       const [a] = await deps.tx.select().from(runArtifacts).where(and(eq(runArtifacts.id, i.ref), inArray(runArtifacts.runId, family))).limit(1);
       if (!a) throw Object.assign(new Error(`No artifact ${i.ref} in this run`), { code: "UNKNOWN_REFERENCE" });
-      const json = JSON.parse(readFileSync(join(e.dataDir, a.path), "utf8")) as unknown;
+      const body = await e.runFiles.read(a.path);
+      if (body === null) throw Object.assign(new Error(`Artifact ${i.ref} has no stored body`), { code: "UNKNOWN_REFERENCE" });
+      const json = JSON.parse(body) as unknown;
       const { data, summary } = artifactPage(a.id, a.summary, json, i.offset ?? 0, i.limit ?? 50);
       const out = { data, summary };
       return a.taintedBy ? Object.assign(out, { taintedBy: `artifact:${a.id}` }) : out;
@@ -158,7 +158,7 @@ export function builtinCommands(e: Engine): WeftCommand[] {
     },
     async run(i, ctx, deps) {
       if (!ctx.run) throw Object.assign(new Error("code.run runs inside agent runs"), { code: "NOT_PERMITTED" });
-      const s = sandboxFromEnv(process.env);
+      const s = sandboxFromEnv(e.env ?? process.env);
       if (!s.engine) throw Object.assign(new Error(s.reason), { code: "UNAVAILABLE" });
       let inputs: unknown = null;
       if (i.inputs_json !== undefined && i.inputs_json.trim()) {
@@ -167,9 +167,9 @@ export function builtinCommands(e: Engine): WeftCommand[] {
       // Memory reads in the box are pinned to the commit at start (harness 3.3).
       let memoryAt = "";
       try { memoryAt = await e.memory.head(); } catch { /* no memory repo in this world */ }
-      const files = codeFiles(e, ctx, i.source);
+      const files = await codeFiles(e, ctx, i.source);
       const res = await s.engine.run({ language: "js", source: i.source, purpose: i.purpose, inputs }, DEFAULT_CODE_LIMITS, sandboxCall(e, deps.tx, ctx, { memoryAt }));
-      files.writeOutput({ purpose: i.purpose, ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, tainted: res.tainted, memory_at: memoryAt });
+      await files.writeOutput({ purpose: i.purpose, ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, tainted: res.tainted, memory_at: memoryAt });
       // Resource failures are refusals the model can act on; a script error comes back as data so it can be fixed.
       if (res.error && res.error.code !== "SANDBOX_ERROR") throw Object.assign(new Error(res.error.message), { code: res.error.code });
       const data = { ok: res.ok, value: res.value, error: res.error, logs: res.logs, calls: res.calls, memory_at: memoryAt };

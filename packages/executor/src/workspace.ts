@@ -1,9 +1,10 @@
 // Compact observations and file-system offload (harness 7.4, 6.8). Over 8,000 characters of JSON, the redacted full
 // result goes to runs/<run_id>/artifacts/<step_n>-<wire>.json with a run_artifacts row; the model gets a summary,
 // the row count, the first 10 rows and the artifact ref. File names are generated, never derived from model input.
+// The body goes through the engine's RunFileStore (docs/cloudflare/design.md 4.1): files under the data dir on Node,
+// the run_files table on the durable platform; the key is the dataDir-relative path the run_artifacts row records.
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { and, eq, inArray } from "drizzle-orm";
 import type { ToolOutcome } from "@weft/contracts";
 import { newId, type WeftCommand } from "@weft/core";
@@ -13,6 +14,7 @@ import { refusal } from "./outcome";
 import { wireName } from "./registry";
 import type { CallScope } from "./scope";
 import { markTainted } from "./taint";
+import { runRel } from "./hosted/run-files";
 
 export const OBSERVATION_CAP = 8000;
 export const PREVIEW_ROWS = 10;
@@ -113,14 +115,12 @@ export async function offloadIfLarge(e: Engine, tx: DbTx, scope: CallScope, def:
   if (json.length <= OBSERVATION_CAP || !scope.run) return null;
   const run = scope.run;
   const step = scope.ctx.run?.stepN ?? 0;
-  const dir = join(runDir(e.dataDir, run.companyId, run.id), "artifacts");
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${step}-${wireName(def.name)}.json`);
-  writeFileSync(file, json);   // already redacted by the caller
+  const path = `${runRel(run.companyId, run.id)}/artifacts/${step}-${wireName(def.name)}.json`;
+  await e.runFiles.write(path, json);   // already redacted by the caller
   const id = await newId(tx, "art_");
   const rows = rowsOf(data);
   await tx.insert(runArtifacts).values({
-    id, runId: run.id, stepN: step, path: relative(e.dataDir, file), bytes: Buffer.byteLength(json), sha256: createHash("sha256").update(json).digest("hex"),
+    id, runId: run.id, stepN: step, path, bytes: Buffer.byteLength(json), sha256: createHash("sha256").update(json).digest("hex"),
     summary, domain: def.domain, needs: def.needs, taintedBy: scope.ctx.tainted ? (scope.taintedBy ?? "external") : null,
   });
   const total = totalOf(data, rows);
@@ -137,7 +137,9 @@ export async function readArtifactInTx(e: Engine, tx: DbTx, scope: CallScope, re
   for (const c of await tx.select({ id: execRuns.id }).from(execRuns).where(eq(execRuns.parentRunId, run.id))) family.add(c.id);
   const [a] = await tx.select().from(runArtifacts).where(and(eq(runArtifacts.id, ref), inArray(runArtifacts.runId, [...family]))).limit(1);
   if (!a) return refusal("UNKNOWN_REFERENCE", `No artifact ${ref} in this run`, t());
-  const stored = JSON.parse(readFileSync(join(e.dataDir, a.path), "utf8")) as unknown;
+  const body = await e.runFiles.read(a.path);
+  if (body === null) return refusal("UNKNOWN_REFERENCE", `Artifact ${ref} has no stored body`, t());
+  const stored = JSON.parse(body) as unknown;
   if (a.taintedBy) {
     await markTainted(tx, run.id, `artifact:${a.id}`, scope.ctx.run?.stepN ?? 0);
     if (!scope.ctx.tainted) { scope.ctx.tainted = true; scope.taintedBy = `artifact:${a.id}`; }

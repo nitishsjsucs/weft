@@ -12,10 +12,10 @@ import { canonicalJson } from "../shared/canonical-json";
 import { sha256Hex } from "../shared/hash";
 import { DomainRefusal, notFound, ptDateOf, readCommand, riskOf, writeCommand } from "../demo/define";
 import { refreshOpenDrafts } from "../payroll/lifecycle";
-import { applyCaps, deemedWorkedMinutes, forfeitureProblem, perHourWorked, postedBalance, requestDays, yearEndCarry } from "../time-off/engine";
+import { applyCaps, balanceOf, deemedWorkedMinutes, forfeitureProblem, perHourWorked, postedBalance, requestDays, yearEndCarry } from "../time-off/engine";
 import {
   appendLedger, assignmentsOf, balanceFor, checksForRequest, displayName, employedOn, ensureAssignments, holidayMap, ledgerOf, loadPolicies, parseDays, periodAccrual,
-  policyById, routeRequest, teamCoverage, workerOf, type PolicyRow, type RequestRow,
+  policyById, routeRequest, teamCoverage, workerOf, type LedgerRow, type PolicyRow, type RequestRow,
 } from "../time-off/store";
 import { balanceForms, REQUEST_TOTALS_BY, requestBalance, requestTotals, timeForms, workerRef } from "../time-off/forms";
 import { inScope, outsideReports, readScopeOf, reportsAccess, splitByScope, type ReadScope } from "../people/scope";
@@ -149,6 +149,34 @@ export function holidaysNote(days: { date: string; holiday: boolean }[]): string
   const list = h.length === 1 ? h[0]! : `${h.slice(0, -1).join(", ")} and ${h[h.length - 1]}`;
   return `${list} ${h.length === 1 ? "is a company holiday" : "are company holidays"}, charged 0 hours`;
 }
+/** At most this many worker ids go into one inArray ledger read (DO SQLite binds at most 100 parameters). */
+export const LEDGER_BATCH_IDS = 90;
+/** ledgerOf's order: effective date, then id. */
+const byLedgerOrder = (a: LedgerRow, b: LedgerRow) => (a.effectiveDate === b.effectiveDate ? (a.id < b.id ? -1 : 1) : a.effectiveDate < b.effectiveDate ? -1 : 1);
+
+/**
+ * Every ledger row of these workers in one statement, grouped per worker and policy in ledgerOf's order (design 4.5,
+ * the /v1/time-off/requests N+1 fix: the home tab polled 145 statements every 10 s). Past LEDGER_BATCH_IDS workers it
+ * reads the company's ledger through workers instead, still one statement and the same groups.
+ */
+export async function ledgersByWorkerPolicy(tx: DbTx, companyId: string, workerIds: readonly string[]): Promise<Map<string, LedgerRow[]>> {
+  const ids = [...new Set(workerIds)];
+  const out = new Map<string, LedgerRow[]>();
+  if (!ids.length) return out;
+  const rows = ids.length <= LEDGER_BATCH_IDS
+    ? await tx.select().from(timeOffLedger).where(inArray(timeOffLedger.workerId, ids))
+    : (await tx.select({ l: timeOffLedger }).from(timeOffLedger).innerJoin(workers, eq(workers.id, timeOffLedger.workerId)).where(eq(workers.companyId, companyId))).map((x) => x.l);
+  const wanted = new Set(ids);
+  for (const r of rows) {
+    if (!wanted.has(r.workerId)) continue;
+    const key = `${r.workerId}:${r.policyId}`;
+    const list = out.get(key);
+    if (list) list.push(r); else out.set(key, [r]);
+  }
+  for (const list of out.values()) list.sort(byLedgerOrder);
+  return out;
+}
+
 const listRequests = readCommand({
   name: "time_off.list_requests", domain: "people",
   summary: "List time-off requests with status, minutes, hours and days, checks, the routed approver and the policy balance now and without each request.",
@@ -166,12 +194,15 @@ const listRequests = readCommand({
     // every pending and approved request (this one and any other open one on the policy), so it is the balance now;
     // adding back only the minutes this request holds or used (its own ledger rows) gives the balance without it. The
     // model never adds or subtracts minutes (forms.ts requestBalance says why these are not before and after).
-    const ledgers = new Map<string, { available: number; rows: Awaited<ReturnType<typeof ledgerOf>> } | null>();
+    // One ledger read for every worker shown (balanceFor and ledgerOf per worker and policy were the N+1).
+    const byKey = await ledgersByWorkerPolicy(deps.tx, ctx.companyId, rows.filter((r) => ws.has(r.workerId) && pols.has(r.policyId)).map((r) => r.workerId));
+    const ledgers = new Map<string, { available: number; rows: LedgerRow[] } | null>();
     const balanceAround = async (r: RequestRow) => {
       const key = `${r.workerId}:${r.policyId}`;
       if (!ledgers.has(key)) {
         const w = ws.get(r.workerId), p = pols.get(r.policyId);
-        ledgers.set(key, w && p ? { available: (await balanceFor(deps.tx, w, p, today)).availableMinutes, rows: await ledgerOf(deps.tx, w.id, p.id) } : null);
+        const lrows = byKey.get(key) ?? [];
+        ledgers.set(key, w && p ? { available: balanceOf({ workerId: w.id, policyId: p.id, typeKind: p.typeKind, asOf: today, rows: lrows, startDate: w.startDate, waitingDays: p.waitingDaysBeforeUse }).availableMinutes, rows: lrows } : null);
       }
       const l = ledgers.get(key);
       if (!l) return requestBalance(null, 0);

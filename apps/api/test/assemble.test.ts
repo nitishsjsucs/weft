@@ -1,5 +1,6 @@
 // The compose split (docs/cloudflare/tracks.md cf0-contracts): createWeft(opts) is assembleWeft(nodePlatform, opts)
-// with the same signature, and the round 0 assemble refuses any platform but Node until cf2-platform wires the parts.
+// with the same signature. A durable platform without its secrets fails closed before opening anything (cf2-platform;
+// the full durable platform is apps/api/test/hosted-platform.test.ts).
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,9 +32,9 @@ describe("assembleWeft", () => {
     } finally { await a.close(); await b.close(); }
   });
 
-  it("refuses the durable platform before opening anything", async () => {
+  it("refuses a durable platform without WEFT_VAULT_KEY before opening anything", async () => {
     const dir = tempDir();
-    await expect(assembleWeft({ kind: "durable" }, { dataDir: dir, testMode: true })).rejects.toThrow(/cf2-platform/);
+    await expect(assembleWeft({ kind: "durable", env: {} }, { dataDir: dir, testMode: true })).rejects.toThrow(/WEFT_VAULT_KEY/);
     expect(existsSync(join(dir, "weft.db"))).toBe(false);
   });
 });

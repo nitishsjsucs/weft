@@ -2,9 +2,9 @@
 // per call, reimbursements on the open draft outside gross (E10), approve as taxable inside gross (E11), paid on
 // processing, after-deadline approvals on the next draft (E12) and paid is final (E14).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { PayrollRun } from "@weft/contracts";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { events, expenses, paychecks, payrollRuns, principals, simBankBatches, uploads } from "@weft/db";
 import { W3ExpensesDetail, W3ExpensesPage, W3ExpensesPortalPage } from "../../../packages/contracts/src/ext/w3-expenses";
@@ -224,7 +224,7 @@ describe("expenses self-service (portal)", () => {
     expect(row).toMatchObject({ status: "needs_review", decisionNote: null, hasReceipt: true, attendees: "Sam Okafor, one candidate" });
     // The receipt is stored on the I-9 path under a masked name and served to admins only.
     const [u] = await w.db.select().from(uploads).where(eq(uploads.id, row.receiptUploadId!));
-    expect(u).toMatchObject({ purpose: "receipt", workerId: "wrk_0025", fileName: "lu***.png", storagePath: expect.stringMatching(/^uploads\/[0-9a-f]{64}\.bin$/) });
+    expect(u).toMatchObject({ purpose: "receipt", workerId: "wrk_0025", fileName: "lu***.png", storagePath: expect.stringMatching(/^(uploads\/[0-9a-f]{64}\.bin|blob:[0-9a-f]{64})$/) });
     expect((await w.app.request(`/v1/expenses/${id}/receipt`, { headers: w.uiHeaders("usr_dana") })).status).toBe(200);
     expect((await w.app.request(`/v1/expenses/${id}/receipt`, { headers: w.uiHeaders("usr_sam") })).status).toBe(403);
     // Both submissions emitted expense.submitted; the audit trail holds submit, return and resubmit.
@@ -239,13 +239,17 @@ describe("expenses self-service (portal)", () => {
     expect((await w.db.select().from(expenses).where(eq(expenses.id, own.json.data.expense_id)))[0]!.workerId).toBe("wrk_0025");
     expect((await call("usr_sam", "POST", "/v1/portal/expenses/exp_0001/resubmit", { category: "travel", merchant: "x", amountCents: 100, transactionDate: "2026-10-22", businessPurpose: "y" })).status).toBe(404);
     const n = await receiptRows();
-    const files = readdirSync(join(w.dataDir, "uploads")).length;
+    // Stored uploads, wherever the world keeps them (files on Node, blobs rows with WEFT_BLOBS=sqlite).
+    const storedUploads = async () => w.blobs.kind === "file"
+      ? (existsSync(join(w.dataDir, "uploads")) ? readdirSync(join(w.dataDir, "uploads")).length : 0)
+      : Number((await w.db.all<{ n: number }>(sql`SELECT count(DISTINCT key) AS n FROM blobs`))[0]!.n);
+    const files = await storedUploads();
     const txt = await multipart("usr_sam", "/v1/portal/expenses", form({ category: "office", merchant: "Paperworks Supply (demo)", amountCents: "1200", transactionDate: "2026-10-22", businessPurpose: "Folders" }, { type: "text/plain", bytes: Buffer.from("not a receipt") }));
     expect([txt.status, txt.json.code]).toEqual([422, "INVALID_INPUT"]);
     const refused = await multipart("usr_sam", "/v1/portal/expenses", form({ category: "mileage", merchant: "Personal car (demo)", amountCents: "6384", transactionDate: "2026-10-22", businessPurpose: "Depot visit" }, { type: "image/png", bytes: Buffer.from("89504e47 unique refused receipt") }));
     expect([refused.status, refused.json.code]).toEqual([422, "DOMAIN_MILES_REQUIRED"]);
     expect(await receiptRows()).toBe(n);
-    expect(readdirSync(join(w.dataDir, "uploads")).length).toBe(files);
+    expect(await storedUploads()).toBe(files);
   });
 
   it("the new hire persona submits from the portal with a receipt; the engine flags a claim dated before the start date", async () => {

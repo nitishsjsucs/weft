@@ -1,6 +1,8 @@
 // /v1 sim routes (demo controls, dev only). Owner: t2-world. Every mutation kicks the scheduler before responding.
 // Reset rebuilds the database in place (drop every table, migrate, seed), deletes memory repos and run workspaces
-// under .data/companies, and never touches .data/spend.
+// under .data/companies, and never touches .data/spend. On the durable platform (docs/cloudflare/design.md 4.6 and
+// 6.2) the seed generator never runs: reset goes through the platform's hosted reset (a delta reset or a full restore
+// of the slot's storage) with background work settled first, and only the rich profile exists there.
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -14,6 +16,7 @@ import { readSeedProfile, seedWorldProfile, type SeedProfile } from "@weft/seed/
 import type { Weft, WeftEnv } from "../http/context";
 import { viewerScope } from "../http/scope";
 import { SimResetBody } from "../../../../packages/contracts/src/ext/tour";
+import { HOSTED_ERRORS } from "../../../../packages/contracts/src/ext/cf-hosted";
 
 const AdvanceBody = z.union([
   z.object({ to: z.string() }).strict(),
@@ -58,7 +61,7 @@ const removeTree = (dir: string) => rmSync(dir, { recursive: true, force: true, 
  * finalizations their terminal steps started.
  */
 async function settleBackgroundWork(weft: Weft): Promise<void> {
-  const bound = Number(process.env.WEFT_RESET_DRAIN_MS ?? 5_000);
+  const bound = Number((weft.platform?.env ?? process.env).WEFT_RESET_DRAIN_MS ?? 5_000);
   const agent = weft.agent as { drain?: (ms: number) => Promise<boolean> };
   const routines = weft.routines as { drain?: (ms: number, closing?: boolean) => Promise<boolean> };
   const quiet = async (fn: () => Promise<unknown> | undefined) => { try { await fn(); } catch { /* a stubbed part has nothing to drain */ } };
@@ -78,11 +81,33 @@ const resetChains = new WeakMap<Weft, Promise<unknown>>();
  * (no git process is running then) before any table is dropped, and drop, migrate and seed hold the write lock
  * together, so no other request writes into a half-built world.
  */
-export function resetWorld(weft: Weft, opts: { profile?: SeedProfile } = {}): Promise<{ ms: number; profile: SeedProfile }> {
+export function resetWorld(weft: Weft, opts: { profile?: SeedProfile } = {}): Promise<{ ms: number; profile: SeedProfile; gen?: number }> {
   const prev = resetChains.get(weft) ?? Promise.resolve();
-  const run = prev.then(() => rebuild(weft, opts.profile), () => rebuild(weft, opts.profile));
+  const go = () => (weft.platform?.kind === "durable" ? hostedReset(weft) : rebuild(weft, opts.profile));
+  const run = prev.then(go, go);
   resetChains.set(weft, run.catch(() => undefined));
   return run;
+}
+
+/** The profile hosted worlds have; a hosted reset to any other profile is a 400 with a reason. */
+export const HOSTED_RESET_PROFILE: SeedProfile = "rich";
+
+/**
+ * The durable platform's reset: settle background work and keep ticks out (as Node's rebuild does), then let the
+ * platform reset the slot's storage. The CompanyDO rebuilds the in-memory runtime afterwards (ctx.abort()), so this
+ * Weft is not reused once the hook returns.
+ */
+async function hostedReset(weft: Weft): Promise<{ ms: number; profile: SeedProfile; gen: number }> {
+  const hook = weft.platform.reset;
+  if (!hook) throw new NotImplemented("hosted reset (the Durable Object host supplies it)");
+  const t0 = Date.now();
+  const scheduler = weft.scheduler as { exclusive?: <T>(fn: () => Promise<T>) => Promise<T> };
+  const exclusive = <T>(fn: () => Promise<T>) => (scheduler.exclusive ? scheduler.exclusive(fn) : fn());
+  const { gen } = await exclusive(async () => {
+    await settleBackgroundWork(weft);
+    return hook({ profile: "rich" });
+  });
+  return { ms: Date.now() - t0, profile: HOSTED_RESET_PROFILE, gen };
 }
 
 /** The world is rebuilt with the profile it was seeded with (a rich dev world stays rich) unless the caller names one. */
@@ -181,13 +206,17 @@ export function simRoutes(weft: Weft): Hono<WeftEnv> {
   });
 
   r.post("/v1/sim/reset", async (c) => {
-    if (!weft.testMode && process.env.WEFT_ALLOW_RESET === "0") throw new NotImplemented("reset disabled by WEFT_ALLOW_RESET=0");
+    if (!weft.testMode && (weft.platform?.env ?? process.env).WEFT_ALLOW_RESET === "0") throw new NotImplemented("reset disabled by WEFT_ALLOW_RESET=0");
     // No scheduler kick here: a reset world must digest exactly like a fresh `pnpm db:seed` (no tick has run).
     // Optional { profile: "base" | "rich" }; without it the world keeps the profile it was seeded with. Strict: an
     // unknown profile or key is a 400 (packages/contracts/src/ext/tour.ts), and a missing body counts as {}.
     const { profile } = SimResetBody.parse(await c.req.json().catch(() => ({})));
-    const { ms, profile: seeded } = await resetWorld(weft, { profile });
-    return c.json({ ok: true, ms, profile: seeded });
+    if (weft.platform?.kind === "durable" && profile && profile !== HOSTED_RESET_PROFILE) {
+      const e = HOSTED_ERRORS.HOSTED_RESET_PROFILE;
+      return c.json({ _tag: e.tag, code: "HOSTED_RESET_PROFILE", message: `The hosted demo resets to the ${HOSTED_RESET_PROFILE} profile only; ${profile} is not available here` }, e.status);
+    }
+    const { ms, profile: seeded, gen } = await resetWorld(weft, { profile });
+    return c.json({ ok: true, ms, profile: seeded, ...(gen !== undefined ? { gen } : {}) });
   });
 
   return r;

@@ -35,7 +35,11 @@ export const SYSTEM_ALLOWLISTS: Record<SystemPrincipal, readonly string[]> = {
 export function createSystemExecutor(e: Engine): SystemExecutor {
   return {
     async exec(principal, command, args, source) {
-      if (!SYSTEM_PRINCIPALS.includes(principal)) return refusal("NOT_PERMITTED", `${String(principal)} is not a system principal`, false);
+      // The frozen four, plus any principal the platform registered with its own exact allowlist (svc_jobs, whose
+      // OCR write-backs exist only on the durable platform; docs/cloudflare/design.md 5.4).
+      const hostedList = e.hosted?.systemAllowlists.get(principal);
+      if (!SYSTEM_PRINCIPALS.includes(principal) && !hostedList) return refusal("NOT_PERMITTED", `${String(principal)} is not a system principal`, false);
+      const allowlist: readonly string[] = SYSTEM_ALLOWLISTS[principal] ?? hostedList ?? [];
       const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
         const p = await loadPrincipal(tx, principal);
         let companyId = p?.companyId ?? null;
@@ -53,7 +57,7 @@ export function createSystemExecutor(e: Engine): SystemExecutor {
           },
           grants: allView(), taintedBy: null, nonce: null, actor: { kind: "system", id: principal },
           stamp: { attended: source.attended, requestedBy: source.requestedBy }, run: null, batch: null, callId: null,
-          systemAllowed: !!def && SYSTEM_ALLOWLISTS[principal].includes(def.name),
+          systemAllowed: !!def && allowlist.includes(def.name),
         };
         return (await runInTx(e, tx, scope, command, args)).outcome;
       }));

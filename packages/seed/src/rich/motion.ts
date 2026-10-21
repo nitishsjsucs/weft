@@ -9,9 +9,8 @@ import {
 import { confidentialityText, expenses as policy, newId, offerLetterFor, payroll, sha256Hex } from "@weft/core";
 import { formatCents, type Flag, type Preview } from "@weft/contracts";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { uploads } from "@weft/db";
+import { seedUpload, type SeedBlobMode } from "../blobs";
 import { receiptPng } from "../w3-expenses";
 import { seedPortalHires } from "./portal-hires";
 import { day, joinAnd, paycheckNote } from "./flag-notes";
@@ -24,19 +23,17 @@ type Bump = (table: string, n?: number) => void;
 type Proposal = (p: Record<string, unknown>) => Promise<string>;
 type Run = (spec: Record<string, unknown>) => Promise<{ runId: string; routineRunId: string | null }>;
 type ActionFn = (a: Record<string, unknown>) => void;
-export interface MotionApi { dataDir?: string; tx: DbTx; bump: Bump; proposal: Proposal; run: Run; action: ActionFn; preview: (command: string, args: Record<string, unknown>) => Promise<Preview & { risk: string }>; chat: (channel: string, author: string, text: string, ts: string) => Promise<string> }
+export interface MotionApi { dataDir?: string; blobMode?: SeedBlobMode; tx: DbTx; bump: Bump; proposal: Proposal; run: Run; action: ActionFn; preview: (command: string, args: Record<string, unknown>) => Promise<Preview & { risk: string }>; chat: (channel: string, author: string, text: string, ts: string) => Promise<string> }
 
-/** A DEMO receipt image in the uploads store, as the base seed and a portal upload write one; returns the upload id. */
-export async function receiptUpload(L: { tx: DbTx; dataDir?: string; bump: Bump }, workerId: string, expenseId: string, n: number, at: string, extract: string): Promise<string | null> {
+/** A DEMO receipt image in the uploads store, as the base seed and a portal upload write one; returns the upload id.
+ * The bytes go where the world's uploads go: files by default, the blobs table with WEFT_BLOBS=sqlite (../blobs.ts). */
+export async function receiptUpload(L: { tx: DbTx; dataDir?: string; blobMode?: SeedBlobMode; bump: Bump }, workerId: string, expenseId: string, n: number, at: string, extract: string): Promise<string | null> {
   if (!L.dataDir) return null;
   const png = receiptPng(1000 + n);
-  const sha = createHash("sha256").update(png).digest("hex");
-  const rel = `uploads/${sha}.bin`;
-  mkdirSync(join(L.dataDir, "uploads"), { recursive: true });
-  writeFileSync(join(L.dataDir, rel), png);
-  writeFileSync(join(L.dataDir, "uploads", `${sha}.extract.json`), extract);
+  const up = await seedUpload({ tx: L.tx, dataDir: L.dataDir, mode: L.blobMode ?? "file" }, png, extract);
+  if (up.chunks) L.bump("blobs", up.chunks);
   const id = await newId(L.tx, "upl_");
-  await L.tx.insert(uploads).values({ id, workerId, purpose: "receipt", fileName: `receipt-${expenseId}.png`, storagePath: rel, bytes: png.length, sha256: sha, createdAt: at });
+  await L.tx.insert(uploads).values({ id, workerId, purpose: "receipt", fileName: `receipt-${expenseId}.png`, storagePath: up.storagePath, bytes: png.length, sha256: up.sha256, createdAt: at });
   L.bump("uploads");
   return id;
 }

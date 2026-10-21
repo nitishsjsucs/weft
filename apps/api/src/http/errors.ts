@@ -10,10 +10,16 @@ import type { WeftEnv } from "./context";
  * runner's WEFT_E2E=1). Tests keep stdout and stderr quiet, so without this file a 500 under load left no trace.
  */
 export const ERROR_LOG = join("run", "errors.log");
+/** The durable platform's 500 traces under tests (it has no errors.log); the last 50, newest last. */
+export const durableErrors: string[] & { push(...t: string[]): number } = Object.assign([] as string[], {
+  push(this: string[], ...t: string[]) { Array.prototype.push.apply(this, t); while (this.length > 50) this.shift(); return this.length; },
+});
 
 function logInternal(c: Context<WeftEnv>, text: string): void {
   const weft = c.var.weft;
   const underTest = !!weft?.testMode || process.env.WEFT_E2E === "1";
+  // The durable platform has no data dir on disk: its 500s go to console.error, redacted, and so to Workers Logs.
+  if (weft?.platform?.kind === "durable") { if (!weft.testMode) console.error(text); else durableErrors.push(text.slice(0, 4000)); return; }
   if (underTest && weft?.dataDir && weft.dataDir !== ":memory:") {
     try {
       mkdirSync(join(weft.dataDir, "run"), { recursive: true });

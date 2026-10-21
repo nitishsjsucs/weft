@@ -21,6 +21,8 @@ import { runAllowlist } from "./runs";
 import { markTainted } from "./taint";
 import { applyUntrusted } from "./untrusted";
 import { offloadIfLarge } from "./workspace";
+import { appendOutbox, jobsFor } from "./hosted/outbox";
+import { ephemeralReadId } from "./hosted/read-ids";
 
 export const LEASE_MS = 10 * 60_000;
 export const MAX_ISSUES = 5;
@@ -278,7 +280,10 @@ async function runCall(e: Engine, tx: DbTx, scope: CallScope, command: string, r
       if (opts.approved && (out.moneyCents ?? null) !== (opts.approved.moneyCents ?? null)) {
         throw Object.assign(new Error(`money check failed for ${opts.approved.id}: moved ${out.moneyCents ?? "none"}, approved ${opts.approved.moneyCents ?? "none"}`), { code: "INTERNAL" });
       }
-      const resultId = await newId(sp, "res_");
+      // Design 4.4: a read outside a run (a page GET, an MCP read) gets an ephemeral id and writes no id_counters row.
+      // Run reads keep counter ids, because exec_calls.outcome_json persists them. Off on Node (id sequences and the
+      // pinned eval digests stay put); the disjoint res_e_ prefix never collides with a counter id.
+      const resultId = def.effect === "read" && !scope.run && e.hosted?.ephemeralReadIds ? ephemeralReadId() : await newId(sp, "res_");
       let actionSeq: number | null = null;
       if (def.effect !== "read") {
         const reversible = def.reversible !== false && out.reverseArgs !== undefined;
@@ -302,6 +307,15 @@ async function runCall(e: Engine, tx: DbTx, scope: CallScope, command: string, r
       if (leaseKey) {
         await sp.insert(leases).values({ resource: leaseKey, holderRunId: holder, acquiredAt: ctx.now, expiresAt: new Date(Date.parse(ctx.now) + LEASE_MS).toISOString() })
           .onConflictDoUpdate({ target: leases.resource, set: { holderRunId: holder, acquiredAt: ctx.now, expiresAt: new Date(Date.parse(ctx.now) + LEASE_MS).toISOString() } });
+      }
+      // The after-commit outbox (design 3.4): jobs this result asks for (receipt or notice OCR, a note's embedding)
+      // join the command's savepoint, so they commit and roll back with it. Only a platform with an outbox appends.
+      const world = e.hosted?.outbox;
+      if (world) {
+        for (const job of await jobsFor(sp, world, def, input, out.data, { tainted: ctx.tainted })) {
+          await appendOutbox(sp, world, job, ctx.now);
+          e.hosted.outboxPending = true;
+        }
       }
       // Untrusted fields: wrap with the run nonce and taint the run.
       let data: unknown = out.data;

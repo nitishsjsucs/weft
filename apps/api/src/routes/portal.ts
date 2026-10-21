@@ -1,15 +1,13 @@
 // /v1 portal routes (wave 2, docs/wave2.md). Owner: w2-onboarding. The new hire persona's checklist: read the view,
 // open the offer, click-to-sign, Form W-4, the state certificate, direct deposit, the I-9 upload and benefits.
 // Writes run onboarding.* human_only commands through the executor; the persona reaches only /v1/portal/* (auth.ts).
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { Hono } from "hono";
 import { DirectDepositSubmission, Forbidden, Unauthorized, type HumanSession } from "@weft/contracts";
 import { loadPersona, portalView } from "@weft/core";
 import type { Weft, WeftEnv } from "../http/context";
 import { stubRoutes } from "../http/stub";
 import { outcomeJson } from "./offers";
+import { storeUpload, uploadLimitResponse } from "../http/uploads";
 
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "application/pdf"]);
@@ -76,7 +74,7 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     return outcomeJson(c, out);
   });
 
-  // I-9: multipart (fields plus idImage). The file is stored under the data dir in uploads/; responses are masked.
+  // I-9: multipart (fields plus idImage). The file is stored through the world's BlobStore; responses are masked.
   r.post("/v1/portal/i9", async (c) => {
     const s = need(c.var.session);
     await persona(s);
@@ -86,21 +84,16 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     if (!(file instanceof File)) return c.json(refusedJson("INVALID_INPUT", "idImage: attach an image of your ID"), 422);
     if (file.size === 0 || file.size > MAX_UPLOAD_BYTES) return c.json(refusedJson("INVALID_INPUT", "idImage: the file must be between 1 byte and 5 MB"), 422);
     if (!UPLOAD_TYPES.has(file.type)) return c.json(refusedJson("INVALID_INPUT", "idImage: use a PNG, JPEG, WebP or PDF file"), 422);
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const sha = createHash("sha256").update(bytes).digest("hex");
-    const rel = `uploads/${sha}.bin`;
-    const abs = join(weft.dataDir, rel);
-    const fresh = !existsSync(abs);
-    mkdirSync(join(weft.dataDir, "uploads"), { recursive: true });
-    if (fresh) writeFileSync(abs, bytes, { mode: 0o600 });
+    let up: Awaited<ReturnType<typeof storeUpload>>;
+    try { up = await storeUpload(weft, new Uint8Array(await file.arrayBuffer())); } catch (e) { const res = uploadLimitResponse(c, e); if (res) return res; throw e; }
     const field = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : undefined);
     const out = await weft.executor.human.exec(s, "documents.submit_i9", {
       citizenship: field("citizenship"), documentKind: field("documentKind"), documentNumberLast4: field("documentNumberLast4"),
       expiresOn: field("expiresOn") || null, typedName: field("typedName"),
       // Only the masked name travels into the command, its action row and the uploads row.
-      file_name: maskName(file.name || "id-image"), bytes: bytes.length, sha256: sha, storage_path: rel,
+      file_name: maskName(file.name || "id-image"), bytes: up.bytes, sha256: up.sha256, storage_path: up.storagePath,
     });
-    if (!out.ok && fresh) { try { unlinkSync(abs); } catch { /* already gone */ } }
+    if (!out.ok) await up.undo();
     return outcomeJson(c, out);
   });
 

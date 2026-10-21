@@ -40,7 +40,7 @@ export async function integrationCard(weft: Weft, vendor: IntegrationVendor): Pr
   const ownership = vendor === "workday" ? ((conn?.ownershipJson ? JSON.parse(conn.ownershipJson) : DEFAULT_OWNERSHIP) as Record<string, "weft" | "vendor">) : null;
   return {
     status: { ...s, category: VENDOR_CATEGORY[vendor], lastSyncAt: conn?.lastSyncAt ?? s.lastSyncAt, cursor: conn?.cursor ?? s.cursor, health: (conn?.health as typeof s.health | undefined) ?? s.health, detail: conn?.detail ?? s.detail },
-    title: copy.title, body: copy.body, freePath: copy.freePath, secrets: secretsReport(vendor, process.env), ownership,
+    title: copy.title, body: copy.body, freePath: copy.freePath, secrets: secretsReport(vendor, (weft.platform?.env ?? process.env) as Record<string, string | undefined>), ownership,
   };
 }
 
