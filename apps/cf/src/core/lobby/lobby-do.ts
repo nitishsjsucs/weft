@@ -45,6 +45,8 @@ export interface LobbyStatus {
   lease: LeaseInfo | null;
   /** The visitor's place on the waitlist, if any. */
   waitlistPosition: number | null;
+  /** The leased world's own model choice (WORLD_MODEL_SETTING), from the slot's heartbeat; null without a lease. */
+  worldProvider: string | null;
 }
 
 export interface ProvisionStep { slot: string; action: "restore" | "deferred" | "ready" | "leased" | "restoring" | "error"; detail?: string }
@@ -288,12 +290,14 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const free = pool.filter((s) => s.state === "ready" && !leased.some((l) => l.slot === s.name)).length;
     const waitlistN = this.one<{ n: number }>(`SELECT COUNT(*) AS n FROM waitlist WHERE seen > ?`, now - WAITLIST_TTL_MS)?.n ?? 0;
     let lease: LeaseInfo | null = null;
+    let worldProvider: string | null = null;
     if (input.visitor) {
       const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
       if (l && (input.slot == null || l.slot === input.slot) && (input.gen == null || l.gen === input.gen)) {
         try {
-          const hb = await this.company(l.slot).heartbeat();
+          const hb = await this.company(l.slot).heartbeat({ provider: true });
           this.absorbUsage(hb.usage);
+          worldProvider = hb.worldProvider ?? null;
           if (hb.lastActivityMs !== null && hb.lastActivityMs > l.last_seen) {
             this.sql.exec(`UPDATE leases SET last_seen = ? WHERE slot = ?`, hb.lastActivityMs, l.slot);
             l.last_seen = hb.lastActivityMs;
@@ -306,7 +310,10 @@ export class LobbyDO extends DurableObject<CoreEnv> {
         else lease = this.leaseInfo(l);
       }
     }
-    return { level, pool: { size: pool.length, free, waitlist: waitlistN }, lease, waitlistPosition: input.visitor ? this.waitlistPosition(input.visitor, now) : null };
+    return {
+      level, pool: { size: pool.length, free, waitlist: waitlistN }, lease,
+      waitlistPosition: input.visitor ? this.waitlistPosition(input.visitor, now) : null, worldProvider: lease ? worldProvider : null,
+    };
   }
 
   /**

@@ -1,9 +1,9 @@
 // Design 11.4: Turnstile with Cloudflare's published test secrets (1x...AA passes, 2x...AA fails) against the local
 // siteverify stub (one opt-in case asks Cloudflare's real endpoint), the session and human-grant cookies, a tampered
-// cookie gets 401, mutations need a lease and a fresh grant (428), cross-origin mutations are refused, and the kill
-// switch answers model-calling admissions 503.
+// cookie gets 401, mutations need a lease and a fresh grant (428), cross-origin mutations are refused, the kill switch
+// answers model-calling admissions 503, and the session reports the world's model switch.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HOSTED_CONFIG_KEYS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, type SessionStatus } from "../../src/shared/contracts";
+import { DO_NAMES, HOSTED_CONFIG_KEYS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, type SessionStatus } from "../../src/shared/contracts";
 import { Harness, TURNSTILE } from "../support/harness";
 
 let h: Harness;
@@ -12,6 +12,14 @@ beforeAll(async () => {
   await h.provision();
 });
 afterAll(async () => { await h?.close(); });
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Ends every lease, so a describe starts with the whole pool free. */
+async function releaseAll(): Promise<void> {
+  const env = await h.coreEnv();
+  const lobby = env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
+  for (const x of (await h.ops()).lobby.leases) await lobby.release({ slot: x.slot, reason: "test" });
+}
 
 describe("session and Turnstile", () => {
   it("starts a lease behind the always-pass test secret and sets both cookies HttpOnly, Secure, SameSite=Strict", async () => {
@@ -141,6 +149,32 @@ describe("session and Turnstile", () => {
       await env.CONFIG.delete(HOSTED_CONFIG_KEYS.agentEnabled);
     }
   }, 120_000);
+});
+
+describe("the session's provider", () => {
+  beforeAll(async () => {
+    await releaseAll();
+    await sleep(400);   // past the front's KV memo (200 ms here), so the kill switch case above is gone
+  });
+
+  it("reports the world's model switch as reason world, and the default once it is cleared", async () => {
+    const v = h.visitor();
+    expect((await v.lease()).status).toBe("leased");
+    const provider = async () => (await v.json<SessionStatus>("/api/_session")).body.provider;
+    expect(await provider()).toEqual({ id: "openai", reason: "default" });
+    expect((await v.fetch("/api/_hosted/model", { method: "PUT", body: JSON.stringify({ provider: "workers_ai" }) })).status).toBe(200);
+    expect(await provider()).toEqual({ id: "workers_ai", reason: "world" });
+    expect((await v.fetch("/api/_hosted/model", { method: "PUT", body: JSON.stringify({ provider: "scripted" }) })).status).toBe(200);
+    expect(await provider()).toEqual({ id: "scripted", reason: "world" });
+    expect((await v.fetch("/api/_hosted/model", { method: "PUT", body: JSON.stringify({ provider: null }) })).status).toBe(200);
+    expect(await provider()).toEqual({ id: "openai", reason: "default" });
+    // Another visitor's world, and the showcase, keep the default.
+    const other = h.visitor();
+    await other.lease();
+    await v.fetch("/api/_hosted/model", { method: "PUT", body: JSON.stringify({ provider: "workers_ai" }) });
+    expect((await other.json<SessionStatus>("/api/_session")).body.provider).toEqual({ id: "openai", reason: "default" });
+    expect((await h.visitor().json<SessionStatus>("/api/_session")).body.provider).toEqual({ id: "openai", reason: "default" });
+  });
 });
 
 // Opt-in (WEFT_CF_REAL_SITEVERIFY=1, needs outbound HTTPS from workerd): the same lease against Cloudflare's own

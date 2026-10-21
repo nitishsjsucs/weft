@@ -11,7 +11,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   HOSTED_SETTINGS, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
-  DO_NAMES, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
+  DO_NAMES, WORLD_MODEL_SETTING, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
 } from "../../shared/contracts";
 import { envConfig } from "../../shared/config";
 import { mcpKeyId, readCtx } from "../../shared/tokens";
@@ -568,9 +568,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.lastActivity = null;
   }
 
-  async heartbeat(): Promise<SlotHeartbeat> {
+  async heartbeat(opts: { provider?: boolean } = {}): Promise<SlotHeartbeat> {
     const usage = this.usage;
     this.usage = zeroUsage();
+    const worldProvider = opts.provider ? this.worldProvider() : null;
     let clean = true;
     if (this.stamp && hasKvState(this.ctx.storage.sql)) {
       try {
@@ -580,7 +581,22 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         clean = false;
       }
     }
-    return { stamped: this.stamp, lastActivityMs: this.lastActivity, clean, usage, snapshot: this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? null };
+    return { stamped: this.stamp, lastActivityMs: this.lastActivity, clean, usage, snapshot: this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? null, ...(opts.provider ? { worldProvider } : {}) };
+  }
+
+  /**
+   * The world's own model choice (the Simulators model switch, WORLD_MODEL_SETTING), read with plain SQL so the
+   * session status shows it without booting anything (design 5.2). Null when unset, unreadable or not a string.
+   */
+  private worldProvider(): string | null {
+    if (!this.stamp || this.stamp.mode !== "slot" || !hasKvState(this.ctx.storage.sql)) return null;
+    try {
+      const row = this.ctx.storage.sql.exec(`SELECT value_json AS v FROM settings WHERE key = ?`, WORLD_MODEL_SETTING).toArray()[0];
+      const v = row ? (JSON.parse(String(row.v)) as unknown) : null;
+      return typeof v === "string" ? v : null;
+    } catch {
+      return null;
+    }
   }
 
   /** The default reset after a lease (design 4.6): delete dirty rows, reinsert their seed rows, check the digests. */

@@ -2,8 +2,8 @@
 // Turnstile, and the human grant refresh. The front never trusts the browser for a slot: the Lobby assigns one and
 // the signed cookie carries it.
 import {
-  DO_NAMES, HOSTED_CONFIG_KEYS, MIN_LIVE_HEADROOM_USD,
-  type HostedProviderId, type LeaseResult, type SessionStatus, type TurnstileTokenBody, type VerifyResult,
+  DO_NAMES, HOSTED_CONFIG_KEYS, MIN_LIVE_HEADROOM_USD, NEURON_SHARES, WORKERS_AI_PROVIDER_ID,
+  type HostedProviderId, type HostedSpendStatus, type LeaseResult, type SessionStatus, type TurnstileTokenBody, type VerifyResult,
 } from "../shared/contracts";
 import { agentEnabled, envConfig } from "../shared/config";
 import type { FrontEnv } from "../shared/env";
@@ -15,23 +15,54 @@ import { clearSessionCookies, grantCookie, sessionCookies, type Visit } from "./
 
 const lobby = (env: FrontEnv) => env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
 
+const HOSTED_PROVIDER_IDS: readonly HostedProviderId[] = ["openai", WORKERS_AI_PROVIDER_ID, "scripted"];
+const parseProvider = (v: string | null | undefined): HostedProviderId | null => {
+  const t = (v ?? "").trim();
+  return (HOSTED_PROVIDER_IDS as readonly string[]).includes(t) ? (t as HostedProviderId) : null;
+};
+/** Neurons a Workers AI run needs to start (packages/agent/src/providers/hosted.ts MIN_NEURONS_FOR_RUN). */
+export const MIN_NEURONS_FOR_RUN = 1_000;
+
+/** The provider a new run would pick: the KV default unless the world chose one, with the reason the banner shows. */
+export function wantedProvider(i: { agentEnabled: boolean; configured: string | null; world: string | null }): SessionStatus["provider"] {
+  if (!i.agentEnabled) return { id: "scripted", reason: "paused" };
+  const fromWorld = parseProvider(i.world);
+  return { id: fromWorld ?? parseProvider(i.configured) ?? "openai", reason: fromWorld ? "world" : "default" };
+}
+
+/**
+ * The provider GET /api/_session reports (design 5.2 and 6.5): chooseHostedProvider's rules (packages/agent/src/
+ * providers/hosted.ts, which the front cannot import) over what the front sees. The world's model switch wins over
+ * the KV default ("world"); less than MIN_LIVE_HEADROOM_USD left for the day, the visitor, the IP hash or under the
+ * live cap means "budget"; Workers AI without the neurons a run needs (the day cap and the agent's share) means
+ * "neurons". Which providers the world can build is not visible here, so all of them are assumed.
+ */
+export function sessionProvider(want: SessionStatus["provider"], s: HostedSpendStatus | null): SessionStatus["provider"] {
+  if (want.id === "scripted" || want.reason === "paused" || !s) return want;
+  const left = [s.caps.dayUsd * 1e6 - s.spentMicros.day];
+  if (s.spentMicros.visitor !== null) left.push(s.caps.visitorDayUsd * 1e6 - s.spentMicros.visitor);
+  if (s.spentMicros.ip !== null) left.push(s.caps.ipDayUsd * 1e6 - s.spentMicros.ip);
+  if (s.caps.liveUsd !== null) left.push(s.caps.liveUsd * 1e6 - s.spentMicros.live);
+  if (left.some((l) => l < MIN_LIVE_HEADROOM_USD * 1e6)) return { id: "scripted", reason: "budget" };
+  if (want.id === WORKERS_AI_PROVIDER_ID) {
+    const neuronsLeft = Math.min(s.caps.neuronsDay - s.neurons.used, NEURON_SHARES.agent - s.neurons.byProduct.agent);
+    if (neuronsLeft < MIN_NEURONS_FOR_RUN) return { id: "scripted", reason: "neurons" };
+  }
+  return want;
+}
+
 export async function sessionStatus(env: FrontEnv, v: Visit): Promise<Response> {
   const cfg = await envConfig(env);
   const st = await lobby(env).status({ visitor: v.session?.visitor ?? null, slot: v.session?.slot ?? null, gen: v.session?.gen ?? null });
   const cookies: string[] = [];
   if (v.session && !st.lease) cookies.push(...clearSessionCookies());
   const enabled = agentEnabled(cfg);
-  const configured = (cfg.get(HOSTED_CONFIG_KEYS.modelProvider) ?? "openai").trim() as HostedProviderId;
-  let provider: SessionStatus["provider"] = { id: configured, reason: "default" };
-  if (!enabled) provider = { id: "scripted", reason: "paused" };
-  else if (configured !== "scripted") {
+  const want = wantedProvider({ agentEnabled: enabled, configured: cfg.get(HOSTED_CONFIG_KEYS.modelProvider) ?? null, world: st.lease ? st.worldProvider : null });
+  let provider = want;
+  if (want.id !== "scripted" && want.reason !== "paused") {
     try {
       const s = await env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({ visitor: st.lease ? v.session?.visitor ?? null : null, ipHash: v.ipHash });
-      const leftDay = s.caps.dayUsd * 1e6 - s.spentMicros.day;
-      const leftVisitor = s.spentMicros.visitor === null ? Infinity : s.caps.visitorDayUsd * 1e6 - s.spentMicros.visitor;
-      const leftIp = s.spentMicros.ip === null ? Infinity : s.caps.ipDayUsd * 1e6 - s.spentMicros.ip;
-      if (Math.min(leftDay, leftVisitor, leftIp) < MIN_LIVE_HEADROOM_USD * 1e6) provider = { id: "scripted", reason: "budget" };
-      else if (configured === "workers_ai" && s.neurons.used >= s.caps.neuronsDay) provider = { id: "scripted", reason: "neurons" };
+      provider = sessionProvider(want, s);
     } catch { /* the status still answers; the run admission decides for itself */ }
   }
   const grantExpiresAt = v.grantExp !== null && st.lease ? new Date(v.grantExp * 1000).toISOString() : null;
