@@ -1,10 +1,13 @@
 // Notice scenarios (SPEC 8): original fictional fixture text, rendered with the sim date, then parsed. The text comes
 // from the repo on Node and from the platform's FixtureSource on the durable platform (./fixtures.ts).
-import { readFileSync } from "node:fs";
 import { NOTICE_FIXTURE_DIRS, noticeFixtureSource, onNoticeFixturesChanged } from "./fixtures";
 import type { AgencyCode, AgencyNoticeKind, NoticeExtract, NoticeScenario } from "@weft/contracts";
 import { addDays, ptDate } from "../time";
 import { parseNotice } from "./parser";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 export interface ScenarioDef { agency: AgencyCode; formCode: string; kind: AgencyNoticeKind; title: string; fileName: string; respondDays: number }
 
@@ -26,7 +29,7 @@ export function fixtureText(name: NoticeScenario): string {
       if (text === null) throw new Error(`notice fixture ${name} is not bundled`);
       t = text;
     } else {
-      t = readFileSync(new URL(`../../fixtures/notices/${name}.txt`, import.meta.url), "utf8");
+      t = fs().readFileSync(new URL(`../../fixtures/notices/${name}.txt`, import.meta.url), "utf8");
     }
     cache.set(name, t);
   }

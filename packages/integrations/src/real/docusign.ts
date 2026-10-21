@@ -6,12 +6,15 @@
 // signer (clientUserId); a fresh recipient view per click; Connect HMAC in base64 over the raw body; at most one status
 // read per envelope every 15 minutes (DocuSign's hard limit; Weft's poller spaces them 20 minutes apart).
 import { createHash, createSign } from "node:crypto";
-import { readFileSync } from "node:fs";
 import type { ConnectorStatus, ESignConnector, EnvelopeStatus, WebhookVerdict } from "@weft/contracts";
 import { isTestEnv, LiveIntegrationInTest } from "../mode";
 import { readSecret, type Env } from "../secrets";
 import { constantTimeEqual, hmacSha256 } from "../webhook";
 import { IntegrationRefused } from "./checkr";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 type Fetch = typeof fetch;
 type Json = Record<string, unknown>;
@@ -62,7 +65,7 @@ export function createDocusignClient(o: DocusignClientOptions): ESignConnector {
       integrationKey: readSecret("DOCUSIGN_INTEGRATION_KEY", env), userId: readSecret("DOCUSIGN_USER_ID", env), aud: oauthHost,
       privateKeyPem: (() => {
         // The refusal never carries the path.
-        try { return readFileSync(readSecret("DOCUSIGN_PRIVATE_KEY_FILE", env), "utf8"); } catch { throw new IntegrationRefused("INTEGRATION_LIVE_DISABLED", "DOCUSIGN_PRIVATE_KEY_FILE could not be read"); }
+        try { return fs().readFileSync(readSecret("DOCUSIGN_PRIVATE_KEY_FILE", env), "utf8"); } catch { throw new IntegrationRefused("INTEGRATION_LIVE_DISABLED", "DOCUSIGN_PRIVATE_KEY_FILE could not be read"); }
       })(), nowSec: Math.floor(nowMs() / 1000),
     });
     const res = await f(`https://${oauthHost}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }).toString() });

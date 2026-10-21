@@ -1,13 +1,16 @@
 // The vault (harness 6.4). The executor is the only reader of vault.key. AES-256-GCM per secret; resolved values
 // are returned only to simulators as an in-memory argument and are added to the redactor.
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { SimClock, VaultAdmin } from "@weft/contracts";
 import { vaultSecrets, type Db, type DbTx } from "@weft/db";
 import type { Redactor } from "./redact";
 import { writeLocked } from "../write";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 export const VAULT_NAME = /^[a-z0-9][a-z0-9-]{1,62}$/;
 
@@ -16,14 +19,14 @@ export function loadVaultKey(dataDir: string, env: Record<string, string | undef
   if (fromEnv && /^[0-9a-f]{64}$/i.test(fromEnv)) return Buffer.from(fromEnv, "hex");
   const dir = join(dataDir, "run");
   const file = join(dir, "vault.key");
-  mkdirSync(dir, { recursive: true });
-  if (existsSync(file)) {
-    const hex = readFileSync(file, "utf8").trim();
+  fs().mkdirSync(dir, { recursive: true });
+  if (fs().existsSync(file)) {
+    const hex = fs().readFileSync(file, "utf8").trim();
     if (/^[0-9a-f]{64}$/i.test(hex)) return Buffer.from(hex, "hex");
   }
   const key = randomBytes(32);
-  writeFileSync(file, key.toString("hex") + "\n", { mode: 0o600 });
-  chmodSync(file, 0o600);
+  fs().writeFileSync(file, key.toString("hex") + "\n", { mode: 0o600 });
+  fs().chmodSync(file, 0o600);
   return key;
 }
 

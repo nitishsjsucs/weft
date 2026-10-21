@@ -3,12 +3,15 @@
 // BlobStore is the SQL one (WEFT_BLOBS=sqlite, which the hosted snapshot is seeded with). Rows are written in the
 // caller's transaction, so a seed step that rolls back leaves no blob behind.
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecutorBundle } from "@weft/contracts";
 import { blobs, type DbTx } from "@weft/db";
 import { executorInternals } from "@weft/executor";
 import { BLOB_CHUNK_BYTES } from "../../contracts/src/ext/cf-db";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 export type SeedBlobMode = "file" | "sqlite";
 
@@ -32,8 +35,8 @@ export async function seedUpload(o: { tx: DbTx; dataDir: string; mode: SeedBlobM
     return { storagePath: `blob:${sha}`, sha256: sha, chunks };
   }
   const rel = `uploads/${sha}.bin`;
-  mkdirSync(join(o.dataDir, "uploads"), { recursive: true });
-  writeFileSync(join(o.dataDir, rel), bytes);
-  if (sidecar !== null) writeFileSync(join(o.dataDir, "uploads", `${sha}.extract.json`), sidecar);
+  fs().mkdirSync(join(o.dataDir, "uploads"), { recursive: true });
+  fs().writeFileSync(join(o.dataDir, rel), bytes);
+  if (sidecar !== null) fs().writeFileSync(join(o.dataDir, "uploads", `${sha}.extract.json`), sidecar);
   return { storagePath: rel, sha256: sha, chunks: 0 };
 }

@@ -2,9 +2,12 @@
 // 4.1). The key is the dataDir-relative path the run_artifacts row records, companies/<cmp>/runs/<run>/artifacts/
 // <n>-<wire>.json, with "/" separators. Node keeps today's files under the data dir; the durable platform keeps the
 // bodies in the run_files table (apps/api/src/platform/sql.ts), where they commit and roll back with the command.
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import type { RunFileStore } from "../../../contracts/src/ext/cf-platform";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 export type { RunFileStore } from "../../../contracts/src/ext/cf-platform";
 
@@ -32,16 +35,16 @@ export function fileRunFiles(dataDir: string): RunFileStore {
   return {
     async write(path, body) {
       const f = abs(path);
-      mkdirSync(dirname(f), { recursive: true });
-      writeFileSync(f, body);
+      fs().mkdirSync(dirname(f), { recursive: true });
+      fs().writeFileSync(f, body);
     },
     async read(path) {
       let f: string;
       try { f = abs(path); } catch { return null; }
-      try { return readFileSync(f, "utf8"); } catch { return null; }
+      try { return fs().readFileSync(f, "utf8"); } catch { return null; }
     },
     async removePrefix(prefix) {
-      rmSync(abs(prefix.replace(/\/+$/, "")), { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
+      fs().rmSync(abs(prefix.replace(/\/+$/, "")), { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
     },
   };
 }

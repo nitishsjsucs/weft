@@ -3,13 +3,16 @@
 // with WEFT_BLOBS=sqlite), run handles as 0600 JSON files, the proxy secret and the vault key in <dataDir>/run, the
 // scheduler on setInterval. This is the only platform module that touches node:fs.
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { INTEGRATION_OPTIONAL_SECRETS, INTEGRATION_SECRETS, IntegrationVendor, type RunHandle } from "@weft/contracts";
 import type { Db } from "@weft/db";
 import { readSecret } from "@weft/integrations";
 import type { BlobStore, PlatformContext, RunHandleStore, SchedulerHost, WeftPlatform } from "../../../../packages/contracts/src/ext/cf-platform";
 import { sqlBlobStore } from "./sql";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 export const FILE_UPLOAD = /^uploads\/[0-9a-f]{64}\.bin$/;
 
@@ -27,23 +30,23 @@ export function fileBlobStore(dataDir: string): BlobStore {
       const sha = createHash("sha256").update(bytes).digest("hex");
       const storagePath = `uploads/${sha}.bin`;
       const f = join(root, storagePath);
-      const fresh = !existsSync(f);
-      mkdirSync(join(root, "uploads"), { recursive: true });
-      if (fresh) writeFileSync(f, bytes, { mode: 0o600 });
+      const fresh = !fs().existsSync(f);
+      fs().mkdirSync(join(root, "uploads"), { recursive: true });
+      if (fresh) fs().writeFileSync(f, bytes, { mode: 0o600 });
       return { storagePath, sha256: sha, bytes: bytes.byteLength, fresh };
     },
     async get(storagePath) {
       const f = abs(storagePath);
       if (!f) return null;
-      try { return new Uint8Array(readFileSync(f)); } catch { return null; }
+      try { return new Uint8Array(fs().readFileSync(f)); } catch { return null; }
     },
     async has(storagePath) {
       const f = abs(storagePath);
-      return !!f && existsSync(f);
+      return !!f && fs().existsSync(f);
     },
     async delete(storagePath) {
       const f = abs(storagePath);
-      if (f) { try { unlinkSync(f); } catch { /* already gone */ } }
+      if (f) { try { fs().unlinkSync(f); } catch { /* already gone */ } }
     },
   };
 }
@@ -63,22 +66,22 @@ export function fileRunHandleStore(dir: string): RunHandleStore {
   };
   return {
     async save(handle) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs().mkdirSync(dir, { recursive: true, mode: 0o700 });
       const f = file(handle.runId);
-      writeFileSync(f, JSON.stringify(handle), { mode: 0o600 });
-      chmodSync(f, 0o600);
+      fs().writeFileSync(f, JSON.stringify(handle), { mode: 0o600 });
+      fs().chmodSync(f, 0o600);
     },
     async load(runId) {
       if (!SAFE_RUN_ID.test(runId)) return null;
       try {
-        const v = JSON.parse(readFileSync(file(runId), "utf8")) as Partial<RunHandle> & { nonce?: unknown };
+        const v = JSON.parse(fs().readFileSync(file(runId), "utf8")) as Partial<RunHandle> & { nonce?: unknown };
         if (v.runId !== runId || typeof v.token !== "string") return null;
         return Object.freeze(typeof v.nonce === "string" ? { runId, token: v.token, nonce: v.nonce } : { runId, token: v.token });
       } catch { return null; }
     },
     async drop(runId) {
       if (!SAFE_RUN_ID.test(runId)) return;
-      try { rmSync(file(runId), { force: true }); } catch { /* already gone */ }
+      try { fs().rmSync(file(runId), { force: true }); } catch { /* already gone */ }
     },
   };
 }
@@ -87,11 +90,11 @@ export function fileRunHandleStore(dir: string): RunHandleStore {
 export function readOrCreateProxySecret(dataDir: string): string {
   const dir = join(dataDir, "run");
   const file = join(dir, "proxy.secret");
-  mkdirSync(dir, { recursive: true });
-  if (existsSync(file)) { const s = readFileSync(file, "utf8").trim(); if (s.length >= 32) return s; }
+  fs().mkdirSync(dir, { recursive: true });
+  if (fs().existsSync(file)) { const s = fs().readFileSync(file, "utf8").trim(); if (s.length >= 32) return s; }
   const secret = randomBytes(32).toString("hex");
-  writeFileSync(file, secret + "\n", { mode: 0o600 });
-  chmodSync(file, 0o600);
+  fs().writeFileSync(file, secret + "\n", { mode: 0o600 });
+  fs().chmodSync(file, 0o600);
   return secret;
 }
 
@@ -120,7 +123,7 @@ export function learnVendorSecrets(env: Record<string, string | undefined>, add:
     if (!v) continue;
     add(v);
     if (k === "DOCUSIGN_PRIVATE_KEY_FILE") {
-      const pem = (() => { try { return readFileSync(v, "utf8").trim(); } catch { return null; } })();
+      const pem = (() => { try { return fs().readFileSync(v, "utf8").trim(); } catch { return null; } })();
       if (pem) add(pem);
     }
   }

@@ -1,8 +1,11 @@
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 // Secret lookup for real vendor adapters (docs/wave3.md). Reads only the file named by WEFT_SECRETS_FILE (KEY=VALUE lines),
 // never process.env values, and never logs, returns to the UI or persists a value. presence() reports names only.
 // On Cloudflare (WEFT_RUNTIME=cloudflare, docs/cloudflare/design.md 4.1) there is no secrets file and no file system:
 // a secret is a Worker secret, so the named values come from the Worker env only, and nothing is read from disk.
-import { readFileSync } from "node:fs";
 
 export type Env = Record<string, string | undefined>;
 
@@ -18,7 +21,7 @@ function parse(env: Env): Map<string, string> {
   const file = env.WEFT_SECRETS_FILE;
   if (!file) return out;
   let text = "";
-  try { text = readFileSync(file, "utf8"); } catch { return out; }
+  try { text = fs().readFileSync(file, "utf8"); } catch { return out; }
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;

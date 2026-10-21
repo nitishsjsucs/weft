@@ -3,7 +3,6 @@
 // under .data/companies, and never touches .data/spend. On the durable platform (docs/cloudflare/design.md 4.6 and
 // 6.2) the seed generator never runs: reset goes through the platform's hosted reset (a delta reset or a full restore
 // of the slot's storage) with background work settled first, and only the rich profile exists there.
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -17,6 +16,10 @@ import type { Weft, WeftEnv } from "../http/context";
 import { viewerScope } from "../http/scope";
 import { SimResetBody } from "../../../../packages/contracts/src/ext/tour";
 import { HOSTED_ERRORS } from "../../../../packages/contracts/src/ext/cf-hosted";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 const AdvanceBody = z.union([
   z.object({ to: z.string() }).strict(),
@@ -53,7 +56,7 @@ function session(c: { var: { session: HumanSession | null } }): HumanSession {
 }
 
 /** Removes a directory tree, retrying while something still writes into it (ENOTEMPTY, EBUSY, EPERM). */
-const removeTree = (dir: string) => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
+const removeTree = (dir: string) => fs().rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
 
 /**
  * Lets background work started before the reset settle, so none of it writes into the world while it is rebuilt:

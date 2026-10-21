@@ -8,10 +8,13 @@
 //
 // The samples come from the repo on Node and from the platform's FixtureSource on the durable platform (./fixtures.ts).
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { NOTICE_FIXTURE_DIRS, noticeFixtureSource, onNoticeFixturesChanged } from "./fixtures";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 /** What the sidecar says. `kind` is free text on purpose: an upload may be a kind Weft does not handle. */
 export interface UploadExtract {
@@ -60,8 +63,8 @@ function sampleFiles(): { f: string; path: string; bytes: Buffer; sidecar: () =>
     });
   }
   const DIR = mailedDir();
-  return readdirSync(DIR).filter((x) => x.endsWith(".txt")).sort().map((f) => ({
-    f, path: join(DIR, f), bytes: readFileSync(join(DIR, f)), sidecar: () => readFileSync(join(DIR, `${f.slice(0, -4)}.json`), "utf8"),
+  return fs().readdirSync(DIR).filter((x) => x.endsWith(".txt")).sort().map((f) => ({
+    f, path: join(DIR, f), bytes: fs().readFileSync(join(DIR, f)), sidecar: () => fs().readFileSync(join(DIR, `${f.slice(0, -4)}.json`), "utf8"),
   }));
 }
 

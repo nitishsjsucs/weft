@@ -1,9 +1,12 @@
-import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "hono";
 import { ZodError } from "zod";
 import { Internal, isWeftError, NotFound, ValidationError, type ErrorBody } from "@weft/contracts";
 import type { WeftEnv } from "./context";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 /**
  * Where a 500's stack goes when the API runs under tests: `<dataDir>/run/errors.log` (vitest testMode, or the e2e
@@ -22,8 +25,8 @@ function logInternal(c: Context<WeftEnv>, text: string): void {
   if (weft?.platform?.kind === "durable") { if (!weft.testMode) console.error(text); else durableErrors.push(text.slice(0, 4000)); return; }
   if (underTest && weft?.dataDir && weft.dataDir !== ":memory:") {
     try {
-      mkdirSync(join(weft.dataDir, "run"), { recursive: true });
-      appendFileSync(join(weft.dataDir, ERROR_LOG), `${new Date().toISOString()} ${c.req.method} ${new URL(c.req.url).pathname}\n${text}\n\n`);
+      fs().mkdirSync(join(weft.dataDir, "run"), { recursive: true });
+      fs().appendFileSync(join(weft.dataDir, ERROR_LOG), `${new Date().toISOString()} ${c.req.method} ${new URL(c.req.url).pathname}\n${text}\n\n`);
     } catch { /* the data dir is gone (a test closed it); the 500 body still goes out */ }
   }
   if (!weft?.testMode) console.error(text);

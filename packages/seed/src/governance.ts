@@ -2,13 +2,16 @@
 // Principals, agent grants, ceilings, settings, vault secrets (through executor.vault.put), the demo API keys
 // (files mode 0600) and the memory repo init.
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 
 import { newId } from "@weft/core";
 import { agentGrants, apiKeys, companies, limits, principals, settings, workers } from "@weft/db";
 import type { SeedContext } from "./context";
+
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
 
 type G = "none" | "view" | "edit" | "approve";
 const grants = (g: Partial<Record<"people" | "payroll" | "tax" | "benefits" | "it" | "comms" | "company", G>>) =>
@@ -39,8 +42,8 @@ export function hashKey(plaintext: string): string { return createHash("sha256")
 export function newKeyPlaintext(): string { return `weft_sk_${randomBytes(24).toString("hex")}`; }
 
 function writeSecretFile(path: string, text: string): void {
-  writeFileSync(path, text + "\n", { mode: 0o600 });
-  chmodSync(path, 0o600);
+  fs().writeFileSync(path, text + "\n", { mode: 0o600 });
+  fs().chmodSync(path, 0o600);
 }
 
 export async function seedGovernance(ctx: SeedContext): Promise<void> {
@@ -75,7 +78,7 @@ export async function seedGovernance(ctx: SeedContext): Promise<void> {
   }
 
   // Demo API keys (SPEC 5.6): admin and mcp scope, principal Dana, files mode 0600. Only the hash is stored.
-  mkdirSync(ctx.dataDir, { recursive: true });
+  fs().mkdirSync(ctx.dataDir, { recursive: true });
   for (const k of [{ label: "demo", scope: "admin", surface: "api", file: "demo-api-key.txt" }, { label: "demo mcp", scope: "mcp", surface: "mcp", file: "demo-mcp-key.txt" }]) {
     const plaintext = newKeyPlaintext();
     const id = await newId(db, "key_");
