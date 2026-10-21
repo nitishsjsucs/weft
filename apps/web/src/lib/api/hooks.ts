@@ -3,8 +3,12 @@
 // invalidation after every mutation; mocks swap in through the client's fetch when NEXT_PUBLIC_WEFT_MOCKS=1.
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, buildPath, createClient, type CallOptions, type GetPath } from "./client";
+import { getVersion, invalidate, onInvalidate, subscribeVersion } from "./invalidate";
 import { mockFetch, mocksEnabled, PRINCIPALS } from "./mocks";
+import { scheduler, type Registration } from "./poll";
 import { setClockNow } from "@/components/app/format";
+import { HOSTED } from "@/lib/hosted/flags";
+import { hostedFetch } from "@/lib/hosted/fetch";
 
 export { PRINCIPALS };
 export type PrincipalId = (typeof PRINCIPALS)[number]["id"];
@@ -29,16 +33,26 @@ export function usePrincipal(): string {
   return useSyncExternalStore((cb) => { principalSubs.add(cb); return () => principalSubs.delete(cb); }, getPrincipal, () => DEFAULT_PRINCIPAL);
 }
 
-export const client = createClient({ principal: getPrincipal, ...(mocksEnabled ? { fetch: mockFetch } : {}) });
-export const rawFetch: typeof fetch = mocksEnabled ? mockFetch : (...a) => fetch(...a);
+// The hosted build's fetch (lib/hosted/fetch.ts) records x-weft-tables and handles the front Worker's gate answers
+// (428 human check and retry, lease required or ended); on Node the client uses the plain fetch as before.
+export const client = createClient({ principal: getPrincipal, ...(mocksEnabled ? { fetch: mockFetch } : HOSTED ? { fetch: hostedFetch } : {}) });
+export const rawFetch: typeof fetch = mocksEnabled ? mockFetch : HOSTED ? hostedFetch : (...a) => fetch(...a);
 
-// Global invalidation: every mutation bumps the version and each mounted query refetches.
-let version = 0;
-const versionSubs = new Set<() => void>();
-export function invalidate() { version++; versionSubs.forEach((f) => f()); }
-/** Runs `cb` after every invalidate() (a mutation anywhere in the app); returns the unsubscribe. */
-export function onInvalidate(cb: () => void): () => void { versionSubs.add(cb); return () => { versionSubs.delete(cb); }; }
-export function useVersion() { return useSyncExternalStore((cb) => { versionSubs.add(cb); return () => versionSubs.delete(cb); }, () => version, () => 0); }
+// Global invalidation (lib/api/invalidate.ts): every mutation bumps the version and each mounted query refetches.
+export { invalidate, onInvalidate };
+export function useVersion() { return useSyncExternalStore(subscribeVersion, getVersion, () => 0); }
+
+/**
+ * A hand-written poll loop that follows the hosted polling discipline (lib/api/poll.ts): `fire` runs every `baseMs`
+ * on Node exactly as a setInterval did; on the hosted build it pauses while hidden, backs off when idle and, with the
+ * change feed connected, runs only when a commit touches `url` (null: any commit) or the safety net picks it.
+ * Returns the stop function and a `ran` to call when it fetches for any other reason.
+ */
+export function startPoller(fire: () => void, baseMs: number, url: string | null): { stop: () => void; ran: () => void } {
+  if (!HOSTED) { const t = setInterval(fire, baseMs); return { stop: () => clearInterval(t), ran: () => {} }; }
+  const reg = scheduler().register({ url, baseMs, fire });
+  return { stop: () => reg.unregister(), ran: () => reg.ran() };
+}
 
 const cache = new Map<string, unknown>();
 
@@ -56,8 +70,10 @@ export function useGet<P extends GetPath>(path: P, opts: CallOptions & { refresh
   const optsRef = useRef({ params, query });
   optsRef.current = { params, query };
 
+  const pollRef = useRef<Registration | null>(null);
   useEffect(() => {
     if (!key) return;
+    pollRef.current?.ran();
     const ctrl = new AbortController();
     setState((s) => (s.key === key ? { ...s, loading: true } : { key, data: cache.get(key) as T | undefined, error: null, loading: true }));
     client.get(path, { ...optsRef.current, signal: ctrl.signal }).then(
@@ -69,8 +85,14 @@ export function useGet<P extends GetPath>(path: P, opts: CallOptions & { refresh
 
   useEffect(() => {
     if (!key || !refreshMs) return;
-    const t = setInterval(() => setTick((x) => x + 1), refreshMs);
-    return () => clearInterval(t);
+    if (!HOSTED) {
+      const t = setInterval(() => setTick((x) => x + 1), refreshMs);
+      return () => clearInterval(t);
+    }
+    // Hosted: the scheduler decides when (hidden, idle, change feed); the fetch effect above reports each fetch.
+    const reg = scheduler().register({ url: `/api${key}`, baseMs: refreshMs, fire: () => setTick((x) => x + 1) });
+    pollRef.current = reg;
+    return () => { reg.unregister(); if (pollRef.current === reg) pollRef.current = null; };
   }, [key, refreshMs]);
 
   const reload = useCallback(() => setTick((x) => x + 1), []);

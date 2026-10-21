@@ -7,7 +7,9 @@ import { CircleCheck, CircleDashed, Lock } from "lucide-react";
 import { Button, Card } from "@weft/ui/components";
 import { formatCents, W2_ONBOARDING_TID as T, type PortalTaskKind, type W2OnboardingPortalView } from "@weft/contracts";
 import { fmtDate } from "../app/format";
-import { ApiError, createClient } from "@/lib/api/client";
+import { ApiError, apiFetch, createClient } from "@/lib/api/client";
+import { HOSTED } from "@/lib/hosted/flags";
+import { bootSession } from "@/lib/hosted/session";
 import { WeftMark } from "@/components/app/weft-mark";
 import { PortalW3Sections } from "./w3-sections";
 import { PortalAskBox } from "./w4-ask";   // wave 4 (w4-parity-agent): the portal question box
@@ -43,6 +45,8 @@ function Submit({ busy, testId, children }: { busy: boolean; testId: string; chi
 }
 
 export function PortalView() {
+  // Hosted: the portal reads the same world as the app shell, so it starts the session read too (lib/hosted/session.ts).
+  useEffect(() => { if (HOSTED) bootSession(); }, []);
   const as = usePersona();
   const api = useMemo(() => createClient({ principal: () => as || null }), [as]);
   const [view, setView] = useState<View | null>(null);
@@ -169,7 +173,7 @@ function TaskPanel({ task, view, api, onDone }: { task: Task; view: View; api: A
   if (task.kind === "i9_sim") {
     return <I9Form busy={busy} nameField={nameField} errorLine={errorLine} onSubmit={(fd) => run(async () => {
       fd.set("typedName", name);
-      const res = await fetch("/api/v1/portal/i9", { method: "POST", headers: { "x-weft-principal": view.signer.principalId }, body: fd });
+      const res = await apiFetch("/api/v1/portal/i9", { method: "POST", headers: { "x-weft-principal": view.signer.principalId }, body: fd });
       const j = (await res.json().catch(() => ({}))) as { message?: string; _tag?: string };
       if (!res.ok) throw new ApiError(res.status, { _tag: (j._tag ?? "Refused") as never, message: j.message ?? res.statusText } as never);
     })} />;

@@ -9,6 +9,7 @@ import { CalendarHeart, CalendarPlus, MessageSquareHeart } from "lucide-react";
 import { Badge, Button, Card, CardHeading } from "@weft/ui/components";
 import { CHECKIN_QUESTIONS, LifeEventKind } from "@weft/contracts";
 import { fmtDate } from "../app/format";
+import { apiFetch } from "@/lib/api/client";
 
 /** Test ids for the e2e spec (e2e/gp20-people-life-events.spec.ts repeats the literals). */
 export const W4_PEOPLE_TID = {
@@ -55,10 +56,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function usePortal(principal: string) {
   const headers = useMemo(() => ({ "x-weft-principal": principal, accept: "application/json", "content-type": "application/json" }), [principal]);
   const get = useCallback(async <R,>(path: string): Promise<R | null> => {
-    try { const res = await fetch(`/api${path}`, { headers }); return res.ok ? ((await res.json()) as R) : null; } catch { return null; }
+    try { const res = await apiFetch(`/api${path}`, { headers }); return res.ok ? ((await res.json()) as R) : null; } catch { return null; }
   }, [headers]);
   const post = useCallback(async (path: string, body: unknown): Promise<{ ok: boolean; text: string }> => {
-    const res = await fetch(`/api${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+    const res = await apiFetch(`/api${path}`, { method: "POST", headers, body: JSON.stringify(body) });
     const b = (await res.json().catch(() => null)) as Body;
     if (!res.ok || !b?.ok) { const i = b?.issues?.[0] ?? b?.extra?.issues?.[0]; return { ok: false, text: i ? `${i.path}: ${i.message}` : b?.message ?? `Not saved (${res.status})` }; }
     return { ok: true, text: b.summary ?? "Saved" };

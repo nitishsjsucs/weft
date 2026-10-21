@@ -10,6 +10,7 @@ import { Receipt } from "lucide-react";
 import type { W3ExpensesPortalPage, W3ExpensesPortalRow } from "../../../../../../packages/contracts/src/ext/w3-expenses";
 import { CATEGORY_LABEL, RULE_LABEL, STATUS_LABEL, STATUS_TONE, usd } from "../../app/expenses/labels";
 import { fmtDate } from "../../app/format";
+import { apiFetch } from "@/lib/api/client";
 
 const field = "h-9 w-full rounded-lg border border-[var(--app-border)] bg-card px-3 text-2 outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]";
 const rateOn = (d: string) => EXPENSE_RATES.mileageCentsPerMileX10.find((r) => r.from <= d && d <= r.to)?.centsPerMileX10 ?? null;
@@ -34,7 +35,7 @@ export function ExpensesPortalSection({ principal }: { workerId: string; princip
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/portal/expenses", { headers });
+      const res = await apiFetch("/api/v1/portal/expenses", { headers });
       if (res.ok) setPage((await res.json()) as W3ExpensesPortalPage);
     } catch { /* the list stays as it was */ }
   }, [headers]);
@@ -42,7 +43,7 @@ export function ExpensesPortalSection({ principal }: { workerId: string; princip
 
   const send = async (fd: FormData, expenseId: string | null) => {
     setError(null); setDone(null);
-    const res = await fetch(expenseId ? `/api/v1/portal/expenses/${expenseId}/resubmit` : "/api/v1/portal/expenses", { method: "POST", headers, body: fd });
+    const res = await apiFetch(expenseId ? `/api/v1/portal/expenses/${expenseId}/resubmit` : "/api/v1/portal/expenses", { method: "POST", headers, body: fd });
     const body = (await res.json().catch(() => null)) as { ok?: boolean; summary?: string; message?: string; issues?: { path: string; message: string }[]; extra?: { issues?: { path: string; message: string }[] } } | null;
     if (!res.ok || !body?.ok) {
       const issue = body?.issues?.[0] ?? body?.extra?.issues?.[0];

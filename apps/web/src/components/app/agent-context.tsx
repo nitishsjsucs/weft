@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { client } from "@/lib/api/hooks";
+import { client, startPoller } from "@/lib/api/hooks";
+import { HOSTED } from "@/lib/hosted/flags";
 import { recentAgentRuns, routineIdOf } from "./agent/follow";
 
 /** `background` marks a routine run the panel picked up on its own (no click started it). */
@@ -79,10 +80,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch { /* the list may be unavailable for this viewer */ }
-      if (live) timer = setTimeout(() => void tick(), FOLLOW_MS);
+      if (live && !HOSTED) timer = setTimeout(() => void tick(), FOLLOW_MS);
     };
+    // Hosted: the poll scheduler runs the follower (paused while hidden, and on commits once the change feed is up).
+    let busy = false;
+    const poller = HOSTED ? startPoller(() => { if (busy) return; busy = true; poller?.ran(); void tick().finally(() => { busy = false; }); }, FOLLOW_MS, "/api/v1/agent/runs?limit=10") : null;
     void tick();
-    return () => { live = false; if (timer) clearTimeout(timer); };
+    return () => { live = false; if (timer) clearTimeout(timer); poller?.stop(); };
   }, []);
   const clear = useCallback(() => setThread([]), []);
   const value = useMemo(() => ({ open, setOpen, thread, push, watch, clear }), [open, thread, push, watch, clear]);
