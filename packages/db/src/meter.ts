@@ -47,7 +47,8 @@ export function createSqlMeter(): SqlMeterControl {
   return {
     async measure<T>(fn: () => Promise<T>) {
       const span = new Span();
-      const value = await spans.run([...(spans.getStore() ?? []), span], fn);
+      // Awaited inside the span's context: a drizzle query builder is a thenable that runs only when awaited.
+      const value = await spans.run([...(spans.getStore() ?? []), span], async () => await fn());
       return { value, usage: span.usage() };
     },
     totals: () => total.usage(),

@@ -121,7 +121,8 @@ function mapError(e: unknown): unknown {
   const message = e instanceof Error ? e.message : String(e);
   const parsed = parseWorkerdSuffix(message);
   if (!parsed) return e;
-  return new DurableDbError(parsed.code, `${parsed.code}: ${parsed.message}`, parsed.extendedCode, { cause: e });
+  // workerd places some errors (" at offset 7"); libsql's messages carry no offset, so the facade drops it.
+  return new DurableDbError(parsed.code, `${parsed.code}: ${parsed.message.replace(/ at offset \d+$/, "")}`, parsed.extendedCode, { cause: e });
 }
 
 // ---- the facade ---------------------------------------------------------------------------------------------------

@@ -244,6 +244,41 @@ export const CASES: ConformanceCase[] = [
     } },
   },
 
+  {
+    name: "facade result shapes and bindings, as libsql gives them",
+    covers: "the facade returns libsql's ResultSet (test/durable.test.ts compares libsql itself)",
+    async run(h) {
+      const { db } = facade(h);
+      const ins = await db.run(sql`INSERT INTO kv (k, v, n) VALUES ('a', '1', 7)`);
+      const cas = await db.run(sql`UPDATE kv SET v = '2' WHERE k = 'a' AND v = '1'`);
+      const miss = await db.run(sql`UPDATE kv SET v = '3' WHERE k = 'a' AND v = '1'`);
+      const sel = await db.run(sql`SELECT k, v, 1 AS k FROM kv`);
+      const returning = await db.insert(kv).values({ k: "b", v: "x", n: 2 }).returning();
+      const batch = await db.batch([db.insert(kv).values({ k: "c", v: "y" }), db.select().from(kv)]);
+      const bound = await db.all(sql`SELECT ${true} AS t, ${false} AS f, typeof(${3}) AS ty, ${3} || '' AS s, ${new Date(0)} AS d, ${5n} AS b, hex(${new Uint8Array([1, 2])}) AS hx, typeof(x'0a') AS bt`);
+      const dup = await db.run(sql`INSERT INTO kv (k, v) VALUES ('a', 'dup')`).then(() => null, (e: { cause?: { code?: string; extendedCode?: string; message?: string } }) => e.cause);
+      const missing = await db.run(sql`SELECT * FROM nope`).then(() => null, (e: { cause?: { code?: string; message?: string } }) => e.cause);
+      return {
+        ins: { rowsAffected: ins.rowsAffected, lastInsertRowid: String(ins.lastInsertRowid), columns: ins.columns },
+        cas: cas.rowsAffected, miss: miss.rowsAffected,
+        sel: { rowsAffected: sel.rowsAffected, lastInsertRowid: sel.lastInsertRowid ?? null, columns: sel.columns, row: { ...sel.rows[0] }, length: sel.rows[0]!.length, indexed: Array.prototype.slice.call(sel.rows[0]) },
+        returning, batch: batch.map((x) => (Array.isArray(x) ? x.length : (x as { rowsAffected: number }).rowsAffected)), bound,
+        dup: { code: dup?.code, extendedCode: dup?.extendedCode, message: dup?.message },
+        missing: { code: missing?.code, message: missing?.message },
+      };
+    },
+    expect: { ok: true, value: {
+      ins: { rowsAffected: 1, lastInsertRowid: "1", columns: [] },
+      cas: 1, miss: 0,
+      sel: { rowsAffected: 0, lastInsertRowid: null, columns: ["k", "v", "k"], row: { k: "a", v: "2" }, length: 3, indexed: ["a", "2", 1] },
+      returning: [{ k: "b", v: "x", n: 2 }],
+      batch: [1, 3],
+      bound: [{ t: 1, f: 0, ty: "real", s: "3.0", d: 0, b: 5, hx: "0102", bt: "blob" }],
+      dup: { code: "SQLITE_CONSTRAINT", extendedCode: "SQLITE_CONSTRAINT_PRIMARYKEY", message: "SQLITE_CONSTRAINT: UNIQUE constraint failed: kv.k" },
+      missing: { code: "SQLITE_ERROR", message: "SQLITE_ERROR: no such table: nope" },
+    } },
+  },
+
   // ---- negative shapes: unreachable through the facade, pinned here --------------------------------------------
   {
     name: "raw linear begin and commit hangs and resets",
