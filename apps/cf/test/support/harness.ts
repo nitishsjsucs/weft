@@ -1,14 +1,16 @@
 // The Miniflare suite's harness (design 11.4): wrangler's createTestHarness running both Workers from the real
 // wrangler configs, rewritten for a local run. The rewrite points weft-core at the test entry (fake engine) or the
 // real one, swaps the bindings Miniflare does not emulate locally (Workers AI, Vectorize, Browser Run) for the fakes
-// worker, uses Turnstile's published test secret, a test origin and random secrets, and serves a small assets
-// directory. Everything else (Durable Objects across scripts, the Workflow, queues, KV, D1, R2, the Rate Limiting
-// bindings, the cron trigger and the service binding) is exactly what the configs declare.
+// worker, uses Turnstile's published test secret against a local siteverify stub (siteverify-stub.ts, so the suite
+// needs no network), a test origin and random secrets, and serves a small assets directory. Everything else (Durable
+// Objects across scripts, the Workflow, queues, KV, D1, R2, the Rate Limiting bindings, the cron trigger and the
+// service binding) is exactly what the configs declare.
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createTestHarness, type TestHarness, type WorkerHandle } from "wrangler";
 import { signAdmin, signSmoke } from "../../src/shared/tokens";
+import { SiteverifyStub } from "./siteverify-stub";
 import { CF_DIR, REPO } from "./config-files";
 import { writeLocalConfigs } from "../../../../scripts/cf/lib/configs";
 import { applyLocalD1 } from "../../../../scripts/cf/lib/d1-local";
@@ -35,6 +37,8 @@ export interface HarnessOptions {
   assets?: Record<string, string>;
   /** Extra run_worker_first patterns (the [id] shell fallback case). */
   runWorkerFirst?: string[];
+  /** Verify against Cloudflare's real siteverify instead of the local stub (the one opt-in network case). */
+  realSiteverify?: boolean;
 }
 
 export interface Secrets { session: string; ctx: string; proxy: string; smoke: string; admin: string; vault: string }
@@ -64,10 +68,11 @@ export interface RequestOpts { ip?: string; jar?: CookieJar; origin?: string | n
 export class Harness {
   front!: WorkerHandle;
   core!: WorkerHandle;
-  private constructor(readonly server: TestHarness, readonly secrets: Secrets, readonly dir: string) {}
+  private constructor(readonly server: TestHarness, readonly secrets: Secrets, readonly dir: string, readonly siteverify: SiteverifyStub | null) {}
 
   static async start(o: HarnessOptions = {}): Promise<Harness> {
     const id = `${process.pid}-${++seq}-${Date.now().toString(36)}`;
+    const siteverify = o.realSiteverify ? null : await SiteverifyStub.start();
     const dir = join(REPO, ".scratch", "cf4-worker", "harness", id);
     mkdirSync(join(dir, "assets"), { recursive: true });
     const rand = () => randomBytes(32).toString("hex");
@@ -77,7 +82,8 @@ export class Harness {
 
     const paths = writeLocalConfigs({
       dir, engine: o.engine ?? "fake", origin: ORIGIN, poolSize: o.poolSize, assetsDir: join(dir, "assets"),
-      runWorkerFirst: o.runWorkerFirst, coreVars: o.coreVars, frontVars: o.frontVars, configMemoMs: 200,
+      runWorkerFirst: o.runWorkerFirst, coreVars: o.coreVars, configMemoMs: 200,
+      frontVars: { ...(siteverify ? { TURNSTILE_VERIFY_URL: siteverify.url } : {}), ...o.frontVars },
     });
 
     const shared = { WEFT_SESSION_SECRET: secrets.session, WEFT_CTX_SECRET: secrets.ctx, WEFT_PROXY_SECRET: secrets.proxy };
@@ -90,7 +96,7 @@ export class Harness {
       ],
     });
     await server.listen();
-    const h = new Harness(server, secrets, dir);
+    const h = new Harness(server, secrets, dir, siteverify);
     h.front = server.getWorker("weft");
     h.core = server.getWorker("weft-core");
     // weft-ops: Miniflare creates the D1 database empty (the extras' job ledger and run catalog live there).
@@ -104,7 +110,10 @@ export class Harness {
   }
 
   async close(): Promise<void> {
-    try { await this.server.close(); } finally { rmSync(this.dir, { recursive: true, force: true }); }
+    try { await this.server.close(); } finally {
+      rmSync(this.dir, { recursive: true, force: true });
+      await this.siteverify?.close();
+    }
   }
 
   /** A request to the front Worker as a browser would send it (Origin set on mutations, the jar's cookies). */
@@ -170,8 +179,14 @@ export class Visitor {
   fetch(path: string, init: RequestInit = {}, o: Omit<RequestOpts, "jar" | "ip"> = {}): Promise<Response> {
     return this.h.fetch(path, init, { ...o, ip: this.ip, jar: this.jar });
   }
+  /** POST /api/_session/lease with the dummy token. A refusal (a failed siteverify above all) fails the case here. */
   async lease(): Promise<{ status: string; slot?: string; gen?: number; position?: number }> {
     const r = await this.fetch("/api/_session/lease", { method: "POST", body: JSON.stringify({ token: TURNSTILE.dummyToken }) });
+    if (!r.ok) {
+      const text = await r.text();
+      const via = this.h.siteverify ? `the siteverify stub (${this.h.siteverify.calls.at(-1)?.secretKind ?? "not called"})` : "Cloudflare's siteverify";
+      throw new Error(`lease answered ${r.status} ${text.slice(0, 200)}; Turnstile was checked against ${via}`);
+    }
     return r.json() as never;
   }
   json<T = unknown>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T; res: Response }> {

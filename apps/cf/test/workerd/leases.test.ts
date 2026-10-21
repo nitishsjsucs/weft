@@ -131,6 +131,7 @@ describe("leases", () => {
     expect(over).toMatchObject({ status: "ip_limit" });
     expect((await h.visitor("192.0.2.78").lease()).status).toBe("leased");
   });
+
 });
 
 describe("the showcase", () => {

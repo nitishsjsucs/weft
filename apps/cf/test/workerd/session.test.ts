@@ -1,6 +1,7 @@
-// Design 11.4: Turnstile with Cloudflare's published test secrets (1x...AA passes, 2x...AA fails), the session and
-// human-grant cookies, a tampered cookie gets 401, mutations need a lease and a fresh grant (428), cross-origin
-// mutations are refused, and the kill switch answers model-calling admissions 503.
+// Design 11.4: Turnstile with Cloudflare's published test secrets (1x...AA passes, 2x...AA fails) against the local
+// siteverify stub (one opt-in case asks Cloudflare's real endpoint), the session and human-grant cookies, a tampered
+// cookie gets 401, mutations need a lease and a fresh grant (428), cross-origin mutations are refused, and the kill
+// switch answers model-calling admissions 503.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HOSTED_CONFIG_KEYS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, type SessionStatus } from "../../src/shared/contracts";
 import { Harness, TURNSTILE } from "../support/harness";
@@ -34,6 +35,28 @@ describe("session and Turnstile", () => {
     const st = await v.json<SessionStatus>("/api/_session");
     expect(st.body).toMatchObject({ world: "slot", lease: { slot: body.slot, gen: body.gen }, agentEnabled: true, pool: { size: 12 } });
     expect(st.body.grantExpiresAt).not.toBeNull();
+  });
+
+  it("verifies against the local siteverify stub: the visitor's IP, the test secret, a fresh UUID key per check", async () => {
+    const stub = h.siteverify!;
+    const before = stub.calls.length;
+    const v = h.visitor("198.51.100.199");
+    await v.lease();
+    expect((await v.fetch("/api/_session/verify", { method: "POST", body: JSON.stringify({ token: TURNSTILE.dummyToken }) })).status).toBe(200);
+    const calls = stub.calls.slice(before);
+    expect(calls).toHaveLength(2);
+    for (const c of calls) {
+      expect(c).toMatchObject({ secretKind: "pass", response: TURNSTILE.dummyToken, remoteip: "198.51.100.199" });
+      expect(c.idempotencyKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    }
+    expect(calls[0]!.idempotencyKey).not.toBe(calls[1]!.idempotencyKey);
+  });
+
+  it("refuses a token the test secret does not accept (only the dummy token passes)", async () => {
+    const r = await h.visitor().fetch("/api/_session/lease", { method: "POST", body: JSON.stringify({ token: "a.real.looking.token" }) });
+    expect(r.status).toBe(403);
+    expect(await r.json()).toMatchObject({ code: "TURNSTILE_FAILED" });
+    expect(r.headers.getSetCookie()).toEqual([]);
   });
 
   it("returns the same lease when the visitor starts again", async () => {
@@ -120,6 +143,18 @@ describe("session and Turnstile", () => {
   }, 120_000);
 });
 
+// Opt-in (WEFT_CF_REAL_SITEVERIFY=1, needs outbound HTTPS from workerd): the same lease against Cloudflare's own
+// siteverify with the always-pass test secret, so the stub's semantics stay pinned to the real endpoint.
+describe.skipIf(process.env.WEFT_CF_REAL_SITEVERIFY !== "1")("Turnstile against Cloudflare's siteverify", () => {
+  let r: Harness;
+  beforeAll(async () => { r = await Harness.start({ realSiteverify: true, poolSize: 1 }); await r.provision(); });
+  afterAll(async () => { await r?.close(); });
+
+  it("leases with the always-pass test secret and the dummy token", async () => {
+    expect(await r.visitor().lease()).toMatchObject({ status: "leased", slot: "slot-1" });
+  });
+});
+
 describe("Turnstile failing secret", () => {
   let f: Harness;
   beforeAll(async () => { f = await Harness.start({ turnstileSecret: TURNSTILE.failSecret }); });
@@ -130,5 +165,10 @@ describe("Turnstile failing secret", () => {
     expect(r.status).toBe(403);
     expect(await r.json()).toMatchObject({ code: "TURNSTILE_FAILED", _tag: "Forbidden" });
     expect(r.headers.getSetCookie()).toEqual([]);
+    expect(f.siteverify!.calls.at(-1)).toMatchObject({ secretKind: "fail" });
+  });
+
+  it("fails a lease helper loudly, naming the siteverify that refused", async () => {
+    await expect(f.visitor().lease()).rejects.toThrow(/lease answered 403 .*TURNSTILE_FAILED.*siteverify stub \(fail\)/);
   });
 });
