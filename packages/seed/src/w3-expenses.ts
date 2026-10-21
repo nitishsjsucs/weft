@@ -5,7 +5,7 @@
 // Never change wave 1 or wave 2 seed counts and never touch processed runs: nothing is attached to a run here, so the
 // open draft pay_2026_10_30 is unchanged. The approved history was imported as approved from the previous expense tool
 // and waits for the next draft Weft creates (expenses.schedule on payroll.draft_created).
-import { crc32, deflateSync } from "node:zlib";
+import { crc32, inflateSync } from "node:zlib";
 import { eq } from "drizzle-orm";
 import { W3_CEILINGS, type ExpenseCategory } from "@weft/contracts";
 import { expensePolicies, expenses, limits, uploads } from "@weft/db";
@@ -53,6 +53,27 @@ export const SEED_EXPENSES: readonly SeedExpense[] = [
   { key: "D2", workerId: "wrk_0024", category: "travel", merchant: "Cityride Taxi (demo)", amountCents: 12_600, transactionDate: "2026-10-05", submittedAt: "2026-10-06T13:00:00.000Z", purpose: "Taxi to the airport", status: "declined", decided: { at: "2026-10-07T16:00:00.000Z", by: "usr_dana", reason: "no_receipt", note: "No receipt after two reminders." } },
 ];
 
+/**
+ * The IDAT (zlib, level 9) of each receipt image, indexed by seed % 11 (the only part of the seed the pixels use), as
+ * canonical zlib writes it. Node's own deflateSync is not byte-stable across builds: the nodejs.org binaries bundle
+ * Chromium's zlib, whose 4-byte match hash writes different valid streams for patterns 2 and 9, while the digests the
+ * tests and eval worlds pin were made on a Node that writes canonical streams. Pinned bytes keep every digest the same
+ * on every Node; inflateSync proves they still hold the pixels.
+ */
+const RECEIPT_IDAT: readonly string[] = [
+  "78da63f88f0618feff3780008400860a5c5aa0da88d6825f054e5bc8739801295ac87318441b0033911188",
+  "78da63f88f0618feff3730304015c050814d8b01421b295aa0da88d6429ec30cc8739801295ae0020009021662",
+  "78da63f88f0618feff378003a800860a6c5a08a8c0650b195aa0da88d6429ec30cc87318501b0081f51257",
+  "78da63f88f0618feff37000324010c1538b4c0b411ab85800a5cb690e7300352b490e730a83600bd5e1731",
+  "78da63f88f0618feff37304013c05081450b0890a105a68d582de439cc803c871990a20521000097a91c0b",
+  "78da63f88f0618feff3780019800860a2c5a08a9c0610b195a60da88d5429ec30cc87318481b000ca01800",
+  "78da63f88f0618feff37000164010c15d8b5c0b511a985900a1cb690e7300352b490e7309836004ce31cda",
+  "78da63f88f0618feff37400260010c15d8b5e05581db1652b4105281c316f21c66408a16240100428118cf",
+  "78da63f88f0618feff378002b800860a9c5a20da88d78257056e5b48d14248050e5bc87318581b00791b14c4",
+  "78da63f88f0618feff37000214010c1558b520b491a405a28d782de439cc80142d8454e0b00526000083f5199e",
+  "78da63f88f0618feff3740008800860aac5af0abc0690b195a20da88d7429ec30c48d1822c00003b451593",
+];
+
 /** A tiny deterministic PNG (16 x 20, grayscale, a few dark "text" rows that differ per receipt). */
 export function receiptPng(seed: number): Buffer {
   const w = 16, h = 20;
@@ -67,8 +88,10 @@ export function receiptPng(seed: number): Buffer {
     const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td) >>> 0);
     return Buffer.concat([len, td, crc]);
   };
+  const idat = Buffer.from(RECEIPT_IDAT[seed % 11]!, "hex");
+  if (!inflateSync(idat).equals(raw)) throw new Error(`receiptPng(${seed}): the pinned IDAT does not hold this receipt's pixels`);
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 0; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0))]);
 }
 
 export async function seedW3Expenses(ctx: SeedContext): Promise<void> {
