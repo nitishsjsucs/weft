@@ -1,0 +1,669 @@
+{
+ "note": "Free-plan account probe (measured on account dc93c3bc... 2026-10-20, all probe resources deleted), Cloudflare product research with sources, and the Node-to-Workers porting seam map. Inputs to docs/cloudflare/design.md.",
+ "probe": {
+  "summary": "I tested every listed Cloudflare product on account dc93c3bc… by experiment, using CF_SETUP_TOKEN. It is an account-owned token, so it verifies through /accounts/{id}/tokens/verify. The account is on Workers Free: no Workers Paid subscription and usage_model is standard. One Worker, weft-probe, ran a SQLite-backed Durable Object, a Workflow, static assets, KV, D1, R2, a Queue producer and consumer, Vectorize, Workers AI, AI Gateway, the Rate Limiting binding, Secrets Store, the Browser binding, a cron trigger and Workers Logs. A second Worker, weft-probe-size, tested bundle size.\n\nCPU findings:\n- **Worker requests and Workflow steps:** the docs say 10 ms on Free, but in practice an isolate gets some flexibility. Requests up to 870 ms of CPU succeeded. Requests were killed at 1.78 s and 2.01 s (HTTP 503, error 1102). Workflow steps up to 722 ms succeeded, and steps were killed at 2.05 s.\n- **Durable Objects:** both the fetch handler and alarms get the full 30 s per invocation even on Free. 6.9 s (fetch) and 9.8 s (alarm) succeeded. Runs were killed at about 29.4 to 32.5 s, and the killed alarm was retried automatically.\n- **Bundle size:** the 3 MiB compressed limit is gone. Uploads of 3.2, 5.2 and 10.35 MiB of incompressible data all deployed. The docs (updated 2026-10-12) now say 64 MiB uncompressed, with no compressed limit.\n\nProduct availability:\n- **Work on Free:** Static assets, KV, D1, R2, Queues, Workflows, DO SQLite, Vectorize, Workers AI (gpt-oss-120b, bge-m3, bge-base, mistral-small-3.1 vision, whisper), AI Gateway (logs and cache confirmed), AI Search, Browser Rendering (REST and binding), the Rate Limiting binding, Turnstile (widget created through the API), Cron Triggers, Workers Logs, Secrets Store (one store per account) and Hyperdrive.\n- **Needs a one-time dashboard step:** Analytics Engine (error 10089). I did not enable it.\n- **Paid-only:** Containers and Pipelines.\n\nOther limits that matter for the agent: each Worker or Durable Object invocation can make only 50 external fetches, and the 51st fails. The Rate Limiting binding only loosely enforces limits across requests.\n\nThe token had every permission these tests needed. All weft-probe-* resources were deleted, and an API listing confirmed none remain. The four existing apps and staysignal-demo were not touched.",
+  "items": [
+   {
+    "name": "Worker CPU limit (fetch handler)",
+    "verdict": "measured",
+    "detail": "Docs: 10 ms on Free, plus 'built-in flexibility' for occasional overruns. The burn loop runs at about 90k iterations/ms cold and about 350k/ms warm on Cloudflare (about 600k/ms on the M5). Recorded CPU per invocation, all successful: 5 ms tier 3.4/7.6/6.7 ms; 20 ms tier 13.9/11.8/17.7; 50 ms tier 17.7/31.1/10.7; 200 ms tier 220.4/38.5/164.8; 1000 ms tier 870.5/257.8/761.1; 3e8 iterations 629.7 ms; ten back-to-back 60M-iteration calls 125-534 ms, all OK. Killed: 1,779.6 ms and 2,010.0 ms CPU, giving HTTP 503 'error code: 1102', GraphQL status exceededResources, Logs outcome exceededCpu. In practice the kill point was about 1.8-2.0 s, but anything over 10 ms is undocumented leniency.",
+    "source": "curl /api/burn?n=...; GraphQL workersInvocationsAdaptive (dimensions.datetime, sum.cpuTimeUs, max.cpuTime, status); Workers Logs $workers.cpuTimeMs"
+   },
+   {
+    "name": "Durable Object CPU limit (fetch handler)",
+    "verdict": "measured",
+    "detail": "Free plan gets the 30 s per-invocation limit, not 10 ms. Per-call CPU from Logs: 5 ms tier 13/4/4 ms; 20 ms tier 22/17/10; 50 ms tier 46/41; 200 ms tier 151/113/39; 1000 ms tier 867/869/1153; 3e8 iterations 3,190 ms; 1e9 iterations 6,900 ms, all OK. Killed: 3e9 at 29,383 ms and 1e10 at 32,000 ms. The client saw 500 'Durable Object storage operation exceeded timeout which caused object to be reset.' (remote=true, overloaded=true) and Logs reported exceededWallTime. Per-object totals in durableObjectsPeriodicGroups.cpuTime agree: burn-5 21.96 ms for 3 calls, burn-20 49.8, burn-50 103.3, burn-200 303.7, burn-1000 1153.8, burn-big 3190.4, burn-big3 29383, burn-big4 32000. durableObjectsInvocationsAdaptiveGroups came back empty for this window.",
+    "source": "curl /api/do/burn?n=..&obj=burn-<tier>; GraphQL durableObjectsPeriodicGroups; Workers Logs telemetry query"
+   },
+   {
+    "name": "Durable Object alarm CPU limit",
+    "verdict": "measured",
+    "detail": "Alarm CPU (Logs): 8, 23, 33, 171, 860 and 9,805 ms all completed on retryCount 0. The 1e10 alarm hit exceededCpu at 32,000 / 30,000 / 30,000 / 32,500 ms with 'Durable Object exceeded its CPU time limit and was reset.' (exceededCpuErrors 2+1 in periodic groups). It retried automatically about 37-47 s apart (retryCount 1-3) until I overwrote it with n=0, and it then finished as retry 4. Rows written before 'await ctx.storage.sync()' survived each reset. While an alarm is burning CPU, fetches to that object queue behind it or fail ('Network connection lost', or the reset error).",
+    "source": "curl /api/do/alarm?n=..&obj=alarm-<tier> then /api/do/log; Workers Logs eventType=alarm; GraphQL durableObjectsPeriodicGroups.exceededCpuErrors"
+   },
+   {
+    "name": "DO SQLite transactionSync rollback",
+    "verdict": "measured",
+    "detail": "Inside transactionSync, two inserts made 3 rows visible; then a throw. After the throw only the 'outside' row remained (rolled back). A following transactionSync commit persisted ('outside','committed'). CPU 2 ms.",
+    "source": "curl /api/do/tx?obj=tx-test"
+   },
+   {
+    "name": "DO SQLite database size and SQL limits",
+    "verdict": "measured",
+    "detail": "Wrote 15 MiB of randomblob(262144) rows into one object: five 1 MiB requests, then one 10 MiB request using 42 ms CPU. sql.databaseSize went from 20,480 to 15,798,272 bytes with no errors. A 120,000-char SQL statement failed with 'statement too long: SQLITE_TOOBIG'; 90,000 chars worked. A 2.5 MB bound string argument and a 3,000,000-byte zeroblob row both worked. Docs: 1 GB per object and 5 GB per account on Free.",
+    "source": "curl /api/do/fill?mb=..&kind=random; /api/do/sqlbig; developers.cloudflare.com/durable-objects/platform/limits"
+   },
+   {
+    "name": "Workflows (CPU-heavy step)",
+    "verdict": "limited",
+    "detail": "Available on Free. Step CPU (Logs eventType=workflow): 8 ms, 224 ms and 722 ms instances completed. The 7 s and 30 s targets errored at 2,050 ms CPU with 'Worker exceeded CPU time limit.' (exceededCpu, retries limit 0). Same practical ceiling as a Worker (about 2 s); docs say 10 ms per step on Free, 100 concurrent instances, 1,024 steps, 3-day state retention. The binding create/get/status calls worked.",
+    "source": "curl /api/wf/start, /api/wf/status; npx wrangler workflows instances describe; Workers Logs"
+   },
+   {
+    "name": "Worker bundle size limit",
+    "verdict": "measured",
+    "detail": "No size error was triggered. Incompressible Data-module Workers of 3,222.89 KiB (gzip 3,223.90), 5,176.02 KiB (gzip 5,177.62) and 10,351.80 KiB (gzip 10,354.98) all deployed and served the right byte count. Docs updated 2026-10-12: Worker size is 64 MiB uncompressed on Free and Paid, with 'no compressed size limit'. The old 3 MiB Free limit no longer applies. I stopped at 10.35 MiB.",
+    "source": "npx wrangler deploy (weft-probe-size); developers.cloudflare.com/workers/platform/limits/index.md"
+   },
+   {
+    "name": "Subrequests per invocation",
+    "verdict": "limited",
+    "detail": "In both a Worker and a DO fetch, 50 external fetches succeeded and the 51st threw 'Too many subrequests by single Worker invocation...'. Docs: Free allows 50 external and 1,000 to Cloudflare services per invocation, and 50 D1 queries per invocation. An agent loop making many model or tool fetches has to split work across invocations (for example DO alarms or Queue messages).",
+    "source": "curl /api/subreq?n=55 and /api/do/subreq?n=55"
+   },
+   {
+    "name": "Workers static assets",
+    "verdict": "available",
+    "detail": "Uploaded 1 asset; / served index.html and /api/* ran the Worker first (run_worker_first). Docs: 20,000 files per version and 25 MiB per file on Free.",
+    "source": "npx wrangler deploy with assets.directory; curl /"
+   },
+   {
+    "name": "KV",
+    "verdict": "available",
+    "detail": "Created namespace weft-probe-kv (id 9577d997...). Binding put with expirationTtl, get and list all worked. Deleted.",
+    "source": "npx wrangler kv namespace create/delete; curl /api/kv"
+   },
+   {
+    "name": "D1",
+    "verdict": "available",
+    "detail": "Created weft-probe-d1 (region WNAM). exec, prepare/bind/run and batch worked; meta showed served_by v3-prod, colo SJC, sql_duration 0.30 ms. sqlite_version() is blocked ('not authorized to use function'). The account already has 7 D1 databases against a Free cap of 10 per account (500 MB each, 5 GB total).",
+    "source": "npx wrangler d1 create/delete; curl /api/d1; D1 limits doc"
+   },
+   {
+    "name": "R2",
+    "verdict": "available",
+    "detail": "Bucket creation asked for nothing; put, get and list through the binding worked, and wrangler r2 object put worked. The subscriptions API already shows an 'R2 Paid' rate plan (price 0, usage-metered) plus the existing peopledesk-policies bucket, so R2 was enabled before this test. Usage past the R2 free tier would be metered under that plan. I added no payment method and changed no billing.",
+    "source": "npx wrangler r2 bucket create/delete; GET /accounts/{id}/subscriptions (read-only); curl /api/r2"
+   },
+   {
+    "name": "Queues (producer and consumer)",
+    "verdict": "available",
+    "detail": "weft-probe-q: send plus sendBatch of 2; the consumer (max_batch_timeout 2 s) received all 3 messages about 3.3-3.6 s later with attempts=1. Deleting a Worker that consumes a queue is refused with code 10064 until the consumer is removed.",
+    "source": "npx wrangler queues create/consumer remove/delete; curl /api/q/send; DO queue-log"
+   },
+   {
+    "name": "Durable Objects SQLite",
+    "verdict": "available",
+    "detail": "new_sqlite_classes migration deployed; namespace weft-probe_ProbeDO (use_sqlite true). idFromName stubs, sql.exec, the KV-style put/get, setAlarm, storage.sync and transactionSync all worked. Free plan allows SQLite backend only (docs).",
+    "source": "npx wrangler deploy; GET /workers/durable_objects/namespaces"
+   },
+   {
+    "name": "Vectorize",
+    "verdict": "available",
+    "detail": "Created weft-probe-vec (768 dims, cosine). Upserted 3 bge-base-en-v1.5 vectors, which returned a mutationId. Queries returned 0 matches for about 1-3 minutes, then vectorCount 3, and the query 'when do we pay salaries' ranked p0 'Payroll run for October' at 0.708. Free: 100 indexes per account. Deleted.",
+    "source": "npx wrangler vectorize create/delete; curl /api/vec, /api/vec/query"
+   },
+   {
+    "name": "Workers AI",
+    "verdict": "available",
+    "detail": "73 models listed. @cf/openai/gpt-oss-120b: yes; Responses-API shaped output, 532 ms, 2.26 neurons for 75 in / 28 out tokens. gpt-oss-20b: yes. @cf/baai/bge-m3: yes, 1024 dims. bge-base-en-v1.5: yes, 768 dims. Vision for receipts: mistral-small-3.1-24b-instruct (no license-terms flag) read a rendered receipt PNG correctly (merchant, date, total 10.62) in 1.07 s for 10.1 neurons. llama-4-scout-17b-16e-instruct was also correct (1.9 s, 22 neurons). llama-3.2-11b-vision-instruct exists but carries a Meta license (needs an agree step, so I did not use it). llava-1.5-7b (beta) and moondream3.1 also exist; gemma-3-12b-it does not. Whisper: @cf/openai/whisper, whisper-large-v3-turbo and whisper-tiny-en exist, and both whisper and turbo transcribed a 3 s TTS clip correctly. Also deepgram nova-3, aura-1/2 and melotts. Qwen3 models are present (qwen3-30b-a3b-fp8).",
+    "source": "GET /accounts/{id}/ai/models/search; env.AI.run via /api/ai/chat, /api/ai/vision, /api/ai/embed; POST /ai/run/@cf/openai/whisper*"
+   },
+   {
+    "name": "AI Gateway",
+    "verdict": "available",
+    "detail": "Created weft-probe-gw (collect_logs on, cache_ttl 300, rate limit 20 per 60 s sliding). Calling gpt-oss-120b through the binding with {gateway:{id}} took 1,175 ms and returned env.AI.aiGatewayLogId. An identical second call came from cache: log cached=true, 22 ms, cost 0, same response id. The logs API returned 3 entries with status, duration and cost estimates (tokens show 0 for the gpt-oss Responses format). The account already has gateways default, peopledesk and agentboard. Free: 10 gateways, 100,000 stored logs per account (shared). I did not test OpenAI pass-through. Deleted.",
+    "source": "POST/DELETE /accounts/{id}/ai-gateway/gateways; GET .../gateways/weft-probe-gw/logs; curl /api/ai/chat?gw=weft-probe-gw"
+   },
+   {
+    "name": "AI Search (AutoRAG)",
+    "verdict": "available",
+    "detail": "The account already runs peopledesk-policies. I created weft-probe-rag (type r2, source weft-probe-r2, include docs/**) reusing the existing AI Search service token. It used embedding @cf/qwen/qwen3-embedding-0.6b and ai_gateway_id default. A sync started automatically on creation; a manual POST /jobs returned 7020 sync_in_cooldown. One 265-byte file was indexed in about 2.5 minutes, and the search 'how many PTO days carry over' returned the right chunk (score 0.69, vector only; keyword hits 0). Deleted.",
+    "source": "GET/POST/DELETE /accounts/{id}/ai-search/instances; /items; /jobs; POST /search"
+   },
+   {
+    "name": "Browser Rendering",
+    "verdict": "limited",
+    "detail": "REST /pdf rendered a 1-page PDF (19,680 bytes, 1.94 s, x-browser-ms-used 129). A second REST call about 1 s later got 429 (code 2001 'Rate limit exceeded', retry-after 10); after waiting 12 s, /screenshot returned a 400x380 PNG. The Workers binding (shown as 'Browser Run', @cloudflare/puppeteer 1.4.0) rendered a PDF in 3.3 s; with puppeteer the bundle was 698 KiB (138 KiB gzip).",
+    "source": "POST /accounts/{id}/browser-rendering/pdf and /screenshot; curl /api/br/pdf"
+   },
+   {
+    "name": "Analytics Engine",
+    "verdict": "unavailable",
+    "detail": "Not enabled on this account. Deploying with analytics_engine_datasets failed: 'You need to enable Analytics Engine. Head to the Cloudflare Dashboard to enable: https://dash.cloudflare.com/dc93c3bc8aa4f9e09a0d7e7354a80873/workers/analytics-engine [code: 10089]'. The SQL API returned 'Authorization error' even though the token has Account Analytics Read. Nitish has to opt in once in the dashboard; I did not, because it is an account setting. No dataset was created.",
+    "source": "npx wrangler deploy; POST /accounts/{id}/analytics_engine/sql"
+   },
+   {
+    "name": "Rate Limiting binding",
+    "verdict": "limited",
+    "detail": "Configured limit 5 per 10 s. Within one invocation, 20 calls gave 6 allowed then blocked (TTTTTTFFFFFFFFFFFFFF), and the next request was fully blocked (FFFFF). Across separate HTTP requests it is loose: 25 sequential requests in about 8 s gave 23 allowed and 2 blocked; 25 requests at concurrency 10 gave 22 allowed and 3 blocked. It is per location and eventually consistent, so it works as a coarse per-IP throttle but not as a quota; spend caps have to be enforced in a Durable Object.",
+    "source": "curl /api/rl?key=..&count=..; xargs -P 10 burst"
+   },
+   {
+    "name": "Turnstile",
+    "verdict": "available",
+    "detail": "The token's Turnstile Sites Write permission was enough to create a managed widget weft-probe-ts by API with domain weft-probe.nitish-ratakonda.workers.dev (the workers.dev hostname was accepted). The account had 0 widgets beforehand. siteverify with the real secret and a dummy token returned success=false, invalid-input-response. The test secrets 1x0000…AA (pass) and 2x0000…AA (fail) behaved as expected from the Worker. The secret was never printed. Deleted.",
+    "source": "GET/POST/DELETE /accounts/{id}/challenges/widgets; POST challenges.cloudflare.com/turnstile/v0/siteverify"
+   },
+   {
+    "name": "Cron Triggers",
+    "verdict": "available",
+    "detail": "Before the probe the account used 1 cron trigger (placessync-production, */2 * * * *) against a Free cap of 5. The probe's '* * * * *' was registered at 23:53:30 and first fired with scheduledTime 23:59:11 (about 5m40s propagation), then every minute. Docs: 10 ms CPU per cron run on Free. After cleanup the count is back to 1.",
+    "source": "GET /workers/scripts/{name}/schedules for every script; DO cron-log"
+   },
+   {
+    "name": "Workers Logs",
+    "verdict": "available",
+    "detail": "observability.enabled with head_sampling_rate 1. The telemetry query (dataset cloudflare-workers, filter $metadata.service) returned per-invocation events for fetch, alarm, workflow, queue and scheduled. Each has $workers.cpuTimeMs, wallTimeMs, outcome (ok, exceededCpu, exceededWallTime, canceled, exception), entrypoint and scriptVersion. This was the most reliable per-request CPU source. Events include the client IP and geo in request headers and cf. A Worker that streams a DO response back shows outcome 'canceled', which is noise.",
+    "source": "POST /accounts/{id}/workers/observability/telemetry/query (Workers Observability Read)"
+   },
+   {
+    "name": "GraphQL Analytics API",
+    "verdict": "available",
+    "detail": "workersInvocationsAdaptive gives per-second datetime rows with sum.cpuTimeUs, max.cpuTime and status (success, exceededResources), available after about 45-60 s. durableObjectsPeriodicGroups gives per-object, per-minute cpuTime, activeTime, exceededCpuErrors and rows read/written (the 'name' dimension is the idFromName name). durableObjectsInvocationsAdaptiveGroups returned no rows.",
+    "source": "POST /client/v4/graphql (Account Analytics Read)"
+   },
+   {
+    "name": "Secrets Store",
+    "verdict": "limited",
+    "detail": "One store per account. The existing store default_secrets_store (38f6b501…) was empty. Creating a second store failed with code 1003 maximum_stores_exceeded. I added the dummy secret weft-probe-secret (scopes workers) to the existing store, bound it with secrets_store_secrets, and the Worker read it via env.SS.get() (22 chars, matched). Then I deleted the secret, so the store is back to 0 secrets.",
+    "source": "GET/POST /accounts/{id}/secrets_store/stores and /stores/{id}/secrets; curl /api/ss"
+   },
+   {
+    "name": "Hyperdrive",
+    "verdict": "available",
+    "detail": "Not Paid-only on this account. Listing worked (0 configs). Creating a config with a fake origin failed on validation, not on plan: 2008 'DNS lookup failed. Please make sure the hostname is valid and is a publicly routable address or IP'. Nothing was created. It only matters if Weft adds Postgres.",
+    "source": "GET/POST /accounts/{id}/hyperdrive/configs"
+   },
+   {
+    "name": "Containers",
+    "verdict": "paid-only",
+    "detail": "GET /containers/applications returned code 1000: 'Unauthorized: You do not have access to Cloudflare Containers. Deploying containers requires the Workers Paid plan.' GET /cloudchamber/me returned 'Account is not authorized'.",
+    "source": "GET /accounts/{id}/containers/applications; /cloudchamber/me"
+   },
+   {
+    "name": "Pipelines",
+    "verdict": "paid-only",
+    "detail": "GET /pipelines/v1/pipelines returned code 1021 'This feature requires a Workers Paid plan.' This matches the 2026-10-10 result.",
+    "source": "GET /accounts/{id}/pipelines/v1/pipelines"
+   },
+   {
+    "name": "CF_SETUP_TOKEN permissions",
+    "verdict": "available",
+    "detail": "Account-owned token 'people-analytics-setup' (id efeecf43…, active, no expiry). It verifies through /accounts/{id}/tokens/verify; /user/tokens/verify returns 'Invalid API Token'. Every check in this task worked with it: Workers Scripts, KV, D1, R2, Queues, Vectorize, Workers AI, AI Gateway, AI Search, Browser Run, Turnstile Sites, Secrets Store, Hyperdrive, Containers Read, Observability, Account Analytics Read and Billing Read. It is very broad: it also has Billing Write, Account API Tokens Write, Access and Zero Trust write, and zone-level permissions. I used wrangler with the token, not OAuth.",
+    "source": "GET /accounts/{id}/tokens/{token_id}"
+   }
+  ],
+  "risks": [
+   "Cleanup is complete. I deleted every weft-probe resource: Workers weft-probe and weft-probe-size (the weft-probe_ProbeDO namespace went with the script), Workflow weft-probe-wf, Queue weft-probe-q (consumer removed first), the R2 objects and bucket weft-probe-r2, KV weft-probe-kv, D1 weft-probe-d1, Vectorize weft-probe-vec, AI Gateway weft-probe-gw, AI Search weft-probe-rag, Turnstile widget weft-probe-ts, and Secrets Store secret weft-probe-secret. An API listing of scripts, KV, D1, R2, queues, Vectorize, workflows, DO namespaces, AI gateways, AI Search, Turnstile, Secrets Store secrets and Hyperdrive shows zero weft-probe matches. The remaining scripts are agentboard-preview, agentboard-production, onboardflow-production, peopledesk, placessync-production and staysignal-demo, all untouched, and the account is back to 1 cron trigger.",
+   "These probe traces remain and cannot be deleted by API: Workers Logs events for weft-probe (3-day retention) and its GraphQL analytics. weft-probe-rag indexed through the existing 'default' AI Gateway, so a few embedding log entries may sit in default's logs, which count toward the 100,000-log Free cap shared across the account. The tests also used some daily free allowance: about 40 Workers AI neurons and about 3.5 s of browser time. No Analytics Engine dataset, Hyperdrive config or second Secrets Store was created, because those calls failed.",
+   "The scratch folder /private/tmp/claude-501/weft-cf-probe holds the probe code, calls.jsonl, rendered PDFs and PNGs, and Workers Logs dumps (tq*.out.json, which contain my client IP and geo). I grep-checked that no CF token or OpenAI key value is in the folder or in the wrangler logs, and the Turnstile secret file was removed. Delete the folder if it is not needed. The OpenAI key was never loaded.",
+   "Secrets file format: the CF_SETUP_TOKEN line has a space after '='. Sourcing it as the task suggested (set -a; source <(sed ...)) leaves the variable empty and makes bash try to run the token as a command, which can print it in a 'command not found' error. My first attempt used this pattern; no such error appeared in the output. I then parsed the file with awk instead. Other agents should parse it, not source it.",
+   "The 870 ms Worker successes are undocumented 'flexibility', not a guarantee; the documented limit is 10 ms per Worker request, Workflow step and cron run on Free. Design the hosted Weft so Worker requests and Workflow steps stay near 10 ms, and put agent and payroll compute in Durable Objects (30 s per invocation, measured). Each invocation can make only 50 external fetches, so an agent run must be split across DO alarms or Queue messages.",
+   "The Rate Limiting binding is permissive across requests (23 of 25 allowed against a 5 per 10 s limit). With a fully public agent, Turnstile plus the WEFT_RUN_USD_CAP and WEFT_DAY_USD_CAP spend caps enforced in a Durable Object have to be the real gate.",
+   "Analytics Engine needs Nitish to enable it once in the dashboard (an account setting, possibly with terms); until then any deploy that declares an analytics_engine_datasets binding fails with code 10089.",
+   "R2 is enabled under a usage-metered 'R2 Paid' plan, so usage past the R2 free tier would be billed. The planned Weft port should keep R2 use small or watch it.",
+   "CF_SETUP_TOKEN includes Billing Write, Account API Tokens Write and Access and Zero Trust write. A narrower deploy token for Weft (Workers, storage, AI, Turnstile, Observability read) would reduce the damage if it leaked.",
+   "Not tested: OpenAI gpt-5.6-luna through AI Gateway (the task said to call it with Workers AI only), the AI Search binding from a Worker, Free daily quotas for Workers AI neurons and requests, and Worker bundles above 10.35 MiB."
+  ]
+ },
+ "research": {
+  "summary": "I researched about 45 Cloudflare developer products against Cloudflare's own docs (fetched as markdown on 2026-10-20) and the changelog RSS. I also ran read-only API and GraphQL checks on account dc93c3bc... using CF_SETUP_TOKEN. I created and deployed nothing.\n\n**Free plan core:** Workers, static assets, Durable Objects with SQLite (alarms, hibernatable WebSockets, point-in-time recovery), the Agents SDK, Workflows, Queues (on Free since 2026-02-04), KV, D1, R2, Vectorize, Workers AI (10,000 neurons/day), AI Gateway, Browser Run (10 min/day), Analytics Engine, the Rate Limiting binding, Turnstile, Workers Logs and traces, Cron Triggers, Images and Hyperdrive.\n\n**Paid only, left out:** Containers, Sandbox SDK, Dynamic Workers, Workers for Platforms, Basin Pipelines (failed on this account), Artifacts. Email Service needs a domain; Web Search API needs prepaid credits or a provider key.\n\n**Corrections to SPEC 9.9 and docs/models.md:**\n- Free Worker size is now 64 MiB uncompressed. The 3 MB compressed limit was removed on 2026-09-04.\n- R2 is already active on this account (buckets peopledesk-policies and weft-probe-r2), so no card is needed.\n- Durable Object CPU on Free is not 10 ms in practice. This account's analytics show Durable Object calls succeeding at p99 104 ms, with no exceeded-CPU errors. The docs still contradict each other on this.\n\n**Platform facts that change the port:**\n- AI Gateway prices gpt-5.6-luna ($0.20 in, $1.20 out, $0.02 cached in per million tokens), so cost tracking and spend limits work. Its logs go to Workers Logs, because this account's first gateway is from 2026-10-15.\n- Workers AI gpt-oss-120b supports function calling and the Responses API (non-streaming only), so Weft's OpenAI provider can switch by base URL.\n- McpAgent is deprecated. New remote MCP servers use the stateless createMcpHandler.\n\n**Main porting blockers:**\n- Weft's async drizzle transactions, including the nested one in executor/pipeline.ts:275, versus the synchronous transactionSync in the Durable Object driver.\n- The Node-runtime proxy.ts versus OpenNext.\n- Next and React patch bumps the adapters require.\n\nA static export plus a front Worker fits the web app best, because its pages fetch /api in the browser.",
+  "items": [
+   {
+    "name": "Workers (runtime)",
+    "verdict": "free-limited",
+    "detail": "Free plan limits:\n- 100,000 requests/day, reset at 00:00 UTC.\n- 10 ms CPU per HTTP request and per Cron run (documented).\n- 128 MB memory.\n- 50 external subrequests plus 1,000 to Cloudflare services per invocation; 6 connections waiting on headers.\n- 64 env vars of 5 KB each.\n- Worker size 64 MiB uncompressed on Free and Paid since 2026-09-04. The old 3 MB compressed Free limit was removed.\n- 1 s startup limit (error 10021).\n- 100 Workers per account (7 deployed today).\n- waitUntil runs up to 30 s after the response.\n\nObserved on this account (GraphQL workersInvocationsAdaptive, last 6 days):\n- Free Workers finish successfully at CPU p99 32 to 56 ms and p999 up to 252 ms.\n- The only exceededResources were 2 invocations at about 1.8 to 2.0 s CPU today, under script __unknown__.\n\nWeft use: one front Worker running the Hono API. It serves assets, verifies Turnstile, applies the Rate Limiting binding, and routes /api/*, /agents/* and /mcp to the company Durable Object. The 100k/day cap is account-wide and shared with the 6 other deployed demos.",
+    "source": "https://developers.cloudflare.com/workers/platform/limits/ ; https://developers.cloudflare.com/changelog/post/2026-09-04-increased-worker-size-limit/ ; https://developers.cloudflare.com/changelog/post/2026-02-11-subrequests-limit/"
+   },
+   {
+    "name": "Workers static assets + run_worker_first",
+    "verdict": "free-ok",
+    "detail": "- Requests that match a static asset are free and unlimited and never invoke the Worker.\n- Free allows 20,000 files per version and 25 MiB per file; _headers allows 100 rules, _redirects 2,100.\n- run_worker_first takes true or a route list, for example [\"/api/*\",\"/agents/*\",\"/mcp\"], with !negations. not_found_handling can be single-page-application or 404-page.\n- Free caveat: once the daily request cap is hit, paths matching run_worker_first return 429; negative patterns still serve assets.\n\nWeft use: serve the built web UI as assets, so page loads never count against the 100k cap.",
+    "source": "https://developers.cloudflare.com/workers/static-assets/ ; https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/ ; https://developers.cloudflare.com/workers/static-assets/binding/#run_worker_first"
+   },
+   {
+    "name": "OpenNext Cloudflare adapter (Next.js 16)",
+    "verdict": "free-limited",
+    "detail": "- opennext.js.org: all minors of Next 16 are supported.\n- @opennextjs/cloudflare 1.20.12 (npm, 2026-10-15) requires next >=16.4.1 or 15.5.28+ and wrangler ^4.148.0. Weft pins next 16.4.0, so a patch bump is needed.\n- Cloudflare's OpenNext guide lists Node.js middleware (Next 15.2+) as not yet supported. In Next 16, proxy.ts always runs on the Node runtime. So Weft's src/proxy.ts (node:fs read of .data/run/proxy.secret plus a loopback Host guard) cannot ship as it is; the front Worker would take over its job.\n- Bundle size no longer blocks on Free (64 MiB uncompressed). opennext.js.org still quotes the stale 3 MiB / 10 MiB limits.\n- Every SSR page costs a Worker request and CPU.\n- Cloudflare's Next guide (2026-08-25) now recommends vinext and keeps OpenNext for apps with compatibility gaps.",
+    "source": "https://opennext.js.org/cloudflare ; https://developers.cloudflare.com/workers/framework-guides/web-apps/opennext/ ; https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/ ; https://nextjs.org/docs/messages/middleware-to-proxy"
+   },
+   {
+    "name": "vinext (Next.js on Vite for Workers)",
+    "verdict": "free-limited",
+    "detail": "- Cloudflare's default Next path. `vinext init` adds it to a Next 16 app without breaking `next dev`.\n- Supports App Router, RSC, Server Actions, streaming SSR, middleware.ts and proxy.ts, `output: \"export\"`, and bindings through cloudflare:workers.\n- Beta per the docs. npm has vinext 1.3.0, which requires react ^19.3.1 and vite ^8 (Weft pins react 19.3.0).\n\nWeft use: only if SSR is wanted. Otherwise the static export below is cheaper.",
+    "source": "https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/ ; https://vinext.dev/compatibility"
+   },
+   {
+    "name": "Next static export served as Worker assets (recommended web path)",
+    "verdict": "free-ok",
+    "detail": "Why it fits: Weft pages are thin async server components that pass params to client views, which fetch /api/* in the browser (for example people/[id]/page.tsx renders <PersonView id>). So `output: \"export\"` works, and page loads cost zero Worker requests.\n\nNext's documented export limitations that matter:\n- No rewrites, so the /api rewrite in next.config.ts moves to the front Worker.\n- No proxy, so proxy.ts goes.\n- No Server Actions or cookies.\n- Dynamic routes need generateStaticParams. That covers the 5 dynamic segments people, payroll, runs, routines and offboarding [id]. Either prerender a placeholder id and have the Worker rewrite /app/people/* to that shell, or move the ids to query params.",
+    "source": "https://nextjs.org/docs/app/guides/static-exports ; https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/"
+   },
+   {
+    "name": "Durable Objects (SQLite storage)",
+    "verdict": "free-ok",
+    "detail": "Free plan:\n- SQLite backend only; KV-backed objects are Paid and legacy.\n- 100,000 requests/day. Every RPC session counts; incoming WebSocket messages bill at 20:1.\n- 13,000 GB-s duration/day, wall clock at 128 MB while active. That is about 28 object-hours/day, and waiting on OpenAI counts.\n- 5M rows read/day and 100k rows written/day. Each setAlarm and each delete counts as a write.\n- 5 GB storage per account; 100 classes.\n- Exceeding a cap makes further operations of that type fail until 00:00 UTC.\n- Limits: 2 MB row, 100 columns, 100 bound parameters, 100 KB statement.\n- CPU: the docs table says 30 s default per request or alarm, but the FAQ says the Workers plan limit applies (10 ms on Free). On this account, Durable Object calls succeeded at p99 104 ms (peopledesk jsrpc), alarms at 50 ms and hibernation events at 77 ms, with no exceededCpu.\n- Pending I/O keeps an object alive up to 15 min per operation (compat date 2026-10-01).\n- Point-in-time recovery to any point in the last 30 days through bookmarks; not available locally.\n\nWeft use: one object per demo company holding the run store, proposals, action log and memory. Give each visitor a lease from a small pool. To reset on reassignment, either restore a seed bookmark with onNextSessionRestoreBookmark plus ctx.abort(), or deleteAll() and reseed (costs rows written).\nCurrent account usage: peak 6,672 rows written/day and 75 GB-s/day (2026-10-15 to 19).",
+    "source": "https://developers.cloudflare.com/durable-objects/platform/limits/ ; https://developers.cloudflare.com/durable-objects/platform/pricing/ ; https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/ ; https://developers.cloudflare.com/changelog/post/2026-10-01-pending-io-keep-alive/"
+   },
+   {
+    "name": "Durable Object SQL transactions and drizzle durable-sqlite",
+    "verdict": "free-ok",
+    "detail": "Cloudflare's rules:\n- sql.exec cannot run BEGIN or SAVEPOINT.\n- transactionSync(callback) rolls back if the callback throws, but the callback must be synchronous and must not return a Promise.\n- Writes with no intervening await are also committed atomically on their own.\n\nDrizzle:\n- drizzle-orm/durable-sqlite (present in Weft's drizzle-orm 0.45.4) runs transactions as `this.client.transactionSync(() => transaction(tx))` in sync mode; nested transactions also go through transactionSync.\n- Migrations use drizzle-orm/durable-sqlite/migrator inside blockConcurrencyWhile, with a wrangler Text rule for **/*.sql.\n\nPorting impact: Weft's executor and seed use async callbacks under writeLocked (runs.ts:28, admin.ts:20, agent.ts:31/50, human.ts, system.ts:39, scheduler.ts:68), plus a nested savepoint at pipeline.ts:275. These must become synchronous on the hosted side. The writeLocked mutex is unnecessary inside a single-threaded Durable Object.",
+    "source": "https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync ; https://orm.drizzle.team/docs/connect-cloudflare-do ; local: /Users/nitishcs/Developer/projects/weft/node_modules/.pnpm/drizzle-orm@0.45.4_@libsql+client@0.18.0_@opentelemetry+api@1.9.1/node_modules/drizzle-orm/durable-sqlite/session.js"
+   },
+   {
+    "name": "Durable Object alarms",
+    "verdict": "free-ok",
+    "detail": "- One alarm per object at a time; store a schedule table and re-arm from it.\n- At-least-once delivery, retried with exponential backoff from 2 s, up to 6 retries.\n- 15 min wall time per alarm handler.\n- Each setAlarm costs 1 row written.\n- With compat date 2026-02-24 or later, deleteAll() also deletes the alarm.\n\nWeft use: the routine scheduler (one alarm per company DO, driven by the SimClock), proposal expiry, and lease expiry for pooled demo companies.",
+    "source": "https://developers.cloudflare.com/durable-objects/api/alarms/ ; https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/"
+   },
+   {
+    "name": "Hibernatable WebSockets (Durable Objects)",
+    "verdict": "free-ok",
+    "detail": "- ctx.acceptWebSocket lets the object hibernate without dropping clients. No duration is billed while hibernated.\n- Received messages up to 32 MiB.\n- Incoming messages bill at 20:1 against the 100k requests/day; outgoing messages and auto-responses are free.\n\nWeft use: stream run steps and inbox updates to the browser instead of holding a Server-Sent Events connection, which keeps the object active and billed.",
+    "source": "https://developers.cloudflare.com/durable-objects/best-practices/websockets/ ; https://developers.cloudflare.com/durable-objects/platform/pricing/"
+   },
+   {
+    "name": "Agents SDK (Agent class, scheduling, state sync)",
+    "verdict": "free-ok",
+    "detail": "- Agent extends partyserver Server, which extends DurableObject, so it runs on the Free SQLite Durable Objects.\n- Scheduling: this.schedule(delay, Date or cron) and scheduleEvery(seconds). Schedules persist in SQLite and run on Durable Object alarms. Cron schedules are idempotent; intervals have built-in overlap prevention.\n- State: setState persists to the agent's SQL and broadcasts to connected clients. validateStateChange rejects bad updates, and read-only connections are supported.\n- React: useAgent from agents/react, with onStateUpdate.\n- The SDK also ships human-in-the-loop helpers and Workflow integration.\n- npm agents is at 0.29.0 (2026-10-20).\n\nWeft use: a WeftCompany agent per demo company, with schedules for routines and state sync for the live inbox and run view in the web UI.",
+    "source": "https://developers.cloudflare.com/agents/ ; https://developers.cloudflare.com/agents/runtime/lifecycle/agent-class/ ; https://developers.cloudflare.com/agents/runtime/execution/schedule-tasks/ ; https://developers.cloudflare.com/agents/runtime/lifecycle/state/"
+   },
+   {
+    "name": "Remote MCP (McpAgent / createMcpHandler, Streamable HTTP)",
+    "verdict": "free-ok",
+    "detail": "- McpAgent is deprecated and feature-frozen (docs 2026-07-27). New servers should use createMcpHandler from agents/mcp/server with @modelcontextprotocol/server 2.0.0. This is stateless Streamable HTTP; SSE is deprecated.\n- createLegacyMcpHandler (agents/mcp) keeps @modelcontextprotocol/sdk 1.30.0 sessions.\n- OAuth: Workers OAuth Provider v1 supports MCP 2026-07-28.\n\nWeft use: expose the apps/mcp tool surface at /mcp on the front Worker, backed by the company Durable Object. apps/mcp currently uses @modelcontextprotocol/sdk 1.32.1 (v1), so it needs either the v2 server package or the legacy handler at the exact pinned version.",
+    "source": "https://developers.cloudflare.com/agents/model-context-protocol/apis/agent-api/ ; https://developers.cloudflare.com/agents/model-context-protocol/apis/handler-api/ ; https://developers.cloudflare.com/agents/model-context-protocol/protocol/transport/"
+   },
+   {
+    "name": "Workflows",
+    "verdict": "free-limited",
+    "detail": "Free plan:\n- 3,000 steps/day; steps billed since 2026-08-10, and Free is never charged beyond the included amount.\n- 1 GB-month storage.\n- 10 ms CPU per step (Paid 30 s to 5 min); wall time per step unlimited.\n- 1,024 steps per instance.\n- 100 concurrently running instances; waiting instances don't count.\n- 100 MB state per instance; 1 MiB step result and event payload.\n- 3-day retention.\n- Executions share the 100k/day Workers requests.\n- step.sleep up to 365 days; waitForEvent available.\n- createBatch can create up to 100 instances per call.\n- This account already runs 4 workflows.\n\nWeft use: payroll runs (calculate, then waitForEvent approval, then pay, then store stubs in R2) and onboarding or offboarding checklists. Weft's own executor already owns proposals and approvals, so Workflows is optional and only adds durable retries.",
+    "source": "https://developers.cloudflare.com/workflows/reference/limits/ ; https://developers.cloudflare.com/workflows/reference/pricing/ ; https://developers.cloudflare.com/changelog/post/2026-07-07-workflows-billing-updates/ ; https://developers.cloudflare.com/changelog/post/2026-09-10-paid-retention-default/"
+   },
+   {
+    "name": "Queues",
+    "verdict": "free-limited",
+    "detail": "On Free since 2026-02-04 with all features.\n\nFree plan:\n- 10,000 operations/day, counted per 64 KB. About 3 operations per message, so roughly 3,300 messages/day.\n- Retention fixed at 24 h; delaySeconds up to 24 h.\n- 128 KB messages; batches up to 100 messages.\n- 100 retries plus a dead-letter queue.\n- 15 min consumer wall time.\n\nThis account already has 5 queues, and Queues worked here on 2026-10-10.\n\nWeft use: integration deliveries (webhooks to the simulated payroll, benefits and IT providers) with retries and a dead-letter queue, and PDF render jobs so they respect the Browser Run rate.",
+    "source": "https://developers.cloudflare.com/queues/platform/limits/ ; https://developers.cloudflare.com/queues/platform/pricing/ ; https://developers.cloudflare.com/changelog/post/2026-02-04-queues-free-plan/"
+   },
+   {
+    "name": "Workers KV",
+    "verdict": "free-limited",
+    "detail": "Free plan:\n- 100,000 reads/day.\n- 1,000 writes/day to different keys, plus 1,000 deletes and 1,000 lists.\n- 1 write per second to the same key.\n- 1 GB storage.\n- 25 MiB values.\n- Eventually consistent, with cacheTtl at least 30 s.\n\nWeft use: read-mostly configuration only, such as the model switch (OpenAI or Workers AI), the demo seed manifest and feature flags. It is not suitable for visitor leases or spend counters (too few writes, eventually consistent).",
+    "source": "https://developers.cloudflare.com/kv/platform/limits/ ; https://developers.cloudflare.com/kv/platform/pricing/"
+   },
+   {
+    "name": "D1",
+    "verdict": "free-limited",
+    "detail": "Free plan:\n- 10 databases, 500 MB each, 5 GB total.\n- 5M rows read/day and 100k rows written/day. Failures past these caps are enforced since 2026-09-01.\n- 50 queries per invocation.\n- 7-day Time Travel.\n- 30 s query duration.\n\nTransactions: only db.batch() is documented as a SQL transaction. Interactive BEGIN/COMMIT is not available (per third-party reports and a drizzle issue; not stated on the Cloudflare pages I fetched). So Weft's interactive executor transactions don't port.\n\nWeft use: at most a small global index (visitor to company lease, eval scoreboard). A coordinator Durable Object can do this with stronger consistency.",
+    "source": "https://developers.cloudflare.com/d1/platform/limits/ ; https://developers.cloudflare.com/d1/platform/pricing/ ; https://developers.cloudflare.com/changelog/post/2026-09-01-d1-free-tier-limit-enforcement/ ; https://developers.cloudflare.com/d1/worker-api/d1-database/#batch"
+   },
+   {
+    "name": "R2",
+    "verdict": "free-ok",
+    "detail": "- Free tier per month: 10 GB-month Standard storage, 1M Class A operations, 10M Class B operations, free egress. Infrequent Access is not covered.\n- New accounts need an R2 subscription through a dashboard checkout.\n- This account already has R2 active: the read-only bucket list returned peopledesk-policies and weft-probe-r2. No activation or card is needed now.\n\nWeft use: receipt and expense uploads, pay stub and offer letter PDFs, the memory git-bundle export, eval artifacts and seed snapshots.",
+    "source": "https://developers.cloudflare.com/r2/pricing/ ; https://developers.cloudflare.com/r2/get-started/ ; API GET /accounts/{id}/r2/buckets (read-only, 2026-10-20)"
+   },
+   {
+    "name": "Vectorize",
+    "verdict": "free-limited",
+    "detail": "Free plan:\n- 30M queried vector dimensions/month and 5M stored dimensions.\n- 100 indexes; 1,000 namespaces per index.\n- Up to 1,536 dimensions; 10 KiB metadata; topK 50 (100 without values).\n\nAt 384 dimensions (bge-small-en-v1.5) that is about 13,000 stored vectors and about 78,000 queries/month. At 1,024 dimensions (bge-m3) it is about 4,900 vectors.\n\nWeft use: semantic memory recall at run start (a P1 harness item). Use one namespace per demo company, with Workers AI embeddings at about 1,075 to 1,841 neurons per million tokens.",
+    "source": "https://developers.cloudflare.com/vectorize/platform/limits/ ; https://developers.cloudflare.com/vectorize/platform/pricing/ ; https://developers.cloudflare.com/workers-ai/models/bge-small-en-v1.5/"
+   },
+   {
+    "name": "Workers AI",
+    "verdict": "free-limited",
+    "detail": "Free allocation: 10,000 neurons/day account-wide, after which requests fail. Text generation is limited to 300 requests/minute.\n\nPaid-only models: kimi-k2.6, kimi-k2.7-code, glm-5.2, glm-5.3, glm-5.3-flash and the deepseek-v4 family (403, code 5035).\n\nChat models on Free:\n- gpt-oss-120b: 128k context, function calling, reasoning low/medium/high; 31,818 neurons per M input and 68,182 per M output. Supports the Responses API (non-streaming only), so Weft's Responses provider can switch by base URL.\n- gpt-oss-20b.\n- llama-3.3-70b-fp8-fast: function calling, but only a 24k context.\n- llama-4-scout: vision plus function calling, 131k context.\n- gemma-4-26b-a4b: vision plus function calling, 256k context, 9,091/27,273 neurons per M.\n- glm-4.7-flash, nemotron-3-120b, qwen3-30b-a3b. Qwen3 needs /no_think.\n\nOther models:\n- Embeddings: bge-small/base/large/m3, qwen3-embedding-0.6b.\n- Vision for receipts: clairic (typed extraction preview, 2026-10-19), moondream3.1, mistral-small-3.1. llama-3.2-11b-vision requires agreeing to the Meta license first.\n- Speech to text: whisper-large-v3-turbo at 46.63 neurons per audio minute (about 214 min/day); nova-3.\n\nRough estimate, assuming 40k input and 3k output tokens per run: gpt-oss-120b gives about 6 agent runs/day on Free, gemma-4 about 22. This account used about 1,800 neurons/day at peak (2026-10-15).\n\nWeft use: the selectable model switch, receipt OCR, embeddings.",
+    "source": "https://developers.cloudflare.com/workers-ai/platform/pricing/ ; https://developers.cloudflare.com/workers-ai/platform/limits/ ; https://developers.cloudflare.com/changelog/post/2026-07-28-models-require-workers-paid/ ; https://developers.cloudflare.com/workers-ai/models/gpt-oss-120b/ ; https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/ ; https://developers.cloudflare.com/changelog/post/2026-10-19-clairic-workers-ai/"
+   },
+   {
+    "name": "AI Gateway",
+    "verdict": "free-ok",
+    "detail": "Core features (analytics, caching, rate limiting) are free on all plans.\n\nFree plan details:\n- 10 gateways per account; 3 exist (default, peopledesk, agentboard, all created 2026-10-15).\n- OpenAI base URL: https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/openai, which supports /responses.\n- Caching: exact match on the full request, text and image only, TTL up to 1 month, cf-aig-skip-cache and cf-aig-cache-ttl headers, 25 MB cacheable.\n- Rate limiting: fixed or sliding window per gateway.\n- Spend limits: up to 20 rules per gateway, scoped by model, provider or custom metadata (5 entries per request), for example visitor_id or company. Enforcement is eventually consistent and returns 429.\n- Cost tracking: gpt-5.6-luna is in the catalog at $0.20 in, $1.20 out, $0.02 cached in and $0.25 cache creation per million tokens. GraphQL aiGatewayRequestsAdaptiveGroups exposes cost and tokens.\n- Authenticated gateway: requires the cf-aig-authorization header.\n- BYOK keeps the OpenAI key in Secrets Store.\n- DLP and Guardrails are available (Guardrails bills Workers AI).\n- Logs: this account's first gateway was created after 2026-09-24, so logs go to Workers Logs and its allowance.\n\nWeft use: put OpenAI behind a dedicated gateway with a per-visitor spend rule as a backstop to Weft's own WEFT_RUN_USD_CAP and WEFT_DAY_USD_CAP. Route Workers AI through the same gateway for side-by-side analytics.",
+    "source": "https://developers.cloudflare.com/ai-gateway/reference/pricing/ ; https://developers.cloudflare.com/ai-gateway/reference/limits/ ; https://developers.cloudflare.com/ai-gateway/usage/providers/openai/ ; https://developers.cloudflare.com/ai-gateway/features/caching/ ; https://developers.cloudflare.com/ai-gateway/features/spend-limits/ ; https://developers.cloudflare.com/ai/models/openai/gpt-5.6-luna/"
+   },
+   {
+    "name": "AI Search",
+    "verdict": "free-limited",
+    "detail": "- Generally available. Billing begins 2026-11-01.\n- Included per month: 5M ingestion tokens, 10 GB-month storage, 1,000 semantic queries and 1,000 full-text queries.\n- Free limits: 100 instances, 100k files per instance, 500 pages crawled per day.\n- Embedding, storage and crawling are included.\n\nWeft use: possible managed search over policy handbooks and help docs. Vectorize plus Workers AI gives more control and a larger query budget, so it is the better fit for per-company memory.",
+    "source": "https://developers.cloudflare.com/ai-search/platform/limits-pricing/"
+   },
+   {
+    "name": "Browser Run (formerly Browser Rendering)",
+    "verdict": "free-limited",
+    "detail": "Free plan:\n- 10 browser-minutes per day, then 429 until UTC midnight.\n- Quick Actions limited to 1 request every 10 s.\n- 3 concurrent sessions; 1 new browser every 20 s; 60 s idle timeout.\n- /crawl: 5 jobs/day of 100 pages each.\n- /pdf renders a URL or custom HTML. Through the Worker binding no API token is needed.\n\nWeft use: pay stub and offer letter PDFs rendered from Weft HTML templates, through a Queue to respect the 10 s rate, with results cached in R2. Alternative: a pure-JS PDF library inside the Worker, which needs no browser minutes.",
+    "source": "https://developers.cloudflare.com/browser-run/limits/ ; https://developers.cloudflare.com/browser-run/pricing/ ; https://developers.cloudflare.com/browser-run/quick-actions/pdf-endpoint/"
+   },
+   {
+    "name": "Workers Analytics Engine",
+    "verdict": "free-ok",
+    "detail": "- Free includes 100,000 data points written/day and 10,000 read queries/day. Usage is not billed yet.\n- Each writeDataPoint takes 20 blobs (16 KB total), 20 doubles and 1 index (96 bytes); 250 data points per invocation.\n- 3-month retention; query through the SQL API.\n\nWeft use: per-run and per-visitor metrics (USD spent, tokens, model, steps, outcome, rate-limit and Turnstile rejections) for an admin spend dashboard, and the Workers AI versus OpenAI side-by-side evaluation.",
+    "source": "https://developers.cloudflare.com/analytics/analytics-engine/pricing/ ; https://developers.cloudflare.com/analytics/analytics-engine/limits/"
+   },
+   {
+    "name": "Rate Limiting binding",
+    "verdict": "free-ok",
+    "detail": "- Generally available since 2025-09-19.\n- Configured as ratelimits [{name, namespace_id, simple:{limit, period}}], with period 10 or 60 s; called as limit({key}).\n- Counters are per Cloudflare location, cached locally and eventually consistent; Cloudflare says it is not an accounting system.\n- Not visible in the dashboard; monitor via logs or Analytics Engine.\n- No plan restriction is documented.\n\nWeft use: first-line per-IP limits keyed on cf-connecting-ip, for example 10 model actions/min and 60 API calls/10 s. The hard daily caps stay in a strongly consistent Durable Object.",
+    "source": "https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/ ; https://developers.cloudflare.com/changelog/post/2025-09-19-ratelimit-workers-ga/"
+   },
+   {
+    "name": "Turnstile",
+    "verdict": "free-ok",
+    "detail": "- Free plan: up to 20 widgets, unlimited challenges, 10 hostnames per widget. A hostname must be an FQDN and covers its subdomains.\n- Tokens are single-use and expire after 300 s. Siteverify (POST challenges.cloudflare.com/turnstile/v0/siteverify) accepts remoteip and idempotency_key.\n- Turnstile Spin (generally available 2026-08-10) can set up the widget and siteverify.\n\nWeft use: require a fresh token before every model-calling action (start a run, approve a proposal that triggers a step, ask the agent). Verify it server-side in the front Worker, then mint a short-lived signed session so a visitor isn't challenged on every click.",
+    "source": "https://developers.cloudflare.com/turnstile/plans/ ; https://developers.cloudflare.com/turnstile/get-started/server-side-validation/ ; https://developers.cloudflare.com/turnstile/additional-configuration/hostname-management/ ; https://developers.cloudflare.com/changelog/post/2026-08-10-turnstile-spin-ga/"
+   },
+   {
+    "name": "Workers Logs",
+    "verdict": "free-limited",
+    "detail": "- Free now: 200,000 log events/day with 3-day retention. head_sampling_rate is configurable; 256 KB per request log.\n- From 2026-12-01, Observability pricing applies: Free gets 0.5 GB/day ingestion and 7-day retention, and ingestion stops at the cap. That allowance is shared with traces and AI Gateway logs.\n\nWeft use: structured JSON logs per run and step. Never log prompts or keys; sample down for public traffic.",
+    "source": "https://developers.cloudflare.com/workers/observability/logs/workers-logs/ ; https://developers.cloudflare.com/observability/pricing/"
+   },
+   {
+    "name": "Workers traces and OpenTelemetry export",
+    "verdict": "free-limited",
+    "detail": "- Automatic tracing is in early beta, with head_sampling_rate and 7-day retention.\n- From 2026-12-01, stored traces count against the account's Observability allowance (0.5 GB/day on Free).\n- OTLP export of traces and logs to account-level destinations (Honeycomb, Grafana Cloud, Axiom or any OTLP endpoint), configured as observability.traces.destinations. persist:false skips Cloudflare storage.\n- AI Gateway can also export spans.\n- No plan restriction is stated for export.\n\nWeft use: carry the existing agent spans (packages/agent/src/otel.ts) on the hosted side to the same OTLP backend used locally.",
+    "source": "https://developers.cloudflare.com/workers/observability/traces/ ; https://developers.cloudflare.com/workers/observability/opentelemetry-export/ ; https://developers.cloudflare.com/observability/export/opentelemetry/"
+   },
+   {
+    "name": "Cron Triggers",
+    "verdict": "free-limited",
+    "detail": "- Free: 5 cron triggers per account; 1 is used now (placessync-production, */2).\n- 10 ms CPU per run; 15 min wall time.\n- Changes take up to 15 min to propagate.\n\nWeft use: one daily or hourly sweep that recycles idle demo-company leases and checks pool health. Per-company routines belong on Durable Object alarms instead.",
+    "source": "https://developers.cloudflare.com/workers/configuration/cron-triggers/ ; https://developers.cloudflare.com/workers/platform/limits/ ; API GET /workers/scripts/{name}/schedules (read-only, 2026-10-20)"
+   },
+   {
+    "name": "Secrets Store",
+    "verdict": "free-limited",
+    "detail": "- Open beta: 100 secrets per account, one store per account, values up to 65,536 bytes.\n- Workers bind to it with Workers permission scope.\n- AI Gateway BYOK stores provider keys there.\n- Plan availability and pricing are not stated.\n\nWeft use: optional. Either keep OPENAI_API_KEY as a plain Worker secret (wrangler secret put), or hold it only in AI Gateway BYOK so the Worker never sees it. Same goes for the Turnstile secret and the gateway auth token.",
+    "source": "https://developers.cloudflare.com/secrets-store/ ; https://developers.cloudflare.com/secrets-store/integrations/workers/ ; https://developers.cloudflare.com/ai-gateway/configuration/bring-your-own-keys/"
+   },
+   {
+    "name": "Images (binding)",
+    "verdict": "free-limited",
+    "detail": "- The Images Free plan includes 5,000 unique transformations/month and does not charge for exceeding it. Hosted Images storage is Paid only.\n- The binding works on raw bytes (R2, request body, fetch); .info() is free.\n\nWeft use: downscale and normalize receipt photos before the vision model to cut tokens, and make avatar thumbnails.",
+    "source": "https://developers.cloudflare.com/images/pricing/ ; https://developers.cloudflare.com/images/optimization/binding/"
+   },
+   {
+    "name": "Hyperdrive",
+    "verdict": "not-applicable",
+    "detail": "Free since 2025-04-08: 100,000 queries/day, 10 configs, about 20 origin connections. It only fronts external Postgres or MySQL, and Weft uses SQLite (libsql locally, Durable Object SQLite hosted).",
+    "source": "https://developers.cloudflare.com/hyperdrive/platform/pricing/ ; https://developers.cloudflare.com/hyperdrive/platform/limits/"
+   },
+   {
+    "name": "Email Service (Email Routing / Email Workers / Email Sending)",
+    "verdict": "not-applicable",
+    "detail": "- Routing (the email() handler) works on Free and Paid but needs a domain onboarded to Cloudflare.\n- Sending to arbitrary recipients needs Workers Paid; sending to verified destination addresses is free.\n\nWith workers.dev only and no custom domain, it is left out. Weft keeps its simulated email provider.",
+    "source": "https://developers.cloudflare.com/email-service/ ; https://developers.cloudflare.com/email-service/api/route-emails/email-handler/"
+   },
+   {
+    "name": "Containers",
+    "verdict": "paid-only",
+    "detail": "Available on Workers Paid only (Free row is N/A). It would have hosted microsandbox-style Python. Left out; the sandbox stays QuickJS-WASM inside the Durable Object or WEFT_SANDBOX=off.",
+    "source": "https://developers.cloudflare.com/containers/ ; https://developers.cloudflare.com/containers/platform/pricing/"
+   },
+   {
+    "name": "Sandbox SDK",
+    "verdict": "paid-only",
+    "detail": "Available on Workers Paid only. Sandbox SDK 1.0 controls sandboxes from your own Durable Object and runs on Containers. Left out.",
+    "source": "https://developers.cloudflare.com/sandbox/"
+   },
+   {
+    "name": "Dynamic Workers",
+    "verdict": "paid-only",
+    "detail": "Currently Workers Paid only: 1,000 unique Dynamic Workers/month included, then $0.002 per worker per day. It remains the upgrade path behind Weft's SandboxEngine contract for code.run.",
+    "source": "https://developers.cloudflare.com/dynamic-workers/pricing/ ; https://developers.cloudflare.com/dynamic-workers/"
+   },
+   {
+    "name": "Workers for Platforms",
+    "verdict": "paid-only",
+    "detail": "$25/month plan purchased through the dashboard; Workflows also can't deploy into its namespaces. Not needed for Weft.",
+    "source": "https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/reference/pricing/"
+   },
+   {
+    "name": "Basin Pipelines (formerly Pipelines)",
+    "verdict": "paid-only",
+    "detail": "Renamed under Cloudflare Basin (generally available 2026-10-01). The current pricing table lists only Workers Paid (50 GB/month of transforms and sinks). It failed on this account on 2026-10-10 with code 1021. The replacement is a Worker to Queue to R2 path, plus Analytics Engine for metrics.",
+    "source": "https://developers.cloudflare.com/basin-pipelines/platform/pricing/ ; https://developers.cloudflare.com/changelog/post/2026-10-01-basin-ga/"
+   },
+   {
+    "name": "Artifacts (Git-speaking versioned storage)",
+    "verdict": "paid-only",
+    "detail": "Open beta since 2026-10-01, Workers Paid only, billed from 2026-10-14. It would have fit Weft's memory git repo; the fallback is memory in Durable Object SQLite with a git-bundle export to R2.",
+    "source": "https://developers.cloudflare.com/changelog/post/2026-10-01-artifacts-open-beta/"
+   },
+   {
+    "name": "Web Search API (AI Gateway)",
+    "verdict": "not-applicable",
+    "detail": "Beta since 2026-10-02. It is billed to prepaid AI Gateway credits (a payment) or needs a provider API key (Ceramic, Exa or Linkup). Weft's agent works on its own company data, so it is left out.",
+    "source": "https://developers.cloudflare.com/changelog/post/2026-10-02-introducing-web-search-api/"
+   }
+  ],
+  "risks": [
+   "Secret exposure: one of my shell commands printed a CF_SETUP_TOKEN value to my tool output. The line in ~/Developer/projects/.people-analytics.secrets.env has whitespace after the '=', so bash tried to run the value as a command and echoed it in the error. It went nowhere else; later calls used a script that redacts it. Nitish may want to rotate the people-analytics-setup token. The setup token is account-scoped: /accounts/{id}/tokens/verify reports it active, while /user/tokens/verify rejects it.",
+   "Durable Object CPU on Free is documented both ways. The Durable Objects limits table says 30 s default per request or alarm, but its FAQ says Durable Objects have the same per-invocation CPU limits as Workers (10 ms on Free). This account's GraphQL analytics show calls succeeding at p99 104 ms and alarms at 50 ms with no exceededCpu. Plain Workers on Free succeed up to about 250 ms (p999) despite the documented 10 ms. The tolerance is not documented and could change, so measure Weft's own per-step CPU. Workflows document 10 ms per step on Free.",
+   "Today's account analytics show two invocations under script name __unknown__ that ended exceededResources at about 1.8 to 2.0 s CPU, plus successes up to 870 ms. Weft's QuickJS limit is 2 s CPU (DEFAULT_CODE_LIMITS), so a hosted code.run near that limit may be killed.",
+   "The account already has probe resources I did not create: Worker weft-probe (bindings AI, ASSETS, Durable Object class ProbeDO, workflow weft-probe-wf), R2 bucket weft-probe-r2 and queue weft-probe-q. They likely belong to another session; avoid name clashes.",
+   "Worker size contradictions: the 2026-09-04 changelog and the Workers limits page say 64 MiB uncompressed on both plans with no compressed limit. opennext.js.org and the Workflows limits page still say 3 MB Free and 10 MB Paid.",
+   "Durable Object storage per object on Free: the limits table says 10 GB, but the storage-full FAQ says 1 GB on Free. The account total is 5 GB either way.",
+   "Cron Triggers: the Durable Object alarms page says a Worker can have up to three, but the Workers limits page says 5 per account on Free.",
+   "Workflows limits page: its prose cites a 10,000 concurrent-instance limit, while its table says 100 (Free) and 50,000 (Paid).",
+   "Basin Pipelines: the 2026-05-28 pricing changelog says Workers Free includes 1 GB/month per dimension, but the current pricing table lists only Workers Paid, and the account probe on 2026-10-10 failed with code 1021. I treated it as Paid only.",
+   "Free daily caps are account-wide and shared with the six other deployed apps (OnboardFlow, PeopleDesk, PlacesSync, AgentBoard production and preview, StaySignal): 100k requests, 100k Durable Object rows written, 13,000 GB-s, 10k neurons, 10k queue operations, 3,000 Workflow steps, 10 browser-minutes and 200k log events. Current use is low (peak 6,672 rows written/day, about 1,800 neurons/day), but public traffic to Weft could starve the other demos.",
+   "Transactions: drizzle's durable-sqlite driver wraps every transaction in ctx.storage.transactionSync, whose callback must not return a Promise. Weft's async transaction callbacks and the nested savepoint at packages/executor/src/pipeline.ts:275 won't keep their rollback guarantees as written. I could not confirm whether workerd throws or silently commits early. D1 offers only batch() as a transaction; 'no interactive BEGIN' comes from third-party sources, not the Cloudflare pages I fetched.",
+   "Next.js: OpenNext requires next >=16.4.1 (Weft pins 16.4.0) and does not support Node middleware. Next 16 proxy.ts always runs on Node, and Weft's proxy reads node:fs. vinext is beta and requires react ^19.3.1 (Weft pins 19.3.0). A static export must handle the 5 dynamic [id] segments and drop the /api rewrite.",
+   "The Rate Limiting binding's plan availability is not stated in the docs. It is per-location and eventually consistent, so it can't enforce WEFT_DAY_USD_CAP; keep the hard caps in a Durable Object ledger.",
+   "AI Gateway spend limits are eventually consistent (bursts can overshoot), and their Free availability is not stated explicitly. Cloudflare's catalog lists a $0.25 per million cache-creation price for gpt-5.6-luna, while Weft's LUNA price table assumes no cache-write surcharge, so gateway cost estimates may differ from Weft's ledger.",
+   "AI Gateway logs on this account go to Workers Logs (first gateway 2026-10-15, after the 2026-09-24 cutover) and record public visitors' prompts and responses. Consider turning off log collection, or logging metadata only, and watch the 0.5 GB/day Free ingestion cap that starts 2026-12-01.",
+   "From 2026-12-01, all Free logs and traces share 0.5 GB/day of ingestion, and ingestion stops at the cap. AI Search billing starts 2026-11-01, and the docs don't say whether Free accounts are blocked or billed past the included 1,000 queries/month.",
+   "Secrets Store is in open beta; its Free availability and pricing are not documented (100 secrets, one store per account).",
+   "MCP: McpAgent is deprecated. createMcpHandler needs @modelcontextprotocol/server 2.0.0, while Weft's apps/mcp uses @modelcontextprotocol/sdk 1.32.1 (the legacy handler pins 1.30.0). A public remote MCP endpoint can't sit behind Turnstile, so it needs OAuth, API keys or read-only tools, plus the same per-IP rate limits and Durable Object spend caps.",
+   "Workers AI: llama-3.2-11b-vision requires sending an 'agree' prompt to accept the Meta license, which is accepting terms, so don't do it on Nitish's behalf. llama-3.3-70b has only a 24k context. The list of Paid-only models changed on 2026-07-28 and may change again. The Free budget supports only about 6 gpt-oss-120b agent runs/day (my estimate, assuming 40k input and 3k output tokens per run).",
+   "Turnstile hostname rules require an FQDN. The docs don't explicitly confirm a *.workers.dev hostname, so add weft.nitish-ratakonda.workers.dev and test.",
+   "Point-in-time recovery as the demo reset: the docs don't say what a restore costs in rows written, local development doesn't support it, and bookmarks only reach back 30 days, so an older seed needs a reseed. The deleteAll() plus reseed fallback costs about twice the seed's row count in rows written; measure the seed's row count first.",
+   "Browser Run Quick Actions on Free allow 1 request every 10 s. Concurrent pay stub or offer letter requests from public visitors will get 429s unless they are queued and cached in R2, or rendered with an in-Worker PDF library."
+  ]
+ },
+ "seams": {
+  "summary": "I read the code and changed nothing in the repo. Each measurement ran against a scratch world: a rich seed in the scratchpad dir (/private/tmp/claude-501/-Users-nitishcs-Downloads-resume-fine-tuner/dbbbe8b6-3969-4418-a6af-c3e18c3900aa/scratchpad/seed-rich/.data), with copies for each probe, plus /private/tmp/weft-bundle and /private/tmp/weft-web-probe.\n\nPlatform facts (Cloudflare docs read 2026-10-20):\n- **Supported under nodejs_compat:** all of node:crypto (except DSA/DH keygen, argon2, ed448/x448). path, url, zlib, net, process and AsyncLocalStorage are supported; os is partial.\n- **child_process:** a non-functional stub.\n- **fs:** an in-memory virtual file system. /tmp is per request and does not persist; /bundle is read-only.\n- **DO SQLite:** sql.exec rejects BEGIN/SAVEPOINT. transactionSync needs a synchronous callback. The async transaction() on SQLite objects includes sql.exec writes, but the docs say nothing about rollback when the closure throws, or about nesting. The workerd authorizer allows main-database triggers and the foreign_keys/defer_foreign_keys PRAGMAs, and denies journal_mode, busy_timeout and ATTACH.\n- **DO limits:** 2 MB per row/string/BLOB, 100 bound parameters, 100 KB per statement, 100 columns per table.\n- **Free daily caps for DOs:** 100,000 requests, 100,000 rows written, 5M rows read, 13,000 GB-s, 5 GB stored.\n- **Free Workers:** 10 ms CPU, 50 subrequests, 100,000 requests a day, 5 Cron Triggers, 64 MiB uncompressed and no compressed size limit.\n- **DO CPU on Free:** the limits table says 30 s, but the FAQ says DOs have the same limits as Workers. Still unknown.\n\nCodebase map:\n- **Node builtins by file count:** crypto 35, fs 36, path 36, url 4, os 3, zlib 1, net 1, child_process 1, async_hooks 1.\n- **Commands and tools:** 190 commands; MCP exposes 121 of them plus agent_ask, so 122 tools.\n- **Transactions:** 33 db.transaction sites, all with async bodies. The executor runs every command body inside one transaction plus a savepoint. Git (memory.search/read/write_note), QuickJS with a setTimeout and sync fs (offload/read_artifact) are awaited inside transactions. Simulators, core commands and the vault are database plus sync compute only.\n\nMeasured:\n- **Rich world:** 7,957 rows in 99 tables (about 20,186 counting index entries), 160 indexes, 8 triggers. 4.4 MB database; the SQL dump is 3.0 MB (253 KB gzip). Memory is 90 files and 36 commits; 20 upload files (80 KB). Reset plus seed took 3.8 s.\n- **Base world:** 4,750 rows (10,942 with index entries), 2.2 MB.\n- **CPU and statements:** 67 GET routes issued 599 SQL statements; one scheduler tick issued 44 and used about 15 ms CPU. Warm route CPU in Node had a median of 0.5 ms; three routes ran 16 to 20 ms (two time-off routes and memory/tree). The most bound parameters seen in one statement was 72.\n- **API bundle (wrangler 4.149 dry-run):** 6,090 KiB, 1,269 KiB gzip; minified 3,336 KiB, 955 KiB gzip; no build errors. Module evaluation took 114 ms. Under workerd, @libsql/client resolves to its HTTP-only variant and rejects file: URLs.\n- **Web static export (probe copy):** `output: export` built all 30 routes, 5.1 MB, 693 KB gzip of JS. It needed four edits: remove proxy.ts, remove force-dynamic on `/`, give the 5 dynamic routes a placeholder id, and drop the rewrites. OpenNext is not needed.\n\nRecommended shape:\n- **Front Worker:** serves the static assets, runs Turnstile and the Rate Limiting binding, hosts the MCP route, and sends /api/* to a pool of company Durable Objects.\n- **Company DOs:** each holds one world in DO SQLite through a libsql-compatible Client facade, so drizzle and the Db types stay unchanged. Memory and blobs move into the same database, alarms replace the scheduler, and runs are stepped by alarms.\n- **Spend:** one singleton Spend DO keeps the ledger.\n- **World resets:** use PITR bookmarks or a dump made at build time.\n- **First spike:** test whether `ctx.storage.transaction(async)` rolls back on a throw and supports nesting, and measure real DO CPU through the GraphQL Analytics API.",
+  "items": [
+   {
+    "name": "node:crypto (35 source files)",
+    "verdict": "easy",
+    "detail": "Uses:\n- createHash sha256: upload content addressing, API-key and run-token hashes, memory, simulators, digests.\n- createHmac + timingSafeEqual: simulator vendor webhooks, integrations/webhook.ts, auth.ts safeEqual, scope.ts.\n- randomBytes: run tokens, nonces, proxy secret, world id, reservation ids, API keys.\n- createCipheriv/createDecipheriv aes-256-gcm with setAAD/getAuthTag: vault.ts.\n- createSign RSA-SHA256: real DocuSign adapter, off by default.\n\nCloudflare's node:crypto page says all node:crypto APIs work under nodejs_compat except DSA/DH keygen, argon2, randomUUIDv7, ed448/x448 and FIPS toggles. nodejs_compat is on by default from compat date 2026-08-04. The wrangler dry-run bundled every node:crypto reference without error. No adapter is needed; add one workerd smoke test of a vault put/resolve round trip (GCM with AAD) and a webhook HMAC verify.",
+    "source": "packages/executor/src/vault/vault.ts, apps/api/src/http/auth.ts, packages/integrations/src/webhook.ts, packages/sim/src/vendors/{checkr,docusign,greenhouse,workday}.ts, packages/executor/src/{runs,scope,untrusted,admin,workspace}.ts, packages/agent/src/canonical.ts, packages/routines/src/{engine,waits}.ts, packages/integrations/src/real/{checkr,docusign}.ts"
+   },
+   {
+    "name": "node:fs persistent state outside the database (36 source files)",
+    "verdict": "medium",
+    "detail": "Workers' fs is an in-memory virtual file system. /tmp is unique per request and does not persist, /bundle is read-only, fs.rm's force option is not implemented, and timestamps are epoch. So every persistent file use needs an adapter.\n\nUses by purpose:\n- (a) Uploads: see the uploads item.\n- (b) Run artifacts and code.run files: workspace.ts, builtins.ts, sandbox/files.ts, routes/agent.ts:204.\n- (c) Small state files:\n  - run/proxy.secret, from readOrCreateProxySecret in compose.ts.\n  - run/vault.key.\n  - run/handles/<run>.json, from fileRunHandleStore in compose.ts.\n  - companies/.world-id, in world-id.ts.\n  - demo-api-key.txt and demo-mcp-key.txt: written by seed governance.ts, read by executor/index.ts:89 to teach the redactor.\n  - run/errors.log: appendFileSync in http/errors.ts.\n- (d) The spend ledger jsonl files and mkdir lock (agent/spend.ts).\n- (e) Secrets files named by WEFT_SECRETS_FILE (agent/secrets.ts, integrations/secrets.ts) and the DocuSign PEM.\n- (f) Reset's rmSync of companies/ and run/handles (routes/sim.ts:98, seed/cli.ts).\n- (g) mkdirSync(dataDir) in db/client.ts openDb.\n- (h) The memory repo: see the memory item.\n\nProposed adapters, each with today's file version for Node and a DO version:\n- `interface BlobStore { put(key: string, bytes: Uint8Array): Promise<void>; get(key: string): Promise<Uint8Array|null>; has(key: string): Promise<boolean>; delete(key: string): Promise<void> }`\n- `interface SmallState { get(name: string): string|null; set(name: string, v: string): void; delete(name: string): void }`, backed by ctx.storage.kv or a kv table.\n- Error log goes to console.error (Workers Logs).\n- Secrets come from env only.\n\nThe Engine and the Weft composition root take { blobs, state } instead of building paths from dataDir.",
+    "source": "apps/api/src/compose.ts, apps/api/src/world-id.ts, apps/api/src/http/errors.ts, apps/api/src/routes/{expenses,portal,compliance,training,agent-surfaces,agent,sim}.ts, packages/executor/src/{workspace,builtins,index}.ts, packages/executor/src/sandbox/files.ts, packages/executor/src/vault/vault.ts, packages/agent/src/{spend,secrets}.ts, packages/integrations/src/secrets.ts, packages/seed/src/{governance,w3-expenses,cli}.ts, packages/seed/src/rich/motion.ts, packages/db/src/client.ts"
+   },
+   {
+    "name": "Bundled data files found via import.meta.url (node:path, node:url)",
+    "verdict": "easy",
+    "detail": "These read repo files at runtime, and the files are not in the Worker bundle:\n- packages/db/src/migrate.ts: the drizzle/ folder via fileURLToPath(new URL('../drizzle', import.meta.url)).\n- packages/sim/src/notices/mailed.ts: readdirSync of mailed/*.txt plus .json sidecars (12 files, 48 KB).\n- packages/sim/src/notices/scenarios.ts: fixtures/notices/<name>.txt (4 files, 16 KB).\n- packages/agent/src/providers/factory.ts: DEFAULT_SCRIPTS_DIR = <repo>/scenarios, read by scripted.ts (59 JSON scripts, 236 KB). This is needed hosted, because unattended routine runs use the deterministic template provider unless WEFT_BACKGROUND_LLM=1.\n- packages/seed/src/cli.ts loads compose.ts by file URL (Node only).\n\nnode:path and node:url themselves work. Fix: `interface FixtureSource { list(dir: string): string[]; text(path: string): string }`. Node reads the files; the Worker uses a generated fixtures module or wrangler `rules` (Text for **/*.txt, **/*.sql; Data or JSON for the rest).",
+    "source": "packages/db/src/migrate.ts, packages/sim/src/notices/mailed.ts, packages/sim/src/notices/scenarios.ts, packages/agent/src/providers/factory.ts, packages/agent/src/providers/scripted.ts, packages/agent/src/runtime.ts, scenarios/"
+   },
+   {
+    "name": "node:os, node:zlib, node:net",
+    "verdict": "easy",
+    "detail": "- **os** (partially supported on Workers): tmpdir() for git's isolated HOME (memory/git.ts; goes away with the SQLite memory store) and test helpers; homedir() for expanding ~ in WEFT_SECRETS_FILE (agent/secrets.ts; hosted secrets come from env).\n- **zlib** (supported): deflateSync and crc32, only in seed w3-expenses.ts to build PNG receipts. With a build-time snapshot the seed never runs in a Worker.\n- **net:** a createServer port probe in apps/api/src/main.ts only. A Worker entry (`export default { fetch }` plus the DO class) replaces main.ts and @hono/node-server; Hono's app.fetch runs as is.",
+    "source": "packages/executor/src/memory/git.ts, packages/agent/src/secrets.ts, apps/api/src/testing.ts, packages/seed/src/w3-expenses.ts, apps/api/src/main.ts"
+   },
+   {
+    "name": "node:async_hooks write lock (withWriteLock, writeLocked, lockedWrite)",
+    "verdict": "easy",
+    "detail": "packages/db/src/client.ts builds a re-entrant write mutex from AsyncLocalStorage and a module-level `tail` promise. serializeWrites wraps libsql execute/batch with that mutex and SQLITE_BUSY retries. executor/write.ts writeLocked, agent/busy.ts and routines/busy.ts retry SQLITE_BUSY, which comes from libsql's connection pool.\n\nAsyncLocalStorage is supported under nodejs_compat. A DO has one connection, so SQLITE_BUSY never happens and the retries become dead code. Keep the mutex for logical serialization, but key `tail` per Db (WeakMap<Db, Promise>). Several DO instances of one class can share an isolate, and today's module-level `tail` (and git.ts serialGit's `tail`) would serialize writes across different visitors' worlds.",
+    "source": "packages/db/src/client.ts, packages/executor/src/write.ts, packages/agent/src/busy.ts, packages/routines/src/busy.ts, packages/executor/src/memory/git.ts"
+   },
+   {
+    "name": "Database driver: @libsql/client file: URL to Durable Object SQLite",
+    "verdict": "hard",
+    "detail": "Only packages/db imports @libsql/client and drizzle-orm/libsql: Db = LibSQLDatabase<Schema> & { $client: Client }, with DbTx derived from it. Verified in both bundles: under the workerd condition @libsql/client resolves to its web (hrana/HTTP) variant, which throws URL_SCHEME_NOT_SUPPORTED for file: URLs. So openDb cannot run in a Worker today.\n\n**Option A:** drizzle-orm/durable-sqlite (present in 0.45.4). It is a sync driver; its session's transaction() is `this.client.transactionSync(() => transaction(tx))`, and nested transactions take the same path. The async bodies used everywhere would commit at their first await and would not roll back on a later throw.\n\n**Option B (recommended):** a libsql-compatible Client facade over ctx.storage.sql, so drizzle-orm/libsql and every Db/DbTx type stay as they are.\n- execute({sql, args}) maps to sql.exec(sql, ...args), returned as a ResultSet. rowsAffected comes from `SELECT changes()` and lastInsertRowid from `last_insert_rowid()`.\n- batch() runs the statements in transactionSync.\n- transaction() returns an object whose commit/rollback resolve a deferred awaited inside ctx.storage.transaction(async ...).\n- Intercept drizzle's savepoint, release and rollback-to statements, which sql.exec refuses.\n- executeMultiple skips journal_mode and busy_timeout (not on workerd's PRAGMA allowlist; foreign_keys and defer_foreign_keys are).\n- Inline literal args when a statement has more than 100 bound parameters (the DO limit).\n- close() is a no-op.\n\nInterface: `openDb(opts: { dataDir: string } | { durable: DurableObjectStorage }): Db`.\n\nOn the rich world in Node, the 67 GET routes ran 599 statements and one tick ran 44. That only works because DO SQLite is in-process.",
+    "source": "packages/db/src/client.ts, packages/db/src/migrate.ts, packages/db/src/index.ts, node_modules/.pnpm/drizzle-orm@0.45.4*/node_modules/drizzle-orm/durable-sqlite/session.js, /private/tmp/weft-bundle/dist-min/entry.js"
+   },
+   {
+    "name": "db.transaction bodies that await async work (33 call sites)",
+    "verdict": "hard",
+    "detail": "**Call sites:**\n- executor: runs.ts:28; agent.ts:31 and :50; admin.ts:20; human.ts:84, 96, 113, 134, 161, 179, 220; system.ts:39; index.ts:102 and :116; plus the savepoint at pipeline.ts:275, which is tx.transaction around def.run.\n- apps/api: scheduler.ts:68; integrations/poll-screening.ts:37, 59, 68, 80; integrations/poll.ts:33 and :36; routes/integrations.ts:141 and :152; contractors.ts:35; screening.ts:99 and :137 (both `await import('@weft/sim')` inside the body); sim.ts:129.\n- seed: actions.ts:38; w3-timeoff.ts:166 and :174; rich/index.ts:895.\n\nEvery body is async and awaits drizzle. packages/core alone has 1,607 awaits in 15,332 lines, and all 190 command bodies run inside the executor transaction.\n\n**Non-database work awaited inside a transaction:**\n- memory.search, memory.read and memory.write_note run git through execFile (memory/commands.ts).\n- code.run awaits memory.head (git), the QuickJS engine and a setTimeout race for the wall deadline (quickjs.ts:245). Its inner weft.call calls re-enter runInTx on the same tx (sandbox/host.ts).\n- offloadIfLarge and agent.read_artifact do sync fs.\n- Real vendor adapters would fetch inside def.run; they are off by default.\n\nSimulators, vault decrypt and core commands are database plus sync compute only. Decision notes and timeline appends already run after commit (human.ts decisionNote, timeline.ts afterCommit).\n\n**DO options:**\n- transactionSync requires a synchronous callback, so every body would need rewriting to drizzle's sync .all()/.get()/.run(). That is weeks of work across 190 commands.\n- ctx.storage.transaction(async) on SQLite objects counts sql.exec writes as part of the transaction. Rollback on a throw and nesting are undocumented, so it needs a spike.\n\n**Required either way:** move git, QuickJS timers and fs out of transaction bodies (DB-backed memory and blobs do that), so the only awaits left inside a transaction are microtasks and no other DO event can interleave.\n\n**Savepoint fallback** if nesting fails: run the command in its own transaction, and record the refusal (exec_calls, or decide's Rollback path) in a second one.",
+    "source": "packages/executor/src/{pipeline,agent,human,runs,system,admin,index,builtins,workspace}.ts, packages/executor/src/memory/commands.ts, packages/executor/src/sandbox/{host,quickjs}.ts, apps/api/src/scheduler.ts, apps/api/src/routes/{screening,integrations,contractors,sim}.ts, apps/api/src/integrations/{poll,poll-screening}.ts, packages/seed/src/{actions,w3-timeoff}.ts, packages/seed/src/rich/index.ts"
+   },
+   {
+    "name": "Compare-and-set approval executes once (rowsAffected)",
+    "verdict": "medium",
+    "detail": "**How it works today:**\n- decide(approve) runs `UPDATE proposals SET status='approved' ... WHERE id=? AND status='pending'` and requires rowsAffected === 1 (human.ts:181).\n- It reruns the full pipeline on the stored args in the same transaction.\n- `UPDATE ... SET status='executed', executed_action_seq=? WHERE id=? AND status='approved' AND executed_action_seq IS NULL` must also affect exactly 1 row (pipeline.ts:295).\n- The UNIQUE index proposals_executed_action_seq is a second guard.\n- Deny, dismiss and expire use the same check (human.ts:136 and :163, proposals.ts:250); routines/waits.ts:77 and :84 test rowsAffected > 0. Seven sites in all.\n\n**The DO risk:** libsql's rowsAffected is exact. DO cursors expose rowsWritten, a billing counter that probably counts index entries as D1's does, and proposals has the indexes proposals_status and proposals_executed_action_seq besides its key. A naive mapping would make every CAS look like it lost.\n\n**Fix:** the facade derives rowsAffected from `SELECT changes()` right after each write. With that, the CAS holds on a DO, because the object is single-threaded and the bodies have no I/O awaits. Add a workerd test: a double approve gives one execution and one NOT_PENDING.",
+    "source": "packages/executor/src/human.ts, packages/executor/src/pipeline.ts, packages/executor/src/proposals.ts, packages/routines/src/waits.ts, packages/db/drizzle/0000_init.sql"
+   },
+   {
+    "name": "Hash-chained actions and append-only triggers",
+    "verdict": "medium",
+    "detail": "appendAction (chain.ts) reads the head (ORDER BY seq DESC LIMIT 1), computes sha256 over canonical JSON in JavaScript and inserts seq+1 with prev_hash, all in the caller's transaction. appendAudit does the same for approval_audit.\n\nThe migrations 0001_triggers.sql and 0004_signature_triggers.sql add 8 triggers that RAISE(ABORT) on UPDATE or DELETE of actions, approval_audit and signatures, and on edits or deletes of signed documents.\n\nThe read-then-insert must be serialized. A DO guarantees that (single thread, no I/O await in the body). D1 does not: with no interactive transactions, two writers would read the same head. workerd's SQLite authorizer allows main-database CREATE TRIGGER; temp triggers are denied and names starting _cf_ are reserved. So the migrations should apply unchanged; confirm in wrangler dev and on the deploy.\n\nResets can't DELETE these rows. Today's sim reset drops every table under PRAGMA foreign_keys=OFF (routes/sim.ts:102). On a DO, use ctx.storage.deleteAll() (from compat date 2026-02-24 it also clears the alarm), then migrate and restore, or use a PITR restore.\n\nverifyChain also reports gitLag from memory.chainHeadSeq(), so the hosted memory store must keep the Weft-Chain-Head trailer.",
+    "source": "packages/executor/src/chain.ts, packages/db/drizzle/0001_triggers.sql, packages/db/drizzle/0004_signature_triggers.sql, apps/api/src/routes/sim.ts, packages/executor/src/index.ts, packages/executor/src/timeline.ts"
+   },
+   {
+    "name": "Migrations",
+    "verdict": "medium",
+    "detail": "8 drizzle migrations (0000_init to 0007_wave4, 1,352 lines) create 99 tables, 160 indexes and 8 triggers (counted in a seeded rich database). drizzle-orm/libsql/migrator applies them from a folder found via import.meta.url plus meta/_journal.json, after openDb sends `PRAGMA journal_mode=WAL; busy_timeout=5000; foreign_keys=ON`.\n\nHosted plan:\n- Bundle the .sql files and the journal (wrangler Text rule or a generated module).\n- Run a small migrator in the DO constructor under ctx.blockConcurrencyWhile, one transactionSync per migration.\n- Write __drizzle_migrations exactly as libsql does, so Node and DO databases stay identical.\n- Drop journal_mode and busy_timeout (denied by workerd); keep foreign_keys (allowed).\n\nThe schema fits DO limits: the widest tables are expenses (31 columns) and proposals (30) against 100 per table, and rows must stay under 2 MB. The facade's migrate() runs the batch in transactionSync with foreign keys deferred.",
+    "source": "packages/db/src/migrate.ts, packages/db/src/client.ts, packages/db/drizzle/*.sql, packages/db/drizzle/meta, packages/db/drizzle.config.ts"
+   },
+   {
+    "name": "D1 as the database instead of DO SQLite",
+    "verdict": "blocker",
+    "detail": "D1 has no interactive transactions, only batch() of statements whose results cannot feed later statements. Nearly every executor call reads, decides and writes inside one transaction:\n- exec_calls dedupe;\n- the proposals CAS;\n- reading the chain head before an append;\n- daySpent ceilings;\n- lease checks;\n- id_counters;\n- run_taint.\n\nIt also issues hundreds of small queries per request (599 over the 67 GETs), and each would be a network round trip on D1. Keep D1 out of the data path; DO SQLite (5 GB per account on Free) is the store.",
+    "source": "packages/executor/src/pipeline.ts, packages/executor/src/chain.ts, packages/executor/src/human.ts, packages/executor/src/proposals.ts"
+   },
+   {
+    "name": "Memory store (git CLI repo per company)",
+    "verdict": "hard",
+    "detail": "createMemoryStore (store.ts, 513 lines) implements:\n- the contracts MemoryStore: init, head, read(path, at), search, write, appendTimeline, remove, tree;\n- LocalMemory on top: root, chainHeadSeq, seedFiles, digest, links, aliasIndex, recall, history.\n\nIt runs git through execFile (git.ts: hardened flags, an isolated HOME in os.tmpdir, the serialGit queue, a 15 s timeout) and reads and writes the working tree with sync fs:\n- search is `git grep -i --fixed-strings`;\n- pinned reads are `git show <sha>:<path>`;\n- history is `git log -p`;\n- chainHeadSeq reads Weft-Chain-Head trailers;\n- commit dates come from the sim clock, so SHAs are reproducible;\n- bundle.ts and scripts/memory-bundle.ts make git bundles.\n\nchild_process is a non-functional stub on Workers, so the store fails at its first call even though it bundles cleanly. The executor builds createMemoryStore directly (executor/index.ts:77), and apps/api's memory routes, digest and recall bind to it. The seeded rich memory is small: 90 files, 30 KB of text, 36 commits.\n\nProposed:\n- Inject `memory: (deps) => LocalMemory` into createExecutor and add a SQLite version used by both runtimes.\n- Tables: memory_commits(seq, sha CHAR(40), parent, message, author, date, trailers) and memory_files(path, commit_seq, text or NULL for a delete).\n- read(path, at) returns the latest version with commit_seq ≤ at's seq.\n- search uses instr(lower(text), lower(term)), or FTS5 (supported in DO).\n- history diffs are computed in JavaScript.\n- sha is sha1 of a canonical commit preimage: 40 hex, so SHA_RE and `at` validation still pass.\n- Export writes a git fast-import stream so memory:restore can rebuild a real repo.\n\nMemory writes then become plain SQL in the caller's transaction, which also fixes git inside transactions. Run contract tests against both versions, since commit ids will differ from git's.",
+    "source": "packages/executor/src/memory/{store,git,bundle,commands,seed-content}.ts, packages/executor/src/index.ts, packages/contracts/src/memory.ts, apps/api/src/memory/{binding,digest,recall}.ts, apps/api/src/routes/memory.ts, scripts/memory-bundle.ts, scripts/memory-restore.ts"
+   },
+   {
+    "name": "Uploads on disk",
+    "verdict": "medium",
+    "detail": "Uploads are content-addressed by sha256 under <dataDir>/uploads, shared by all companies, with an `uploads` row holding storage_path.\n- Write sites: files are written before the executor call and unlinked if it refuses (expenses.ts:50-57, portal.ts:90-103, compliance.ts:96-104); training.ts:42-45 and agent-surfaces.ts:166-169 also write.\n- Read site: receipts are read back at expenses.ts:151-153.\n- The seed writes 20 files (80 KB, including .extract.json sidecars).\n\nThe cap is 5 MB per file (MAX_RECEIPT_BYTES), above the DO 2 MB limit per BLOB or row.\n\nOptions ruled out:\n- R2: excluded because activation might ask for a card.\n- Workers KV: only 1,000 writes a day on Free.\n\nProposed: BlobStore in DO SQLite as blobs(key = sha256, idx, bytes) in 1 MB chunks, or a hosted cap of 1.5 MB. Today's write-then-undo flow maps to put/delete, and storage_path becomes the blob key.",
+    "source": "apps/api/src/routes/{expenses,portal,compliance,training,agent-surfaces}.ts, packages/seed/src/w3-expenses.ts, packages/seed/src/rich/motion.ts, packages/core/src/commands/w4-compliance.ts"
+   },
+   {
+    "name": "Run workspaces and large-result artifacts (runs/<id>/...)",
+    "verdict": "easy",
+    "detail": "offloadIfLarge writes results over 8,000 characters to companies/<co>/runs/<run>/artifacts/<step>-<wire>.json, plus a run_artifacts row (path, bytes, sha256). They are read back by agent.read_artifact (builtins.ts:137), readArtifactInTx and GET artifact (routes/agent.ts:204). code.run writes runs/<run>/code/<step>.js and <step>.out.json (sandbox/files.ts). The seeded world has no run files.\n\nHosted: a run_files(path PK, text) table, or a body column on run_artifacts, behind BlobStore. Artifacts must stay under 2 MB or be chunked. This also takes the sync fs calls out of the pipeline transaction.",
+    "source": "packages/executor/src/workspace.ts, packages/executor/src/builtins.ts, packages/executor/src/sandbox/files.ts, apps/api/src/routes/agent.ts"
+   },
+   {
+    "name": "Vault (AES-256-GCM)",
+    "verdict": "easy",
+    "detail": "vault.ts encrypts each secret with createCipheriv('aes-256-gcm'), a 12-byte IV and the name as AAD, and stores the tag. primeRedactor decrypts everything at boot and swallows failures. The crypto runs under nodejs_compat.\n\nKey source: loadVaultKey prefers env WEFT_VAULT_KEY (64 hex) and otherwise creates <dataDir>/run/vault.key. On Workers that fallback would write to a per-request /tmp and mint a new random key per request, so stored secrets would silently fail to decrypt.\n\nHosted:\n- Set WEFT_VAULT_KEY as a Worker secret, and fail closed when it is missing.\n- Build the seed snapshot with the same key, or insert vault rows at restore time.",
+    "source": "packages/executor/src/vault/vault.ts, packages/executor/src/vault/redact.ts, packages/executor/src/index.ts"
+   },
+   {
+    "name": "Spend ledger (.data/spend/<UTC day>.jsonl)",
+    "verdict": "medium",
+    "detail": "createSpendLedger (agent/spend.ts) implements the narrow contracts SpendLedger (reserve, settle, release, spent) plus committed and entries. It writes one jsonl file per UTC day and takes an mkdir lock (2 s retry, 10 s stale). sim reset never touches it.\n\nreserve checks three caps:\n- per run: world plus run id, times runCapScale;\n- per day: across all worlds;\n- live: live providers, summed over every day file ever.\n\nThe caps come from WEFT_RUN_USD_CAP 0.10, WEFT_DAY_USD_CAP 2.00 and WEFT_LIVE_USD_CAP 0.50.\n\nHosted caps must hold across every visitor world. Proposed:\n- One singleton SpendLedger DO (idFromName('spend')) with a spend_entries table indexed by (day), (world, run_id) and live.\n- RPC reserve/settle/release/spent called from each company DO's model loop, one reserve and one settle per attempt.\n- Add per-visitor or per-IP day scopes alongside the Rate Limiting binding.\n- World id = pool slot plus generation, replacing companies/.world-id.",
+    "source": "packages/agent/src/spend.ts, packages/contracts/src/spend.ts, apps/api/src/world-id.ts, apps/api/src/compose.ts, packages/agent/src/loop.ts, docs/models.md"
+   },
+   {
+    "name": "Scheduler and cron routines",
+    "verdict": "medium",
+    "detail": "createScheduler ticks every 5 s with setInterval (unref'd) and on kick() after each mutation. Each tick runs, in order:\n- sims.tick and rail sync;\n- offer expiry;\n- integration polls and webhooks;\n- time-off year end and benefit windows;\n- proposal expiry;\n- event handlers, from an events.rowid cursor kept in settings;\n- routines.tick: croner cron slots on the SimClock, then events.\n\nThe SimClock is persisted in settings: now = base_sim + (wall - base_wall) * rate, with WEFT_CLOCK_RATE defaulting to 1. One tick on the rich world ran 44 statements and about 15 ms of CPU in Node.\n\nHosted:\n- No setInterval. DO alarms drive ticks only while a world is assigned and active, plus kick() inline after mutations. Each alarm is a DO request and each setAlarm is a row written.\n- A 5 s alarm for every world all day would be 17,280 requests per world per day, against a cap of 100,000.\n- Recommend clock rate 0 (frozen at the seed Monday) with the existing Simulators-panel advance buttons, or rate 1 with catch-up on the next request.\n- Use Cron Triggers (5 per account) only for pool maintenance.",
+    "source": "apps/api/src/scheduler.ts, packages/routines/src/engine.ts, packages/core/src/shared/clock.ts, apps/api/src/routes/sim.ts"
+   },
+   {
+    "name": "Agent runtime: background runs, queue and restart rule",
+    "verdict": "medium",
+    "detail": "How it works today:\n- runtime.ts enqueue() starts runs in the background (void queue.push) after the HTTP response.\n- The queue is per process: concurrency 1 for openai, 8 for scripted.\n- runLoop (loop.ts) is a for(;;) over model steps. Budgets: chat 12 steps, routine 6, routine_draft 4, 10 minutes of wall time.\n- Loop state is rebuilt from run_steps rows (setupOf, historyFromSteps, resumed segments).\n- RunHandleStore saves handles to files.\n- boot() fails running and queued runs with PROCESS_RESTART.\n\nOn a DO, a promise that outlives its request is not guaranteed to finish, and evictions would turn PROCESS_RESTART into a routine failure.\n\nHosted:\n- Start and continue runs from a DO alarm (15 min of wall time per handler), one model step or a few per invocation, ending each segment after a step.\n- boot() resumes queued and running runs instead of failing them.\n- RunHandleStore moves to a DO table.\n- The 50 subrequests per invocation on Free bound a segment: the model fetch, spend reserve/settle RPCs and child runs. Whether DO RPC counts as a subrequest is undocumented.\n- subscribe() callbacks for SSE stay in-process, because the same DO serves the stream.",
+    "source": "packages/agent/src/runtime.ts, packages/agent/src/loop.ts, packages/agent/src/queue.ts, apps/api/src/compose.ts"
+   },
+   {
+    "name": "Simulators",
+    "verdict": "easy",
+    "detail": "The packages/sim simulators run on the DbTx they are given and use only node:crypto and two fixture readers. They cover agencies, bank, IdP, devices, chat, carriers, vendors, the payment rail and faults. They run inside executor transactions with no I/O awaits, so they port unchanged once the database adapter exists. Only mailed.ts and scenarios.ts need the bundled FixtureSource. Integration polls and webhook deliveries call simulator outboxes in short transactions.",
+    "source": "packages/sim/src, packages/sim/src/notices/{mailed,scenarios}.ts, apps/api/src/integrations/{poll,poll-screening}.ts"
+   },
+   {
+    "name": "Integrations (real adapters off)",
+    "verdict": "easy",
+    "detail": "createVendorOverlay(process.env) installs the real Checkr and DocuSign adapters only when WEFT_INTEGRATIONS_REAL=1 and every secret resolves from WEFT_SECRETS_FILE, which is read with fs. They use fetch, createHmac and createSign (RSA-SHA256 JWT with a PEM read via readFileSync).\n\nHosted: always simulated. Leave WEFT_INTEGRATIONS_REAL unset and bundle no secrets-file path. If they are ever enabled, their fetches would run inside executor transactions (def.run), so they would first need an outbox that sends after commit.",
+    "source": "packages/integrations/src/real/{checkr,docusign}.ts, packages/integrations/src/secrets.ts, apps/api/src/compose.ts"
+   },
+   {
+    "name": "Phoenix/OpenInference tracing export",
+    "verdict": "easy",
+    "detail": "apps/api/src/telemetry.ts startTracingFromEnv registers @arizeai/phoenix-otel's NodeTracerProvider, with an OTLP protobuf HTTP exporter to a loopback Phoenix, only when WEFT_TRACE=phoenix. main.ts calls it; compose.ts does not. packages/agent/src/otel.ts uses only @opentelemetry/api (a no-op without a provider) and the OpenInference helpers.\n\nHosted: leave WEFT_TRACE unset and keep telemetry.ts out of the Worker entry. Model-call visibility comes from AI Gateway logs and Workers Logs; the in-app run trace reads run_steps.\n\nIf tracing is ever turned on hosted, three pieces of module-level state in otel.ts would leak across DO instances that share an isolate:\n- the `learned` set of secrets;\n- `recallNotes`, keyed by run id, and run ids restart at run_0001 in every world;\n- the global setTraceRedactor.",
+    "source": "apps/api/src/telemetry.ts, apps/api/src/main.ts, packages/agent/src/otel.ts, apps/api/src/compose.ts"
+   },
+   {
+    "name": "QuickJS sandbox (WASM)",
+    "verdict": "medium",
+    "detail": "createQuickJsEngine uses quickjs-emscripten RELEASE_SYNC (@jitl/quickjs-wasmfile-release-sync; emscripten-module.wasm is 491 KiB, 226 KiB gzip) and instantiates a fresh module per code.run; harness.md measured 20 to 29 ms for that locally.\n\nPorting steps:\n- Workers cannot compile WASM from bytes at runtime, so import the .wasm as a module and use newVariant(RELEASE_SYNC, { wasmModule }).\n- The wall deadline is a setTimeout inside the executor transaction (quickjs.ts:245), which yields to the event loop mid-transaction on a DO. Replace it with a Date.now() check in the interrupt handler.\n- Inner weft.call reads re-enter runInTx on the same tx (host.ts); keep that.\n- codeFiles writes to disk (see the run workspaces item).\n\nKeep the documented hosted default, WEFT_SANDBOX=off (code.run refuses with UNAVAILABLE), until DO CPU on Free is measured.",
+    "source": "packages/executor/src/sandbox/{quickjs,host,select,files}.ts, packages/executor/src/builtins.ts, research/harness.md section 3.7"
+   },
+   {
+    "name": "Seed process and fast snapshot/restore of a seeded company",
+    "verdict": "hard",
+    "detail": "**Rich world:**\n- 7,957 rows in 99 tables, about 20,186 counting index entries. Largest tables: ytd_ledger 3,327, paychecks 960, time_off_ledger 417, run_steps 411, onboarding_tasks 411, documents 277, actions 232.\n- 4.4 MB database; sqlite3 .dump is 3.0 MB (253 KB gzip).\n- Memory: 90 files, 36 commits. Uploads: 20 files.\n- reset plus seed took 3.8 s.\n- The summary line reported 34 memory commits and 231 actions.\n\n**Base world:** 4,750 rows (10,942 with index entries), 2.2 MB.\n\n**Bundle cost:** faker plus seed add about 580 KB minified, and the seed writes files and git. Don't run it in the Worker.\n\n**Snapshot:**\n- Seed in Node at build time with the hosted settings: clock rate 0, the deploy WEFT_VAULT_KEY, and the SQLite memory and blob stores, so a world is one SQLite database.\n- Dump only the data rows.\n- Ship it as a Workers static asset fetched through env.ASSETS behind run_worker_first, or as a 253 KB gzip Data module.\n\n**Restore in the DO:**\n- deleteAll(), migrate, then INSERT chunks of literals under 100 KB each (about 30 to 60 sql.exec calls) in transactionSync.\n- Then mint fresh API keys and revoke the seeded admin and mcp keys.\n- CPU is unknown; if Free DO CPU is 10 ms, split the restore across alarms.\n\n**Row budget:** about 20k rows written per rich restore (if index entries count, as on D1) against 100,000 a day, so at most 4 to 5 resets a day.\n\n**Faster path, PITR:**\n- After the first seed, store `await ctx.storage.getCurrentBookmark()` in a Lobby DO.\n- Reset with onNextSessionRestoreBookmark(bm) then ctx.abort().\n- The window is 30 days, so re-seed monthly with a Cron Trigger.\n- Not supported in local dev; Free-plan availability and whether it counts rows written are undocumented.\n- Also reuse clean slots: a dirty flag is set on the first write.",
+    "source": "packages/seed/src/{cli,index,profile,governance,w3-expenses}.ts, packages/seed/src/rich/{index,motion}.ts, apps/api/src/routes/sim.ts, packages/executor/src/memory/seed-content.ts, scratchpad/seed-rich/.data"
+   },
+   {
+    "name": "Visitor isolation: pool of company DOs and per-isolate globals",
+    "verdict": "medium",
+    "detail": "A world holds one company: the seed creates cmp_larkspur, and run ids, id_counters and the world id restart per world. So isolation means one DO per world.\n\nState that assumes one world per process:\n- the db write-lock `tail` and git's serialGit `tail`;\n- the auth.ts Window rate limiters, which are per isolate and not per IP;\n- otel.ts module state;\n- the integrations webhookReceivers map, keyed by Db.\n\nPool design:\n- A Lobby DO maps a signed visitor cookie to a slot DO, with lease expiry and a dirty flag.\n- Clean slots are reused without a reset; dirty slots are reset on reassignment.\n- Fresh admin and mcp keys are minted per visitor.\n- The seed's demo-api-key.txt and demo-mcp-key.txt plaintexts never ship.\n\nFree limits: 100 DO classes, unlimited objects, 5 GB total; a rich world is 4.4 MB.",
+    "source": "packages/db/src/client.ts, packages/executor/src/memory/git.ts, apps/api/src/http/auth.ts, packages/agent/src/otel.ts, apps/api/src/integrations/poll.ts, packages/seed/src/governance.ts"
+   },
+   {
+    "name": "Web app: static export versus OpenNext",
+    "verdict": "medium",
+    "detail": "**Probe** (a copy in /private/tmp/weft-web-probe; the repo is untouched). Edits:\n- `output: 'export'` and `trailingSlash: true`;\n- deleted src/proxy.ts;\n- removed `export const dynamic = 'force-dynamic'` from (marketing)/page.tsx;\n- appended `export function generateStaticParams() { return [{ id: '_' }] }` to the 5 dynamic pages: offboarding, payroll, people, routines and runs [id].\n\n`next build --webpack` built all 30 routes as static or SSG: 226 files, 5.1 MB, of which 2.34 MB of JS (693 KB gzip). That is far under the 20,000-file and 25 MiB-per-file asset limits.\n\n**Facts:**\n- Every page.tsx and layout.tsx is a server component, but each only renders client views.\n- The 5 dynamic pages await params and pass id as a prop. A static export bakes in the placeholder, so the views must read the id from usePathname.\n- `/` is force-dynamic and calls loadLanding() on the server, fetching 127.0.0.1:4070 /v1/stats and /v1/health, with a seed fallback. Make it a client fetch.\n- src/proxy.ts (Next 16 middleware) injects x-weft-proxy from .data/run/proxy.secret and enforces a loopback Host; next.config rewrites /api/* to 127.0.0.1:4070. Neither works with an export.\n- There are no route handlers, server actions, cookies() or headers(), next/image or next/font.\n- routines-view.tsx and w4-ask.tsx import ../../packages/contracts/src/ext by relative path, so the build needs the monorepo layout.\n\n**Hosted:**\n- Workers static assets with run_worker_first ['/api/*', '/mcp'].\n- The Worker serves /app/<section>/<id>/ from /app/<section>/_/ via env.ASSETS.fetch.\n- A conditional next.config (WEFT_STATIC_EXPORT=1).\n\nOpenNext is not needed, and server rendering under the 10 ms Free Worker CPU limit would be a risk.",
+    "source": "apps/web/next.config.ts, apps/web/src/proxy.ts, apps/web/src/app/(marketing)/page.tsx, apps/web/src/components/marketing/live.ts, apps/web/src/app/(app)/app/*/[id]/page.tsx, apps/web/src/components/app/routines/routines-view.tsx, apps/web/src/components/portal/w4-ask.tsx, /private/tmp/weft-web-probe/apps/web/out"
+   },
+   {
+    "name": "Web polling versus the free request caps",
+    "verdict": "medium",
+    "detail": "The polling interval comes from useApi's refreshMs (lib/api/hooks.ts):\n- 29 call sites at 5 s;\n- 5 at 4 s and 5 at 3 s;\n- 1 at 2 s and 6 at 10 s.\n\nPortal sections poll at 5 s and 10 s, and the run view polls the trace every 1 s while it streams.\n\nOne open tab sends roughly 1 to 3 requests per second. Each is a Worker request plus a DO request, and each kind is capped at 100,000 a day on Free. That is about 10 to 30 open-tab-hours a day in total, across all visitors.\n\nHosted:\n- Pause polling while document.hidden is true, and lengthen intervals.\n- Replace most polling with a per-world change counter pushed over a hibernatable WebSocket from the company DO. A hibernated socket does not bill duration.\n- Static asset requests do not invoke the Worker.",
+    "source": "apps/web/src/lib/api/hooks.ts, apps/web/src/lib/api/sse.ts, apps/web/src/components/portal/screening/section.tsx, apps/web/src/components/portal/w4-training.tsx"
+   },
+   {
+    "name": "SSE run events",
+    "verdict": "medium",
+    "detail": "GET /v1/agent/runs/:id/events uses hono streamSSE with in-process agent.subscribe and a 15 s heartbeat from setInterval (http/sse.ts). The web client falls back to a 1 s trace poll.\n\nThis works from a DO, because the DO that runs the loop also serves the stream. But an open stream keeps the DO active: the Free duration budget is 13,000 GB-s a day, about 29 object-hours at 128 MB.\n\nKeep streams short: close them when the run settles (already done) plus a hard timeout. Use a hibernatable WebSocket for any long-lived push.",
+    "source": "apps/api/src/http/sse.ts, apps/api/src/routes/agent.ts, apps/web/src/lib/api/sse.ts"
+   },
+   {
+    "name": "Auth, host allowlist, proxy secret and abuse hooks",
+    "verdict": "medium",
+    "detail": "**Today (auth.ts):**\n- allowedHosts accepts loopback hosts on the API and web ports only, and x-forwarded-host and Origin are checked against the same list.\n- x-weft-principal is honored only with a matching x-weft-proxy and WEFT_DEV_AUTH=1 (or testMode).\n- x-api-key is looked up by sha256.\n- In-memory fixed windows allow 60 a minute per key and 1,200 a minute per UI principal.\n\n**Hosted:**\n- Allow <name>.nitish-ratakonda.workers.dev.\n- Only the front Worker can reach a company DO (bindings are not public). The Worker strips any client x-weft-proxy and passes a trusted session over RPC, or a Worker-secret proxy value.\n- The Worker runs Turnstile siteverify (one subrequest) before the model-calling routes:\n  - POST /v1/agent/runs (agent.ts:111);\n  - the portal ask (agent-surfaces.ts:101);\n  - @mentions (agent-surfaces.ts:150);\n  - the routine draft (routines.ts:102);\n  - starting a suggestion (proposals.ts:82);\n  - attended routine run-now and approvals that wake a run.\n- The Rate Limiting binding is keyed by CF-Connecting-IP; check that it's available on Free.\n- The isolate-local windows are not real abuse control.",
+    "source": "apps/api/src/http/auth.ts, apps/api/src/routes/{agent,agent-surfaces,routines,proposals}.ts, apps/web/src/proxy.ts, apps/api/src/compose.ts"
+   },
+   {
+    "name": "API bundle size for Workers",
+    "verdict": "easy",
+    "detail": "The probe entry, /private/tmp/weft-bundle/entry.ts, imports createWeft from apps/api/src/compose.ts.\n\n| Build | Size | Gzip |\n|---|---|---|\n| esbuild 0.25.12 (platform node, conditions workerd/worker/browser, node:* external) | 6.39 MB | 1.31 MB |\n| esbuild, minified | 3.43 MB | 970 KB |\n| wrangler 4.149.0 dry-run (nodejs_compat, compat 2026-09-01) | 6,090 KiB | 1,269 KiB |\n| wrangler, --minify | 3,336 KiB | 955 KiB |\n\nNeither build reported errors.\n\nLargest minified contributors: packages/core 610 KB, zod 449 KB, @faker-js/faker 434 KB, openai 361 KB, @anthropic-ai/sdk 239 KB, packages/seed 146 KB, apps/api 135 KB, executor 128 KB, agent 99 KB, routines 83 KB, drizzle-orm 82 KB. Dropping the seed, faker and Claude saves about 820 KB.\n\nModule evaluation of the minified bundle took 114 ms in Node, against a 1 s startup limit. createWeft on a seeded world took 16 ms wall and 12 ms CPU after imports. The Free plan allows 64 MiB uncompressed with no compressed limit (today's docs). The QuickJS .wasm adds 491 KiB only if the sandbox is enabled.",
+    "source": "apps/api/src/compose.ts, /private/tmp/weft-bundle/{entry.ts,wrangler.jsonc,meta-min.json,dist,dist-min}"
+   },
+   {
+    "name": "MCP server (122 tools) as a remote MCP server on Workers",
+    "verdict": "medium",
+    "detail": "apps/mcp/src/main.ts (120 lines) is a stdio client of GET /v1/tools?surface=mcp and POST /v1/tools/:name, using an mcp-scope x-api-key from WEFT_API_KEY or a key file.\n\nThe registry has 190 commands: 70 marked mcp read, 53 propose, 67 hidden. NEVER_EXPOSED filters proposals, rollback, vault, settings, api_keys, memory writes and routine toggles, leaving 121 tools, plus agent_ask: 122.\n\nPlan:\n- createMcpServer(cfg, fetchImpl) already takes a fetch, and SDK 1.32.1 ships WebStandardStreamableHTTPServerTransport (server/webStandardStreamableHttp.js). So the remote server is a stateless POST /mcp route in the front Worker: one Server and transport per request, sessionIdGenerator undefined, and fetchImpl pointed at the visitor world's DO stub.\n- Auth: Authorization Bearer or x-api-key carrying the per-world mcp key minted at assignment, with a prefix that encodes the slot for routing. The DO verifies the hash.\n- agent_ask polls /v1/agent/runs/:id up to 120 times at 500 ms: up to 121 subrequests, over the 50 per invocation on Free. Replace it with one long-poll endpoint that waits on the runtime's settled waiters.\n- The agents SDK's McpAgent (a DO per session) is unnecessary, since the server keeps no state.\n- stdio stays for local use.",
+    "source": "apps/mcp/src/main.ts, apps/api/src/routes/tools.ts, node_modules/@modelcontextprotocol/sdk/dist/esm/server/webStandardStreamableHttp.js"
+   },
+   {
+    "name": "Model providers through AI Gateway and Workers AI",
+    "verdict": "medium",
+    "detail": "**OpenAI:** openai.ts builds `new OpenAI({ apiKey, maxRetries: 0, timeout })` and calls responses.create (the Responses API, never chat completions). Add a baseURL option, https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai, and an optional cf-aig-authorization header. The openai SDK runs on Workers. loadSecret reads OPENAI_API_KEY from env first, so a Worker secret works.\n\n**Workers AI switch:** chat-completions.ts does a plain fetch to <base>/v1/chat/completions with live:false. Point it at the gateway's workers-ai or compat endpoint, or add a provider over env.AI.run(model, { messages, tools }, { gateway: { id } }).\n- Qwen3 needs /no_think.\n- Neurons (10,000 a day on Free) are not dollars, so the ledger needs a price or a separate daily cap.\n\n**Bundle and scripts:** leave @anthropic-ai/sdk and the Claude provider out of the hosted bundle. The scripted and template providers need scenarios/*.json bundled.",
+    "source": "packages/agent/src/providers/{factory,openai,chat-completions,scripted,claude}.ts, packages/agent/src/secrets.ts"
+   },
+   {
+    "name": "Composition root, process.env and the Worker entry",
+    "verdict": "medium",
+    "detail": "createWeft(dataDir) wires every part and does file I/O while it builds: migrate, proxy secret, run-handle directory, vault key, world id and demo key files. Code reads process.env in many places: WEFT_LLM, WEFT_SANDBOX via sandboxFromEnv in builtins.ts, WEFT_CLOCK_RATE, WEFT_DEV_AUTH, WEFT_E2E, the cap variables, WEFT_TRACE, screeningVendor, esignEnabled.\n\nWith nodejs_compat and a recent compatibility date, process.env is filled from vars and secrets; verify this on the deploy. Passing env explicitly is safer.\n\nHosted entry:\n- `createWeftDurable({ storage: ctx.storage, env, blobs, state, memory, ledger: spendStub, clockRate })` inside the DO constructor's blockConcurrencyWhile.\n- A front Worker fetch handling routing, Turnstile, rate limits, assets and MCP.\n- main.ts, scripts/dev.ts, demo.ts, testing.ts and the seed CLI stay Node-only, so tests and evals keep running on Node.",
+    "source": "apps/api/src/compose.ts, apps/api/src/main.ts, apps/api/src/http/context.ts, packages/executor/src/builtins.ts, packages/core/src/shared/clock.ts, packages/core/src/screening/orders.ts, packages/core/src/esign/envelopes.ts"
+   }
+  ],
+  "risks": [
+   "Transactions are the critical path. Every one of the 33 transaction sites and all 190 command bodies are async and await drizzle (1,607 awaits in packages/core alone). The executor runs each command inside a nested savepoint. On a DO, transactionSync rejects async callbacks, sql.exec rejects BEGIN/SAVEPOINT, and ctx.storage.transaction(async) on SQLite objects has no documented rollback-on-throw or nesting. Spike this first in wrangler dev and deployed. If it fails, the fallback is a sync rewrite of the whole command layer.",
+   "Free-plan DO CPU per invocation is undocumented: the DO limits table says 30 s, the FAQ says the same as Workers (10 ms on Free). Warm routes in Node have a median of 0.5 ms, but /v1/time-off/requests takes 20 ms and /v1/time-off/balances 16 ms warm; cold isolates cost more. A tick is about 15 ms, a snapshot restore is likely hundreds of ms, and QuickJS instantiation is 20 to 29 ms. Measure cpuTime through the GraphQL Analytics API before committing; wrangler tail rarely delivers on this Mac.",
+   "Free daily rows written (100,000) versus world resets: a rich world is about 20,186 rows plus index entries per restore (base about 10,942), so at most 4 to 5 snapshot restores a day before visitor activity. PITR bookmark restore would avoid this, but it is unverified on Free, unsupported in local dev, and bookmarks expire after 30 days.",
+   "Request caps versus polling: the Worker and DO are each capped at 100,000 requests a day. The web app polls dozens of hooks at 2 to 5 s, about 1 to 3 requests per second per open tab, so the whole public demo gets roughly 10 to 30 tab-hours a day unless polling is paused when hidden or replaced by hibernatable WebSocket pushes. Always-on 5 s scheduler alarms would also burn about 17,280 requests per world per day.",
+   "The CAS invariants depend on exact rowsAffected (7 sites). DO cursors expose rowsWritten, which probably counts index entries, and proposals has two secondary indexes. A naive mapping makes every approval look already decided. The facade must use SELECT changes().",
+   "Duration budget: 13,000 GB-s a day is about 29 DO-hours at 128 MB. Open SSE streams, in-flight model waits and background runs keep objects active.",
+   "50 subrequests per invocation on Free, and whether DO RPC counts is undocumented. A 12-step chat run in one invocation (model fetch plus spend reserve/settle per attempt, plus child runs) and MCP agent_ask (up to 121 polls) can exceed it. Step runs from alarms and long-poll instead.",
+   "WEFT_LIVE_USD_CAP defaults to 0.50, cumulative over every ledger day, for live providers (openai has live:true). A public demo would exhaust it permanently. Nitish set the run cap (0.10) and day cap (2.00), but the hosted live cap needs an explicit decision.",
+   "Memory parity: the hosted SQLite MemoryStore must reproduce the git semantics tests rely on: 40-hex commit ids for SHA_RE and `at`, pinned reads, history diffs, and the Weft-Chain-Head trailer behind verifyChain gitLag. Commit ids will differ from git's, so both stores need shared contract tests.",
+   "Module-level singletons shared by DO instances in one isolate: the db write-lock tail, git's serialGit tail, otel.ts learned secrets, recallNotes keyed by run id (ids restart at run_0001 in every world), the global setTraceRedactor, and the auth Window limiters. This couples or leaks state across visitors' worlds.",
+   "Vault key fallback: without WEFT_VAULT_KEY, loadVaultKey writes run/vault.key, which on Workers lands in a per-request /tmp and mints a new key per request. Stored secrets then silently fail to decrypt (primeRedactor swallows the errors). Fail closed, and build the snapshot with the deploy key.",
+   "DO limits to enforce in the adapter: 100 bound parameters per query (the most seen in GET routes plus one tick was 72; writes and large inArray lists were not measured), 100 KB per statement, and 2 MB per row/BLOB (receipts allow 5 MB today; artifacts are unbounded JSON).",
+   "Process notes: no repo files changed. One command briefly copied a scratch script into apps/api and removed it in the same command. The static-export probe prerendered `/`, whose loadLanding() fetches 127.0.0.1:4070/v1/stats and /v1/health; Nitish's API was listening there, so two read-only GETs may have reached it (the page rendered with the fallback stats). The working tree has someone else's uncommitted edits (README.md, SPEC.md, the tour and top-bar files); this map did not touch them."
+  ]
+ }
+}
