@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { createClient } from "@/lib/api/client";
-import { errorText } from "@/lib/api/hooks";
+import { errorText, startPoller } from "@/lib/api/hooks";
 import { TRAINING_TONE, type TrainingRowDto } from "../app/compliance/w4-upload-training";
 
 export function W4TrainingSection({ principal }: { principal: string }) {
@@ -19,8 +19,8 @@ export function W4TrainingSection({ principal }: { principal: string }) {
   }, [api]);
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 10_000);
-    return () => clearInterval(t);
+    const p = startPoller(() => void load(), 10_000, "/api/v1/portal/training");
+    return () => p.stop();
   }, [load]);
   const complete = async (id: string) => {
     setBusy(id); setError(null);

@@ -3,7 +3,7 @@
 // the same text as its H1, and the bar shows "People > Dana Whitfield (demo)" instead of the raw "wrk_0001". While
 // the record loads the bar shows the id in a small mono face.
 import { createContext, useContext, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { usePathname } from "next/navigation";
+import { useAppPathname } from "@/lib/pathname";
 import { useGet } from "@/lib/api/hooks";
 import { period } from "../format";
 
@@ -19,14 +19,14 @@ export function BreadcrumbProvider({ children }: { children: ReactNode }) {
 /** The record title registered for the current path, or null (a stale title from another page never shows). */
 export function useCrumbTitle(): string | null {
   const { title } = useContext(Ctx);
-  const pathname = usePathname();
+  const pathname = useAppPathname();
   return title && title.path === pathname ? title.label : null;
 }
 
 /** Sets the last breadcrumb to `label` while mounted. Renders nothing. */
 export function CrumbLabel({ label }: { label: string | null | undefined }) {
   const { set } = useContext(Ctx);
-  const pathname = usePathname();
+  const pathname = useAppPathname();
   useEffect(() => {
     if (!label) return;
     set({ path: pathname, label });

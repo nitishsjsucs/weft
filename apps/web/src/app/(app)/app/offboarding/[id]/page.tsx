@@ -1,7 +1,10 @@
 // One offboarding case (wave 2). Owner: w2-offboarding (docs/wave2.md).
-import { OffboardingCaseView } from "@/components/app/offboarding/offboarding-view";
+import { OffboardingRoute } from "@/components/app/route-shells";
+import { shellStaticParams } from "@/lib/static-export";
+
+export const generateStaticParams = shellStaticParams;
 
 export default async function OffboardingCasePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <OffboardingCaseView id={id} />;
+  return <OffboardingRoute id={id} />;
 }

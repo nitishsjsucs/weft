@@ -6,7 +6,8 @@
 // change the person approves on step 7. Autoplay clicks Approve only for the proposal this session's own notice run
 // made (autoApproveAllowed); a deep link or a stale pending card waits for a person.
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { currentPathname, useAppPathname } from "@/lib/pathname";
 import { getPrincipal, invalidate, rawFetch, setPrincipal } from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
 import { getBridge } from "./bridge";
@@ -20,6 +21,9 @@ import { TourCard, type CardView, type StatusTone } from "./tour-card";
 import { TourRing } from "./tour-ring";
 import { TourResetDialog } from "./tour-reset-dialog";
 import { TOUR_RESET_COPY } from "./steps";
+import { HOSTED } from "@/lib/hosted/flags";
+import { afterHostedReset, hostedStore } from "@/lib/hosted/session";
+import { hostedResetError, resetNote } from "../hosted/copy";
 
 export interface TourApi {
   start: (opts?: { stepId?: string; autoplay?: boolean }) => void;
@@ -111,11 +115,11 @@ function useMedia(q: string): boolean {
 }
 
 const pathOnly = (href: string) => href.split("#")[0]!.split("?")[0]!;
-const here = () => `${window.location.pathname}${window.location.search}`;
+const here = () => `${currentPathname()}${window.location.search}`;
 
 export function TourProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = useAppPathname();
   const [s, dispatch] = useReducer(reduce, IDLE);
   const sRef = useRef(s);
   sRef.current = s;
@@ -189,7 +193,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       start({ stepId: t === "1" ? undefined : t, autoplay });
     } else if (!booted.current) {
       const p = loadTour(session());
-      if (p) dispatch({ type: "resume", persisted: p, auto: takeOwnNavigation(session(), window.location.pathname, Date.now()) });
+      if (p) dispatch({ type: "resume", persisted: p, auto: takeOwnNavigation(session(), currentPathname(), Date.now()) });
     }
     booted.current = true;
   }, [pathname, router, start]);
@@ -219,6 +223,9 @@ export function TourProvider({ children }: { children: ReactNode }) {
     setReset({ busy: true, error: null });
     try {
       await apiPost("/v1/sim/reset", { profile: "rich" });
+      // Hosted: the front Worker reset this visitor's world through the Lobby and reissued the cookie with the new
+      // generation; read the session again and reopen the change feed on the new world.
+      if (HOSTED) await afterHostedReset();
       invalidate();
       getBridge()?.clearThread();
       setPrincipal(TOUR_PRINCIPAL);
@@ -227,7 +234,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
       setReset({ busy: false, error: null });
       dispatch({ type: "reset-done", at: Date.now() });
     } catch (e) {
-      const text = e instanceof ApiError ? resetErrorText(e.status, e.tag, e.message, TOUR_RESET_COPY.disabled) : resetErrorText(null, null, e instanceof Error ? e.message : String(e), TOUR_RESET_COPY.disabled);
+      const hosted = HOSTED && e instanceof ApiError ? hostedResetError(e.status, (e.body as { code?: string }).code ?? null) : null;
+      const text = hosted ?? (e instanceof ApiError ? resetErrorText(e.status, e.tag, e.message, TOUR_RESET_COPY.disabled) : resetErrorText(null, null, e instanceof Error ? e.message : String(e), TOUR_RESET_COPY.disabled));
       setReset({ busy: false, error: text });
     }
   }, [router]);
@@ -341,8 +349,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
       const href = await resolveHref(index);
       if (signal.aborted) return;
       if (href === "skip") { advance(); return; }
-      if (pathOnly(href) !== window.location.pathname || (href.includes("?") && here() !== href.split("#")[0])) {
-        if (window.location.pathname.startsWith("/portal") && !href.startsWith("/portal")) setPrincipal(TOUR_PRINCIPAL);
+      if (pathOnly(href) !== currentPathname() || (href.includes("?") && here() !== href.split("#")[0])) {
+        if (currentPathname().startsWith("/portal") && !href.startsWith("/portal")) setPrincipal(TOUR_PRINCIPAL);
         markNavigation(session(), pathOnly(href), Date.now());
         router.push(href);
       } else if (href.includes("#") && window.location.hash !== `#${href.split("#")[1]}`) {
@@ -350,7 +358,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       }
       expected.current = pathOnly(href);
       const until = Date.now() + 15_000;
-      while (!signal.aborted && window.location.pathname !== expected.current && Date.now() < until) await sleep(50, signal);
+      while (!signal.aborted && currentPathname() !== expected.current && Date.now() < until) await sleep(50, signal);
       if (signal.aborted) return;
       clearNavigation(session());
 
@@ -729,6 +737,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
       ) : null}
       <TourResetDialog
         open={s.status === "reset"} from={s.resetFrom} reasons={s.resetReasons} busy={reset.busy} error={reset.error}
+        note={HOSTED ? resetNote(hostedStore.get().status?.lease?.resetsLeft) : null}
         onReset={() => void doReset()}
         onSkip={() => { setReset({ busy: false, error: null }); dispatch({ type: "reset-skip", at: Date.now() }); }}
         onCancel={() => { setReset({ busy: false, error: null }); dispatch({ type: "reset-cancel" }); }}

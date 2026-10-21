@@ -1,9 +1,19 @@
 "use client";
 // Live run steps (SPEC 9.6): SSE over fetch (so the "Viewing as" principal header rides along), with a 1 s trace
 // polling fallback whenever the stream is unavailable, blocked or ends early. Steps are merged by step number.
+// Hosted (docs/cloudflare/design.md 3.4): the fallback polls every 5 s through the poll scheduler, so it pauses while
+// the tab is hidden and, with the change feed connected, re-reads the trace only when a commit touches it.
 import type { AgentRunRow, RunStatus, RunStepRow, RunTrace } from "@weft/contracts";
 import { getPrincipal, onInvalidate, rawFetch } from "./hooks";
 import { mocksEnabled } from "./mocks";
+import { scheduler, type Registration } from "./poll";
+import { HOSTED, HOSTED_POLL_MULTIPLIER, HOSTED_TRACE_POLL_MS } from "@/lib/hosted/flags";
+
+/** The trace fallback's delay: 1 s (3 s while paused) on Node; 5 s (6 s while paused) hosted. Exported for tests. */
+export function traceDelayMs(paused: boolean, hosted = HOSTED): number {
+  if (!hosted) return paused ? 3_000 : 1_000;
+  return paused ? 3_000 * HOSTED_POLL_MULTIPLIER : HOSTED_TRACE_POLL_MS;
+}
 
 export const TERMINAL: RunStatus[] = ["done", "failed", "refused", "escalated", "expired", "cancelled"];
 export const isTerminal = (s: RunStatus | undefined) => !!s && TERMINAL.includes(s);
@@ -73,6 +83,7 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
   let stopped = false;
   let state: RunWatch = { run: null, steps: [], trace: null, mode: "idle" };
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollReg: Registration | null = null;
   const ctrl = new AbortController();
   const emit = (patch: Partial<RunWatch>) => { state = { ...state, ...patch }; if (!stopped) onUpdate(state); };
   const headers = () => ({ accept: "application/json", "x-weft-principal": getPrincipal() });
@@ -91,12 +102,27 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
   }
   /** `keepMode`: the SSE stream ended cleanly on a paused run; keep the "sse" label while the slow re-poll waits. */
   function startPolling(keepMode = false) {
-    if (stopped || pollTimer) return;
+    if (stopped || pollTimer || pollReg) return;
     if (!keepMode) emit({ mode: "polling" });
+    if (HOSTED) {
+      let busy = false;
+      const tick = async () => {
+        if (busy || stopped) return;
+        busy = true;
+        pollReg?.ran();
+        const done = await pollOnce();
+        busy = false;
+        if (done || stopped) { pollReg?.unregister(); pollReg = null; }
+        else pollReg?.update({ baseMs: traceDelayMs(isPaused(state.run?.status)) });
+      };
+      pollReg = scheduler().register({ url: `/api/v1/agent/runs/${encodeURIComponent(runId)}/trace`, baseMs: traceDelayMs(false), multiply: false, fire: () => void tick() });
+      void tick();
+      return;
+    }
     const loop = async () => {
       pollTimer = null;
       const done = await pollOnce();
-      if (!stopped && !done) pollTimer = setTimeout(loop, isPaused(state.run?.status) ? 3_000 : 1_000);
+      if (!stopped && !done) pollTimer = setTimeout(loop, traceDelayMs(isPaused(state.run?.status)));
     };
     void loop();
   }
@@ -149,5 +175,5 @@ export function watchRun(runId: string, onUpdate: (w: RunWatch) => void, opts: {
       }
     })();
   }
-  return () => { stopped = true; ctrl.abort(); stopRefresh(); if (pollTimer) clearTimeout(pollTimer); if (refreshTimer) clearTimeout(refreshTimer); };
+  return () => { stopped = true; ctrl.abort(); stopRefresh(); if (pollTimer) clearTimeout(pollTimer); if (refreshTimer) clearTimeout(refreshTimer); pollReg?.unregister(); pollReg = null; };
 }

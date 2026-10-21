@@ -13,6 +13,8 @@ import { useAgent } from "../agent-context";
 import { ApprovalCard } from "../agent/approval-card";
 import { HeldBack } from "../agent/held-back";
 import { SimInboundControls } from "./w4-inbound";   // wave 4 (w4-parity-agent): inbound chat mentions and emailed receipts
+import { HOSTED } from "@/lib/hosted/flags";
+import { ModelSwitchSection } from "../../hosted/model-switch";
 
 /** A posted approval card with its live status (wave 3): the card JSON was built by the executor from the stored preview. */
 function SimChatCard({ card }: { card: ApprovalCardW3 }) {
@@ -264,6 +266,7 @@ export function SimulatorsView() {
           {last ? <p className="mt-2 text-1 text-green-11">{last}</p> : null}
           {delivered ? <DeliveredHeldBack noticeId={delivered.noticeId} runId={delivered.runId} /> : null}
         </section>
+        {HOSTED ? <ModelSwitchSection /> : null}
         <section className="@min-[68rem]:col-span-2">
           <CardHeading icon={<Zap />}>Fault injection</CardHeading>
           <Card className="grid gap-px overflow-hidden bg-[var(--app-border)] tablet:grid-cols-2 laptop:grid-cols-3">

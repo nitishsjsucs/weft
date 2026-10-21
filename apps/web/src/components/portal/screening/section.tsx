@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { createClient } from "@/lib/api/client";
+import { startPoller } from "@/lib/api/hooks";
 
 interface Row { orderId: string; vendor: "checkr" | "hireright"; mode: "simulated" | "real"; status: string; consentNeeded: boolean; vendorLabel: string; packageName: string }
 const STATUS: Record<string, string> = {
@@ -17,7 +18,7 @@ export function ScreeningPortalSection({ principal }: { workerId: string; princi
   const api = useMemo(() => createClient({ principal: () => principal || null }), [principal]);
   const [rows, setRows] = useState<Row[]>([]);
   const load = useCallback(async () => { try { setRows((await api.get("/v1/portal/screening")) as unknown as Row[]); } catch { setRows([]); } }, [api]);
-  useEffect(() => { void load(); const t = setInterval(() => void load(), 5_000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { void load(); const p = startPoller(() => void load(), 5_000, "/api/v1/portal/screening"); return () => p.stop(); }, [load]);
   if (rows.length === 0) return null;
   return (
     <section id="screening-apply" data-testid="portal-screening" className="flex flex-col gap-3">

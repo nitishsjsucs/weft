@@ -5,8 +5,9 @@ import { AlertDialog } from "radix-ui";
 import { Button } from "@weft/ui/components";
 import { TOUR_RESET_COPY as C } from "./steps";
 
-export function TourResetDialog({ open, from, reasons, busy, error, onReset, onSkip, onCancel }: {
-  open: boolean; from: "start" | "menu" | null; reasons: string[]; busy: boolean; error: string | null;
+/** `note`: an extra line under the body (the hosted demo's resets left). */
+export function TourResetDialog({ open, from, reasons, busy, error, note, onReset, onSkip, onCancel }: {
+  open: boolean; from: "start" | "menu" | null; reasons: string[]; busy: boolean; error: string | null; note?: string | null;
   onReset: () => void; onSkip: () => void; onCancel: () => void;
 }) {
   return (
@@ -20,6 +21,7 @@ export function TourResetDialog({ open, from, reasons, busy, error, onReset, onS
         >
           <AlertDialog.Title className="text-[14px] font-semibold text-gray-12">{C.title}</AlertDialog.Title>
           <AlertDialog.Description className="leading-5 text-gray-11">{C.body}</AlertDialog.Description>
+          {note ? <p data-tour-reset-note="" className="leading-5 text-gray-11">{note}</p> : null}
           {reasons.length ? <ul className="flex list-disc flex-col gap-0.5 pl-4 text-gray-10">{reasons.map((r) => <li key={r}>{r}</li>)}</ul> : null}
           {error ? <p role="alert" data-tour-reset-error="" className="leading-5 text-red-11">{error}</p> : null}
           <p className="sr-only" aria-live="polite">{busy ? C.live : ""}</p>

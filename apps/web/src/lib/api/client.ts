@@ -1,5 +1,7 @@
 // Typed /v1 client (scaffold). The browser calls /api/* (Next rewrite to the API with x-weft-proxy injected).
 // `api.get("/v1/workers", { query })` and `api.post("/v1/proposals/:id/approve", { params, body })`.
+import { HOSTED } from "@/lib/hosted/flags";
+import { hostedFetch } from "@/lib/hosted/fetch";
 import type { Action, ChainStatus, DecisionResult, EmployerRate, ErrorBody, EventRow, Health, Notice, Offer, PageResult, Paycheck, PayrollRun, Proposal, RoutineDef, RoutineRunDto, RunTrace, AgentRunRow, Stats, TaxAccount, ToolOutcome, Worker, ROUTES } from "@weft/contracts";
 
 type Route = (typeof ROUTES)[number];
@@ -73,9 +75,12 @@ export function buildPath(path: string, params: CallOptions["params"] = {}, quer
   return s ? `${filled}?${s}` : filled;
 }
 
+/** The browser's fetch for /api: the plain fetch on Node; on the hosted build the gate-aware one (lib/hosted/fetch.ts). */
+export const apiFetch: typeof fetch = HOSTED ? hostedFetch : (...a: Parameters<typeof fetch>) => fetch(...a);
+
 export function createClient(cfg: ClientConfig = {}) {
   const base = cfg.baseUrl ?? "/api";
-  const f = cfg.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+  const f = cfg.fetch ?? apiFetch;
   async function call<T>(method: string, path: string, o: CallOptions = {}): Promise<T> {
     const headers: Record<string, string> = { accept: "application/json" };
     const who = cfg.principal?.();

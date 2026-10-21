@@ -1,5 +1,5 @@
 "use client";
-import { usePathname } from "next/navigation";
+import { useAppPathname } from "@/lib/pathname";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@weft/ui";
 import { AgentProvider, useAgent } from "../agent-context";
@@ -9,6 +9,8 @@ import { BreadcrumbProvider } from "./crumbs";
 import { AGENT_PANEL_ID, Header, SIDEBAR_ID } from "./header";
 import { Sidebar } from "./sidebar";
 import { mocksEnabled } from "@/lib/api/mocks";
+import { HOSTED } from "@/lib/hosted/flags";
+import { HostedBanner } from "../../hosted/hosted-banner";
 import { TourShellBridge } from "../../tour/shell-bridge";
 
 function useMedia(q: string): boolean {
@@ -25,7 +27,7 @@ function useMedia(q: string): boolean {
 
 function Frame({ children }: { children: ReactNode }) {
   const agent = useAgent();
-  const pathname = usePathname();
+  const pathname = useAppPathname();
   const desktop = useMedia("(min-width: 80rem)");
   const laptop = useMedia("(min-width: 64rem)");
   const [sidebarHidden, setSidebarHidden] = useState(false);
@@ -51,6 +53,7 @@ function Frame({ children }: { children: ReactNode }) {
       <div className={cn("flex min-h-0 min-w-0 flex-col bg-background", showSidebar && "border-l border-[var(--app-border)]")}>
         <Header sidebarVisible={showSidebar} sidebarExpanded={laptop ? showSidebar : mobileNav} onToggleSidebar={() => (laptop ? setSidebarHidden((h) => !h) : setMobileNav((v) => !v))} onOpenSearch={() => setSearch(true)} />
         {mocksEnabled ? <div className="border-b border-[var(--app-border)] bg-amber-3 px-4 py-1 text-1 text-amber-11">Mock data (NEXT_PUBLIC_WEFT_MOCKS=1). Nothing here talks to the API.</div> : null}
+        {HOSTED ? <HostedBanner /> : null}
         <main data-app-main="" className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">{children}</main>
       </div>
       {dockAgent ? <AgentPanel id={AGENT_PANEL_ID} className="min-h-0" /> : null}

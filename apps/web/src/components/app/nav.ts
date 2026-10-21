@@ -1,11 +1,12 @@
-import { Banknote, BookOpen, Cable, ChartColumn, FlaskConical, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
+import { Banknote, BookOpen, Cable, ChartColumn, FlaskConical, Gauge, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, Scale, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
+import { HOSTED } from "@/lib/hosted/flags";
 
 /** `domain`: the grant a section reads; a person whose grants close it (a manager: payroll, benefits, IT) does not see the item. */
 export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox" | "simulated"; domain?: "payroll" | "benefits" | "it" }
 export interface NavGroup { label: string | null; items: NavItem[] }
 
 // Sidebar per SPEC 11.3. Slugs feed the `nav-<slug>` test ids.
-export const NAV: NavGroup[] = [
+const BASE_NAV: NavGroup[] = [
   { label: null, items: [
     { slug: "home", label: "Home", href: "/app", icon: House },
     { slug: "inbox", label: "Inbox", href: "/app/inbox", icon: Inbox, badge: "inbox" },
@@ -31,6 +32,17 @@ export const NAV: NavGroup[] = [
     { slug: "simulators", label: "Simulators", href: "/app/simulators", icon: FlaskConical, badge: "simulated" },
   ] },
 ];
+/** Hosted only (Weft on Cloudflare, docs/cloudflare/design.md 10): the Platform readout and the model comparison. */
+export const HOSTED_NAV_ITEMS: NavItem[] = [
+  { slug: "platform", label: "Platform", href: "/app/platform", icon: Gauge },
+  { slug: "models", label: "Model comparison", href: "/app/models", icon: Scale },
+];
+/** The sidebar groups: on the hosted build the Company group ends with the hosted pages; on Node it is unchanged. */
+export function navGroups(hosted: boolean): NavGroup[] {
+  if (!hosted) return BASE_NAV;
+  return BASE_NAV.map((g) => (g.label === "Company" ? { ...g, items: [...g.items, ...HOSTED_NAV_ITEMS] } : g));
+}
+export const NAV: NavGroup[] = navGroups(HOSTED);
 export const SETTINGS_ITEM: NavItem = { slug: "settings", label: "Settings", href: "/app/settings", icon: Settings };
 export const ALL_NAV: NavItem[] = [...NAV.flatMap((g) => g.items), SETTINGS_ITEM];
 

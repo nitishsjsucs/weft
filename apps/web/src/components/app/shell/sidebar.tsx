@@ -3,7 +3,7 @@
 // New agent thread button beside it, then the nav. One pill style only (the Inbox count); "Simulated" is quiet
 // trailing text.
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useAppPathname } from "@/lib/pathname";
 import { useEffect, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { Button, Kbd, shortcutLabel } from "@weft/ui/components";
@@ -82,7 +82,7 @@ function SearchRow({ onOpenSearch, onNavigate }: { onOpenSearch: () => void; onN
 }
 
 export function Sidebar({ id, onNavigate, onOpenSearch }: { id?: string; onNavigate?: () => void; onOpenSearch: () => void }) {
-  const pathname = usePathname();
+  const pathname = useAppPathname();
   const active = activeNav(pathname);
   const pending = usePendingCount();
   const can = useCan();
