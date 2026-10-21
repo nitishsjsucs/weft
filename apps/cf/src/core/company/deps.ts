@@ -35,8 +35,11 @@ export interface WeftDeps {
   /** cf2-platform: apps/api/src/platform/durable.ts, exported from @weft/api/assemble */
   durablePlatform(input: DurablePlatformInput & { fetch?: typeof fetch; fetchCounter?: FetchCounter }): DurableWeftPlatform<unknown>;
   assembleWeft: typeof assembleModule.assembleWeft;
-  /** cf3-agent: @weft/agent world.ts, @weft/mcp remote.ts */
+  /** cf3-agent: @weft/agent world.ts and script-source.ts, @weft/mcp remote.ts */
   bindWorldScope?(scope: Pick<WorldScope, "current"> | null): void;
+  /** The scripted provider's scenarios come from the bundled fixtures in a Worker (there is no scenarios/ folder). */
+  setScriptSource?(source: unknown): void;
+  fixtureScriptSource?(fixtures: { text(path: string): string | null; list(dir: string): string[] }, dir?: string): unknown;
   createRemoteMcpHandler(
     cfg: { apiUrl?: string; askLimiter?: { take(apiKey: string): Promise<{ ok: true } | { ok: false; limit: number }> } | null; allowedOrigins?: readonly string[] },
     fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
@@ -94,6 +97,8 @@ export function weftDeps(): WeftDeps {
     durablePlatform: get(assembleModule, "durablePlatform") as WeftDeps["durablePlatform"],
     assembleWeft: assembleModule.assembleWeft,
     bindWorldScope: get(agentModule, "bindWorldScope") as WeftDeps["bindWorldScope"],
+    setScriptSource: get(agentModule, "setScriptSource") as WeftDeps["setScriptSource"],
+    fixtureScriptSource: get(agentModule, "fixtureScriptSource") as WeftDeps["fixtureScriptSource"],
     createRemoteMcpHandler: get(mcpModule, "createRemoteMcpHandler") as WeftDeps["createRemoteMcpHandler"],
     adminChange: executorModule.adminChange,
     executorInternals: executorModule.executorInternals,

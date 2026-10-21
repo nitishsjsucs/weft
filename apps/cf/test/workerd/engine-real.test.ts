@@ -8,7 +8,7 @@
 // alarm-driven run with an SSE subscriber; PROCESS_RESTART at boot; a replayed alarm executes nothing twice; a
 // showcase cold start plus GET sweep writes 0 rows; ETag 304s read 0 rows; a warm tick writes 0 rows; the fetch
 // counter stays at or under 40; /mcp lists 122 tools and refuses approve, rollback and vault; 4 slots in one isolate
-// stay under 100 MB; no node:fs, node:child_process or node:net is reachable from the weft-core entry.
+// stay under 100 MB (engine-memory.test.ts); no node:fs, node:child_process or node:net is reachable from the weft-core entry.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +20,7 @@ import { ROUTES } from "../../../../packages/contracts/src/api";
 import { DO_NAMES, MAX_FETCHES_PER_ALARM } from "../../src/shared/contracts";
 import { missingDeps } from "../../src/core/company/deps";
 import { scanImports, type Metafile } from "../../../../scripts/cf/lib/import-scan";
-import { CF_DIR, Harness, ORIGIN, type Visitor } from "../support/harness";
+import { CF_DIR, Harness, ORIGIN } from "../support/harness";
 
 const missing = missingDeps();
 const manifestFile = join(CF_DIR, "generated/manifest.json");
@@ -55,11 +55,16 @@ describe.skipIf(!ready)("real engine in workerd", () => {
   beforeAll(async () => {
     manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as typeof manifest;
     h = await Harness.start({ engine: "real", poolSize: 4 });
+    // Six worlds restore in one day here (the deployed pool of 2 makes four): lift the provisioning ceiling.
+    await (await h.coreEnv()).CONFIG.put("lobby.provision_rows_ceiling", "400000");
+    await sleep(400);
     await h.provision(300_000);
   }, 360_000);
   afterAll(async () => { await h?.close(); });
 
-  const smoke = async (path: string, init: RequestInit = {}) => h.fetch(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(await h.smokeHeaders()) } }, { origin: null, principal: "usr_dana" });
+  // Each smoke call comes from its own address, so the polling loops stay clear of RL_API (120 per 60 s per IP hash).
+  let ipSeq = 0;
+  const smoke = async (path: string, init: RequestInit = {}) => h.fetch(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(await h.smokeHeaders()) } }, { origin: null, principal: "usr_dana", ip: `192.0.2.${(ipSeq++ % 200) + 20}` });
   const smokeJson = async <T>(path: string, init: RequestInit = {}) => { const r = await smoke(path, init); return { status: r.status, body: (await r.json()) as T }; };
   const post = (path: string, body: unknown) => smokeJson(path, { method: "POST", body: JSON.stringify(body) });
   const env = () => h.coreEnv();
@@ -108,14 +113,18 @@ describe.skipIf(!ready)("real engine in workerd", () => {
 
   it("returns slot-smoke to the seed with the delta reset, twice, within 25% of 557 rows written", async () => {
     const lobby = async () => { const e = await env(); return e.LOBBY.get(e.LOBBY.idFromName(DO_NAMES.lobby)); };
+    // Start from the seed (the cases above changed slot-smoke), and remember the seed's pending proposals.
+    expect(await (await lobby()).resetWorld({ slot: DO_NAMES.smoke })).toMatchObject({ ok: true });
+    const seedPending = (await pending()).map((p) => p.id).sort();
     for (let cycle = 0; cycle < 2; cycle++) {
-      await post("/api/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" });
+      expect((await post("/api/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" })).status).toBe(200);
       const open = await until(pending, (ps) => ps.some((p) => p.command === "tax.update_rate"));
-      await post(`/api/v1/proposals/${open.find((p) => p.command === "tax.update_rate")!.id}/approve`, { reasonCode: null, note: null });
+      expect((await post(`/api/v1/proposals/${open.find((p) => p.command === "tax.update_rate")!.id}/approve`, { reasonCode: null, note: null })).status).toBe(200);
       const r = await (await lobby()).resetWorld({ slot: DO_NAMES.smoke });
       expect(r).toMatchObject({ ok: true, method: "delta" });
+      console.log(`delta reset ${cycle + 1}: ${(r as { rowsWritten: number }).rowsWritten} rows written`);
       expect((r as { rowsWritten: number }).rowsWritten).toBeLessThanOrEqual(Math.ceil(557 * 1.25));
-      expect((await pending()).length).toBe(0);
+      expect((await pending()).map((p) => p.id).sort()).toEqual(seedPending);
       expect((await smokeJson<{ ok: boolean; head: { hash: string } | null }>("/api/v1/actions/verify")).body.head?.hash ?? null).toBe(manifest.extra?.chainHead ?? null);
     }
   });
@@ -151,15 +160,18 @@ describe.skipIf(!ready)("real engine in workerd", () => {
     await until(async () => (await v.json<{ status: string }>(`/api/v1/agent/runs/${start.body.runId}`, { headers: { "x-weft-principal": "usr_dana" } })).body, (r) => !["queued", "running"].includes(r.status));
     const sql = await h.core.getDurableObjectStorage("CompanyDO", { name: l.slot! });
     await sql.exec(`UPDATE agent_runs SET status = 'running', terminal_reason = NULL WHERE id = ?`, start.body.runId);
-    await h.core.evictDurableObject("CompanyDO", { name: l.slot! });
+    await (await company(l.slot!)).restartWorld("Miniflare PROCESS_RESTART case");
+    await sleep(500);
     const after = await v.json<{ status: string; terminalReason: string | null }>(`/api/v1/agent/runs/${start.body.runId}`, { headers: { "x-weft-principal": "usr_dana" } });
     expect(after.body).toMatchObject({ status: "failed", terminalReason: "PROCESS_RESTART" });
   });
 
   it("writes 0 rows on a showcase cold start and GET sweep, reads 0 rows on a 304, and 0 rows on a warm tick", async () => {
-    await h.core.evictDurableObject("CompanyDO", { name: DO_NAMES.showcase });
-    const show = await company(DO_NAMES.showcase);
-    await show.heartbeat();
+    // A cold start: restart the showcase if it is running.
+    await (await company(DO_NAMES.showcase)).restartWorld("Miniflare cold start");
+    await sleep(500);
+    const show = await company(DO_NAMES.showcase);   // a stub to the restarted object
+    expect((await show.heartbeat()).usage.rowsWritten).toBe(0);
     const v = h.visitor();
     const gets = ROUTES.filter((r) => r.method === "GET" && !r.path.includes(":") && !r.path.includes("/events"));
     for (const r of gets) await v.fetch(`/api${r.path}?sweep=1`, {}, { principal: "usr_dana" });
@@ -183,7 +195,7 @@ describe.skipIf(!ready)("real engine in workerd", () => {
     expect(warm).toMatchObject({ ran: true, rowsWritten: 0 });
   });
 
-  it("serves remote MCP: 122 tools, approve, rollback and vault refused, a proposal pending approval", async () => {
+  it("serves remote MCP: 122 tools, approve, rollback and vault refused, a payout proposal pending approval", async () => {
     const v = h.visitor();
     await v.lease();
     const { key } = await (await v.fetch("/api/_hosted/mcp-key", { method: "POST", headers: { "x-weft-principal": "usr_dana" } })).json() as { key: string };
@@ -199,29 +211,12 @@ describe.skipIf(!ready)("real engine in workerd", () => {
       expect(tools.some((t) => /^(proposals|actions__rollback|vault__)/.test(t.name))).toBe(false);
       const refused = await client.callTool({ name: "actions__rollback", arguments: { seq: 1, reason: "x" } });
       expect(refused.isError).toBe(true);
-      const rate = await client.callTool({ name: "tax__update_rate", arguments: { code: "sui", state: "CA", rate: "0.016", effective_from: "2027-01-01", source_notice_id: null } });
-      expect(JSON.stringify(rate.content)).toContain("pending_approval");
+      // docs/demo-scenarios.md scenario 8, call 6: a propose tool files a proposal that waits for a person.
+      const payouts = await client.callTool({ name: "contractors__schedule_payouts", arguments: { worker_ids: ["wrk_0049", "wrk_0050", "wrk_0051"], scheduled_for: "2026-10-30" } });
+      expect(JSON.stringify(payouts.content)).toContain("pending_approval");
     } finally {
       await client.close();
     }
-  });
-
-  it("keeps 4 worlds in one isolate under 100 MB", async () => {
-    const rss = () => {
-      const out = execFileSync("ps", ["-axo", "pid=,ppid=,rss=,comm="], { encoding: "utf8" });
-      const rows = out.trim().split("\n").map((l) => l.trim().split(/\s+/)).map(([pid, ppid, kb, ...c]) => ({ pid: Number(pid), ppid: Number(ppid), kb: Number(kb), comm: c.join(" ") }));
-      const mine = new Set([process.pid]);
-      for (let changed = true; changed;) { changed = false; for (const r of rows) if (mine.has(r.ppid) && !mine.has(r.pid)) { mine.add(r.pid); changed = true; } }
-      return rows.filter((r) => mine.has(r.pid) && /workerd/.test(r.comm)).reduce((n, r) => n + r.kb, 0) / 1024;
-    };
-    const base = rss();
-    for (const slot of ["slot-1", "slot-2", "slot-3", "slot-4"]) await (await company(slot)).heartbeat();
-    const visitors: Visitor[] = [];
-    for (let i = 0; i < 4; i++) { const x = h.visitor(`198.51.100.${150 + i}`); await x.lease(); visitors.push(x); }
-    for (const x of visitors) await x.fetch("/api/v1/workers?limit=50", { headers: { "x-weft-principal": "usr_dana" } });
-    const grown = rss() - base;
-    console.log(`workerd RSS ${base.toFixed(0)} MB before, +${grown.toFixed(0)} MB with 4 worlds booted`);
-    expect(grown).toBeLessThan(100);
   });
 
   it("reaches no node:fs, node:child_process or node:net from the weft-core entry", () => {

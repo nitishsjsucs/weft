@@ -33,6 +33,8 @@ const RESTORE_KEY = "weft.restore";
 const SNAPSHOT_KEY = "weft.snapshot";
 
 interface RestoreProgress { slot: string; gen: number; mode: WorldMode; next: number; rowsWritten: number; triggers: RestoreTrigger[] }
+interface RestoreDone { slot: string; gen: number; rowsWritten: number }
+const RESTORE_DONE_KEY = "weft.restore_done";
 
 export class CompanyDO extends DurableObject<CoreEnv> {
   private stamp: WorldStamp | null = null;
@@ -115,6 +117,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       });
       this.engine = engine;
       this.bootError = null;
+      // What the boot itself read and wrote counts too (design 4.4: a cold start on a restored snapshot writes 0 rows).
+      const booted = engine.meter.totals();
+      this.usage.rowsRead += booted.rowsRead;
+      this.usage.rowsWritten += booted.rowsWritten;
       for (const k of leaseKeys(this.ctx.storage.sql)) engine.addSecret(k);
       this.unsubscribe = engine.meter.onCommit((c) => this.broadcast({ type: "commit", seq: c.seq, tables: c.tables }));
       logEvent("world.boot", { slot: stamp.slot, gen: stamp.gen, outcome: "ok" });
@@ -357,6 +363,15 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     await this.alarm();
   }
 
+  /**
+   * Restarts the object (ctx.abort), as an eviction or a deploy does: the next request runs the constructor, and the
+   * boot rule fails runs that were running with PROCESS_RESTART (design 3.3). An operations lever for a stuck world.
+   */
+  async restartWorld(reason = "restart"): Promise<{ ok: true }> {
+    setTimeout(() => { try { this.ctx.abort(reason); } catch { /* aborting throws in this context */ } }, 0);
+    return { ok: true };
+  }
+
   /** One scheduler tick, measured (design 4.4 and 8.2: a warm idle tick reads about 274 rows and writes 0). */
   async measureTick(): Promise<{ ran: boolean; rowsRead: number; rowsWritten: number; statements: number }> {
     const engine = this.engine;
@@ -542,20 +557,29 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     try { return (await this.storage.getCurrentBookmark?.()) ?? null; } catch { return null; }
   }
 
+  /**
+   * Stamps the world and boots it. Idempotent across Workflow retries: the stamp and the end of the restore commit
+   * together and are remembered, so a retry after a failed boot only boots again.
+   */
   async restoreFinish(input: { bookmark: string | null }): Promise<RestoreFinish> {
-    const p = this.progress();
     const mod = this.module ?? (this.module = await loadEngine());
     const a = await mod.artifacts();
-    const s: WorldStamp = { slot: p.slot, gen: p.gen, mode: p.mode, visitor: null, ipHash: null };
-    this.ctx.storage.transactionSync(() => {
-      writeStamp(this.ctx.storage.sql, s);
-      this.ctx.storage.kv.put(SNAPSHOT_KEY, a.version);
-      this.ctx.storage.kv.delete(RESTORE_KEY);
-    });
-    this.stamp = s;
-    await this.startEngine();
-    if (!this.engine) throw new Error(`restored ${p.slot} but the world did not boot: ${this.bootError ?? "unknown"}`);
-    return { slot: p.slot, gen: p.gen, snapshot: a.version, bookmark: input.bookmark, rowsWritten: p.rowsWritten };
+    const p = this.ctx.storage.kv.get<RestoreProgress>(RESTORE_KEY);
+    if (p) {
+      const s: WorldStamp = { slot: p.slot, gen: p.gen, mode: p.mode, visitor: null, ipHash: null };
+      this.ctx.storage.transactionSync(() => {
+        writeStamp(this.ctx.storage.sql, s);
+        this.ctx.storage.kv.put(SNAPSHOT_KEY, a.version);
+        this.ctx.storage.kv.put<RestoreDone>(RESTORE_DONE_KEY, { slot: p.slot, gen: p.gen, rowsWritten: p.rowsWritten });
+        this.ctx.storage.kv.delete(RESTORE_KEY);
+      });
+      this.stamp = s;
+    }
+    const done = this.ctx.storage.kv.get<RestoreDone>(RESTORE_DONE_KEY);
+    if (!done) throw new Error("no restore in progress (restoreBegin first)");
+    if (!this.engine) await this.startEngine();
+    if (!this.engine) throw new Error(`restored ${done.slot} but the world did not boot: ${this.bootError ?? "unknown"}`);
+    return { slot: done.slot, gen: done.gen, snapshot: a.version, bookmark: input.bookmark, rowsWritten: done.rowsWritten };
   }
 
   /** The weekly full verify of a clean, unleased world against the manifest (design 4.6); a dirty world is skipped. */

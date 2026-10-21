@@ -51,6 +51,7 @@ export function bundledMigrations(): MigrationEntryLike[] {
 async function boot(input: WorldBootInput): Promise<WorldEngine> {
   const d = weftDeps();
   d.bindWorldScope?.(d.worldScope);
+  if (d.setScriptSource && d.fixtureScriptSource) d.setScriptSource(d.fixtureScriptSource(bundledFixtures));
   const key = hostedWorldId(input.world);
   const inScope = <T>(fn: () => T): T => d.worldScope.run(key, fn);
   let opened: PlatformDb<unknown> | null = null;
@@ -70,6 +71,9 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
   }
   const meter: SqlMeter = db.meter;
   const guard: TxGuard = db.guard;
+  // The host starts the scheduler (main.ts does on Node): on the durable platform it hands the tick to the
+  // SchedulerHost, which arms the alarm only while the clock runs.
+  inScope(() => weft.scheduler.start());
   const internals = d.executorInternals(weft.executor);
   const origin = (input.env.WEFT_PUBLIC_ORIGIN ?? "https://weft.invalid").replace(/\/$/, "");
   const appFetch = async (req: Request): Promise<Response> => inScope(() => weft.app.fetch(req));
