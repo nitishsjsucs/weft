@@ -1,6 +1,6 @@
 // Drizzle schema for SPEC 6 (frozen after the scaffold commit). Ids are prefixed text; timestamps are ISO-8601 UTC
 // strings from the sim clock (spend uses the wall clock); money columns end in _cents; JSON columns end in _json.
-import { sqliteTable, text, integer, primaryKey, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, blob, primaryKey, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 
 const ts = (n: string) => text(n);
 const json = (n: string) => text(n);
@@ -541,3 +541,21 @@ export const agentActionOverrides = sqliteTable("agent_action_overrides", {
   id: text("id").primaryKey(), companyId: text("company_id").notNull(), principalId: text("principal_id").notNull(), command: text("command").notNull(),
   mode: text("mode").notNull(), setBy: text("set_by").notNull(), setAt: ts("set_at").notNull(), proposalId: text("proposal_id")
 }, (t) => [uniqueIndex("agent_action_overrides_key").on(t.companyId, t.principalId, t.command)]);
+
+// 6.10 Weft on Cloudflare (docs/cloudflare/design.md 4.1, migration 0008_hosted.sql). Additive only; owner
+// cf0-contracts (names in packages/contracts/src/ext/cf-db.ts HOSTED_TABLES). Present on Node too and empty there
+// unless a hosted option is on (WEFT_MEMORY=sqlite, WEFT_BLOBS=sqlite); the digest skips them while they are empty.
+// The SQL memory repo: real git objects (same SHAs as git), the one ref, and the commit log with its chain trailer.
+export const memObjects = sqliteTable("mem_objects", { sha: text("sha").primaryKey(), type: text("type").notNull(), body: blob("body", { mode: "buffer" }).notNull() });
+export const memRefs = sqliteTable("mem_refs", { name: text("name").primaryKey(), sha: text("sha").notNull() });
+export const memLog = sqliteTable("mem_log", {
+  seq: integer("seq").primaryKey(), sha: text("sha").notNull(), parent: text("parent"), date: text("date").notNull(),
+  chainSeq: integer("chain_seq"), chainHash: text("chain_hash"),
+});
+// Uploads in 1 MiB chunks (uploads.storage_path `blob:<sha256>`), run artifact and code bodies, run handles (a bearer
+// credential: never in run_steps, read by no route), small per-world state, and the after-commit jobs outbox.
+export const blobs = sqliteTable("blobs", { key: text("key").notNull(), idx: integer("idx").notNull(), bytes: blob("bytes", { mode: "buffer" }).notNull() }, (t) => [primaryKey({ columns: [t.key, t.idx] })]);
+export const runFiles = sqliteTable("run_files", { path: text("path").primaryKey(), body: text("body").notNull() });
+export const runHandles = sqliteTable("run_handles", { runId: text("run_id").primaryKey(), token: text("token").notNull(), nonce: text("nonce") });
+export const kvState = sqliteTable("kv_state", { key: text("key").primaryKey(), value: text("value").notNull() });
+export const outbox = sqliteTable("outbox", { id: text("id").primaryKey(), kind: text("kind").notNull(), body: text("body").notNull(), createdAt: ts("created_at").notNull() });

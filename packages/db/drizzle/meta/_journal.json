@@ -57,6 +57,13 @@
       "when": 1792500000000,
       "tag": "0007_wave4",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792600000000,
+      "tag": "0008_hosted",
+      "breakpoints": true
     }
   ]
 }
