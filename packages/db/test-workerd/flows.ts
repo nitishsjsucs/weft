@@ -3,11 +3,13 @@
 // triggers armed, and then the ten flows of the 8.2 table run through the API with the scripted provider while the
 // emulator records every committed write. Each round ends with a delta reset on the emulator. The recorded writes are
 // what the workerd test replays (conformance.workerd.test.ts), so the same session is measured with workerd's own
-// row counts. Node only: it composes the whole app.
+// row counts. The caller names the memory repository the session runs on; the shell's WEFT_MEMORY never decides it.
+// Node only: it composes the whole app.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROUTES } from "../../contracts/src/api";
+import { WEFT_MEMORY_SQLITE } from "../../contracts/src/ext/cf-memory";
 import { createWeft } from "../../../apps/api/src/compose";
 import { seedWorldProfile } from "../../seed/src/profile";
 import { emulatorOf } from "../src/client";
@@ -19,9 +21,27 @@ import { buildSnapshot, deltaReset, restoreSnapshot, verifyAgainstManifest, type
 type Weft = Awaited<ReturnType<typeof createWeft>>;
 
 export const SEED_CLOCK = "2026-10-26T15:30:00.000Z";
-/** The design's measured delta reset after a 10-flow session (verified locally by the risk design), and the 25% band. */
+/** The memory repository a recorded session runs on: git (Node's default) or the SQL repo hosted worlds always use. */
+export type SessionMemory = "git" | "sqlite";
+export const SESSION_MEMORIES: readonly SessionMemory[] = ["git", "sqlite"];
+
+/**
+ * The design's measured delta reset after a 10-flow session (verified locally by the risk design), and the 25% band.
+ * The risk design measured it before the SQL memory repo existed (memory lived in git, outside the database), so it
+ * bounds the session on git memory.
+ */
 export const DELTA_RESET_BASELINE_ROWS = 557;
 export const DELTA_RESET_MAX_ROWS = Math.floor(DELTA_RESET_BASELINE_ROWS * 1.25);
+/**
+ * The same session on the SQL memory repo, as hosted worlds run it: the reset also deletes the git objects and log
+ * rows of the session's memory commits and puts mem_refs back (85 more keys). Measured on 2026-10-21 with this file's
+ * session, verified locally: 717 rows written in workerd (the billing count) and 716 on the emulator, against 630 and
+ * 629 for the same session on git memory.
+ */
+export const DELTA_RESET_SQL_MEMORY_BASELINE_ROWS = 717;
+export const DELTA_RESET_SQL_MEMORY_MAX_ROWS = Math.floor(DELTA_RESET_SQL_MEMORY_BASELINE_ROWS * 1.25);
+/** The rows-written band of a delta reset after the session on `memory`. */
+export const deltaResetMaxRows = (memory: SessionMemory): number => (memory === "sqlite" ? DELTA_RESET_SQL_MEMORY_MAX_ROWS : DELTA_RESET_MAX_ROWS);
 
 export const FLOWS = [
   "deliver CA EDD DE 2088 and let the routine run propose",
@@ -101,12 +121,13 @@ export interface RecordedSession {
 }
 
 /**
- * Seeds, snapshots, restores and runs `rounds` engaged sessions on the emulator, each followed by a delta reset.
- * Sets WEFT_DB=durable-emu for its own duration only.
+ * Seeds, snapshots, restores and runs `rounds` engaged sessions on the emulator, each followed by a delta reset, with
+ * memory on `memory`. Sets WEFT_DB=durable-emu and WEFT_MEMORY for its own duration only.
  */
-export async function recordRichSession(rounds = 2): Promise<RecordedSession> {
-  const prev = process.env.WEFT_DB;
+export async function recordRichSession(memory: SessionMemory, rounds = 2): Promise<RecordedSession> {
+  const prev = { db: process.env.WEFT_DB, memory: process.env.WEFT_MEMORY };
   process.env.WEFT_DB = "durable-emu";
+  if (memory === "sqlite") process.env.WEFT_MEMORY = WEFT_MEMORY_SQLITE; else delete process.env.WEFT_MEMORY;
   const dir = mkdtempSync(join(tmpdir(), "weft-flows-"));
   try {
     const migrations = readMigrationsFromDir(migrationsDir());
@@ -144,7 +165,8 @@ export async function recordRichSession(rounds = 2): Promise<RecordedSession> {
     }
     return { snapshot, migrations, journalHash: jh, rounds: recorded, restore, resets, answers, mismatched };
   } finally {
-    if (prev === undefined) delete process.env.WEFT_DB; else process.env.WEFT_DB = prev;
+    if (prev.db === undefined) delete process.env.WEFT_DB; else process.env.WEFT_DB = prev.db;
+    if (prev.memory === undefined) delete process.env.WEFT_MEMORY; else process.env.WEFT_MEMORY = prev.memory;
     rmSync(dir, { recursive: true, force: true });
   }
 }
