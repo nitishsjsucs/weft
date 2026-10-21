@@ -7,7 +7,9 @@ import type { RunStepRow, RunTrace } from "./trace";
 import type { ProposalDecided } from "./approvals";
 
 export interface SimClock { now(): string; rate(): number; advance(to: string): Promise<void>; set(to: string, rate?: number): Promise<void> }
-export type SystemPrincipal = "svc_scheduler" | "svc_events" | "svc_sim" | "svc_digest";
+// svc_jobs (Weft on Cloudflare, docs/cloudflare/design.md 5.4): the queue write-backs; it has an allowlist only where the
+// durable platform registers them (extraCommands), so on Node it can run nothing.
+export type SystemPrincipal = "svc_scheduler" | "svc_events" | "svc_sim" | "svc_digest" | "svc_jobs";
 export interface SystemExecutor { exec(principal: SystemPrincipal, command: string, args: unknown, source: { eventId: string | null; attended: boolean; requestedBy: string | null }): Promise<ToolOutcome> }
 export interface VaultAdmin { put(input: { name: string; kind: string; value: string; description: string; by: string }): Promise<void>; list(): Promise<{ name: string; kind: string; fingerprint: string }[]> }
 export interface ChainStatus { ok: boolean; head: { seq: number; hash: string } | null; gaps: number[]; badSeq: number | null; gitLag: number; /** Wave 2 review: signed documents whose text, hash or action row disagree. */ signatureProblems?: string[] }

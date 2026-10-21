@@ -1,5 +1,6 @@
 // Copied verbatim from research/harness.md section 13 (provider.ts).
-export type ProviderId = "openai" | "claude" | "openai_compat" | "scripted";
+// Weft on Cloudflare (docs/cloudflare/design.md 5.2) adds "workers_ai", the hosted Workers AI switch.
+export type ProviderId = "openai" | "claude" | "openai_compat" | "scripted" | "workers_ai";
 export type Effort = "none" | "low" | "medium" | "high" | "xhigh" | "max";   // "none" is OpenAI only
 export type TaskKind = "notice_analysis" | "payroll_review" | "tax_registration" | "it_provisioning";
 export type AgentKind = "main" | `task:${TaskKind}`;

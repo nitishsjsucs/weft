@@ -8,11 +8,12 @@ import type { SpendLedger } from "../spend";
 
 // Providers -----------------------------------------------------------------------------------------------------
 
-/** The Workers AI switch (design 5.2). An ext addition: the frozen ProviderId union gains it at integration. */
-export const WORKERS_AI_PROVIDER_ID = "workers_ai" as const;
-export type HostedProviderId = ProviderId | typeof WORKERS_AI_PROVIDER_ID;
-/** A provider whose id may be `workers_ai`; everything else is the frozen ModelProvider. */
-export type HostedModelProvider = Omit<ModelProvider, "id"> & { id: HostedProviderId };
+/** The Workers AI switch (design 5.2), folded into the frozen ProviderId at integration (cf7). */
+export const WORKERS_AI_PROVIDER_ID = "workers_ai" as const satisfies ProviderId;
+/** The same union as ProviderId since the fold; kept so the hosted modules' imports stay valid. */
+export type HostedProviderId = ProviderId;
+/** The frozen ModelProvider since the fold. */
+export type HostedModelProvider = ModelProvider;
 
 export const WORKERS_AI_MODEL = "@cf/openai/gpt-oss-120b";
 export const WORKERS_AI_LABEL = "Workers AI gpt-oss-120b";

@@ -10,7 +10,7 @@ import type { SystemPrincipal } from "../runtime";
 import type { SpendLedger } from "../spend";
 import type { DurableStorageLike, SqlMeter, TxGuard } from "./cf-db";
 import type { MemoryRepo } from "./cf-memory";
-import type { HostedSpendLedger, RunHost } from "./cf-agent";
+import type { FetchCounter, HostedSpendLedger, RunHost, WorkersAiBindingLike } from "./cf-agent";
 import type { HostedWorldRef } from "./cf-hosted";
 
 export type PlatformKind = "node" | "durable";
@@ -105,8 +105,9 @@ export interface SchedulerHost {
   stop(): Promise<void>;
 }
 
-/** The system principal the queue write-backs run as (an ext addition to the frozen SystemPrincipal union). */
-export type HostedSystemPrincipal = SystemPrincipal | "svc_jobs";
+/** The system principals including svc_jobs, the queue write-backs' principal; the frozen SystemPrincipal holds it since
+ * the integration fold (cf7), and the name stays for the hosted modules' imports. */
+export type HostedSystemPrincipal = SystemPrincipal;
 
 export interface HostedExecutorOptions {
   /** `def.effect === "read"` with no run returns `res_e_` + 16 random hex instead of minting a counter id, so reads
@@ -173,4 +174,10 @@ export interface DurablePlatformInput {
   schedulerHost: SchedulerHost;
   extraCommands?: readonly CommandDef[];
   onOutbox?: () => void;
+  // Integration additions (cf3-agent request 2, folded by cf7): what the hosted model path needs from the Worker.
+  /** The Workers AI binding (`env.AI`) for the workers_ai switch; absent locally where nothing emulates it. */
+  ai?: WorkersAiBindingLike | null;
+  /** The fetch the model transports call: CompanyDO's counted fetch (at most MAX_FETCHES_PER_ALARM per alarm). */
+  fetch?: typeof fetch;
+  fetchCounter?: FetchCounter | null;
 }

@@ -14,10 +14,13 @@ import { writeLocked } from "./write";
 /** System calls are governed by the allowlist; references resolve in every domain. */
 const allView = () => { const g = noGrants(); for (const d of DOMAINS) g[d] = "view"; return g; };
 
-export const SYSTEM_PRINCIPALS: SystemPrincipal[] = ["svc_scheduler", "svc_events", "svc_sim", "svc_digest"];
+/** The principals every platform has. svc_jobs is not among them: it exists only where the durable platform registers the
+ * queue write-backs, with the exact allowlist it hands the engine (engine.hosted.systemAllowlists). */
+export type CoreSystemPrincipal = Exclude<SystemPrincipal, "svc_jobs">;
+export const SYSTEM_PRINCIPALS: CoreSystemPrincipal[] = ["svc_scheduler", "svc_events", "svc_sim", "svc_digest"];
 
 /** Exact allowlists. Additions are requested in docs/tracks/t3-governance.md; nothing at R2 or above is ever allowed. */
-export const SYSTEM_ALLOWLISTS: Record<SystemPrincipal, readonly string[]> = {
+export const SYSTEM_ALLOWLISTS: Record<CoreSystemPrincipal, readonly string[]> = {
   svc_scheduler: ["comms.post_update", "documents.expire_offers",   // expire_offers: wave 2, the offer expiry sweep (R1)
     "time_off.close_year", "integrations.sync_now", "integrations.record_delivery",   // wave 3 (docs/wave3.md): year end, vendor polling
     "benefits.close_windows", "benefits.record_carrier_receipt"],   // wave 4 (w4-parity-people): the window date sweep and carrier receipts
@@ -38,8 +41,9 @@ export function createSystemExecutor(e: Engine): SystemExecutor {
       // The frozen four, plus any principal the platform registered with its own exact allowlist (svc_jobs, whose
       // OCR write-backs exist only on the durable platform; docs/cloudflare/design.md 5.4).
       const hostedList = e.hosted?.systemAllowlists.get(principal);
-      if (!SYSTEM_PRINCIPALS.includes(principal) && !hostedList) return refusal("NOT_PERMITTED", `${String(principal)} is not a system principal`, false);
-      const allowlist: readonly string[] = SYSTEM_ALLOWLISTS[principal] ?? hostedList ?? [];
+      const core = (SYSTEM_PRINCIPALS as readonly SystemPrincipal[]).includes(principal) ? SYSTEM_ALLOWLISTS[principal as CoreSystemPrincipal] : null;
+      if (!core && !hostedList) return refusal("NOT_PERMITTED", `${String(principal)} is not a system principal`, false);
+      const allowlist: readonly string[] = core ?? hostedList ?? [];
       const outcome = await writeLocked(() => e.db.transaction(async (tx) => {
         const p = await loadPrincipal(tx, principal);
         let companyId = p?.companyId ?? null;

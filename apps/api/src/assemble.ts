@@ -11,12 +11,15 @@
 import { join, resolve } from "node:path";
 import { isWeftError, NotImplemented, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
 import { eq } from "drizzle-orm";
-import { closeDb, migrate, notices, openDb, type Db } from "@weft/db";
+import { closeDb, migrate, notices, openDb, settings, type Db } from "@weft/db";
 import { commands, complianceNoticeVariant, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createVendorOverlay } from "@weft/integrations";
 import { createExecutor, executorInternals, fileRunFiles } from "@weft/executor";
-import { createAgentRuntime, createProvider, createSpendLedger, loadSecret, setTraceRedactor, traceMcpCall } from "@weft/agent";
+import {
+  createAgentRuntime, createHostedProviderPool, createProvider, createSpendLedger, envSecret, fixtureScriptSource, hostedProviderSelector, hostedProviderSet,
+  loadSecret, nodeProviderPorts, setTraceRedactor, traceMcpCall, type ProviderPool,
+} from "@weft/agent";
 import { createRoutines, PREBUILT_HASH_KEY, type WeftRoutinesEngine } from "@weft/routines";
 import { createChatContextSource } from "./routes/agent";
 import { createRoutinesEventSource } from "./routes/routines";
@@ -29,7 +32,8 @@ import { fileRunHandleStore, learnVendorSecrets, nodeBlobStore, readOrCreateProx
 import { fileSmallState, kvRow } from "./platform/state";
 import { repoFixtures } from "./platform/fixtures";
 import { useNoticeFixtures } from "../../../packages/sim/src/notices/fixtures";
-import { HOSTED_CLOCK } from "../../../packages/contracts/src/ext/cf-hosted";
+import { HOSTED_CLOCK, WORLD_MODEL_SETTING } from "../../../packages/contracts/src/ext/cf-hosted";
+import type { WeftDurablePlatform } from "./platform/durable";
 import { SMALL_STATE_KEYS, type PlatformContext, type PlatformDb, type WeftPlatform } from "../../../packages/contracts/src/ext/cf-platform";
 
 export { nodePlatform } from "./platform/node";
@@ -175,7 +179,8 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
   }), () => stubOf("executor"));
   // Harness 6.4: provider keys may come from WEFT_SECRETS_FILE and never reach process.env; teach the redactor them too.
   for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) {
-    const v = (() => { try { return loadSecret(k, secretEnv); } catch { return null; } })();
+    // Worker secrets only on the durable platform; Node also reads the file WEFT_SECRETS_FILE names.
+    const v = (() => { try { return durable ? envSecret(k, secretEnv) : loadSecret(k, secretEnv); } catch { return null; } })();
     if (v) executorInternals(executor)?.addSecret(v);
   }
   if (!durable) {
@@ -196,9 +201,45 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
     env: secretEnv, ledger, testMode, scriptVariant: scriptVariant(db, clock),
     // The local chat-completions providers send each tool's compact description (wave 2, w2-providers-sandbox request 1).
     compactDescriptions: (wire: string) => executorInternals(executor)?.engine.registry.def(wire)?.compactDescription || null,
-    ...(durable ? { fixtures } : {}),
   };
-  const provider = opts.provider ?? (await tolerate<ModelProvider>("provider", () => createProvider(providerOptions), () => placeholderProvider));
+  // The durable platform reads no file: scripts come from the bundled fixtures, secrets from the Worker env, and the
+  // provider of each run is chosen when the run is created (cf3-agent's pool: KV model.provider, the world's model
+  // switch, the lease's SpendDO position, the kill switch; slot-smoke always scripted; docs/cloudflare/design.md 5.2).
+  const hostedParts = durable ? (platform as Partial<WeftDurablePlatform>).hosted ?? null : null;
+  const scriptSource = durable ? fixtureScriptSource(fixtures) : undefined;
+  let pool: ProviderPool | undefined;
+  let hostedDefault: ModelProvider | undefined;
+  if (durable && !opts.provider) {
+    const leaseVisitor = () => { try { return state.get(SMALL_STATE_KEYS.leaseVisitor); } catch { return null; } };
+    const hostedOptions = {
+      ...providerOptions, scriptSource, envOnlySecrets: true,
+      ai: hostedParts?.ai ?? null,
+      world: () => (world ? { slot: world.slot, gen: world.gen, visitor: leaseVisitor() } : null),
+      counter: hostedParts?.fetchCounter ?? null,
+      guard: pdb.guard,
+      ...(hostedParts?.fetch ? { fetch: hostedParts.fetch } : {}),
+      // KV aig.collect_log (folded into WEFT_AIG_COLLECT_LOG by CompanyDO): "false" turns the gateway's log off.
+      collectLog: () => ((env.WEFT_AIG_COLLECT_LOG ?? "").trim().toLowerCase() === "false" ? false : null),
+    };
+    const set = await tolerate("provider", () => hostedProviderSet(hostedOptions, nodeProviderPorts(hostedOptions)), () => null);
+    if (set) {
+      pool = createHostedProviderPool({
+        set,
+        select: hostedProviderSelector({
+          config: async () => ({ agentEnabled: (env.WEFT_AGENT_ENABLED ?? "").trim().toLowerCase() !== "false", provider: env.WEFT_HOSTED_PROVIDER ?? null }),
+          worldSetting: async () => {
+            const [row] = await db.select({ v: settings.valueJson }).from(settings).where(eq(settings.key, WORLD_MODEL_SETTING)).limit(1);
+            const v = (() => { try { return row ? (JSON.parse(row.v) as unknown) : null; } catch { return null; } })();
+            return typeof v === "string" ? v : null;
+          },
+          status: () => hostedParts?.spendStatus() ?? Promise.resolve(null),
+          forced: world?.mode === "smoke" ? "scripted" : null,
+        }),
+      });
+      hostedDefault = set.providers.openai ?? set.providers.scripted;
+    }
+  }
+  const provider = opts.provider ?? hostedDefault ?? (await tolerate<ModelProvider>("provider", () => createProvider(providerOptions), () => placeholderProvider));
   const routinesRef: { current: RoutinesEngine | null } = { current: null };
   const agentOptions = {
     db, clock, executor: executor.agent, provider, ledger,
@@ -210,7 +251,7 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
     contextSource: createChatContextSource(db),
     handleStore: runHandles,
     ...(platform.runHost ? { runHost: platform.runHost } : {}),
-    ...(durable ? { env: secretEnv, fixtures } : {}),
+    ...(durable ? { env: secretEnv, scriptSource, ...(pool ? { providers: pool } : {}) } : {}),
   };
   const agent = await tolerate<AgentRuntime>("agent", () => createAgentRuntime(agentOptions), () => stubOf("agent"));
   // Design 4.4: the prebuilt hash gate, so a second boot (a restored snapshot booted once) writes nothing on its first
