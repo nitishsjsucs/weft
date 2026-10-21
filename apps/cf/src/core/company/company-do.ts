@@ -23,9 +23,13 @@ import { configEnv, liveEnv } from "./company-do-env";
 import { spendClient } from "../spend/client";
 import { AlarmPlan } from "./alarms";
 import { loadEngine, type EngineModule, type RestoreTrigger, type WorldEngine } from "./engine";
+import { countFetchesIn, installCountedFetch, rawFetch } from "./fetch-scope";
 import { durableRunHost, durableSchedulerHost, fetchCounter, type DurableRunHost, type DurableSchedulerHost } from "./hosts";
 import { zeroUsage, type ResetOutcome, type RestoreBeginInput, type RestoreFinish, type RestoreVerify, type SlotHeartbeat, type UsageDelta, type WorldStamp } from "./rpc";
 import { addLeaseKey, hasKvState, leaseKeys, modeOf, readStamp, writeStamp } from "./world-state";
+
+// Every global fetch an alarm invocation makes counts against its MAX_FETCHES_PER_ALARM (fetch-scope.ts).
+installCountedFetch();
 
 /** Usage is pushed to the Lobby once any of these is reached (and the rest at each heartbeat). */
 const PUSH_AT = { rowsWritten: 1_000, rowsRead: 100_000, requests: 500 } as const;
@@ -114,7 +118,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         schedulerHost: this.scheduler,
         onOutbox: () => queueMicrotask(() => void this.flushOutbox()),
         readOnly: stamp.mode === "showcase",
-        fetch: this.counter.wrap(globalThis.fetch.bind(globalThis)),
+        fetch: this.counter.wrap(rawFetch),
         mcpAskAllowed: async (apiKey) => {
           const keyId = await mcpKeyId(apiKey);
           const r = await this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby)).take({ key: `mcp_ask:${keyId}`, limit: MCP_AGENT_ASK_PER_KEY_DAY });
@@ -377,13 +381,13 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const t0 = Date.now();
     try {
       this.config = await envConfig(this.env);
-      const { usage } = await engine.meter.measure(() => engine.inScope(async () => {
+      const { usage } = await countFetchesIn(this.counter, () => engine.meter.measure(() => engine.inScope(async () => {
         if (due.has("tick")) await this.scheduler.tick();
         if (due.has("runs") || this.runHost.pending().length) {
           const r = await this.runHost.drain();
           logEvent("alarm.runs", { slot: this.stamp?.slot, gen: this.stamp?.gen, outcome: "ok", started: r.started, remaining: r.remaining, live: r.liveStarted, fetches: this.counter.count });
         }
-      }));
+      })));
       this.usage.rowsRead += usage.rowsRead;
       this.usage.rowsWritten += usage.rowsWritten;
       if (due.has("outbox")) await this.flushOutbox();

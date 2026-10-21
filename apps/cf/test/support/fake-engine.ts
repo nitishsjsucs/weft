@@ -74,7 +74,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     return rows;
   };
   const secrets: string[] = [];
-  const runs = new Map<string, { live: boolean; fetches: number }>();
+  const runs = new Map<string, { live: boolean; fetches: number; global: boolean }>();
 
   const app = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
@@ -106,17 +106,19 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
       return json({ ok: true }, 201);
     }
     if (p === "/v1/agent/runs" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { live?: boolean; fetches?: number };
+      // global: the run fetches through globalThis.fetch, as a transport built without the world's fetch does.
+      const body = (await req.json().catch(() => ({}))) as { live?: boolean; fetches?: number; global?: boolean };
       const id = `run_${String(runs.size + 1).padStart(4, "0")}`;
-      runs.set(id, { live: body.live !== false, fetches: Math.min(60, body.fetches ?? 0) });
+      runs.set(id, { live: body.live !== false, fetches: Math.min(60, body.fetches ?? 0), global: body.global === true });
       exec(`INSERT INTO runs (id, status, live) VALUES (?, 'queued', ?)`, id, body.live !== false ? 1 : 0);
       input.runHost.submit({
         runId: id, live: body.live !== false,
         async start() {
           exec(`UPDATE runs SET status = 'running' WHERE id = ?`, id);
           let made = 0;
-          for (let i = 0; i < (runs.get(id)?.fetches ?? 0); i++) {
-            try { await input.fetch("https://fetch-count.invalid/"); } catch { /* unreachable on purpose */ }
+          const cfg = runs.get(id);
+          for (let i = 0; i < (cfg?.fetches ?? 0); i++) {
+            try { await (cfg?.global ? globalThis.fetch : input.fetch)("https://fetch-count.invalid/"); } catch { /* unreachable on purpose */ }
             made += 1;
           }
           exec(`UPDATE runs SET status = 'done', fetches = ? WHERE id = ?`, made, id);

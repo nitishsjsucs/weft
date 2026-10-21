@@ -3,9 +3,10 @@
 // with none of those three tracks merged (test/support/real-engine.ts). Once they are merged the cases always run,
 // and the gate case fails on any part deps.ts reports missing, a partial merge, or no snapshot from pnpm cf:snapshot.
 //
-// Covered here: full restore matches the manifest; the delta reset returns the digest to the manifest twice; GP1
-// (deliver DE 2088, two proposals, approve, Undo, chain valid); double approve gives one execution; GP5 taint; an
-// alarm-driven run with an SSE subscriber; PROCESS_RESTART at boot; a replayed alarm executes nothing twice; a
+// Covered here: full restore matches the manifest; the delta reset after the ten flows of design 8.2 returns the
+// world to the seed twice; GP1 (deliver DE 2088, two proposals, approve, Undo, chain valid); double approve gives one
+// execution; GP5 taint; an alarm-driven run with an SSE subscriber; PROCESS_RESTART at boot; alarms replayed while a
+// run is queued and after it execute nothing twice (exec_calls unchanged, one proposal per command); a
 // showcase cold start plus GET sweep writes 0 rows; ETag 304s read 0 rows; a warm tick writes 0 rows; the fetch
 // counter stays at or under 40; /mcp lists 122 tools and refuses approve, rollback and vault; 4 slots in one isolate
 // stay under 100 MB (engine-memory.test.ts); no node:fs, node:child_process or node:net is reachable from the weft-core entry.
@@ -82,9 +83,25 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect(health.body).toMatchObject({ runtime: "cloudflare", seedProfile: "rich", world: { slot: DO_NAMES.smoke } });
   });
 
-  it("GP1: deliver DE 2088, two proposals, approve the rate, Undo, chain valid; a double approve executes once", async () => {
+  it("GP1: deliver DE 2088, two proposals, approve the rate, Undo, chain valid; a double approve executes once; replayed alarms execute nothing twice", async () => {
+    const co = await company(DO_NAMES.smoke);
+    const seedPending = new Set((await pending()).map((p) => p.id));
+    const fresh = async () => (await pending()).filter((p) => !seedPending.has(p.id));
     expect((await post("/api/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" })).status).toBe(200);
-    const open = await until(pending, (ps) => ["notices.send_response", "tax.update_rate"].every((c) => ps.some((p) => p.command === c)));
+    // The delivery queued the routine run. Alarms are at-least-once: fire its alarm twice at once, as a retried
+    // delivery may, while the run is queued or running.
+    await Promise.all([co.runAlarmNow(), co.runAlarmNow()]);
+    const open = await until(fresh, (ps) => ["notices.send_response", "tax.update_rate"].every((c) => ps.some((p) => p.command === c)));
+    const smokeSql = await h.core.getDurableObjectStorage("CompanyDO", { name: DO_NAMES.smoke });
+    const execCalls = async () => ((await smokeSql.exec(`SELECT COUNT(*) AS n FROM exec_calls`)) as { n: number }[])[0]!.n;
+    const calls = await execCalls();
+    expect(calls).toBeGreaterThan(0);
+    // And again after the run: the replays start nothing and execute no call twice (exec_calls dedupe, design 4.3).
+    await co.runAlarmNow();
+    await co.runAlarmNow();
+    expect(await execCalls()).toBe(calls);
+    const after = await fresh();
+    for (const c of ["notices.send_response", "tax.update_rate"]) expect(after.filter((p) => p.command === c), c).toHaveLength(1);
     const rate = open.find((p) => p.command === "tax.update_rate")!;
     const reply = open.find((p) => p.command === "notices.send_response")!;
     const approved = await post(`/api/v1/proposals/${rate.id}/approve`, { reasonCode: null, note: null });
@@ -99,23 +116,56 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect(both.map((r) => r.status).sort()).toEqual([200, 422]);
     expect(both.find((r) => r.status === 422)!.body).toMatchObject({ ok: false, code: "NOT_PENDING" });
     expect((await smokeJson<{ ok: boolean }>("/api/v1/actions/verify")).body.ok).toBe(true);
-    // A replayed alarm with nothing queued executes nothing twice.
-    const before = (await smokeJson<{ count: number }>("/api/v1/actions?limit=200")).body.count;
-    const co = await company(DO_NAMES.smoke);
-    await co.runAlarmNow();
-    await co.runAlarmNow();
-    expect((await smokeJson<{ count: number }>("/api/v1/actions?limit=200")).body.count).toBe(before);
   });
 
-  it("returns slot-smoke to the seed with the delta reset, twice, within 25% of 557 rows written", async () => {
+  it("returns slot-smoke to the seed with the delta reset after the ten flows, twice, within 25% of 557 rows written", async () => {
     const lobby = async () => { const e = await env(); return e.LOBBY.get(e.LOBBY.idFromName(DO_NAMES.lobby)); };
+    const co = await company(DO_NAMES.smoke);
+    // Runs start in alarm invocations: drive them until none is queued or running.
+    const settle = async () => {
+      for (let i = 0; i < 40; i++) {
+        await co.runAlarmNow();
+        const runs = (await smokeJson<{ data: { status: string }[] }>("/api/v1/agent/runs?limit=50")).body.data ?? [];
+        if (!runs.some((r) => ["queued", "running"].includes(r.status))) return;
+        await sleep(100);
+      }
+      throw new Error("runs did not settle");
+    };
     // Start from the seed (the cases above changed slot-smoke), and remember the seed's pending proposals.
     expect(await (await lobby()).resetWorld({ slot: DO_NAMES.smoke })).toMatchObject({ ok: true });
     const seedPending = (await pending()).map((p) => p.id).sort();
     for (let cycle = 0; cycle < 2; cycle++) {
-      expect((await post("/api/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" })).status).toBe(200);
-      const open = await until(pending, (ps) => ps.some((p) => p.command === "tax.update_rate"));
-      expect((await post(`/api/v1/proposals/${open.find((p) => p.command === "tax.update_rate")!.id}/approve`, { reasonCode: null, note: null })).status).toBe(200);
+      // The ten flows of design 8.2 (the session cf1-db records on the emulator, packages/db/test-workerd/flows.ts).
+      const status: Record<string, number> = {};
+      status.deliver = (await post("/api/v1/sim/notices/deliver", { scenario: "ca_de2088_rate_change" })).status;
+      await settle();
+      const open = (await pending()).filter((p) => !seedPending.includes(p.id));
+      const rate = open.find((p) => p.command === "tax.update_rate");
+      const reply = open.find((p) => p.command === "notices.send_response");
+      status.approveRate = rate ? (await post(`/api/v1/proposals/${rate.id}/approve`, { reasonCode: null, note: null })).status : 0;
+      await settle();
+      status.approveReply = reply ? (await post(`/api/v1/proposals/${reply.id}/approve`, { reasonCode: null, note: null })).status : 0;
+      await settle();
+      status.prePayroll = (await post("/api/v1/routines/rt_pre_payroll/trigger", {})).status;
+      await settle();
+      status.chatCost = (await post("/api/v1/agent/runs", { text: "Show payroll cost by month" })).status;
+      await settle();
+      status.expenses = (await post("/api/v1/routines/rt_expense_review/trigger", {})).status;
+      await settle();
+      status.chatTimeOff = (await post("/api/v1/agent/runs", { text: "How many hours of time off does Grace Adeyemi have left?" })).status;
+      await settle();
+      status.offer = (await post("/api/v1/offers/offr_0001/accept", {})).status;
+      await settle();
+      status.payday = (await post("/api/v1/sim/clock/advance", { to: "2026-10-30T16:00:00.000Z" })).status;
+      await settle();
+      let gets = 0;
+      for (const r of ROUTES) if (r.method === "GET" && !r.path.includes(":") && !r.path.includes("/events")) { if ((await smoke(`/api${r.path}`)).status < 500) gets++; }
+      await settle();
+      for (const [flow, code] of Object.entries(status)) {
+        expect(code, `${flow} in cycle ${cycle + 1}`).toBeGreaterThanOrEqual(200);
+        expect(code, `${flow} in cycle ${cycle + 1}`).toBeLessThan(300);
+      }
+      expect(gets).toBeGreaterThan(40);
       const r = await (await lobby()).resetWorld({ slot: DO_NAMES.smoke });
       expect(r).toMatchObject({ ok: true, method: "delta" });
       console.log(`delta reset ${cycle + 1}: ${(r as { rowsWritten: number }).rowsWritten} rows written`);

@@ -100,6 +100,24 @@ describe("alarm-driven runs", () => {
     expect(counted.peak).toBeLessThanOrEqual(40);
   });
 
+  it("counts a run's fetches through the global fetch too, and refuses them past 40 in one alarm invocation", async () => {
+    const v = h.visitor();
+    const l = await v.lease();
+    const env = await h.coreEnv();
+    const co = env.COMPANY.get(env.COMPANY.idFromName(l.slot!));
+    const one = await v.json<{ runId: string }>("/api/v1/agent/runs", { method: "POST", body: JSON.stringify({ live: true, fetches: 3, global: true }) });
+    await until(async () => (await v.json<{ status: string }>(`/api/v1/agent/runs/${one.body.runId}`)).body.status, (st) => st === "done");
+    expect((await co.alarmFetches()).count).toBe(3);
+    const many = await v.json<{ runId: string }>("/api/v1/agent/runs", { method: "POST", body: JSON.stringify({ live: true, fetches: 45, global: true }) });
+    await until(async () => (await v.json<{ status: string }>(`/api/v1/agent/runs/${many.body.runId}`)).body.status, (st) => st === "done");
+    const counted = await co.alarmFetches();
+    expect(counted.count).toBe(MAX_FETCHES_PER_ALARM);
+    expect(counted.peak).toBe(MAX_FETCHES_PER_ALARM);
+    // A fetch outside an alarm invocation (a request) is not charged to any alarm.
+    expect((await v.fetch("/api/v1/notes")).status).toBe(200);
+    expect((await co.alarmFetches()).count).toBe(MAX_FETCHES_PER_ALARM);
+  });
+
   it("ticks the scheduler from the alarm only while the clock rate is above 0", async () => {
     const v = h.visitor();
     await v.lease();
