@@ -22,7 +22,7 @@ import { randomAlnum } from "../../shared/crypto";
 import { hostedError, plainError } from "../../shared/http";
 import { isModelAdmission } from "../../shared/routes";
 import { bundledFixtures } from "../fixtures";
-import { catalogRowFor, createSlotExtras, handleHostedPdf, worldExportJson } from "../../extras/slot";
+import { catalogRowFor, createSlotExtras, handleHostedPdf, indexSeedMemory, worldExportJson } from "../../extras/slot";
 import { weftDeps, type MigrationEntryLike, type SnapshotLike } from "./deps";
 import type { EngineModule, SnapshotArtifacts, SnapshotExtra, WorldBootInput, WorldEngine, WorldStore } from "./engine";
 import { bundledSnapshotFiles } from "./snapshot-assets";
@@ -184,6 +184,19 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
       });
     },
     catalogRow: (runId) => inScope(() => catalogRowFor(weft.db as never, runId, { slot: input.world.slot, gen: input.world.gen })),
+    // The seed index reads this world's memory at HEAD and pays for every batch through SpendDO's embeddings share,
+    // charged to the world and to no visitor (an operator step).
+    ...(x?.ai && x.vectors && x.neurons ? {
+      indexSeedMemory: async ({ fromChunk }: { fromChunk: number }) => {
+        const deps = {
+          ai: x.ai as never, vectors: x.vectors!, neurons: x.neurons!,
+          gateway: x.gateway({ slot: input.world.slot, gen: input.world.gen, run: null, kind: "embed", visitor: null }),
+          charge: { world: key, visitor: null, ipHash: null },
+        };
+        const r = await inScope(() => indexSeedMemory(deps, memoryRepo, x.snapshot(), { fromChunk }));
+        return { namespace: r.namespace, notes: r.notes, chunks: r.chunks, nextChunk: r.nextChunk };
+      },
+    } : {}),
     close: () => inScope(() => weft.close()),
   };
 }

@@ -755,6 +755,23 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     return { ok: v.ok && v.chainValid, skipped: false, mismatches: v.mismatches.slice(0, 20), rows: v.rows };
   }
 
+  /**
+   * One step of the seed memory index (design 5.4; the Lobby's seedIndex drives it and keeps the next chunk). It runs
+   * on the showcase only: its memory is the snapshot's, so the vectors hold for every world restored from it.
+   */
+  async indexSeedMemory(input: { fromChunk: number }): Promise<{ snapshot: string; namespace: string; notes: number; chunks: number; nextChunk: number | null }> {
+    this.assertName(DO_NAMES.showcase);
+    if (!this.stamp || this.stamp.mode !== "showcase") throw new Error("the seed index runs on the provisioned showcase only");
+    if (!this.engine && !this.ctx.storage.kv.get(RESTORE_KEY)) await this.startEngine();
+    const engine = this.engine;
+    if (!engine) throw new Error(`WORLD_NOT_READY: the showcase is not running${this.bootError ? ` (${this.bootError})` : ""}`);
+    if (!engine.indexSeedMemory) throw new Error("SEED_INDEX_DISABLED: this deployment has no Workers AI or Vectorize binding");
+    const fromChunk = Math.max(0, Math.floor(input.fromChunk));
+    const r = await engine.indexSeedMemory({ fromChunk });
+    logEvent("seed.index", { slot: this.stamp.slot, outcome: r.nextChunk === null ? "done" : "partial", from: fromChunk, next: r.nextChunk, chunks: r.chunks });
+    return { snapshot: this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? "none", ...r };
+  }
+
   /** A fresh point-in-time bookmark of a clean world (bookmarks cover 30 days); null when unavailable or dirty. */
   async takeBookmark(): Promise<string | null> {
     if (!this.stamp || this.stamp.visitor || !this.storage.getCurrentBookmark) return null;

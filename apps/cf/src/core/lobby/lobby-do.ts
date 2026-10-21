@@ -5,7 +5,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   DO_NAMES, HOSTED_CONFIG_KEYS, HOSTED_SETTINGS, slotName,
-  type DegradationLevel, type HostedErrorCode, type HostedResetResult, type LeaseInfo, type LeaseResult, type WorldMode,
+  type DegradationLevel, type HostedErrorCode, type HostedResetResult, type LeaseInfo, type LeaseResult, type SeedIndexProgress, type WorldMode,
 } from "../../shared/contracts";
 import { agentEnabled, CF4_CONFIG_KEYS, configNumber, envConfig } from "../../shared/config";
 import { poolSize, type CoreEnv } from "../../shared/env";
@@ -75,6 +75,8 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   /** Slots this instance has claimed and is resetting now. A slot left `resetting` by an earlier instance (the object
    * restarted mid-reset) is not here, and the sweep sends it to a full restore. */
   private readonly resetsRunning = new Set<string>();
+  /** A seed index step is running in this instance (seedIndex). */
+  private seedIndexRunning = false;
 
   constructor(ctx: DurableObjectState, env: CoreEnv) {
     super(ctx, env);
@@ -762,6 +764,39 @@ export class LobbyDO extends DurableObject<CoreEnv> {
       lastSweepAt: this.meta("sweep.at"),
       shares: shareUse(u, b),
     };
+  }
+
+  /**
+   * POST /api/_admin/seed-index (design 5.4): one step of the seed memory index on the showcase, resumed from the
+   * chunk the last step reached. Progress is kept here per snapshot (lobby_meta seed_index.<snapshot>), so a new
+   * snapshot starts again from chunk 0 and a complete index runs nothing. One step at a time.
+   */
+  async seedIndex(input: { now?: number } = {}): Promise<SeedIndexProgress | { error: "WORLD_NOT_READY" | "SEED_INDEX_FAILED"; message: string }> {
+    const show = this.slot(DO_NAMES.showcase);
+    if (!show || show.state !== "ready" || !show.snapshot) return { error: "WORLD_NOT_READY", message: "The showcase is not provisioned yet (POST /api/_admin/provision)" };
+    const key = `seed_index.${show.snapshot}`;
+    const prev = (() => { try { return JSON.parse(this.meta(key) ?? "null") as SeedIndexProgress | null; } catch { return null; } })();
+    if (prev?.done) return { ...prev, ran: false };
+    if (this.seedIndexRunning) return { ...(prev ?? { snapshot: show.snapshot, namespace: "", notes: 0, chunks: 0, from: 0, nextChunk: 0, done: false, at: "" }), ran: false };
+    this.seedIndexRunning = true;
+    try {
+      const from = prev?.nextChunk ?? 0;
+      let r: { namespace: string; notes: number; chunks: number; nextChunk: number | null };
+      try {
+        r = await this.company(DO_NAMES.showcase).indexSeedMemory({ fromChunk: from });
+      } catch (e) {
+        logError("seed.index", e, { slot: DO_NAMES.showcase });
+        return { error: "SEED_INDEX_FAILED", message: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+      }
+      const out: SeedIndexProgress = {
+        snapshot: show.snapshot, namespace: r.namespace, notes: r.notes, chunks: r.chunks, from, nextChunk: r.nextChunk, done: r.nextChunk === null,
+        at: new Date(input.now ?? Date.now()).toISOString(), ran: true,
+      };
+      this.setMeta(key, JSON.stringify(out));
+      return out;
+    } finally {
+      this.seedIndexRunning = false;
+    }
   }
 
   /** The admin-only GET /api/_admin/ops readout (no visitor ids, no IP hashes). */

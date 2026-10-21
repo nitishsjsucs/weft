@@ -146,10 +146,32 @@ export const HOSTED_PATHS = {
   pdf: "/api/_hosted/pdf",
   /** POST: McpKeyMint, the lease's MCP key, shown once. */
   mcpKey: "/api/_hosted/mcp-key",
-  /** HMAC with WEFT_ADMIN_TOKEN and a 5-minute timestamp: provision, conformance, ops. */
+  /** HMAC with WEFT_ADMIN_TOKEN and a 5-minute timestamp: provision, conformance, ops, seed-index (SeedIndexProgress). */
   admin: "/api/_admin",
   mcp: "/mcp",
 } as const;
+
+/**
+ * POST /api/_admin/seed-index (design 5.4): one metered step of the seed memory index. The showcase embeds the
+ * snapshot's memory notes into `seed-<snapshot>` from `from` until SpendDO's embeddings share refuses a batch; the
+ * Lobby keeps `nextChunk` per snapshot, so the operator calls it once a day until `done`. Semantic recall (KV
+ * recall.semantic) stays off until then.
+ */
+export interface SeedIndexProgress {
+  snapshot: string;
+  namespace: string;
+  notes: number;
+  chunks: number;
+  /** The chunk this step started from. */
+  from: number;
+  /** The first chunk not indexed yet, or null once every chunk is. */
+  nextChunk: number | null;
+  done: boolean;
+  /** When this step ran (ISO); a step on a complete index runs nothing and keeps the time of the last one. */
+  at: string;
+  /** False when the index was already complete (or another step was running) and nothing ran. */
+  ran: boolean;
+}
 
 export interface TurnstileTokenBody { token: string }
 export interface LeaseInfo { slot: string; gen: number; expiresAt: string; idleExpiresAt: string; resetsLeft: number }

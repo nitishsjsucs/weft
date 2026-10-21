@@ -221,6 +221,10 @@ async function admin(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<R
       return json(await env.COMPANY.get(env.COMPANY.idFromName(DO_NAMES.conformance)).runConformance());
     case "POST sweep":
       return json(await lobby(env).sweep());
+    case "POST seed-index": {
+      const r = await lobby(env).seedIndex();
+      return "error" in r ? plainError(503, "NotImplemented", r.error, r.message) : json(r);
+    }
     case "POST reset": {
       const slot = typeof parsed.slot === "string" ? parsed.slot : "";
       const r = await lobby(env).resetWorld({ slot });
