@@ -1,0 +1,12 @@
+# Snapshot artifacts (design 4.1): built by pnpm cf:snapshot, private (vault ciphertext and key hashes), never committed.
+generated/snapshot-rich.sql.gz
+generated/seed-rows.json.gz
+generated/manifest.json
+generated/stats.json
+# wrangler state and dry-run output
+.wrangler/
+dist/
+.dev.vars
+# Rendered deploy and dry-run configs (scripts/cf/lib/configs.ts)
+wrangler.*.deploy.json
+wrangler.*.dryrun.json
