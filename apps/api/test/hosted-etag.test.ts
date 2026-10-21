@@ -40,6 +40,9 @@ describe("ETag/304 on the polled GET routes", () => {
     expect(again.value.headers.get("etag")).toBe(etag);
     expect(again.value.headers.get(TABLES_HEADER)).toBe(first.headers.get(TABLES_HEADER));
     expect([again.statements, again.rowsRead]).toEqual([0, 0]);
+    // The browser keeps a polled response but revalidates it every time (cf5-web relies on the If-None-Match round trip).
+    expect(first.headers.get("cache-control")).toBe("private, no-cache");
+    expect(again.value.headers.get("cache-control")).toBe("private, no-cache");
     // The same query in another order is the same poll; without If-None-Match it is computed and answers the same body.
     expect((await get("/v1/proposals?limit=100&status=pending", { etag })).status).toBe(304);
     const plain = await cost(() => get("/v1/proposals?status=pending&limit=100"));
@@ -146,6 +149,8 @@ describe("ETag/304 on the polled GET routes", () => {
       const res = await app.request(p, { headers: h });
       expect(res.status, p).toBe(200);
       expect(res.headers.get("etag"), p).toBeNull();
+      // A response that read SpendDO, KV or the env is never stored, not by the browser and not by the front's memo.
+      if (p === "/v1/workers") expect(res.headers.get("cache-control")).toBe("no-store");
     }
     const clean = await app.request("/v1/expenses", { headers: h });
     expect(clean.headers.get("etag")).toMatch(/^W\//);

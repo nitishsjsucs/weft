@@ -9,7 +9,9 @@
 //   and the first poll after a restart is computed (design 4.5). The remembered entry was made by a request with
 //   the same identity material that passed auth and read the auth tables, so an unchanged principals or api_keys
 //   version is what keeps that identity valid. A route whose handler touched a source outside the company SQL
-//   (SpendDO, KV, the environment) marks itself uncachable through markUncachable();
+//   (SpendDO, KV, the environment) marks itself uncachable through markUncachable() and answers
+//   `cache-control: no-store`, which the front Worker's showcase memo also honours; a polled route answers
+//   `cache-control: private, no-cache`, so the browser revalidates with If-None-Match on every poll (cf5-web);
 // - the read-only world guard: on the showcase (or kv_state world.readonly = "1") every mutation is refused with 409
 //   WORLD_READ_ONLY, again in the Durable Object after the front Worker's LEASE_REQUIRED.
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -27,7 +29,7 @@ import { allowedHostsFor } from "./auth";
  */
 export const POLLED_GET_ROUTES: readonly string[] = [
   "/v1/proposals", "/v1/proposals/:id", "/v1/time-off/requests", "/v1/offboarding", "/v1/offboarding/:id", "/v1/offers", "/v1/agent/mentions",
-  "/v1/expense-intake", "/v1/expenses", "/v1/training/assignments", "/v1/sim/chat", "/v1/sim/state", "/v1/agent/runs/:id", "/v1/agent/runs/:id/trace",
+  "/v1/expense-intake", "/v1/expenses", "/v1/training/assignments", "/v1/sim/chat", "/v1/sim/state", "/v1/agent/runs", "/v1/agent/runs/:id", "/v1/agent/runs/:id/trace",
   "/v1/routine-gallery", "/v1/routines", "/v1/workers", "/v1/workers/:id", "/v1/workers/:id/documents", "/v1/workers/:id/onboarding", "/v1/it/accounts",
   "/v1/tax/accounts", "/v1/tax/rates", "/v1/notices", "/v1/contractors/payouts", "/v1/screening/orders", "/v1/compliance/calendar", "/v1/filings",
   "/v1/handoffs", "/v1/integrations", "/v1/sync-items", "/v1/ats/jobs", "/v1/integrations/greenhouse/imported", "/v1/integrations/workday/imported",
@@ -50,6 +52,8 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 /** 16 random hex digits, from Web Crypto (Node and workerd alike). Minted inside a request, never at module scope. */
 const randomEpoch = (): string => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+/** A polled response the browser keeps but revalidates on every use (the If-None-Match round trip the web relies on). */
+const REVALIDATE = "private, no-cache";
 
 function hostedError(code: keyof typeof HOSTED_ERRORS, message: string): Response {
   const e = HOSTED_ERRORS[code];
@@ -110,7 +114,7 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
       if (r && etagMatches(req.headers.get("if-none-match"), r.etag) && r.tables.every((t) => meter.version(t) === r.versions[t])) {
         stats.notModified++;
         memo.delete(key); memo.set(key, r);   // most recently used last
-        return new Response(null, { status: 304, headers: { etag: r.etag, [TABLES_HEADER]: r.tables.join(",") } });
+        return new Response(null, { status: 304, headers: { etag: r.etag, [TABLES_HEADER]: r.tables.join(","), "cache-control": REVALIDATE } });
       }
     }
 
@@ -120,6 +124,8 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
     stats.computed++;
     const headers = new Headers(res.headers);
     headers.set(TABLES_HEADER, usage.tablesRead.join(","));
+    if (scope.uncachable) headers.set("cache-control", "no-store");
+    else if (key && !headers.has("cache-control")) headers.set("cache-control", REVALIDATE);
     // Remember only a clean read: a 200 that read company tables and wrote nothing, during which no commit landed (its
     // rows could predate it), and that touched nothing outside the company SQL.
     if (key && res.status === 200 && !scope.uncachable && commitSeq === before && usage.tablesWritten.length === 0 && usage.tablesRead.length > 0) {
@@ -134,7 +140,7 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
       // still answers 304 without its body.
       if (etagMatches(req.headers.get("if-none-match"), etag)) {
         stats.notModified++;
-        return new Response(null, { status: 304, headers: { etag, [TABLES_HEADER]: usage.tablesRead.join(",") } });
+        return new Response(null, { status: 304, headers: { etag, [TABLES_HEADER]: usage.tablesRead.join(","), "cache-control": REVALIDATE } });
       }
     }
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
