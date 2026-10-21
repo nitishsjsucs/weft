@@ -12,14 +12,17 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { apiKeys, principals, settings, type Db, type DbTx } from "@weft/db";
 import { newId } from "@weft/core";
+import { SqlRepo } from "@weft/executor";
+import { createRecallSource } from "@weft/cf-extras";
 import {
-  formatHostedMcpKey, hostedWorldId, MCP_AGENT_ASK_PER_KEY_DAY, WORLD_MODEL_SETTING,
+  formatHostedMcpKey, hostedWorldId, MCP_AGENT_ASK_PER_KEY_DAY, SMALL_STATE_KEYS, WORLD_MODEL_SETTING,
   type DurableStorageLike, type DurableWeftPlatform, type PlatformDb, type SqlMeter, type TxGuard,
 } from "../../shared/contracts";
 import { randomAlnum } from "../../shared/crypto";
-import { hostedError } from "../../shared/http";
+import { hostedError, plainError } from "../../shared/http";
 import { isModelAdmission } from "../../shared/routes";
 import { bundledFixtures } from "../fixtures";
+import { catalogRowFor, createSlotExtras, handleHostedPdf, worldExportJson } from "../../extras/slot";
 import { weftDeps, type MigrationEntryLike, type SnapshotLike } from "./deps";
 import type { EngineModule, SnapshotArtifacts, SnapshotExtra, WorldBootInput, WorldEngine, WorldStore } from "./engine";
 import { bundledSnapshotFiles } from "./snapshot-assets";
@@ -89,6 +92,43 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     }
     return appFetch(req);
   };
+  // The extras (cf6-extras, design 5.4): the slot port the queue consumers call back into, the PDF route over the
+  // world's own read routes, the run catalog source and, when Workers AI and Vectorize are bound, the semantic recall
+  // candidates (off until the flag says otherwise; lexical recall is unchanged without them).
+  const memoryRepo = new SqlRepo(weft.db as never);
+  const leaseOf = (): { visitor: string | null; ipHash: string | null } | null => {
+    try {
+      const visitor = weft.platform.state.get(SMALL_STATE_KEYS.leaseVisitor), ipHash = weft.platform.state.get(SMALL_STATE_KEYS.leaseIpHash);
+      return visitor || ipHash ? { visitor, ipHash } : null;
+    } catch { return null; }
+  };
+  const x = input.extras ?? null;
+  const worldInfo = () => ({ slot: input.world.slot, gen: input.world.gen, mode: input.world.mode, snapshot: x?.snapshot() ?? "none", lease: leaseOf() });
+  const extras = x ? createSlotExtras({
+    world: worldInfo,
+    blobs: weft.blobs,
+    memoryText: (path, commit) => memoryRepo.read(path, commit),
+    exportMemory: () => memoryRepo.exportFastImport(),
+    exportWorld: () => worldExportJson(weft.db as never, { slot: input.world.slot, gen: input.world.gen, exportedAt: new Date().toISOString() }),
+    exec: (command, args) => inScope(() => weft.executor.system.exec("svc_jobs", command, args, { eventId: null, attended: false, requestedBy: null })),
+  }) : null;
+  if (x?.ai && x.vectors) {
+    const ai = x.ai, vectors = x.vectors;
+    d.attachSemanticRecall?.(weft.db, {
+      source: createRecallSource({
+        ai: ai as never, vectors, neurons: x.neurons,
+        gateway: x.gateway({ slot: input.world.slot, gen: input.world.gen, run: null, kind: "embed", visitor: leaseOf()?.visitor ?? null }),
+        charge: { world: key, visitor: leaseOf()?.visitor ?? null, ipHash: leaseOf()?.ipHash ?? null },
+      }),
+      enabled: async () => (await x.flags()).recallSemantic,
+      world: () => ({ slot: input.world.slot, gen: input.world.gen, snapshot: x.snapshot() }),
+      readText: (path, at) => memoryRepo.read(path, at),
+      // A failing source keeps the lexical block; the reason goes to Workers Logs without any memory text.
+      onError: (e) => console.warn(JSON.stringify({ evt: "recall.semantic", slot: input.world.slot, outcome: "lexical_only", message: weft.executor.redact(e instanceof Error ? e.message : String(e)).slice(0, 200) })),
+    });
+  }
+  const pendingPdfs = new Map<string, number>();
+
   const mcp = d.createRemoteMcpHandler({
     apiUrl: origin,
     allowedOrigins: [origin],
@@ -129,6 +169,21 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
       }));
     },
     addSecret: (v) => internals?.addSecret(v),
+    extras,
+    async pdf(request, p) {
+      if (!x?.files) return plainError(503, "NotImplemented", "PDF_DISABLED", "PDF rendering is off on this deployment");
+      const url = new URL(request.url);
+      // The document data comes from the world's own read routes, with the request's own principal and proxy headers.
+      const headers = new Headers();
+      for (const h of ["x-weft-proxy", "x-weft-principal", "host"]) { const v = request.headers.get(h); if (v) headers.set(h, v); }
+      return handleHostedPdf(url.pathname, {
+        world: { slot: input.world.slot, gen: input.world.gen, mode: input.world.mode, snapshot: x.snapshot() },
+        ctx: p.ctx,
+        app: (path) => appFetch(new Request(`${url.origin}${path}`, { headers })),
+        files: x.files, render: x.render, flags: x.flags, browserMsUsed: p.browserMsUsed, newJobId: p.newJobId, pending: pendingPdfs,
+      });
+    },
+    catalogRow: (runId) => inScope(() => catalogRowFor(weft.db as never, runId, { slot: input.world.slot, gen: input.world.gen })),
     close: () => inScope(() => weft.close()),
   };
 }

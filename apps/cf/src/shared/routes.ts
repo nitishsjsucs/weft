@@ -27,7 +27,7 @@ export const SIM_RESET_PATH = "/v1/sim/reset";
 export const HEALTH_PATH = "/v1/health";
 
 /** Paths CompanyDO serves itself (the front rewrites the public paths onto them). */
-export const DO_PATHS = { live: "/_live", mcp: "/mcp", model: "/_hosted/model", mcpKey: "/_hosted/mcp-key" } as const;
+export const DO_PATHS = { live: "/_live", mcp: "/mcp", model: "/_hosted/model", mcpKey: "/_hosted/mcp-key", pdf: "/_hosted/pdf" } as const;
 
 /** Lease-end marker on a 409 LEASE_ENDED from a slot, so the front clears the cookie without parsing the body. */
 export const LEASE_HEADER = "x-weft-lease";

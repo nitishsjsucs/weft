@@ -5,8 +5,25 @@
 // weft-engine.ts, loaded lazily (design 3.2: @weft/* is imported inside blockConcurrencyWhile); the Miniflare suite
 // plugs a small fake in through the same seam, so the plumbing is tested without the Weft stack.
 import type {
-  DurableStorageLike, HostedProviderId, HostedSpendLedger, HostedWorldRef, McpKeyMint, RunHost, SchedulerHost, SqlMeter, TxGuard, WorkersAiBindingLike,
+  AigMetadata, DurableStorageLike, HostedProviderId, HostedSpendLedger, HostedWorldRef, McpKeyMint, RunHost, SchedulerHost, SqlMeter, TxGuard, WorkersAiBindingLike,
 } from "../../shared/contracts";
+import type { AiGatewayOption, ExtrasFlags, HostedJob, NeuronBudget, QueueLike, R2BucketLike, RunCatalogRow, VectorizeLike } from "@weft/cf-extras";
+import type { SlotExtrasPort } from "../../extras/ports";
+
+/** The Worker bindings the extras use inside a world (cf6-extras); an absent one switches its extra off. */
+export interface WorldExtrasBindings {
+  ai: WorkersAiBindingLike | null;
+  vectors: VectorizeLike | null;
+  files: R2BucketLike | null;
+  render: QueueLike<HostedJob> | null;
+  /** The memoized KV flags (flagsFor(env)). */
+  flags: () => Promise<ExtrasFlags>;
+  /** SpendDO's ledger as the embeddings share sees it. */
+  neurons: NeuronBudget | null;
+  gateway: (meta: AigMetadata) => AiGatewayOption | null;
+  /** The snapshot this world was restored from (the seed vectors live in seed-<snapshot>). */
+  snapshot: () => string;
+}
 
 /** What the world boots with (DurablePlatformInput, plus the DO-side knobs). */
 export interface WorldBootInput {
@@ -26,6 +43,17 @@ export interface WorldBootInput {
   ai?: WorkersAiBindingLike | null;
   /** MCP agent_ask admission per key per UTC day (MCP_AGENT_ASK_PER_KEY_DAY, a Lobby counter). */
   mcpAskAllowed: (apiKey: string) => Promise<boolean>;
+  /** The extras' bindings; absent in the fake-engine suite. */
+  extras?: WorldExtrasBindings;
+}
+
+/** What the PDF route needs from CompanyDO beyond the world (design 6.3). */
+export interface WorldPdfInput {
+  ctx: { human: boolean; smoke: boolean };
+  /** Browser milliseconds used today (the Lobby counter pdf.browser_ms). */
+  browserMsUsed: () => Promise<number>;
+  /** A globally unique job id (obx_<16 hex>). */
+  newJobId: () => string;
 }
 
 export interface WorldEngine {
@@ -46,6 +74,12 @@ export interface WorldEngine {
   setWorldProvider(input: { provider: HostedProviderId | null; principalId: string | null }): Promise<void>;
   /** Teaches the redactor a secret (minted lease keys). */
   addSecret(value: string): void;
+  /** The extras' slot port (CompanyDO's extras* RPC methods delegate to it); null without the extras bindings. */
+  readonly extras?: SlotExtrasPort | null;
+  /** GET /_hosted/pdf/<kind>/<id> on this world (cf6's handleHostedPdf over the world's own read routes). */
+  pdf?(request: Request, input: WorldPdfInput): Promise<Response>;
+  /** The run catalog row of a run that settled (done, failed or waiting), or null while it runs. */
+  catalogRow?(runId: string): Promise<RunCatalogRow | null>;
   /** Drains in-flight work within a bound and closes the world. */
   close(): Promise<void>;
 }

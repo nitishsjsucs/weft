@@ -265,6 +265,41 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     }
   });
 
+  it("reads an uploaded receipt through weft-jobs: one write-back action, none on a redelivery, nothing but the two write-backs as svc_jobs", async () => {
+    // cf6-extras end to end on the real stack: expenses.submit appends an outbox row in its transaction, CompanyDO sends
+    // it after the commit, the weft-jobs consumer reads the receipt (the fakes worker stands in for Workers AI) and
+    // writes the extract back through CompanyDO.extrasWriteBack, which runs the executor's svc_jobs system path.
+    const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (ch) => ch.charCodeAt(0));
+    const sql = await h.core.getDurableObjectStorage("CompanyDO", { name: DO_NAMES.smoke });
+    const count = async (q: string, ...b: unknown[]) => Number(((await sql.exec(q, ...b)) as { n: number }[])[0]!.n);
+    const actionsBefore = await count("SELECT count(*) AS n FROM actions");
+    const form = new FormData();
+    for (const [k, v] of Object.entries({ workerId: "wrk_0025", category: "meals", merchant: "Fake Cafe (demo)", amountCents: "1062", transactionDate: "2026-10-20", businessPurpose: "Team lunch" })) form.set(k, v);
+    form.set("receipt", new Blob([PNG], { type: "image/png" }), "lunch.png");
+    // The multipart body as bytes with its boundary and length, as a browser sends it (the front needs a Content-Length).
+    const encoded = new Response(form);
+    const bytes = new Uint8Array(await encoded.arrayBuffer());
+    const res = await smoke("/api/v1/expenses", { method: "POST", body: bytes, headers: { "content-type": encoded.headers.get("content-type")!, "content-length": String(bytes.byteLength) } });
+    const body = (await res.json()) as { data: { expense_id: string } };
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    const id = body.data.expense_id;
+    const row = await until(async () => ((await sql.exec("SELECT receipt_extract_json AS j, receipt_upload_id AS upl FROM expenses WHERE id = ?", id)) as { j: string | null; upl: string }[])[0]!, (r) => !!r.j, 60_000);
+    const extract = JSON.parse(row.j!) as { source: string; merchant: string | null; read: boolean; ocrJobId: string };
+    expect(extract).toMatchObject({ source: "ocr", merchant: "Fake Cafe (demo)", read: true });
+    expect(extract.ocrJobId).toMatch(/^obx_[0-9a-f]{16}$/);
+    const writeBacks = () => count("SELECT count(*) AS n FROM actions WHERE command = 'expenses.attach_receipt_extract'");
+    expect(await writeBacks()).toBe(1);
+    expect(await count("SELECT count(*) AS n FROM outbox")).toBe(0);
+    // The same job again, through the slot port: refused before any write, so it settles as "already" with no new row.
+    const co = await company(DO_NAMES.smoke);
+    const args = { job_id: extract.ocrJobId, expense_id: id, upload_id: row.upl, extract: null, model: "@cf/mistralai/mistral-small-3.1-24b-instruct", neurons: 0 };
+    expect(await co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args } as never)).toEqual({ ok: true, status: "already", reason: null });
+    expect(await co.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+    expect(await writeBacks()).toBe(1);
+    expect(await count("SELECT count(*) AS n FROM actions")).toBe(actionsBefore + 2);   // expenses.submit and its one write-back
+    expect((await smokeJson<{ ok: boolean }>("/api/v1/actions/verify")).body.ok).toBe(true);
+  }, 120_000);
+
   it("runs the design 11.3 conformance cases on the scratch conformance object (the deployed route), which wipes itself", async () => {
     const r = await h.admin("POST", "/api/_admin/conformance", {});
     expect(r.status).toBe(200);

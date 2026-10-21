@@ -27,9 +27,15 @@ import { countFetchesIn, installCountedFetch, rawFetch } from "./fetch-scope";
 import { durableRunHost, durableSchedulerHost, fetchCounter, type DurableRunHost, type DurableSchedulerHost } from "./hosts";
 import { zeroUsage, type ResetOutcome, type RestoreBeginInput, type RestoreFinish, type RestoreVerify, type SlotHeartbeat, type UsageDelta, type WorldStamp } from "./rpc";
 import { addLeaseKey, hasKvState, leaseKeys, modeOf, readStamp, writeStamp } from "./world-state";
+import { COUNTERS, createRunCatalog, gatewayOption, neuronBudgetFromLedger, type D1Like, type HostedJob as ExtrasJob, type QueueLike, type R2BucketLike, type VectorizeLike } from "@weft/cf-extras";
+import { flagsFor } from "../../extras/env";
+import type { HiddenWriteBack, SlotExport, SlotExtrasPort, SlotWorldInfo, WriteBackOutcome } from "../../extras/ports";
 
 // Every global fetch an alarm invocation makes counts against its MAX_FETCHES_PER_ALARM (fetch-scope.ts).
 installCountedFetch();
+
+/** Job ids are unique across every world and generation for good (the D1 job ledger is keyed by id alone). */
+const newGlobalJobId = (): string => `obx_${[...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 
 /** Usage is pushed to the Lobby once any of these is reached (and the rest at each heartbeat). */
 const PUSH_AT = { rowsWritten: 1_000, rowsRead: 100_000, requests: 500 } as const;
@@ -120,6 +126,16 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         readOnly: stamp.mode === "showcase",
         fetch: this.counter.wrap(rawFetch),
         ai: (this.env.AI as unknown as WorkersAiBindingLike | undefined) ?? null,
+        extras: {
+          ai: (this.env.AI as unknown as WorkersAiBindingLike | undefined) ?? null,
+          vectors: (this.env.MEMVEC as unknown as VectorizeLike | undefined) ?? null,
+          files: (this.env.FILES as unknown as R2BucketLike | undefined) ?? null,
+          render: (this.env.RENDER as unknown as QueueLike<ExtrasJob> | undefined) ?? null,
+          flags: flagsFor(this.env as never),
+          neurons: neuronBudgetFromLedger(this.env.SPEND.get(this.env.SPEND.idFromName(DO_NAMES.spend)) as never),
+          gateway: (meta) => gatewayOption(this.env as unknown as Record<string, unknown>, meta),
+          snapshot: () => this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? "none",
+        },
         mcpAskAllowed: async (apiKey) => {
           const keyId = await mcpKeyId(apiKey);
           const r = await this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby)).take({ key: `mcp_ask:${keyId}`, limit: MCP_AGENT_ASK_PER_KEY_DAY });
@@ -187,6 +203,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       if (url.pathname === DO_PATHS.mcp) return await this.serveMcp(request);
       if (url.pathname === DO_PATHS.model) return await this.switchModel(request, stamp);
       if (url.pathname === DO_PATHS.mcpKey) return await this.mintKey(request, stamp);
+      if (url.pathname.startsWith(`${DO_PATHS.pdf}/`)) return await this.servePdf(request, c);
       if (url.pathname === SIM_RESET_PATH) return hostedError("HOSTED_RESET_PROFILE", "Hosted resets go through the lobby (POST /api/v1/sim/reset)");
       if (isModelAdmission(request.method, url.pathname) && c.visitor) {
         const rl = await this.env.RL_RUN.limit({ key: `run:${c.visitor}` });
@@ -328,6 +345,62 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     return json(minted, { status: 201 });
   }
 
+  /** GET /_hosted/pdf/<kind>/<id> (design 6.3, cf6-extras): a cached PDF at once, else one render job and 202. */
+  private async servePdf(request: Request, c: WeftCtx): Promise<Response> {
+    if (request.method !== "GET") return plainError(405, "ValidationError", "METHOD", "GET a PDF");
+    const engine = this.engine!;
+    if (!engine.pdf) return plainError(503, "NotImplemented", "PDF_DISABLED", "PDF rendering is off on this deployment");
+    const lobby = this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby));
+    const { value: res, usage } = await engine.meter.measure(() => engine.pdf!(request, {
+      ctx: { human: c.human, smoke: c.smoke },
+      browserMsUsed: () => lobby.extrasCounterPeek(COUNTERS.browserMs),
+      newJobId: newGlobalJobId,
+    }));
+    this.usage.rowsRead += usage.rowsRead;
+    this.usage.rowsWritten += usage.rowsWritten;
+    return res;
+  }
+
+  // Extras (cf6-extras, apps/cf/src/extras/ports.ts SlotExtrasPort): the queue consumers' way back into this world.
+  // Each runs outside any transaction; the write-back goes through the executor's own system path. ---------------
+
+  private async slotExtras(): Promise<SlotExtrasPort> {
+    if (!this.engine && this.stamp && !this.ctx.storage.kv.get(RESTORE_KEY)) await this.startEngine();
+    const port = this.engine?.extras;
+    if (!port) throw new Error(this.bootError ? "WORLD_NOT_READY: this demo company failed to start" : "WORLD_NOT_READY: this demo company is not running");
+    return port;
+  }
+  async extrasWorld(): Promise<SlotWorldInfo> { return (await this.slotExtras()).extrasWorld(); }
+  async extrasBlob(storagePath: string): Promise<Uint8Array | null> { return (await this.slotExtras()).extrasBlob(storagePath); }
+  async extrasWriteBack(w: HiddenWriteBack): Promise<WriteBackOutcome> {
+    const port = await this.slotExtras();
+    const engine = this.engine!;
+    const { value, usage } = await engine.meter.measure(() => port.extrasWriteBack(w));
+    this.usage.rowsRead += usage.rowsRead;
+    this.usage.rowsWritten += usage.rowsWritten;
+    return value;
+  }
+  async extrasMemoryText(path: string, commit: string): Promise<string | null> { return (await this.slotExtras()).extrasMemoryText(path, commit); }
+  async extrasExport(what: "memory" | "world"): Promise<SlotExport> { return (await this.slotExtras()).extrasExport(what); }
+
+  /** Run outcomes for the model comparison page (design 5.2): numbers only, recorded outside any transaction. */
+  private recordRuns(runIds: readonly string[]): void {
+    const engine = this.engine;
+    const ops = this.env.OPS as unknown as D1Like | undefined;
+    if (!engine?.catalogRow || !ops || !runIds.length) return;
+    const catalog = createRunCatalog(ops);
+    this.ctx.waitUntil((async () => {
+      for (const id of new Set(runIds)) {
+        try {
+          const row = await engine.catalogRow!(id);
+          if (row) await catalog.record(row);
+        } catch (e) {
+          logError("catalog.record", e, { slot: this.stamp?.slot });
+        }
+      }
+    })());
+  }
+
   // Outbox -----------------------------------------------------------------------------------------------------
 
   /** After the outer commit: send each outbox row to its queue, then delete it (design 3.4). At least once. */
@@ -387,6 +460,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         if (due.has("runs") || this.runHost.pending().length) {
           const r = await this.runHost.drain();
           logEvent("alarm.runs", { slot: this.stamp?.slot, gen: this.stamp?.gen, outcome: "ok", started: r.started, remaining: r.remaining, live: r.liveStarted, fetches: this.counter.count });
+          this.recordRuns(r.runIds);
         }
       })));
       this.usage.rowsRead += usage.rowsRead;

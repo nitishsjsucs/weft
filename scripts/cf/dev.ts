@@ -4,8 +4,10 @@
 // Turnstile's always-pass test secret, local random secrets in .dev.vars (mode 600, never printed), the bindings
 // Miniflare does not emulate swapped for the fakes worker, the web export from apps/web/out when it exists.
 //
-//   pnpm cf:dev [--port 5780] [--pool 2] [--fake] [--detach]     pnpm cf:dev stop
+//   pnpm cf:dev [--port 5780] [--pool 2] [--dir .scratch/<track>/cf-dev] [--fake] [--detach]     pnpm cf:dev stop [--dir ...]
 //
+// The weft-ops D1 schema (apps/cf/d1) is applied to the local state first (wrangler d1 migrations apply --local),
+// since Miniflare creates the database empty.
 // --fake runs the Miniflare suite's fake world engine (no snapshot needed); otherwise run pnpm cf:snapshot first.
 // --detach returns once the pool is ready and leaves the server running (its pid is in .scratch/cf4-worker/cf-dev).
 import { execFileSync, spawn } from "node:child_process";
@@ -15,7 +17,14 @@ import { signAdmin } from "../../apps/cf/src/shared/tokens";
 import { APPS_CF, writeLocalConfigs } from "./lib/configs";
 import { ensureEnvValue, hex, REPO_ROOT } from "./lib/env-file";
 
-export const DEV_DIR = join(REPO_ROOT, ".scratch/cf4-worker/cf-dev");
+export const DEFAULT_DEV_DIR = join(REPO_ROOT, ".scratch/cf4-worker/cf-dev");
+/** --dir (repo-relative or absolute), so each track keeps its own state (cf7 runs on port 5800 under .scratch/cf7). */
+const devDir = (argv: string[]): string => {
+  const i = argv.indexOf("--dir");
+  const d = i >= 0 ? argv[i + 1] : undefined;
+  return d ? (d.startsWith("/") ? d : join(REPO_ROOT, d)) : DEFAULT_DEV_DIR;
+};
+let DEV_DIR = DEFAULT_DEV_DIR;
 export const DEFAULT_PORT = 5780;
 const TURNSTILE_PASS = "1x0000000000000000000000000000000AA";
 
@@ -63,6 +72,7 @@ function stop(): void {
 }
 
 async function main(argv: string[]): Promise<void> {
+  DEV_DIR = devDir(argv);
   if (argv[0] === "stop") return stop();
   const arg = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] ?? null : null; };
   const port = Number(arg("--port") ?? DEFAULT_PORT);
@@ -84,6 +94,10 @@ async function main(argv: string[]): Promise<void> {
   writeFileSync(join(DEV_DIR, ".dev.vars"), Object.entries(vars).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 0o600 });
 
   const log = openSync(join(DEV_DIR, "dev.log"), "a");
+  // weft-ops: the extras' job ledger, run catalog and failed jobs need their tables before the first job.
+  execFileSync(join(REPO_ROOT, "node_modules/.bin/wrangler"), ["d1", "migrations", "apply", "weft-ops", "--local", "--persist-to", join(DEV_DIR, "state"), "-c", paths.core], {
+    cwd: APPS_CF, stdio: ["ignore", log, log], env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" },
+  });
   const child = spawn(join(REPO_ROOT, "node_modules/.bin/wrangler"), [
     "dev", "-c", paths.front, "-c", paths.core, "-c", paths.fakes, "--port", String(port), "--ip", "127.0.0.1",
     "--persist-to", join(DEV_DIR, "state"), "--log-level", "warn", "--show-interactive-dev-session=false",

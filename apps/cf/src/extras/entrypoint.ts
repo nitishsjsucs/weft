@@ -7,11 +7,14 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { DictationResult, HelpSearchResult, MessageBatchLike, ModelComparisonRow, PlatformReadout, RunCatalogRow } from "@weft/cf-extras";
 import { hostedDepsFromEnv, jobDepsFromEnv, type ExecutionContextLike, type ExtrasEnv } from "./env";
 import { createHostedExtras } from "./hosted";
+import { extrasFetch } from "./http";
 import type { DictateInput, HostedExtrasApi, SlotExport } from "./ports";
 import { handleExtrasBatch } from "./queues";
 
 export class HostedExtras extends WorkerEntrypoint<ExtrasEnv> implements HostedExtrasApi {
   #api(): HostedExtrasApi { return createHostedExtras(hostedDepsFromEnv(this.env, this.ctx)); }
+  /** The front's forwarded /api/_hosted/* requests (x-weft-ctx verified here); the RPC methods below serve them. */
+  override fetch(request: Request): Promise<Response> { return extrasFetch(request, this, this.env.WEFT_CTX_SECRET ?? ""); }
   help(query: string): Promise<HelpSearchResult> { return this.#api().help(query); }
   dictate(input: DictateInput): Promise<DictationResult> { return this.#api().dictate(input); }
   platform(): Promise<PlatformReadout> { return this.#api().platform(); }

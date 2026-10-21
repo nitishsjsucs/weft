@@ -23,6 +23,9 @@ export const showcaseMemo = new ResponseMemo();
 
 const lobby = (env: FrontEnv) => env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
 const UPLOAD_OVERHEAD = 64 * 1024;
+/** GET /api/_hosted/export/<memory|world>/<job id> (cf6-extras), and the dictation body cap (30 s of 16 kHz PCM WAV). */
+const HOSTED_EXPORT_PREFIX = "/api/_hosted/export/";
+const DICTATE_MAX_BYTES = 1024 * 1024;
 
 function originAllowed(req: Request, env: FrontEnv): boolean {
   const origin = req.headers.get("origin");
@@ -157,8 +160,21 @@ async function hosted(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<
     const refused = await mutationGate(req, env, v);
     if (refused) return refused;
   }
-  if (![HOSTED_PATHS.platform, HOSTED_PATHS.models, HOSTED_PATHS.help, HOSTED_PATHS.dictate].includes(path as never) && !path.startsWith(`${HOSTED_PATHS.pdf}/`)) {
+  // A PDF is the visitor's world's own document (design 6.3): gated like a mutation above, then answered by the
+  // visitor's slot (cf6-extras: CompanyDO runs handleHostedPdf over the world's own read routes on /_hosted/pdf/...).
+  if (path.startsWith(`${HOSTED_PATHS.pdf}/`)) {
+    if (req.method !== "GET") return plainError(405, "ValidationError", "METHOD", "GET a PDF");
+    return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: `${DO_PATHS.pdf}${path.slice(HOSTED_PATHS.pdf.length)}`, search: "" });
+  }
+  // Exports belong to a leased world (the job id names its slot's file).
+  if (path.startsWith(HOSTED_EXPORT_PREFIX) && !t.leased && !v.smoke) return hostedError("LEASE_REQUIRED", "Exports belong to your own demo company");
+  if (![HOSTED_PATHS.platform, HOSTED_PATHS.models, HOSTED_PATHS.help, HOSTED_PATHS.dictate].includes(path as never) && !path.startsWith(HOSTED_EXPORT_PREFIX)) {
     return plainError(404, "NotFound", "NOT_FOUND", "No such hosted route");
+  }
+  if (path === HOSTED_PATHS.dictate) {
+    const len = Number(req.headers.get("content-length") ?? "NaN");
+    if (!Number.isFinite(len)) return plainError(411, "ValidationError", "LENGTH_REQUIRED", "Dictation needs a Content-Length");
+    if (len > DICTATE_MAX_BYTES) return plainError(413, "ValidationError", "DICTATION_TOO_LONG", "Dictation clips are at most 30 seconds");
   }
   return forwardToExtras(req, env, url, ctxOf(v, t.slot, t.gen));
 }

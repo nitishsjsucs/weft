@@ -27,6 +27,8 @@ export interface ExtrasEnv {
   SPEND: DurableNamespaceLike<SpendExtrasRpc>;
   WEFT_AIG_GATEWAY?: string;
   WEFT_SEMANTIC_RECALL?: string;
+  /** Verifies the front's x-weft-ctx on forwarded /api/_hosted/* requests. */
+  WEFT_CTX_SECRET?: string;
 }
 export interface ExecutionContextLike { waitUntil(p: Promise<unknown>): void }
 export type ExtrasLog = (evt: Record<string, unknown>) => void;

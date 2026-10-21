@@ -38,6 +38,8 @@ export interface WeftDeps {
   /** cf2-platform: apps/api/src/platform/durable.ts, exported from @weft/api/assemble */
   durablePlatform(input: DurablePlatformInput & { fetch?: typeof fetch; fetchCounter?: FetchCounter }): DurableWeftPlatform<unknown>;
   assembleWeft: typeof assembleModule.assembleWeft;
+  /** cf6-extras: apps/api/src/memory/binding.ts, the semantic recall hook (re-exported from @weft/api/assemble). */
+  attachSemanticRecall?: typeof assembleModule.attachSemanticRecall;
   /** cf3-agent: @weft/agent world.ts and script-source.ts, @weft/mcp remote.ts */
   bindWorldScope?(scope: Pick<WorldScope, "current"> | null): void;
   /** The scripted provider's scenarios come from the bundled fixtures in a Worker (there is no scenarios/ folder). */
@@ -101,6 +103,7 @@ export function weftDeps(): WeftDeps {
     runConformanceSub: get(dbModule, "runConformanceSub") as WeftDeps["runConformanceSub"],
     durablePlatform: get(assembleModule, "durablePlatform") as WeftDeps["durablePlatform"],
     assembleWeft: assembleModule.assembleWeft,
+    attachSemanticRecall: get(assembleModule, "attachSemanticRecall") as WeftDeps["attachSemanticRecall"],
     bindWorldScope: get(agentModule, "bindWorldScope") as WeftDeps["bindWorldScope"],
     setScriptSource: get(agentModule, "setScriptSource") as WeftDeps["setScriptSource"],
     fixtureScriptSource: get(agentModule, "fixtureScriptSource") as WeftDeps["fixtureScriptSource"],

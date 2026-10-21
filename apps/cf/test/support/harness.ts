@@ -11,6 +11,7 @@ import { createTestHarness, type TestHarness, type WorkerHandle } from "wrangler
 import { signAdmin, signSmoke } from "../../src/shared/tokens";
 import { CF_DIR, REPO } from "./config-files";
 import { writeLocalConfigs } from "../../../../scripts/cf/lib/configs";
+import { applyLocalD1 } from "../../../../scripts/cf/lib/d1-local";
 import type { CoreEnv } from "../../src/shared/env";
 
 export { CF_DIR, REPO };
@@ -92,6 +93,8 @@ export class Harness {
     const h = new Harness(server, secrets, dir);
     h.front = server.getWorker("weft");
     h.core = server.getWorker("weft-core");
+    // weft-ops: Miniflare creates the D1 database empty (the extras' job ledger and run catalog live there).
+    await applyLocalD1((await h.coreEnv()).OPS as never);
     return h;
   }
 

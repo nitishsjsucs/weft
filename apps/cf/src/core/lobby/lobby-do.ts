@@ -584,6 +584,33 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     });
   }
 
+  // The extras' names for the same counters and records (cf6-extras LobbyExtrasRpc, apps/cf/src/extras/ports.ts): one
+  // counter table and one vector ledger serve both. ------------------------------------------------------------------
+
+  async extrasCounterTake(name: string, n: number, cap: number, day?: string): Promise<{ ok: boolean; used: number; left: number }> {
+    const d = day ?? utcDay();
+    const used = this.count(name, d);
+    if (used + n > cap) return { ok: false, used, left: Math.max(0, cap - used) };
+    const after = this.bump(name, n, d);
+    return { ok: true, used: after, left: Math.max(0, cap - after) };
+  }
+
+  async extrasCounterAdd(name: string, n: number, day?: string): Promise<number> {
+    return this.bump(name, n, day ?? utcDay());
+  }
+
+  async extrasCounterPeek(name: string, day?: string): Promise<number> {
+    return this.count(name, day ?? utcDay());
+  }
+
+  async extrasReadout(): Promise<LobbyReadout> {
+    return this.readout();
+  }
+
+  async extrasRecordVectors(slot: string, gen: number, ids: string[]): Promise<void> {
+    await this.recordVectors({ slot, gen, ids });
+  }
+
   private async dropVectors(slot: string, gen: number): Promise<void> {
     const ids = this.all<{ id: string }>(`SELECT id FROM vectors WHERE slot = ? AND gen <= ?`, slot, gen).map((r) => r.id);
     if (!ids.length) return;

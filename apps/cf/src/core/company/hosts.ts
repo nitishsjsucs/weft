@@ -9,7 +9,7 @@
 //   moves only through the Simulators advance buttons). kick() after mutations stays inline in Weft's own code.
 import type { FetchCounter, RunHost, RunHostJob, SchedulerHost } from "../../shared/contracts";
 
-export interface DrainResult { started: number; remaining: number; liveStarted: number; fetches: number | null }
+export interface DrainResult { started: number; remaining: number; liveStarted: number; fetches: number | null; /** The runs this drain started (and waited for). */ runIds: string[] }
 
 export interface DurableRunHost extends RunHost {
   readonly kind: "alarm";
@@ -31,10 +31,11 @@ export function durableRunHost(opts: { arm: () => void | Promise<void>; counter?
     },
     pending: () => fifo.map((j) => j.runId),
     async drain() {
-      if (draining) return { started: 0, remaining: fifo.length, liveStarted: 0, fetches: opts.counter?.count ?? null };
+      if (draining) return { started: 0, remaining: fifo.length, liveStarted: 0, fetches: opts.counter?.count ?? null, runIds: [] };
       draining = true;
       let started = 0;
       let liveStarted = 0;
+      const runIds: string[] = [];
       try {
         for (let round = 0; round < maxRounds && fifo.length > 0; round++) {
           const batch: RunHostJob[] = [];
@@ -47,13 +48,14 @@ export function durableRunHost(opts: { arm: () => void | Promise<void>; counter?
           }
           if (!batch.length) break;
           started += batch.length;
+          for (const j of batch) runIds.push(j.runId);
           await Promise.allSettled(batch.map((j) => j.start()));
         }
       } finally {
         draining = false;
       }
       if (fifo.length > 0) arm();
-      return { started, remaining: fifo.length, liveStarted, fetches: opts.counter?.count ?? null };
+      return { started, remaining: fifo.length, liveStarted, fetches: opts.counter?.count ?? null, runIds };
     },
   };
 }

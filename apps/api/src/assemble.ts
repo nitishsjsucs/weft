@@ -43,6 +43,9 @@ export { FIXTURE_PATHS, mapFixtures, repoFixtures, bundleFixtures } from "./plat
 export { sqlSmallState } from "./platform/state";
 export { sqlBlobStore, sqlRunFileStore, sqlRunHandleStore, BlobTooLarge, SQL_BLOB_PREFIX } from "./platform/sql";
 export { hostedApp, markUncachable, POLLED_GET_ROUTES } from "./http/hosted";
+// cf6-extras: the semantic recall hook CompanyDO attaches after assembling a world.
+export { attachSemanticRecall } from "./memory/binding";
+export type { SemanticRecallOptions } from "./memory/semantic";
 export type { HostedResetHook, WeftPlatformInfo } from "./http/context";
 
 export interface CreateWeftOptions {
