@@ -19,6 +19,7 @@ import type { ExecContext, Preview, SimClock, Simulators } from "@weft/contracts
 import { createSimulators } from "@weft/sim";
 import type { SeedContext } from "../context";
 import { seedRichMotion, type MotionApi } from "./motion";
+import { seedBlobMode } from "../blobs";
 import { seedImportedPayHistory } from "./pay-history";
 import { enrollLeaver, seedTurnover, terminateLeaverEnrollments } from "./turnover";
 import { SEED_CHAT } from "../it";
@@ -901,7 +902,7 @@ export async function seedRichProfile(ctx: SeedContext): Promise<RichSummary> {
     await seedPeopleRecords(L, ws);
     await seedMoneyAndCompliance(L, ws);
     const api: MotionApi = {
-      tx, dataDir: ctx.dataDir, bump: (t, n) => L.bump(t, n), chat: (c, a, t, ts) => L.chat(c, a, t, ts),
+      tx, dataDir: ctx.dataDir, blobMode: seedBlobMode(ctx.executor), bump: (t, n) => L.bump(t, n), chat: (c, a, t, ts) => L.chat(c, a, t, ts),
       proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), preview: (c, a) => L.preview(c, a), run: (r) => L.run(r as unknown as RunSpec), action: (a) => L.action(a as unknown as PendingAction),
     };
     await seedRichMotion(api, ws);

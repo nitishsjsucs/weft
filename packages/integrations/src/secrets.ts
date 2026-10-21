@@ -1,11 +1,20 @@
 // Secret lookup for real vendor adapters (docs/wave3.md). Reads only the file named by WEFT_SECRETS_FILE (KEY=VALUE lines),
 // never process.env values, and never logs, returns to the UI or persists a value. presence() reports names only.
+// On Cloudflare (WEFT_RUNTIME=cloudflare, docs/cloudflare/design.md 4.1) there is no secrets file and no file system:
+// a secret is a Worker secret, so the named values come from the Worker env only, and nothing is read from disk.
 import { readFileSync } from "node:fs";
 
 export type Env = Record<string, string | undefined>;
 
+/** True on the hosted runtime, where secrets are Worker secrets and WEFT_SECRETS_FILE is never read. */
+export const workerSecretsOnly = (env: Env): boolean => env.WEFT_RUNTIME === "cloudflare";
+
 function parse(env: Env): Map<string, string> {
   const out = new Map<string, string>();
+  if (workerSecretsOnly(env)) {
+    for (const [k, v] of Object.entries(env)) if (/^[A-Z0-9_]+$/.test(k) && typeof v === "string" && v.trim()) out.set(k, v.trim());
+    return out;
+  }
   const file = env.WEFT_SECRETS_FILE;
   if (!file) return out;
   let text = "";

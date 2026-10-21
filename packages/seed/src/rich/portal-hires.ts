@@ -18,7 +18,7 @@ const DEMO_DOC = "DEMO DOCUMENT. Fictional company, fictional person, simulated 
 const KINDS = ["sign_offer", "sign_confidentiality", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts"] as const;
 const OWNER: Record<string, string> = { i9_sim: "hr", it_accounts: "agent" };
 
-export interface PortalHiresApi { dataDir?: string; tx: DbTx; bump: (table: string, n?: number) => void; action: (a: Record<string, unknown>) => void }
+export interface PortalHiresApi { dataDir?: string; blobMode?: import("../blobs").SeedBlobMode; tx: DbTx; bump: (table: string, n?: number) => void; action: (a: Record<string, unknown>) => void }
 
 type Hire = {
   first: string; last: string; title: string; dept: string; wkp: string; state: string; tz: string; base: number; start: string; manager: string | null;

@@ -5,10 +5,13 @@
 //
 // The samples also deliver the notice kinds the simulator has no scenario for (late deposit penalty, FUTA credit
 // reduction, benefit charge, an unknown kind and a smudged scan) without inserting rows by hand.
+//
+// The samples come from the repo on Node and from the platform's FixtureSource on the durable platform (./fixtures.ts).
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { NOTICE_FIXTURE_DIRS, noticeFixtureSource, onNoticeFixturesChanged } from "./fixtures";
 
 /** What the sidecar says. `kind` is free text on purpose: an upload may be a kind Weft does not handle. */
 export interface UploadExtract {
@@ -42,16 +45,30 @@ export function parseSidecar(v: unknown): UploadExtract | null {
 }
 
 let cache: MailedSample[] | null = null;
+onNoticeFixturesChanged(() => { cache = null; });
+
+/** The sample files as (file name, path, bytes, sidecar text): the repo on Node, the FixtureSource when one is set. */
+function sampleFiles(): { f: string; path: string; bytes: Buffer; sidecar: () => string }[] {
+  const src = noticeFixtureSource();
+  if (src) {
+    return src.list(NOTICE_FIXTURE_DIRS.mailed).filter((p) => p.endsWith(".txt")).map((path) => {
+      const f = path.slice(path.lastIndexOf("/") + 1);
+      return { f, path, bytes: Buffer.from(src.bytes(path) ?? new Uint8Array()), sidecar: () => src.text(`${path.slice(0, -4)}.json`) ?? "" };
+    });
+  }
+  return readdirSync(DIR).filter((x) => x.endsWith(".txt")).sort().map((f) => ({
+    f, path: join(DIR, f), bytes: readFileSync(join(DIR, f)), sidecar: () => readFileSync(join(DIR, `${f.slice(0, -4)}.json`), "utf8"),
+  }));
+}
+
 /** Every sample in mailed/ with a valid sidecar, by name. */
 export function mailedSamples(): MailedSample[] {
   if (cache) return cache;
   const out: MailedSample[] = [];
-  for (const f of readdirSync(DIR).filter((x) => x.endsWith(".txt")).sort()) {
+  for (const { f, path, bytes, sidecar } of sampleFiles()) {
     const name = f.slice(0, -4);
-    const path = join(DIR, f);
-    const bytes = readFileSync(path);
     let extract: UploadExtract | null = null;
-    try { extract = parseSidecar(JSON.parse(readFileSync(join(DIR, `${name}.json`), "utf8"))); } catch { extract = null; }
+    try { extract = parseSidecar(JSON.parse(sidecar())); } catch { extract = null; }
     if (extract) out.push({ name, fileName: f, path, sha256: sha(bytes), text: bytes.toString("utf8"), extract });
   }
   cache = out;

@@ -12,7 +12,21 @@ export function importanceOf(command: string): 0 | 1 | 2 | 3 {
   return 1;
 }
 
+/**
+ * After the outer commit: a platform with an outbox (the durable one) sends the rows the command appended. Never
+ * inside a transaction: the Queue send is real I/O, and IO_IN_TX turns a send that would hold the input gate into a
+ * test failure (docs/cloudflare/design.md 4.2).
+ */
+export function flushOutbox(e: Engine): void {
+  const h = e.hosted;
+  if (!h?.outboxPending || !h.onOutbox) return;
+  h.guard?.assertNotInTx("outbox flush");
+  h.outboxPending = false;
+  try { h.onOutbox(); } catch (err) { e.log(`outbox flush failed: ${err instanceof Error ? err.message : String(err)}`); }
+}
+
 export async function afterCommit(e: Engine, outcome: ToolOutcome | null): Promise<void> {
+  flushOutbox(e);
   if (!outcome || !(outcome.ok && outcome.status === "done") || outcome.actionSeq === null) return;
   const [a] = await e.db.select().from(actions).where(eq(actions.seq, outcome.actionSeq)).limit(1);
   if (!a) return;

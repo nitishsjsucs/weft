@@ -3,7 +3,7 @@
 // precheck runs in code first: skip is recorded with zero tokens, run starts an agent run with derived arguments.
 // Decisions wake the run through the checklist first, so a run whose checklist holds ends with zero tokens.
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Cron } from "croner";
 import { agentRuns, routineRuns, routines, runSteps, type Db } from "@weft/db";
 import { lockedWrite } from "./busy";
@@ -33,10 +33,15 @@ export interface EventSource {
   consume(eventId: string): Promise<void>;
 }
 
+/** Where the prebuilt hash gate keeps its hash (docs/cloudflare/design.md 4.4). The composition root supplies it
+ * (apps/api keeps it in kv_state, which the world digest never counts); without one there is no gate. */
+export interface PrebuiltHashStore { get(): Promise<string | null>; set(hash: string): Promise<void> }
+
 export interface CreateRoutinesOptions {
   db: Db; clock: SimClock; agent: AgentRuntime; runs: RoutineRunAuthority; readOnly: ReadOnlyExecutor;
   companyId?: string;
   events?: EventSource;
+  prebuiltHash?: PrebuiltHashStore;
 }
 
 export interface WeftRoutinesEngine extends RoutinesEngine {
@@ -106,6 +111,18 @@ function codeOwned(r: RoutineDef) {
   };
 }
 
+/** The kv_state key apps/api keeps the prebuilt hash under (docs/cloudflare/design.md 4.4). kv_state is never in the
+ * world digest, so the gate leaves the base and eval digests unchanged, and a world rebuild (POST /v1/sim/reset drops
+ * every table, a restore replaces them) takes the hash with the rows. */
+export const PREBUILT_HASH_KEY = "routines.prebuilt_hash";
+
+/** The hash of everything ensurePrebuilt writes for the code-owned prebuilt routines of a company. A new build whose
+ * definitions differ gets a new hash, so the rows are compared and refreshed once, then skipped again. */
+export function prebuiltHash(defs: readonly RoutineDef[], companyId: string): string {
+  const rows = defs.map((r) => ({ id: r.id, ownerPrincipalId: r.ownerPrincipalId, enabled: r.enabled, autonomy: r.autonomy, source: r.source, ...codeOwned(r) }));
+  return createHash("sha256").update(JSON.stringify({ v: 1, companyId, rows })).digest("hex");
+}
+
 export function runKey(routineId: string, triggerRef: string): string {
   return createHash("sha256").update(JSON.stringify({ routine_id: routineId, trigger_ref: triggerRef })).digest("hex");
 }
@@ -171,10 +188,19 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
 
   const newId = () => `rtr_${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
 
+  const wantHash = prebuiltHash(PREBUILT, companyId);
   async function ensurePrebuilt() {
     // POST /v1/sim/reset drops and rebuilds every table under a live engine, so a cached "already seeded" flag is
     // only trusted while the prebuilt rows are still there.
     if (seeded && (await db.select({ id: routines.id }).from(routines).where(eq(routines.id, PREBUILT[0]!.id)).limit(1)).length) return;
+    // The hash gate (design 4.4): a world whose rows this build already wrote (a second boot, a restored snapshot
+    // that was booted once) skips the comparison, so its first tick writes nothing. Every prebuilt id must still be
+    // there; a world that lost rows is compared and repaired as before.
+    const stored = opts.prebuiltHash ? await opts.prebuiltHash.get() : null;
+    if (opts.prebuiltHash && stored === wantHash) {
+      const [n] = await db.select({ n: sql<number>`count(*)` }).from(routines).where(inArray(routines.id, PREBUILT.map((r) => r.id)));
+      if (Number(n?.n ?? 0) === PREBUILT.length) { seeded = true; return; }
+    }
     seeded = true;
     const rows = new Map((await db.select().from(routines)).map((r) => [r.id, r]));
     for (const r of PREBUILT) {
@@ -195,6 +221,7 @@ export function createRoutines(opts: CreateRoutinesOptions): WeftRoutinesEngine 
         taintedBy: r.taintedBy, createdAt: clock.now(),
       }).onConflictDoNothing());
     }
+    if (opts.prebuiltHash && stored !== wantHash) await lockedWrite(() => opts.prebuiltHash!.set(wantHash));
   }
 
   async function list(): Promise<RoutineDef[]> {

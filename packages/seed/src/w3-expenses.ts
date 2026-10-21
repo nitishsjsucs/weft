@@ -5,15 +5,13 @@
 // Never change wave 1 or wave 2 seed counts and never touch processed runs: nothing is attached to a run here, so the
 // open draft pay_2026_10_30 is unchanged. The approved history was imported as approved from the previous expense tool
 // and waits for the next draft Weft creates (expenses.schedule on payroll.draft_created).
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
-import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { W3_CEILINGS, type ExpenseCategory } from "@weft/contracts";
 import { expensePolicies, expenses, limits, uploads } from "@weft/db";
 import { expenses as exp, newId } from "@weft/core";
 import type { SeedContext } from "./context";
+import { seedBlobMode, seedUpload } from "./blobs";
 
 /** Agent ceilings: per call, the daily aggregate (the governance step's _day_cents naming), and the auto-approval cap (routine autonomy "auto" only). */
 export const EXPENSE_LIMITS: Record<string, number> = {
@@ -80,8 +78,7 @@ export async function seedW3Expenses(ctx: SeedContext): Promise<void> {
     rulesJson: JSON.stringify(exp.EXPENSE_POLICY_V1.rules), sourcesJson: JSON.stringify(exp.EXPENSE_POLICY_V1.sources),
   });
   for (const [key, cents] of Object.entries(EXPENSE_LIMITS)) await db.insert(limits).values({ companyId, key, cents }).onConflictDoNothing();
-  const dir = join(ctx.dataDir, "uploads");
-  mkdirSync(dir, { recursive: true });
+  const mode = seedBlobMode(ctx.executor);
   const ids: string[] = [];
   for (const [n, s] of SEED_EXPENSES.entries()) {
     const id = await newId(db, "exp_");
@@ -90,13 +87,10 @@ export async function seedW3Expenses(ctx: SeedContext): Promise<void> {
     let extract: string | null = null;
     if (s.receipt) {
       const png = receiptPng(n + 1);
-      const sha = createHash("sha256").update(png).digest("hex");
-      const rel = `uploads/${sha}.bin`;
-      writeFileSync(join(ctx.dataDir, rel), png);
       extract = JSON.stringify({ merchant: s.merchant, date: s.receipt.date, total_cents: s.receipt.totalCents, source: "simulated extractor (sidecar)" });
-      writeFileSync(join(dir, `${sha}.extract.json`), extract);
+      const up = await seedUpload({ tx: db, dataDir: ctx.dataDir, mode }, png, extract);
       receiptUploadId = await newId(db, "upl_");
-      await db.insert(uploads).values({ id: receiptUploadId, workerId: s.workerId, purpose: "receipt", fileName: `receipt-${id}.png`, storagePath: rel, bytes: png.length, sha256: sha, createdAt: s.submittedAt });
+      await db.insert(uploads).values({ id: receiptUploadId, workerId: s.workerId, purpose: "receipt", fileName: `receipt-${id}.png`, storagePath: up.storagePath, bytes: png.length, sha256: up.sha256, createdAt: s.submittedAt });
     }
     await db.insert(expenses).values({
       id, companyId, workerId: s.workerId, category: s.category, merchant: s.merchant, amountCents: s.amountCents, currency: "USD", transactionDate: s.transactionDate,
