@@ -51,7 +51,8 @@ export default {
       if (req.method === "OPTIONS") return new Response(null, { status: 204 });
       const visit = await resolveVisit(req, env);
       if (visit.tampered) return withCookies(hostedError("SESSION_INVALID", "The session cookie is not valid"), clearSessionCookies());
-      if (await rateLimited(env.RL_API, `api:${visit.ipHash}`)) return hostedError("RATE_LIMITED", "Too many requests; slow down a little", { retryAfterS: 60 });
+      // A valid smoke visit (x-weft-smoke HMAC) is the deploy's own check and skips RL_API; an unsigned burst does not.
+      if (!visit.smoke && await rateLimited(env.RL_API, `api:${visit.ipHash}`)) return hostedError("RATE_LIMITED", "Too many requests; slow down a little", { retryAfterS: 60 });
 
       if (path === HOSTED_PATHS.session && req.method === "GET") return await sessionStatus(env, visit);
       if (path === HOSTED_PATHS.lease || path === HOSTED_PATHS.verify) {

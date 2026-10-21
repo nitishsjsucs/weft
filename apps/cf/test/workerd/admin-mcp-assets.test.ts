@@ -1,9 +1,9 @@
 // Design 9.2, 6.3, 6.4, 3.5 and 4.6: the admin routes need the HMAC signature; provisioning is idempotent and the
 // conformance route runs on its scratch object and wipes it; /mcp routes by the key prefix and dies with the lease
 // generation and stops the moment its lease ends, agent_ask at most 5 per key per day; the [id] shell fallback;
-// ReseedWorkflow's restore steps are idempotent; and the Rate Limiting bindings answer 429.
+// ReseedWorkflow's restore steps are idempotent; and the Rate Limiting bindings answer 429, except to a valid smoke.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DO_NAMES, MCP_AGENT_ASK_PER_KEY_DAY } from "../../src/shared/contracts";
+import { DO_NAMES, HOSTED_RATE_LIMITS, MCP_AGENT_ASK_PER_KEY_DAY } from "../../src/shared/contracts";
 import { signAdmin } from "../../src/shared/tokens";
 import { FAKE_SNAPSHOT_VERSION } from "../support/fake-engine";
 import { Harness } from "../support/harness";
@@ -153,10 +153,25 @@ describe("restore steps", () => {
 });
 
 describe("rate limits", () => {
-  it("answers 429 past RL_API (120 per 60 s per IP hash)", async () => {
-    const statuses = await Promise.all(Array.from({ length: 140 }, () => h.fetch("/api/_session", {}, { ip: "203.0.113.200" }).then((r) => r.status)));
+  const limit = HOSTED_RATE_LIMITS.RL_API.limit;
+  const burst = async (n: number, ip: string, headers: Record<string, string> = {}) =>
+    Promise.all(Array.from({ length: n }, () => h.fetch("/api/_no_such_route", { headers }, { ip }).then((r) => r.status)));
+
+  it(`answers 429 past RL_API (${limit} per 60 s per IP hash)`, async () => {
+    const statuses = await burst(limit + 100, "203.0.113.200");
     expect(statuses.filter((s) => s === 429).length).toBeGreaterThan(0);
-    expect(statuses.filter((s) => s === 200).length).toBeLessThanOrEqual(120);
+    expect(statuses.filter((s) => s !== 429).length).toBeLessThanOrEqual(limit);
+  });
+
+  it("lets a valid smoke visit past RL_API, and an unsigned one from the same address still counts", async () => {
+    const smoke = await h.smokeHeaders();
+    const statuses = await burst(limit + 100, "203.0.113.201", smoke);
+    expect(statuses.filter((s) => s === 429)).toEqual([]);
+    expect(new Set(statuses)).toEqual(new Set([404]));
+    // The smoke burst used none of the address's allowance; a forged smoke header is an ordinary visit.
+    expect((await burst(1, "203.0.113.201"))[0]).toBe(404);
+    const forged = await burst(limit + 100, "203.0.113.202", { "x-weft-smoke": `${Math.floor(Date.now() / 1000)}.${"0".repeat(64)}` });
+    expect(forged.filter((s) => s === 429).length).toBeGreaterThan(0);
   });
 });
 

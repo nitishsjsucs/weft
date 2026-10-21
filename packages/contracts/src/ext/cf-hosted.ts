@@ -50,9 +50,11 @@ export const HOSTED_SETTINGS = {
   configMemoMs: 60_000,
 } as const;
 
-/** Rate Limiting binding settings (coarse and per location, never the cap; design 6.3). */
+/** Rate Limiting binding settings (coarse and per location, never the cap; design 6.3). RL_API fits the guided tour
+ * (a peak of 158 /api requests in 60 s, measured on cf:dev) about four times over: two tabs, or two visitors behind
+ * one address, never see a rate-limited banner. */
 export const HOSTED_RATE_LIMITS = {
-  RL_API: { limit: 120, period: 60 },
+  RL_API: { limit: 600, period: 60 },
   RL_MUTATE: { limit: 30, period: 60 },
   RL_MCP: { limit: 60, period: 60 },
   RL_RUN: { limit: 6, period: 60 },
