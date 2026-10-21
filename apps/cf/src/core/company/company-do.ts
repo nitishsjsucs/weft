@@ -29,6 +29,8 @@ import { addLeaseKey, hasKvState, leaseKeys, modeOf, readStamp, writeStamp } fro
 
 /** Usage is pushed to the Lobby once any of these is reached (and the rest at each heartbeat). */
 const PUSH_AT = { rowsWritten: 1_000, rowsRead: 100_000, requests: 500 } as const;
+/** How long a clean check, a reset or a restore waits for mutations already in flight (an MCP agent_ask long-polls). */
+export const QUIESCE_MS = 10_000;
 const RESTORE_KEY = "weft.restore";
 const SNAPSHOT_KEY = "weft.snapshot";
 
@@ -50,6 +52,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private readonly counter = fetchCounter(MAX_FETCHES_PER_ALARM);
   private runHost: DurableRunHost;
   private scheduler: DurableSchedulerHost;
+  /** Mutations past the gate and not yet answered, and the resets waiting for them (see quiesce). */
+  private inflight = 0;
+  private quiescing = 0;
+  private idleWaiters: (() => void)[] = [];
 
   constructor(ctx: DurableObjectState, env: CoreEnv) {
     super(ctx, env);
@@ -163,10 +169,15 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     }
     const refused = this.gate(c, stamp, request.method, url.pathname);
     if (refused) return refused;
+    // A mutation is counted from here (no await since the gate) until it is answered, so a clean check or a reset
+    // sees every row it writes; while one of those runs, new mutations wait outside.
+    const counted = isMutation(request.method);
+    if (counted && this.quiescing) return plainError(503, "NotImplemented", "WORLD_REBUILDING", "This demo company is being reset; try again in a moment");
+    if (counted) this.inflight += 1;
     if (c.visitor && c.visitor === stamp.visitor) this.lastActivity = Date.now();
-    this.config = await envConfig(this.env);
 
     try {
+      this.config = await envConfig(this.env);
       if (url.pathname === DO_PATHS.live) return this.acceptLive(request, stamp);
       if (url.pathname === DO_PATHS.mcp) return await this.serveMcp(request);
       if (url.pathname === DO_PATHS.model) return await this.switchModel(request, stamp);
@@ -178,8 +189,37 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       }
       return await this.serveApp(request, url, stamp);
     } finally {
+      if (counted) this.leave();
       this.scheduler.poke();
       this.maybePushUsage();
+    }
+  }
+
+  private leave(): void {
+    this.inflight -= 1;
+    if (this.inflight <= 0) {
+      this.inflight = 0;
+      for (const w of this.idleWaiters.splice(0)) w();
+    }
+  }
+
+  /**
+   * Runs a clean check, a reset or a restore once the mutations already past the gate are answered (at most
+   * QUIESCE_MS), refusing new ones meanwhile (503 WORLD_REBUILDING), so a write that was in flight when a lease
+   * ended is either seen by the clean check and reset, or refused; it never lands in the next generation.
+   */
+  private async quiesce<T>(fn: () => Promise<T>): Promise<T> {
+    this.quiescing += 1;
+    try {
+      if (this.inflight > 0) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, QUIESCE_MS);
+          this.idleWaiters.push(() => { clearTimeout(timer); resolve(); });
+        });
+      }
+      return await fn();
+    } finally {
+      this.quiescing -= 1;
     }
   }
 
@@ -403,11 +443,25 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   // Lobby RPC --------------------------------------------------------------------------------------------------
 
-  /** The Lobby stamps a generation and the lease's visitor (lease start, or a clean slot's next generation). */
-  async applyStamp(s: WorldStamp): Promise<{ ok: true; gen: number }> {
+  /**
+   * The Lobby stamps a generation and the lease's visitor (lease start, or a clean slot's next generation). With
+   * `ifClean` the stamp is the clean slot's reset: once in-flight mutations are answered, it stamps only if no domain
+   * row was written since the last reset, with no await between that check and the stamp; otherwise it answers
+   * `ok: false` and stamps nothing (the Lobby then runs the delta reset).
+   */
+  async applyStamp(s: WorldStamp, opts: { ifClean?: boolean } = {}): Promise<{ ok: boolean; gen: number }> {
     this.assertName(s.slot);
     if (!hasKvState(this.ctx.storage.sql)) throw new Error(`${s.slot} is not provisioned`);
     if (modeOf(s.slot) !== s.mode) throw new Error(`stamp mode ${s.mode} does not match ${s.slot}`);
+    if (!opts.ifClean) return this.stampNow(s);
+    return this.quiesce(async () => {
+      const mod = this.module ?? (await loadEngine());
+      if (!mod.store.isClean(this.storage)) return { ok: false, gen: this.stamp?.gen ?? s.gen - 1 };
+      return this.stampNow(s);
+    });
+  }
+
+  private async stampNow(s: WorldStamp): Promise<{ ok: true; gen: number }> {
     const prev = this.stamp;
     this.ctx.storage.transactionSync(() => writeStamp(this.ctx.storage.sql, s));
     this.stamp = s;
@@ -446,6 +500,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   /** The default reset after a lease (design 4.6): delete dirty rows, reinsert their seed rows, check the digests. */
   async deltaReset(s: WorldStamp): Promise<ResetOutcome> {
+    return this.quiesce(() => this.deltaResetNow(s));
+  }
+
+  private async deltaResetNow(s: WorldStamp): Promise<ResetOutcome> {
     const t0 = Date.now();
     await this.stopEngine();
     const mod = this.module ?? (await loadEngine());
@@ -474,10 +532,12 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   async resetToBookmark(input: { bookmark: string; stamp: WorldStamp }): Promise<ResetOutcome> {
     const t0 = Date.now();
     if (!this.storage.onNextSessionRestoreBookmark) return { ok: false, method: "pitr", gen: this.stamp?.gen ?? 0, rowsWritten: 0, mismatches: ["pitr unavailable"], ms: 0 };
-    await this.stopEngine();
-    await this.storage.onNextSessionRestoreBookmark(input.bookmark);
-    setTimeout(() => this.ctx.abort("reset to bookmark"), 0);
-    return { ok: true, method: "pitr", gen: input.stamp.gen, rowsWritten: 0, mismatches: [], ms: Date.now() - t0 };
+    return this.quiesce(async () => {
+      await this.stopEngine();
+      await this.storage.onNextSessionRestoreBookmark!(input.bookmark);
+      setTimeout(() => this.ctx.abort("reset to bookmark"), 0);
+      return { ok: true, method: "pitr", gen: input.stamp.gen, rowsWritten: 0, mismatches: [], ms: Date.now() - t0 };
+    });
   }
 
   // ReseedWorkflow RPC: a full restore in short steps (design 4.6 and 9.2) ----------------------------------------
@@ -485,13 +545,15 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   async restoreBegin(input: RestoreBeginInput): Promise<{ ok: true }> {
     this.assertName(input.slot);
     if (modeOf(input.slot) !== input.mode) throw new Error(`restore mode ${input.mode} does not match ${input.slot}`);
-    await this.stopEngine();
-    this.closeSockets({ type: "lease", state: "ended", gen: input.gen }, null);
-    this.alarms.clear();
-    this.stamp = null;
-    await this.ctx.storage.deleteAll();
-    this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { slot: input.slot, gen: input.gen, mode: input.mode, next: 0, rowsWritten: 0, triggers: [] });
-    return { ok: true };
+    return this.quiesce(async () => {
+      await this.stopEngine();
+      this.closeSockets({ type: "lease", state: "ended", gen: input.gen }, null);
+      this.alarms.clear();
+      this.stamp = null;
+      await this.ctx.storage.deleteAll();
+      this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { slot: input.slot, gen: input.gen, mode: input.mode, next: 0, rowsWritten: 0, triggers: [] });
+      return { ok: true as const };
+    });
   }
 
   private progress(): RestoreProgress {

@@ -70,6 +70,9 @@ const COUNTER = {
 export class LobbyDO extends DurableObject<CoreEnv> {
   private readonly sql: SqlStorage;
   private levelMemo: { at: number; result: LevelResult } | null = null;
+  /** Slots this instance has claimed and is resetting now. A slot left `resetting` by an earlier instance (the object
+   * restarted mid-reset) is not here, and the sweep sends it to a full restore. */
+  private readonly resetsRunning = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: CoreEnv) {
     super(ctx, env);
@@ -301,19 +304,38 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     return { level, pool: { size: pool.length, free, waitlist: waitlistN }, lease, waitlistPosition: input.visitor ? this.waitlistPosition(input.visitor, now) : null };
   }
 
+  /**
+   * Takes a ready slot out of the pool for a reset: state `resetting`, which assign never hands out. Synchronous, so
+   * nothing can lease the slot between the check and the update; the caller ends the lease in the same step. Null
+   * when the slot is not ready (a reset or restore already owns it).
+   */
+  private claim(name: string, now: number): SlotRow | null {
+    const s = this.slot(name);
+    if (!s || s.state !== "ready") return null;
+    this.sql.exec(`UPDATE slots SET state = 'resetting', updated_at = ? WHERE name = ?`, now, name);
+    this.resetsRunning.add(name);
+    return { ...s, state: "resetting" };
+  }
+
   /** Ends a lease and resets its slot right away, so the next visitor gets a clean world (design 6.2 step 4). */
   async release(input: { slot: string; reason: string; now?: number }): Promise<void> {
     const now = input.now ?? Date.now();
     const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE slot = ?`, input.slot);
     if (!l) return;
-    this.sql.exec(`DELETE FROM leases WHERE slot = ?`, input.slot);
+    // One step, before any await: the lease ends and the slot leaves the pool, so assign never hands the ended
+    // visitor's world to the next one before it is reset. A slot that is not ready is owned by a running reset or
+    // restore, which leaves it ready only once it is back at the seed.
+    const claimed = this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`DELETE FROM leases WHERE slot = ?`, input.slot);
+      return this.claim(input.slot, now);
+    });
     logEvent("lease.ended", { slot: l.slot, gen: l.gen, outcome: input.reason, ms: now - l.started_at });
     try {
       await this.company(l.slot).endLease({ gen: l.gen, reason: input.reason });
     } catch (e) {
       logError("lobby.release.end", e, { slot: l.slot });
     }
-    await this.resetSlot(l.slot, null, now);
+    if (claimed) await this.resetClaimed(claimed, null, now);
   }
 
   /** "Reset demo data..." for the leased visitor: at most HOSTED_SETTINGS.resetsPerLease per lease. */
@@ -322,13 +344,21 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE slot = ? AND visitor = ?`, input.slot, input.visitor);
     if (!l || l.gen !== input.gen || leaseEnded({ startedAt: l.started_at, lastSeen: l.last_seen }, now)) return { error: "LEASE_ENDED", message: "This demo company's lease has ended; start a new one" };
     if (l.resets >= HOSTED_SETTINGS.resetsPerLease) return { error: "RESET_LIMIT", message: `A lease allows ${HOSTED_SETTINGS.resetsPerLease} resets` };
-    this.sql.exec(`UPDATE leases SET resets = resets + 1, last_seen = ? WHERE slot = ?`, now, l.slot);
-    const out = await this.resetSlot(l.slot, { visitor: l.visitor, ipHash: l.ip_hash }, now);
-    if (!out || !out.ok) {
-      this.sql.exec(`DELETE FROM leases WHERE slot = ?`, l.slot);
+    const claimed = this.ctx.storage.transactionSync(() => {
+      const s = this.claim(l.slot, now);
+      if (s) this.sql.exec(`UPDATE leases SET resets = resets + 1, last_seen = ? WHERE slot = ?`, now, l.slot);
+      return s;
+    });
+    if (!claimed) {
+      if (this.slot(l.slot)?.state === "resetting") return { error: "RATE_LIMITED", message: "This demo company is already being reset; try again in a moment" };
+      // The world failed or is being restored: the lease cannot go on (the slot is not ready, so nobody else gets it).
+      this.sql.exec(`DELETE FROM leases WHERE slot = ? AND visitor = ?`, l.slot, l.visitor);
       return { error: "LEASE_ENDED", message: "This demo company is being rebuilt; start a new one in a few minutes" };
     }
-    this.sql.exec(`UPDATE leases SET gen = ? WHERE slot = ?`, out.gen, l.slot);
+    const out = await this.resetClaimed(claimed, { visitor: l.visitor, ipHash: l.ip_hash }, now);
+    // A reset that could not finish in place ended the lease and started a full restore; so did a lease that ended
+    // while the reset ran. Either way the visitor never learns the new generation.
+    if (!out.ok || !out.leaseKept) return { error: "LEASE_ENDED", message: "This demo company is being rebuilt; start a new one in a few minutes" };
     logEvent("lease.reset", { slot: l.slot, gen: out.gen, outcome: out.method, rowsWritten: out.rowsWritten, ms: out.ms });
     return { ok: true, gen: out.gen, resetsLeft: Math.max(0, HOSTED_SETTINGS.resetsPerLease - l.resets - 1) };
   }
@@ -339,34 +369,45 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const s = this.slot(input.slot);
     if (!s) return { error: "LEASE_REQUIRED", message: `No world named ${input.slot}` };
     if (this.one(`SELECT 1 FROM leases WHERE slot = ?`, input.slot)) return { error: "LEASE_REQUIRED", message: `${input.slot} is leased; it resets when its lease ends` };
-    const out = await this.resetSlot(input.slot, null, now);
-    if (!out || !out.ok) return { error: "LEASE_ENDED", message: `${input.slot} is being rebuilt` };
+    const claimed = this.claim(input.slot, now);
+    if (!claimed) return { error: "LEASE_ENDED", message: `${input.slot} is being rebuilt` };
+    const out = await this.resetClaimed(claimed, null, now);
+    if (!out.ok) return { error: "LEASE_ENDED", message: `${input.slot} is being rebuilt` };
     return { ok: true, gen: out.gen, resetsLeft: HOSTED_SETTINGS.resetsPerLease, method: out.method, rowsWritten: out.rowsWritten };
   }
 
   /**
-   * Resets a slot to the seed and stamps the next generation (design 4.6). A clean slot (no domain writes since its
-   * last reset) only gets the new generation; a stale slot (another snapshot) gets a full restore; otherwise
-   * point-in-time recovery when KV reset.pitr=on and a bookmark exists, else the delta reset. A failed delta reset
-   * (digest mismatch) falls back to a full restore.
+   * Resets a claimed slot (state `resetting`, see claim) to the seed and stamps the next generation (design 4.6). A
+   * clean slot (no domain writes since its last reset) only gets the new generation; a stale slot (another snapshot)
+   * gets a full restore; otherwise point-in-time recovery when KV reset.pitr=on and a bookmark exists, else the delta
+   * reset. A reset that fails (a digest mismatch, a failed stamp, an error) falls back to a full restore. The slot is
+   * ready again only after a reset that succeeded; it never goes back to the pool as it was.
    */
-  private async resetSlot(name: string, keep: { visitor: string; ipHash: string } | null, now: number): Promise<ResetOutcome | null> {
-    const s = this.slot(name);
-    if (!s || s.state !== "ready") return null;
+  private async resetClaimed(s: SlotRow, keep: { visitor: string; ipHash: string } | null, now: number): Promise<ResetOutcome & { leaseKept: boolean }> {
+    try {
+      return await this.resetInPlace(s, keep, now);
+    } finally {
+      this.resetsRunning.delete(s.name);
+    }
+  }
+
+  private async resetInPlace(s: SlotRow, keep: { visitor: string; ipHash: string } | null, now: number): Promise<ResetOutcome & { leaseKept: boolean }> {
+    const name = s.name;
     const cfg = await this.config();
     const snapshot = cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? null;
     if (snapshot && s.snapshot && s.snapshot !== snapshot) {
-      await this.startRestore(name, now, "stale");
-      return null;
+      return this.rebuild(s, keep, now, "stale", { ok: false, method: "delta", gen: s.gen, rowsWritten: 0, mismatches: ["stale snapshot"], ms: 0 });
     }
-    this.sql.exec(`UPDATE slots SET state = 'resetting', updated_at = ? WHERE name = ?`, now, name);
     const stamp: WorldStamp = { slot: name, gen: s.gen + 1, mode: s.mode, visitor: keep?.visitor ?? null, ipHash: keep?.ipHash ?? null };
     let out: ResetOutcome;
     try {
       const co = this.company(name);
       const hb = await co.heartbeat();
       this.absorbUsage(hb.usage);
-      if (hb.clean) out = await co.applyStamp(stamp).then((r: { ok: boolean }) => ({ ok: r.ok, method: "stamp" as const, gen: stamp.gen, rowsWritten: 0, mismatches: [], ms: 0 }));
+      // The clean check and the stamp are one step in the slot (ifClean), so a write that lands after the heartbeat
+      // sends the slot to the delta reset instead of into the next generation.
+      const stamped = hb.clean ? await co.applyStamp(stamp, { ifClean: true }) : null;
+      if (stamped?.ok) out = { ok: true, method: "stamp", gen: stamp.gen, rowsWritten: 0, mismatches: [], ms: 0 };
       else if ((cfg.get(CF4_CONFIG_KEYS.resetPitr) ?? "off") === "on" && s.bookmark) {
         out = await co.resetToBookmark({ bookmark: s.bookmark, stamp });
         // The object restarts on the bookmark (its stamp is the restore's); stamp the new generation once it is back.
@@ -379,13 +420,35 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     this.bump(COUNTER.visitorRows, out.rowsWritten);
     if (!out.ok) {
       logEvent("reset.mismatch", { slot: name, gen: s.gen, outcome: out.mismatches.slice(0, 5).join(",") });
-      this.sql.exec(`UPDATE slots SET state = 'ready', updated_at = ? WHERE name = ?`, now, name);
-      await this.startRestore(name, now, "mismatch");
-      return out;
+      return this.rebuild(s, keep, now, "mismatch", out);
     }
-    this.sql.exec(`UPDATE slots SET state = 'ready', gen = ?, updated_at = ? WHERE name = ?`, out.gen, now, name);
+    const done = out;
+    const leaseKept = this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`UPDATE slots SET state = 'ready', gen = ?, updated_at = ? WHERE name = ?`, done.gen, now, name);
+      return keep !== null && this.all(`UPDATE leases SET gen = ? WHERE slot = ? AND visitor = ? RETURNING slot`, done.gen, name, keep.visitor).length > 0;
+    });
     await this.dropVectors(name, s.gen);
-    return out;
+    return { ...out, leaseKept };
+  }
+
+  /**
+   * A claimed slot the reset could not return to the seed in place: its lease (if any) ends, and it gets a full
+   * restore (state `restoring`), or waits as `failed` for the sweep when today's restore budget defers it. Either way
+   * assign cannot hand it out until the restore has finished.
+   */
+  private async rebuild(s: SlotRow, keep: { visitor: string } | null, now: number, why: string, out: ResetOutcome): Promise<ResetOutcome & { leaseKept: boolean }> {
+    if (keep) {
+      this.sql.exec(`DELETE FROM leases WHERE slot = ? AND visitor = ?`, s.name, keep.visitor);
+      try {
+        await this.company(s.name).endLease({ gen: s.gen, reason: `rebuild (${why})` });
+      } catch (e) {
+        logError("lobby.rebuild.end", e, { slot: s.name });
+      }
+    }
+    const step = await this.startRestore(s.name, now, why, { claimed: true });
+    // startRestore leaves the slot restoring or failed; anything else (it found a lease) must not stay resetting.
+    this.sql.exec(`UPDATE slots SET state = 'failed', error = ?, updated_at = ? WHERE name = ? AND state = 'resetting'`, `reset failed (${why}): ${step.action}`, now, s.name);
+    return { ...out, ok: false, leaseKept: false };
   }
 
   private async stampWithRetry(name: string, stamp: WorldStamp): Promise<boolean> {
@@ -403,16 +466,21 @@ export class LobbyDO extends DurableObject<CoreEnv> {
 
   // Full restores and provisioning -----------------------------------------------------------------------------
 
-  /** Starts ReseedWorkflow for a slot if today's restore budget allows (design 9.2); otherwise leaves it for a later sweep. */
-  private async startRestore(name: string, now: number, why: string): Promise<ProvisionStep> {
+  /**
+   * Starts ReseedWorkflow for a slot if today's restore budget allows (design 9.2); otherwise leaves it for a later
+   * sweep. The config is read first, so the checks and the state change below run without an await between them (no
+   * lease can start in between). A slot in `resetting` belongs to its reset: only that reset (`claimed`) restores it.
+   */
+  private async startRestore(name: string, now: number, why: string, opts: { claimed?: boolean } = {}): Promise<ProvisionStep> {
+    const cfg = await this.config();
+    const b = this.budget(cfg);
     const s = this.slot(name);
     if (!s) return { slot: name, action: "error", detail: "unknown slot" };
     if (s.state === "restoring") return { slot: name, action: "restoring" };
+    if (s.state === "resetting" && !opts.claimed) return { slot: name, action: "restoring", detail: "a reset is running" };
     if (this.one(`SELECT 1 FROM leases WHERE slot = ?`, name)) return { slot: name, action: "leased" };
-    const cfg = await this.config();
-    const b = this.budget(cfg);
     if (!restoreFits(this.usage(), b)) {
-      this.sql.exec(`UPDATE slots SET state = CASE WHEN state = 'ready' THEN 'failed' ELSE state END, error = ?, updated_at = ? WHERE name = ?`, `restore deferred (${why})`, now, name);
+      this.sql.exec(`UPDATE slots SET state = CASE WHEN state IN ('ready', 'resetting') THEN 'failed' ELSE state END, error = ?, updated_at = ? WHERE name = ?`, `restore deferred (${why})`, now, name);
       this.setMeta("provision.pending", "1");
       return { slot: name, action: "deferred", detail: "restore budget used for today" };
     }
@@ -539,6 +607,13 @@ export class LobbyDO extends DurableObject<CoreEnv> {
       orphans = await this.env.SPEND.get(this.env.SPEND.idFromName(DO_NAMES.spend)).settleOrphans(new Date(now).toISOString());
     } catch (e) {
       logError("lobby.sweep.orphans", e);
+    }
+    // A reset this instance is not running left its slot `resetting` (the Lobby restarted mid-reset): the slot is
+    // failed, so the loop below gives it a full restore once it has no lease. It was never back in the pool.
+    for (const r of this.all<{ name: string }>(`SELECT name FROM slots WHERE state = 'resetting'`)) {
+      if (this.resetsRunning.has(r.name)) continue;
+      this.sql.exec(`UPDATE slots SET state = 'failed', error = 'reset interrupted', updated_at = ? WHERE name = ? AND state = 'resetting'`, now, r.name);
+      logEvent("reset.interrupted", { slot: r.name });
     }
     const restores: ProvisionStep[] = [];
     if (this.meta("provision.requested") === "1") {

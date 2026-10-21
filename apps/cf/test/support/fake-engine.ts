@@ -8,6 +8,9 @@ import type { EngineModule, SnapshotArtifacts, WorldBootInput, WorldEngine, Worl
 const SEED = ["Larkspur Robotics (demo) handbook", "Payroll runs on Fridays", "Benefits renew in January"];
 
 export const FAKE_SNAPSHOT_VERSION = "fake-snapshot-1";
+/** A note with this text makes the fake delta reset report a digest mismatch and change nothing (cf1's deltaReset
+ * throws inside its transaction on a mismatch, so the world is left as it was). */
+export const FAKE_FORCE_MISMATCH = "fake: force a delta reset mismatch";
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -84,8 +87,10 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     }
     if (p === "/v1/notes" && req.method === "GET") return json(exec(`SELECT id, text FROM notes ORDER BY id`));
     if (p === "/v1/notes" && req.method === "POST") {
-      const body = (await req.json()) as { text?: string; job?: string };
+      const body = (await req.json()) as { text?: string; job?: string; delayMs?: number };
       const text = String(body.text ?? "");
+      // A slow mutation (awaiting I/O before it writes), to hold a request in flight across a lease's end.
+      if (body.delayMs) await new Promise((r) => setTimeout(r, Math.min(5_000, body.delayMs!)));
       inTx = true;
       try {
         input.storage.transactionSync(() => {
@@ -203,6 +208,7 @@ const store: WorldStore = {
     return { ok: n === SEED.length, mismatches: n === SEED.length ? [] : [`notes ${n} != ${SEED.length}`], rows: n, chainValid: true };
   },
   deltaReset(storage) {
+    if (storage.sql.exec(`SELECT 1 AS x FROM notes WHERE text = ?`, FAKE_FORCE_MISMATCH).toArray().length) return { ok: false, rowsWritten: 0, mismatches: ["notes"] };
     let rowsWritten = 0;
     storage.transactionSync(() => {
       const dirty = storage.sql.exec(`SELECT COUNT(*) AS n FROM _weft_dirty`).one().n as number;
