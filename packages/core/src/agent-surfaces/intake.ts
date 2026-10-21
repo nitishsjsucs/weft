@@ -16,7 +16,7 @@ const EXAMPLE_ADDR = /^[^@\s]+@([a-z0-9-]+\.)*example$/i;
 
 const Receipt = z.object({
   file_name: z.string().min(1).max(120), fixture: z.string().min(1).max(60), bytes: z.number().int().min(1), sha256: z.string().length(64),
-  storage_path: z.string().startsWith("uploads/"), merchant: z.string().min(1).max(120), category: ExpenseCategory,
+  storage_path: z.string().regex(/^(uploads\/|blob:)/), merchant: z.string().min(1).max(120), category: ExpenseCategory,
   amount_cents: z.number().int().min(1), transaction_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 }).strict();
 const IntakeInput = z.object({

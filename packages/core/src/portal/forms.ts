@@ -270,7 +270,7 @@ export const submitDirectDeposit = writeCommand({
 
 // documents.submit_i9 ---------------------------------------------------------------------------------------
 // The executor maps null to undefined before parsing, so the contract's nullable fields are also optional here.
-const I9Input = I9Submission.extend({ expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), file_name: z.string().min(1).max(120), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/), storage_path: z.string().regex(/^uploads\/[0-9a-f]{64}\.bin$/) }).strict();
+const I9Input = I9Submission.extend({ expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), file_name: z.string().min(1).max(120), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/), storage_path: z.string().regex(/^(uploads\/[0-9a-f]{64}\.bin|blob:[0-9a-f]{64})$/) }).strict();
 export function maskedUpload(u: { id: string; fileName: string; bytes: number; sha256: string }) {
   const kb = Math.max(1, Math.round(u.bytes / 1024));
   const ext = /\.[A-Za-z0-9]{1,5}$/.exec(u.fileName)?.[0] ?? "";

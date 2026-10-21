@@ -276,11 +276,12 @@ const reopenCmd = writeCommand({
 // ---------------------------------------------------------------- human-only: submit and resubmit (the employee's own claim)
 
 const GRANT_RANK = { none: 0, view: 1, edit: 2, approve: 3 } as const;
-/** A receipt the route stored on the I-9 upload path (uploads/<sha256>.bin); the command writes the uploads row. */
+/** A receipt the route stored on the I-9 upload path (uploads/<sha256>.bin, or blob:<sha256> where uploads live in SQL:
+ * WEFT_BLOBS=sqlite and the hosted durable platform, docs/cloudflare/design.md 4.1); the command writes the uploads row. */
 const ReceiptFile = z.object({
   file_name: z.string().min(1).max(120), bytes: z.number().int().min(1).max(5 * 1024 * 1024), sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  storage_path: z.string().regex(/^uploads\/[0-9a-f]{64}\.bin$/),
-}).refine((f) => f.storage_path === `uploads/${f.sha256}.bin`, { message: "storage_path must be uploads/<sha256>.bin" });
+  storage_path: z.string().regex(/^(uploads\/[0-9a-f]{64}\.bin|blob:[0-9a-f]{64})$/),
+}).refine((f) => f.storage_path === `uploads/${f.sha256}.bin` || f.storage_path === `blob:${f.sha256}`, { message: "storage_path must be uploads/<sha256>.bin or blob:<sha256>" });
 const ClaimFields = {
   category: ExpenseCategory, merchant: z.string().min(1).max(120), amount_cents: z.number().int().min(1).max(10_000_000),
   transaction_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), business_purpose: z.string().min(1).max(400), attendees: z.string().max(400).optional(),

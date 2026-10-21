@@ -3,7 +3,7 @@
 // valid number is verified by the bank simulator, only last 4 digits are stored), the I-9 with an ID image under the
 // data dir (masked in every response) and a benefits election. 7 of 7 turns the worker active, and the next payroll
 // draft pays them with the W-4 extra withholding, the elected pre-tax deductions and no MISSING_BANK_ACCOUNT flag.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
@@ -90,12 +90,13 @@ describe("GP7 new-hire checklist unblocks payroll", () => {
     expect(acts).toHaveLength(1);
     expect(acts[0]!.args_json).not.toContain("rowan-passport");
     const [row] = await weft.db.all<{ storage_path: string; sha256: string }>(sql`SELECT storage_path, sha256 FROM uploads WHERE worker_id = ${workerId}`);
-    expect(row!.storage_path).toMatch(/^uploads\/[0-9a-f]{64}\.bin$/);
-    expect(readFileSync(join(weft.dataDir, row!.storage_path)).equals(PNG)).toBe(true);
+    // The world's upload store: a file under the data dir, or blob rows under WEFT_BLOBS=sqlite.
+    expect(row!.storage_path).toMatch(/^(uploads\/[0-9a-f]{64}\.bin|blob:[0-9a-f]{64})$/);
+    expect(Buffer.from((await weft.blobs.get(row!.storage_path))!).equals(PNG)).toBe(true);
     const view = await me();
     expect(view.upload).toMatchObject({ masked: true, fileName: "ro***.png" });
     expect(JSON.stringify(view)).not.toContain(row!.sha256);
-    expect(existsSync(join(weft.dataDir, "uploads"))).toBe(true);
+    if (weft.blobs.kind === "file") expect(existsSync(join(weft.dataDir, "uploads"))).toBe(true);
   });
 
   it("the benefits election writes enrollments; 7 of 7 turns the worker active", async () => {
