@@ -9,6 +9,8 @@ import { useCan } from "@/lib/api/access";
 import { fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { OfferScreening } from "../screening/offer-screening";
+import { HOSTED } from "@/lib/hosted/flags";
+import { PdfButton } from "../../hosted/pdf-button";
 
 const DEPTS = [["dpt_engineering", "Engineering"], ["dpt_hardware", "Hardware"], ["dpt_operations", "Operations"], ["dpt_people", "People"], ["dpt_finance", "Finance"], ["dpt_gtm", "Go-to-market"]] as const;
 const STATES = ["CO", "CA", "NY", "TX"] as const;
@@ -77,6 +79,8 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
         </span>
       ) : null}
       {o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted") ? <a data-testid={T.offerPortalLink} className="text-1 text-blue-11 hover:underline" href={`/portal?as=${o.personaPrincipalId}`}>Open portal as new hire</a> : null}
+      {HOSTED && o.status !== "draft" && o.status !== "voided" ? <PdfButton kind="offer_letter" subjectId={o.id} size="xs" /> : null}
+      {HOSTED && o.status === "accepted" ? <PdfButton kind="signed_agreement" subjectId={o.id} size="xs" /> : null}
       {err ? <span role="alert" className="w-full text-1 text-red-11">{errorText(err)}</span> : null}
       <OfferScreening offerId={o.id} accepted={o.status === "accepted"} />
     </li>

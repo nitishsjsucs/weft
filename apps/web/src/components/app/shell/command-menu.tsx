@@ -10,8 +10,11 @@ import { useCan } from "@/lib/api/access";
 import { useGet } from "@/lib/api/hooks";
 import { period } from "../format";
 import { useTour } from "../../tour/tour-provider";
+import { HOSTED } from "@/lib/hosted/flags";
+import { HELP_MIN_CHARS, helpSummary, searchHelp } from "../../hosted/help-search";
+import type { HelpSearchResult } from "../../../../../../packages/contracts/src/ext/cf-extras";
 
-interface Entry { id: string; label: string; hint: string; href: string; run?: () => void }
+interface Entry { id: string; label: string; hint: string; href: string; run?: () => void; keepOpen?: boolean }
 
 /** Cmd+K: navigation plus record search over people and payroll runs (P0 scope, SPEC 11.3). */
 export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
@@ -19,6 +22,8 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
   const tour = useTour();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
+  // Hosted: Help results from AI Search, fetched only when the visitor picks the "Search Weft help" entry.
+  const [help, setHelp] = useState<{ q: string; busy: boolean; result: HelpSearchResult | null } | null>(null);
   const workers = useGet("/v1/workers", { query: { limit: 100 }, enabled: open });
   const runs = useGet("/v1/payrolls", { query: { limit: 25 }, enabled: open });
 
@@ -29,7 +34,7 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onOpenChange]);
-  useEffect(() => { if (!open) { setQ(""); setSel(0); } }, [open]);
+  useEffect(() => { if (!open) { setQ(""); setSel(0); setHelp(null); } }, [open]);
 
   const can = useCan();
   const entries = useMemo<Entry[]>(() => {
@@ -39,10 +44,17 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
     const demo: Entry[] = [{ id: "tour-start", label: "Take the tour", hint: "3 minute walkthrough", href: "/app", run: () => tour.start() }];
     const needle = q.trim().toLowerCase();
     const all = needle ? [...demo, ...nav, ...pay, ...ppl] : [...demo, ...nav];
-    return all.filter((e) => !needle || e.label.toLowerCase().includes(needle) || e.id.toLowerCase().includes(needle)).slice(0, 12);
+    const matched = all.filter((e) => !needle || e.label.toLowerCase().includes(needle) || e.id.toLowerCase().includes(needle)).slice(0, 12);
+    if (!HOSTED || needle.length < HELP_MIN_CHARS) return matched;
+    const term = q.trim();
+    const ask: Entry = {
+      id: "help-search", label: `Search Weft help for "${term}"`, hint: "Help", href: "", keepOpen: true,
+      run: () => { setHelp({ q: term, busy: true, result: null }); void searchHelp(term).then((result) => setHelp({ q: term, busy: false, result })); },
+    };
+    return [...matched.slice(0, 11), ask];
   }, [q, workers.data, runs.data, tour, can]);
 
-  const go = (e: Entry | undefined) => { if (!e) return; onOpenChange(false); if (e.run) e.run(); else router.push(e.href); };
+  const go = (e: Entry | undefined) => { if (!e) return; if (e.keepOpen) { e.run?.(); return; } onOpenChange(false); if (e.run) e.run(); else router.push(e.href); };
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -78,6 +90,22 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
               </li>
             ))}
           </ul>
+          {HOSTED && help ? (
+            <div data-testid="hosted-help" className="border-t border-[var(--app-border)] p-3 text-[13px]">
+              <div className="mb-2 text-1 text-gray-10" role="status">{help.busy ? `Searching Weft help for "${help.q}"...` : help.result ? helpSummary(help.result) : ""}</div>
+              {help.result?.ok ? (
+                <ul className="flex max-h-[30vh] flex-col gap-2 overflow-y-auto">
+                  {help.result.hits.map((h) => (
+                    <li key={h.path} data-help-path={h.path} className="rounded-lg bg-gray-2 px-2.5 py-2">
+                      <div className="font-medium text-gray-12">{h.title}</div>
+                      <div className="mt-0.5 text-1 text-gray-11">{h.snippet}</div>
+                      <div className="mt-0.5 font-mono text-0 text-gray-10">{h.path}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

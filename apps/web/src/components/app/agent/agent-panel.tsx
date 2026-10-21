@@ -1,5 +1,5 @@
 "use client";
-import { usePathname } from "next/navigation";
+import { useAppPathname } from "@/lib/pathname";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, FileSearch, Plus, X } from "lucide-react";
 import { Button } from "@weft/ui/components";
@@ -8,13 +8,16 @@ import { TID } from "@weft/contracts";
 import { client, errorText } from "@/lib/api/hooks";
 import { useAgent } from "../agent-context";
 import { PanelStart } from "./panel-start";
+import { HOSTED } from "@/lib/hosted/flags";
+import { HOSTED_COPY } from "../../hosted/copy";
+import { appendDictation, DictateButton } from "../../hosted/dictate-button";
 import { RunFeed } from "./run-feed";
 
 /** The agent panel (every app page): thread, live step chips, composer, and "Ask about this page". */
 /** `overlay` is true when the panel covers the page (below 1280 px); only then does its header carry a close X. */
 export function AgentPanel({ id, className, overlay = false }: { id?: string; className?: string; overlay?: boolean }) {
   const agent = useAgent();
-  const pathname = usePathname();
+  const pathname = useAppPathname();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [withPage, setWithPage] = useState(false);
@@ -48,6 +51,7 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
           <div className="flex flex-col gap-2 text-2 text-gray-11">
             <p>Ask about payroll, people, taxes or anything on this page. The agent reads through the same tools you do and asks before it changes anything.</p>
             <p className="text-1 text-gray-10">Every company, person and agency here is synthetic.</p>
+            {HOSTED ? <p className="text-1 text-gray-10" data-testid="hosted-fictional">{HOSTED_COPY.fictional}</p> : null}
             <PanelStart pathname={pathname} onAsk={(p) => void send(p)} onOpen={(runId, label) => agent.watch(runId, label)} />
           </div>
         ) : null}
@@ -85,6 +89,7 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
             >
               <FileSearch className="size-3.5" /> Ask about this page
             </button>
+            {HOSTED ? <DictateButton onText={(t) => setText((cur) => appendDictation(cur, t))} /> : null}
             <span className="flex-1" />
             <Button data-testid={TID.agentSend} data-tour="agent-send" variant="primary" size="icon-sm" className="rounded-full" onClick={() => void send()} disabled={busy || !text.trim()} aria-label="Send">
               <ArrowUp />

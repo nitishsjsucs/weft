@@ -4,6 +4,8 @@ import type { Paycheck } from "@weft/contracts";
 import { useGet } from "@/lib/api/hooks";
 import { cents, hours } from "../format";
 import { FlagChip } from "./flag-chip";
+import { HOSTED } from "@/lib/hosted/flags";
+import { PdfButton } from "../../hosted/pdf-button";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-5"><h3 className="mb-2 text-1 font-medium tracking-wide text-gray-10 uppercase">{title}</h3>{children}</section>;
@@ -18,6 +20,7 @@ export function PaycheckDrawer({ paycheck, onClose }: { paycheck: Paycheck | nul
       {pc ? (
         <div data-testid="paycheck-drawer">
           {pc.flags.length ? <div className="mb-4 flex flex-wrap gap-1">{pc.flags.map((f) => <FlagChip key={f.rule} pc={pc} flag={f} />)}</div> : null}
+          {HOSTED ? <div className="mb-4"><PdfButton kind="pay_stub" subjectId={pc.id} /></div> : null}
           <Section title="Summary">
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
               {([["Gross pay", pc.gross.display], ["Net pay", pc.net.display], ["Employee taxes", pc.employeeTaxes.display], ["Company taxes", pc.companyTaxes.display], ["Company benefits", pc.companyBenefits.display], ["Reimbursements", pc.reimbursements.display], ["Hours", hours(pc.hoursX100)]] as const).map(([k, v]) => (
