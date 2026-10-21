@@ -1,7 +1,9 @@
 // Help search (design 6.3): AI Search over Weft's own docs, at most 30 queries a UTC day by a Lobby counter, behind
 // the extras.help kill flag; hits are one per doc with a title, path and short snippet. The corpus builder takes the
 // visitor-facing docs only and refuses a doc with a secret-shaped string.
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { HOSTED_SETTINGS } from "../../contracts/src/ext/cf-hosted";
@@ -82,4 +84,16 @@ describe("help corpus", () => {
     expect(() => buildHelpCorpus(() => "token 0123456789abcdef0123456789abcdef", docs)).toThrow(/secret-shaped/);
     expect(buildHelpCorpus(() => "<!-- note -->Hello ![shot](a.png) there", docs)[0]!.body).toContain("Hello  there");
   });
+
+  it("pnpm cf:help-corpus writes the files and a manifest, and uploads nothing without --upload", () => {
+    const out = mkdtempSync(join(tmpdir(), "weft-help-"));
+    try {
+      const log = execFileSync(join(ROOT, "node_modules", ".bin", "tsx"), [join(ROOT, "scripts", "cf", "help-corpus.ts"), "--out", out], { cwd: ROOT, encoding: "utf8" });
+      expect(log).toContain("not uploaded");
+      const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as { bucket: string; prefix: string; files: { key: string; source: string }[] };
+      expect(manifest).toMatchObject({ bucket: "weft-files", prefix: "help/" });
+      expect(manifest.files.map((f) => f.key)).toEqual(HELP_CORPUS.map((d) => d.key));
+      expect(readFileSync(join(out, "help", "tour.md"), "utf8")).toContain("Source: docs/tour.md");
+    } finally { rmSync(out, { recursive: true, force: true }); }
+  }, 60_000);
 });

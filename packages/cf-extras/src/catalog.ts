@@ -20,7 +20,8 @@ const int = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0)
 const clip = (s: string, n: number) => s.slice(0, n);
 
 export function catalogStatement(db: D1Like, r: RunCatalogRow) {
-  const endedAt = new Date(Date.parse(r.endedAt)).toISOString();
+  const t = Date.parse(r.endedAt);
+  const endedAt = new Date(Number.isFinite(t) ? t : Date.now()).toISOString();
   return db.prepare(UPSERT).bind(
     clip(r.slot, 32), int(r.gen), clip(r.runId, 40), clip(r.provider, 24), clip(r.model, 64), clip(r.trigger, 24), int(r.steps),
     r.grounded === null ? null : r.grounded ? 1 : 0, int(r.costUsdMicros), int(r.neurons), int(r.latencyMs), clip(r.status, 24),

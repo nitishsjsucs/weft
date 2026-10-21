@@ -1,6 +1,7 @@
 // Hybrid memory recall (design 5.4; track cf6-extras): semantic candidates from a RecallSource (Vectorize on hosted)
 // added to the lexical <recall> block, off by default. It changes nothing unless a platform attaches a source and its
-// flag is on (hosted: WEFT_SEMANTIC_RECALL=1 and KV recall.semantic=on, set only after the live L1 to L4 gate). Each
+// flag is on (hosted: KV recall.semantic=on, set only after the live L1 to L4 gate; WEFT_SEMANTIC_RECALL while the
+// key is absent). Each
 // candidate is re-read from the world's memory repo at HEAD and kept only when the file exists there and is
 // byte-identical to the file at the commit that was indexed, so every citation is `path#L<line>` of a note as it is
 // now, at a real commit. Untrusted notes (tainted_by, or a human decision note) keep their label and taint the run;

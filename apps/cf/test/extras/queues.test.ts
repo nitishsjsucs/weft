@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { EMBEDDING_MODEL, OCR_MODEL, renderPdfHtml, sha256Hex, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
 import { exportObjectKey, handleExtrasBatch, retryDelaySeconds } from "../../src/extras/queues";
-import { batch, embeddingHandler, fakeAi, fakeBrowser, fakeSlot, fakeVectorize, FLAGS_ON, jobDeps, memoryR2, message, TINY_JPEG } from "./helpers";
+import { batch, embeddingHandler, fakeAi, fakeBrowser, fakeImages, fakeSlot, fakeVectorize, FLAGS_ON, jobDeps, memoryR2, message, TINY_JPEG } from "./helpers";
 
 const ocrReply = () => ({ response: JSON.stringify({ merchant: "Corner Deli (demo)", date: "2026-10-22", total: "41.38", currency: "USD", confidence: 0.91 }) });
 async function receiptJob(o: Partial<Extract<HostedJob, { kind: "ocr.receipt" }>> = {}) {
@@ -20,7 +20,8 @@ describe("OCR jobs", () => {
     const job = await receiptJob();
     slot.blobs.set(job.storagePath, TINY_JPEG);
     const ai = fakeAi({ [OCR_MODEL]: ocrReply });
-    const deps = jobDeps({ "slot-1": slot }, { ai });
+    const images = fakeImages();
+    const deps = jobDeps({ "slot-1": slot }, { ai, images });
     const first = message(job);
     await run(deps, "weft-jobs", first);
     expect(first.acked).toBe(1);
@@ -29,6 +30,7 @@ describe("OCR jobs", () => {
     await run(deps, "weft-jobs", again);
     expect(again.acked).toBe(1);
     expect(ai.calls).toHaveLength(1);
+    expect(images.transforms).toHaveLength(2);
     expect(slot.writeBacks).toHaveLength(1);
     expect(deps.db.rows("jobs")).toMatchObject([{ job_id: "obx_0001", state: "done", outcome: "attached", result_json: null }]);
     expect(deps.metrics.points.map((p) => p.tags?.outcome)).toEqual(["attached", "repeat:attached"]);

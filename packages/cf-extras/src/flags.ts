@@ -1,7 +1,8 @@
 // The extras flags (design 6.3 and 7.1), read from KV `weft-config` and memoized in the isolate for
 // HOSTED_SETTINGS.configMemoMs. Each extra is a kill flag: absent means on, "off" (or "false") turns it off, so an
 // operator can stop OCR, PDF rendering, Help or dictation without a redeploy. Semantic recall is the exception: it
-// stays off until the live L1 to L4 gate passes, so it needs WEFT_SEMANTIC_RECALL=1 and KV recall.semantic=on.
+// stays off until the live L1 to L4 gate passes. KV recall.semantic decides when it is set ("on" or "off"), so the
+// deploy track turns it on without a redeploy; while it is absent, the WEFT_SEMANTIC_RECALL var decides (hosted "0").
 // Track cf6-extras.
 import { HOSTED_CONFIG_KEYS, HOSTED_SETTINGS } from "../../contracts/src/ext/cf-hosted";
 import type { KvLike } from "./bindings";
@@ -21,7 +22,7 @@ export function flagsFrom(values: Partial<Record<keyof typeof HOSTED_CONFIG_KEYS
     pdf: killFlag(values.extrasPdf ?? null),
     help: killFlag(values.extrasHelp ?? null),
     dictation: killFlag(values.extrasDictation ?? null),
-    recallSemantic: optIn(env.WEFT_SEMANTIC_RECALL) && optIn(values.recallSemantic ?? null),
+    recallSemantic: values.recallSemantic !== null && values.recallSemantic !== undefined ? optIn(values.recallSemantic) : optIn(env.WEFT_SEMANTIC_RECALL),
   };
 }
 
