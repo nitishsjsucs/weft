@@ -13,6 +13,7 @@ import { approxTokens } from "./context";
 import { NOOP_LOOP_TRACE, recallDocs, runInputOf, traceRun, type LoopTrace } from "./otel";
 import { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
 import type { NewStep, RunStore } from "./store";
+import type { GatewayStepResult } from "./providers/gateway";
 
 export const BUDGETS = {
   chat: { steps: 12, usd: 0.1, minutes: 10, toolCallsPerStep: 8 },
@@ -347,7 +348,9 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       }
       const modelMs = wall() - tModel;
       const usd = stepCostUsd(res.usage, deps.prices);
-      const actualMicros = provider.live ? usdToMicros(usd) : 0;
+      // An AI Gateway cache HIT cost nothing (design 5.1): it settles at $0 and the step row says why.
+      const cacheHit = (res as GatewayStepResult).gatewayCacheHit === true;
+      const actualMicros = provider.live && !cacheHit ? usdToMicros(usd) : 0;
       lt.llmSettled(res, deps.prices, actualMicros);
       if (res.stop === "error" && res.usage.input === 0) await ledger.settle(rsv.reservationId, provider.live ? usdToMicros(reserveUsd(estInput, 0, deps.prices)) : 0);
       else await ledger.settle(rsv.reservationId, actualMicros);
@@ -358,7 +361,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       const ok = res.stop === "tool_calls" || res.stop === "final";
       modelStepRow = await append({
         stage: "model", kind: "model_call", attempt, outcome: ok ? "ok" : "error", native: ok ? res.native : null,
-        result: { provider: provider.id, stop: res.stop, text: res.text.slice(0, 2000), toolCalls: res.toolCalls.map((c) => c.name), error: res.error ?? null, refusal: res.refusal ?? null, servedBy: res.servedBy },
+        result: { provider: provider.id, stop: res.stop, text: res.text.slice(0, 2000), toolCalls: res.toolCalls.map((c) => c.name), error: res.error ?? null, refusal: res.refusal ?? null, servedBy: res.servedBy, ...(cacheHit ? { gatewayCache: "HIT" } : {}) },
         usage: res.usage, costUsdMicros: actualMicros, requestId: res.requestId, prefixHash: pHash,
         timings: { admissionMs, assembleMs, timeToLlmMs, modelMs, dispatchMs: 0, tokensPerSecond: modelMs > 0 && res.usage.output > 0 ? Math.round((res.usage.output / modelMs) * 1000) : null },
       });

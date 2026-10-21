@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "workerd": "./src/portable.ts",
+      "worker": "./src/portable.ts",
+      "default": "./src/index.ts"
+    },
+    "./portable": "./src/portable.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",

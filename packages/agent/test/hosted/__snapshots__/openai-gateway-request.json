@@ -1,0 +1,30 @@
+{
+  "direct": {
+    "url": "https://api.openai.com/v1/responses"
+  },
+  "gateway": {
+    "url": "https://gateway.ai.cloudflare.com/v1/acct_0123/weft-gw/openai/responses",
+    "addedHeaders": {
+      "cf-aig-authorization": "Bearer aig_tok_not_real",
+      "cf-aig-metadata": "{\"slot\":\"slot-1\",\"gen\":3,\"run\":\"run_0001\",\"kind\":\"routine\",\"visitor\":\"vis_a\"}"
+    }
+  },
+  "removedHeaders": [],
+  "body": {
+    "sha256": "d1dbfb335779b8560d41087f9a0236d837673033929a252d4201d17536277695",
+    "keys": [
+      "model",
+      "input",
+      "tools",
+      "tool_choice",
+      "parallel_tool_calls",
+      "reasoning",
+      "store",
+      "include",
+      "prompt_cache_key",
+      "max_output_tokens"
+    ],
+    "store": false,
+    "prompt_cache_key": "weft:main:rt_agency_notice:cmp_larkspur"
+  }
+}

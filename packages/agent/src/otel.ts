@@ -18,12 +18,18 @@ import {
 } from "@weft/contracts";
 import { escapeTagText, sha256 } from "./canonical";
 import { stepCostUsd, type Prices } from "./cost";
+import { perWorld } from "./world";
 
-let redact: TraceRedact = (v) => v;
-/** Tokens the redactor removed (see learn below); a new redactor starts a new memory. */
-const learned = new Set<string>();
-/** apps/api/src/compose.ts injects the executor's Redactor (value redaction) here; the brain never imports the vault. */
-export function setTraceRedactor(r: TraceRedact): void { redact = r; learned.clear(); }
+/**
+ * The redactor, the tokens it removed (see learn below) and the run-start recall notes, per world (world.ts): on Node
+ * there is one world; CompanyDO instances sharing an isolate never see each other's (docs/cloudflare/design.md 6.4).
+ */
+interface WorldTraceState { redact: TraceRedact; learned: Set<string>; recallNotes: Map<string, RecallNote> }
+const worldState = perWorld<WorldTraceState>(() => ({ redact: (v) => v, learned: new Set<string>(), recallNotes: new Map() }));
+const redact: TraceRedact = (v) => worldState().redact(v);
+/** apps/api/src/compose.ts injects the executor's Redactor (value redaction) here; the brain never imports the vault.
+ * A new redactor starts a new memory. */
+export function setTraceRedactor(r: TraceRedact): void { const w = worldState(); w.redact = r; w.learned.clear(); }
 /** Every span attribute value passes through this before it is set. */
 export function traceRedact<T>(value: T): T { return redact(value); }
 
@@ -53,6 +59,7 @@ export const LEARN_MAX = 2000;
  */
 function learn(before: string, after: string): void {
   if (before === after) return;
+  const learned = worldState().learned;
   for (const tok of before.match(/[A-Za-z0-9+/=_-]{6,}/g) ?? []) {
     if (after.includes(tok)) continue;
     learned.delete(tok);
@@ -61,10 +68,10 @@ function learn(before: string, after: string): void {
   }
 }
 /** The redaction memory's size (tests). */
-export const learnedSize = (): number => learned.size;
+export const learnedSize = (): number => worldState().learned.size;
 function forget(s: string): string {
   let out = s;
-  for (const t of learned) if (out.includes(t)) out = out.split(t).join("[redacted]");
+  for (const t of worldState().learned) if (out.includes(t)) out = out.split(t).join("[redacted]");
   return out;
 }
 
@@ -431,13 +438,16 @@ export interface RecallNote {
   detail?: string;
 }
 const RECALL_NOTES_MAX = 500;
-const recallNotes = new Map<string, RecallNote>();
 export function noteRunRecall(runId: string, note: RecallNote): void {
+  const recallNotes = worldState().recallNotes;
   recallNotes.delete(runId);
   recallNotes.set(runId, note);
   while (recallNotes.size > RECALL_NOTES_MAX) recallNotes.delete(recallNotes.keys().next().value!);
 }
+/** The note recorded for a run in the current world, without taking it (tests). */
+export const peekRecallNote = (runId: string): RecallNote | undefined => worldState().recallNotes.get(runId);
 function takeRecallNote(runId: string): RecallNote | undefined {
+  const recallNotes = worldState().recallNotes;
   const n = recallNotes.get(runId);
   recallNotes.delete(runId);
   return n;
