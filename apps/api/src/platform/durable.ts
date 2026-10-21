@@ -58,6 +58,8 @@ export interface WeftDurablePlatform extends DurableWeftPlatform<Db> {
   readonly hosted: DurableHostedParts;
 }
 
+const uniqueByName = (cmds: readonly CommandDef[]): CommandDef[] => [...new Map(cmds.map((c) => [c.name, c])).values()];
+
 /** A read-only view of `base` with `over` on top, read at each use (CompanyDO's env is itself a live view). */
 function overlayEnv(base: Readonly<Record<string, string | undefined>>, over: Record<string, string>): Readonly<Record<string, string | undefined>> {
   const keys = () => [...new Set([...Object.keys(base), ...Object.keys(over)])];
@@ -179,8 +181,9 @@ export function durablePlatform(input: HostedPlatformInput, deps: DurablePlatfor
     executor: {
       // Design 4.4: page GETs and MCP reads write no rows on hosted.
       ephemeralReadIds: true,
-      // The hidden OCR write-backs (hosted/commands.ts) plus whatever CompanyDO adds.
-      extraCommands: [...(hostedServiceCommands() as unknown as CommandDef[]), ...(input.extraCommands ?? [])],
+      // The hidden OCR write-backs (their one definition, the executor's hosted/commands.ts) plus whatever CompanyDO
+      // adds; a command passed twice under one name is registered once.
+      extraCommands: uniqueByName([...(hostedServiceCommands() as unknown as CommandDef[]), ...(input.extraCommands ?? [])]),
       ...(input.onOutbox ? { onOutbox: input.onOutbox } : {}),
     },
   };

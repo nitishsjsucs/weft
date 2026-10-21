@@ -55,8 +55,8 @@ export { GitRepo } from "./memory/repo-git";
 export { serialGit } from "./memory/git";
 export { COMPANY_TZ, companyDay, fmtDateTimePT, humanTimes } from "./memory/time";
 export { fileRunFiles, runRel, safeRunFileKey, type RunFileStore } from "./hosted/run-files";
-export { appendOutbox, ackOutbox, pendingOutbox, jobsFor, contentTypeOf, type HostedJobDraft, type OutboxWorld } from "./hosted/outbox";
-export { hostedServiceCommands, JOBS_PRINCIPAL, JOBS_ALLOWLIST, MAX_SCAN_TEXT } from "./hosted/commands";
+export { appendOutbox, ackOutbox, pendingOutbox, jobsFor, contentTypeOf, noteKindOfPath, outboxId, OUTBOX_COMMANDS, type HostedJobDraft, type OutboxWorld } from "./hosted/outbox";
+export { attachReceiptExtract, attachScanExtract, hostedServiceCommands, JOBS_PRINCIPAL, JOBS_ALLOWLIST, MAX_SCAN_TEXT, NOT_READ_YET, type StoredNoticeScan, type StoredReceiptExtract, type WriteBackStatus } from "./hosted/commands";
 export { ephemeralReadId, EPHEMERAL_READ_ID } from "./hosted/read-ids";
 
 export interface CreateExecutorOptions {

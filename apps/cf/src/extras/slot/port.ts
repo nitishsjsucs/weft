@@ -33,9 +33,9 @@ const SHA_PATH = /^(blob:|uploads\/)[0-9a-f]{64}(\.bin)?$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 
 /**
- * Refusals that mean the write-back has nothing left to do. The commands here report a repeat or a changed subject as
- * `already` or `skipped`; cf2-platform's versions of the same commands refuse them with these codes instead, so the
- * queue handler finishes the job either way, whichever definition integration keeps.
+ * Refusals that mean the write-back has nothing left to do: the executor's write-backs (the one definition, kept at
+ * integration) refuse a repeat or a changed subject with these codes before writing anything, so a redelivery adds no
+ * action row, and the queue handler finishes the job as `already` or `skipped`.
  */
 export const SETTLED_WRITE_BACK_REFUSALS: Readonly<Record<string, { status: "already" | "skipped"; reason: string | null }>> = {
   DOMAIN_ALREADY_APPLIED: { status: "already", reason: null },

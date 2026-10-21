@@ -6,6 +6,20 @@ import { canonicalJson } from "../shared/canonical-json";
 
 export type NoticeRow = typeof notices.$inferSelect;
 
+/**
+ * The parser's extract as stored, without the OCR scan the hosted write-back keeps beside it (`scan`, Weft on
+ * Cloudflare, docs/cloudflare/design.md 5.4): null when nothing else is there. Readers that compare or cite the
+ * parser's extract use this, so an OCR read never makes a letter look different or cite an extract it never had.
+ */
+export function parserExtractOf(json: string | null): Record<string, unknown> | unknown[] | string | null {
+  if (!json) return null;
+  let v: unknown;
+  try { v = JSON.parse(json); } catch { return json; }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return v as unknown[] | null;
+  const { scan: _scan, ...rest } = v as Record<string, unknown>;
+  return "scan" in (v as object) && Object.keys(rest).length === 0 ? null : rest;
+}
+
 export function parseExtract(json: string | null): NoticeExtract | null {
   if (!json) return null;
   const r = NoticeExtract.safeParse(JSON.parse(json));
@@ -54,8 +68,7 @@ export async function noticeProposals(tx: DbTx, companyId: string, noticeId: str
 
 /** A letter's identity: everything the parser read plus the exact body. Two rows with the same identity are one letter. */
 function letterKey(n: NoticeRow): string {
-  let extracted: unknown = null;
-  try { extracted = n.extractedJson ? JSON.parse(n.extractedJson) : null; } catch { extracted = n.extractedJson; }
+  const extracted = parserExtractOf(n.extractedJson);
   const parts = { agency: n.agency, kind: n.kind, form: n.formCode, account: n.taxAccountId, extracted, body: n.bodyText };
   try { return canonicalJson(parts); } catch { return JSON.stringify(parts); }
 }

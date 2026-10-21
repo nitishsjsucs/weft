@@ -6,6 +6,7 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { filings, notices, type DbTx } from "@weft/db";
+import { parserExtractOf } from "../notices/queries";
 
 export const EscalationReason = z.enum(["agency_call_needed", "penalty_dispute", "unrecognized_notice", "missing_filing", "amount_mismatch"]);
 export type EscalationReason = z.infer<typeof EscalationReason>;
@@ -31,7 +32,7 @@ export async function evidencePack(tx: DbTx, n: typeof notices.$inferSelect): Pr
     out.push({ label: "tax account", ref: n.taxAccountId });
     for (const f of (await tx.select().from(filings).where(eq(filings.taxAccountId, n.taxAccountId))).sort((a, b) => (a.period < b.period ? -1 : 1))) out.push({ label: `filing ${f.form} ${f.period}`, ref: f.id });
   }
-  if (n.extractedJson) out.push({ label: "parser extract", ref: `${n.id}#extract` });
+  if (parserExtractOf(n.extractedJson) !== null) out.push({ label: "parser extract", ref: `${n.id}#extract` });
   return out;
 }
 

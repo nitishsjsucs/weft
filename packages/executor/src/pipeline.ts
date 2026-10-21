@@ -312,7 +312,9 @@ async function runCall(e: Engine, tx: DbTx, scope: CallScope, command: string, r
       // join the command's savepoint, so they commit and roll back with it. Only a platform with an outbox appends.
       const world = e.hosted?.outbox;
       if (world) {
-        for (const job of await jobsFor(sp, world, def, input, out.data, { tainted: ctx.tainted })) {
+        // Semantic recall: WEFT_SEMANTIC_RECALL, which CompanyDO folds from KV recall.semantic into the live env.
+        const semanticRecall = (e.env.WEFT_SEMANTIC_RECALL ?? "").trim() === "1";
+        for (const job of await jobsFor(sp, world, def, input, out.data, { tainted: ctx.tainted, semanticRecall })) {
           await appendOutbox(sp, world, job, ctx.now);
           e.hosted.outboxPending = true;
         }
