@@ -2,16 +2,21 @@
 // for example packages/sim/fixtures/notices/<name>.txt. Node reads the repo; the durable platform reads the generated
 // module apps/cf/generated/fixtures.ts, which cf4-worker builds from the same paths (FIXTURE_PATHS lists every file
 // and directory the durable path reads, so the generator and the tests agree on what must be bundled).
-import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { FixtureSource } from "../../../../packages/contracts/src/ext/cf-platform";
 
-/** What the durable path reads through the FixtureSource: the migrations, the notice scenarios and the mailed samples. */
+/** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
+ * 6.4), where only Node's code paths call it. */
+const fs = () => process.getBuiltinModule("node:fs");
+
+/** What the durable path reads through the FixtureSource: the migrations, the notice scenarios, the mailed samples and
+ * the scripted provider's scenarios (scenarios/<name>.json, read through cf3-agent's fixtureScriptSource). */
 export const FIXTURE_PATHS = {
   migrations: "packages/db/drizzle",
   journal: "packages/db/drizzle/meta/_journal.json",
   noticeScenarios: "packages/sim/fixtures/notices",
   mailedNotices: "packages/sim/src/notices/mailed",
+  scripts: "scenarios",
 } as const;
 
 /**
@@ -37,12 +42,12 @@ export function repoFixtures(at?: string): FixtureSource {
   let base: string | null = at ?? null;
   const abs = (p: string) => { const n = norm(p); if (!SAFE(n)) throw new Error(`bad fixture path ${JSON.stringify(p).slice(0, 60)}`); return join((base ??= repoRoot()), n); };
   return {
-    text(path) { try { return readFileSync(abs(path), "utf8"); } catch { return null; } },
-    bytes(path) { try { return new Uint8Array(readFileSync(abs(path))); } catch { return null; } },
+    text(path) { try { return fs().readFileSync(abs(path), "utf8"); } catch { return null; } },
+    bytes(path) { try { return new Uint8Array(fs().readFileSync(abs(path))); } catch { return null; } },
     list(dir) {
       const d = norm(dir);
       try {
-        return readdirSync(abs(d)).filter((f) => !f.startsWith(".") && statSync(join(abs(d), f)).isFile()).sort().map((f) => `${d}/${f}`);
+        return fs().readdirSync(abs(d)).filter((f) => !f.startsWith(".") && fs().statSync(join(abs(d), f)).isFile()).sort().map((f) => `${d}/${f}`);
       } catch { return []; }
     },
   };
@@ -66,7 +71,7 @@ export function mapFixtures(files: Readonly<Record<string, string | Uint8Array>>
 export function bundleFixtures(at?: string): Record<string, string> {
   const src = repoFixtures(at);
   const out: Record<string, string> = {};
-  for (const dir of [FIXTURE_PATHS.migrations, `${FIXTURE_PATHS.migrations}/meta`, FIXTURE_PATHS.noticeScenarios, FIXTURE_PATHS.mailedNotices]) {
+  for (const dir of [FIXTURE_PATHS.migrations, `${FIXTURE_PATHS.migrations}/meta`, FIXTURE_PATHS.noticeScenarios, FIXTURE_PATHS.mailedNotices, FIXTURE_PATHS.scripts]) {
     for (const f of src.list(dir)) out[f] = src.text(f)!;
   }
   return out;

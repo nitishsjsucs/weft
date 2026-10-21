@@ -16,6 +16,12 @@ export const DIGEST_EXCLUDE: Record<string, readonly string[] | "*"> = {
   kv_state: "*",
   run_handles: ["token", "nonce"],
   [DIRTY_TABLE]: "*",
+  // The SQL memory repo (WEFT_MEMORY=sqlite, always on hosted): git memory was never part of the world digest, so the
+  // digest is the same whichever repository holds memory. The snapshot manifest digests these tables on its own and
+  // records the memory HEAD separately (cf1-db snapshot.ts, scripts/cf/snapshot.ts).
+  mem_objects: "*",
+  mem_refs: "*",
+  mem_log: "*",
 };
 /** Settings rows whose values are wall clock. */
 const SETTINGS_EXCLUDE = new Set(["clock.base_wall"]);

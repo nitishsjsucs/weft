@@ -13,7 +13,8 @@ import { canonicalJson, sha256Hex } from "../../../packages/core/src/index";
 import { dumpDb, seedWorld } from "../../../packages/seed/src/index";
 import { git } from "../../../packages/executor/src/memory/git";
 import { DEFAULT_COMPANY_ID } from "../../../packages/agent/src/index";
-import { createWeft, type Weft } from "../../../apps/api/src/index";
+import { type Weft } from "../../../apps/api/src/index";
+import { assembleWeft, type CreateWeftOptions } from "../../../apps/api/src/assemble";
 import { TEST_MUTATORS as ACTIVE_TEST_MUTATORS } from "../tasks/test/worlds";
 import { TEST_MUTATORS as RETIRED_R1_MUTATORS } from "../tasks/retired-r1/worlds";
 import { renderScenarioAt } from "../../../packages/sim/src/index";
@@ -309,6 +310,20 @@ export function freshDir(dataDir: string, keep: string[] = ["spend"]): void {
   mkdirSync(dataDir, { recursive: true });
   for (const f of readdirSync(dataDir)) if (!keep.includes(f)) rmSync(join(dataDir, f), { recursive: true, force: true });
 }
+
+/**
+ * The pinned eval worlds are Node default worlds: git memory and upload files, whatever the shell sets. The world
+ * digests pin that world, and the evidence reads memory with git. WEFT_MEMORY=sqlite and WEFT_BLOBS=sqlite (the
+ * combined hosted run, docs/cloudflare/tracks.md cf7) change the world itself, so they stop at the eval runner; the
+ * database switch (WEFT_DB=durable-emu) keeps every digest and still applies.
+ */
+export function evalWorldEnv(env: Readonly<Record<string, string | undefined>> = process.env): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { ...env };
+  delete out.WEFT_MEMORY;
+  delete out.WEFT_BLOBS;
+  return out;
+}
+const createWeft = (o: CreateWeftOptions) => assembleWeft({ kind: "node", env: evalWorldEnv() }, o);
 
 export async function buildWorld(world: EvalWorld, opts: BuildOptions): Promise<TrialWorld> {
   if (world.base !== WORLD_BASE) throw new Error(`WORLD_BASE: task names ${world.base}, the suite builds ${WORLD_BASE}`);

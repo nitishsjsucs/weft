@@ -1,5 +1,5 @@
-// Durable test worlds (track cf2-platform): a seeded world built on Node the way the hosted snapshot is (WEFT_BLOBS=
-// sqlite and WEFT_PREBUILT_HASH=1, booted and ticked once so the prebuilt routine rows and their hash match the code),
+// Durable test worlds (track cf2-platform): a seeded world built on Node the way the hosted snapshot is (blobs and
+// memory in SQL and WEFT_PREBUILT_HASH=1, booted and ticked once so the prebuilt routine rows and their hash match the code),
 // then opened as a Durable Object slot through the durable platform over the node:sqlite storage stand-in
 // (./durable-emu.ts), with fake SpendDO, RunHost and SchedulerHost bindings. Everything that touches the disk happens
 // in buildSeededWorld() and openDurableWorld()'s setup, before a test turns its fs guard on.
@@ -23,7 +23,7 @@ import { createEmuStorage, testDurableDriver, type EmuStorage, type TestMeter } 
 export interface SeededWorld { dir: string; vaultKey: string; profile: "base" | "rich"; dispose(): void }
 
 /** What the hosted snapshot build sets on Node: blobs in SQL and the prebuilt hash gate (so the snapshot carries the hash). */
-export const SNAPSHOT_BUILD_ENV = { WEFT_BLOBS: "sqlite", WEFT_PREBUILT_HASH: "1" } as const;
+export const SNAPSHOT_BUILD_ENV = { WEFT_BLOBS: "sqlite", WEFT_MEMORY: "sqlite", WEFT_PREBUILT_HASH: "1" } as const;
 
 /**
  * Seeds a world on Node as the snapshot builder does (blobs in SQL, the prebuilt hash gate, frozen clock) and boots it

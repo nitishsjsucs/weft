@@ -106,6 +106,12 @@ describe.runIf(REAL)("S8 on the real T2 commands", () => {
       const json = { "content-type": "application/json" };
       const d = await real.app.request("/v1/sim/notices/deliver", { method: "POST", headers: { ...real.uiHeaders("usr_dana"), ...json }, body: JSON.stringify({ scenario: "ca_de2088_rate_change" }) });
       const noticeId = ((await d.json()) as { data: { notice_id: string } }).data.notice_id;
+      // The delivery starts the notice's own routine run, which files the same rate change. Let it settle first, so the
+      // MCP proposal is the newest one whichever memory repository is in use (the SQL repo finishes the routine faster
+      // than git, and a routine proposal filed after the MCP one would supersede it).
+      await real.scheduler.tick();
+      await (real.agent as unknown as { idle?: () => Promise<void> }).idle?.();
+      await (real.routines as unknown as { drain(ms?: number): Promise<boolean> }).drain(5_000);
       const text = async (r: unknown) => JSON.parse(((r as { content: { text: string }[] }).content)[0]!.text);
       const got = await text(await mcp.callTool({ name: "notices__get", arguments: { notice_id: noticeId, response_format: null } }));
       const n = got.data.notice as { tax_account_id: string; extracted: { effectiveFrom: string; rates: { code: string; oldRate: string; newRate: string }[] } };

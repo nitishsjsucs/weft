@@ -1,6 +1,7 @@
 // The world digest and the hosted tables (migration 0008_hosted.sql; docs/cloudflare/tracks.md cf0-contracts): empty
 // hosted tables leave the digest exactly as before they existed, so the base digest and every pinned eval digest are
-// unchanged; once they hold rows they count (BLOBs as hex); hosted runtime state and workerd's tables never count.
+// unchanged; once they hold rows they count (BLOBs as hex); hosted runtime state, the SQL memory repo (git memory
+// never counted either) and workerd's tables never count.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,20 +50,26 @@ describe("hosted tables in the dump", () => {
   it("leave the dump alone while empty and count once they hold a row, BLOBs as hex", async () => {
     const empty = await digestDb(db);
     expect(Object.keys(await dumpDb(db)).filter((t) => (HOSTED_TABLES as readonly string[]).includes(t))).toEqual([]);
-    await db.run(sql`INSERT INTO mem_objects (sha, type, body) VALUES ('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', 'blob', ${Buffer.from([0, 1, 254, 255])})`);
-    await db.run(sql`INSERT INTO blobs (key, idx, bytes) VALUES ('blob:ab', 0, ${Buffer.from("receipt")})`);
+    await db.run(sql`INSERT INTO blobs (key, idx, bytes) VALUES ('blob:ab', 0, ${Buffer.from([0, 1, 254, 255])})`);
+    await db.run(sql`INSERT INTO run_files (path, body) VALUES ('companies/cmp_x/runs/run_0001/artifacts/1-a.json', '{}')`);
     const dump = await dumpDb(db);
-    expect(dump.mem_objects).toEqual([{ sha: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", type: "blob", body: { $blob: "0001feff" } }]);
-    expect(dump.blobs).toEqual([{ key: "blob:ab", idx: 0, bytes: { $blob: Buffer.from("receipt").toString("hex") } }]);
+    expect(dump.blobs).toEqual([{ key: "blob:ab", idx: 0, bytes: { $blob: "0001feff" } }]);
+    expect(dump.run_files).toEqual([{ path: "companies/cmp_x/runs/run_0001/artifacts/1-a.json", body: "{}" }]);
     expect(await digestDb(db)).not.toBe(empty);
-    await db.run(sql`DELETE FROM mem_objects`);
     await db.run(sql`DELETE FROM blobs`);
+    await db.run(sql`DELETE FROM run_files`);
     expect(await digestDb(db)).toBe(empty);
   });
 
-  it("never count kv_state, run handle tokens or the dirty-key table", async () => {
+  it("never count kv_state, run handle tokens, the SQL memory repo or the dirty-key table", async () => {
     const empty = await digestDb(db);
     await db.run(sql`INSERT INTO kv_state (key, value) VALUES ('world.id', 'slot-1:gen-7')`);
+    await db.run(sql`INSERT INTO mem_objects (sha, type, body) VALUES ('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', 'blob', ${Buffer.from([])})`);
+    await db.run(sql`INSERT INTO mem_refs (name, sha) VALUES ('refs/heads/main', 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391')`);
+    const memory = await dumpDb(db);
+    for (const t of ["mem_objects", "mem_refs", "mem_log"]) expect(memory).not.toHaveProperty(t);
+    await db.run(sql`DELETE FROM mem_objects`);
+    await db.run(sql`DELETE FROM mem_refs`);
     await db.run(sql.raw(`CREATE TABLE "${DIRTY_TABLE}" (tbl TEXT NOT NULL, pk TEXT NOT NULL)`));
     await db.run(sql.raw(`INSERT INTO "${DIRTY_TABLE}" (tbl, pk) VALUES ('workers', 'wrk_0001')`));
     expect(await digestDb(db)).toBe(empty);
@@ -77,7 +84,9 @@ describe("hosted tables in the dump", () => {
     await db.run(sql.raw(`DROP TABLE "${DIRTY_TABLE}"`));
   });
 
-  it("skip workerd's reserved _cf_ tables, which refuse every read there", async () => {
+  // The node:sqlite emulator (WEFT_DB=durable-emu) refuses CREATE TABLE "_cf_*" with SQLITE_AUTH exactly as workerd
+  // does (verified in Miniflare by cf1-db), so there is no stand-in table to create; the libsql run pins the rule.
+  it.skipIf(process.env.WEFT_DB === "durable-emu")("skip workerd's reserved _cf_ tables, which refuse every read there", async () => {
     const before = await digestDb(db);
     await db.run(sql.raw(`CREATE TABLE "_cf_KV" (key TEXT PRIMARY KEY, value BLOB)`));
     await db.run(sql.raw(`INSERT INTO "_cf_KV" (key, value) VALUES ('k', x'00')`));

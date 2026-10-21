@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunHandle, ToolOutcome } from "@weft/contracts";
 import { makeWorld, type World } from "./fixtures";
-import { encodings } from "../src/index";
+import { sql } from "drizzle-orm";
+import { encodings, SqlRepo } from "../src/index";
 
 const worlds: World[] = [];
 afterEach(async () => { for (const w of worlds.splice(0)) await w.close(); });
@@ -79,11 +80,16 @@ describe("memory", () => {
     const value = "sim-git-secret-0a1b2c3d4e5f";
     await w.executor.vault.put({ name: "git-test", kind: "portal_password", value, description: "t", by: "usr_dana" });
     await w.executor.agent.exec(h, { callId: "m", command: "comms.send_message", args: { channel: "#payroll", text: `pw ${value}` } });
+    // The same check on either repository: git's objects, or the SQL repo's mem_objects (WEFT_MEMORY=sqlite).
+    const sqlMemory = process.env.WEFT_MEMORY === "sqlite";
     const root = join(w.dir, "companies", "cmp_larkspur", "memory");
-    const log = execFileSync("git", ["-C", root, "log", "-1", "--format=%B"], { encoding: "utf8" });
+    const log = sqlMemory ? ((await new SqlRepo(w.db).log({ n: 1 }))[0]?.body ?? "") : execFileSync("git", ["-C", root, "log", "-1", "--format=%B"], { encoding: "utf8" });
     expect(log).toMatch(/Weft-Chain-Head: 1 [0-9a-f]{64}/);
     expect((await w.executor.verifyChain())).toMatchObject({ ok: true, gitLag: 0 });
-    const objects = execFileSync("git", ["-C", root, "cat-file", "--batch-all-objects", "--batch"], { encoding: "latin1" });
+    const objects = sqlMemory
+      ? (await w.db.all<{ body: Uint8Array }>(sql`SELECT body FROM mem_objects`)).map((r) => Buffer.from(r.body).toString("latin1")).join("\n")
+      : execFileSync("git", ["-C", root, "cat-file", "--batch-all-objects", "--batch"], { encoding: "latin1" });
+    if (sqlMemory) expect(objects.length).toBeGreaterThan(0);
     for (const f of encodings(value)) expect(objects.includes(f), f).toBe(false);
   });
 });

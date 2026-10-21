@@ -25,7 +25,8 @@ export function blobKeyOf(storagePath: string): string | null {
   const k = storagePath.slice(SQL_BLOB_PREFIX.length);
   return SHA.test(k) ? k : null;
 }
-const toBuffer = (v: unknown): Buffer => (Buffer.isBuffer(v) ? v : v instanceof ArrayBuffer ? Buffer.from(v) : ArrayBuffer.isView(v) ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : Buffer.from(String(v ?? ""), "latin1"));
+// Buffer.isBuffer is a type guard under @types/node but not under workers-types (apps/cf typechecks this file too).
+const toBuffer = (v: unknown): Buffer => (Buffer.isBuffer(v) ? (v as Buffer) : v instanceof ArrayBuffer ? Buffer.from(v) : ArrayBuffer.isView(v) ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : Buffer.from(String(v ?? ""), "latin1"));
 
 export interface SqlBlobStoreOptions {
   /** Hosted uploads are capped (HOSTED_SETTINGS.uploadMaxBytes, 1.5 MB); put refuses bigger files with BlobTooLarge. */

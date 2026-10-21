@@ -1,8 +1,7 @@
 // The durable platform (docs/cloudflare/design.md 3.3, 4.1, 4.2, 5.4 and 6.4; track cf2-platform acceptance):
 // - an fs guard proves the durable path makes no node:fs (or child_process, or net) call from Weft code: assembly and
-//   a GET sweep make none at all, and the visitor flows make none from this track's code (the calls left are in other
-//   tracks' modules, listed exactly in PENDING_OTHER_TRACKS until cf1-db and cf3-agent land; see
-//   .scratch/contract-requests/cf2-platform.md);
+//   a GET sweep make none at all, and since the integration (cf1-db's SqlRepo, cf3-agent's bundled script source)
+//   the visitor flows make none either;
 // - a missing WEFT_VAULT_KEY (or WEFT_PROXY_SECRET) on the durable platform throws at assemble time, before anything
 //   is opened, and WEFT_REQUIRE_VAULT_KEY=1 does the same on Node;
 // - two Weft instances in one process share no limiter, redactor or recall state;
@@ -38,14 +37,11 @@ import { HIDDEN_SERVICE_COMMANDS, type HostedJob } from "../../../packages/contr
 import { HOSTED_SETTINGS } from "../../../packages/contracts/src/ext/cf-hosted";
 
 /**
- * Calls the guard still sees on the visitor flows, all in other tracks' modules: cf1-db's memory store and git repo
- * (SqlRepo replaces them) and cf3-agent's scripted provider and plan-script lookup (the FixtureSource replaces them).
- * The integration stage empties this list once those land; a call from any other file fails the test.
+ * Calls the guard may still see on the visitor flows. Empty since the integration: cf1-db's SqlRepo replaced the memory
+ * store's git repo and cf3-agent's bundled script source replaced the scripted provider's scenarios directory, so a
+ * call from any Weft file fails the test.
  */
-export const PENDING_OTHER_TRACKS = new Set([
-  "packages/executor/src/memory/store.ts", "packages/executor/src/memory/git.ts",
-  "packages/agent/src/providers/scripted.ts", "packages/agent/src/runtime.ts",
-]);
+export const PENDING_OTHER_TRACKS = new Set<string>();
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
 let seed: SeededWorld;
@@ -135,9 +131,10 @@ describe("the fs guard on the durable path", () => {
 });
 
 /**
- * Module-level import.meta paths in modules the hosted entry imports, still in other tracks' code (the hosted bundle
- * defines import.meta for them until they compute lazily; .scratch/contract-requests/cf2-platform.md). Script entries
- * the hosted entry never imports are not scanned.
+ * Module-level import.meta reads that cannot throw in workerd, each for a reason the integration checked: migrate.ts
+ * builds MIGRATIONS_DIR only when import.meta.url is a file URL (else ""), and providers/factory.ts is @weft/agent's
+ * Node entry, which a Worker bundle never evaluates (the workerd condition resolves src/portable.ts, pinned by
+ * packages/agent/test/hosted/portable.test.ts). Script entries the hosted entry never imports are not scanned.
  */
 const MODULE_LEVEL_IMPORT_META_PENDING = new Set(["packages/db/src/migrate.ts", "packages/agent/src/providers/factory.ts"]);
 const ENTRY_SCRIPTS = new Set(["apps/api/src/demo.ts", "packages/seed/src/cli.ts"]);
@@ -350,6 +347,8 @@ describe("platform parts", () => {
     expect(bundled.list(FIXTURE_PATHS.noticeScenarios)).toEqual(repo.list(FIXTURE_PATHS.noticeScenarios));
     expect(bundled.list(FIXTURE_PATHS.mailedNotices)).toEqual(repo.list(FIXTURE_PATHS.mailedNotices));
     expect(bundled.list(FIXTURE_PATHS.mailedNotices).length).toBeGreaterThan(5);
+    expect(bundled.list(FIXTURE_PATHS.scripts)).toEqual(repo.list(FIXTURE_PATHS.scripts));
+    expect(bundled.list(FIXTURE_PATHS.scripts).length).toBeGreaterThan(5);
     expect(repo.text("../package.json")).toBeNull();
     expect(Buffer.from(bundled.bytes(FIXTURE_PATHS.journal)!).toString("utf8")).toBe(repo.text(FIXTURE_PATHS.journal));
   });

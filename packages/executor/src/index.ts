@@ -1,11 +1,11 @@
 // The hands (SPEC 9.3, harness 5 and 6). Owner: t3-governance. Weft on Cloudflare (docs/cloudflare/design.md 3.3,
 // 4.1, 4.2 and 4.4, track cf2-platform): the platform hands in the environment, the vault key, the run file store,
 // the boot-time redactor secrets and the hosted options; every one defaults to today's Node behavior.
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { NotImplemented, type ExecutorBundle, type SandboxEngine, type SimClock } from "@weft/contracts";
 import { createMemoryStore } from "./memory/store";
+import { nodeFs } from "./memory/git";
 import { seedMemoryFiles } from "./memory/seed-content";
 import { memoryCommands } from "./memory/commands";
 import { withMemoryCitations } from "./memory/citations";
@@ -47,7 +47,11 @@ export { toCsv } from "./workspace";
 export type { WeftRunHandle } from "./runs";
 export type { BatchedAgentCall } from "./agent";
 export { adminChange, createApiKey, AdminRefused } from "./admin";
-export { MemoryError, MEMORY_FOLDERS } from "./memory/store";
+export { MemoryError, MEMORY_FOLDERS, memoryRepoFactory } from "./memory/store";
+// The memory repositories (cf1-db, docs/cloudflare/design.md 4.3). The bundle helpers (memory/bundle.ts) stay out of
+// the package index: they run the git CLI, and nothing on the durable path may reach node:child_process.
+export { SqlRepo } from "./memory/repo-sql";
+export { GitRepo } from "./memory/repo-git";
 export { serialGit } from "./memory/git";
 export { COMPANY_TZ, companyDay, fmtDateTimePT, humanTimes } from "./memory/time";
 export { fileRunFiles, runRel, safeRunFileKey, type RunFileStore } from "./hosted/run-files";
@@ -121,7 +125,10 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
     dataDir: opts.dataDir, clock: opts.clock, redactor,
     defaultCompanyId: async () => (await opts.db.all<{ id: string }>(sql`SELECT id FROM companies ORDER BY id LIMIT 1`))[0]?.id ?? null,
     initialFiles: (companyId: string, now: string) => seedMemoryFiles(opts.db, companyId, now),
-    ...(opts.memoryRepo ? { repo: opts.memoryRepo } : {}),
+    // The platform's repo (the durable platform: always SqlRepo over the world's Db); otherwise WEFT_MEMORY=sqlite with
+    // this Db selects SqlRepo, and anything else keeps today's git repository (memoryRepoFactory).
+    ...(opts.memoryRepo ? { repo: (_root: string, companyId: string) => opts.memoryRepo!(companyId) } : {}),
+    db: opts.db, env,
   };
   const memory = createMemoryStore(memoryOptions);
   engine.memory = memory;
@@ -134,8 +141,10 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
   if (opts.bootSecrets) {
     for (const v of opts.bootSecrets()) redactor.add(v);
   } else {
+    // Node only (the durable platform passes bootSecrets): node:fs loads here, so it never sits on the hosted import graph.
+    const fs = nodeFs();
     for (const f of ["demo-api-key.txt", "demo-mcp-key.txt"]) {
-      try { redactor.add(readFileSync(join(opts.dataDir, f), "utf8").trim()); } catch { /* not seeded yet */ }
+      try { redactor.add(fs.readFileSync(join(opts.dataDir, f), "utf8").trim()); } catch { /* not seeded yet */ }
     }
   }
 

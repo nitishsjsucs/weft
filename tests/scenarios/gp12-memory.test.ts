@@ -4,7 +4,6 @@
 // with a recall block within RECALL_BUDGET that includes the one-pager and the dossier path, logged in
 // memory_recalls; running the digest twice for the same period changes nothing. Scripted provider only.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -12,12 +11,16 @@ import { RECALL_BUDGET, type RoutineDef, type RoutineRun, type WeftEvent } from 
 import { dossiers, memoryRecalls, runSteps, runTaint } from "@weft/db";
 type WeftRoutinesEngine = { fire(r: RoutineDef, i: { triggerRef: string; payload: Record<string, unknown>; attended: boolean; event: WeftEvent | null; at?: string }): Promise<RoutineRun> };
 import { memoryBinding } from "../../apps/api/src/memory/binding";
+import { memoryRepoFactory } from "../../packages/executor/src/index";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 let weft: TestWeft;
 let root: string;
 const routine = () => (globalThis as unknown as Record<symbol, { routine: RoutineDef }>)[Symbol.for("weft.w2-memory.registry")]!.routine;
-const gitIn = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+// The company memory through the repository port, so the scenario holds on git and on the SQL repo (WEFT_MEMORY=sqlite).
+const repo = () => memoryRepoFactory({ db: weft.db })(root, "cmp_larkspur");
+const fileText = async (path: string, at?: string) => (await repo().read(path, at)) ?? "";
+const fileExists = async (path: string) => (await repo().read(path)) !== null;
 const approxTokens = (s: string) => Math.ceil(s.length / 4);
 
 beforeAll(async () => {
@@ -53,24 +56,27 @@ describe("GP12 memory recall and coarsening (w2-memory)", () => {
     const run = await eng.fire(routine(), { triggerRef: slot, payload: { slot }, attended: false, event: null, at: weft.clock.now() });
     expect(run.status).toBe("skipped");
     expect(run.summary).toMatch(/^Memory digest committed [0-9a-f]{12}/);
-    const log = gitIn("log", "-1", "--format=%an <%ae>|%cn|%s%n%b");
-    expect(log).toContain("Weft Agent <agent@weft.example>|Weft Agent|memory digest: daily 2026-10-09, weekly 2026-W41");
-    expect(log).toMatch(/Weft-Digest: daily:2026-10-09,hourly:2026-10-09T17,weekly:2026-W41/);
-    const daily = readFileSync(join(root, "timeline/daily/2026-10-09.md"), "utf8");
+    const [last] = await repo().log({ n: 1 });
+    expect(last).toMatchObject({ author: "Weft Agent", subject: "memory digest: daily 2026-10-09, weekly 2026-W41" });
+    expect(last!.body).toMatch(/Weft-Digest: daily:2026-10-09,hourly:2026-10-09T17,weekly:2026-W41/);
+    if (repo().kind === "git") {
+      expect(execFileSync("git", ["-C", root, "log", "-1", "--format=%an <%ae>|%cn"], { encoding: "utf8" })).toContain("Weft Agent <agent@weft.example>|Weft Agent");
+    }
+    const daily = await fileText("timeline/daily/2026-10-09.md");
     expect(daily).toContain("- people.set_pay_rate: 1 (timeline/raw/2026-10-09.md#L12)");
     expect(daily).toMatch(/\[i2\] people\.set_pay_rate: .*\(ref: timeline\/raw\/2026-10-09\.md#L12\)/);
-    expect(existsSync(join(root, "timeline/hourly/2026-10-09T17.md"))).toBe(true);
-    expect(readFileSync(join(root, "timeline/weekly/2026-W41.md"), "utf8")).toContain("- timeline/daily/2026-10-09.md");
+    expect(await fileExists("timeline/hourly/2026-10-09T17.md")).toBe(true);
+    expect(await fileText("timeline/weekly/2026-W41.md")).toContain("- timeline/daily/2026-10-09.md");
     // The raw day is past the window: gone from the tree, still in history at the commit the summary names.
-    expect(existsSync(join(root, "timeline/raw/2026-10-09.md"))).toBe(false);
+    expect(await fileExists("timeline/raw/2026-10-09.md")).toBe(false);
     const at = /resolve at commit ([0-9a-f]{40})/.exec(daily)![1]!;
-    expect(gitIn("show", `${at}:timeline/raw/2026-10-09.md`).split("\n")[11]).toContain("people.set_pay_rate");
+    expect((await fileText("timeline/raw/2026-10-09.md", at)).split("\n")[11]).toContain("people.set_pay_rate");
     // Dossier of the person in the new events, with dated, sourced facts and backlinks; the one-pager exists.
-    const person = readFileSync(join(root, "entities/people/wrk_0026.md"), "utf8");
+    const person = await fileText("entities/people/wrk_0026.md");
     expect(person).toMatch(/- Work state \[\[entities\/states\/[A-Z]{2}\]\] \(\d{4}-\d{2}-\d{2}, src: worker:wrk_0026\)/);
     expect(person).toContain("## Backlinks");
     expect(person).toContain("- [[timeline/daily/2026-10-09]]");
-    const pager = readFileSync(join(root, RECALL_BUDGET.onePager), "utf8");
+    const pager = await fileText(RECALL_BUDGET.onePager);
     expect(pager).toContain("## Headcount by state");
     expect(pager).toContain("## Agent autonomy");
     // People read these files: times are in company time like the payroll page, never raw UTC ISO.
@@ -82,13 +88,13 @@ describe("GP12 memory recall and coarsening (w2-memory)", () => {
   });
 
   it("running the digest again for the same period changes nothing", async () => {
-    const head = gitIn("rev-parse", "HEAD").trim();
+    const head = await repo().head();
     const eng = weft.routines as unknown as WeftRoutinesEngine;
     const again = await eng.fire(routine(), { triggerRef: "cron:2026-10-26T15:05:00.000Z", payload: {}, attended: false, event: null });
     expect(again.summary).toMatch(/^Memory digest committed/);   // same run key: the engine returns the first run
     const direct = await memoryBinding(weft.db)!.digest({ companyId: "cmp_larkspur", now: weft.clock.now() });
     expect(direct.commit).toBeNull();
-    expect(gitIn("rev-parse", "HEAD").trim()).toBe(head);
+    expect(await repo().head()).toBe(head);
   });
 
   it("a chat about that person starts with a recall block within budget, logged in memory_recalls", async () => {
