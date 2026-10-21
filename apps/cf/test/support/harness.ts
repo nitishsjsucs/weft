@@ -130,10 +130,10 @@ export class Harness {
     return res;
   }
 
-  async admin(method: string, path: string, body?: unknown): Promise<Response> {
+  async admin(method: string, path: string, body?: unknown, o: Omit<RequestOpts, "origin"> = {}): Promise<Response> {
     const text = body === undefined ? "" : JSON.stringify(body);
     const sig = await signAdmin({ token: this.secrets.admin, method, path, body: text });
-    return this.fetch(path, { method, body: text || undefined, headers: { "x-weft-admin": sig, ...(text ? { "content-type": "application/json" } : {}) } }, { origin: null });
+    return this.fetch(path, { method, body: text || undefined, headers: { "x-weft-admin": sig, ...(text ? { "content-type": "application/json" } : {}) } }, { ...o, origin: null });
   }
 
   async smokeHeaders(): Promise<Record<string, string>> {
@@ -187,6 +187,12 @@ export class Visitor {
       const via = this.h.siteverify ? `the siteverify stub (${this.h.siteverify.calls.at(-1)?.secretKind ?? "not called"})` : "Cloudflare's siteverify";
       throw new Error(`lease answered ${r.status} ${text.slice(0, 200)}; Turnstile was checked against ${via}`);
     }
+    return r.json() as never;
+  }
+  /** POST /api/_admin/lease (the operator lease): the cookies land in this visitor's jar. */
+  async operatorLease(name?: string): Promise<{ status: string; slot?: string; gen?: number; operator?: string }> {
+    const r = await this.h.admin("POST", "/api/_admin/lease", name === undefined ? {} : { name }, { ip: this.ip, jar: this.jar });
+    if (!r.ok) throw new Error(`operator lease answered ${r.status}: ${(await r.text()).slice(0, 200)}`);
     return r.json() as never;
   }
   json<T = unknown>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T; res: Response }> {

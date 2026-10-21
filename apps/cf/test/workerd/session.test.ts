@@ -1,9 +1,11 @@
 // Design 11.4: Turnstile with Cloudflare's published test secrets (1x...AA passes, 2x...AA fails) against the local
 // siteverify stub (one opt-in case asks Cloudflare's real endpoint), the session and human-grant cookies, a tampered
 // cookie gets 401, mutations need a lease and a fresh grant (428), cross-origin mutations are refused, the kill switch
-// answers model-calling admissions 503, and the session reports the world's model switch.
+// answers model-calling admissions 503, the session reports the world's model switch, and the operator lease
+// (POST /api/_admin/lease and /api/_admin/grant) is the admin signature's alone.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DO_NAMES, HOSTED_CONFIG_KEYS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, type SessionStatus } from "../../src/shared/contracts";
+import { signAdmin } from "../../src/shared/tokens";
 import { Harness, TURNSTILE } from "../support/harness";
 
 let h: Harness;
@@ -174,6 +176,117 @@ describe("the session's provider", () => {
     await v.fetch("/api/_hosted/model", { method: "PUT", body: JSON.stringify({ provider: "workers_ai" }) });
     expect((await other.json<SessionStatus>("/api/_session")).body.provider).toEqual({ id: "openai", reason: "default" });
     expect((await h.visitor().json<SessionStatus>("/api/_session")).body.provider).toEqual({ id: "openai", reason: "default" });
+  });
+});
+
+describe("the operator lease", () => {
+  const LEASE = "/api/_admin/lease";
+  let leasesBefore = 0;
+  beforeAll(async () => {
+    await releaseAll();
+    leasesBefore = (await h.ops()).lobby.leases.length;
+  });
+  const signed = async (o: { token?: string; nowS?: number; path?: string; body?: string } = {}) => ({
+    "x-weft-admin": await signAdmin({ token: o.token ?? h.secrets.admin, method: "POST", path: o.path ?? LEASE, body: o.body ?? "{}", nowS: o.nowS }),
+    "content-type": "application/json",
+  });
+
+  it("refuses no signature, a wrong token, a stale timestamp, another path's or another body's signature", async () => {
+    const v = h.visitor("198.51.100.180");
+    const tries: Record<string, HeadersInit> = {
+      none: { "content-type": "application/json" },
+      wrong: await signed({ token: "w".repeat(64) }),
+      stale: await signed({ nowS: Math.floor(Date.now() / 1000) - 600 }),
+      future: await signed({ nowS: Math.floor(Date.now() / 1000) + 600 }),
+      path: await signed({ path: "/api/_admin/grant" }),
+      body: await signed({ body: '{"name":"other"}' }),
+    };
+    for (const [why, headers] of Object.entries(tries)) {
+      const r = await v.fetch(LEASE, { method: "POST", body: "{}", headers }, { origin: null });
+      expect(r.status, why).toBe(401);
+      expect(await r.json(), why).toMatchObject({ code: "ADMIN_SIGNATURE" });
+      expect(r.headers.getSetCookie(), why).toEqual([]);
+    }
+    expect(v.jar.cookies.size).toBe(0);
+    expect((await h.ops()).lobby.leases.length).toBe(leasesBefore);
+  });
+
+  it("leases a pool slot with both cookies, no Turnstile, and returns the same lease when asked again", async () => {
+    const stub = h.siteverify!;
+    const calls = stub.calls.length;
+    const v = h.visitor("198.51.100.181");
+    const l = await v.operatorLease("op-a");
+    expect(l).toMatchObject({ status: "leased", operator: "op-a" });
+    expect(l.slot).toMatch(/^slot-\d+$/);
+    expect(stub.calls.length).toBe(calls);
+    expect([...v.jar.cookies.keys()].sort()).toEqual([SESSION_COOKIE, HUMAN_GRANT_COOKIE].sort());
+    const st = await v.json<SessionStatus>("/api/_session");
+    expect(st.body).toMatchObject({ world: "slot", lease: { slot: l.slot, gen: l.gen } });
+    expect(st.body.grantExpiresAt).not.toBeNull();
+    expect((await v.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "operator note" }) })).status).toBe(201);
+    // Another client asking for the same name gets the same lease (and its own copy of the cookies).
+    const again = h.visitor("198.51.100.182");
+    expect(await again.operatorLease("op-a")).toMatchObject({ status: "leased", slot: l.slot, gen: l.gen });
+    expect((await again.json<{ text: string }[]>("/api/v1/notes")).body.map((n) => n.text)).toContain("operator note");
+    // Other names are other leases.
+    const b = await h.visitor("198.51.100.183").operatorLease("op-b");
+    expect(b.slot).not.toBe(l.slot);
+    expect((await h.admin("POST", LEASE, { name: "Not A Name" })).status).toBe(400);
+  });
+
+  it("needs the grant for mutations like any lease: without it 428, with POST /api/_admin/grant 201", async () => {
+    const v = h.visitor("198.51.100.184");
+    await v.operatorLease("op-grant");
+    v.jar.cookies.delete(HUMAN_GRANT_COOKIE);
+    const noGrant = await v.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "x" }) });
+    expect(noGrant.status).toBe(428);
+    expect(await noGrant.json()).toMatchObject({ code: "TURNSTILE_REQUIRED" });
+    const g = await h.admin("POST", "/api/_admin/grant", { name: "op-grant" }, { ip: v.ip, jar: v.jar });
+    expect(g.status).toBe(200);
+    expect(await g.json()).toMatchObject({ ok: true });
+    expect(v.jar.cookies.has(HUMAN_GRANT_COOKIE)).toBe(true);
+    expect((await v.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "after grant" }) })).status).toBe(201);
+    // The grant route serves the operator's own session only, and never starts a lease.
+    const visitor = h.visitor("198.51.100.185");
+    await visitor.lease();
+    expect((await h.admin("POST", "/api/_admin/grant", { name: "op-grant" }, { ip: visitor.ip, jar: visitor.jar })).status).toBe(409);
+    expect((await h.admin("POST", "/api/_admin/grant", { name: "op-never-leased" })).status).toBe(409);
+  });
+
+  it("ends like any lease: the cookie stops, the grant route answers LEASE_ENDED, the slot is reset", async () => {
+    const env = await h.coreEnv();
+    const v = h.visitor("198.51.100.186");
+    const l = await v.operatorLease("op-end");
+    expect(l.status).toBe("leased");
+    await v.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "operator was here" }) });
+    const oldCookie = v.jar.cookies.get(SESSION_COOKIE)!;
+    await env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby)).release({ slot: l.slot!, reason: "test" });
+    const stale = h.visitor(v.ip);
+    stale.jar.cookies.set(SESSION_COOKIE, oldCookie);
+    expect(await stale.json("/api/v1/notes")).toMatchObject({ status: 409, body: { code: "LEASE_ENDED" } });
+    const g = await h.admin("POST", "/api/_admin/grant", { name: "op-end" }, { ip: v.ip, jar: v.jar });
+    expect(g.status).toBe(409);
+    expect(await g.json()).toMatchObject({ code: "LEASE_ENDED" });
+    expect(v.jar.cookies.has(SESSION_COOKIE)).toBe(false);
+    const next = await v.operatorLease("op-end");
+    expect(next.status).toBe("leased");
+    expect((await v.json<{ text: string }[]>("/api/v1/notes")).body.map((n) => n.text)).not.toContain("operator was here");
+  });
+
+  it("holds an MCP key on its pool slot (scenario 8 on the deployed URL) that dies with the lease", async () => {
+    const env = await h.coreEnv();
+    const v = h.visitor("198.51.100.187");
+    const l = await v.operatorLease("op-mcp");
+    expect(l.status).toBe("leased");
+    const k = await v.fetch("/api/_hosted/mcp-key", { method: "POST" });
+    expect(k.status).toBe(201);
+    const { key } = await k.json() as { key: string };
+    const mcp = () => h.fetch("/mcp", { method: "POST", body: JSON.stringify({ method: "tools/list" }), headers: { authorization: `Bearer ${key}` } }, { origin: null });
+    const ok = await mcp();
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ mcp: true, world: { slot: l.slot, gen: l.gen } });
+    await env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby)).release({ slot: l.slot!, reason: "test" });
+    expect((await mcp()).status).toBe(409);
   });
 });
 

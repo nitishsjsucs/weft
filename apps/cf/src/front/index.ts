@@ -15,6 +15,7 @@ import { ADMIN_HEADER, mcpKeyId, signCtx, verifyAdmin } from "../shared/tokens";
 import { serveAssets } from "./assets";
 import { forwardToWorld, stripTrust } from "./forward";
 import { ResponseMemo } from "./memo";
+import { operatorGrant, operatorLease } from "./operator";
 import { sessionStatus, startLease, verifyHuman } from "./session";
 import { clearSessionCookies, FrontConfigError, resolveVisit, secrets, sessionCookies, targetOf, withCookies, type Visit } from "./visit";
 
@@ -62,7 +63,7 @@ export default {
         return path === HOSTED_PATHS.lease ? await startLease(req, env, visit) : await verifyHuman(req, env, visit);
       }
       if (path === HOSTED_PATHS.live) return await live(req, env, visit);
-      if (path === HOSTED_PATHS.admin || path.startsWith(`${HOSTED_PATHS.admin}/`)) return await admin(req, env, url);
+      if (path === HOSTED_PATHS.admin || path.startsWith(`${HOSTED_PATHS.admin}/`)) return await admin(req, env, url, visit);
       if (path.startsWith("/api/_hosted/")) return await hosted(req, env, url, visit);
       if (path.startsWith("/api/v1/")) return await api(req, env, url, visit);
       return plainError(404, "NotFound", "NOT_FOUND", "No such API route");
@@ -202,8 +203,8 @@ async function mcp(req: Request, env: FrontEnv, url: URL): Promise<Response> {
   });
 }
 
-/** /api/_admin/* (design 9.2 and 10): HMAC with WEFT_ADMIN_TOKEN over method, path, timestamp and body. */
-async function admin(req: Request, env: FrontEnv, url: URL): Promise<Response> {
+/** /api/_admin/* (design 6.2, 9.2 and 10): HMAC with WEFT_ADMIN_TOKEN over method, path, timestamp and body. */
+async function admin(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Response> {
   const body = req.method === "GET" || req.method === "HEAD" ? "" : await req.text();
   if (body.length > 64 * 1024) return plainError(413, "ValidationError", "TOO_LARGE", "Admin bodies are small");
   const ok = await verifyAdmin({ token: env.WEFT_ADMIN_TOKEN, header: req.headers.get(ADMIN_HEADER), method: req.method, path: url.pathname, body });
@@ -225,6 +226,10 @@ async function admin(req: Request, env: FrontEnv, url: URL): Promise<Response> {
       const r = await lobby(env).resetWorld({ slot });
       return "error" in r ? hostedError(r.error, r.message) : json(r);
     }
+    case "POST lease":
+      return operatorLease(env, v, parsed);
+    case "POST grant":
+      return operatorGrant(env, v, parsed);
     case "GET ops": {
       const [l, s] = await Promise.all([lobby(env).ops(), env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({})]);
       const cfg = await envConfig(env);

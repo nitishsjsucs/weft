@@ -1,6 +1,7 @@
 // Design 11.4: lease assign, expiry and reset; 20 concurrent starts get unique slots; the per-IP lease cap, also
-// under concurrent starts; isolation (a write in one slot is invisible in another; an old cookie generation gets
-// 409); showcase mutations get 409 at the edge and in the Durable Object.
+// under concurrent starts; the operator lease under the same pool, cap and expiry; isolation (a write in one slot is
+// invisible in another; an old cookie generation gets 409); showcase mutations get 409 at the edge and in the Durable
+// Object.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DO_NAMES, HOSTED_SETTINGS, SESSION_COOKIE, TRUST_HEADERS } from "../../src/shared/contracts";
 import { utcDay } from "../../src/shared/http";
@@ -148,6 +149,36 @@ describe("leases", () => {
     expect(results.filter((r) => r.status === "leased")).toHaveLength(1);
     expect(results.filter((r) => r.status === "ip_limit")).toHaveLength(POOL - 1);
     expect((await h.ops()).lobby.leases).toHaveLength(1);
+  });
+});
+
+describe("the operator lease", () => {
+  it("waits for the pool like any visitor", async () => {
+    await releaseAll();
+    for (let i = 0; i < POOL; i++) expect((await h.visitor(`198.51.100.${150 + i}`).lease()).status).toBe("leased");
+    const op = h.visitor("198.51.100.160");
+    expect(await op.operatorLease("op-pool")).toMatchObject({ status: "waitlist", operator: "op-pool" });
+    expect(op.jar.cookies.size).toBe(0);
+    await releaseAll();
+    expect((await op.operatorLease("op-pool")).status).toBe("leased");
+  });
+
+  it("counts against its address's daily lease cap", async () => {
+    await releaseAll();
+    const ip = "192.0.2.80";
+    await (await lobby()).extrasCounterAdd(`ip:${await ipHash(h.secrets.session, ip, utcDay())}`, HOSTED_SETTINGS.leasesPerIpHashPerDay);
+    const op = h.visitor(ip);
+    expect(await op.operatorLease("op-cap")).toMatchObject({ status: "ip_limit" });
+    expect(op.jar.cookies.size).toBe(0);
+  });
+
+  it("ends at the lease's total time like any other", async () => {
+    await releaseAll();
+    const op = h.visitor("198.51.100.161");
+    const l = await op.operatorLease("op-expiry");
+    expect(l.status).toBe("leased");
+    expect((await (await lobby()).sweep({ now: Date.now() + (HOSTED_SETTINGS.leaseTotalMinutes + 1) * 60_000 })).released).toBeGreaterThanOrEqual(1);
+    expect(await op.json("/api/v1/notes")).toMatchObject({ status: 409, body: { code: "LEASE_ENDED" } });
   });
 });
 
