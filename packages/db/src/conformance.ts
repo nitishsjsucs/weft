@@ -1,13 +1,14 @@
-// The transaction conformance cases (docs/cloudflare/design.md 11.3), written once and run twice: on the node:sqlite
-// emulator (packages/db/test/conformance.test.ts) and inside workerd through Miniflare (conformance.workerd.test.ts,
-// `pnpm --filter @weft/db test:workerd`). Each case returns a JSON observation and both runners compare it with the
-// same `expect` value, so the emulator stays pinned to the real runtime. The deployed conformance route (cf4/cf7)
-// can run the same module against production workerd.
+// The transaction conformance cases (docs/cloudflare/design.md 11.3), written once and run three times: on the
+// node:sqlite emulator (packages/db/test/conformance.test.ts), inside workerd through Miniflare
+// (test-workerd/conformance.workerd.test.ts, `pnpm --filter @weft/db test:workerd`), and on a deployed Durable Object
+// through runConformance below (CompanyDO's scratch `conformance` object, design 9.2 step 5). Each case returns a JSON
+// observation and every runner compares it with the same `expect` value, so the emulator stays pinned to the real
+// runtime.
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import type { DurableStorageLike } from "../../contracts/src/ext/cf-db";
-import { openDurableDb } from "../src/durable";
-import { createTxGuard } from "../src/tx-guard";
+import { openDurableDb } from "./durable";
+import { createTxGuard } from "./tx-guard";
 
 export interface CaseHost {
   readonly storage: DurableStorageLike;
@@ -597,3 +598,80 @@ export const CASES: ConformanceCase[] = [
     expect: { ok: true, value: { inTx: "Cannot call deleteAll() within a transaction", left: [], ids: [{ id: 1 }] } },
   },
 ];
+
+// ---- the deployed run ------------------------------------------------------------------------------------------------
+
+/** Key order does not matter and undefined properties are dropped, as in the vitest runners' toEqual. */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(o).sort().filter((k) => o[k] !== undefined).map((k) => [k, canonical(o[k])]));
+  }
+  return v;
+}
+const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
+export interface ConformanceRunOptions {
+  /** Delivers SUBS[name] as a second event to this object (CompanyDO: an RPC to itself, queued behind the input gate). */
+  deliver?(name: keyof typeof SUBS): Promise<unknown>;
+  sleep?(ms: number): Promise<void>;
+  /** The slow cases wait out the 30 s input-gate timeout and reset the object; off by default on a deployed object. */
+  includeSlow?: boolean;
+}
+export interface ConformanceCaseResult { name: string; ok: boolean; skipped?: boolean; detail?: string }
+export interface ConformanceRun { passed: number; failed: number; skipped: number; cases: ConformanceCaseResult[] }
+
+/**
+ * Runs the design 11.3 cases one after another on a live Durable Object's storage, wiping it with deleteAll() before
+ * each case and after the last (every case expects an empty database). A case that needs a second event is skipped
+ * without `deliver`; the slow cases are skipped unless `includeSlow`, since they reset the object they run on.
+ */
+export async function runConformance(storage: DurableStorageLike, opts: ConformanceRunOptions = {}): Promise<ConformanceRun> {
+  const out: ConformanceRun = { passed: 0, failed: 0, skipped: 0, cases: [] };
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let delivered = false;
+  const host: CaseHost = {
+    storage, platform: "workerd", sleep,
+    deliver: async (name) => {
+      delivered = true;
+      if (!opts.deliver) throw new Error("NO_DELIVER: this run has no second-event channel");
+      return opts.deliver(name);
+    },
+  };
+  for (const c of CASES) {
+    if (c.slow && !opts.includeSlow) {
+      out.skipped++;
+      out.cases.push({ name: c.name, ok: true, skipped: true, detail: "waits out the 30 s input-gate timeout and resets the object; covered in Miniflare and on the emulator" });
+      continue;
+    }
+    await storage.deleteAll();
+    delivered = false;
+    let got: Outcome;
+    try { got = { ok: true, value: await c.run(host) }; } catch (e) { got = { ok: false, error: messageOf(e) }; }
+    if (delivered && !opts.deliver) {
+      out.skipped++;
+      out.cases.push({ name: c.name, ok: true, skipped: true, detail: "needs a second event and this run has none" });
+      continue;
+    }
+    let ok = same(got, c.expect);
+    let detail = ok ? undefined : `expected ${JSON.stringify(c.expect).slice(0, 400)}, got ${JSON.stringify(got).slice(0, 400)}`;
+    if (ok && c.after) {
+      let after: Outcome;
+      try { after = { ok: true, value: await c.after(host) }; } catch (e) { after = { ok: false, error: messageOf(e) }; }
+      ok = same(after, { ok: true, value: c.expectAfter });
+      if (!ok) detail = `after: expected ${JSON.stringify(c.expectAfter).slice(0, 400)}, got ${JSON.stringify(after).slice(0, 400)}`;
+    }
+    if (ok) out.passed++; else out.failed++;
+    out.cases.push({ name: c.name, ok, ...(detail ? { detail } : {}) });
+  }
+  await storage.deleteAll();
+  return out;
+}
+
+/** Runs one second-event body (SUBS[name]) on this storage: what a deployed object answers to its own `deliver` RPC. */
+export async function runConformanceSub(storage: DurableStorageLike, name: string): Promise<unknown> {
+  if (!Object.hasOwn(SUBS, name)) throw new Error(`no conformance sub ${name.slice(0, 40)}`);
+  const host: CaseHost = { storage, platform: "workerd", sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)), deliver: () => Promise.reject(new Error("a sub delivers nothing")) };
+  return SUBS[name as keyof typeof SUBS](host);
+}

@@ -11,7 +11,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   HOSTED_SETTINGS, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
-  DO_NAMES, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorldMode,
+  DO_NAMES, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
 } from "../../shared/contracts";
 import { envConfig } from "../../shared/config";
 import { mcpKeyId, readCtx } from "../../shared/tokens";
@@ -119,6 +119,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         onOutbox: () => queueMicrotask(() => void this.flushOutbox()),
         readOnly: stamp.mode === "showcase",
         fetch: this.counter.wrap(rawFetch),
+        ai: (this.env.AI as unknown as WorkersAiBindingLike | undefined) ?? null,
         mcpAskAllowed: async (apiKey) => {
           const keyId = await mcpKeyId(apiKey);
           const r = await this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby)).take({ key: `mcp_ask:${keyId}`, limit: MCP_AGENT_ASK_PER_KEY_DAY });
@@ -671,10 +672,20 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (this.stamp && this.stamp.mode !== "conformance") throw new Error("conformance runs only on the conformance object");
     const mod = this.module ?? (this.module = await loadEngine());
     if (!mod.store.conformance) throw new Error("this build has no conformance cases");
+    // The interleave case's second event: an RPC to this same object, which workerd queues behind the input gate.
+    const self = this.env.COMPANY.get(this.ctx.id) as unknown as { conformanceSub(name: string): Promise<unknown> };
     try {
-      return await mod.store.conformance(this.storage);
+      return await mod.store.conformance(this.storage, { deliver: (name) => self.conformanceSub(name) });
     } finally {
       await this.ctx.storage.deleteAll();
     }
+  }
+
+  /** A conformance case's second event (runConformance's deliver), on the conformance object only. */
+  async conformanceSub(name: string): Promise<unknown> {
+    this.assertName(DO_NAMES.conformance);
+    const mod = this.module ?? (this.module = await loadEngine());
+    if (!mod.store.conformanceSub) throw new Error("this build has no conformance cases");
+    return mod.store.conformanceSub(this.storage, name);
   }
 }

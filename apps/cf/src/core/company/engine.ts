@@ -5,7 +5,7 @@
 // weft-engine.ts, loaded lazily (design 3.2: @weft/* is imported inside blockConcurrencyWhile); the Miniflare suite
 // plugs a small fake in through the same seam, so the plumbing is tested without the Weft stack.
 import type {
-  DurableStorageLike, HostedProviderId, HostedSpendLedger, HostedWorldRef, McpKeyMint, RunHost, SchedulerHost, SqlMeter, TxGuard,
+  DurableStorageLike, HostedProviderId, HostedSpendLedger, HostedWorldRef, McpKeyMint, RunHost, SchedulerHost, SqlMeter, TxGuard, WorkersAiBindingLike,
 } from "../../shared/contracts";
 
 /** What the world boots with (DurablePlatformInput, plus the DO-side knobs). */
@@ -22,6 +22,8 @@ export interface WorldBootInput {
   readOnly: boolean;
   /** Counted fetch for model transports (design 8.1: at most 40 per alarm). */
   fetch: typeof fetch;
+  /** The Workers AI binding for the workers_ai switch (absent where nothing provides it). */
+  ai?: WorkersAiBindingLike | null;
   /** MCP agent_ask admission per key per UTC day (MCP_AGENT_ASK_PER_KEY_DAY, a Lobby counter). */
   mcpAskAllowed: (apiKey: string) => Promise<boolean>;
 }
@@ -96,8 +98,11 @@ export interface WorldStore {
   /** True when no domain row was written since the last reset (the dirty-key table holds nothing but kv_state). */
   isClean(storage: DurableStorageLike): boolean;
   deltaReset(storage: DurableStorageLike, a: SnapshotArtifacts): DeltaResetResult;
-  /** The design 11.3 conformance cases on this object's storage (the deployed `conformance` scratch object). */
-  conformance?(storage: DurableStorageLike): Promise<{ passed: number; failed: number; cases: { name: string; ok: boolean; detail?: string }[] }>;
+  /** The design 11.3 conformance cases on this object's storage (the deployed `conformance` scratch object); `deliver`
+   * sends a case's second event to the same object (an RPC to itself, which waits for the input gate). */
+  conformance?(storage: DurableStorageLike, opts?: { deliver?(name: string): Promise<unknown> }): Promise<{ passed: number; failed: number; skipped?: number; cases: { name: string; ok: boolean; skipped?: boolean; detail?: string }[] }>;
+  /** One second-event body of the conformance cases, run on this storage. */
+  conformanceSub?(storage: DurableStorageLike, name: string): Promise<unknown>;
 }
 
 export interface EngineModule {

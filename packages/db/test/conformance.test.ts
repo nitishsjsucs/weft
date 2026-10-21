@@ -2,6 +2,7 @@
 // (test-workerd/conformance.workerd.test.ts), so the emulator stays pinned to the runtime it stands in for.
 import { describe, expect, it } from "vitest";
 import { DurableEmulator, WORKERD_MESSAGES } from "../src/emu";
+import { runConformance } from "../src/conformance";
 import { CASES, GATE_TIMEOUT_MESSAGE, SUBS, messageOf, type CaseHost, type Outcome } from "../test-workerd/cases";
 
 /** The gate timeout is 30 s as in workerd; the hang cases use 1 s here so the suite stays quick. */
@@ -32,6 +33,17 @@ describe("transaction conformance on the emulator (design 11.3)", () => {
       } finally { emu.close(); }
     }, 20_000);
   }
+
+  it("runConformance runs every case in turn on one object, as the deployed conformance route does", async () => {
+    const emu = new DurableEmulator();
+    try {
+      const r = await runConformance(emu, { sleep: (ms) => emu.sleep(ms), deliver: (name) => emu.deliver(() => SUBS[name](host(emu))) });
+      expect(r.cases.filter((c) => !c.ok)).toEqual([]);
+      expect(r.skipped).toBe(CASES.filter((c) => c.slow).length);
+      expect(r.passed).toBe(CASES.length - r.skipped);
+      expect(emu.sql.exec("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf%' ESCAPE '\\'").one().n).toBe(0);
+    } finally { emu.close(); }
+  }, 60_000);
 
   it("uses workerd's 30 s gate timeout and message by default", () => {
     expect(GATE_TIMEOUT_MESSAGE).toBe(WORKERD_MESSAGES.gateTimeout);

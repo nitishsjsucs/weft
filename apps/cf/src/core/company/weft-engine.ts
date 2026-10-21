@@ -58,6 +58,8 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
   const platform = d.durablePlatform({
     storage: input.storage, env: input.env, world: input.world, fixtures: bundledFixtures, spend: input.spend,
     runHost: input.runHost, schedulerHost: input.schedulerHost, onOutbox: input.onOutbox, fetch: input.fetch,
+    // The transports call input.fetch, which already counts against the alarm's budget: no second counter here.
+    ai: input.ai ?? null,
   });
   const wrapped: DurableWeftPlatform<unknown> = {
     ...platform,
@@ -178,10 +180,15 @@ const store: WorldStore = {
       return { ok: false, rowsWritten: 0, mismatches: [message(e)] };
     }
   },
-  async conformance(storage) {
+  async conformance(storage, opts) {
     const run = weftDeps().runConformance;
     if (!run) throw new Error("cf1-db: @weft/db does not export runConformance yet");
-    return run(storage);
+    return run(storage, opts);
+  },
+  async conformanceSub(storage, name) {
+    const sub = weftDeps().runConformanceSub;
+    if (!sub) throw new Error("cf1-db: @weft/db does not export runConformanceSub yet");
+    return sub(storage, name);
   },
 };
 

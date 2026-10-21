@@ -33,7 +33,8 @@ export interface WeftDeps {
   verifyAgainstManifest(storage: DurableStorageLike, manifest: SnapshotLike["manifest"], only?: readonly string[]): { mismatched: string[]; digest: string; digests: Record<string, { rows: number; digest: string }> };
   deltaReset(storage: DurableStorageLike, snap: SnapshotLike): SqlCostLike & { tables: string[]; keys: number };
   dirtyKeys(storage: DurableStorageLike): Map<string, string[]>;
-  runConformance?(storage: DurableStorageLike): Promise<{ passed: number; failed: number; cases: { name: string; ok: boolean; detail?: string }[] }>;
+  runConformance?(storage: DurableStorageLike, opts?: { deliver?(name: string): Promise<unknown> }): Promise<{ passed: number; failed: number; skipped?: number; cases: { name: string; ok: boolean; skipped?: boolean; detail?: string }[] }>;
+  runConformanceSub?(storage: DurableStorageLike, name: string): Promise<unknown>;
   /** cf2-platform: apps/api/src/platform/durable.ts, exported from @weft/api/assemble */
   durablePlatform(input: DurablePlatformInput & { fetch?: typeof fetch; fetchCounter?: FetchCounter }): DurableWeftPlatform<unknown>;
   assembleWeft: typeof assembleModule.assembleWeft;
@@ -70,6 +71,7 @@ const REQUIRED: readonly [object, string, string, string][] = [
   [dbModule, "@weft/db", "verifyAgainstManifest", "cf1-db"],
   [dbModule, "@weft/db", "deltaReset", "cf1-db"],
   [dbModule, "@weft/db", "dirtyKeys", "cf1-db"],
+  [dbModule, "@weft/db", "runConformance", "cf1-db"],
   [assembleModule, "@weft/api/assemble", "durablePlatform", "cf2-platform"],
   [mcpModule, "@weft/mcp", "createRemoteMcpHandler", "cf3-agent"],
 ];
@@ -96,6 +98,7 @@ export function weftDeps(): WeftDeps {
     deltaReset: db("deltaReset"),
     dirtyKeys: db("dirtyKeys"),
     runConformance: get(dbModule, "runConformance") as WeftDeps["runConformance"],
+    runConformanceSub: get(dbModule, "runConformanceSub") as WeftDeps["runConformanceSub"],
     durablePlatform: get(assembleModule, "durablePlatform") as WeftDeps["durablePlatform"],
     assembleWeft: assembleModule.assembleWeft,
     bindWorldScope: get(agentModule, "bindWorldScope") as WeftDeps["bindWorldScope"],

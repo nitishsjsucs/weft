@@ -10,5 +10,6 @@ export { worldScope, keyedWithReset } from "./scope";
 export { DurableEmulator, openDurableEmulator, EmulatedSqlError, ALLOWED_PRAGMAS, WORKERD_MESSAGES, type DurableEmulatorOptions, type RecordedWrite } from "./emu";
 export { migrateDurable, MIGRATIONS_TABLE, type DurableMigrationOutcome } from "./migrate-durable";
 export { migrationEntries, journalHash, readMigrationsFromDir, type MigrationEntry, type MigrationJournal } from "./migrations";
+export { runConformance, runConformanceSub, CASES as CONFORMANCE_CASES, type ConformanceRun, type ConformanceRunOptions, type ConformanceCaseResult } from "./conformance";
 export { splitStatements, tokenize, statementKind, tablesOf, targetTable, parameterCount } from "./sqltext";
 export { buildSnapshot, restoreSnapshot, beginRestore, restoreChunks, finishRestore, armDirtyTracking, dirtyKeys, deltaReset, snapshotTables, tableDigest, tableDigests, verifyAgainstManifest, encodeSnapshot, decodeSnapshot, snapshotToJson, snapshotFromJson, gzip, gunzip, SNAPSHOT_VERSION, MAX_CHUNK_BYTES, type Snapshot, type SnapshotManifest, type SnapshotChunk, type SnapshotTable, type SeedRows, type SeedTable, type TableDigest, type RestoreOutcome, type DeltaResetOutcome, type SqlCost } from "./snapshot";
