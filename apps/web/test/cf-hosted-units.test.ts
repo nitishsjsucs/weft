@@ -122,6 +122,7 @@ describe("hosted copy", () => {
     expect(resetNote(1)).toContain("1 reset is left");
     expect(resetNote(undefined)).toContain("3 resets are left");
     expect(hostedResetError(429, "RESET_LIMIT")).toBe("You have used the 3 resets for this demo company.");
+    expect(hostedResetError(503, "RESETS_PAUSED")).toContain("paused until 00:00 UTC");
     expect(hostedResetError(400, "HOSTED_RESET_PROFILE")).toContain("rich demo data");
     expect(hostedResetError(409, "LEASE_REQUIRED")).toContain("Start your own demo company");
     expect(hostedResetError(500, null)).toBeNull();
