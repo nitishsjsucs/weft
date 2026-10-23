@@ -14,7 +14,7 @@ import { DO_PATHS, HEALTH_PATH, isModelAdmission, isUpload, SIM_RESET_PATH } fro
 import { ADMIN_HEADER, mcpKeyId, signCtx, verifyAdmin } from "../shared/tokens";
 import { serveAssets } from "./assets";
 import { forwardToWorld, stripTrust } from "./forward";
-import { ResponseMemo } from "./memo";
+import { HEALTH_MEMO_MS, readNames, ResponseMemo, type NormalizedRead } from "./memo";
 import { operatorGrant, operatorLease, operatorRelease } from "./operator";
 import { sessionStatus, startLease, verifyHuman } from "./session";
 import { clearSessionCookies, FrontConfigError, resolveVisit, secrets, sessionCookies, targetOf, withCookies, type Visit } from "./visit";
@@ -120,20 +120,51 @@ async function api(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Res
     }
     return forwardToWorld(req, env, { ...worldOf(v, t), path: apiPath, search: url.search });
   }
-  // Reads. The showcase is immutable per snapshot: memoized in the isolate (health is always fresh).
-  // The showcase is asked the normalized read the key names (memo.ts), so nothing else a client adds can vary it.
-  if (!t.leased && req.method === "GET" && apiPath !== HEALTH_PATH) {
-    const cfg = await envConfig(env);
-    const read = ResponseMemo.normalize({ path: apiPath, search: url.search, principal: req.headers.get("x-weft-principal"), snapshot: cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? "none" });
-    const hit = showcaseMemo.get(read.key);
-    if (hit) return hit;
-    const headers = new Headers(req.headers);
-    if (read.principal) headers.set("x-weft-principal", read.principal);
-    else headers.delete("x-weft-principal");
-    const res = await forwardToWorld(new Request(req.url, { method: "GET", headers }), env, { ...worldOf(v, t), path: apiPath, search: read.search });
-    return showcaseMemo.put(read.key, res);
-  }
+  // Reads. The showcase is immutable per snapshot: memoized in the isolate, HEAD and health included.
+  if (!t.leased && (req.method === "GET" || req.method === "HEAD")) return showcaseRead(req, env, url, v, t, apiPath);
   return forwardToWorld(req, env, { ...worldOf(v, t), path: apiPath, search: url.search });
+}
+
+/** A HEAD answer: the GET's status and headers without its body. */
+const forMethod = (req: Request, res: Response): Response => (req.method === "HEAD" ? new Response(null, { status: res.status, headers: res.headers }) : res);
+
+/**
+ * An unleased GET or HEAD (design 4.5): answered from the showcase memo, else the showcase is asked the normalized
+ * read the key names (memo.ts) as a GET, so nothing a client adds can vary the key: not an unknown parameter, not a
+ * known one the route does not read (learned from the world's x-weft-query), not the method. Misses are capped per
+ * path family per window, so free values cannot make the showcase read without end. GET /api/v1/health is reused for
+ * HEALTH_MEMO_MS, so a showcase tab's health poll reaches no Durable Object while the answer is fresh.
+ */
+async function showcaseRead(req: Request, env: FrontEnv, url: URL, v: Visit, t: ReturnType<typeof targetOf>, apiPath: string): Promise<Response> {
+  const cfg = await envConfig(env);
+  const base = { path: apiPath, search: url.search, principal: req.headers.get("x-weft-principal"), snapshot: cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? "none" };
+  const maxAge = apiPath === HEALTH_PATH ? HEALTH_MEMO_MS : undefined;
+  let read = ResponseMemo.normalize({ ...base, reads: showcaseMemo.readsFor(apiPath) });
+  const hit = showcaseMemo.get(read.key, maxAge);
+  if (hit) return forMethod(req, hit);
+  if (!showcaseMemo.admitMiss(apiPath, read)) {
+    return hostedError("RATE_LIMITED", "The shared demo company is answering many different requests right now; try again in a minute, or start your own demo company", { retryAfterS: 60 });
+  }
+  const ask = (r: NormalizedRead) => {
+    const headers = new Headers(req.headers);
+    if (r.principal) headers.set("x-weft-principal", r.principal);
+    else headers.delete("x-weft-principal");
+    return forwardToWorld(new Request(req.url, { method: "GET", headers }), env, { ...worldOf(v, t), path: apiPath, search: r.search });
+  };
+  let res = await ask(read);
+  let names = readNames(res);
+  // The route read a parameter the learned set had left out (it reads it only for some values of another): ask again
+  // with every known parameter, so the answer is the one this request asked for.
+  if (read.dropped.length && (names === null || read.dropped.some((d) => names!.has(d)))) {
+    await res.body?.cancel();
+    read = ResponseMemo.normalize({ ...base, reads: null });
+    res = await ask(read);
+    names = readNames(res);
+  }
+  if (res.status !== 200) return forMethod(req, res);
+  // Kept under the key of everything this route is known to read, which this request and the asked one agree on.
+  const learned = showcaseMemo.learn(apiPath, names);
+  return forMethod(req, await showcaseMemo.put(ResponseMemo.normalize({ ...base, reads: learned }).key, res));
 }
 
 /** "Reset demo data..." (design 6.2 step 5): through the Lobby, rich profile only, a new cookie generation. */

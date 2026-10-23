@@ -11,8 +11,8 @@ import { formatHostedMcpKey, HOSTED_RATE_LIMITS, HUMAN_GRANT_COOKIE, SESSION_COO
 
 export interface FakeFront {
   env: FrontEnv;
-  /** Requests that reached a world: the object name, the URL and the principal header it got. */
-  worlds: { slot: string; url: string; principal: string | null }[];
+  /** Requests that reached a world: the object name, the URL, the principal header it got and the method. */
+  worlds: { slot: string; url: string; principal: string | null; method?: string }[];
   /** Every Rate Limiting call: the binding and the key. */
   limits: { binding: string; key: string }[];
   takes: { key: string; limit: number }[];
@@ -20,7 +20,7 @@ export interface FakeFront {
   spend: unknown[];
 }
 
-export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldStatus?: number; worldHeaders?: Record<string, string>; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
+export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldStatus?: number; worldHeaders?: Record<string, string>; worldQuery?: (url: URL) => string | null; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
   const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [], spend: [] };
   const rl = (binding: string, max: number) => {
     const seen = new Map<string, number>();
@@ -37,8 +37,9 @@ export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown;
       get: (slot: string) => ({
         fetch: async (req: Request) => {
           const url = new URL(req.url);
-          out.worlds.push({ slot, url: req.url, principal: req.headers.get("x-weft-principal") });
-          return new Response(JSON.stringify(o.worldBody?.(url) ?? { slot, path: url.pathname }), { status: o.worldStatus ?? 200, headers: { "content-type": "application/json", ...o.worldHeaders } });
+          out.worlds.push({ slot, url: req.url, principal: req.headers.get("x-weft-principal"), method: req.method });
+          const reads = o.worldQuery?.(url);
+          return new Response(JSON.stringify(o.worldBody?.(url) ?? { slot, path: url.pathname, search: url.search }), { status: o.worldStatus ?? 200, headers: { "content-type": "application/json", ...o.worldHeaders, ...(reads != null ? { "x-weft-query": reads } : {}) } });
         },
       }),
     },
@@ -195,6 +196,73 @@ describe("the showcase memo", () => {
     await get("/api/v1/workers", "usr_sam");
     expect(f.worlds.at(-1)).toMatchObject({ slot: "showcase", principal: "usr_sam" });
     expect(f.worlds).toHaveLength(3);
+  });
+
+  it("answers HEAD from the memo too (a HEAD miss asks the showcase a GET), without a body", async () => {
+    showcaseMemo.clear();
+    const f = fakeFront();
+    const head = await call(f, "/api/v1/workers?status=active", { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    expect(f.worlds.map((w) => w.method)).toEqual(["GET"]);
+    for (let i = 0; i < 25; i++) {
+      const r = await call(f, `/api/v1/workers?status=active&cb=${i}`, { method: i % 2 ? "HEAD" : "GET" });
+      expect(r.headers.get("x-weft-memo")).toBe("hit");
+      expect((await r.text()).length > 0).toBe(i % 2 === 0);
+    }
+    expect(f.worlds).toHaveLength(1);
+  });
+
+  it("keys a read by the parameters its route reads (x-weft-query), so an allowlisted one the route ignores cannot make misses", async () => {
+    showcaseMemo.clear();
+    const f = fakeFront({ worldQuery: (u) => (u.pathname === "/v1/workers" ? "afterId,beforeId,limit,state,status,type" : "") });
+    // /v1/workers?q=<counter>: q is a known parameter (memory search reads it), but this route never reads it.
+    for (let i = 0; i < 200; i++) expect((await call(f, `/api/v1/workers?q=${i}&order=${i}`)).status).toBe(200);
+    expect(f.worlds).toHaveLength(1);
+    // A parameter the route reads is still its own read.
+    expect(JSON.parse(await (await call(f, "/api/v1/workers?status=active&q=9")).text())).toMatchObject({ search: "?status=active" });
+    expect(f.worlds).toHaveLength(2);
+    expect(new URL(f.worlds[1]!.url).search).toBe("?status=active");
+  });
+
+  it("asks again with every known parameter when the route reads one the learned set had dropped", async () => {
+    showcaseMemo.clear();
+    // A route that reads `status` only when kind=x.
+    const f = fakeFront({ worldQuery: (u) => (u.searchParams.get("kind") === "x" ? "kind,status" : "kind") });
+    await call(f, "/api/v1/handoffs?kind=a&status=open");
+    expect(showcaseMemo.readsFor("/v1/handoffs")).toEqual(new Set(["kind"]));
+    const r = await call(f, "/api/v1/handoffs?kind=x&status=open");
+    expect(JSON.parse(await r.text())).toMatchObject({ search: "?kind=x&status=open" });
+    expect(f.worlds.map((w) => new URL(w.url).search)).toEqual(["?kind=a&status=open", "?kind=x", "?kind=x&status=open"]);
+    // Learned now: the same read is a hit, and another status is its own read.
+    expect((await call(f, "/api/v1/handoffs?kind=x&status=open&cb=1")).headers.get("x-weft-memo")).toBe("hit");
+    expect(JSON.parse(await (await call(f, "/api/v1/handoffs?kind=x&status=done")).text())).toMatchObject({ search: "?kind=x&status=done" });
+  });
+
+  it("caps the misses free values can cause: a route family's distinct keys, and search texts, per minute", async () => {
+    showcaseMemo.clear();
+    const f = fakeFront({ worldQuery: (u) => (u.pathname === "/v1/memory/search" ? "at,folders,limit,q" : "from,to") });
+    const answers: number[] = [];
+    for (let i = 0; i < 40; i++) answers.push((await call(f, `/api/v1/reports/payroll-cost?from=2026-01-01&to=2026-${String(1 + (i % 12)).padStart(2, "0")}-${String(1 + Math.floor(i / 12)).padStart(2, "0")}`)).status);
+    expect(answers.filter((s) => s === 200)).toHaveLength(30);
+    const refused = await call(f, "/api/v1/reports/payroll-cost?from=2025-01-01");
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({ code: "RATE_LIMITED" });
+    // What is in the memo still answers, and other families still work.
+    expect((await call(f, "/api/v1/reports/payroll-cost?from=2026-01-01&to=2026-01-01")).status).toBe(200);
+    expect((await call(f, "/api/v1/workers")).status).toBe(200);
+    const texts: number[] = [];
+    for (let i = 0; i < 15; i++) texts.push((await call(f, `/api/v1/memory/search?q=word${i}`)).status);
+    expect(texts.filter((s) => s === 200)).toHaveLength(10);
+    expect(f.worlds).toHaveLength(30 + 1 + 10);
+  });
+
+  it("answers the showcase's GET /api/v1/health from the memo, at most one Durable Object request a minute per isolate", async () => {
+    showcaseMemo.clear();
+    const f = fakeFront();
+    for (let i = 0; i < 50; i++) expect((await call(f, "/api/v1/health")).status).toBe(200);
+    expect((await call(f, "/api/v1/health", { method: "HEAD" })).status).toBe(200);
+    expect(f.worlds).toHaveLength(1);
   });
 });
 

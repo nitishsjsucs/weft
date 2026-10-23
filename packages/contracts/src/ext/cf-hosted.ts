@@ -125,6 +125,9 @@ export const TRUST_HEADERS = { proxy: "x-weft-proxy", ctx: "x-weft-ctx", smoke: 
 export interface WeftCtx { slot: string; gen: number; visitor: string | null; ipHash: string | null; human: boolean; smoke: boolean; iat: number }
 /** GET responses list the tables they read (comma-separated, sorted); the web refetches queries whose tables a commit wrote. */
 export const TABLES_HEADER = "x-weft-tables";
+/** GET responses list the query parameter names their route read (sorted, comma-separated; "*" for all of them), so the
+ * front's showcase memo keys a read by those parameters only and a parameter the route ignores cannot vary the key. */
+export const QUERY_HEADER = "x-weft-query";
 /** ETag on polled GETs: W/"<gen>.<hash(route, query, principal, versions of the tables it read)>". */
 export const hostedEtag = (gen: number, hash: string): string => `W/"${gen}.${hash}"`;
 

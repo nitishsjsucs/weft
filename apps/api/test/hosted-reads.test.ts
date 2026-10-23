@@ -80,6 +80,24 @@ describe("reads on the durable platform", () => {
   beforeAll(async () => { w = await openDurableWorld(seed, { copy: true }); }, 120_000);
   afterAll(async () => { await w?.close(); });
 
+  it("names the query parameters each GET's route read in x-weft-query, so a parameter it ignores cannot vary the showcase memo's key", async () => {
+    const workers = await req(w, "GET", "/v1/workers?status=active&q=zzz&cb=1&order=x");
+    expect(workers.status).toBe(200);
+    expect(workers.headers.get("x-weft-query")).toBe("afterId,beforeId,limit,state,status,type");
+    const search = await req(w, "GET", "/v1/memory/search?q=payroll&limit=3&status=x");
+    expect(search.headers.get("x-weft-query")).toBe("at,folders,limit,q");
+    // Only what the route read: never the client's other parameters, and none for a route that reads none.
+    expect((await req(w, "GET", "/v1/tax/rates?limit=3")).headers.get("x-weft-query")).toBe("jurisdiction");
+    const stats = await req(w, "GET", "/v1/stats?limit=3&q=1");
+    expect(stats.status).toBe(200);
+    expect(stats.headers.get("x-weft-query")).toBe("");
+    // Node's app has no hosted layer and no such header.
+    const node = await createTestWeft();
+    try {
+      expect((await node.app.request("/v1/health", { headers: node.uiHeaders("usr_dana") })).headers.get("x-weft-query")).toBeNull();
+    } finally { await node.close(); }
+  });
+
   it("a read outside a run returns a res_e_ id and mints nothing; run reads keep counter ids", async () => {
     const counter = () => Number(w.storage.sql.exec("SELECT next FROM id_counters WHERE prefix = 'res_'").toArray()[0]?.next ?? 0);
     const before = counter();
