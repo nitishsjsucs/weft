@@ -499,7 +499,7 @@ The script reads the account's subscriptions (read only) before and after and st
    | 2 | slot-2, slot-3 | 41,112 | about 38,900 |
    | 3 | slot-4 | 20,556 | about 59,400 |
 
-7. `pnpm cf:smoke`, then `pnpm cf:smoke --live` (Nitish's opt-in, one notice run on Luna at about $0.0012), then `pnpm cf:budget`. The cases that need a pool slot (scenario 8's MCP key, the `--live` run, the 428 check, the Verify walkthrough in Playwright) take an operator lease (`POST /api/_admin/lease`, 6.2 step 7) under the same admin signature as provisioning; they never touch Turnstile.
+7. On UTC day 2 (11.6), `pnpm cf:smoke`, then `pnpm cf:smoke --live` (Nitish's opt-in, one notice run on Luna at about $0.0012), then `pnpm cf:budget`. The cases that need a pool slot (scenario 8's MCP key, the `--live` run, the 428 check, the Verify walkthrough in Playwright) take an operator lease (`POST /api/_admin/lease`, 6.2 step 7) under the same admin signature as provisioning; they never touch Turnstile.
 
 ### 9.3 Secrets
 
@@ -622,8 +622,10 @@ The same cases run on the emulator and in workerd, so the emulator stays pinned 
 
 The smoke loads `WEFT_SMOKE_TOKEN` into its own command environment only. The token grants a human session restricted to `slot-smoke` with the provider forced to scripted, so it spends $0. Agents never solve a real Turnstile challenge; Nitish exercises the real widget once in his own browser.
 
+The deployed checks run on UTC day 2 of provisioning, not on the provisioning day: a full local `e2e:cf` run writes about 4,100 visitor rows, and on day 1 the three full restores already take 61,668 rows written (9.2 step 6).
+
 - **Platform:** `/` and `/app/` come from assets (GraphQL invocation count unchanged); `/app/people/wrk_0026/` renders Lena Brooks (demo) from the shell; the CSP header is present; `/api/v1/health` reports runtime `cloudflare`, profile `rich`, the slot and generation; an unleased mutation gets 409; a mutation without a grant gets 428 (an operator lease with its grant cookie dropped); an unsigned burst of more GETs than `RL_API` allows (limit plus 100) yields at least one 429 (recorded, not gating, because the binding is loose); a change in `slot-smoke` is invisible from an unleased showcase context (isolation between pool slots is covered by the Miniflare suite); the transaction conformance route passes; a showcase GET sweep writes 0 rows; a repeated seed-embedding call is a gateway cache HIT that settles $0.
-- **Guided tour:** tour autoplay on `slot-smoke`, every step on its own target, within 180 s; the hosted reset goes through the Lobby.
+- **Guided tour:** tour autoplay in a pool slot under the operator lease `smoke` (6.2 step 7), every step on its own target, within 180 s; the hosted reset goes through the Lobby. It does not run on `slot-smoke`: the hosted shell needs a lease's session and grant cookies and cannot run on the `x-weft-smoke` header.
 - **The eight scenarios** (`docs/demo-scenarios.md`), through the API on `slot-smoke`:
   1. Deliver CA EDD DE 2088: two proposals; approve the rate; Undo appends `tax.revert_rate`; chain valid.
   2. Run review now: "Explained 4 flagged paychecks" and a Submit card for 47 paychecks, $267,919.36.
@@ -634,7 +636,7 @@ The smoke loads `WEFT_SMOKE_TOKEN` into its own command environment only. The to
   7. Chart: Sep 2026 $537,996.96, total $5,302,554.78; Lena Brooks $139,240.00 effective Oct 16.
   8. Remote MCP with the official SDK client over Streamable HTTP, with the MCP key of an operator lease's pool slot (slot-smoke mints none): 122 tools, read the notice, `tax__update_rate` returns `pending_approval`; the in-app run trace is present and the gateway log carries the run's metadata.
 - **Extras:** an uploaded receipt gets an OCR extract within 60 s; an offer letter PDF downloads and the second request is served from R2; Help search returns the tour document; the dead-letter queue is empty; the last Lobby sweep is under 20 minutes old.
-- **After:** `GET /v1/actions/verify` valid; `slot-smoke` reset; `pnpm cf:budget` shows CPU p99 under the targets and no `exceededResources`; a Workers Logs dump grepped for known secret prefixes has no match.
+- **After:** `GET /v1/actions/verify` valid; `slot-smoke` reset; `pnpm cf:budget` shows CPU p99 under the targets and no `exceededResources`; `pnpm cf:budget --logs` finds no credential shape (`sk-`, `weft_sk_`, a full `wk_mcp_` key, an `x-weft-*` credential header with a value) in the day's Workers Logs events, counted by prefix and never compared with a loaded secret.
 - **`--live`** (Nitish's opt-in): one notice run on Luna in an operator-leased pool slot under the caps, about $0.0012, and one Workers AI run recorded in D1 (not gating).
 
 ## 12. Risks
