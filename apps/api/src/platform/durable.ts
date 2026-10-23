@@ -96,11 +96,21 @@ export function defaultDurableDriver(): DurableDbDriver {
   };
 }
 
+/** Reservation ids for a step that cannot spend (a provider that is not live, at $0): never sent to SpendDO. */
+export const FREE_RESERVATION_PREFIX = "rsv_free_";
+const freeReservationId = () => `${FREE_RESERVATION_PREFIX}${[...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+
 /**
  * The SpendDO ledger as the agent runtime sees it: the frozen SpendLedger, with every reservation charged to this
  * world ("slot-N:gen-G", the run cap key with the run id) and to the lease's visitor and IP hash, which CompanyDO
  * keeps in kv_state, so background runs fall inside the same caps (design 5.3). Every call is a DO RPC: never inside
  * a transaction (IO_IN_TX), and a request that reads it is not cached by the ETag layer.
+ *
+ * A step of a provider that is not live (scripted, templates) reserves $0 and settles at $0 (packages/agent/src/
+ * loop.ts), so it changes no total and no cap: it gets a local id and makes no SpendDO call, where it wrote two
+ * entries (a reserve and a settle, with their index and total rows) per step. The run cap folds only the run's
+ * spending entries, which a $0 step never had, and the eval grader (G8) reads the run's own cost. A settle of such an
+ * id above $0, which no provider makes today, is still recorded (a reservation and its settle at that amount).
  */
 export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWorldRef; state: () => SmallState | null; guard: () => TxGuard | null }): SpendLedger {
   const worldId = hostedWorldId(o.world);
@@ -109,6 +119,8 @@ export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWo
   // agent's share, and settles the neurons it used, as bindSpendLedger does; without this a world switched to
   // workers_ai would spend the day's free neurons (OCR, dictation, embeddings) under the USD caps alone.
   const neuronReservations = new Set<string>();
+  /** The free reservations not closed yet, with what they were made for (bounded, as neuronReservations). */
+  const freeReservations = new Map<string, Parameters<SpendLedger["reserve"]>[0]>();
   /** The lease's visitor and IP hash, or null when either cannot be read or was never stored. */
   const lease = (): { visitor: string; ipHash: string } | null => {
     try {
@@ -117,13 +129,20 @@ export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWo
       return visitor && ipHash ? { visitor, ipHash } : null;
     } catch { return null; }
   };
-  return {
+  const ledger: SpendLedger = {
     async reserve(input) {
+      if (!input.live && input.usdMicros <= 0) {
+        o.guard()?.assertNotInTx("SpendDO.reserve");
+        const id = freeReservationId();
+        freeReservations.set(id, input);
+        if (freeReservations.size > 1000) freeReservations.delete(freeReservations.keys().next().value!);
+        return { ok: true, reservationId: id };
+      }
       io("SpendDO.reserve");
       const who = lease();
       // Fails closed: a reservation that could spend money is never made without the lease's visitor and IP hash, so
-      // no run escapes the visitor and IP caps (a slot between leases, or kv_state unreadable). A non-live attempt (the
-      // scripted provider reserves and settles at zero, as slot-smoke does) needs no lease.
+      // no run escapes the visitor and IP caps (a slot between leases, or kv_state unreadable). A non-live attempt at
+      // zero (the scripted provider, as slot-smoke runs it) is free above and needs no lease.
       if (!who && (input.live || input.usdMicros > 0)) {
         return { ok: false, code: "BUDGET_EXCEEDED", cap: FROZEN_CAP.visitor, hostedCap: "visitor", spentMicros: 0, capMicros: 0 } satisfies HostedReserveRefusal;
       }
@@ -136,16 +155,29 @@ export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWo
       return r;
     },
     async settle(reservationId, actualUsdMicros) {
+      if (reservationId.startsWith(FREE_RESERVATION_PREFIX)) {
+        const made = freeReservations.get(reservationId);
+        freeReservations.delete(reservationId);
+        if (actualUsdMicros <= 0 || !made) return;
+        // Not free after all: recorded at what it cost, charged as any reservation is.
+        const r = await ledger.reserve({ ...made, usdMicros: actualUsdMicros });
+        if (r.ok) await ledger.settle(r.reservationId, actualUsdMicros);
+        return;
+      }
       io("SpendDO.settle");
       if (neuronReservations.delete(reservationId)) await spend.settle(reservationId, actualUsdMicros, { neurons: neuronsForUsdMicros(actualUsdMicros, USD_PER_1K_NEURONS) });
       else await spend.settle(reservationId, actualUsdMicros);
     },
-    async release(reservationId) { io("SpendDO.release"); neuronReservations.delete(reservationId); await spend.release(reservationId); },
+    async release(reservationId) {
+      if (reservationId.startsWith(FREE_RESERVATION_PREFIX)) { freeReservations.delete(reservationId); return; }
+      io("SpendDO.release"); neuronReservations.delete(reservationId); await spend.release(reservationId);
+    },
     async spent(scope) {
       io("SpendDO.spent");
       return spend.spent(scope.runId ? { ...scope, world: worldId } : scope);
     },
   };
+  return ledger;
 }
 
 /** What a statement or transaction on a closed world's database throws (closableStorage). */
