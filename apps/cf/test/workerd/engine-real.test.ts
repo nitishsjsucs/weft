@@ -23,6 +23,7 @@ import { DO_NAMES, MAX_FETCHES_PER_ALARM, type SeedIndexProgress } from "../../s
 import { exportObjectKey } from "../../src/extras/queues";
 import { Harness, ORIGIN } from "../support/harness";
 import { MANIFEST_FILE as manifestFile, realEngine, realEngineProblems, skipReason } from "../support/real-engine";
+import { DELTA_RESET_SQL_MEMORY_BASELINE_ROWS, DELTA_RESET_SQL_MEMORY_MAX_ROWS } from "../../../../packages/db/test-workerd/flows";
 
 describe("real engine gate", () => {
   it("runs the real engine once cf1, cf2 and cf3 are merged, with every part they export and the snapshot", () => {
@@ -120,7 +121,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect((await smokeJson<{ ok: boolean }>("/api/v1/actions/verify")).body.ok).toBe(true);
   });
 
-  it("returns slot-smoke to the seed with the delta reset after the ten flows, twice, within 25% of 557 rows written", async () => {
+  it(`returns slot-smoke to the seed with the delta reset after the ten flows, twice, within the SQL-memory band (25% over ${DELTA_RESET_SQL_MEMORY_BASELINE_ROWS} rows written)`, async () => {
     const lobby = async () => { const e = await env(); return e.LOBBY.get(e.LOBBY.idFromName(DO_NAMES.lobby)); };
     const co = await company(DO_NAMES.smoke);
     // Runs start in alarm invocations: drive them until none is queued or running.
@@ -171,7 +172,9 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
       const r = await (await lobby()).resetWorld({ slot: DO_NAMES.smoke });
       expect(r).toMatchObject({ ok: true, method: "delta" });
       console.log(`delta reset ${cycle + 1}: ${(r as { rowsWritten: number }).rowsWritten} rows written`);
-      expect((r as { rowsWritten: number }).rowsWritten).toBeLessThanOrEqual(Math.ceil(557 * 1.25));
+      // Hosted worlds always run the SQL memory repo, whose reset also returns the session's memory objects: cf1's
+      // measured baseline and band for it (717 in workerd on Linux, 634 on this Mac; the band is 896).
+      expect((r as { rowsWritten: number }).rowsWritten).toBeLessThanOrEqual(DELTA_RESET_SQL_MEMORY_MAX_ROWS);
       expect((await pending()).map((p) => p.id).sort()).toEqual(seedPending);
       expect((await smokeJson<{ ok: boolean; head: { hash: string } | null }>("/api/v1/actions/verify")).body.head?.hash ?? null).toBe(manifest.extra?.chainHead ?? null);
     }

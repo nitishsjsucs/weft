@@ -1,7 +1,7 @@
 // The Lobby's pure rules (design 6.2, 6.5, 8.2 and 9.2, with the section 0 settings): Weft's daily shares of the
 // account caps, the degradation level, the rows-written budget that admits leases and full restores, and lease
 // expiry. No I/O, so the unit suite pins every threshold.
-import { HOSTED_SETTINGS, type DegradationLevel } from "../../shared/contracts";
+import { HOSTED_DELTA_RESET_BASELINE_ROWS, HOSTED_SETTINGS, type DegradationLevel } from "../../shared/contracts";
 
 /** Weft's daily shares of the account-wide caps (design 8.2: 60% of requests, rows and duration). */
 export const SHARES = {
@@ -21,8 +21,13 @@ export type ShareKey = keyof typeof SHARES;
 export const PROVISION_ROWS_CEILING = 90_000;
 /** Rows written by one full restore of the rich world (verified locally; KV lobby.full_restore_rows changes it). */
 export const FULL_RESTORE_ROWS = 20_556;
-/** Rows written by one engaged session: 894 activity with dirty tracking, 557 delta reset, about 100 Lobby and ledger. */
-export const SESSION_ROWS_ESTIMATE = 1_550;
+/** Rows written by an engaged session's own activity with dirty tracking (verified locally, design 2). */
+export const SESSION_ACTIVITY_ROWS = 894;
+/** About what the Lobby and the spend ledger write for one session. */
+export const SESSION_OVERHEAD_ROWS = 100;
+/** Rows written by one engaged session: its activity, the delta reset after it on the SQL memory repo hosted worlds
+ * run (cf1's measured baseline, HOSTED_DELTA_RESET_BASELINE_ROWS), and the Lobby and ledger rows: 1,711. */
+export const SESSION_ROWS_ESTIMATE = SESSION_ACTIVITY_ROWS + HOSTED_DELTA_RESET_BASELINE_ROWS + SESSION_OVERHEAD_ROWS;
 
 export interface DayUsage {
   /** Rows written by worlds outside full restores: visitor activity, resets, ledger and Lobby rows. */
