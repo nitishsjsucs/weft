@@ -41,6 +41,9 @@ export interface ExtrasJobDeps {
 type Outcome = string;
 interface OcrRead { extract: ReceiptOcrExtract | NoticeScanExtract | null; model: string; neurons: number; code: string | null }
 
+/** A world's refusal of a job from another generation than its own (CompanyDO.extrasWriteBack and extrasExport). */
+export const STALE_GENERATION = "STALE_GENERATION";
+
 /** Retry delay: 5 s, 10 s, 20 s and so on, at most 5 minutes. */
 export const retryDelaySeconds = (attempts: number): number => Math.min(300, 5 * 2 ** Math.max(0, attempts - 1));
 
@@ -170,9 +173,15 @@ async function runOcr(job: Extract<HostedJob, { kind: "ocr.receipt" | "ocr.notic
     read = r.ok ? { extract: r.extract, model: r.model, neurons: r.neurons, code: null } : { extract: null, model: OCR_MODEL, neurons: 0, code: r.code };
     await deps.ledger.saveRead(job.jobId, job.kind, read);
   }
+  // The job's generation goes with the write-back: the world refuses it once a reset moved on (the read above may
+  // have taken long enough for one), so the previous visitor's extract never lands in the next visitor's world.
   const out = job.kind === "ocr.receipt"
-    ? await port.extrasWriteBack({ command: HIDDEN_SERVICE_COMMANDS.receiptExtract, args: { job_id: job.jobId, expense_id: job.expenseId, upload_id: job.uploadId, extract: read.extract as ReceiptOcrExtract | null, model: read.model, neurons: read.neurons } })
-    : await port.extrasWriteBack({ command: HIDDEN_SERVICE_COMMANDS.noticeExtract, args: { job_id: job.jobId, notice_id: job.noticeId, upload_id: job.uploadId, extract: read.extract as NoticeScanExtract | null, model: read.model, neurons: read.neurons } });
+    ? await port.extrasWriteBack({ command: HIDDEN_SERVICE_COMMANDS.receiptExtract, args: { job_id: job.jobId, expense_id: job.expenseId, upload_id: job.uploadId, extract: read.extract as ReceiptOcrExtract | null, model: read.model, neurons: read.neurons } }, job.gen)
+    : await port.extrasWriteBack({ command: HIDDEN_SERVICE_COMMANDS.noticeExtract, args: { job_id: job.jobId, notice_id: job.noticeId, upload_id: job.uploadId, extract: read.extract as NoticeScanExtract | null, model: read.model, neurons: read.neurons } }, job.gen);
+  if (!out.ok && out.code === STALE_GENERATION) {
+    await deps.ledger.done(job.jobId, job.kind, "stale");
+    return "stale";
+  }
   if (!out.ok) throw new ExtrasError("WRITE_BACK_REFUSED", `${out.code}: ${out.message}`, out.retryable);
   const outcome = `${out.status}${read.code ? `:${read.code}` : ""}`;
   await deps.ledger.done(job.jobId, job.kind, outcome);
@@ -213,7 +222,7 @@ async function runEmbed(job: Extract<HostedJob, { kind: "embed.memory" }>, deps:
 async function runExport(job: Extract<HostedJob, { kind: "export.world" }>, deps: ExtrasJobDeps, port: SlotExtrasPort): Promise<Outcome> {
   const key = exportObjectKey(job);
   if (!(await deps.files.head(key))) {
-    const out = await port.extrasExport(job.what);
+    const out = await port.extrasExport(job.what, job.gen);
     await deps.files.put(key, out.bytes, { httpMetadata: { contentType: out.contentType }, customMetadata: { slot: job.slot, gen: String(job.gen), what: job.what, requestedBy: job.requestedBy.slice(0, 64) } });
   }
   await deps.ledger.done(job.jobId, job.kind, "stored");

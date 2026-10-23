@@ -1,6 +1,6 @@
 // Who is asking (design 3.4 and 6.2): the signed session cookie (visitor, slot, generation, expiry), the human grant,
 // the smoke header and the daily-salted IP hash. About 0.1 ms of HMAC per request; no Durable Object call.
-import { DO_NAMES, HOSTED_SETTINGS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, TRUST_HEADERS, type SessionClaims } from "../shared/contracts";
+import { DO_NAMES, HOSTED_SETTINGS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, TRUST_HEADERS, type LeaseInfo, type SessionClaims } from "../shared/contracts";
 import type { FrontEnv } from "../shared/env";
 import { clearCookie, parseCookies, setCookie, utcDay } from "../shared/http";
 import { grantToken, ipHash, readGrant, readSession, sessionToken, verifySmoke } from "../shared/tokens";
@@ -61,6 +61,13 @@ export function targetOf(v: Visit): { slot: string; gen: number; leased: boolean
   if (v.smoke) return { slot: DO_NAMES.smoke, gen: 0, leased: true };
   if (v.session) return { slot: v.session.slot, gen: v.session.gen, leased: true };
   return { slot: DO_NAMES.showcase, gen: 0, leased: false };
+}
+
+/** The session claims for a lease the Lobby answered: its slot and generation, and its total expiry, which both
+ * expires the cookie (seconds) and names the lease (milliseconds). */
+export function leaseClaims(visitor: string, l: Pick<LeaseInfo, "slot" | "gen" | "expiresAt">): SessionClaims {
+  const ms = Date.parse(l.expiresAt);
+  return { visitor, slot: l.slot, gen: l.gen, exp: Math.floor(ms / 1000), leaseExpiresMs: ms };
 }
 
 export async function sessionCookies(env: FrontEnv, c: SessionClaims, grant: boolean, nowS = Math.floor(Date.now() / 1000)): Promise<string[]> {

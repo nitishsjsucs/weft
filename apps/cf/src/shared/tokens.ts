@@ -31,9 +31,9 @@ export async function readSession(secret: string, token: string, nowS = Math.flo
   if (!r.ok) return r;
   const c = r.claims;
   if (typeof c?.visitor !== "string" || !VISITOR_RE.test(c.visitor) || typeof c.slot !== "string" || !SLOT_RE.test(c.slot)
-    || !Number.isInteger(c.gen) || c.gen < 0 || !Number.isInteger(c.exp)) return { ok: false, reason: "malformed" };
+    || !Number.isInteger(c.gen) || c.gen < 0 || !Number.isInteger(c.exp) || !Number.isInteger(c.leaseExpiresMs)) return { ok: false, reason: "malformed" };
   if (c.exp <= nowS) return { ok: false, reason: "expired" };
-  return { ok: true, claims: { visitor: c.visitor, slot: c.slot, gen: c.gen, exp: c.exp } };
+  return { ok: true, claims: { visitor: c.visitor, slot: c.slot, gen: c.gen, exp: c.exp, leaseExpiresMs: c.leaseExpiresMs } };
 }
 
 export async function readGrant(secret: string, token: string, nowS = Math.floor(Date.now() / 1000)): Promise<Checked<HumanGrantClaims>> {
@@ -151,9 +151,10 @@ function ipv6Groups(addr: string): number[] | null {
 }
 
 /**
- * What a per-IP key counts (design 6.4): an IPv4 address as it is, an IPv6 address by its /64 prefix, since one
- * subscriber is handed a whole /64 and could otherwise take a fresh lease, rate limit and cap from each of its 2^64
- * addresses, and an IPv4-mapped IPv6 address as its IPv4 address. Anything that does not parse is kept as given.
+ * What a per-IP key counts (design 6.4): an IPv4 address as it is, an IPv6 address by its /56 prefix, and an
+ * IPv4-mapped IPv6 address as its IPv4 address. ISPs commonly delegate a whole /56 (256 /64s) to one subscriber, so a
+ * /64 key would let one subscriber take a fresh lease, rate limit and cap from each of its 256 subnets, and every
+ * address inside them. Anything that does not parse is kept as given.
  */
 export function ipKeyOf(ip: string): string {
   let s = ip.trim().toLowerCase();
@@ -163,12 +164,12 @@ export function ipKeyOf(ip: string): string {
   const g = ipv6Groups(s);
   if (!g) return s;
   if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return `${g[6]! >> 8}.${g[6]! & 255}.${g[7]! >> 8}.${g[7]! & 255}`;
-  return `${g.slice(0, 4).map((x) => x.toString(16)).join(":")}::/64`;
+  return `${[g[0]!, g[1]!, g[2]!, g[3]! & 0xff00].map((x) => x.toString(16)).join(":")}::/56`;
 }
 
 /** The daily-salted IP hash (design 6.4): the salt is derived from WEFT_SESSION_SECRET and the UTC day, so raw IPs
  * are never stored and a hash cannot be linked across days. Every per-IP key (leases, rate limits, spend caps) is
- * this hash, so an IPv6 visitor counts once per /64 (ipKeyOf). */
+ * this hash, so an IPv6 visitor counts once per /56 (ipKeyOf). */
 export async function ipHash(sessionSecret: string, ip: string, day: string): Promise<string> {
   return toHex(await hmac(sessionSecret, `weft-ip|${day}|${ipKeyOf(ip)}`)).slice(0, 32);
 }

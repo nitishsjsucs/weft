@@ -11,7 +11,7 @@ import { hostedError, json, readJson } from "../shared/http";
 import { logEvent } from "../shared/log";
 import { newVisitorId } from "../shared/tokens";
 import { siteverify } from "./turnstile";
-import { clearSessionCookies, grantCookie, sessionCookies, type Visit } from "./visit";
+import { clearSessionCookies, grantCookie, leaseClaims, sessionCookies, type Visit } from "./visit";
 
 const lobby = (env: FrontEnv) => env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
 
@@ -53,21 +53,23 @@ export function sessionProvider(want: SessionStatus["provider"], s: HostedSpendS
 
 export async function sessionStatus(env: FrontEnv, v: Visit): Promise<Response> {
   const cfg = await envConfig(env);
-  const st = await lobby(env).status({ visitor: v.session?.visitor ?? null, slot: v.session?.slot ?? null, gen: v.session?.gen ?? null });
+  const st = await lobby(env).status({ visitor: v.session?.visitor ?? null, slot: v.session?.slot ?? null, gen: v.session?.gen ?? null, leaseExpiresMs: v.session?.leaseExpiresMs ?? null });
   const cookies: string[] = [];
   if (v.session && !st.lease) cookies.push(...clearSessionCookies());
   else if (v.session && st.lease && st.lease.gen !== v.session.gen) {
     // The visitor's own lease moved to a newer generation (a hosted reset): reissue the session cookie for it rather
-    // than clearing the cookie the reset just set. The Lobby answers this only for the same visitor and slot.
-    const exp = Math.floor(Date.parse(st.lease.expiresAt) / 1000);
-    cookies.push(...(await sessionCookies(env, { visitor: v.session.visitor, slot: st.lease.slot, gen: st.lease.gen, exp }, false)));
+    // than clearing the cookie the reset just set. The Lobby answers this only for a cookie of that same lease (its
+    // slot and its total expiry), never for a cookie of the visitor's earlier lease.
+    cookies.push(...(await sessionCookies(env, leaseClaims(v.session.visitor, st.lease), false)));
   }
   const enabled = agentEnabled(cfg);
   const want = wantedProvider({ agentEnabled: enabled, configured: cfg.get(HOSTED_CONFIG_KEYS.modelProvider) ?? null, world: st.lease ? st.worldProvider : null });
   let provider = want;
-  if (want.id !== "scripted" && want.reason !== "paused") {
+  // Only a leased visitor can start a run, so only a leased visitor's session read asks SpendDO for the caps: a
+  // cookie-less GET /api/_session (anyone, any number of times) never reaches the ledger.
+  if (st.lease && v.session && want.id !== "scripted" && want.reason !== "paused") {
     try {
-      const s = await env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({ visitor: st.lease ? v.session?.visitor ?? null : null, ipHash: v.ipHash });
+      const s = await env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({ visitor: v.session.visitor, ipHash: v.ipHash });
       provider = sessionProvider(want, s);
     } catch { /* the status still answers; the run admission decides for itself */ }
   }
@@ -98,8 +100,7 @@ export async function startLease(req: Request, env: FrontEnv, v: Visit): Promise
   const r: LeaseResult = await lobby(env).assign({ visitor, ipHash: v.ipHash });
   const res = json(r);
   if (r.status === "leased") {
-    const exp = Math.floor(Date.parse(r.expiresAt) / 1000);
-    for (const c of await sessionCookies(env, { visitor, slot: r.slot, gen: r.gen, exp }, true)) res.headers.append("set-cookie", c);
+    for (const c of await sessionCookies(env, leaseClaims(visitor, r), true)) res.headers.append("set-cookie", c);
   } else if (v.session) {
     for (const c of clearSessionCookies()) res.headers.append("set-cookie", c);
   }

@@ -31,9 +31,16 @@ interface FakeWorld {
   lockTail: Promise<unknown>;
   input: WorldBootInput | null;
   engine: WorldEngine | null;
+  /** How long engine.close() takes (a real close drains runs, up to 5 s each). */
+  closeDelayMs: number;
+  /** The generation each boot was asked for, in order, and each engine closed. */
+  bootGens: number[];
+  closedGens: number[];
+  /** Hidden write-backs that reached a world's extras port, with the generation of the engine that ran them. */
+  writeBacks: { gen: number; jobId: unknown }[];
 }
 let world: FakeWorld;
-const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null });
+const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [] });
 
 function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]): { toArray(): Record<string, unknown>[] } }): WorldEngine {
   const guard: TxGuard = {
@@ -65,7 +72,14 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
     outboxAck: (id: string) => writeLocked(async () => { sql.exec(`DELETE FROM outbox WHERE id = ?`, id); }),
     catalogRow: async (runId: string) => (runId === "run_0002" ? null : { runId, slot: input.world.slot, gen: input.world.gen, provider: "scripted", model: "fake", trigger: "chat", steps: 1, grounded: null, costUsdMicros: 0, neurons: 0, latencyMs: 0, status: "cancelled", terminalReason: "CANCELLED", endedAt: new Date().toISOString() }),
     pdf: async (_req: Request, p: { browserMsUsed: () => Promise<number> }) => new Response(String(await p.browserMsUsed())),
-    close: async () => undefined,
+    extras: ({
+      extrasWorld: async () => ({ slot: input.world.slot, gen: input.world.gen, mode: input.world.mode, snapshot: "fake", lease: null }),
+      extrasBlob: async () => null,
+      extrasWriteBack: async (w: { args: { job_id?: unknown } }) => { world.writeBacks.push({ gen: input.world.gen, jobId: w.args.job_id }); return { ok: true, status: "attached", reason: null }; },
+      extrasMemoryText: async () => null,
+      extrasExport: async () => ({ bytes: new TextEncoder().encode(`world gen ${input.world.gen}`), contentType: "application/json" }),
+    }) as unknown as WorldEngine["extras"],
+    close: async () => { if (world.closeDelayMs) await sleep(world.closeDelayMs); world.closedGens.push(input.world.gen); },
   } as WorldEngine;
 }
 
@@ -73,20 +87,21 @@ let currentSql: ReturnType<typeof memorySql> | null = null;
 const fakeModule: EngineModule = {
   async boot(input) {
     world.boots += 1;
+    world.bootGens.push(input.world.gen);
     if (world.bootDelayMs) await sleep(world.bootDelayMs);
     if (world.failBoots > 0) { world.failBoots -= 1; throw new Error("fake boot failure"); }
     world.input = input;
     world.engine = engineFor(input, currentSql!.sql);
     return world.engine;
   },
-  store: { isClean: () => true } as unknown as EngineModule["store"],
+  store: { isClean: () => true, deltaReset: () => ({ ok: true, rowsWritten: 0, mismatches: [] }) } as unknown as EngineModule["store"],
   artifacts: async () => ({ version: "fake", manifest: { journalHash: "x", digest: "x", chunks: 0, rows: 0 }, snapshot: {} }),
 };
 setEngineLoader(async () => fakeModule);
 
 type LobbyStatusFn = (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown;
 
-function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number } = {}) {
+function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean } = {}) {
   const m = memorySql();
   currentSql = m;
   m.sql.exec(`CREATE TABLE kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
@@ -130,7 +145,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     LOBBY: { idFromName: (n: string) => n, get: () => lobbyStub },
     SPEND: { idFromName: (n: string) => n, get: () => ({}) },
     COMPANY: { idFromName: (n: string) => n, get: () => ({}) },
-    JOBS: { send: async (body: unknown) => { sent.push({ queue: "jobs", body }); } },
+    JOBS: { send: async (body: unknown) => { if (o.failSend?.(body)) throw new Error("Queue.send refused the message"); sent.push({ queue: "jobs", body }); } },
     RENDER: { send: async (body: unknown) => { sent.push({ queue: "render", body }); } },
     RL_RUN: { limit: async () => ({ success: true }) },
     OPS: { prepare: () => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); return {}; } }) }) },
@@ -290,6 +305,100 @@ describe("the world's boot", () => {
   });
 });
 
+describe("a reset while the old world closes", () => {
+  const NEXT = "vis_" + "b".repeat(32);
+  const next = (c: ReturnType<typeof company>): WorldStamp => ({ ...c.stamp!, gen: 4, visitor: NEXT, leaseStartedAt: T0 + 5 * MIN });
+  /** The engine serving the world now, by the generation it booted for. */
+  const servingGen = async (c: ReturnType<typeof company>) => (await c.co.extrasWorld()).gen;
+
+  it("boots nothing from an alarm that fires during the close; the alarm asks again and the reset boots the next generation", async () => {
+    const c = company();
+    await c.ready();
+    world.closeDelayMs = 40;
+    world.bootDelayMs = 60;
+    const reset = c.co.deltaReset(next(c));
+    await sleep(10);
+    // The previous visitor's world is closing (engine is gone, draining runs): an alarm fires.
+    const asked = c.alarms.length;
+    await c.co.runAlarmNow();
+    expect(world.bootGens).toEqual([3]);
+    // The alarm's purposes are asked for again later, not dropped.
+    expect(c.alarms.length).toBeGreaterThan(asked);
+    expect(c.alarms.at(-1)!).toBeGreaterThan(Date.now());
+    expect(await reset).toMatchObject({ ok: true, gen: 4 });
+    expect(world.bootGens).toEqual([3, 4]);
+    expect(await servingGen(c)).toBe(4);
+    // The next visitor is served by the new generation; the previous cookie generation is refused.
+    expect((await c.co.fetch(await req("/v1/workers", { gen: 4, visitor: NEXT }))).status).toBe(200);
+    expect((await c.co.fetch(await req("/v1/workers", { gen: 3 }))).status).toBe(409);
+  });
+
+  it("refuses an extras RPC that arrives during the close with WORLD_NOT_READY (the queue retries), booting nothing", async () => {
+    const c = company();
+    await c.ready();
+    world.closeDelayMs = 40;
+    const reset = c.co.deltaReset(next(c));
+    await sleep(10);
+    await expect(c.co.extrasWorld()).rejects.toThrow(/WORLD_NOT_READY/);
+    await expect(c.co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_late" } } as never, 3)).rejects.toThrow(/WORLD_NOT_READY/);
+    expect(world.bootGens).toEqual([3]);
+    await reset;
+    expect(world.bootGens).toEqual([3, 4]);
+    expect(await servingGen(c)).toBe(4);
+    expect(world.writeBacks).toEqual([]);
+  });
+
+  it("never keeps a boot of the old generation that is still in flight when the reset stamps the next one", async () => {
+    const c = company();
+    await c.ready();
+    world.closeDelayMs = 30;
+    world.bootDelayMs = 80;
+    const reset = c.co.deltaReset(next(c));
+    await sleep(10);
+    // A boot of the old stamp started during the close, as a caller past the reset's guard would start it.
+    const stale = (c.co as unknown as { startEngine(): Promise<void> }).startEngine();
+    expect(await reset).toMatchObject({ ok: true, gen: 4 });
+    await stale;
+    // The reset booted its own generation rather than sharing the old boot; the old one was closed, not kept.
+    expect(world.bootGens).toEqual([3, 3, 4]);
+    expect(world.closedGens).toEqual([3, 3]);
+    expect(await servingGen(c)).toBe(4);
+  });
+
+  it("refuses a write-back or an export of a job from an older generation, whatever engine is up", async () => {
+    const c = company();
+    await c.ready();
+    await c.co.deltaReset(next(c));
+    expect(await servingGen(c)).toBe(4);
+    // The previous visitor's OCR job (gen 3) finishes after the reset: nothing reaches the new visitor's world.
+    expect(await c.co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_old" } } as never, 3)).toMatchObject({ ok: false, code: "STALE_GENERATION", retryable: false });
+    await expect(c.co.extrasExport("world", 3)).rejects.toThrow(/STALE_GENERATION/);
+    expect(world.writeBacks).toEqual([]);
+    expect(await c.co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_new" } } as never, 4)).toMatchObject({ ok: true });
+    expect(world.writeBacks).toEqual([{ gen: 4, jobId: "obx_new" }]);
+    expect(new TextDecoder().decode((await c.co.extrasExport("world", 4)).bytes)).toBe("world gen 4");
+  });
+
+  it("boots nothing from an alarm or an extras RPC during a restore's first step, and the restore's last step boots the restored world", async () => {
+    const c = company();
+    await c.ready();
+    world.closeDelayMs = 40;
+    const begin = c.co.restoreBegin({ slot: "slot-1", gen: 5, mode: "slot" } as never);
+    await sleep(10);
+    await c.co.runAlarmNow();
+    await expect(c.co.extrasWorld()).rejects.toThrow(/WORLD_NOT_READY/);
+    await begin;
+    expect(world.bootGens).toEqual([3]);
+    const fakeRestore = fakeModule.store as unknown as Record<string, unknown>;
+    fakeRestore.beginRestore = () => ({ applied: 0, triggers: [] });
+    fakeRestore.finishRestore = () => ({ ok: true, mismatches: [], rowsWritten: 0 });
+    c.m.sql.exec(`CREATE TABLE IF NOT EXISTS kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    expect(await c.co.restoreFinish({ bookmark: null })).toMatchObject({ slot: "slot-1", gen: 5 });
+    expect(world.bootGens).toEqual([3, 5]);
+    expect(await servingGen(c)).toBe(5);
+  });
+});
+
 describe("the outbox flush", () => {
   const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
   const append = (c: ReturnType<typeof company>, id: string, body: string) => c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES (?, 'ocr.receipt', ?, ?)`, id, body, new Date().toISOString());
@@ -327,6 +436,45 @@ describe("the outbox flush", () => {
     expect(await flush).toBe(2);
     expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([`obx_${"2".padStart(16, "0")}`, `obx_${"3".padStart(16, "0")}`]);
     expect(c.m.sql.exec(`SELECT COUNT(*) AS n FROM outbox`).toArray()[0]!.n).toBe(0);
+  });
+});
+
+describe("the outbox retry", () => {
+  const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
+  const append = (c: ReturnType<typeof company>, id: string, body: string, at: string) => c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES (?, 'ocr.receipt', ?, ?)`, id, body, at);
+  const poison = `obx_${"1".padStart(16, "0")}`;
+
+  it("sends the rows behind one whose send keeps failing, and backs off exponentially (capped) instead of every 30 s", async () => {
+    let failing = true;
+    const c = company({ failSend: (b) => failing && (b as { jobId: string }).jobId === poison });
+    await c.ready();
+    // The row that cannot be sent is the oldest: the rows behind it go anyway.
+    append(c, "obx_a", job(1), "2026-10-26T15:00:00.000Z");
+    append(c, "obx_b", job(2), "2026-10-26T15:00:01.000Z");
+    append(c, "obx_c", job(3), "2026-10-26T15:00:02.000Z");
+    let now = T0 + MIN;
+    at(now);
+    expect(await c.co.flushOutbox()).toBe(2);
+    expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([job(2), job(3)].map((b) => (JSON.parse(b) as { jobId: string }).jobId));
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([{ id: "obx_a" }]);
+    const delays: number[] = [c.alarms.at(-1)! - now];
+    for (let i = 0; i < 9; i++) {
+      now = c.alarms.at(-1)!;
+      at(now);
+      await c.co.alarm();
+      delays.push(c.alarms.at(-1)! - now);
+    }
+    expect(delays).toEqual([2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 300_000, 300_000]);
+    // Once it goes, the backoff starts again from the beginning.
+    failing = false;
+    now = c.alarms.at(-1)!;
+    at(now);
+    await c.co.alarm();
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([]);
+    failing = true;
+    append(c, "obx_d", job(1), "2026-10-26T16:00:00.000Z");
+    expect(await c.co.flushOutbox()).toBe(0);
+    expect(c.alarms.at(-1)! - now).toBe(2_000);
   });
 });
 

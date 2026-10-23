@@ -1,10 +1,8 @@
 // The Lobby's rules (design 6.2, 6.5, 8.2, 9.2) with the section 0 settings: 30 minute idle and 3 hour leases, the
 // shares, the provisioning-day ceiling that seeds the whole pool on day 1, and the degradation ladder.
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { HOSTED_DELTA_RESET_BASELINE_ROWS, HOSTED_SETTINGS } from "../../src/shared/contracts";
-import { REPO } from "../support/config-files";
+import { DELTA_RESET_SQL_MEMORY_BASELINE_ROWS } from "../../../../packages/db/test-workerd/flows";
 import {
   defaultBudget, degradationLevel, emptyUsage, etaMinutes, FULL_RESTORE_ROWS, leaseEnded, leaseExpiresAt, leaseIdleExpiresAt,
   PROVISION_ROWS_CEILING, restoreFits, restoresLeft, rowsCeiling, SESSION_ACTIVITY_ROWS, SESSION_OVERHEAD_ROWS, SESSION_ROWS_ESTIMATE, sessionFits, SHARES, shareUse, visitorRowsBudget,
@@ -14,10 +12,10 @@ const MIN = 60_000;
 
 describe("the engaged session's rows", () => {
   it("are built on cf1's measured SQL-memory delta reset, the reset every hosted world runs", () => {
-    // packages/db/test-workerd/flows.ts records the measurement; the contract constant must stay equal to it.
-    const flows = readFileSync(join(REPO, "packages/db/test-workerd/flows.ts"), "utf8");
-    const measured = Number(/export const DELTA_RESET_SQL_MEMORY_BASELINE_ROWS = ([\d_]+);/.exec(flows)?.[1]?.replace(/_/g, ""));
-    expect(HOSTED_DELTA_RESET_BASELINE_ROWS).toBe(measured);
+    // packages/db/test-workerd/flows.ts records the measurement; the contract constant must stay equal to it. Both are
+    // imported, so an alias or a computed value compares as the number it is.
+    expect(Number.isInteger(DELTA_RESET_SQL_MEMORY_BASELINE_ROWS)).toBe(true);
+    expect(HOSTED_DELTA_RESET_BASELINE_ROWS).toBe(DELTA_RESET_SQL_MEMORY_BASELINE_ROWS);
     expect(SESSION_ROWS_ESTIMATE).toBe(SESSION_ACTIVITY_ROWS + HOSTED_DELTA_RESET_BASELINE_ROWS + SESSION_OVERHEAD_ROWS);
     expect(SESSION_ROWS_ESTIMATE).toBe(1_711);
     // The Mac's measured reset (634 rows) sits inside the 25% band too.

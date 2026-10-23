@@ -94,6 +94,11 @@ function ctxOf(v: Visit, slot: string, gen: number) {
   return { slot, gen, visitor: v.smoke ? null : v.session?.visitor ?? null, ipHash: v.ipHash, human: v.smoke || v.grant, smoke: v.smoke };
 }
 
+/** The world a visit's request goes to, its signed context, and the session cookie's lease (forward.ts). */
+function worldOf(v: Visit, t: { slot: string; gen: number }) {
+  return { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), leaseExpiresMs: v.smoke ? null : v.session?.leaseExpiresMs ?? null };
+}
+
 async function api(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Response> {
   const apiPath = url.pathname.slice("/api".length);
   const t = targetOf(v);
@@ -113,7 +118,7 @@ async function api(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Res
         if (!r.ok) return hostedError("UPLOAD_LIMIT", `The hosted demo allows ${HOSTED_SETTINGS.uploadsPerVisitorPerDay} uploads a day`);
       }
     }
-    return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
+    return forwardToWorld(req, env, { ...worldOf(v, t), path: apiPath, search: url.search });
   }
   // Reads. The showcase is immutable per snapshot: memoized in the isolate (health is always fresh).
   // The showcase is asked the normalized read the key names (memo.ts), so nothing else a client adds can vary it.
@@ -125,10 +130,10 @@ async function api(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Res
     const headers = new Headers(req.headers);
     if (read.principal) headers.set("x-weft-principal", read.principal);
     else headers.delete("x-weft-principal");
-    const res = await forwardToWorld(new Request(req.url, { method: "GET", headers }), env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: read.search });
+    const res = await forwardToWorld(new Request(req.url, { method: "GET", headers }), env, { ...worldOf(v, t), path: apiPath, search: read.search });
     return showcaseMemo.put(read.key, res);
   }
-  return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
+  return forwardToWorld(req, env, { ...worldOf(v, t), path: apiPath, search: url.search });
 }
 
 /** "Reset demo data..." (design 6.2 step 5): through the Lobby, rich profile only, a new cookie generation. */
@@ -154,7 +159,7 @@ async function live(req: Request, env: FrontEnv, v: Visit): Promise<Response> {
   if ((req.headers.get("upgrade") ?? "").toLowerCase() !== "websocket") return plainError(426, "ValidationError", "UPGRADE_REQUIRED", "Expected a WebSocket upgrade");
   const t = targetOf(v);
   if (!t.leased) return hostedError("LEASE_REQUIRED", "The live feed belongs to your own demo company");
-  return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: DO_PATHS.live, search: "" });
+  return forwardToWorld(req, env, { ...worldOf(v, t), path: DO_PATHS.live, search: "" });
 }
 
 async function hosted(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Response> {
@@ -164,7 +169,7 @@ async function hosted(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<
     const refused = await mutationGate(req, env, v);
     if (refused) return refused;
     const inner = path === HOSTED_PATHS.modelSwitch ? DO_PATHS.model : DO_PATHS.mcpKey;
-    return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: inner, search: "" });
+    return forwardToWorld(req, env, { ...worldOf(v, t), path: inner, search: "" });
   }
   const gated = path === HOSTED_PATHS.dictate || path.startsWith(`${HOSTED_PATHS.pdf}/`);
   if (gated || isMutation(req.method)) {
@@ -175,7 +180,7 @@ async function hosted(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<
   // visitor's slot (cf6-extras: CompanyDO runs handleHostedPdf over the world's own read routes on /_hosted/pdf/...).
   if (path.startsWith(`${HOSTED_PATHS.pdf}/`)) {
     if (req.method !== "GET") return plainError(405, "ValidationError", "METHOD", "GET a PDF");
-    return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: `${DO_PATHS.pdf}${path.slice(HOSTED_PATHS.pdf.length)}`, search: "" });
+    return forwardToWorld(req, env, { ...worldOf(v, t), path: `${DO_PATHS.pdf}${path.slice(HOSTED_PATHS.pdf.length)}`, search: "" });
   }
   // Exports belong to a leased world (the job id names its slot's file).
   if (path.startsWith(HOSTED_EXPORT_PREFIX) && !t.leased && !v.smoke) return hostedError("LEASE_REQUIRED", "Exports belong to your own demo company");

@@ -16,10 +16,12 @@ export interface FakeFront {
   /** Every Rate Limiting call: the binding and the key. */
   limits: { binding: string; key: string }[];
   takes: { key: string; limit: number }[];
+  /** SpendDO.status calls (what each asked for). */
+  spend: unknown[];
 }
 
-export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldHeaders?: Record<string, string>; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
-  const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [] };
+export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldStatus?: number; worldHeaders?: Record<string, string>; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
+  const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [], spend: [] };
   const rl = (binding: string, max: number) => {
     const seen = new Map<string, number>();
     return { limit: async ({ key }: { key: string }) => { out.limits.push({ binding, key }); const n = (seen.get(key) ?? 0) + 1; seen.set(key, n); return { success: n <= max }; } };
@@ -36,7 +38,7 @@ export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown;
         fetch: async (req: Request) => {
           const url = new URL(req.url);
           out.worlds.push({ slot, url: req.url, principal: req.headers.get("x-weft-principal") });
-          return new Response(JSON.stringify(o.worldBody?.(url) ?? { slot, path: url.pathname }), { status: 200, headers: { "content-type": "application/json", ...o.worldHeaders } });
+          return new Response(JSON.stringify(o.worldBody?.(url) ?? { slot, path: url.pathname }), { status: o.worldStatus ?? 200, headers: { "content-type": "application/json", ...o.worldHeaders } });
         },
       }),
     },
@@ -54,7 +56,7 @@ export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown;
         sweep: async () => ({ released: 0 }),
       }),
     },
-    SPEND: { idFromName: (n: string) => n, get: () => ({ status: async () => ({}) }) },
+    SPEND: { idFromName: (n: string) => n, get: () => ({ status: async (scope: unknown) => { out.spend.push(scope); return {}; } }) },
   } as unknown as FrontEnv;
   return out;
 }
@@ -105,6 +107,40 @@ describe("admin bodies", () => {
     const sig = await signAdmin({ token: f.env.WEFT_ADMIN_TOKEN!, method: "POST", path: "/api/_admin/sweep", body });
     const res = await call(f, "/api/_admin/sweep", { method: "POST", body, headers: { "x-weft-admin": sig, "content-type": "application/json" } });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("lease, verify and reset bodies", () => {
+  const visitor = "vis_" + "d".repeat(32);
+  const leased = async (f: FakeFront) => {
+    const nowS = Math.floor(Date.now() / 1000);
+    return `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600, leaseExpiresMs: (nowS + 600) * 1000 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
+  };
+  const cases = [
+    { path: "/api/_session/lease", code: "TURNSTILE_FAILED", session: false },
+    { path: "/api/_session/verify", code: "TURNSTILE_FAILED", session: true },
+    { path: "/api/v1/sim/reset", code: "BAD_BODY", session: true },
+  ];
+
+  it("stop reading a chunked body (no Content-Length) as soon as it passes 16 KB", async () => {
+    for (const c of cases) {
+      const f = fakeFront();
+      const headers: Record<string, string> = { origin: "https://weft.test", "content-type": "application/json" };
+      if (c.session) headers.cookie = await leased(f);
+      const res = await within(call(f, c.path, { method: "POST", body: stalling(16 * 1024 + 1), duplex: "half", headers } as RequestInit), 2_000);
+      expect(await res.json(), c.path).toMatchObject({ code: c.code });
+      expect(f.worlds, c.path).toEqual([]);
+    }
+  });
+
+  it("refuse a declared Content-Length over 16 KB before reading the body", async () => {
+    for (const c of cases) {
+      const f = fakeFront();
+      const headers: Record<string, string> = { origin: "https://weft.test", "content-type": "application/json", "content-length": String(16 * 1024 + 1) };
+      if (c.session) headers.cookie = await leased(f);
+      const res = await within(call(f, c.path, { method: "POST", body: stalling(10), duplex: "half", headers } as RequestInit), 2_000);
+      expect(await res.json(), c.path).toMatchObject({ code: c.code });
+    }
   });
 });
 
@@ -174,7 +210,7 @@ describe("RL_MUTATE", () => {
     // A leased visitor from the same address whose request carries a forged smoke header is that visitor.
     const visitor = "vis_" + "b".repeat(32);
     const nowS = Math.floor(Date.now() / 1000);
-    const cookie = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
+    const cookie = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600, leaseExpiresMs: (nowS + 600) * 1000 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
     const forged = await post({ cookie, "x-weft-smoke": `${nowS}.${"0".repeat(64)}` });
     expect(forged.status).toBe(200);
     expect(f.worlds.at(-1)!.slot).toBe("slot-1");
@@ -190,7 +226,7 @@ describe("RL_MUTATE", () => {
     }
     const visitor = "vis_" + "c".repeat(32);
     const nowS = Math.floor(Date.now() / 1000);
-    const cookie = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-2", gen: 1, exp: nowS + 600 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
+    const cookie = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-2", gen: 1, exp: nowS + 600, leaseExpiresMs: (nowS + 600) * 1000 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
     const mine = await call(f, "/api/v1/notes", { method: "POST", body: "{}", ip, headers: { cookie, origin: "https://weft.test" } });
     expect(mine.status).toBe(200);
   });
@@ -198,12 +234,13 @@ describe("RL_MUTATE", () => {
 
 describe("GET /api/_session after a hosted reset", () => {
   const visitor = "vis_" + "e".repeat(32);
-  const lease = (gen: number) => ({ slot: "slot-1", gen, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), idleExpiresAt: new Date(Date.now() + 1_800_000).toISOString(), resetsLeft: 2 });
+  // The lease's total expiry, to the millisecond: it names the lease in the cookie.
+  const LEASE_EXP = Date.now() + 3_600_123;
+  const lease = (gen: number) => ({ slot: "slot-1", gen, expiresAt: new Date(LEASE_EXP).toISOString(), idleExpiresAt: new Date(Date.now() + 1_800_000).toISOString(), resetsLeft: 2 });
   const status = (gen: number | null) => ({ level: 0, pool: { size: 2, free: 1, waitlist: 0 }, lease: gen === null ? null : lease(gen), waitlistPosition: null, worldProvider: null });
-  const sessionWith = async (f: FakeFront, gen: number) => {
-    const nowS = Math.floor(Date.now() / 1000);
-    return call(f, "/api/_session", { headers: { cookie: `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen, exp: nowS + 600 })}` } });
-  };
+  const cookieFor = async (f: FakeFront, gen: number, leaseExpiresMs = LEASE_EXP) =>
+    `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen, exp: Math.floor(leaseExpiresMs / 1000), leaseExpiresMs })}`;
+  const sessionWith = async (f: FakeFront, gen: number) => call(f, "/api/_session", { headers: { cookie: await cookieFor(f, gen) } });
 
   it("reissues the session cookie for the lease's newer generation instead of clearing the one the reset set", async () => {
     const asked: unknown[] = [];
@@ -211,13 +248,14 @@ describe("GET /api/_session after a hosted reset", () => {
     const r = await sessionWith(f, 3);
     expect(r.status).toBe(200);
     expect(await r.json()).toMatchObject({ world: "slot", lease: { slot: "slot-1", gen: 4 } });
-    expect(asked).toEqual([{ visitor, slot: "slot-1", gen: 3 }]);
+    // The Lobby is asked with the cookie's lease, so it can tell this lease from the visitor's earlier ones.
+    expect(asked).toEqual([{ visitor, slot: "slot-1", gen: 3, leaseExpiresMs: LEASE_EXP }]);
     const set = r.headers.getSetCookie();
     expect(set).toHaveLength(1);
     expect(set[0]).toMatch(new RegExp(`^${SESSION_COOKIE}=v1\\.`));
     expect(set[0]).not.toContain("Max-Age=0");
     const token = set[0]!.split(";")[0]!.slice(SESSION_COOKIE.length + 1);
-    expect(await readSession(f.env.WEFT_SESSION_SECRET!, token)).toMatchObject({ ok: true, claims: { visitor, slot: "slot-1", gen: 4 } });
+    expect(await readSession(f.env.WEFT_SESSION_SECRET!, token)).toMatchObject({ ok: true, claims: { visitor, slot: "slot-1", gen: 4, exp: Math.floor(LEASE_EXP / 1000), leaseExpiresMs: LEASE_EXP } });
   });
 
   it("sets nothing when the cookie is current, and clears both cookies when the Lobby has no lease", async () => {
@@ -225,5 +263,29 @@ describe("GET /api/_session after a hosted reset", () => {
     const gone = (await sessionWith(fakeFront({ status: () => status(null) }), 3)).headers.getSetCookie();
     expect(gone).toHaveLength(2);
     expect(gone.every((c) => c.includes("Max-Age=0"))).toBe(true);
+  });
+
+  it("asks SpendDO for the caps only for a leased visitor, never for a cookie-less read", async () => {
+    const f = fakeFront({ status: (input) => status(input.visitor ? 3 : null) });
+    for (let i = 0; i < 5; i++) expect((await call(f, "/api/_session")).status).toBe(200);
+    expect(f.spend).toEqual([]);
+    expect((await sessionWith(f, 3)).status).toBe(200);
+    expect(f.spend).toHaveLength(1);
+    expect(f.spend[0]).toMatchObject({ visitor });
+  });
+
+  it("keeps the cookies of a request the world answers 409 LEASE_ENDED only while the Lobby says the same lease moved on", async () => {
+    const ended = { "x-weft-lease": "ended" };
+    const asked: unknown[] = [];
+    const moved = fakeFront({ worldStatus: 409, worldHeaders: ended, status: (input) => { asked.push(input); return status(4); } });
+    const kept = await call(moved, "/api/v1/notes", { headers: { cookie: await cookieFor(moved, 3) } });
+    expect(kept.status).toBe(409);
+    expect(kept.headers.getSetCookie()).toEqual([]);
+    expect(asked).toEqual([{ visitor, slot: "slot-1", gen: 3, leaseExpiresMs: LEASE_EXP }]);
+    // A cookie of the visitor's earlier lease of that slot: the Lobby (namesLease) answers no lease, so it is cleared.
+    const earlier = fakeFront({ worldStatus: 409, worldHeaders: ended, status: () => status(null) });
+    const cleared = await call(earlier, "/api/v1/notes", { headers: { cookie: await cookieFor(earlier, 3, LEASE_EXP - 3_600_000) } });
+    expect(cleared.status).toBe(409);
+    expect(cleared.headers.getSetCookie().filter((c) => c.includes("Max-Age=0"))).toHaveLength(2);
   });
 });

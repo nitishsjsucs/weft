@@ -25,18 +25,20 @@ export interface FakeSlot extends SlotExtrasPort {
   blobs: Map<string, Uint8Array>;
   memory: Map<string, string>;
   writeBacks: HiddenWriteBack[];
+  /** The job generation each write-back and export named (CompanyDO refuses another generation than its own). */
+  gens: number[];
   reply: (w: HiddenWriteBack) => WriteBackOutcome;
 }
 export function fakeSlot(world: Partial<SlotWorldInfo> = {}): FakeSlot {
   const s: FakeSlot = {
     world: { slot: "slot-1", gen: 3, mode: "slot", snapshot: "snap1", lease: { visitor: "v_1", ipHash: "ip_1" }, ...world },
-    blobs: new Map(), memory: new Map(), writeBacks: [],
+    blobs: new Map(), memory: new Map(), writeBacks: [], gens: [],
     reply: () => ({ ok: true, status: "attached", reason: null }),
     async extrasWorld() { return s.world; },
     async extrasBlob(p) { return s.blobs.get(p) ?? null; },
-    async extrasWriteBack(w) { s.writeBacks.push(w); return s.reply(w); },
+    async extrasWriteBack(w, gen) { s.gens.push(gen); s.writeBacks.push(w); return s.reply(w); },
     async extrasMemoryText(path, commit) { return s.memory.get(`${commit}:${path}`) ?? null; },
-    async extrasExport(what) { return { bytes: new TextEncoder().encode(`${what} export of ${s.world.slot}`), contentType: what === "memory" ? "application/octet-stream" : "application/json" }; },
+    async extrasExport(what, gen) { s.gens.push(gen); return { bytes: new TextEncoder().encode(`${what} export of ${s.world.slot}`), contentType: what === "memory" ? "application/octet-stream" : "application/json" }; },
   };
   return s;
 }

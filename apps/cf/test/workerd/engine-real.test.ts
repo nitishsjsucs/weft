@@ -327,9 +327,12 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect(await count("SELECT count(*) AS n FROM outbox")).toBe(0);
     // The same job again, through the slot port: refused before any write, so it settles as "already" with no new row.
     const co = await company(DO_NAMES.smoke);
+    const worldGen = (await co.extrasWorld()).gen;
     const args = { job_id: extract.ocrJobId, expense_id: id, upload_id: row.upl, extract: null, model: "@cf/mistralai/mistral-small-3.1-24b-instruct", neurons: 0 };
-    expect(await co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args } as never)).toEqual({ ok: true, status: "already", reason: null });
-    expect(await co.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+    expect(await co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args } as never, worldGen)).toEqual({ ok: true, status: "already", reason: null });
+    expect(await co.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never, worldGen)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+    // A job of an older generation is refused before the executor sees it.
+    expect(await co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { ...args, job_id: "obx_0000000000000000" } } as never, worldGen - 1)).toMatchObject({ ok: false, code: "STALE_GENERATION", retryable: false });
     expect(await writeBacks()).toBe(1);
     // The same job delivered a second time through weft-core's queue(), as after a consumer that wrote back but lost
     // its ledger row: the OCR reads the receipt again, and svc_jobs' write-back is refused before it writes anything.

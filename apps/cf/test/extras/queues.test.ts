@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { d1JobLedger, EMBEDDING_MODEL, memoryNeuronBudget, OCR_MODEL, pdfFailureKey, pdfObjectKey, renderPdfHtml, sha256Hex, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
 import { extrasCron } from "../../src/extras/cron";
-import { BUDGET_RETRIES, exportObjectKey, handleExtrasBatch, retryDelaySeconds } from "../../src/extras/queues";
+import { BUDGET_RETRIES, exportObjectKey, handleExtrasBatch, retryDelaySeconds, STALE_GENERATION } from "../../src/extras/queues";
 import { batch, embeddingHandler, fakeAi, fakeBrowser, fakeImages, fakeSlot, fakeVectorize, FLAGS_ON, jobDeps, memoryR2, message, TINY_JPEG } from "./helpers";
 
 // 290 prompt and 41 completion tokens: ceil(290 x 0.031876 + 41 x 0.050488) = 12 neurons.
@@ -60,6 +60,22 @@ describe("OCR jobs", () => {
     expect(ai.calls).toHaveLength(1);
     expect(slot.writeBacks).toHaveLength(2);
     expect(deps.db.rows("jobs")).toMatchObject([{ state: "done", result_json: null }]);
+  });
+
+  it("names the job's generation in the write-back, and finishes as stale when the world refuses it (a reset moved on)", async () => {
+    const slot = fakeSlot();
+    const job = await receiptJob();
+    slot.blobs.set(job.storagePath, TINY_JPEG);
+    const deps = jobDeps({ "slot-1": slot }, { ai: fakeAi({ [OCR_MODEL]: ocrReply }) });
+    // The world was at generation 3 when the job started and is at 4 by the write-back (the OCR read took a while).
+    slot.reply = () => ({ ok: false, code: STALE_GENERATION, message: "a job of generation 3 for generation 4", retryable: false });
+    const m = message(job);
+    await run(deps, "weft-jobs", m);
+    expect(slot.gens).toEqual([3]);
+    expect(m.acked).toBe(1);
+    expect(m.retried).toEqual([]);
+    expect(deps.db.rows("jobs")).toMatchObject([{ job_id: "obx_0001", state: "done", outcome: "stale" }]);
+    expect(deps.db.rows("failed_jobs")).toEqual([]);
   });
 
   it("an unreadable or unsupported upload writes back a null extract; the kill flag skips it", async () => {
@@ -245,6 +261,7 @@ describe("embedding, export and render jobs", () => {
     expect(key).toBe("exports/slot-1/g3/memory-obx_x1.fast-import");
     expect(files.puts).toBe(1);
     expect(files.objects.get(key)!.meta).toEqual({ slot: "slot-1", gen: "3", what: "memory", requestedBy: "usr_dana" });
+    expect(slot.gens).toEqual([3]);
   });
 
   it("renders a PDF through a browser that loads nothing, then serves the cached copy on redelivery", async () => {

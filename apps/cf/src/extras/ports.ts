@@ -34,11 +34,16 @@ export interface SlotExtrasPort {
   extrasWorld(): Promise<SlotWorldInfo>;
   /** An upload's bytes by its storage path (`blob:<sha256>`), or null. */
   extrasBlob(storagePath: string): Promise<Uint8Array | null>;
-  /** Runs a hidden write-back as svc_jobs inside the slot's executor. */
-  extrasWriteBack(w: HiddenWriteBack): Promise<WriteBackOutcome>;
+  /**
+   * Runs a hidden write-back as svc_jobs inside the slot's executor. `gen` is the job's generation: CompanyDO refuses
+   * one that is not the world's (STALE_GENERATION, not retryable), so a late job of the previous visitor's generation
+   * never writes into the next visitor's world.
+   */
+  extrasWriteBack(w: HiddenWriteBack, gen: number): Promise<WriteBackOutcome>;
   /** A memory file's text at a commit, or null when the path or commit is missing. */
   extrasMemoryText(path: string, commit: string): Promise<string | null>;
-  extrasExport(what: "memory" | "world"): Promise<SlotExport>;
+  /** The world or its memory as a file; CompanyDO throws STALE_GENERATION for a job of another generation than the world's. */
+  extrasExport(what: "memory" | "world", gen: number): Promise<SlotExport>;
 }
 
 /** LobbyDO's RPC methods for the extras. */

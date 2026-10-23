@@ -69,6 +69,24 @@ const COUNTER = {
   doRequests: "do_requests", workersRequests: "workers_requests",
 } as const;
 
+/**
+ * Whether a session cookie's claims name the visitor's lease `l` (the row is already the visitor's). The cookie must
+ * be for the lease's slot and carry the lease's total expiry (`leaseExpiresMs`, to the millisecond), which names the
+ * lease: a reset keeps the lease's start, and the visitor's next lease has another one. The lease's own generation
+ * qualifies. An older generation qualifies only with that same expiry: it is a cookie from before the visitor's own
+ * "Reset demo data..." of this lease, answered with the lease as it is now so the front reissues the cookie. A cookie
+ * of an earlier, ended lease of the same visitor (operator visitor ids are stable per name) never names a later lease,
+ * so a cookie that leaked is revoked when its lease ends; a generation newer than the lease's names none. A caller
+ * without a lease expiry (a slot asking about its own stamp) is answered for the lease's own generation only.
+ */
+export function namesLease(l: Pick<LeaseRow, "slot" | "gen" | "started_at" | "last_seen">, c: { slot?: string | null; gen?: number | null; leaseExpiresMs?: number | null }): boolean {
+  if (c.slot != null && l.slot !== c.slot) return false;
+  const sameLease = c.leaseExpiresMs != null && leaseExpiresAt({ startedAt: l.started_at, lastSeen: l.last_seen }) === c.leaseExpiresMs;
+  if (c.leaseExpiresMs != null && !sameLease) return false;
+  if (c.gen == null || l.gen === c.gen) return true;
+  return sameLease && c.gen < l.gen;
+}
+
 export class LobbyDO extends DurableObject<CoreEnv> {
   private readonly sql: SqlStorage;
   private levelMemo: { at: number; result: LevelResult } | null = null;
@@ -283,8 +301,12 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     return n;
   }
 
-  /** Session status for the front's GET /api/_session. */
-  async status(input: { visitor: string | null; slot?: string | null; gen?: number | null; now?: number }): Promise<LobbyStatus> {
+  /**
+   * Session status for the front's GET /api/_session (and the front's other lease checks). `slot`, `gen` and
+   * `leaseExpiresMs` are the session cookie's claims; a Durable Object asking about its own stamp sends no lease
+   * expiry and is answered only for the stamp's own generation (see namesLease).
+   */
+  async status(input: { visitor: string | null; slot?: string | null; gen?: number | null; leaseExpiresMs?: number | null; now?: number }): Promise<LobbyStatus> {
     const now = input.now ?? Date.now();
     const { level } = await this.levelNow(now);
     const pool = this.poolSlots();
@@ -295,11 +317,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     let worldProvider: string | null = null;
     if (input.visitor) {
       const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
-      // A cookie from before the visitor's own "Reset demo data..." names an older generation of the same lease (the
-      // reset kept the lease and moved it on), so it is answered with the lease as it is now, and the front reissues
-      // the cookie. Only the visitor's own row on the cookie's slot qualifies: another slot, or a cookie generation
-      // newer than the lease's, is no lease.
-      if (l && (input.slot == null || l.slot === input.slot) && (input.gen == null || l.gen >= input.gen)) {
+      if (l && namesLease(l, input)) {
         try {
           const hb = await this.company(l.slot).heartbeat({ provider: true });
           this.absorbUsage(hb.usage);

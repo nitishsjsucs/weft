@@ -14,6 +14,9 @@ export interface ForwardTarget {
   /** The path inside the world (for example /v1/workers or /mcp). */
   path: string;
   search: string;
+  /** The session cookie's lease (its total expiry in ms) when the request carries one: it decides whether a 409
+   * LEASE_ENDED keeps the cookies (see leaseMovedOn). */
+  leaseExpiresMs?: number | null;
 }
 
 export function stripTrust(headers: Headers): Headers {
@@ -38,17 +41,22 @@ export async function forwardToWorld(req: Request, env: FrontEnv, t: ForwardTarg
     // A request that left with the cookie from before a hosted reset of the visitor's own lease reaches the world
     // after the generation moved on. The lease lives on (the reset reissued the cookie), so keep the cookies and let
     // the next session read pick up the new generation, instead of logging the visitor out.
-    if (await leaseMovedOn(env, t.ctx)) return res;
+    if (await leaseMovedOn(env, t)) return res;
     return withCookies(res, clearSessionCookies());
   }
   return res;
 }
 
-/** True when the visitor still holds a lease on the same slot under a newer generation than this request carried. */
-async function leaseMovedOn(env: FrontEnv, ctx: ForwardTarget["ctx"]): Promise<boolean> {
-  if (!ctx.visitor) return false;
+/**
+ * True when the request's cookie names a lease the visitor still holds, under a newer generation than the cookie (a
+ * hosted reset of that same lease). The Lobby's same-lease rule applies (namesLease): a cookie of the visitor's
+ * earlier, ended lease of that slot is not moved on, so its cookies are cleared.
+ */
+async function leaseMovedOn(env: FrontEnv, t: ForwardTarget): Promise<boolean> {
+  const ctx = t.ctx;
+  if (!ctx.visitor || t.leaseExpiresMs == null) return false;
   try {
-    const st = await env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby)).status({ visitor: ctx.visitor, slot: ctx.slot, gen: ctx.gen });
+    const st = await env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby)).status({ visitor: ctx.visitor, slot: ctx.slot, gen: ctx.gen, leaseExpiresMs: t.leaseExpiresMs });
     return !!st.lease && st.lease.slot === ctx.slot && st.lease.gen > ctx.gen;
   } catch {
     return false;

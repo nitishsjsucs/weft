@@ -1,11 +1,18 @@
 // SpendDO's ledger (design 4.1, 4.3, 5.2 and 6.3): `spend_entries` and `neuron_entries` in the SpendDO's own SQLite,
-// never reset. It keeps the file ledger's semantics (packages/agent/src/spend.ts): a reservation opens at its
-// reserved amount, a settle replaces it, a release zeroes it, open reservations count as spent, settle and release
+// never reset with a world. It keeps the file ledger's semantics (packages/agent/src/spend.ts): a reservation opens at
+// its reserved amount, a settle replaces it, a release zeroes it, open reservations count as spent, settle and release
 // rows copy the reservation's scope columns (so they land in its day), and the per-run cap keys a run by its world
 // and its id. The hosted caps add the visitor and IP-hash day caps, the neuron day cap with per-product shares, a
 // cumulative live cap that is off by default (section 0), and orphans settled at their reserved worst case after
 // ORPHAN_SETTLE_MS. Reserve checks and inserts in one synchronous transaction, so two slots racing for the last cents
 // of the day cap cannot both pass. Pure over SqlStorageLike: unit tests run it on node:sqlite.
+//
+// Rows read stay flat (design 8.2: DO rows read are an account-wide daily cap any visitor can spend): today's fold,
+// today's direct neurons and the live totals are kept in memory, built once per object (today's rows and the live
+// rows, each through an index) and updated by every write after it commits, since every write goes through this
+// ledger in this one object. A status reads no row; a reservation reads only its run's rows. The orphan sweep reads
+// only the reservations that crossed the orphan age since its last run, and prunes entries older than
+// RETAIN_DAYS (live totals of pruned rows carry over in spend_meta, so the cumulative live cap still counts them).
 import {
   FROZEN_CAP, NEURON_SHARES, ORPHAN_SETTLE_MS,
   type HostedCap, type HostedCaps, type HostedReserveInput, type HostedReserveRefusal, type HostedSpendScope,
@@ -24,6 +31,9 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS spend_entries_day ON spend_entries(day)`,
   `CREATE INDEX IF NOT EXISTS spend_entries_rsv ON spend_entries(reservation_id)`,
   `CREATE INDEX IF NOT EXISTS spend_entries_run ON spend_entries(world, run_id) WHERE run_id IS NOT NULL`,
+  // The live totals' one build per object, and the orphan sweep's window of reservations by age.
+  `CREATE INDEX IF NOT EXISTS spend_entries_live ON spend_entries(seq) WHERE live = 1`,
+  `CREATE INDEX IF NOT EXISTS spend_entries_reserve_at ON spend_entries(at) WHERE kind = 'reserve'`,
   `CREATE TABLE IF NOT EXISTS neuron_entries (
      seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, day TEXT NOT NULL, product TEXT NOT NULL,
      model TEXT NOT NULL, neurons INTEGER NOT NULL)`,
@@ -52,27 +62,32 @@ export interface SpendRow {
 
 interface Folded { r: SpendRow; micros: number; neurons: number; open: boolean }
 
+/** One step of the file ledger's fold: a reserve opens at its reserved amount, a settle or release closes it. */
+export function foldInto(m: Map<string, Folded>, e: SpendRow): void {
+  if (e.kind === "reserve") {
+    m.set(e.reservation_id, { r: e, micros: e.usd_micros, neurons: e.neurons, open: true });
+    return;
+  }
+  const cur = m.get(e.reservation_id);
+  if (!cur) return;
+  cur.micros = e.kind === "settle" ? e.usd_micros : 0;
+  cur.neurons = e.kind === "settle" ? e.neurons : 0;
+  cur.open = false;
+}
+
 /** The file ledger's fold: per reservation, open at its reserved amount until a settle or release closes it. */
 export function fold(rows: readonly SpendRow[]): Map<string, Folded> {
   const m = new Map<string, Folded>();
-  for (const e of rows) {
-    if (e.kind === "reserve") m.set(e.reservation_id, { r: e, micros: e.usd_micros, neurons: e.neurons, open: true });
-    else {
-      const cur = m.get(e.reservation_id);
-      if (!cur) continue;
-      cur.micros = e.kind === "settle" ? e.usd_micros : 0;
-      cur.neurons = e.kind === "settle" ? e.neurons : 0;
-      cur.open = false;
-    }
-  }
+  for (const e of rows) foldInto(m, e);
   return m;
 }
 
 export interface Totals { settledMicros: number; openMicros: number; neurons: number }
 const committedOf = (t: Totals) => t.settledMicros + t.openMicros;
+const zeroTotals = (): Totals => ({ settledMicros: 0, openMicros: 0, neurons: 0 });
 
 function totalsOf(folded: Iterable<Folded>, keep: (r: SpendRow) => boolean = () => true): Totals {
-  const t: Totals = { settledMicros: 0, openMicros: 0, neurons: 0 };
+  const t = zeroTotals();
   for (const f of folded) {
     if (!keep(f.r)) continue;
     if (f.open) t.openMicros += f.micros;
@@ -81,6 +96,12 @@ function totalsOf(folded: Iterable<Folded>, keep: (r: SpendRow) => boolean = () 
   }
   return t;
 }
+
+/** Spend entries are kept this many UTC days back (today included); older ones are pruned by the orphan sweep. */
+export const RETAIN_DAYS = 3;
+/** The orphan sweep looks back at most this far the first time (and after a long gap); older reservations stay. */
+const ORPHAN_LOOKBACK_MS = 2 * 86_400_000;
+const META = { orphansScannedTo: "orphans.scanned_to", liveCarry: "live.carry" } as const;
 
 export interface SqlSpendLedgerOptions {
   /** Current caps (KV, then vars, then the defaults); read at every reservation. */
@@ -99,6 +120,8 @@ export interface SqlSpendLedger {
   spent(scope: HostedSpendScope): number;
   committed(scope: HostedSpendScope): Totals;
   status(scope: { visitor?: string | null; ipHash?: string | null }): HostedSpendStatus;
+  /** Settles reservations open longer than ORPHAN_SETTLE_MS at their worst case, and prunes entries older than
+   * RETAIN_DAYS; returns how many reservations it settled. */
   settleOrphans(now?: Date): number;
   /** Neurons used outside a reservation (OCR, embeddings, dictation): counted against the day cap and the product's share. */
   recordNeurons(input: { product: NeuronProduct; model: string; neurons: number }): void;
@@ -108,6 +131,11 @@ export interface SqlSpendLedger {
 }
 
 const ROW_COLS = "at, day, world, run_id, kind, reservation_id, usd_micros, model, live, visitor, ip_hash, neurons, product";
+const PRODUCTS: readonly NeuronProduct[] = ["agent", "ocr", "embeddings", "dictation"];
+const noNeurons = (): Record<NeuronProduct, number> => ({ agent: 0, ocr: 0, embeddings: 0, dictation: 0 });
+
+/** What the ledger keeps in memory for the current UTC day: the fold of its entries and its direct neurons. */
+interface DayState { day: string; folded: Map<string, Folded>; direct: Record<NeuronProduct, number> }
 
 export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): SqlSpendLedger {
   const wallNow = opts.wallNow ?? (() => new Date());
@@ -120,18 +148,63 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
     ? q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE world IS NULL AND run_id = ? ORDER BY seq`, runId)
     : q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE world = ? AND run_id = ? ORDER BY seq`, world, runId);
   const rowsLive = () => q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE live = 1 ORDER BY seq`);
-  const directNeurons = (day: string) => q<{ product: string; n: number }>(`SELECT product, SUM(neurons) AS n FROM neuron_entries WHERE day = ? GROUP BY product`, day);
+  const meta = (k: string): string | null => q<{ v: string }>(`SELECT v FROM spend_meta WHERE k = ?`, k)[0]?.v ?? null;
+  const setMeta = (k: string, v: string) => s.sql.exec(`INSERT INTO spend_meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v`, k, v);
 
-  function neuronUse(day: string, dayFolded: Map<string, Folded>): { total: number; byProduct: Record<NeuronProduct, number> } {
-    const byProduct: Record<NeuronProduct, number> = { agent: 0, ocr: 0, embeddings: 0, dictation: 0 };
-    for (const f of dayFolded.values()) {
+  // In-memory state ----------------------------------------------------------------------------------------------
+
+  let dayState: DayState | null = null;
+  /** Today's fold and direct neurons: read once per UTC day (and once per object), then kept by apply(). */
+  function current(): DayState {
+    const day = today();
+    if (dayState?.day !== day) {
+      const direct = noNeurons();
+      for (const d of q<{ product: string; n: number }>(`SELECT product, SUM(neurons) AS n FROM neuron_entries WHERE day = ? GROUP BY product`, day)) {
+        if ((PRODUCTS as readonly string[]).includes(d.product)) direct[d.product as NeuronProduct] += Number(d.n);
+      }
+      dayState = { day, folded: fold(rowsForDay(day)), direct };
+    }
+    return dayState;
+  }
+
+  /** Every live reservation ever made (pruned ones carried in spend_meta), folded: built on first use, then kept. */
+  let liveTotals: Totals | null = null;
+  function live(): Totals {
+    if (!liveTotals) {
+      const carry = parseCarry(meta(META.liveCarry));
+      const t = totalsOf(fold(rowsLive()).values());
+      liveTotals = { settledMicros: carry.settledMicros + t.settledMicros, openMicros: carry.openMicros + t.openMicros, neurons: carry.neurons + t.neurons };
+    }
+    return liveTotals;
+  }
+
+  /**
+   * Keeps the in-memory state in step with an entry that was just committed (`reservation` is the reserve row a settle
+   * or release closes). Called only after the transaction that wrote it returned, so a rolled-back write never counts.
+   */
+  function apply(e: SpendRow, reservation: SpendRow | null): void {
+    if (dayState && e.day === dayState.day) foldInto(dayState.folded, e);
+    if (liveTotals && e.live === 1) {
+      if (e.kind === "reserve") { liveTotals.openMicros += e.usd_micros; liveTotals.neurons += e.neurons; }
+      else if (reservation) {
+        liveTotals.openMicros -= reservation.usd_micros;
+        liveTotals.neurons -= reservation.neurons;
+        if (e.kind === "settle") { liveTotals.settledMicros += e.usd_micros; liveTotals.neurons += e.neurons; }
+      }
+    }
+  }
+
+  function neuronUse(st: DayState): { total: number; byProduct: Record<NeuronProduct, number> } {
+    const byProduct = { ...st.direct };
+    for (const f of st.folded.values()) {
       if (!f.neurons) continue;
       const p = (f.r.product ?? "agent") as NeuronProduct;
       if (p in byProduct) byProduct[p] += f.neurons;
     }
-    for (const d of directNeurons(day)) if (d.product in byProduct) byProduct[d.product as NeuronProduct] += Number(d.n);
     return { total: Object.values(byProduct).reduce((a, b) => a + b, 0), byProduct };
   }
+
+  // Queries --------------------------------------------------------------------------------------------------------
 
   function rowsForScope(scope: HostedSpendScope): SpendRow[] {
     if (scope.runId !== undefined) return rowsForRun(scope.world ?? null, scope.runId);
@@ -141,13 +214,16 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
   }
 
   function scopeTotals(scope: HostedSpendScope): Totals {
-    const folded = fold(rowsForScope(scope));
-    return totalsOf(folded.values(), (r) =>
+    const keep = (r: SpendRow) =>
       (scope.day === undefined || r.day === scope.day)
       && (scope.live === undefined || (r.live === 1) === scope.live)
       && (scope.visitor === undefined || r.visitor === scope.visitor)
       && (scope.ipHash === undefined || r.ip_hash === scope.ipHash)
-      && (scope.runId === undefined || scope.world === undefined || r.world === scope.world));
+      && (scope.runId === undefined || scope.world === undefined || r.world === scope.world);
+    // Today's totals and the live totals come from memory; anything else is read (a run's rows, another day's).
+    if (scope.runId === undefined && scope.day !== undefined && scope.day === today()) return totalsOf(current().folded.values(), keep);
+    if (scope.runId === undefined && scope.day === undefined && scope.live === true && scope.visitor === undefined && scope.ipHash === undefined) return { ...live() };
+    return totalsOf(fold(rowsForScope(scope)).values(), keep);
   }
 
   function insert(e: SpendRow): void {
@@ -163,55 +239,59 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
   }
 
   function close(id: string, kind: "settle" | "release", usd: number, neurons: number): void {
-    s.transactionSync(() => {
+    const done = s.transactionSync((): [SpendRow, SpendRow] | null => {
       const r = findReservation(id);
-      if (!r || isClosed(id)) return;   // unknown, or already closed: a replayed settle changes nothing
-      insert({ ...r, kind, usd_micros: Math.max(0, Math.ceil(usd)), neurons: Math.max(0, Math.ceil(neurons)) });
+      if (!r || isClosed(id)) return null;   // unknown, or already closed: a replayed settle changes nothing
+      const e: SpendRow = { ...r, kind, usd_micros: Math.max(0, Math.ceil(usd)), neurons: Math.max(0, Math.ceil(neurons)) };
+      insert(e);
+      return [e, r];
     });
+    if (done) apply(done[0], done[1]);
   }
 
   return {
     reserve(input) {
-      return s.transactionSync((): ReserveResult => {
+      const out = s.transactionSync((): { result: ReserveResult; row: SpendRow | null } => {
         const caps = opts.caps();
-        const day = today();
+        const st = current();
         const usd = Math.max(0, Math.ceil(input.usdMicros));
         const neurons = Math.max(0, Math.ceil(input.neurons ?? 0));
         const product: NeuronProduct = input.product ?? "agent";
         const world = input.world ?? null;
-        const dayFolded = fold(rowsForDay(day));
+        const dayFolded = st.folded;
         const checks: { cap: HostedCap; capMicros: number; committed: () => number }[] = [];
         if (input.runId !== null) {
           const scale = Math.max(1, input.runCapScale ?? 1);
           checks.push({ cap: "run", capMicros: caps.runUsd * scale * 1e6, committed: () => committedOf(totalsOf(fold(rowsForRun(world, input.runId!)).values())) });
         }
         checks.push({ cap: "day", capMicros: caps.dayUsd * 1e6, committed: () => committedOf(totalsOf(dayFolded.values())) });
-        if (input.live && caps.liveUsd !== null) {
-          checks.push({ cap: "live", capMicros: caps.liveUsd * 1e6, committed: () => committedOf(totalsOf(fold(rowsLive()).values())) });
-        }
+        if (input.live && caps.liveUsd !== null) checks.push({ cap: "live", capMicros: caps.liveUsd * 1e6, committed: () => committedOf(live()) });
         if (input.visitor) checks.push({ cap: "visitor", capMicros: caps.visitorDayUsd * 1e6, committed: () => committedOf(totalsOf(dayFolded.values(), (r) => r.visitor === input.visitor)) });
         if (input.ipHash) checks.push({ cap: "ip", capMicros: caps.ipDayUsd * 1e6, committed: () => committedOf(totalsOf(dayFolded.values(), (r) => r.ip_hash === input.ipHash)) });
         for (const c of checks) {
           const committed = c.committed();
           if (committed + usd > c.capMicros) {
-            return { ok: false, code: "BUDGET_EXCEEDED", cap: FROZEN_CAP[c.cap], hostedCap: c.cap, spentMicros: committed, capMicros: Math.round(c.capMicros) };
+            return { row: null, result: { ok: false, code: "BUDGET_EXCEEDED", cap: FROZEN_CAP[c.cap], hostedCap: c.cap, spentMicros: committed, capMicros: Math.round(c.capMicros) } };
           }
         }
         if (neurons > 0) {
-          const use = neuronUse(day, dayFolded);
+          const use = neuronUse(st);
           const share = shares[product] ?? 0;
           if (use.total + neurons > caps.neuronsDay || use.byProduct[product] + neurons > share) {
-            return { ok: false, code: "BUDGET_EXCEEDED", cap: FROZEN_CAP.neurons, hostedCap: "neurons", spentMicros: use.total, capMicros: Math.min(caps.neuronsDay, share) };
+            return { row: null, result: { ok: false, code: "BUDGET_EXCEEDED", cap: FROZEN_CAP.neurons, hostedCap: "neurons", spentMicros: use.total, capMicros: Math.min(caps.neuronsDay, share) } };
           }
         }
         const reservationId = `rsv_${randomHex(8)}`;
-        insert({
-          at: wallNow().toISOString(), day, world, run_id: input.runId, kind: "reserve", reservation_id: reservationId, usd_micros: usd,
+        const row: SpendRow = {
+          at: wallNow().toISOString(), day: st.day, world, run_id: input.runId, kind: "reserve", reservation_id: reservationId, usd_micros: usd,
           model: input.model, live: input.live ? 1 : 0, visitor: input.visitor ?? null, ip_hash: input.ipHash ?? null,
           neurons, product: neurons > 0 ? product : null,
-        });
-        return { ok: true, reservationId };
+        };
+        insert(row);
+        return { row, result: { ok: true, reservationId } };
       });
+      if (out.row) apply(out.row, null);
+      return out.result;
     },
     settle(id, actual, extra) {
       const r = findReservation(id);
@@ -227,19 +307,18 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       return scopeTotals(scope);
     },
     status(scope) {
-      const day = today();
+      const st = current();
       const caps = opts.caps();
-      const dayFolded = fold(rowsForDay(day));
-      const all = [...dayFolded.values()];
-      const use = neuronUse(day, dayFolded);
+      const all = [...st.folded.values()];
+      const use = neuronUse(st);
       return {
-        day,
+        day: st.day,
         caps,
         spentMicros: {
           day: committedOf(totalsOf(all)),
           visitor: scope.visitor ? committedOf(totalsOf(all, (r) => r.visitor === scope.visitor)) : null,
           ip: scope.ipHash ? committedOf(totalsOf(all, (r) => r.ip_hash === scope.ipHash)) : null,
-          live: committedOf(totalsOf(fold(rowsLive()).values())),
+          live: committedOf(live()),
         },
         neurons: { used: use.total, byProduct: use.byProduct },
         openReservations: all.filter((f) => f.open).length,
@@ -247,25 +326,50 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
     },
     settleOrphans(now = wallNow()) {
       const cutoff = new Date(now.getTime() - ORPHAN_SETTLE_MS).toISOString();
-      const since = new Date(now.getTime() - 2 * 86_400_000).toISOString().slice(0, 10);
-      return s.transactionSync(() => {
-        const open = q<SpendRow>(
-          `SELECT ${ROW_COLS} FROM spend_entries r WHERE r.day >= ? AND r.kind = 'reserve' AND r.at < ?
+      const floor = new Date(now.getTime() - ORPHAN_LOOKBACK_MS).toISOString();
+      const keepFrom = new Date(now.getTime() - (RETAIN_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
+      const done = s.transactionSync(() => {
+        // Only reservations that crossed the orphan age since the last sweep: every older one was settled then, or
+        // closed itself. The first sweep (and one after a long gap) looks back ORPHAN_LOOKBACK_MS.
+        const scannedTo = meta(META.orphansScannedTo);
+        const from = scannedTo !== null && scannedTo > floor ? scannedTo : floor;
+        const open = from < cutoff ? q<SpendRow>(
+          `SELECT ${ROW_COLS} FROM spend_entries r WHERE r.kind = 'reserve' AND r.at >= ? AND r.at < ?
              AND NOT EXISTS (SELECT 1 FROM spend_entries x WHERE x.reservation_id = r.reservation_id AND x.kind != 'reserve')
-           ORDER BY r.seq`, since, cutoff);
-        for (const r of open) insert({ ...r, kind: "settle" });   // worst case: the reserved amount and neurons
-        return open.length;
+           ORDER BY r.seq`, from, cutoff) : [];
+        const settled: [SpendRow, SpendRow][] = [];
+        for (const r of open) {
+          const e: SpendRow = { ...r, kind: "settle" };   // worst case: the reserved amount and neurons
+          insert(e);
+          settled.push([e, r]);
+        }
+        if (scannedTo === null || cutoff > scannedTo) setMeta(META.orphansScannedTo, cutoff);
+        // Prune what is older than the retention window: the live rows' totals carry over first, so the cumulative
+        // live cap still counts them. Settle and release rows share their reservation's day, so a reservation and its
+        // close go together.
+        // Ordered by day first, so the day index serves it (ordering by seq alone would walk every live row).
+        const pruned = q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE day < ? AND live = 1 ORDER BY day, seq`, keepFrom);
+        if (pruned.length) {
+          const t = totalsOf(fold(pruned).values());
+          const carry = parseCarry(meta(META.liveCarry));
+          setMeta(META.liveCarry, JSON.stringify({ settledMicros: carry.settledMicros + t.settledMicros, openMicros: carry.openMicros + t.openMicros, neurons: carry.neurons + t.neurons }));
+        }
+        s.sql.exec(`DELETE FROM spend_entries WHERE day < ?`, keepFrom);
+        s.sql.exec(`DELETE FROM neuron_entries WHERE day < ?`, keepFrom);
+        return settled;
       });
+      for (const [e, r] of done) apply(e, r);
+      return done.length;
     },
     recordNeurons({ product, model, neurons }) {
       const n = Math.max(0, Math.ceil(neurons));
       if (!n) return;
       const at = wallNow().toISOString();
       s.sql.exec(`INSERT INTO neuron_entries (at, day, product, model, neurons) VALUES (?, ?, ?, ?, ?)`, at, at.slice(0, 10), product, model, n);
+      if (dayState && dayState.day === at.slice(0, 10) && product in dayState.direct) dayState.direct[product] += n;
     },
     neuronsLeft(product) {
-      const day = today();
-      const use = neuronUse(day, fold(rowsForDay(day)));
+      const use = neuronUse(current());
       const caps = opts.caps();
       return { product: Math.max(0, (shares[product] ?? 0) - use.byProduct[product]), day: Math.max(0, caps.neuronsDay - use.total) };
     },
@@ -273,4 +377,13 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       return rowsForDay(day ?? today());
     },
   };
+}
+
+function parseCarry(v: string | null): Totals {
+  try {
+    const t = v ? (JSON.parse(v) as Partial<Totals>) : {};
+    return { settledMicros: Number(t.settledMicros) || 0, openMicros: Number(t.openMicros) || 0, neurons: Number(t.neurons) || 0 };
+  } catch {
+    return zeroTotals();
+  }
 }

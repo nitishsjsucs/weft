@@ -229,7 +229,7 @@ describe("slot port", () => {
     expect(await port.extrasMemoryText("entities/people/wrk_0026.md", head)).toContain("---\n");
     expect(await port.extrasMemoryText("../x.md", head)).toBeNull();
     expect(await port.extrasMemoryText("entities/people/wrk_0026.md", "HEAD")).toBeNull();
-    expect(await port.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+    expect(await port.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never, 1)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
     expect((await port.extrasWorld()).lease).toEqual({ visitor: "v_test", ipHash: "ip_test" });
     // A note missing at the commit is null; a read that fails is an error the embedding job retries on.
     const failing = createSlotExtras({ ...slotDeps(), memoryText: async () => { throw new Error("SQLITE_BUSY"); } });
@@ -247,7 +247,7 @@ describe("slot port", () => {
   });
 
   it("exports the world's tables without key material, memory or stored uploads", async () => {
-    const out = await slotPort().extrasExport("world");
+    const out = await slotPort().extrasExport("world", 1);
     expect(out.contentType).toBe("application/json");
     const doc = JSON.parse(new TextDecoder().decode(out.bytes)) as { format: string; tables: Record<string, Record<string, unknown>[]> };
     expect(doc.format).toBe("weft-world-export");
@@ -255,11 +255,11 @@ describe("slot port", () => {
     for (const t of ["mem_objects", "blobs", "kv_state", "run_handles", "__drizzle_migrations"]) expect(doc.tables[t]).toBeUndefined();
     for (const k of doc.tables.api_keys ?? []) { expect(k).not.toHaveProperty("hash"); expect(k).not.toHaveProperty("prefix"); }
     for (const v of doc.tables.vault_secrets ?? []) expect(v).not.toHaveProperty("ciphertext");
-    expect((await slotPort().extrasExport("memory")).contentType).toBe("application/octet-stream");
+    expect((await slotPort().extrasExport("memory", 1)).contentType).toBe("application/octet-stream");
   });
 
   it("counts the world's tables in an export, never workerd's reserved _cf_ tables", async () => {
-    const count = async () => (JSON.parse(new TextDecoder().decode((await slotPort().extrasExport("world")).bytes)) as { tableCount: number; tables: Record<string, unknown> }).tableCount;
+    const count = async () => (JSON.parse(new TextDecoder().decode((await slotPort().extrasExport("world", 1)).bytes)) as { tableCount: number; tables: Record<string, unknown> }).tableCount;
     const before = await count();
     expect(before).toBeGreaterThan(90);
     // As workerd lists its _cf_KV in sqlite_master (Node has none, so one stands in here).
