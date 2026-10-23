@@ -4,6 +4,7 @@
 // calls bindMemory() while buildApp() runs inside createWeft(), before any run can start.
 import type { Db } from "@weft/db";
 import type { SimClock } from "@weft/contracts";
+import type { TxGuard } from "../../../../packages/contracts/src/ext/cf-db";
 import { executorInternals } from "@weft/executor";
 import type { Weft } from "../http/context";
 import { runMemoryDigest, type MemoryW2 } from "./digest";
@@ -22,6 +23,8 @@ export interface MemoryBinding {
   /** Semantic candidates added to the lexical block (cf6-extras, design 5.4); absent everywhere but a hosted world
    * whose platform attached a source, and inert there until its flag is on. */
   semantic?: SemanticRecallOptions | null;
+  /** The facade's IO_IN_TX guard on the durable platform, null on Node: a semantic source is binding I/O. */
+  guard: TxGuard | null;
 }
 
 const bindings = new WeakMap<Db, MemoryBinding>();
@@ -36,7 +39,7 @@ export function bindMemory(weft: Weft): MemoryBinding | null {
   const internals = (() => { try { return executorInternals(weft.executor); } catch { return null; } })();
   if (!memory || typeof memory.digest !== "function" || !internals) return null;
   const b: MemoryBinding = {
-    db: weft.db, clock: weft.clock, memory, recallEnabled: true,
+    db: weft.db, clock: weft.clock, memory, recallEnabled: true, guard: weft.platform?.guard ?? null,
     taintRun: (runId, by) => internals.taintRun(runId, by),
     redact: (text) => weft.executor.redact(text),
     digest: (input) => runMemoryDigest(b, input),
