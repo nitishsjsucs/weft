@@ -4,7 +4,8 @@
 import { describe, expect, it } from "vitest";
 import { HOSTED_CAP_DEFAULTS, ORPHAN_SETTLE_MS, type HostedCaps } from "../../src/shared/contracts";
 import { createSqlSpendLedger, fold, migrateSpend, PRUNE_BATCH, rebuildSpendTotals, SPEND_SCHEMA_VERSION, type SpendRow } from "../../src/core/spend/ledger";
-import { memorySql, readMeter } from "./sqlite";
+import { billedWriteMeter, memorySql, readMeter } from "./sqlite";
+import { SPEND_ROWS_PER_LIVE_STEP } from "../../src/core/lobby/policy";
 
 const USD = 1e6;
 
@@ -327,6 +328,17 @@ describe("SpendDO ledger", () => {
     const st = l.status({ visitor: "vis_a", ipHash: "ip_a" });
     expect(st).toMatchObject({ day: "2026-10-26", spentMicros: { day: 30_000, visitor: 10_000, ip: 30_000, live: 30_000 }, openReservations: 2 });
     expect(l.status({}).spentMicros.visitor).toBeNull();
+  });
+
+  it(`writes SPEND_ROWS_PER_LIVE_STEP (${SPEND_ROWS_PER_LIVE_STEP}) rows per live model step, as workerd bills them: the reservation, its settle, their index rows and totals`, () => {
+    const { l, s } = ledger({ dayUsd: 1_000, runUsd: 1_000, visitorDayUsd: 1_000, ipDayUsd: 1_000 });
+    const w = billedWriteMeter(s);
+    for (let i = 0; i < 20; i++) {
+      const r = reserve(l, 0.002, { runId: `run_${i % 4}` });
+      expect(r.ok).toBe(true);
+      if (r.ok) l.settle(r.reservationId, 1_500);
+    }
+    expect(w.rows / 20).toBe(SPEND_ROWS_PER_LIVE_STEP);
   });
 
   it("fold ignores a settle without its reservation", () => {

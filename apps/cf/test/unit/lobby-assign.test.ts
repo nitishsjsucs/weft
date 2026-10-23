@@ -6,14 +6,14 @@ import { describe, expect, it } from "vitest";
 import { HOSTED_SETTINGS } from "../../src/shared/contracts";
 import { utcDay } from "../../src/shared/http";
 import { LobbyDO } from "../../src/core/lobby/lobby-do";
-import { FULL_RESTORE_ROWS, WAITLIST_MAX, WAITLIST_TTL_MS } from "../../src/core/lobby/policy";
+import { FULL_RESTORE_ROWS, SESSION_LOBBY_ROWS, WAITLIST_MAX, WAITLIST_TTL_MS } from "../../src/core/lobby/policy";
 import { LAST_SEEN_WRITE_MS } from "../../src/core/lobby/lobby-do";
-import { memorySql, readMeter, writeMeter } from "./sqlite";
+import { billedWriteMeter, memorySql, readMeter, writeMeter } from "./sqlite";
 
 const yieldTick = () => new Promise((r) => setTimeout(r, 1));
 
 /** A pool slot as the Lobby sees it: its usage since the last drain, its visitor's last activity, and every heartbeat. */
-interface FakeSlot { usage: { rowsRead: number; rowsWritten: number; requests: number }; lastActivityMs: number | null; heartbeats: Record<string, unknown>[] }
+interface FakeSlot { usage: { rowsRead: number; rowsWritten: number; requests: number }; lastActivityMs: number | null; heartbeats: Record<string, unknown>[]; dirty?: boolean }
 
 function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql>; wake: () => LobbyDO; slots: Map<string, FakeSlot> } {
   const m = memorySql();
@@ -44,8 +44,10 @@ function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnT
           f.heartbeats.push(opts);
           const usage = opts.keepUsage ? { rowsRead: 0, rowsWritten: 0, requests: 0 } : f.usage;
           if (!opts.keepUsage) f.usage = { rowsRead: 0, rowsWritten: 0, requests: 0 };
-          return { stamped: null, lastActivityMs: f.lastActivityMs, clean: true, usage, snapshot: null };
+          return { stamped: null, lastActivityMs: f.lastActivityMs, clean: !f.dirty, usage, snapshot: null };
         },
+        deltaReset: async (st: { gen: number }) => { await yieldTick(); return { ok: true, method: "delta", gen: st.gen, rowsWritten: 717, mismatches: [], ms: 1 }; },
+        endLease: async () => { await yieldTick(); },
       }),
     },
   };
@@ -294,5 +296,33 @@ describe("a lease holder's GET /api/_session", () => {
     expect(counter(m, "rows_written")).toBe(90 * 3);
     expect(counter(m, "do_requests")).toBe(90 * 2);
     expect(f.usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
+  });
+});
+
+describe("one engaged session's own Lobby rows", () => {
+  it(`stay within SESSION_LOBBY_ROWS (${SESSION_LOBBY_ROWS}), as workerd bills them: the lease, 30 minutes of session polls, a usage push, two sweeps, a reset and the lease's end`, async () => {
+    const { lobby, m, slots } = lobbyOver(2);
+    const w = billedWriteMeter(m);
+    const t0 = Date.now();
+    const v = visitor(9);
+    const lease = await lobby.assign({ visitor: v, ipHash: "9".repeat(32), now: t0 });
+    const slot = (lease as { slot: string }).slot;
+    const f = slots.get(slot) ?? (slots.set(slot, { usage: { rowsRead: 0, rowsWritten: 0, requests: 0 }, lastActivityMs: null, heartbeats: [] }), slots.get(slot)!);
+    f.dirty = true;
+    let gen = (lease as { gen: number }).gen;
+    // A tab polls GET /api/_session every 30 s while its visitor works for 30 minutes.
+    for (let i = 1; i <= 60; i++) {
+      const now = t0 + i * 30_000;
+      f.lastActivityMs = now - 1_000;
+      f.usage = { rowsRead: f.usage.rowsRead + 1_000, rowsWritten: f.usage.rowsWritten + 15, requests: f.usage.requests + 8 };
+      if (i === 20) gen = ((await lobby.reset({ visitor: v, slot, gen, now })) as { gen: number }).gen;
+      if (i === 30 || i === 60) await lobby.sweep({ now });
+      if (i === 40) await lobby.reportUsage({ slot, usage: { rowsRead: 100_000, rowsWritten: 1_000, requests: 500 } });
+      expect((await lobby.status({ visitor: v, slot, gen, now })).lease?.slot).toBe(slot);
+    }
+    await lobby.releaseVisitor({ visitor: v, reason: "idle", now: t0 + 61 * 60_000 });
+    // 63 measured on 2026-10-23 (leases 34, counters 22, slots 4, lobby_meta 3); the bound keeps it a measured value.
+    expect(w.rows).toBeLessThanOrEqual(SESSION_LOBBY_ROWS);
+    expect(w.rows).toBeGreaterThanOrEqual(Math.floor(SESSION_LOBBY_ROWS * 0.8));
   });
 });
