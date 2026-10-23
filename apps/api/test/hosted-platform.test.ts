@@ -512,6 +512,21 @@ describe("hosted origins, the read-only guard and the hidden write-backs", () =>
     } finally { await node.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it("svc_jobs runs its two write-backs and nothing else on the durable world: any other command is refused NOT_PERMITTED", async () => {
+    const src = { eventId: null, attended: false, requestedBy: null };
+    const actionsBefore = Number(w.storage.sql.exec("SELECT count(*) AS n FROM actions").one().n);
+    const draft = w.storage.sql.exec<{ id: string }>("SELECT id FROM payroll_runs WHERE status = 'draft' ORDER BY id LIMIT 1").one().id;
+    // An R4 a person approves, and an R1 system record svc_events may run: both are off svc_jobs's allowlist, and the
+    // allowlist is what refuses them (the R2-and-above rule would refuse the first one only).
+    const calls: [string, Record<string, unknown>][] = [["payroll.submit_run", { run_id: draft, exclude_blocked: true }], ["compliance.refresh_calendar", {}]];
+    for (const [command, args] of calls) {
+      const out = await w.weft.executor.system.exec(JOBS_PRINCIPAL as never, command, args, src);
+      expect(out, `${command}: ${JSON.stringify(out)}`).toMatchObject({ ok: false, refusal: { code: "NOT_PERMITTED", message: expect.stringMatching(/not on this system principal's allowlist/) } });
+    }
+    expect(Number(w.storage.sql.exec("SELECT count(*) AS n FROM actions").one().n)).toBe(actionsBefore);
+    expect(w.storage.sql.exec<{ status: string }>("SELECT status FROM payroll_runs WHERE id = ?", draft).one().status).toBe("draft");
+  });
+
   it("builds an ocr.receipt job for a claim's receipt, and the receipt write-back is idempotent and checks the upload", async () => {
     const row = w.storage.sql.exec<{ id: string; upl: string }>("SELECT id, receipt_upload_id AS upl FROM expenses WHERE receipt_upload_id IS NOT NULL ORDER BY id LIMIT 1").one();
     const [job] = await jobsFor(w.weft.db, { slot: "slot-1", gen: 1 }, { name: "expenses.submit" }, { receipt: {} }, { expense_id: row.id }, { tainted: false, semanticRecall: false });
