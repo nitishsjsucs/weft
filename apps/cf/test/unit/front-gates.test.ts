@@ -108,6 +108,40 @@ describe("admin bodies", () => {
   });
 });
 
+describe("lease, verify and reset bodies", () => {
+  const visitor = "vis_" + "d".repeat(32);
+  const leased = async (f: FakeFront) => {
+    const nowS = Math.floor(Date.now() / 1000);
+    return `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
+  };
+  const cases = [
+    { path: "/api/_session/lease", code: "TURNSTILE_FAILED", session: false },
+    { path: "/api/_session/verify", code: "TURNSTILE_FAILED", session: true },
+    { path: "/api/v1/sim/reset", code: "BAD_BODY", session: true },
+  ];
+
+  it("stop reading a chunked body (no Content-Length) as soon as it passes 16 KB", async () => {
+    for (const c of cases) {
+      const f = fakeFront();
+      const headers: Record<string, string> = { origin: "https://weft.test", "content-type": "application/json" };
+      if (c.session) headers.cookie = await leased(f);
+      const res = await within(call(f, c.path, { method: "POST", body: stalling(16 * 1024 + 1), duplex: "half", headers } as RequestInit), 2_000);
+      expect(await res.json(), c.path).toMatchObject({ code: c.code });
+      expect(f.worlds, c.path).toEqual([]);
+    }
+  });
+
+  it("refuse a declared Content-Length over 16 KB before reading the body", async () => {
+    for (const c of cases) {
+      const f = fakeFront();
+      const headers: Record<string, string> = { origin: "https://weft.test", "content-type": "application/json", "content-length": String(16 * 1024 + 1) };
+      if (c.session) headers.cookie = await leased(f);
+      const res = await within(call(f, c.path, { method: "POST", body: stalling(10), duplex: "half", headers } as RequestInit), 2_000);
+      expect(await res.json(), c.path).toMatchObject({ code: c.code });
+    }
+  });
+});
+
 describe("/mcp", () => {
   const key = (slot: string, rand = "A".repeat(24)) => formatHostedMcpKey(slot, 1, rand);
   const mcpCall = (f: FakeFront, k: string, ip?: string) => call(f, "/mcp", { method: "POST", body: "{}", headers: { authorization: `Bearer ${k}` }, ip });

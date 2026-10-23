@@ -80,11 +80,14 @@ export async function readTextCapped(req: Request, maxBytes: number): Promise<st
   return new TextDecoder().decode(all);
 }
 
+/**
+ * A small JSON request body (the lease, verify and reset bodies, the model switch), or null when it is larger than
+ * `maxBytes` or not JSON. The cap holds for a body of unknown length too (readTextCapped), so a chunked body is never
+ * buffered past it. An empty body is `{}`.
+ */
 export async function readJson<T>(req: Request, maxBytes = 16 * 1024): Promise<T | null> {
-  const len = Number(req.headers.get("content-length") ?? "0");
-  if (len > maxBytes) return null;
-  const text = await req.text();
-  if (text.length > maxBytes) return null;
+  const text = await readTextCapped(req, maxBytes);
+  if (text === null) return null;
   if (!text.trim()) return {} as T;
   try {
     return JSON.parse(text) as T;
