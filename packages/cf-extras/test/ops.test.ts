@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { HostedSpendStatus } from "../../contracts/src/ext/cf-agent";
 import { HOSTED_CAP_DEFAULTS } from "../../contracts/src/ext/cf-agent";
 import type { RunCatalogRow } from "../../contracts/src/ext/cf-extras";
-import { compareRows, createRunCatalog } from "../src/catalog";
+import { COMPARE_MEMO_MS, compareRows, createRunCatalog, MAX_COMPARE_ROWS } from "../src/catalog";
 import { COUNTERS, memoryDailyCounters } from "../src/counters";
 import { d1JobLedger, parseJob, pruneOps, queueOfJob } from "../src/jobs";
 import { createAnalyticsEngineSink, createD1MetricsSink, metricsForDay, noopMetricsSink, selectMetricsSink } from "../src/metrics";
@@ -48,6 +48,45 @@ describe("RunCatalog", () => {
     ]);
     expect((await cat.compare({ days: 365 }))[0]!.runs).toBe(4);
     expect(compareRows([])).toEqual([]);
+  });
+
+  it("reads the newest runs of the window through the ended_at index and stops at the limit, never every run of 30 days", async () => {
+    const db = d1Shim();
+    const cat = createRunCatalog(db, { now: () => new Date("2026-10-27T12:00:00Z") });
+    await cat.compare({ days: 30 });
+    const q = db.statements.at(-1)!;
+    expect(q).toMatch(/ORDER BY ended_at DESC LIMIT \?/);
+    const plan = (db.sqlite.prepare(`EXPLAIN QUERY PLAN ${q}`).all("2026-09-28T00:00:00.000Z", MAX_COMPARE_ROWS) as { detail: string }[]).map((p) => p.detail);
+    // A range of the index read backwards, in the order asked: no sort of the whole window before the limit.
+    expect(plan).toEqual([expect.stringMatching(/^SEARCH run_catalog USING INDEX run_catalog_ended \(ended_at>\?\)$/)]);
+    // The window still starts at UTC midnight days - 1 back: a run at 23:59 the day before is out, one at 00:00 is in.
+    await cat.record(row({ runId: "run_out", endedAt: "2026-10-20T23:59:59.999Z" }));
+    await cat.record(row({ runId: "run_in", endedAt: "2026-10-21T00:00:00.000Z" }));
+    expect((await cat.compare({ days: 7 }))[0]!.runs).toBe(1);
+  });
+
+  it("memoizes a window's comparison for a minute when asked, and a record through it drops the memo", async () => {
+    const db = d1Shim();
+    let now = Date.parse("2026-10-27T12:00:00Z");
+    const cat = createRunCatalog(db, { now: () => new Date(now), memoMs: COMPARE_MEMO_MS });
+    await cat.record(row({ runId: "run_1" }));
+    const reads = () => db.statements.filter((x) => /^SELECT/.test(x)).length;
+    const first = await cat.compare({ days: 7 });
+    expect(reads()).toBe(1);
+    // Many visitors within the minute, at once and one after another: one read.
+    await Promise.all(Array.from({ length: 20 }, () => cat.compare({ days: 7 })));
+    now += COMPARE_MEMO_MS - 1;
+    expect(await cat.compare({ days: 7 })).toEqual(first);
+    expect(reads()).toBe(1);
+    // Another window is its own read; a minute on, the window is read again.
+    await cat.compare({ days: 30 });
+    expect(reads()).toBe(2);
+    now += 1;
+    await cat.compare({ days: 7 });
+    expect(reads()).toBe(3);
+    await cat.record(row({ runId: "run_2" }));
+    expect((await cat.compare({ days: 7 }))[0]!.runs).toBe(2);
+    expect(reads()).toBe(4);
   });
 });
 

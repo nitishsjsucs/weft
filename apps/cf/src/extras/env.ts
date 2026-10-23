@@ -3,9 +3,10 @@
 // enabled), and the factories that turn them into the queue consumers' and HostedExtras' dependencies. A binding
 // that is absent switches its extra off instead of failing the Worker. Track cf6-extras.
 import {
-  buildPlatformReadout, createFlagReader, createHelpSearch, createRunCatalog, d1JobLedger, gatewayOption, lobbyCounters, messageOf, neuronBudgetFromLedger, puppeteerLauncher,
-  selectMetricsSink,
-  type AiSearchLike, type AnalyticsEngineLike, type D1Like, type ExtrasFlags, type ImagesLike, type KvLike, type R2BucketLike, type VectorizeLike, type WorkersAiBindingLike,
+  buildPlatformReadout, COMPARE_MEMO_MS, createFlagReader, createHelpSearch, createRunCatalog, d1JobLedger, gatewayOption, lobbyCounters, messageOf, neuronBudgetFromLedger,
+  puppeteerLauncher, selectMetricsSink,
+  type AiSearchLike, type AnalyticsEngineLike, type D1Like, type ExtrasFlags, type ImagesLike, type KvLike, type R2BucketLike, type RunCatalog, type VectorizeLike,
+  type WorkersAiBindingLike,
 } from "@weft/cf-extras";
 import { DO_NAMES } from "../../../../packages/contracts/src/ext/cf-hosted";
 import type { HostedExtrasDeps } from "./hosted";
@@ -46,6 +47,15 @@ export function flagsFor(env: Pick<ExtrasEnv, "CONFIG" | "WEFT_SEMANTIC_RECALL">
   return r;
 }
 
+const catalogs = new WeakMap<object, RunCatalog>();
+/** One run catalog per D1 binding (per isolate), so the model comparison's 60 s memo (COMPARE_MEMO_MS) serves every
+ * GET /api/_hosted/models the isolate answers: the route is anonymous, and each read is D1 rows read. */
+export function catalogFor(db: D1Like): RunCatalog {
+  let c = catalogs.get(db);
+  if (!c) { c = createRunCatalog(db, { memoMs: COMPARE_MEMO_MS }); catalogs.set(db, c); }
+  return c;
+}
+
 const lobby = (env: ExtrasEnv) => env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
 const spend = (env: ExtrasEnv) => env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend));
 
@@ -76,7 +86,7 @@ export function hostedDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike, log
     ai: env.AI ?? null,
     neurons: neuronBudgetFromLedger(spend(env)),
     dictationEnabled: async () => (await flags()).dictation,
-    catalog: createRunCatalog(env.OPS),
+    catalog: catalogFor(env.OPS),
     platform: () => buildPlatformReadout({ lobby: () => lobby(env).extrasReadout(), spend: spend(env), ops: env.OPS, counters }),
     files: env.FILES,
     metrics: selectMetricsSink(env, { waitUntil: (p) => ctx.waitUntil(p), onError: (e) => log({ evt: "extras.metrics", outcome: "flush_failed", message: messageOf(e) }) }),
