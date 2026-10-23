@@ -48,16 +48,17 @@ export async function buildSeededWorld(profile: "base" | "rich" = "base"): Promi
   return { dir, vaultKey, profile, dispose: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-export interface FakeSpend extends HostedSpendLedger { reserves: HostedReserveInput[]; calls: string[] }
+export interface FakeSpend extends HostedSpendLedger { reserves: HostedReserveInput[]; calls: string[]; settles: { id: string; usd: number; actual?: { neurons?: number } }[] }
 export function fakeSpend(): FakeSpend {
   const reserves: HostedReserveInput[] = [];
   const calls: string[] = [];
+  const settles: { id: string; usd: number; actual?: { neurons?: number } }[] = [];
   const settled = new Map<string, number>();
   let n = 0;
   return {
-    reserves, calls,
+    reserves, calls, settles,
     async reserve(input) { calls.push("reserve"); reserves.push(input); const id = `rsv_${++n}`; settled.set(id, input.usdMicros); return { ok: true, reservationId: id }; },
-    async settle(id, usd) { calls.push("settle"); settled.set(id, usd); },
+    async settle(id, usd, actual?: { neurons?: number }) { calls.push("settle"); settles.push({ id, usd, ...(actual ? { actual } : {}) }); settled.set(id, usd); },
     async release(id) { calls.push("release"); settled.delete(id); },
     async spent() { calls.push("spent"); return [...settled.values()].reduce((a, b) => a + b, 0); },
     async status() {

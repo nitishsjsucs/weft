@@ -353,6 +353,23 @@ describe("platform parts", () => {
     expect(Buffer.from(bundled.bytes(FIXTURE_PATHS.journal)!).toString("utf8")).toBe(repo.text(FIXTURE_PATHS.journal));
   });
 
+  it("charges a Workers AI step's neurons against the neuron cap and settles the neurons it used; OpenAI carries none", async () => {
+    const spend = fakeSpend();
+    const state = sqlSmallState(w.storage.sql);
+    state.set(SMALL_STATE_KEYS.leaseVisitor, "vis_abc");
+    state.set(SMALL_STATE_KEYS.leaseIpHash, "iph_123");
+    const ledger = hostedSpendLedger(spend, { world: { slot: "slot-1", gen: 7, mode: "slot" }, state: () => state, guard: () => null });
+    const wai = await ledger.reserve({ runId: "run_0101", usdMicros: 11_000, model: "@cf/openai/gpt-oss-120b", live: true });
+    expect(spend.reserves.at(-1)).toMatchObject({ runId: "run_0101", neurons: 1000, product: "agent" });
+    await ledger.settle((wai as { reservationId: string }).reservationId, 5_500);
+    expect(spend.settles.at(-1)).toMatchObject({ usd: 5_500, actual: { neurons: 500 } });
+    const oai = await ledger.reserve({ runId: "run_0102", usdMicros: 11_000, model: "gpt-5.6-luna", live: true });
+    expect(spend.reserves.at(-1)).not.toHaveProperty("neurons");
+    await ledger.settle((oai as { reservationId: string }).reservationId, 4_000);
+    expect(spend.settles.at(-1)).not.toHaveProperty("actual");
+    state.delete(SMALL_STATE_KEYS.leaseVisitor); state.delete(SMALL_STATE_KEYS.leaseIpHash);
+  });
+
   it("charges every SpendDO call to this world and the lease's visitor and IP hash, outside transactions only", async () => {
     const spend = fakeSpend();
     const state = sqlSmallState(w.storage.sql);

@@ -6,8 +6,9 @@
 import { migrateDurable, migrationEntries, openDurableDb, type Db, type MigrationJournal } from "@weft/db";
 import type { CommandDef, SpendLedger } from "@weft/contracts";
 import { hostedServiceCommands, SqlRepo } from "@weft/executor";
+import { isWorkersAiModel, neuronsForUsdMicros } from "@weft/agent";
 import type { DurableDbHandle, DurableStorageLike, TxGuard } from "../../../../packages/contracts/src/ext/cf-db";
-import { FROZEN_CAP, type FetchCounter, type HostedReserveRefusal, type HostedSpendLedger, type HostedSpendStatus, type WorkersAiBindingLike } from "../../../../packages/contracts/src/ext/cf-agent";
+import { FROZEN_CAP, USD_PER_1K_NEURONS, type FetchCounter, type HostedReserveRefusal, type HostedSpendLedger, type HostedSpendStatus, type WorkersAiBindingLike } from "../../../../packages/contracts/src/ext/cf-agent";
 import { HOSTED_SETTINGS, hostedWorldId, type HostedWorldRef } from "../../../../packages/contracts/src/ext/cf-hosted";
 import type { MemoryRepo } from "../../../../packages/contracts/src/ext/cf-memory";
 import { SMALL_STATE_KEYS, type DurablePlatformInput, type DurableWeftPlatform, type FixtureSource, type PlatformDb, type SmallState } from "../../../../packages/contracts/src/ext/cf-platform";
@@ -104,6 +105,10 @@ export function defaultDurableDriver(): DurableDbDriver {
 export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWorldRef; state: () => SmallState | null; guard: () => TxGuard | null }): SpendLedger {
   const worldId = hostedWorldId(o.world);
   const io = (what: string) => { o.guard()?.assertNotInTx(what); markUncachable(what); };
+  // A Workers AI step also reserves its neurons (its USD equivalent converted back) against the neuron day cap and the
+  // agent's share, and settles the neurons it used, as bindSpendLedger does; without this a world switched to
+  // workers_ai would spend the day's free neurons (OCR, dictation, embeddings) under the USD caps alone.
+  const neuronReservations = new Set<string>();
   /** The lease's visitor and IP hash, or null when either cannot be read or was never stored. */
   const lease = (): { visitor: string; ipHash: string } | null => {
     try {
@@ -122,10 +127,20 @@ export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWo
       if (!who && (input.live || input.usdMicros > 0)) {
         return { ok: false, code: "BUDGET_EXCEEDED", cap: FROZEN_CAP.visitor, hostedCap: "visitor", spentMicros: 0, capMicros: 0 } satisfies HostedReserveRefusal;
       }
-      return spend.reserve({ ...input, world: worldId, visitor: who?.visitor ?? null, ipHash: who?.ipHash ?? null });
+      const neurons = isWorkersAiModel(input.model) ? neuronsForUsdMicros(input.usdMicros, USD_PER_1K_NEURONS) : 0;
+      const r = await spend.reserve({ ...input, world: worldId, visitor: who?.visitor ?? null, ipHash: who?.ipHash ?? null, ...(neurons > 0 ? { neurons, product: "agent" as const } : {}) });
+      if (r.ok && neurons > 0) {
+        neuronReservations.add(r.reservationId);
+        if (neuronReservations.size > 1000) neuronReservations.delete(neuronReservations.values().next().value!);
+      }
+      return r;
     },
-    async settle(reservationId, actualUsdMicros) { io("SpendDO.settle"); await spend.settle(reservationId, actualUsdMicros); },
-    async release(reservationId) { io("SpendDO.release"); await spend.release(reservationId); },
+    async settle(reservationId, actualUsdMicros) {
+      io("SpendDO.settle");
+      if (neuronReservations.delete(reservationId)) await spend.settle(reservationId, actualUsdMicros, { neurons: neuronsForUsdMicros(actualUsdMicros, USD_PER_1K_NEURONS) });
+      else await spend.settle(reservationId, actualUsdMicros);
+    },
+    async release(reservationId) { io("SpendDO.release"); neuronReservations.delete(reservationId); await spend.release(reservationId); },
     async spent(scope) {
       io("SpendDO.spent");
       return spend.spent(scope.runId ? { ...scope, world: worldId } : scope);
