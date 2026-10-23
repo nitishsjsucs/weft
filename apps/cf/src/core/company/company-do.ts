@@ -21,7 +21,7 @@ import { logError, logEvent } from "../../shared/log";
 import { DO_PATHS, HEALTH_PATH, isModelAdmission, LEASE_HEADER, SIM_RESET_PATH } from "../../shared/routes";
 import { configEnv, liveEnv } from "./company-do-env";
 import { spendClient } from "../spend/client";
-import { AlarmPlan, alarmRetryDelayMs } from "./alarms";
+import { AlarmPlan, alarmRetryDelayMs, type AlarmPurpose } from "./alarms";
 import { loadEngine, type EngineModule, type RestoreTrigger, type WorldEngine } from "./engine";
 import { countFetchesIn, installCountedFetch, rawFetch } from "./fetch-scope";
 import { durableRunHost, durableSchedulerHost, fetchCounter, type DurableRunHost, type DurableSchedulerHost } from "./hosts";
@@ -658,18 +658,19 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       // A reset or restore is replacing the world (it boots the next one itself), or a restore waits for its
       // Workflow: nothing boots here. The purposes that were due are asked for again after a backoff, so a step that
       // ends without a running world still gets its boot from a later alarm.
-      if (this.stamp || this.quiescing || this.rebuilding) {
-        const retryMs = alarmRetryDelayMs(this.alarmFailures);
-        this.alarmFailures += 1;
-        logEvent("alarm.deferred", { slot: this.stamp?.slot, gen: this.stamp?.gen, outcome: "rebuilding", retryMs });
-        for (const p of due.size ? due : new Set(["runs"] as const)) await this.alarms.arm(p, Date.now() + retryMs);
-      }
+      if (this.stamp || this.quiescing || this.rebuilding) await this.deferAlarm(due, "rebuilding");
       return;
     }
     this.counter.reset();
     const t0 = Date.now();
     try {
       this.config = await envConfig(this.env);
+      // A reset, a restore or a new generation's stamp may have replaced the world while the config was read: the
+      // engine taken above is then closing or closed, so nothing runs on it, and the purposes are asked for again.
+      if (this.engine !== engine || !sameWorld(this.engineFor, this.stamp)) {
+        await this.deferAlarm(due, "replaced");
+        return;
+      }
       const { usage } = await countFetchesIn(this.counter, () => engine.meter.measure(() => engine.inScope(async () => {
         if (due.has("tick")) await this.scheduler.tick();
         if (due.has("runs") || this.runHost.pending().length) {
@@ -691,6 +692,14 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       this.maybePushUsage();
     }
     await this.alarms.sync();
+  }
+
+  /** Asks again, after the backoff, for the purposes that were due (runs at least), when this alarm could not run them. */
+  private async deferAlarm(due: ReadonlySet<AlarmPurpose>, outcome: "rebuilding" | "replaced"): Promise<void> {
+    const retryMs = alarmRetryDelayMs(this.alarmFailures);
+    this.alarmFailures += 1;
+    logEvent("alarm.deferred", { slot: this.stamp?.slot, gen: this.stamp?.gen, outcome, retryMs });
+    for (const p of due.size ? due : new Set<AlarmPurpose>(["runs"])) await this.alarms.arm(p, Date.now() + retryMs);
   }
 
   /** Runs the alarm's work now, as a retried (at-least-once) alarm invocation would: queued runs, a due tick, the

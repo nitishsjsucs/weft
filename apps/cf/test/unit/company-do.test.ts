@@ -38,9 +38,13 @@ interface FakeWorld {
   closedGens: number[];
   /** Hidden write-backs that reached a world's extras port, with the generation of the engine that ran them. */
   writeBacks: { gen: number; jobId: unknown }[];
+  /** The generation of the engine each alarm's work (engine.inScope) ran on. */
+  scopedGens: number[];
+  /** How long each KV config read takes (envConfig, which the alarm and the boot await). */
+  configDelayMs: number;
 }
 let world: FakeWorld;
-const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [] });
+const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0 });
 
 function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]): { toArray(): Record<string, unknown>[] } }): WorldEngine {
   const guard: TxGuard = {
@@ -61,7 +65,7 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
     guard,
     fetch: async (req) => new Response(JSON.stringify({ path: new URL(req.url).pathname }), { headers: { "content-type": "application/json" } }),
     mcp: async () => new Response(JSON.stringify({ mcp: true }), { headers: { "content-type": "application/json" } }),
-    inScope: async (fn) => { if (world.scoped) await world.scoped(); return fn(); },
+    inScope: async (fn) => { world.scopedGens.push(input.world.gen); if (world.scoped) await world.scoped(); return fn(); },
     clockRate: () => 0,
     mintMcpKey: async (m) => ({ key: `wk_mcp_${m.slot}_${m.gen}_${"k".repeat(24)}`, url: m.publicUrl, expiresAt: m.expiresAt }),
     setWorldProvider: async () => undefined,
@@ -141,7 +145,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   };
   const env = {
     WEFT_CTX_SECRET: CTX, WEFT_PUBLIC_ORIGIN: "https://weft.test", WEFT_CONFIG_MEMO_MS: "0",
-    CONFIG: { get: async (keys: string[] | string) => (Array.isArray(keys) ? new Map(keys.map((k) => [k, null])) : null) },
+    CONFIG: { get: async (keys: string[] | string) => { if (world.configDelayMs) await sleep(world.configDelayMs); return Array.isArray(keys) ? new Map(keys.map((k) => [k, null])) : null; } },
     LOBBY: { idFromName: (n: string) => n, get: () => lobbyStub },
     SPEND: { idFromName: (n: string) => n, get: () => ({}) },
     COMPANY: { idFromName: (n: string) => n, get: () => ({}) },
@@ -400,6 +404,26 @@ describe("a reset while the old world closes", () => {
 });
 
 describe("a world replaced while its own steps await", () => {
+  it("runs no alarm work on an engine that a new generation's stamp replaced while the alarm read the config", async () => {
+    const c = company();
+    await c.ready();
+    world.configDelayMs = 30;
+    // The alarm takes the gen 3 engine, then waits on KV; meanwhile the Lobby stamps generation 4.
+    const alarm = c.co.runAlarmNow();
+    await sleep(5);
+    const stamped = c.co.applyStamp({ ...c.stamp!, gen: 4, visitor: "vis_" + "b".repeat(32) });
+    await alarm;
+    expect(world.closedGens).toEqual([3]);
+    expect(world.scopedGens).toEqual([]);
+    // Its purposes are asked for again, after the backoff.
+    expect(c.alarms.at(-1)!).toBeGreaterThan(Date.now());
+    await stamped;
+    world.configDelayMs = 0;
+    at(c.alarms.at(-1)!);
+    await c.co.alarm();
+    expect(world.scopedGens).toEqual([4]);
+  });
+
   it("keeps a newer boot that started while a stop waited for the previous one", async () => {
     const c = company();
     await c.ready();
