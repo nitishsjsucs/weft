@@ -106,10 +106,47 @@ export async function operatorVisitorId(adminToken: string, name: string): Promi
   return `vis_${toHex(await hmac(adminToken, `weft-operator|${name}`)).slice(0, 32)}`;
 }
 
+/** The eight 16-bit groups of an IPv6 address (compressed forms and a dotted IPv4 tail included), or null. */
+function ipv6Groups(addr: string): number[] | null {
+  let s = addr;
+  const lastColon = s.lastIndexOf(":");
+  const tail = s.slice(lastColon + 1);
+  if (tail.includes(".")) {
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(tail)) return null;
+    const b = tail.split(".").map(Number);
+    if (b.some((n) => n > 255)) return null;
+    s = `${s.slice(0, lastColon + 1)}${((b[0]! << 8) | b[1]!).toString(16)}:${((b[2]! << 8) | b[3]!).toString(16)}`;
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  if (halves.length === 1 ? head.length !== 8 : head.length + rest.length > 7) return null;
+  const all = halves.length === 1 ? head : [...head, ...Array<string>(8 - head.length - rest.length).fill("0"), ...rest];
+  return all.every((g) => /^[0-9a-f]{1,4}$/.test(g)) ? all.map((g) => Number.parseInt(g, 16)) : null;
+}
+
+/**
+ * What a per-IP key counts (design 6.4): an IPv4 address as it is, an IPv6 address by its /64 prefix, since one
+ * subscriber is handed a whole /64 and could otherwise take a fresh lease, rate limit and cap from each of its 2^64
+ * addresses, and an IPv4-mapped IPv6 address as its IPv4 address. Anything that does not parse is kept as given.
+ */
+export function ipKeyOf(ip: string): string {
+  let s = ip.trim().toLowerCase();
+  if (s.startsWith("[")) s = s.slice(1, s.includes("]") ? s.indexOf("]") : undefined);
+  if (s.includes("%")) s = s.slice(0, s.indexOf("%"));
+  if (!s.includes(":")) return s;
+  const g = ipv6Groups(s);
+  if (!g) return s;
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return `${g[6]! >> 8}.${g[6]! & 255}.${g[7]! >> 8}.${g[7]! & 255}`;
+  return `${g.slice(0, 4).map((x) => x.toString(16)).join(":")}::/64`;
+}
+
 /** The daily-salted IP hash (design 6.4): the salt is derived from WEFT_SESSION_SECRET and the UTC day, so raw IPs
- * are never stored and a hash cannot be linked across days. */
+ * are never stored and a hash cannot be linked across days. Every per-IP key (leases, rate limits, spend caps) is
+ * this hash, so an IPv6 visitor counts once per /64 (ipKeyOf). */
 export async function ipHash(sessionSecret: string, ip: string, day: string): Promise<string> {
-  return toHex(await hmac(sessionSecret, `weft-ip|${day}|${ip}`)).slice(0, 32);
+  return toHex(await hmac(sessionSecret, `weft-ip|${day}|${ipKeyOf(ip)}`)).slice(0, 32);
 }
 
 /** A short stable id for an MCP key (rate limit and per-key counters); the key itself is never stored here. */
