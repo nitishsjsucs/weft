@@ -56,6 +56,12 @@ export async function sessionStatus(env: FrontEnv, v: Visit): Promise<Response> 
   const st = await lobby(env).status({ visitor: v.session?.visitor ?? null, slot: v.session?.slot ?? null, gen: v.session?.gen ?? null });
   const cookies: string[] = [];
   if (v.session && !st.lease) cookies.push(...clearSessionCookies());
+  else if (v.session && st.lease && st.lease.gen !== v.session.gen) {
+    // The visitor's own lease moved to a newer generation (a hosted reset): reissue the session cookie for it rather
+    // than clearing the cookie the reset just set. The Lobby answers this only for the same visitor and slot.
+    const exp = Math.floor(Date.parse(st.lease.expiresAt) / 1000);
+    cookies.push(...(await sessionCookies(env, { visitor: v.session.visitor, slot: st.lease.slot, gen: st.lease.gen, exp }, false)));
+  }
   const enabled = agentEnabled(cfg);
   const want = wantedProvider({ agentEnabled: enabled, configured: cfg.get(HOSTED_CONFIG_KEYS.modelProvider) ?? null, world: st.lease ? st.worldProvider : null });
   let provider = want;

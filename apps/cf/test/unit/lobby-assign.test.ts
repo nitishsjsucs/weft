@@ -63,3 +63,28 @@ describe("LobbyDO.assign under interleaving", () => {
     expect(stamps).toHaveLength(4);
   });
 });
+
+describe("LobbyDO.status after a hosted reset", () => {
+  it("answers a cookie of an older generation of the visitor's own lease with the lease as it is now", async () => {
+    const { lobby } = lobbyOver(2);
+    const me = visitor(40);
+    const l = await lobby.assign({ visitor: me, ipHash: "c".repeat(32) });
+    if (l.status !== "leased") throw new Error(`not leased: ${l.status}`);
+    // What a reset that kept the lease leaves behind: the lease row on the next generation.
+    (lobby as unknown as { sql: { exec(q: string, ...b: unknown[]): unknown } }).sql.exec(`UPDATE leases SET gen = gen + 1 WHERE visitor = ?`, me);
+    const now = await lobby.status({ visitor: me, slot: l.slot, gen: l.gen });
+    expect(now.lease).toMatchObject({ slot: l.slot, gen: l.gen + 1 });
+    expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen + 1 })).lease).toMatchObject({ gen: l.gen + 1 });
+  });
+
+  it("still answers no lease for another visitor, another slot or a cookie newer than the lease", async () => {
+    const { lobby } = lobbyOver(2);
+    const me = visitor(41);
+    const l = await lobby.assign({ visitor: me, ipHash: "d".repeat(32) });
+    if (l.status !== "leased") throw new Error(`not leased: ${l.status}`);
+    const other = l.slot === "slot-1" ? "slot-2" : "slot-1";
+    expect((await lobby.status({ visitor: visitor(42), slot: l.slot, gen: l.gen })).lease).toBeNull();
+    expect((await lobby.status({ visitor: me, slot: other, gen: l.gen })).lease).toBeNull();
+    expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen + 1 })).lease).toBeNull();
+  });
+});

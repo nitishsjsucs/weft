@@ -295,7 +295,11 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     let worldProvider: string | null = null;
     if (input.visitor) {
       const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
-      if (l && (input.slot == null || l.slot === input.slot) && (input.gen == null || l.gen === input.gen)) {
+      // A cookie from before the visitor's own "Reset demo data..." names an older generation of the same lease (the
+      // reset kept the lease and moved it on), so it is answered with the lease as it is now, and the front reissues
+      // the cookie. Only the visitor's own row on the cookie's slot qualifies: another slot, or a cookie generation
+      // newer than the lease's, is no lease.
+      if (l && (input.slot == null || l.slot === input.slot) && (input.gen == null || l.gen >= input.gen)) {
         try {
           const hb = await this.company(l.slot).heartbeat({ provider: true });
           this.absorbUsage(hb.usage);

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import front, { showcaseMemo } from "../../src/front/index";
 import { ADMIN_MAX_BODY_BYTES } from "../../src/shared/http";
 import type { FrontEnv } from "../../src/shared/env";
-import { grantToken, ipHash, sessionToken, signAdmin, signSmoke } from "../../src/shared/tokens";
+import { grantToken, ipHash, readSession, sessionToken, signAdmin, signSmoke } from "../../src/shared/tokens";
 import { utcDay } from "../../src/shared/http";
 import { formatHostedMcpKey, HOSTED_RATE_LIMITS, HUMAN_GRANT_COOKIE, SESSION_COOKIE } from "../../src/shared/contracts";
 
@@ -18,7 +18,7 @@ export interface FakeFront {
   takes: { key: string; limit: number }[];
 }
 
-export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldHeaders?: Record<string, string> } = {}): FakeFront {
+export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldHeaders?: Record<string, string>; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
   const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [] };
   const rl = (binding: string, max: number) => {
     const seen = new Map<string, number>();
@@ -50,6 +50,7 @@ export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown;
           return { ok: n <= limit, used: n, left: Math.max(0, limit - n) };
         },
         ops: async () => ({ ok: true }),
+        status: async (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => o.status?.(input) ?? { level: 0, pool: { size: 2, free: 2, waitlist: 0 }, lease: null, waitlistPosition: null, worldProvider: null },
         sweep: async () => ({ released: 0 }),
       }),
     },
@@ -192,5 +193,37 @@ describe("RL_MUTATE", () => {
     const cookie = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-2", gen: 1, exp: nowS + 600 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
     const mine = await call(f, "/api/v1/notes", { method: "POST", body: "{}", ip, headers: { cookie, origin: "https://weft.test" } });
     expect(mine.status).toBe(200);
+  });
+});
+
+describe("GET /api/_session after a hosted reset", () => {
+  const visitor = "vis_" + "e".repeat(32);
+  const lease = (gen: number) => ({ slot: "slot-1", gen, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), idleExpiresAt: new Date(Date.now() + 1_800_000).toISOString(), resetsLeft: 2 });
+  const status = (gen: number | null) => ({ level: 0, pool: { size: 2, free: 1, waitlist: 0 }, lease: gen === null ? null : lease(gen), waitlistPosition: null, worldProvider: null });
+  const sessionWith = async (f: FakeFront, gen: number) => {
+    const nowS = Math.floor(Date.now() / 1000);
+    return call(f, "/api/_session", { headers: { cookie: `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen, exp: nowS + 600 })}` } });
+  };
+
+  it("reissues the session cookie for the lease's newer generation instead of clearing the one the reset set", async () => {
+    const asked: unknown[] = [];
+    const f = fakeFront({ status: (input) => { asked.push(input); return status(4); } });
+    const r = await sessionWith(f, 3);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ world: "slot", lease: { slot: "slot-1", gen: 4 } });
+    expect(asked).toEqual([{ visitor, slot: "slot-1", gen: 3 }]);
+    const set = r.headers.getSetCookie();
+    expect(set).toHaveLength(1);
+    expect(set[0]).toMatch(new RegExp(`^${SESSION_COOKIE}=v1\\.`));
+    expect(set[0]).not.toContain("Max-Age=0");
+    const token = set[0]!.split(";")[0]!.slice(SESSION_COOKIE.length + 1);
+    expect(await readSession(f.env.WEFT_SESSION_SECRET!, token)).toMatchObject({ ok: true, claims: { visitor, slot: "slot-1", gen: 4 } });
+  });
+
+  it("sets nothing when the cookie is current, and clears both cookies when the Lobby has no lease", async () => {
+    expect((await sessionWith(fakeFront({ status: () => status(3) }), 3)).headers.getSetCookie()).toEqual([]);
+    const gone = (await sessionWith(fakeFront({ status: () => status(null) }), 3)).headers.getSetCookie();
+    expect(gone).toHaveLength(2);
+    expect(gone.every((c) => c.includes("Max-Age=0"))).toBe(true);
   });
 });

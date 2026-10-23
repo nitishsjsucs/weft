@@ -72,6 +72,16 @@ describe("leases", () => {
     expect(await old.json()).toMatchObject({ code: "LEASE_ENDED" });
     expect(stale.jar.cookies.has(SESSION_COOKIE)).toBe(false);
 
+    // The session read the app sends right after its reset may still carry the old cookie: it gets the lease as it is
+    // now and a cookie for the new generation, never a logout.
+    const late = h.visitor("198.51.100.103");
+    late.jar.cookies.set(SESSION_COOKIE, oldCookie);
+    const st = await late.json<{ world: string; lease: { slot: string; gen: number } | null }>("/api/_session");
+    expect(st.body).toMatchObject({ world: "slot", lease: { slot: l.slot, gen: l.gen! + 1 } });
+    expect(late.jar.cookies.get(SESSION_COOKIE)).not.toBe(oldCookie);
+    expect(await notes(late)).not.toContain("before reset");
+    expect((await late.json("/api/v1/notes")).status).toBe(200);
+
     const base = await v.fetch("/api/v1/sim/reset", { method: "POST", body: JSON.stringify({ profile: "base" }) });
     expect(base.status).toBe(400);
     expect(await base.json()).toMatchObject({ code: "HOSTED_RESET_PROFILE" });
