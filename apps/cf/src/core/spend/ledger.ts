@@ -7,12 +7,14 @@
 // ORPHAN_SETTLE_MS. Reserve checks and inserts in one synchronous transaction, so two slots racing for the last cents
 // of the day cap cannot both pass. Pure over SqlStorageLike: unit tests run it on node:sqlite.
 //
-// Rows read stay flat (design 8.2: DO rows read are an account-wide daily cap any visitor can spend): today's fold,
-// today's direct neurons and the live totals are kept in memory, built once per object (today's rows and the live
-// rows, each through an index) and updated by every write after it commits, since every write goes through this
-// ledger in this one object. A status reads no row; a reservation reads only its run's rows. The orphan sweep reads
-// only the reservations that crossed the orphan age since its last run, and prunes entries older than
-// RETAIN_DAYS (live totals of pruned rows carry over in spend_meta, so the cumulative live cap still counts them).
+// Rows read stay flat (design 8.2: DO rows read are an account-wide daily cap any visitor can spend): each retained
+// day's fold and direct neurons (today and the RETAIN_DAYS - 1 days before it) and the live totals are kept in
+// memory, each built once per object (a day's rows and the live rows, each through an index) and updated by every
+// write after it commits, since every write goes through this ledger in this one object. A status, and a day's or the
+// live totals (GET /v1/agent/costs, which any visitor can call), read no row once built; a day outside the retained
+// ones answers zero and reads nothing; a reservation reads only its run's rows. The orphan sweep reads only the
+// reservations that crossed the orphan age since its last run, and prunes entries older than RETAIN_DAYS a bounded
+// batch at a time (live totals of pruned rows carry over in spend_meta, so the cumulative live cap still counts them).
 import {
   FROZEN_CAP, NEURON_SHARES, ORPHAN_SETTLE_MS,
   type HostedCap, type HostedCaps, type HostedReserveInput, type HostedReserveRefusal, type HostedSpendScope,
@@ -99,6 +101,16 @@ function totalsOf(folded: Iterable<Folded>, keep: (r: SpendRow) => boolean = () 
 
 /** Spend entries are kept this many UTC days back (today included); older ones are pruned by the orphan sweep. */
 export const RETAIN_DAYS = 3;
+const DAY_MS = 86_400_000;
+/** The UTC days the ledger keeps at `now`: today first, then the RETAIN_DAYS - 1 days before it. */
+export const retainedDays = (now: Date): string[] =>
+  Array.from({ length: RETAIN_DAYS }, (_, i) => new Date(now.getTime() - i * DAY_MS).toISOString().slice(0, 10));
+/**
+ * The orphan sweep prunes at most this many old reservations (each with its settle or release row) and this many old
+ * direct neuron entries per run, so a backlog (a ledger that went unswept for days) is deleted over several sweeps,
+ * never in one large write. At one sweep every 15 minutes that is 48,000 reservations a day.
+ */
+export const PRUNE_BATCH = 500;
 /** The orphan sweep looks back at most this far the first time (and after a long gap); older reservations stay. */
 const ORPHAN_LOOKBACK_MS = 2 * 86_400_000;
 const META = { orphansScannedTo: "orphans.scanned_to", liveCarry: "live.carry" } as const;
@@ -134,8 +146,12 @@ const ROW_COLS = "at, day, world, run_id, kind, reservation_id, usd_micros, mode
 const PRODUCTS: readonly NeuronProduct[] = ["agent", "ocr", "embeddings", "dictation"];
 const noNeurons = (): Record<NeuronProduct, number> => ({ agent: 0, ocr: 0, embeddings: 0, dictation: 0 });
 
-/** What the ledger keeps in memory for the current UTC day: the fold of its entries and its direct neurons. */
+/** What the ledger keeps in memory for one retained UTC day: the fold of its entries and its direct neurons. */
 interface DayState { day: string; folded: Map<string, Folded>; direct: Record<NeuronProduct, number> }
+
+function addTotals(a: Totals, b: Totals): Totals {
+  return { settledMicros: a.settledMicros + b.settledMicros, openMicros: a.openMicros + b.openMicros, neurons: a.neurons + b.neurons };
+}
 
 export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): SqlSpendLedger {
   const wallNow = opts.wallNow ?? (() => new Date());
@@ -153,18 +169,29 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
 
   // In-memory state ----------------------------------------------------------------------------------------------
 
-  let dayState: DayState | null = null;
-  /** Today's fold and direct neurons: read once per UTC day (and once per object), then kept by apply(). */
-  function current(): DayState {
-    const day = today();
-    if (dayState?.day !== day) {
+  /** The retained days' folds and direct neurons, by day: each read once per object (through the day indexes) on its
+   * first use, then kept by apply() and recordNeurons(). A day that leaves the retained ones is dropped. */
+  const days = new Map<string, DayState>();
+  /** The retained day's state (built on first use), or null for any other day: nothing is kept or read for it. */
+  function dayState(day: string, now = wallNow()): DayState | null {
+    const keep = retainedDays(now);
+    for (const d of days.keys()) if (!keep.includes(d)) days.delete(d);
+    if (!keep.includes(day)) return null;
+    let st = days.get(day);
+    if (!st) {
       const direct = noNeurons();
       for (const d of q<{ product: string; n: number }>(`SELECT product, SUM(neurons) AS n FROM neuron_entries WHERE day = ? GROUP BY product`, day)) {
         if ((PRODUCTS as readonly string[]).includes(d.product)) direct[d.product as NeuronProduct] += Number(d.n);
       }
-      dayState = { day, folded: fold(rowsForDay(day)), direct };
+      st = { day, folded: fold(rowsForDay(day)), direct };
+      days.set(day, st);
     }
-    return dayState;
+    return st;
+  }
+  /** Today's state. */
+  function current(): DayState {
+    const now = wallNow();
+    return dayState(now.toISOString().slice(0, 10), now)!;
   }
 
   /** Every live reservation ever made (pruned ones carried in spend_meta), folded: built on first use, then kept. */
@@ -173,7 +200,7 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
     if (!liveTotals) {
       const carry = parseCarry(meta(META.liveCarry));
       const t = totalsOf(fold(rowsLive()).values());
-      liveTotals = { settledMicros: carry.settledMicros + t.settledMicros, openMicros: carry.openMicros + t.openMicros, neurons: carry.neurons + t.neurons };
+      liveTotals = addTotals(carry, t);
     }
     return liveTotals;
   }
@@ -183,7 +210,9 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
    * or release closes). Called only after the transaction that wrote it returned, so a rolled-back write never counts.
    */
   function apply(e: SpendRow, reservation: SpendRow | null): void {
-    if (dayState && e.day === dayState.day) foldInto(dayState.folded, e);
+    // A day not built yet reads this row when it is; a day no longer retained is gone.
+    const st = days.get(e.day);
+    if (st) foldInto(st.folded, e);
     if (liveTotals && e.live === 1) {
       if (e.kind === "reserve") { liveTotals.openMicros += e.usd_micros; liveTotals.neurons += e.neurons; }
       else if (reservation) {
@@ -206,13 +235,6 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
 
   // Queries --------------------------------------------------------------------------------------------------------
 
-  function rowsForScope(scope: HostedSpendScope): SpendRow[] {
-    if (scope.runId !== undefined) return rowsForRun(scope.world ?? null, scope.runId);
-    if (scope.day !== undefined) return rowsForDay(scope.day);
-    if (scope.live) return rowsLive();
-    return q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries ORDER BY seq`);
-  }
-
   function scopeTotals(scope: HostedSpendScope): Totals {
     const keep = (r: SpendRow) =>
       (scope.day === undefined || r.day === scope.day)
@@ -220,10 +242,17 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       && (scope.visitor === undefined || r.visitor === scope.visitor)
       && (scope.ipHash === undefined || r.ip_hash === scope.ipHash)
       && (scope.runId === undefined || scope.world === undefined || r.world === scope.world);
-    // Today's totals and the live totals come from memory; anything else is read (a run's rows, another day's).
-    if (scope.runId === undefined && scope.day !== undefined && scope.day === today()) return totalsOf(current().folded.values(), keep);
-    if (scope.runId === undefined && scope.day === undefined && scope.live === true && scope.visitor === undefined && scope.ipHash === undefined) return { ...live() };
-    return totalsOf(fold(rowsForScope(scope)).values(), keep);
+    // A run's totals read the run's own rows (through its index). Everything else comes from memory: a retained day's
+    // fold, nothing for any other day (no query), the live totals, and otherwise the retained days together (older
+    // entries are pruned, so they are the whole table but for what the next sweep prunes).
+    if (scope.runId !== undefined) return totalsOf(fold(rowsForRun(scope.world ?? null, scope.runId)).values(), keep);
+    const now = wallNow();
+    if (scope.day !== undefined) {
+      const st = dayState(scope.day, now);
+      return st ? totalsOf(st.folded.values(), keep) : zeroTotals();
+    }
+    if (scope.live === true && scope.visitor === undefined && scope.ipHash === undefined) return { ...live() };
+    return retainedDays(now).reduce((t, day) => addTotals(t, totalsOf(dayState(day, now)!.folded.values(), keep)), zeroTotals());
   }
 
   function insert(e: SpendRow): void {
@@ -247,6 +276,31 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       return [e, r];
     });
     if (done) apply(done[0], done[1]);
+  }
+
+  /**
+   * Prunes what is older than the retained days, PRUNE_BATCH oldest reservations at a time, each with its close
+   * (settle and release rows share their reservation's day and id), so a fold of the batch is the batch's whole
+   * story: its live totals carry over into spend_meta first, so the cumulative live cap still counts them. Once no
+   * old reservation is left, the old rows still there (a close whose reservation is gone, which the fold ignores) go
+   * too, as many at a time. Direct neuron entries are pruned PRUNE_BATCH at a time.
+   */
+  function prune(keepFrom: string): void {
+    s.transactionSync(() => {
+      // Ordered by day first, so the day index serves it.
+      const batch = `SELECT reservation_id FROM spend_entries WHERE day < ? AND kind = 'reserve' ORDER BY day, seq LIMIT ?`;
+      const rows = q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE reservation_id IN (${batch}) ORDER BY seq`, keepFrom, PRUNE_BATCH);
+      const folded = fold(rows);
+      if (rows.some((r) => r.live === 1)) {
+        const t = totalsOf(folded.values(), (r) => r.live === 1);
+        setMeta(META.liveCarry, JSON.stringify(addTotals(parseCarry(meta(META.liveCarry)), t)));
+      }
+      if (rows.length) s.sql.exec(`DELETE FROM spend_entries WHERE reservation_id IN (${batch})`, keepFrom, PRUNE_BATCH);
+      if (folded.size < PRUNE_BATCH) {
+        s.sql.exec(`DELETE FROM spend_entries WHERE seq IN (SELECT seq FROM spend_entries WHERE day < ? ORDER BY day, seq LIMIT ?)`, keepFrom, PRUNE_BATCH);
+      }
+      s.sql.exec(`DELETE FROM neuron_entries WHERE seq IN (SELECT seq FROM neuron_entries WHERE day < ? ORDER BY day, seq LIMIT ?)`, keepFrom, PRUNE_BATCH);
+    });
   }
 
   return {
@@ -327,7 +381,6 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
     settleOrphans(now = wallNow()) {
       const cutoff = new Date(now.getTime() - ORPHAN_SETTLE_MS).toISOString();
       const floor = new Date(now.getTime() - ORPHAN_LOOKBACK_MS).toISOString();
-      const keepFrom = new Date(now.getTime() - (RETAIN_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
       const done = s.transactionSync(() => {
         // Only reservations that crossed the orphan age since the last sweep: every older one was settled then, or
         // closed itself. The first sweep (and one after a long gap) looks back ORPHAN_LOOKBACK_MS.
@@ -344,21 +397,10 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
           settled.push([e, r]);
         }
         if (scannedTo === null || cutoff > scannedTo) setMeta(META.orphansScannedTo, cutoff);
-        // Prune what is older than the retention window: the live rows' totals carry over first, so the cumulative
-        // live cap still counts them. Settle and release rows share their reservation's day, so a reservation and its
-        // close go together.
-        // Ordered by day first, so the day index serves it (ordering by seq alone would walk every live row).
-        const pruned = q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE day < ? AND live = 1 ORDER BY day, seq`, keepFrom);
-        if (pruned.length) {
-          const t = totalsOf(fold(pruned).values());
-          const carry = parseCarry(meta(META.liveCarry));
-          setMeta(META.liveCarry, JSON.stringify({ settledMicros: carry.settledMicros + t.settledMicros, openMicros: carry.openMicros + t.openMicros, neurons: carry.neurons + t.neurons }));
-        }
-        s.sql.exec(`DELETE FROM spend_entries WHERE day < ?`, keepFrom);
-        s.sql.exec(`DELETE FROM neuron_entries WHERE day < ?`, keepFrom);
         return settled;
       });
       for (const [e, r] of done) apply(e, r);
+      prune(retainedDays(now).at(-1)!);
       return done.length;
     },
     recordNeurons({ product, model, neurons }) {
@@ -366,7 +408,8 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       if (!n) return;
       const at = wallNow().toISOString();
       s.sql.exec(`INSERT INTO neuron_entries (at, day, product, model, neurons) VALUES (?, ?, ?, ?, ?)`, at, at.slice(0, 10), product, model, n);
-      if (dayState && dayState.day === at.slice(0, 10) && product in dayState.direct) dayState.direct[product] += n;
+      const st = days.get(at.slice(0, 10));
+      if (st && product in st.direct) st.direct[product] += n;
     },
     neuronsLeft(product) {
       const use = neuronUse(current());

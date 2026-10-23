@@ -264,6 +264,22 @@ describe("embedding, export and render jobs", () => {
     expect(slot.gens).toEqual([3]);
   });
 
+  it("finishes an export as stale, with no retry and no file stored, when the world refuses its generation", async () => {
+    const slot = fakeSlot();
+    const files = memoryR2();
+    const deps = jobDeps({ "slot-1": slot }, { files });
+    // A reset moved the world on after the job's generation was checked: CompanyDO answers its stale outcome.
+    slot.extrasExport = async (_what, gen) => { slot.gens.push(gen); return { ok: false, code: STALE_GENERATION, message: "a job of generation 3 for generation 4", retryable: false }; };
+    const m = message({ v: 1, kind: "export.world", jobId: "obx_x2", slot: "slot-1", gen: 3, what: "world", requestedBy: "usr_dana" });
+    await run(deps, "weft-jobs", m);
+    expect(m.acked).toBe(1);
+    expect(m.retried).toEqual([]);
+    expect(files.puts).toBe(0);
+    expect(slot.gens).toEqual([3]);
+    expect(deps.db.rows("jobs")).toMatchObject([{ job_id: "obx_x2", state: "done", outcome: "stale" }]);
+    expect(deps.db.rows("failed_jobs")).toEqual([]);
+  });
+
   it("renders a PDF through a browser that loads nothing, then serves the cached copy on redelivery", async () => {
     const slot = fakeSlot();
     const files = memoryR2();

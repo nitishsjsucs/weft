@@ -7,7 +7,7 @@ import type { Db } from "@weft/db";
 import { dumpDb } from "@weft/seed";
 import { HIDDEN_SERVICE_COMMANDS } from "@weft/cf-extras";
 import type { ToolOutcome } from "@weft/contracts";
-import type { HiddenWriteBack, SlotExport, SlotExtrasPort, SlotWorldInfo, WriteBackOutcome } from "../ports";
+import type { HiddenWriteBack, SlotExport, SlotWorldInfo, WorldExtrasPort, WriteBackOutcome } from "../ports";
 import { RETRYABLE_WRITE_BACK_CODES } from "./commands";
 import { RESERVED_TABLE_PREFIX } from "../../../../../packages/contracts/src/ext/cf-db";
 
@@ -58,7 +58,7 @@ export function writeBackOutcome(o: ToolOutcome): WriteBackOutcome {
   return { ok: false, code: o.refusal.code, message: o.refusal.message, retryable: RETRYABLE_WRITE_BACK_CODES.has(o.refusal.code) };
 }
 
-export function createSlotExtras(deps: SlotExtrasDeps): SlotExtrasPort {
+export function createSlotExtras(deps: SlotExtrasDeps): WorldExtrasPort {
   return {
     async extrasWorld() { return deps.world(); },
     async extrasBlob(storagePath) {

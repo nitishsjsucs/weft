@@ -3,7 +3,7 @@
 // env: the database through the cf1-db facade over ctx.storage, uploads in `blobs`, small state in `kv_state`, run
 // handles and run files in their tables, the bundled fixtures, the SpendDO ledger bound to this world's lease, the
 // alarm RunHost and SchedulerHost. No part calls node:fs (apps/api/test/hosted-platform.test.ts runs an fs guard).
-import { migrateDurable, migrationEntries, openDurableDb, type Db, type MigrationJournal } from "@weft/db";
+import { DurableDbError, migrateDurable, migrationEntries, openDurableDb, type Db, type MigrationJournal } from "@weft/db";
 import type { CommandDef, SpendLedger } from "@weft/contracts";
 import { hostedServiceCommands, SqlRepo } from "@weft/executor";
 import { isWorkersAiModel, neuronsForUsdMicros } from "@weft/agent";
@@ -148,13 +148,51 @@ export function hostedSpendLedger(spend: HostedSpendLedger, o: { world: HostedWo
   };
 }
 
+/** What a statement or transaction on a closed world's database throws (closableStorage). */
+export const ENGINE_CLOSED = "ENGINE_CLOSED";
+
+/**
+ * The Durable Object's storage as one world's engine sees it, with a fence: once `close()` ran, every statement and
+ * every transaction through it (the Db, its migrations and the world's small state) throws ENGINE_CLOSED, and a
+ * transaction still open then rolls back at its next statement. A reset waits for in-flight work only so long (the
+ * QUIESCE_MS bound in CompanyDO, then the close's own drain), so a write-back or an alarm-hosted run that outlives
+ * them would otherwise commit into the next generation's world on the same storage. The storage itself stays open
+ * for the Durable Object, and the next world's engine gets its own fence.
+ */
+export function closableStorage<S extends DurableStorageLike>(storage: S): { storage: S; close(): void; closed(): boolean } {
+  let closed = false;
+  const check = (what: string) => {
+    if (closed) throw new DurableDbError(ENGINE_CLOSED, `${ENGINE_CLOSED}: ${what} on a world whose engine has closed (a reset or restore replaced it), so nothing more is written to it`);
+  };
+  /** `target` with `over` in front; every other member is the target's own (methods bound to it, getters read on it). */
+  const view = <T extends object>(target: T, over: Record<string, unknown>): T => new Proxy(target, {
+    get(t, k) {
+      if (typeof k === "string" && Object.hasOwn(over, k)) return over[k];
+      const v = Reflect.get(t, k, t) as unknown;
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+    },
+  });
+  const sql = view(storage.sql, {
+    exec: (query: string, ...bindings: unknown[]) => { check("a statement"); return storage.sql.exec(query, ...bindings); },
+  });
+  const fenced = view(storage, {
+    sql,
+    transaction: <T>(closure: (txn: unknown) => Promise<T>) => { check("a transaction"); return storage.transaction(closure); },
+    transactionSync: <T>(closure: () => T) => { check("a transaction"); return storage.transactionSync(closure); },
+    deleteAll: () => { check("deleteAll"); return storage.deleteAll(); },
+  });
+  return { storage: fenced, close: () => { closed = true; }, closed: () => closed };
+}
+
 /** The durable platform for one world. CompanyDO builds it from its ctx.storage, env and the SpendDO stub. */
 export function durablePlatform(input: HostedPlatformInput, deps: DurablePlatformDeps = {}): WeftDurablePlatform {
   const driver = deps.driver ?? defaultDurableDriver();
   // Live, not a copy: CompanyDO folds KV weft-config into its env view, and the model switch, the kill switch and the
   // caps must reach a running world (the provider is chosen at each run creation).
   const env = overlayEnv(input.env, { WEFT_RUNTIME: "cloudflare" });
-  const state = sqlSmallState(input.storage.sql);
+  // Everything this world reads and writes goes through the fence its close() shuts (closableStorage).
+  const fence = closableStorage(input.storage);
+  const state = sqlSmallState(fence.storage.sql);
   let guard: TxGuard | null = null;
   // The guard exists once openDb ran; parts built before that see it through this indirection.
   const liveGuard: TxGuard = { inTx: () => guard?.inTx() ?? false, assertNotInTx: (what) => guard?.assertNotInTx(what) };
@@ -178,11 +216,12 @@ export function durablePlatform(input: HostedPlatformInput, deps: DurablePlatfor
       },
     },
     async openDb(): Promise<PlatformDb<Db>> {
-      await driver.migrate(input.storage, input.fixtures);
-      const h = driver.open(input.storage);
+      await driver.migrate(fence.storage, input.fixtures);
+      const h = driver.open(fence.storage);
       guard = h.guard;
-      // The storage belongs to the Durable Object; closing the world leaves it open for the next request.
-      return { db: h.db, meter: h.meter, guard: h.guard, close: async () => undefined };
+      // The storage belongs to the Durable Object and stays open for the next world; this world's view of it closes,
+      // last in assembleWeft's close (after the scheduler stopped and the runs and finalizations drained).
+      return { db: h.db, meter: h.meter, guard: h.guard, close: async () => fence.close() };
     },
     blobs: (ctx) => sqlBlobStore(ctx.db, { maxBytes: input.uploadMaxBytes ?? HOSTED_SETTINGS.uploadMaxBytes, guard: liveGuard }),
     state: () => state,

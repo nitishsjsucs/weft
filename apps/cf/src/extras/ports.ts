@@ -29,6 +29,12 @@ export type HiddenWriteBack =
 
 export interface SlotExport { bytes: Uint8Array; contentType: string }
 
+/** A world's refusal of a job from another generation than its own: never retried, the job finishes as `stale`. */
+export interface StaleGenerationRefusal { ok: false; code: "STALE_GENERATION"; message: string; retryable: false }
+/** What CompanyDO.extrasExport answers: the file, or the refusal of a stale job (a value, since an error thrown
+ * across the RPC reaches the queue as a plain Error, which it retries). */
+export type ExportOutcome = SlotExport | StaleGenerationRefusal;
+
 /** CompanyDO's RPC methods for the extras (cf4-worker delegates each to createSlotExtras). */
 export interface SlotExtrasPort {
   extrasWorld(): Promise<SlotWorldInfo>;
@@ -42,7 +48,13 @@ export interface SlotExtrasPort {
   extrasWriteBack(w: HiddenWriteBack, gen: number): Promise<WriteBackOutcome>;
   /** A memory file's text at a commit, or null when the path or commit is missing. */
   extrasMemoryText(path: string, commit: string): Promise<string | null>;
-  /** The world or its memory as a file; CompanyDO throws STALE_GENERATION for a job of another generation than the world's. */
+  /** The world or its memory as a file; CompanyDO answers STALE_GENERATION (not retryable) for a job of another
+   * generation than the world's, as it does for a write-back. */
+  extrasExport(what: "memory" | "world", gen: number): Promise<ExportOutcome>;
+}
+
+/** The world's own side of the port (createSlotExtras): CompanyDO checks the generation, so its export is the file. */
+export interface WorldExtrasPort extends Omit<SlotExtrasPort, "extrasExport"> {
   extrasExport(what: "memory" | "world", gen: number): Promise<SlotExport>;
 }
 

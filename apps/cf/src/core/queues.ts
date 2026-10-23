@@ -7,6 +7,7 @@ import { QUEUES, type HostedJob } from "../shared/contracts";
 import type { CoreEnv } from "../shared/env";
 import { logError, logEvent } from "../shared/log";
 import { deadLetterHandler, jobHandler } from "./extras-port";
+import { recordFailedJob } from "./failed-jobs";
 
 const KNOWN_KINDS = new Set(["ocr.receipt", "ocr.notice", "embed.memory", "export.world", "render.pdf"]);
 
@@ -23,7 +24,7 @@ export async function handleQueue(batch: MessageBatch<unknown>, env: CoreEnv): P
       try {
         const h = deadLetterHandler();
         if (h) await h(m.body, env, { queue: batch.queue, attempts: m.attempts, id: m.id });
-        else await recordFailedJob(env, m.body, m.attempts);
+        else await recordFailedJob(env, { jobId: String(job?.jobId ?? crypto.randomUUID()), kind: String(job?.kind ?? "unknown"), slot: job?.slot ?? null, gen: job?.gen ?? null, queue: QUEUES.dead, attempts: m.attempts, code: "DEAD_LETTER", message: "retries exhausted" });
         logEvent("job.dead", { kind: job?.kind ?? "unknown", slot: job?.slot ?? null, gen: job?.gen ?? null, attempts: m.attempts });
         m.ack();
         dead += 1;
@@ -63,18 +64,4 @@ export async function handleQueue(batch: MessageBatch<unknown>, env: CoreEnv): P
     }
   }
   return { acked, retried, dead };
-}
-
-/** D1 weft-ops failed_jobs (the table belongs to apps/cf/d1); without it the dead letter is only logged. */
-async function recordFailedJob(env: CoreEnv, body: unknown, attempts: number): Promise<void> {
-  if (!env.OPS) return;
-  const job = body as Partial<HostedJob> | null;
-  try {
-    await env.OPS.prepare(`INSERT OR IGNORE INTO failed_jobs (job_id, kind, slot, gen, queue, attempts, code, message, failed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`)
-      .bind(String(job?.jobId ?? crypto.randomUUID()), String(job?.kind ?? "unknown"), job?.slot ?? null, job?.gen ?? null, QUEUES.dead, attempts, "DEAD_LETTER",
-        "retries exhausted", new Date().toISOString())
-      .run();
-  } catch (e) {
-    logError("job.dead.d1", e);
-  }
 }

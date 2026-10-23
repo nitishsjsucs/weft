@@ -11,7 +11,7 @@ import { signCtx } from "../../src/shared/tokens";
 import { memorySql } from "./sqlite";
 
 (globalThis as { WebSocketRequestResponsePair?: unknown }).WebSocketRequestResponsePair ??= class { constructor(readonly request: string, readonly response: string) {} };
-const { CompanyDO } = await import("../../src/core/company/company-do");
+const { CompanyDO, OUTBOX_DEAD_AFTER } = await import("../../src/core/company/company-do");
 
 const CTX = "c".repeat(64);
 const VISITOR = "vis_" + "a".repeat(32);
@@ -38,9 +38,13 @@ interface FakeWorld {
   closedGens: number[];
   /** Hidden write-backs that reached a world's extras port, with the generation of the engine that ran them. */
   writeBacks: { gen: number; jobId: unknown }[];
+  /** The generation of the engine each alarm's work (engine.inScope) ran on. */
+  scopedGens: number[];
+  /** How long each KV config read takes (envConfig, which the alarm and the boot await). */
+  configDelayMs: number;
 }
 let world: FakeWorld;
-const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [] });
+const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0 });
 
 function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]): { toArray(): Record<string, unknown>[] } }): WorldEngine {
   const guard: TxGuard = {
@@ -61,7 +65,7 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
     guard,
     fetch: async (req) => new Response(JSON.stringify({ path: new URL(req.url).pathname }), { headers: { "content-type": "application/json" } }),
     mcp: async () => new Response(JSON.stringify({ mcp: true }), { headers: { "content-type": "application/json" } }),
-    inScope: async (fn) => { if (world.scoped) await world.scoped(); return fn(); },
+    inScope: async (fn) => { world.scopedGens.push(input.world.gen); if (world.scoped) await world.scoped(); return fn(); },
     clockRate: () => 0,
     mintMcpKey: async (m) => ({ key: `wk_mcp_${m.slot}_${m.gen}_${"k".repeat(24)}`, url: m.publicUrl, expiresAt: m.expiresAt }),
     setWorldProvider: async () => undefined,
@@ -112,6 +116,8 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   const failing = { n: o.failSetAlarms ?? 0 };
   const waits: Promise<unknown>[] = [];
   const recorded: unknown[][] = [];
+  /** Every D1 statement run, with its bindings. */
+  const ops: { sql: string; binds: unknown[] }[] = [];
   const alarms: number[] = [];
   let alarm: number | null = null;
   let ready: Promise<unknown> = Promise.resolve();
@@ -141,17 +147,19 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   };
   const env = {
     WEFT_CTX_SECRET: CTX, WEFT_PUBLIC_ORIGIN: "https://weft.test", WEFT_CONFIG_MEMO_MS: "0",
-    CONFIG: { get: async (keys: string[] | string) => (Array.isArray(keys) ? new Map(keys.map((k) => [k, null])) : null) },
+    CONFIG: { get: async (keys: string[] | string) => { if (world.configDelayMs) await sleep(world.configDelayMs); return Array.isArray(keys) ? new Map(keys.map((k) => [k, null])) : null; } },
     LOBBY: { idFromName: (n: string) => n, get: () => lobbyStub },
     SPEND: { idFromName: (n: string) => n, get: () => ({}) },
     COMPANY: { idFromName: (n: string) => n, get: () => ({}) },
     JOBS: { send: async (body: unknown) => { if (o.failSend?.(body)) throw new Error("Queue.send refused the message"); sent.push({ queue: "jobs", body }); } },
     RENDER: { send: async (body: unknown) => { sent.push({ queue: "render", body }); } },
     RL_RUN: { limit: async () => ({ success: true }) },
-    OPS: { prepare: () => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); return {}; } }) }) },
+    OPS: { prepare: (q: string) => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); ops.push({ sql: q, binds: b }); return {}; } }) }) },
   };
   const co = new CompanyDO(ctx as never, env as never);
-  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded };
+  /** The same object started again (an eviction or a deploy): a new instance over the same storage. */
+  const restart = () => { const again = new CompanyDO(ctx as never, env as never); return { co: again, ready: () => ready }; };
+  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded, ops, kv, restart };
 }
 
 async function req(path: string, o: { method?: string; visitor?: string | null; slot?: string; gen?: number; body?: string; headers?: Record<string, string> } = {}): Promise<Request> {
@@ -372,11 +380,12 @@ describe("a reset while the old world closes", () => {
     expect(await servingGen(c)).toBe(4);
     // The previous visitor's OCR job (gen 3) finishes after the reset: nothing reaches the new visitor's world.
     expect(await c.co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_old" } } as never, 3)).toMatchObject({ ok: false, code: "STALE_GENERATION", retryable: false });
-    await expect(c.co.extrasExport("world", 3)).rejects.toThrow(/STALE_GENERATION/);
+    // The same outcome for an export: a value the queue finishes as stale, never an error it retries.
+    expect(await c.co.extrasExport("world", 3)).toEqual({ ok: false, code: "STALE_GENERATION", message: expect.stringContaining("generation 3"), retryable: false });
     expect(world.writeBacks).toEqual([]);
     expect(await c.co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_new" } } as never, 4)).toMatchObject({ ok: true });
     expect(world.writeBacks).toEqual([{ gen: 4, jobId: "obx_new" }]);
-    expect(new TextDecoder().decode((await c.co.extrasExport("world", 4)).bytes)).toBe("world gen 4");
+    expect(new TextDecoder().decode(((await c.co.extrasExport("world", 4)) as { bytes: Uint8Array }).bytes)).toBe("world gen 4");
   });
 
   it("boots nothing from an alarm or an extras RPC during a restore's first step, and the restore's last step boots the restored world", async () => {
@@ -396,6 +405,51 @@ describe("a reset while the old world closes", () => {
     expect(await c.co.restoreFinish({ bookmark: null })).toMatchObject({ slot: "slot-1", gen: 5 });
     expect(world.bootGens).toEqual([3, 5]);
     expect(await servingGen(c)).toBe(5);
+  });
+});
+
+describe("a world replaced while its own steps await", () => {
+  it("runs no alarm work on an engine that a new generation's stamp replaced while the alarm read the config", async () => {
+    const c = company();
+    await c.ready();
+    world.configDelayMs = 30;
+    // The alarm takes the gen 3 engine, then waits on KV; meanwhile the Lobby stamps generation 4.
+    const alarm = c.co.runAlarmNow();
+    await sleep(5);
+    const stamped = c.co.applyStamp({ ...c.stamp!, gen: 4, visitor: "vis_" + "b".repeat(32) });
+    await alarm;
+    expect(world.closedGens).toEqual([3]);
+    expect(world.scopedGens).toEqual([]);
+    // Its purposes are asked for again, after the backoff.
+    expect(c.alarms.at(-1)!).toBeGreaterThan(Date.now());
+    await stamped;
+    world.configDelayMs = 0;
+    at(c.alarms.at(-1)!);
+    await c.co.alarm();
+    expect(world.scopedGens).toEqual([4]);
+  });
+
+  it("keeps a newer boot that started while a stop waited for the previous one", async () => {
+    const c = company();
+    await c.ready();
+    const co = c.co as unknown as { stamp: WorldStamp; startEngine(): Promise<void>; stopEngine(): Promise<void> };
+    world.bootDelayMs = 40;
+    // Generation 4's boot is in flight, and a stop waits for it.
+    const stamped = c.co.applyStamp({ ...c.stamp!, gen: 4 });
+    await sleep(10);
+    const stop = co.stopEngine();
+    await sleep(10);
+    // Meanwhile the world moves to generation 5 and its boot starts (as restoreFinish starts one when no engine is up).
+    co.stamp = { ...co.stamp, gen: 5 };
+    const newer = co.startEngine();
+    await stamped;
+    await stop;
+    // A caller that finds no engine yet shares the generation 5 boot instead of starting a second one.
+    const served = c.co.extrasWorld().catch(() => null);
+    await newer;
+    await served;
+    expect(world.bootGens).toEqual([3, 4, 5]);
+    expect(world.closedGens).toEqual([3, 4]);
   });
 });
 
@@ -475,6 +529,60 @@ describe("the outbox retry", () => {
     append(c, "obx_d", job(1), "2026-10-26T16:00:00.000Z");
     expect(await c.co.flushOutbox()).toBe(0);
     expect(c.alarms.at(-1)! - now).toBe(2_000);
+  });
+});
+
+describe("a row the outbox can never send", () => {
+  const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
+  const poison = `obx_${"1".padStart(16, "0")}`;
+
+  it(`is dead-lettered after ${OUTBOX_DEAD_AFTER} failed flushes, counted across a restart: recorded in failed_jobs, dropped, and no longer retried`, async () => {
+    expect(OUTBOX_DEAD_AFTER).toBe(12);
+    let tries = 0;
+    const c = company({ failSend: (b) => (b as { jobId: string }).jobId === poison && ++tries > 0 });
+    await c.ready();
+    c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES ('obx_a', 'ocr.receipt', ?, '2026-10-26T15:00:00.000Z')`, job(1));
+    let now = T0 + MIN;
+    at(now);
+    let co = c.co;
+    await co.flushOutbox();
+    for (let i = 0; i < 5; i++) { now = c.alarms.at(-1)!; at(now); await co.alarm(); }
+    expect(tries).toBe(6);
+    // Evicted between two retries (the backoff reaches minutes): the next instance's boot flush is the 7th try.
+    const again = c.restart();
+    await again.ready();
+    co = again.co;
+    expect(tries).toBe(7);
+    while (tries < OUTBOX_DEAD_AFTER) { now = c.alarms.at(-1)!; at(now); await co.alarm(); }
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([]);
+    const dead = c.ops.filter((o) => /INSERT[^]*failed_jobs/i.test(o.sql));
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.binds.slice(0, 7)).toEqual([poison, "ocr.receipt", "slot-1", 3, "weft-jobs", OUTBOX_DEAD_AFTER, "OUTBOX_UNSENT"]);
+    expect(String(dead[0]!.binds[7])).toContain("Queue.send refused");
+    // No more retries: the outbox purpose is not asked for again, and later flushes send nothing and arm nothing.
+    const asked = c.alarms.length;
+    expect(await co.flushOutbox()).toBe(0);
+    expect(c.alarms.length).toBe(asked);
+    expect(tries).toBe(OUTBOX_DEAD_AFTER);
+    expect([...c.kv.keys()].filter((k) => k.includes("outbox"))).toEqual([]);
+  });
+
+  it("counts only flushes that failed the row in a row, and forgets a row once it is sent", async () => {
+    let failing = true;
+    const c = company({ failSend: (b) => failing && (b as { jobId: string }).jobId === poison });
+    await c.ready();
+    c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES ('obx_a', 'ocr.receipt', ?, '2026-10-26T15:00:00.000Z')`, job(1));
+    let now = T0 + MIN;
+    at(now);
+    await c.co.flushOutbox();
+    for (let i = 0; i < OUTBOX_DEAD_AFTER - 2; i++) { now = c.alarms.at(-1)!; at(now); await c.co.alarm(); }
+    failing = false;
+    now = c.alarms.at(-1)!;
+    at(now);
+    await c.co.alarm();
+    expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([poison]);
+    expect(c.ops.filter((o) => /failed_jobs/i.test(o.sql))).toEqual([]);
+    expect([...c.kv.keys()].filter((k) => k.includes("outbox"))).toEqual([]);
   });
 });
 
