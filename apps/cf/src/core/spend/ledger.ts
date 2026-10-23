@@ -105,6 +105,12 @@ const DAY_MS = 86_400_000;
 /** The UTC days the ledger keeps at `now`: today first, then the RETAIN_DAYS - 1 days before it. */
 export const retainedDays = (now: Date): string[] =>
   Array.from({ length: RETAIN_DAYS }, (_, i) => new Date(now.getTime() - i * DAY_MS).toISOString().slice(0, 10));
+/**
+ * The orphan sweep prunes at most this many old reservations (each with its settle or release row) and this many old
+ * direct neuron entries per run, so a backlog (a ledger that went unswept for days) is deleted over several sweeps,
+ * never in one large write. At one sweep every 15 minutes that is 48,000 reservations a day.
+ */
+export const PRUNE_BATCH = 500;
 /** The orphan sweep looks back at most this far the first time (and after a long gap); older reservations stay. */
 const ORPHAN_LOOKBACK_MS = 2 * 86_400_000;
 const META = { orphansScannedTo: "orphans.scanned_to", liveCarry: "live.carry" } as const;
@@ -272,6 +278,31 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
     if (done) apply(done[0], done[1]);
   }
 
+  /**
+   * Prunes what is older than the retained days, PRUNE_BATCH oldest reservations at a time, each with its close
+   * (settle and release rows share their reservation's day and id), so a fold of the batch is the batch's whole
+   * story: its live totals carry over into spend_meta first, so the cumulative live cap still counts them. Once no
+   * old reservation is left, the old rows still there (a close whose reservation is gone, which the fold ignores) go
+   * too, as many at a time. Direct neuron entries are pruned PRUNE_BATCH at a time.
+   */
+  function prune(keepFrom: string): void {
+    s.transactionSync(() => {
+      // Ordered by day first, so the day index serves it.
+      const batch = `SELECT reservation_id FROM spend_entries WHERE day < ? AND kind = 'reserve' ORDER BY day, seq LIMIT ?`;
+      const rows = q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE reservation_id IN (${batch}) ORDER BY seq`, keepFrom, PRUNE_BATCH);
+      const folded = fold(rows);
+      if (rows.some((r) => r.live === 1)) {
+        const t = totalsOf(folded.values(), (r) => r.live === 1);
+        setMeta(META.liveCarry, JSON.stringify(addTotals(parseCarry(meta(META.liveCarry)), t)));
+      }
+      if (rows.length) s.sql.exec(`DELETE FROM spend_entries WHERE reservation_id IN (${batch})`, keepFrom, PRUNE_BATCH);
+      if (folded.size < PRUNE_BATCH) {
+        s.sql.exec(`DELETE FROM spend_entries WHERE seq IN (SELECT seq FROM spend_entries WHERE day < ? ORDER BY day, seq LIMIT ?)`, keepFrom, PRUNE_BATCH);
+      }
+      s.sql.exec(`DELETE FROM neuron_entries WHERE seq IN (SELECT seq FROM neuron_entries WHERE day < ? ORDER BY day, seq LIMIT ?)`, keepFrom, PRUNE_BATCH);
+    });
+  }
+
   return {
     reserve(input) {
       const out = s.transactionSync((): { result: ReserveResult; row: SpendRow | null } => {
@@ -350,7 +381,6 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
     settleOrphans(now = wallNow()) {
       const cutoff = new Date(now.getTime() - ORPHAN_SETTLE_MS).toISOString();
       const floor = new Date(now.getTime() - ORPHAN_LOOKBACK_MS).toISOString();
-      const keepFrom = new Date(now.getTime() - (RETAIN_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
       const done = s.transactionSync(() => {
         // Only reservations that crossed the orphan age since the last sweep: every older one was settled then, or
         // closed itself. The first sweep (and one after a long gap) looks back ORPHAN_LOOKBACK_MS.
@@ -367,21 +397,10 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
           settled.push([e, r]);
         }
         if (scannedTo === null || cutoff > scannedTo) setMeta(META.orphansScannedTo, cutoff);
-        // Prune what is older than the retention window: the live rows' totals carry over first, so the cumulative
-        // live cap still counts them. Settle and release rows share their reservation's day, so a reservation and its
-        // close go together.
-        // Ordered by day first, so the day index serves it (ordering by seq alone would walk every live row).
-        const pruned = q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE day < ? AND live = 1 ORDER BY day, seq`, keepFrom);
-        if (pruned.length) {
-          const t = totalsOf(fold(pruned).values());
-          const carry = parseCarry(meta(META.liveCarry));
-          setMeta(META.liveCarry, JSON.stringify({ settledMicros: carry.settledMicros + t.settledMicros, openMicros: carry.openMicros + t.openMicros, neurons: carry.neurons + t.neurons }));
-        }
-        s.sql.exec(`DELETE FROM spend_entries WHERE day < ?`, keepFrom);
-        s.sql.exec(`DELETE FROM neuron_entries WHERE day < ?`, keepFrom);
         return settled;
       });
       for (const [e, r] of done) apply(e, r);
+      prune(retainedDays(now).at(-1)!);
       return done.length;
     },
     recordNeurons({ product, model, neurons }) {

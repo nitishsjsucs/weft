@@ -2,7 +2,7 @@
 // visitor, IP-hash and neuron caps, orphans settled at their worst case (design 4.3, 5.2, 6.3, section 0).
 import { describe, expect, it } from "vitest";
 import { HOSTED_CAP_DEFAULTS, ORPHAN_SETTLE_MS, type HostedCaps } from "../../src/shared/contracts";
-import { createSqlSpendLedger, fold, migrateSpend, type SpendRow } from "../../src/core/spend/ledger";
+import { createSqlSpendLedger, fold, migrateSpend, PRUNE_BATCH, type SpendRow } from "../../src/core/spend/ledger";
 import { memorySql } from "./sqlite";
 
 const USD = 1e6;
@@ -26,6 +26,68 @@ describe("SpendDO ledger", () => {
     migrateSpend(s);
     s.sql.exec(`UPDATE spend_meta SET v = '99' WHERE k = 'schema'`);
     expect(() => migrateSpend(s)).toThrow(/newer/);
+  });
+
+  it("adds the partial indexes to a ledger made before them, and creating them again changes nothing", () => {
+    const s = memorySql();
+    const indexes = () => s.sql.exec<{ name: string; sql: string }>(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL ORDER BY name`).toArray();
+    // The schema as it was before the live and reservation-time indexes, with an entry in it.
+    s.sql.exec(`CREATE TABLE spend_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
+    s.sql.exec(`INSERT INTO spend_meta (k, v) VALUES ('schema', '1')`);
+    s.sql.exec(`CREATE TABLE spend_entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, day TEXT NOT NULL, world TEXT, run_id TEXT,
+      kind TEXT NOT NULL, reservation_id TEXT NOT NULL, usd_micros INTEGER NOT NULL, model TEXT NOT NULL, live INTEGER NOT NULL, visitor TEXT,
+      ip_hash TEXT, neurons INTEGER NOT NULL DEFAULT 0, product TEXT)`);
+    s.sql.exec(`CREATE INDEX spend_entries_day ON spend_entries(day)`);
+    s.sql.exec(`INSERT INTO spend_entries (at, day, kind, reservation_id, usd_micros, model, live) VALUES ('2026-10-26T11:00:00.000Z', '2026-10-26', 'reserve', 'rsv_old', 7, 'm', 1)`);
+    migrateSpend(s);
+    const once = indexes();
+    expect(once.map((i) => i.name)).toEqual(expect.arrayContaining(["spend_entries_day", "spend_entries_live", "spend_entries_reserve_at", "spend_entries_rsv", "spend_entries_run", "neuron_entries_day"]));
+    migrateSpend(s);
+    migrateSpend(s);
+    expect(indexes()).toEqual(once);
+    const l = createSqlSpendLedger(s, { caps: () => HOSTED_CAP_DEFAULTS, wallNow: () => new Date("2026-10-26T12:00:00.000Z") });
+    expect(l.committed({ day: "2026-10-26" })).toEqual({ settledMicros: 0, openMicros: 7, neurons: 0 });
+  });
+
+  it("prunes a backlog of old entries a bounded batch per sweep, never splitting a reservation from its close", () => {
+    const { l, s, advance } = ledger({ dayUsd: 1_000, runUsd: 1_000, visitorDayUsd: 1_000, ipDayUsd: 1_000, liveUsd: 1_000 }, "2026-10-26T12:00:00.000Z");
+    const n = Math.floor(PRUNE_BATCH * 2.5);
+    const row = s.db.prepare(`INSERT INTO spend_entries (at, day, world, run_id, kind, reservation_id, usd_micros, model, live, visitor, ip_hash, neurons, product)
+      VALUES (?, ?, 'slot-1:gen-1', ?, ?, ?, ?, 'gpt-5.6-luna', ?, 'vis_a', 'ip_a', 0, NULL)`);
+    // Old days, every reservation before any of their closes, so a batch cut by rows would split them.
+    const day = (i: number) => (i % 2 ? "2026-10-20" : "2026-10-21");
+    for (let i = 0; i < n; i++) row.run(`${day(i)}T10:00:00.000Z`, day(i), `run_p${i}`, "reserve", `rsv_p${i}`, 1000, i % 3 ? 1 : 0);
+    // All but the last are settled at 900; the last stays open (counted at its reserved 1,000).
+    for (let i = 0; i < n - 1; i++) row.run(`${day(i)}T11:00:00.000Z`, day(i), `run_p${i}`, "settle", `rsv_p${i}`, 900, i % 3 ? 1 : 0);
+    // A close whose reservation is long gone, which the fold ignores.
+    row.run("2026-10-20T11:00:00.000Z", "2026-10-20", "run_x", "settle", "rsv_gone", 5, 1);
+    const nrow = s.db.prepare(`INSERT INTO neuron_entries (at, day, product, model, neurons) VALUES (?, ?, 'ocr', '@cf/x', 1)`);
+    for (let i = 0; i < n; i++) nrow.run(`${day(i)}T10:00:00.000Z`, day(i));
+    const live = Array.from({ length: n }, (_, i) => i).filter((i) => i % 3);
+    const expected = live.reduce((t, i) => t + (i === n - 1 ? 1000 : 900), 0);
+    expect(l.status({}).spentMicros.live).toBe(expected);
+    const count = (t: string) => Number(s.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`).toArray()[0]!.n);
+    let spend = count("spend_entries"), neurons = count("neuron_entries"), sweeps = 0;
+    const meter = readMeter(s);
+    while (spend > 0 || neurons > 0) {
+      advance(ORPHAN_SETTLE_MS);
+      sweeps += 1;
+      const read = meter.rows;
+      l.settleOrphans();
+      // What a sweep reads is bounded by its batch, not by the backlog (no statement scans a table).
+      expect(meter.rows - read).toBeLessThanOrEqual(2 * PRUNE_BATCH + 2);
+      const s2 = count("spend_entries"), n2 = count("neuron_entries");
+      expect(spend - s2).toBeLessThanOrEqual(2 * PRUNE_BATCH);
+      expect(neurons - n2).toBeLessThanOrEqual(PRUNE_BATCH);
+      spend = s2; neurons = n2;
+      expect(sweeps).toBeLessThan(10);
+    }
+    expect(sweeps).toBe(3);
+    // The pruned live rows' totals carried over whole: each reservation went with its close.
+    const fresh = createSqlSpendLedger(s, { caps: () => ({ ...HOSTED_CAP_DEFAULTS, liveUsd: 1_000 }), wallNow: () => new Date("2026-10-26T13:00:00.000Z") });
+    expect(fresh.status({}).spentMicros.live).toBe(expected);
+    expect(l.status({}).spentMicros.live).toBe(expected);
+    expect(fresh.committed({ live: true })).toEqual({ settledMicros: expected - 1000, openMicros: 1000, neurons: 0 });
   });
 
   it("folds like the file ledger: open counts as spent, settle replaces, release zeroes", () => {
