@@ -34,9 +34,10 @@ export const DELTA_RESET_BASELINE_ROWS = 557;
 export const DELTA_RESET_MAX_ROWS = Math.floor(DELTA_RESET_BASELINE_ROWS * 1.25);
 /**
  * The same session on the SQL memory repo, as hosted worlds run it: the reset also deletes the git objects and log
- * rows of the session's memory commits and puts mem_refs back (85 more keys). Measured on 2026-10-21 with this file's
- * session, verified locally: 717 rows written in workerd (the billing count) and 716 on the emulator, against 630 and
- * 629 for the same session on git memory.
+ * rows of the session's memory commits and puts mem_refs back (85 more keys). Recorded on 2026-10-21 with this file's
+ * session in the cloud session's Linux container (workerd through Miniflare), not on the Mac, so not yet verified
+ * locally: 717 rows written in workerd (the billing count) and 716 on the emulator, against 630 and 629 for the same
+ * session on git memory.
  */
 export const DELTA_RESET_SQL_MEMORY_BASELINE_ROWS = 717;
 export const DELTA_RESET_SQL_MEMORY_MAX_ROWS = Math.floor(DELTA_RESET_SQL_MEMORY_BASELINE_ROWS * 1.25);

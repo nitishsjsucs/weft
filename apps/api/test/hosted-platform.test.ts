@@ -131,12 +131,11 @@ describe("the fs guard on the durable path", () => {
 });
 
 /**
- * Module-level import.meta reads that cannot throw in workerd, each for a reason the integration checked:
- * providers/factory.ts is @weft/agent's Node entry, which a Worker bundle never evaluates (the workerd condition
- * resolves src/portable.ts, pinned by packages/agent/test/hosted/portable.test.ts). Script entries the hosted entry
- * never imports are not scanned.
+ * Module-level import.meta reads that cannot throw in workerd, each for a reason the integration checked. None are
+ * left: providers/factory.ts resolves the repo root lazily too, so even a Worker bundle that reached @weft/agent's
+ * Node entry would evaluate it. Script entries the hosted entry never imports are not scanned.
  */
-const MODULE_LEVEL_IMPORT_META_PENDING = new Set(["packages/agent/src/providers/factory.ts"]);
+const MODULE_LEVEL_IMPORT_META_PENDING = new Set<string>();
 const ENTRY_SCRIPTS = new Set(["apps/api/src/demo.ts", "packages/seed/src/cli.ts"]);
 
 /** Top-level statements that read import.meta while the module evaluates (outside any function body). */
@@ -158,7 +157,7 @@ function moduleLevelImportMeta(root: string): string[] {
 }
 
 describe("module evaluation on workerd", () => {
-  it("no module the hosted entry imports reads import.meta at module level, but the listed other-track ones", () => {
+  it("no module the hosted entry imports reads import.meta at module level", () => {
     // In workerd import.meta.dirname is undefined and import.meta.url is null, so a path built while the module
     // evaluates throws before the world exists; cf2's modules resolve theirs lazily, on Node only.
     const found = ["apps/api/src", "packages"].flatMap(moduleLevelImportMeta).filter((x) => /\/src\//.test(x));
@@ -511,6 +510,21 @@ describe("hosted origins, the read-only guard and the hidden write-backs", () =>
       const refused = await node.executor.system.exec(JOBS_PRINCIPAL as never, HIDDEN_SERVICE_COMMANDS.receiptExtract, {}, { eventId: null, attended: false, requestedBy: null });
       expect(refused).toMatchObject({ ok: false, refusal: { code: "NOT_PERMITTED" } });
     } finally { await node.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("svc_jobs runs its two write-backs and nothing else on the durable world: any other command is refused NOT_PERMITTED", async () => {
+    const src = { eventId: null, attended: false, requestedBy: null };
+    const actionsBefore = Number(w.storage.sql.exec("SELECT count(*) AS n FROM actions").one().n);
+    const draft = w.storage.sql.exec<{ id: string }>("SELECT id FROM payroll_runs WHERE status = 'draft' ORDER BY id LIMIT 1").one().id;
+    // An R4 a person approves, and an R1 system record svc_events may run: both are off svc_jobs's allowlist, and the
+    // allowlist is what refuses them (the R2-and-above rule would refuse the first one only).
+    const calls: [string, Record<string, unknown>][] = [["payroll.submit_run", { run_id: draft, exclude_blocked: true }], ["compliance.refresh_calendar", {}]];
+    for (const [command, args] of calls) {
+      const out = await w.weft.executor.system.exec(JOBS_PRINCIPAL as never, command, args, src);
+      expect(out, `${command}: ${JSON.stringify(out)}`).toMatchObject({ ok: false, refusal: { code: "NOT_PERMITTED", message: expect.stringMatching(/not on this system principal's allowlist/) } });
+    }
+    expect(Number(w.storage.sql.exec("SELECT count(*) AS n FROM actions").one().n)).toBe(actionsBefore);
+    expect(w.storage.sql.exec<{ status: string }>("SELECT status FROM payroll_runs WHERE id = ?", draft).one().status).toBe("draft");
   });
 
   it("builds an ocr.receipt job for a claim's receipt, and the receipt write-back is idempotent and checks the upload", async () => {

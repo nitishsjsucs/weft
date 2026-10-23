@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import type { AgentRunRow, RoutineRun } from "@weft/contracts";
 import { actions, routineRuns, routines, runSteps, workers } from "@weft/db";
-import { DEFAULT_SCRIPTS_DIR, scriptedProvider } from "../../packages/agent/src/index";
+import { defaultScriptsDir, scriptedProvider } from "../../packages/agent/src/index";
 import { routineFigures } from "../../packages/core/src/comms/send";
 import { createTestWeft, type TestWeft } from "./helpers";
 
@@ -29,7 +29,7 @@ const DIGEST_SCRIPT = {
 
 let weft: TestWeft;
 beforeAll(async () => {
-  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR, scripts: { rt_people_digest: DIGEST_SCRIPT } }) });
+  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: defaultScriptsDir(), scripts: { rt_people_digest: DIGEST_SCRIPT } }) });
   await weft.db.update(workers).set({ status: "inactive", endDate: "2026-10-16" }).where(eq(workers.id, "wrk_0004"));
 });
 afterAll(async () => {

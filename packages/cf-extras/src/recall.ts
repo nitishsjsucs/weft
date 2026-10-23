@@ -6,6 +6,7 @@
 // only when the note there is the note that was indexed, so a citation always points at a real commit. Vectors
 // become visible 1 to 3 minutes after an upsert (measured), so fresh notes are found lexically first. Track cf6-extras.
 import { EMBEDDING_DIMS, EMBEDDING_MODEL, seedNamespace, type MemoryVectorMetadata, type RecallCandidate, type RecallQuery, type RecallSource } from "../../contracts/src/ext/cf-extras";
+import type { TxGuard } from "../../contracts/src/ext/cf-db";
 import type { AiGatewayOption, VectorizeLike, VectorizeMatchLike, VectorizeVectorLike, WorkersAiBindingLike } from "./bindings";
 import { sha256Hex } from "./bytes";
 import { ExtrasError } from "./errors";
@@ -17,6 +18,9 @@ export interface EmbedDeps {
   /** The embeddings share (200 neurons a day); absent means unmetered (unit tests only). */
   neurons?: NeuronBudget | null;
   charge?: { world?: string | null; visitor?: string | null; ipHash?: string | null };
+  /** The facade's IO_IN_TX guard (design 4.2): the neuron reservation, the embedding call and the Vectorize reads and
+   * writes are real I/O, so a call inside a database transaction throws IO_IN_TX before any of them. */
+  guard?: Pick<TxGuard, "assertNotInTx"> | null;
 }
 
 /**
@@ -27,6 +31,7 @@ export interface EmbedDeps {
 export async function embedTexts(deps: EmbedDeps, texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   if (texts.length > EMBED_BATCH) throw new Error(`embed at most ${EMBED_BATCH} texts per call`);
+  deps.guard?.assertNotInTx("the Workers AI embedding call");
   const neurons = embeddingNeurons(texts);
   const rsv = deps.neurons ? await deps.neurons.reserve({ product: "embeddings", neurons, model: EMBEDDING_MODEL, ...deps.charge }) : null;
   if (rsv && !rsv.ok) throw new ExtrasError("EMBED_BUDGET", "today's embedding budget is used up");

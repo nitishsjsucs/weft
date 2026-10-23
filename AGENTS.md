@@ -21,7 +21,7 @@ Weft is an open-source, self-hostable, AI-native payroll and HR platform that ru
 |---|---|
 | `pnpm install` | Install (Node 25.9.0, pnpm 12.3.4). After editing any `package.json`, run it again; if a dependency link is still missing, delete `node_modules` folders and reinstall |
 | `pnpm test` | All vitest projects (`packages/*`, `apps/*`, `tests`) |
-| `pnpm typecheck` | `tsc --noEmit` in every package through turbo |
+| `pnpm typecheck` | `tsc --noEmit` in every package through turbo, then `pnpm typecheck:e2e` (the Playwright suites in `e2e/`, and `e2e/cf` where it exists) |
 | `pnpm --filter @weft/web build` | Next production build |
 | `pnpm lint:prose` | No em or en dashes in tracked text |
 | `pnpm lint:brand` | No reference-site names, domains or denylisted phrases outside `research/`, `NOTICE` and `SPEC.md` |

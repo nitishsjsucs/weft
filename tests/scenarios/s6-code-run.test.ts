@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { HumanSession } from "@weft/contracts";
 import { actions, agentRuns, routineRuns, routines } from "@weft/db";
-import { DEFAULT_SCRIPTS_DIR, scriptedProvider, type Script } from "../../packages/agent/src/index";   // relative: tests/package.json does not list @weft/agent
+import { defaultScriptsDir, scriptedProvider, type Script } from "../../packages/agent/src/index";   // relative: tests/package.json does not list @weft/agent
 import { createTestWeft, type TestWeft } from "./helpers";
 
 const ROUTINE = "rt_s6_code_run";
@@ -33,7 +33,7 @@ let weft: TestWeft;
 const prior = process.env.WEFT_SANDBOX;
 beforeAll(async () => {
   process.env.WEFT_SANDBOX = "quickjs";
-  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR, scripts: { [ROUTINE]: S6 } }) });
+  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: defaultScriptsDir(), scripts: { [ROUTINE]: S6 } }) });
   await weft.db.insert(routines).values({
     id: ROUTINE, companyId: "cmp_larkspur", name: "Sandbox scenario", description: "Test only: one code.run over two reads.", ownerPrincipalId: "usr_dana",
     enabled: true, autonomy: "approve", triggerJson: JSON.stringify({ type: "cron", cron: "0 3 1 1 *", tz: "America/Los_Angeles" }), filterJson: null,

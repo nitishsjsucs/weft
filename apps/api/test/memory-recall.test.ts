@@ -5,7 +5,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { RECALL_BUDGET } from "@weft/contracts";
-import { memoryRecalls, runTaint } from "@weft/db";
+import { createTxGuard, memoryRecalls, runTaint } from "@weft/db";
 import { executorInternals, memoryRepoFactory } from "@weft/executor";
 import { createTestWeft, type TestWeft } from "../src/testing";
 import { attachSemanticRecall, memoryBinding } from "../src/memory/binding";
@@ -151,6 +151,25 @@ describe("semantic recall (cf6-extras)", () => {
     attachSemanticRecall(weft.db, { source: source(async () => { throw new Error("Vectorize down"); }), enabled: () => true, world, readText, onError: (e) => told.push(e) });
     expect((await recallFor("chat", "What about Lena Brooks?")).block).toBe(lexical);
     expect(told.map((e) => (e as Error).message)).toEqual(["Vectorize down"]);
+  });
+
+  it("inside a database transaction the source is never asked: recall throws IO_IN_TX instead of passing for a failed source", async () => {
+    const b = memoryBinding(weft.db)!;
+    const guard = createTxGuard();   // the durable facade's guard; Node's binding has none
+    const src = source([cand("knowledge/facts/holiday-payday.md", c1)]);
+    const told: unknown[] = [];
+    attachSemanticRecall(weft.db, { source: src, enabled: () => true, world, readText, onError: (e) => told.push(e) });
+    b.guard = guard;
+    try {
+      const runId = await open();
+      const recall = () => createMemoryRecall(weft.db)({ companyId: "cmp_larkspur", runId, kind: "chat", query: Q, subjectRefs: [] });
+      await expect(guard.within(recall)).rejects.toMatchObject({ code: "IO_IN_TX" });
+      expect(src.queries).toHaveLength(0);
+      expect(told).toEqual([]);
+      // Outside the transaction the same recall asks the source and keeps its line.
+      expect(await recall()).toContain("knowledge/facts/holiday-payday.md#L");
+      expect(src.queries).toHaveLength(1);
+    } finally { b.guard = null; }
   });
 
   it("redacts a semantic line as lexical recall does, including a secret the redactor learned after the note was written", async () => {

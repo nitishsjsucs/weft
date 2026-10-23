@@ -6,9 +6,18 @@
 // scripts/cf/with-cf.sh; `--url` names the deployed origin (the admin token comes from the cf secrets file).
 //
 //   scripts/cf/with-cf.sh pnpm cf:budget --url https://weft.nitish-ratakonda.workers.dev [--day 2026-10-26]
+//
+// `--logs` instead reads the day's Workers Logs events for weft and weft-core through the observability query API
+// (dry, so nothing is saved on the account) and counts credential shapes by prefix (sk-, weft_sk_, a full wk_mcp_
+// key, an x-weft-* credential header with a value; scripts/cf/lib/log-scan.ts). It loads no secret to compare and
+// prints counts only, never an event; any match exits 1. The API documents the Workers Observability Write permission
+// for this query, so the token with-cf.sh supplies needs it.
+//
+//   scripts/cf/with-cf.sh pnpm cf:budget --logs [--day 2026-10-26]
 import { cfApiFromEnv, type CfApi } from "./lib/cf-api";
 import { readResources } from "./lib/configs";
 import { CF_SECRETS_FILE, readEnvValue } from "./lib/env-file";
+import { logScanReport, scanDayLogs } from "./lib/log-scan";
 import { signAdmin } from "../../apps/cf/src/shared/tokens";
 
 /** Design 8.1 targets and 8.2 shares. */
@@ -123,6 +132,13 @@ async function main(argv: string[]): Promise<void> {
   const arg = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] ?? null : null; };
   const day = arg("--day") ?? new Date().toISOString().slice(0, 10);
   const api = cfApiFromEnv();
+  if (argv.includes("--logs")) {
+    const r = logScanReport(day, await scanDayLogs(api, day));
+    console.log(r.lines.join("\n"));
+    if (r.found) { console.log("cf:budget --logs: credential shapes found in the logs (counts above; find them in the dashboard, not here)"); process.exit(1); }
+    console.log("cf:budget --logs: no credential shapes");
+    return;
+  }
   const data = await api.graphql<{ viewer: { accounts: BudgetData[] } }>(QUERY, { account: api.accountId, start: `${day}T00:00:00Z`, end: new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString(), day });
   const acct = data.viewer.accounts[0] ?? { workers: [], objects: [], gateway: [] };
   const url = arg("--url");

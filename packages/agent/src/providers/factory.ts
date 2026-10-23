@@ -15,14 +15,24 @@ export {
   type CreateProviderOptions, type ProviderChoice, type ProviderPorts,
 } from "./factory-core";
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-export const DEFAULT_SCRIPTS_DIR = join(REPO_ROOT, "scenarios");
+/**
+ * The repo root, resolved when Node first asks for a repo path. import.meta.url is null in workerd, so a path built
+ * while this module evaluates would throw before the world exists if a Worker bundle ever reached this file.
+ */
+function repoRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+}
+
+/** <repo>/scenarios, the deterministic templates' default directory. */
+export function defaultScriptsDir(): string {
+  return join(repoRoot(), "scenarios");
+}
 
 /** Node's ports: the secrets file unless `envOnlySecrets`, the scenarios directory unless `scriptSource`. */
 export function nodeProviderPorts(opts: Pick<CreateProviderOptions, "env" | "envOnlySecrets" | "scriptSource">): ProviderPorts {
   return {
     secret: (name) => (opts.envOnlySecrets ? envSecret(name, opts.env) : loadSecret(name, opts.env)),
-    scripts: () => opts.scriptSource ?? dirScriptSource(opts.env.WEFT_SCRIPTS_DIR ?? DEFAULT_SCRIPTS_DIR),
+    scripts: () => opts.scriptSource ?? dirScriptSource(opts.env.WEFT_SCRIPTS_DIR ?? defaultScriptsDir()),
   };
 }
 

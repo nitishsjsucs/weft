@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelProvider } from "../packages/contracts/src/index";
-import { DEFAULT_SCRIPTS_DIR, scriptedProvider, type LedgerEntry } from "../packages/agent/src/index";
+import { defaultScriptsDir, scriptedProvider, type LedgerEntry } from "../packages/agent/src/index";
 import { loadTasks } from "../evals/suite/loader";
 import { planTrials, runPlain, type RunnerOptions } from "../evals/suite/runner";
 
@@ -22,7 +22,7 @@ const STEP_USD = (STEP_OUTPUT_TOKENS * 1.2) / 1e6;
 
 /** The scripted model, but live and priced: its steps reserve and settle real dollars in the trial's ledger. */
 function pricedScripted(): ModelProvider {
-  const base = scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR });
+  const base = scriptedProvider({ scriptsDir: defaultScriptsDir() });
   return {
     ...base,
     live: true,

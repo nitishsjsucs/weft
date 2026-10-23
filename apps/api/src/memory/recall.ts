@@ -37,6 +37,9 @@ export function createMemoryRecall(db: Db): (input: RecallInput) => Promise<stri
     // Hybrid recall (cf6-extras): semantic candidates, re-verified at HEAD, join the block only where a platform
     // attached a source and its flag is on; otherwise this is the lexical outcome itself. A failing source never
     // costs the run its lexical recall.
+    // The source is real I/O (Workers AI, Vectorize, a SpendDO reservation), so a recall inside a transaction throws
+    // IO_IN_TX here, before the source is asked, instead of passing for a failed source (design 4.2).
+    if (b.semantic) b.guard?.assertNotInTx("semantic recall");
     const out = b.semantic ? await withSemanticRecall(b.semantic, input, lexical, trustedOnly, b.redact).catch((e: unknown) => { semanticFailed(b, e); return lexical; }) : lexical;
     if (!out || !out.block) return "";
     // Taint first: if the run cannot be marked, the untrusted text never reaches the pack.

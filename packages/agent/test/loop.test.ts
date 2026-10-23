@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ModelProvider, PrecheckResult, RoutineDef, RoutineRun, SimClock, ToolOutcome } from "@weft/contracts";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
 import { check, requestTrustOf, runEvidence } from "@weft/grounding";
-import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, DEFAULT_SCRIPTS_DIR, frozenPrompt, LUNA, runLoop, scriptedProvider, summarize, type Script, type WeftAgentRuntime } from "../src/index";
+import { CHAT_TOOLS, createAgentRuntime, createSpendLedger, defaultScriptsDir, frozenPrompt, LUNA, runLoop, scriptedProvider, summarize, type Script, type WeftAgentRuntime } from "../src/index";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
@@ -465,7 +465,7 @@ describe("shared grounding evidence, month day ranges and request-only windows (
 describe("default scenarios in scenarios/", () => {
   it("rt_agency_notice.json drives the GP1 batch to waiting with 2 proposals", async () => {
     const fake = noticeExecutor();
-    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR }));
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: defaultScriptsDir() }));
     const h = handle();
     await rt.startRoutineRun(h, { routine, routineRun, trigger, precheck });
     expect(await rt.settled(h.runId)).toMatchObject({ status: "waiting", stepsUsed: 2 });
@@ -474,7 +474,7 @@ describe("default scenarios in scenarios/", () => {
 
   it("chat_approve_all.json declines with no tool call and a grounded answer", async () => {
     const fake = createFakeExecutor(CHAT_TOOLS.map((name) => ({ name, effect: "read" as const })));
-    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR }));
+    const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: defaultScriptsDir() }));
     const h = handle();
     await rt.startChat(h, { text: "Approve everything in my inbox", recipe: "chat", pageContext: null });
     const run = await rt.settled(h.runId);
