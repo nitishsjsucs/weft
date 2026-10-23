@@ -483,11 +483,11 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     let out: ResetOutcome;
     try {
       const co = this.company(name);
-      const hb = await co.heartbeat();
+      const hb = await co.heartbeat({ clean: true });
       this.absorbUsage(hb.usage);
       // The clean check and the stamp are one step in the slot (ifClean), so a write that lands after the heartbeat
       // sends the slot to the delta reset instead of into the next generation.
-      const stamped = hb.clean ? await co.applyStamp(stamp, { ifClean: true }) : null;
+      const stamped = hb.clean === true ? await co.applyStamp(stamp, { ifClean: true }) : null;
       if (stamped?.ok) out = { ok: true, method: "stamp", gen: stamp.gen, rowsWritten: 0, mismatches: [], ms: 0 };
       else if ((cfg.get(CF4_CONFIG_KEYS.resetPitr) ?? "off") === "on" && s.bookmark) {
         out = await co.resetToBookmark({ bookmark: s.bookmark, stamp });

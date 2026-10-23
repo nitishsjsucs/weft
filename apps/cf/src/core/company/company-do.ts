@@ -867,7 +867,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.lastActivity = null;
   }
 
-  async heartbeat(opts: { provider?: boolean } = {}): Promise<SlotHeartbeat> {
+  async heartbeat(opts: { provider?: boolean; clean?: boolean } = {}): Promise<SlotHeartbeat> {
     // The Lobby's heartbeats (its sweep, session reads) reach a slot that no request reaches: a slot whose last ask
     // for an alarm failed while jobs wait, or whose clock started, gets its alarm here too.
     this.runHost.poke();
@@ -875,8 +875,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const usage = this.usage;
     this.usage = zeroUsage();
     const worldProvider = opts.provider ? this.worldProvider() : null;
-    let clean = true;
-    if (this.stamp && hasKvState(this.ctx.storage.sql)) {
+    // Only the reset path asks whether the world is clean; a lease holder's GET /api/_session heartbeats this slot on
+    // every poll and never uses the answer.
+    let clean: boolean | null = opts.clean ? true : null;
+    if (opts.clean && this.stamp && hasKvState(this.ctx.storage.sql)) {
       try {
         clean = (this.module ?? (await loadEngine())).store.isClean(this.storage);
       } catch (e) {

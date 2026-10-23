@@ -283,6 +283,28 @@ describe("the alarm", () => {
   });
 });
 
+describe("the Lobby's heartbeat", () => {
+  it("asks whether the world is clean only when the reset path asks, never on a lease holder's session read or the sweep", async () => {
+    const c = company();
+    await c.ready();
+    const store = fakeModule.store as unknown as { isClean: () => boolean };
+    const was = store.isClean;
+    let checks = 0;
+    store.isClean = () => { checks += 1; return false; };
+    try {
+      // GET /api/_session from the lease holder (the provider too) and the sweep's reclaim.
+      expect((await c.co.heartbeat({ provider: true })).clean).toBeNull();
+      expect((await c.co.heartbeat()).clean).toBeNull();
+      expect(checks).toBe(0);
+      // The reset's own heartbeat.
+      expect((await c.co.heartbeat({ clean: true })).clean).toBe(false);
+      expect(checks).toBe(1);
+    } finally {
+      store.isClean = was;
+    }
+  });
+});
+
 describe("the world's boot", () => {
   it("is shared by concurrent callers: alarms and an RPC on a world whose cold boot failed boot it once", async () => {
     world.failBoots = 1;
