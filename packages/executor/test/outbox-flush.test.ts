@@ -1,8 +1,11 @@
 // The after-commit outbox flush (docs/cloudflare/design.md 3.4 and 4.2, track cf2-platform). The pending flag is the
-// world's, so one request's flush can meet another request's open transaction. It must neither send inside that
-// transaction nor throw IO_IN_TX at a caller whose command already committed, and every committed row is still sent.
+// world's, so one request's flush can meet another request's open transaction. The IO_IN_TX guard cannot see that
+// one (inTx() is scoped to the async context of its own transaction); the world's write lock holds the flush until it
+// commits. The guard does see the caller's own transaction when the flush is reached from inside one. Either way the
+// flush must neither send inside a transaction nor throw IO_IN_TX at a caller whose command already committed, and
+// every committed row is still sent. The guard here is the real one (createTxGuard), so its scoping is the facade's.
 import { describe, expect, it } from "vitest";
-import { withWriteLock } from "@weft/db";
+import { createTxGuard, withWriteLock } from "@weft/db";
 import type { TxGuard } from "../../contracts/src/ext/cf-db";
 import { NODE_HOSTED, type Engine, type EngineHosted } from "../src/engine";
 import { flushOutbox, OUTBOX_RETRY_MS } from "../src/timeline";
@@ -20,47 +23,52 @@ function world(guard: TxGuard | null) {
   return { e, hosted, sent, logs };
 }
 
-/** A facade-wide guard: inTx is true for every caller while any transaction of the world is open (design 4.2). */
-function facadeGuard() {
-  let open = false;
-  const g: TxGuard & { open(v: boolean): void } = {
-    inTx: () => open,
-    assertNotInTx: (what) => { if (open) throw Object.assign(new Error(`IO_IN_TX: ${what}`), { code: "IO_IN_TX" }); },
-    open: (v) => { open = v; },
-  };
-  return g;
-}
+/** An executor transaction as writeLocked runs one: the world's write lock, then the facade's outer transaction. */
+const executorTx = <T>(guard: ReturnType<typeof createTxGuard>, body: () => Promise<T>) => withWriteLock(() => guard.within(body));
 
 describe("the outbox flush", () => {
-  it("meeting another request's open transaction, it neither throws IO_IN_TX nor sends; it sends once that commits", async () => {
-    const guard = facadeGuard();
-    const { e, hosted, sent, logs } = world(guard);
-    guard.open(true);
-    await expect(flushOutbox(e)).resolves.toBeUndefined();
-    expect(sent).toEqual([]);
-    expect(hosted.outboxPending).toBe(true);
-    await sleep(OUTBOX_RETRY_MS * 4);
-    expect(sent).toEqual([]);   // still open: the retry left the rows pending again
-    guard.open(false);
-    await sleep(OUTBOX_RETRY_MS * 6);
-    expect(sent).toEqual(["after commit"]);
-    expect(hosted.outboxPending).toBe(false);
-    expect(logs).toEqual([]);
-  });
-
-  it("waits for an executor transaction that holds the write lock, so it never reads rows that transaction has not committed", async () => {
-    const { e, sent } = world({ inTx: () => false, assertNotInTx: () => undefined });   // a guard scoped to the caller sees nothing
+  it("waits for another request's executor transaction, which the guard cannot see, and sends once that commits", async () => {
+    const guard = createTxGuard();
+    const { e, sent, logs } = world(guard);
     const order: string[] = [];
     let release!: () => void;
-    const held = withWriteLock(async () => { order.push("tx open"); await new Promise<void>((r) => { release = r; }); order.push("tx commit"); });
+    const held = executorTx(guard, async () => {
+      order.push(`tx open, inTx ${guard.inTx()}`);
+      await new Promise<void>((r) => { release = r; });
+      order.push("tx commit");
+    });
     await sleep(1);
+    // This request's own async context has no transaction, so inTx() is false here although the other one is open:
+    // only the write lock keeps the flush from reading rows that transaction has not committed.
+    expect(guard.inTx()).toBe(false);
     const flushed = flushOutbox(e).then(() => order.push(`flushed ${sent.length}`));
     await sleep(10);
     expect(sent).toEqual([]);
     release();
     await held;
     await flushed;
-    expect(order).toEqual(["tx open", "tx commit", "flushed 1"]);
+    expect(order).toEqual(["tx open, inTx true", "tx commit", "flushed 1"]);
+    expect(sent).toEqual(["after commit"]);
+    expect(logs).toEqual([]);
+  });
+
+  it("reached while its caller's own transaction is open, it neither throws IO_IN_TX nor sends; it sends once that commits", async () => {
+    const guard = createTxGuard();
+    const { e, hosted, sent, logs } = world(guard);
+    // A command run from inside another transaction's body: the write lock is re-entrant there, so it does not wait,
+    // and the guard, which sees this context's transaction, is what keeps the send out of it.
+    await executorTx(guard, async () => {
+      await expect(flushOutbox(e)).resolves.toBeUndefined();
+      expect(sent).toEqual([]);
+      expect(hosted.outboxPending).toBe(true);
+      await sleep(OUTBOX_RETRY_MS * 4);
+      expect(sent).toEqual([]);   // still open: each retry left the rows pending again
+    });
+    expect(guard.inTx()).toBe(false);
+    await sleep(OUTBOX_RETRY_MS * 6);
+    expect(sent).toEqual(["after commit"]);
+    expect(hosted.outboxPending).toBe(false);
+    expect(logs).toEqual([]);
   });
 
   it("a failing send is logged, never thrown at the caller", async () => {

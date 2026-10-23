@@ -12,7 +12,7 @@ export function importanceOf(command: string): 0 | 1 | 2 | 3 {
   return 1;
 }
 
-/** How soon a flush that met an open transaction tries again. */
+/** How soon a flush that met its caller's open transaction tries again. */
 export const OUTBOX_RETRY_MS = 5;
 const retries = new WeakMap<Engine, ReturnType<typeof setTimeout>>();
 
@@ -21,10 +21,14 @@ const retries = new WeakMap<Engine, ReturnType<typeof setTimeout>>();
  * inside a transaction: the Queue send is real I/O that would hold the input gate (docs/cloudflare/design.md 4.2).
  *
  * The pending flag is the world's, not one request's, so the flush can run while another request's transaction is
- * open. It therefore takes the world's write lock first: every executor transaction (the only writer of outbox rows)
- * runs inside writeLocked, so under the lock none is open and no uncommitted row can be read and sent. A transaction
- * opened outside the lock (seen by a facade-wide inTx) leaves the rows pending, and the flush tries again shortly;
- * it never throws IO_IN_TX at a caller whose command already committed. Node has no onOutbox and returns at once.
+ * open. The guard cannot see that one: inTx() is scoped to the async context of its own transaction
+ * (packages/db/src/tx-guard.ts), so it answers for the caller's transaction only. The world's write lock is what
+ * protects the flush: every executor transaction (the only writer of outbox rows) runs inside writeLocked, so once
+ * the flush holds the lock no other request's transaction is open and no uncommitted row can be read and sent.
+ * inTx() is true here only when the caller is itself still inside a transaction (the lock is re-entrant, so it does
+ * not wait for that one): the rows stay pending and the flush tries again shortly, until that transaction has
+ * settled. It never throws IO_IN_TX at a caller whose command already committed. Node has no onOutbox and returns
+ * at once.
  */
 export async function flushOutbox(e: Engine): Promise<void> {
   const h = e.hosted;
