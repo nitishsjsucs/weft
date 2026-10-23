@@ -48,3 +48,8 @@ export const AGENT_PAGE_TID = {
   send: "agent-page-send",
   composerNote: "agent-page-composer-note",
 } as const;
+
+/** The sidebar's New agent thread button, pressed on the Agent page, asks the page for a new chat (instead of opening the side panel). */
+export const AGENT_PAGE_NEW_CHAT_EVENT = "weft:agent-page:new-chat";
+/** The Agent page's path. */
+export const AGENT_PAGE_PATH = "/app/agent";

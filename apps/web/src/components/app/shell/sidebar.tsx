@@ -14,6 +14,7 @@ import { usePendingCount } from "@/lib/api/hooks";
 import { useCan } from "@/lib/api/access";
 import { useAgent } from "../agent-context";
 import { WeftMark } from "../weft-mark";
+import { AGENT_PAGE_NEW_CHAT_EVENT, AGENT_PAGE_PATH } from "../../../../../../packages/contracts/src/ext/agent-page";
 
 const TRAILING: Record<"simulated", string> = { simulated: "Simulated" };
 
@@ -54,7 +55,14 @@ function useShortcut(key: string): string {
 function SearchRow({ onOpenSearch, onNavigate }: { onOpenSearch: () => void; onNavigate?: () => void }) {
   const agent = useAgent();
   const kbd = useShortcut("K");
+  const pathname = useAppPathname();
   const newThread = () => {
+    // On the Agent page the agent is the page itself: start a new chat there rather than opening the side panel.
+    if (pathname === AGENT_PAGE_PATH || pathname.startsWith(`${AGENT_PAGE_PATH}/`)) {
+      window.dispatchEvent(new Event(AGENT_PAGE_NEW_CHAT_EVENT));
+      onNavigate?.();
+      return;
+    }
     agent.clear();
     agent.setOpen(true);
     onNavigate?.();

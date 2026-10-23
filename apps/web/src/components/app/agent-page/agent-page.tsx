@@ -12,7 +12,7 @@ import { ArrowUp, BotMessageSquare, PanelLeftOpen, SquarePen, X } from "lucide-r
 import { Badge, Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import type { AgentRunRow } from "@weft/contracts";
-import { AGENT_PAGE_TID as T, type ConversationRunRow } from "../../../../../../packages/contracts/src/ext/agent-page";
+import { AGENT_PAGE_NEW_CHAT_EVENT, AGENT_PAGE_TID as T, type ConversationRunRow } from "../../../../../../packages/contracts/src/ext/agent-page";
 import { client, errorText, invalidate, useGet, useSimClock } from "@/lib/api/hooks";
 import { HOSTED } from "@/lib/hosted/flags";
 import { HOSTED_COPY } from "../../hosted/copy";
@@ -266,6 +266,14 @@ export function AgentPage() {
     setText("");
     requestAnimationFrame(() => composerRef.current?.focus());
   };
+  // The sidebar's New agent thread button, pressed on this page.
+  const newChatRef = useRef(newChat);
+  newChatRef.current = newChat;
+  useEffect(() => {
+    const onNew = () => newChatRef.current();
+    window.addEventListener(AGENT_PAGE_NEW_CHAT_EVENT, onNew);
+    return () => window.removeEventListener(AGENT_PAGE_NEW_CHAT_EVENT, onNew);
+  }, []);
 
   const list = (onClose?: () => void) => (
     <ConversationList conversations={conversations} background={background} routineNames={routineNames} selectedKey={current?.key ?? null} now={now} base={base}

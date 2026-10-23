@@ -7,7 +7,7 @@
 import type { Page } from "@playwright/test";
 import { expect, openApp, test, TID, type AgentRunRow } from "./fixtures";
 import { AGENT_PAGE_TID as T } from "../packages/contracts/src/ext/agent-page";
-import { W3_CHAT_TID } from "../packages/contracts/src/index";
+import { W3_CHAT_TID, W3_SHELL_TID } from "../packages/contracts/src/index";
 
 type Row = AgentRunRow & { question: string | null; askedFrom: string };
 
@@ -124,6 +124,17 @@ test("GP26: the Agent page lists conversations and background work, threads a fo
     await expect(page.getByTestId(T.question).first()).toHaveText("Show payroll cost by month");
     await expect(page.getByTestId(TID.agentComposer)).toHaveCount(0);
     await expect(page.getByTestId(T.composer)).toHaveAttribute("placeholder", "Ask a follow-up...");
+  });
+
+  await test.step("the sidebar's New agent thread starts a new chat on this page, not in the side panel", async () => {
+    await page.getByTestId(W3_SHELL_TID.newThread).click();
+    await expect(page).toHaveURL(/\/app\/agent\/?$/);
+    await expect(page.getByTestId(T.turn)).toHaveCount(0);
+    await expect(page.getByTestId(T.composer)).toHaveAttribute("placeholder", "Ask the agent...");
+    await expect(page.getByTestId(T.composer)).toBeFocused();
+    await expect(page.getByTestId(TID.agentComposer)).toHaveCount(0);
+    await page.goBack();
+    await expect(page.getByTestId(T.turn)).toHaveCount(2);
   });
 
   await test.step("1440 by 900: the list column, the conversation and the composer side by side", async () => {
