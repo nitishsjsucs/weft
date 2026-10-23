@@ -11,7 +11,7 @@ import { signCtx } from "../../src/shared/tokens";
 import { memorySql } from "./sqlite";
 
 (globalThis as { WebSocketRequestResponsePair?: unknown }).WebSocketRequestResponsePair ??= class { constructor(readonly request: string, readonly response: string) {} };
-const { CompanyDO } = await import("../../src/core/company/company-do");
+const { CompanyDO, OUTBOX_DEAD_AFTER } = await import("../../src/core/company/company-do");
 
 const CTX = "c".repeat(64);
 const VISITOR = "vis_" + "a".repeat(32);
@@ -116,6 +116,8 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   const failing = { n: o.failSetAlarms ?? 0 };
   const waits: Promise<unknown>[] = [];
   const recorded: unknown[][] = [];
+  /** Every D1 statement run, with its bindings. */
+  const ops: { sql: string; binds: unknown[] }[] = [];
   const alarms: number[] = [];
   let alarm: number | null = null;
   let ready: Promise<unknown> = Promise.resolve();
@@ -152,10 +154,12 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     JOBS: { send: async (body: unknown) => { if (o.failSend?.(body)) throw new Error("Queue.send refused the message"); sent.push({ queue: "jobs", body }); } },
     RENDER: { send: async (body: unknown) => { sent.push({ queue: "render", body }); } },
     RL_RUN: { limit: async () => ({ success: true }) },
-    OPS: { prepare: () => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); return {}; } }) }) },
+    OPS: { prepare: (q: string) => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); ops.push({ sql: q, binds: b }); return {}; } }) }) },
   };
   const co = new CompanyDO(ctx as never, env as never);
-  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded };
+  /** The same object started again (an eviction or a deploy): a new instance over the same storage. */
+  const restart = () => { const again = new CompanyDO(ctx as never, env as never); return { co: again, ready: () => ready }; };
+  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded, ops, kv, restart };
 }
 
 async function req(path: string, o: { method?: string; visitor?: string | null; slot?: string; gen?: number; body?: string; headers?: Record<string, string> } = {}): Promise<Request> {
@@ -525,6 +529,60 @@ describe("the outbox retry", () => {
     append(c, "obx_d", job(1), "2026-10-26T16:00:00.000Z");
     expect(await c.co.flushOutbox()).toBe(0);
     expect(c.alarms.at(-1)! - now).toBe(2_000);
+  });
+});
+
+describe("a row the outbox can never send", () => {
+  const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
+  const poison = `obx_${"1".padStart(16, "0")}`;
+
+  it(`is dead-lettered after ${OUTBOX_DEAD_AFTER} failed flushes, counted across a restart: recorded in failed_jobs, dropped, and no longer retried`, async () => {
+    expect(OUTBOX_DEAD_AFTER).toBe(12);
+    let tries = 0;
+    const c = company({ failSend: (b) => (b as { jobId: string }).jobId === poison && ++tries > 0 });
+    await c.ready();
+    c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES ('obx_a', 'ocr.receipt', ?, '2026-10-26T15:00:00.000Z')`, job(1));
+    let now = T0 + MIN;
+    at(now);
+    let co = c.co;
+    await co.flushOutbox();
+    for (let i = 0; i < 5; i++) { now = c.alarms.at(-1)!; at(now); await co.alarm(); }
+    expect(tries).toBe(6);
+    // Evicted between two retries (the backoff reaches minutes): the next instance's boot flush is the 7th try.
+    const again = c.restart();
+    await again.ready();
+    co = again.co;
+    expect(tries).toBe(7);
+    while (tries < OUTBOX_DEAD_AFTER) { now = c.alarms.at(-1)!; at(now); await co.alarm(); }
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([]);
+    const dead = c.ops.filter((o) => /INSERT[^]*failed_jobs/i.test(o.sql));
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.binds.slice(0, 7)).toEqual([poison, "ocr.receipt", "slot-1", 3, "weft-jobs", OUTBOX_DEAD_AFTER, "OUTBOX_UNSENT"]);
+    expect(String(dead[0]!.binds[7])).toContain("Queue.send refused");
+    // No more retries: the outbox purpose is not asked for again, and later flushes send nothing and arm nothing.
+    const asked = c.alarms.length;
+    expect(await co.flushOutbox()).toBe(0);
+    expect(c.alarms.length).toBe(asked);
+    expect(tries).toBe(OUTBOX_DEAD_AFTER);
+    expect([...c.kv.keys()].filter((k) => k.includes("outbox"))).toEqual([]);
+  });
+
+  it("counts only flushes that failed the row in a row, and forgets a row once it is sent", async () => {
+    let failing = true;
+    const c = company({ failSend: (b) => failing && (b as { jobId: string }).jobId === poison });
+    await c.ready();
+    c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES ('obx_a', 'ocr.receipt', ?, '2026-10-26T15:00:00.000Z')`, job(1));
+    let now = T0 + MIN;
+    at(now);
+    await c.co.flushOutbox();
+    for (let i = 0; i < OUTBOX_DEAD_AFTER - 2; i++) { now = c.alarms.at(-1)!; at(now); await c.co.alarm(); }
+    failing = false;
+    now = c.alarms.at(-1)!;
+    at(now);
+    await c.co.alarm();
+    expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([poison]);
+    expect(c.ops.filter((o) => /failed_jobs/i.test(o.sql))).toEqual([]);
+    expect([...c.kv.keys()].filter((k) => k.includes("outbox"))).toEqual([]);
   });
 });
 

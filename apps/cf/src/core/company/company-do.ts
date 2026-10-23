@@ -22,7 +22,8 @@ import { DO_PATHS, HEALTH_PATH, isModelAdmission, LEASE_HEADER, SIM_RESET_PATH }
 import { configEnv, liveEnv } from "./company-do-env";
 import { spendClient } from "../spend/client";
 import { AlarmPlan, alarmRetryDelayMs, type AlarmPurpose } from "./alarms";
-import { loadEngine, type EngineModule, type RestoreTrigger, type WorldEngine } from "./engine";
+import { loadEngine, type EngineModule, type OutboxRow, type RestoreTrigger, type WorldEngine } from "./engine";
+import { recordFailedJob } from "../failed-jobs";
 import { countFetchesIn, installCountedFetch, rawFetch } from "./fetch-scope";
 import { durableRunHost, durableSchedulerHost, fetchCounter, type DurableRunHost, type DurableSchedulerHost } from "./hosts";
 import { zeroUsage, type ResetOutcome, type RestoreBeginInput, type RestoreFinish, type RestoreVerify, type SlotHeartbeat, type UsageDelta, type WorldStamp } from "./rpc";
@@ -43,7 +44,16 @@ const newGlobalJobId = (): string => `obx_${[...crypto.getRandomValues(new Uint8
 const PUSH_AT = { rowsWritten: 1_000, rowsRead: 100_000, requests: 500 } as const;
 /** How long a clean check, a reset or a restore waits for mutations already in flight (an MCP agent_ask long-polls). */
 export const QUIESCE_MS = 10_000;
+/**
+ * An outbox row whose send failed in this many flushes in a row is dead-lettered: recorded in D1 failed_jobs (and
+ * logged), then deleted, so it stops costing an alarm (a DO request and a setAlarm row) every 5 minutes for good.
+ * With the retry's backoff (2 s doubling, at most 5 minutes) the 12th failed flush comes about 23 minutes after the
+ * first; the count is kept in the object's storage, so an eviction between two retries does not start it again.
+ */
+export const OUTBOX_DEAD_AFTER = 12;
 const RESTORE_KEY = "weft.restore";
+/** Failed flushes in a row per outbox row id (OUTBOX_DEAD_AFTER), kept while any row has one. */
+const OUTBOX_ATTEMPTS_KEY = "weft.outbox_attempts";
 const SNAPSHOT_KEY = "weft.snapshot";
 
 interface RestoreProgress { slot: string; gen: number; mode: WorldMode; next: number; rowsWritten: number; triggers: RestoreTrigger[] }
@@ -57,6 +67,9 @@ const CANCEL_RUN_PATH = /^\/v1\/agent\/runs\/([^/]+)\/cancel$/;
  * lease start or end, without a new engine). */
 const sameWorld = (a: WorldStamp | null, b: WorldStamp | null): boolean =>
   !!a && !!b && a.slot === b.slot && a.gen === b.gen && a.mode === b.mode;
+
+/** An outbox row whose body is a job (a row that is not is dropped as poison). */
+type SendableRow = OutboxRow & { job: NonNullable<OutboxRow["job"]> };
 
 const leaseEndedError = () => hostedError("LEASE_ENDED", "This demo company's lease has ended", { headers: { [LEASE_HEADER]: "ended" } });
 
@@ -82,6 +95,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private alarmFailures = 0;
   /** Outbox flushes in a row that left a row unsent (the outbox retry backs off with it; a clean flush resets it). */
   private outboxFailures = 0;
+  /** Per outbox row, the flushes in a row whose send of it failed: read from storage once per instance, then kept. */
+  private outboxAttempts: Map<string, number> | null = null;
   private readonly counter = fetchCounter(MAX_FETCHES_PER_ALARM);
   private runHost: DurableRunHost;
   private scheduler: DurableSchedulerHost;
@@ -583,7 +598,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
    * transaction that is still open (in this request or another) is read, and none that later rolls back is sent.
    * The Queue send itself is I/O, outside the lock and outside any transaction. A row whose send fails is tried once
    * per flush and skipped, so it never holds back the rows behind it; it stays for the retry, which backs off with
-   * the flushes in a row that left a row unsent (alarmRetryDelayMs: 2 s doubling, at most 5 minutes).
+   * the flushes in a row that left a row unsent (alarmRetryDelayMs: 2 s doubling, at most 5 minutes). A row whose
+   * send failed in OUTBOX_DEAD_AFTER flushes in a row (counted in storage, so across evictions) is dead-lettered.
    */
   async flushOutbox(): Promise<number> {
     const engine = this.engine;
@@ -595,14 +611,18 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     }
     this.flushing = true;
     let sent = 0;
-    const unsent = new Set<string>();
-    let error: unknown = null;
+    const unsent = new Map<string, { row: SendableRow; error: unknown }>();
+    let readError: unknown = null;
+    let readAll = false;
+    const attempts = this.attemptsOf();
+    const before = JSON.stringify([...attempts]);
     try {
       for (let round = 0; round < 50; round++) {
         this.flushAgain = false;
         const rows = (await engine.outboxPending()).filter((r) => !unsent.has(r.id));
         if (!rows.length) {
           if (this.flushAgain) continue;
+          readAll = true;
           break;
         }
         for (const row of rows) {
@@ -615,27 +635,41 @@ export class CompanyDO extends DurableObject<CoreEnv> {
             engine.guard.assertNotInTx("Queue.send");
             await (queueFor(row.job.kind) === QUEUES.render ? this.env.RENDER : this.env.JOBS).send(row.job, { contentType: "json" });
           } catch (e) {
-            unsent.add(row.id);
-            error ??= e;
+            unsent.set(row.id, { row: row as SendableRow, error: e });
             continue;
           }
           await engine.outboxAck(row.id);
           sent += 1;
+          attempts.delete(row.id);
         }
       }
+      // Each row left unsent failed one more flush in a row; one that reached OUTBOX_DEAD_AFTER is dead-lettered, so
+      // it no longer keeps the retry alarm going. Once the flush has read every pending row, a row it no longer finds
+      // (sent, dead-lettered, or gone with a reset) is forgotten.
+      for (const [id, u] of unsent) {
+        const n = (attempts.get(id) ?? 0) + 1;
+        attempts.set(id, n);
+        if (n < OUTBOX_DEAD_AFTER) continue;
+        await this.deadLetterOutbox(engine, u.row, n, u.error);
+        attempts.delete(id);
+        unsent.delete(id);
+      }
+      if (readAll) for (const id of [...attempts.keys()]) if (!unsent.has(id)) attempts.delete(id);
     } catch (e) {
       // Reading or deleting failed: the rows left are sent by the retry.
-      error = e;
+      readError = e;
     } finally {
       this.flushing = false;
+      if (JSON.stringify([...attempts]) !== before) this.saveAttempts(attempts);
     }
-    if (error === null) {
+    if (readError === null && unsent.size === 0) {
       this.outboxFailures = 0;
       this.alarms.cancel("outbox");
       return sent;
     }
     const retryMs = alarmRetryDelayMs(this.outboxFailures);
     this.outboxFailures += 1;
+    const error = readError ?? [...unsent.values()][0]?.error;
     logError("outbox.flush", error, { slot: this.stamp?.slot, unsent: unsent.size, sent, retryMs, failures: this.outboxFailures });
     try {
       await this.alarms.arm("outbox", Date.now() + retryMs);
@@ -643,6 +677,35 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       logError("alarm.arm", e, { slot: this.stamp?.slot });
     }
     return sent;
+  }
+
+  /** The failed-flush counts per outbox row, from the object's storage on first use. */
+  private attemptsOf(): Map<string, number> {
+    if (!this.outboxAttempts) {
+      const saved = this.ctx.storage.kv.get<Record<string, number>>(OUTBOX_ATTEMPTS_KEY) ?? {};
+      this.outboxAttempts = new Map(Object.entries(saved).filter((e): e is [string, number] => typeof e[1] === "number"));
+    }
+    return this.outboxAttempts;
+  }
+  private saveAttempts(m: Map<string, number>): void {
+    if (m.size) this.ctx.storage.kv.put(OUTBOX_ATTEMPTS_KEY, Object.fromEntries(m));
+    else this.ctx.storage.kv.delete(OUTBOX_ATTEMPTS_KEY);
+  }
+
+  /**
+   * An outbox row that could never be sent (its send failed in OUTBOX_DEAD_AFTER flushes in a row): recorded in D1
+   * failed_jobs as OUTBOX_UNSENT and logged, then deleted. Outside any transaction, as the send was.
+   */
+  private async deadLetterOutbox(engine: WorldEngine, row: SendableRow, attempts: number, error: unknown): Promise<void> {
+    const job = row.job;
+    const why = (error instanceof Error ? error.message : String(error)).slice(0, 200);
+    logEvent("outbox.dead_letter", { slot: job.slot, gen: job.gen, outcome: job.kind, job: job.jobId, attempts, error: why });
+    engine.guard.assertNotInTx("D1.failed_jobs");
+    await recordFailedJob(this.env, {
+      jobId: job.jobId, kind: job.kind, slot: job.slot, gen: job.gen, queue: queueFor(job.kind), attempts, code: "OUTBOX_UNSENT",
+      message: `Queue.send failed in ${attempts} flushes in a row: ${why}`,
+    });
+    await engine.outboxAck(row.id);
   }
 
   // Alarm ------------------------------------------------------------------------------------------------------
@@ -887,6 +950,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       this.alarms.clear();
       this.stamp = null;
       await this.ctx.storage.deleteAll();
+      this.outboxAttempts = null;
       this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { slot: input.slot, gen: input.gen, mode: input.mode, next: 0, rowsWritten: 0, triggers: [] });
       return { ok: true as const };
     }));
