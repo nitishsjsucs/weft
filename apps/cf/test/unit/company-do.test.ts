@@ -376,11 +376,12 @@ describe("a reset while the old world closes", () => {
     expect(await servingGen(c)).toBe(4);
     // The previous visitor's OCR job (gen 3) finishes after the reset: nothing reaches the new visitor's world.
     expect(await c.co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_old" } } as never, 3)).toMatchObject({ ok: false, code: "STALE_GENERATION", retryable: false });
-    await expect(c.co.extrasExport("world", 3)).rejects.toThrow(/STALE_GENERATION/);
+    // The same outcome for an export: a value the queue finishes as stale, never an error it retries.
+    expect(await c.co.extrasExport("world", 3)).toEqual({ ok: false, code: "STALE_GENERATION", message: expect.stringContaining("generation 3"), retryable: false });
     expect(world.writeBacks).toEqual([]);
     expect(await c.co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_new" } } as never, 4)).toMatchObject({ ok: true });
     expect(world.writeBacks).toEqual([{ gen: 4, jobId: "obx_new" }]);
-    expect(new TextDecoder().decode((await c.co.extrasExport("world", 4)).bytes)).toBe("world gen 4");
+    expect(new TextDecoder().decode(((await c.co.extrasExport("world", 4)) as { bytes: Uint8Array }).bytes)).toBe("world gen 4");
   });
 
   it("boots nothing from an alarm or an extras RPC during a restore's first step, and the restore's last step boots the restored world", async () => {

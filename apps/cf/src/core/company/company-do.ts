@@ -31,7 +31,7 @@ import { leaseEnded, leaseExpiresAt } from "../lobby/policy";
 import { COUNTERS, createRunCatalog, gatewayOption, neuronBudgetFromLedger, type D1Like, type HostedJob as ExtrasJob, type QueueLike, type R2BucketLike, type VectorizeLike } from "@weft/cf-extras";
 import { flagsFor } from "../../extras/env";
 import { STALE_GENERATION } from "../../extras/queues";
-import type { HiddenWriteBack, SlotExport, SlotExtrasPort, SlotWorldInfo, WriteBackOutcome } from "../../extras/ports";
+import type { ExportOutcome, HiddenWriteBack, SlotExtrasPort, SlotWorldInfo, WriteBackOutcome } from "../../extras/ports";
 
 // Every global fetch an alarm invocation makes counts against its MAX_FETCHES_PER_ALARM (fetch-scope.ts).
 installCountedFetch();
@@ -549,10 +549,11 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     }
   }
   async extrasMemoryText(path: string, commit: string): Promise<string | null> { return (await this.slotExtras()).port.extrasMemoryText(path, commit); }
-  async extrasExport(what: "memory" | "world", gen: number): Promise<SlotExport> {
+  async extrasExport(what: "memory" | "world", gen: number): Promise<ExportOutcome> {
     const { port } = await this.slotExtras();
+    // The write-back's own outcome: an error thrown across the RPC would reach the queue as a plain Error and retry.
     const stale = this.staleGen(gen);
-    if (stale) throw new Error(`${STALE_GENERATION}: ${stale}`);
+    if (stale) return { ok: false, code: STALE_GENERATION, message: stale, retryable: false };
     return port.extrasExport(what, gen);
   }
 

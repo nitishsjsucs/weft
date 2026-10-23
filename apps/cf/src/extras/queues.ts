@@ -223,6 +223,11 @@ async function runExport(job: Extract<HostedJob, { kind: "export.world" }>, deps
   const key = exportObjectKey(job);
   if (!(await deps.files.head(key))) {
     const out = await port.extrasExport(job.what, job.gen);
+    // The world refused the job's generation (a reset moved on since the check in runJob): nothing to store.
+    if ("ok" in out) {
+      await deps.ledger.done(job.jobId, job.kind, "stale");
+      return "stale";
+    }
     await deps.files.put(key, out.bytes, { httpMetadata: { contentType: out.contentType }, customMetadata: { slot: job.slot, gen: String(job.gen), what: job.what, requestedBy: job.requestedBy.slice(0, 64) } });
   }
   await deps.ledger.done(job.jobId, job.kind, "stored");
