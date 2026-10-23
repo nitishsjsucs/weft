@@ -11,6 +11,7 @@ const KIND: Record<string, string> = {
   suggestion: "a suggestion filed by a run that read untrusted text",
   routine: "the routine run that started it, which read untrusted text",
   run: "the run that started it, which read untrusted text",
+  thread: "an earlier turn of this conversation, which read untrusted text",
   expenses: "text an employee entered on an expense claim",
   time_off: "a note an employee wrote on a time-off request",
   onboarding: "text a new hire entered in the portal",

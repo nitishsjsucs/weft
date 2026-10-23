@@ -16,6 +16,7 @@ export { applyTemplates, parseContext, SCRIPTED_LABEL, ScriptExpectationError, s
 export { CHAT_TOOLS, DRAFT_TOOLS, DEFAULT_COMPANY_ID, type CreateAgentRuntimeOptions, type RoutinesView, type ChatContextSource, type WeftAgentRuntime } from "./runtime";
 export { runLoop, historyFromSteps, renderPlan, outputFor, BUDGETS, MAX_OUTPUT_TOKENS, MAX_TOOLS, assertToolCap, RETRY_OUTPUT_TOKENS, MAX_REQUEUES, type ChecklistState, type LoopDeps, type RunSetup } from "./loop";
 export { createRunStore, type RunStore } from "./store";
+export { answerForThread, boundTurns, earlierConversationBlock, questionOfPack, TURN_ANSWER_CHARS, TURN_QUESTION_CHARS, type EarlierTurn } from "./threads";
 export { buildTrace, summarize, stageLabel, type TraceSummary, type StageRow } from "./trace";
 export { createRunQueue, concurrencyFor, type RunQueue } from "./queue";
 export { routinePack, chatPack, routineDraftPack, approxTokens, ROUTINE_BUDGET_TOKENS, CHAT_BUDGET_TOKENS, type OpenLoop } from "./context";

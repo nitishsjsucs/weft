@@ -2,10 +2,10 @@
 // only the sha256 of the token is stored. Principal, on-behalf-of, kind, surface, company and attended come from
 // executor rows on every call.
 import { randomBytes } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { AgentKind, HumanSession, RunAuthority, RunHandle } from "@weft/contracts";
 import { newId } from "@weft/core";
-import { execRuns, routines } from "@weft/db";
+import { agentRuns, execRuns, routines, runTaint, type Db } from "@weft/db";
 import type { Engine } from "./engine";
 import { hashToken, resolveRun } from "./scope";
 import { agentPrincipalId, loadPrincipal } from "./store";
@@ -64,14 +64,32 @@ export function runAllowlist(row: { allowlistJson: string | null }): string[] | 
   }
 }
 
+/**
+ * The taint a follow-up inherits from its conversation thread (the Agent page; harness 6.2 provenance): when any earlier
+ * run in the thread is tainted (run_taint, or its agent_runs mirror), the new run starts tainted as `thread:<id>`. A
+ * thread is a person's own conversation; runs join one only through POST /v1/agent/runs, which records the id on
+ * agent_runs.thread_id at creation (never from the model) and refuses a thread that acted for someone else. Any run in
+ * the company with the id counts, so a collision can only add taint, never remove it.
+ */
+export async function threadTaint(db: Db, companyId: string, threadId: string | null | undefined): Promise<string | null> {
+  if (!threadId) return null;
+  const runs = await db.select({ id: agentRuns.id, tainted: agentRuns.tainted }).from(agentRuns).where(and(eq(agentRuns.companyId, companyId), eq(agentRuns.threadId, threadId)));
+  if (runs.length === 0) return null;
+  if (runs.some((r) => r.tainted)) return `thread:${threadId}`;
+  const [hit] = await db.select({ runId: runTaint.runId }).from(runTaint).where(and(inArray(runTaint.runId, runs.map((r) => r.id)), eq(runTaint.tainted, true))).limit(1);
+  return hit ? `thread:${threadId}` : null;
+}
+
 export function createRunAuthority(e: Engine): RunAuthority {
   return {
     async openChatRun(session: HumanSession, input) {
       const p = await loadPrincipal(e.db, session.principalId);
       if (!p || p.kind !== "human" || p.companyId !== session.companyId) throw new Error("openChatRun: the session principal is not a human of this company");
       const mcp = input.surface === "mcp" || session.keyScope === "mcp";
+      const fromThread = await threadTaint(e.db, p.companyId, input.threadId);
+      const taintedBy = [mcp ? "mcp" : null, fromThread].filter((x): x is string => x !== null).join(",") || null;
       return open(e, { companyId: p.companyId, onBehalfOf: p.id, agentKind: "main", surface: mcp ? "mcp" : "agent", routineId: null, routineRunId: null,
-        parentRunId: null, attended: true, taintedBy: mcp ? "mcp" : null, allowlist: input.allowlist ?? null });
+        parentRunId: null, attended: true, taintedBy, allowlist: input.allowlist ?? null });
     },
     async openRoutineRun(input) {
       const [r] = await e.db.select().from(routines).where(eq(routines.id, input.routineId)).limit(1);

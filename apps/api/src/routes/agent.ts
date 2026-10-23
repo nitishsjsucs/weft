@@ -6,7 +6,7 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type Proposal, type RunStepRow } from "@weft/contracts";
-import { agentRuns, execRuns, notices, payrollRuns, principals, proposals, runArtifacts, workers, type Db } from "@weft/db";
+import { execRuns, notices, payrollRuns, principals, proposals, runArtifacts, workers, type Db } from "@weft/db";
 import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
 import { approvalCardOf, fileRunFiles } from "@weft/executor";
 import { RUN_LONG_POLL_MAX_S } from "../../../../packages/contracts/src/ext/cf-agent";
@@ -16,6 +16,8 @@ import { sse } from "../http/sse";
 import { stubRoutes } from "../http/stub";
 import { createMemoryRecall } from "../memory/recall";
 import { viewerScope } from "../http/scope";
+import { earlierTurns, questionsOf, runsActingFor, threadBelongsToSomeoneElse } from "../agent/threads";
+import { AGENT_RUN_TRIGGERS, isThreadId, THREAD_ID_RE, type AgentRunTriggerFilter, type ConversationRunRow } from "../../../../packages/contracts/src/ext/agent-page";
 
 // Steps carry raw model call args, so the trace and the SSE stream go through the executor's redactor (harness 9).
 // Route tests that pass a fake executor without a redactor get the value unchanged.
@@ -24,7 +26,9 @@ function redactSafe<T>(weft: Weft, v: T): T {
   return typeof r === "function" ? (JSON.parse(r.call(weft.executor, JSON.stringify(v))) as T) : v;
 }
 
-const StartBody = z.object({ text: z.string().min(1).max(4000), pageContext: z.string().max(400).nullable().optional(), threadId: z.string().nullable().optional() });
+// threadId (the Agent page): a conversation thread the client minted (`thr_` and 8 to 40 characters); null or omitted
+// starts a single run, as the side panel, MCP and every older caller do.
+const StartBody = z.object({ text: z.string().min(1).max(4000), pageContext: z.string().max(400).nullable().optional(), threadId: z.string().regex(THREAD_ID_RE, "threadId is thr_ and 8 to 40 letters, digits, _ or -").nullable().optional() });
 const TERMINAL = new Set(["waiting", "held", "done", "failed", "refused", "escalated", "expired", "cancelled"]);
 const parse = <T>(s: string | null, d: T): T => { if (!s) return d; try { return JSON.parse(s) as T; } catch { return d; } };
 
@@ -70,6 +74,7 @@ export function createChatContextSource(db: Db): ChatContextSource {
     },
     async channels() { return ["#general", "#new-hires", "#payroll", "#people-ops"]; },
     recall: createMemoryRecall(db),   // wave 2 (w2-memory); "" until that track lands recall
+    earlier: (input) => earlierTurns(db, input),   // the Agent page's conversation threads (agent/threads.ts)
   };
 }
 
@@ -92,33 +97,51 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     const scope = await viewerScope(weft, c);
     if (!scope) return null;
     // A live run records its person on the executor's run row; a seeded history run on the agent run row.
-    const companyId = c.var.session?.companyId ?? "cmp_larkspur";
-    const live = await weft.db.select({ id: execRuns.id }).from(execRuns).where(and(eq(execRuns.companyId, companyId), eq(execRuns.onBehalfOf, scope.viewerId)));
-    const seeded = await weft.db.select({ id: agentRuns.id }).from(agentRuns).where(and(eq(agentRuns.companyId, companyId), eq(agentRuns.onBehalfOf, scope.viewerId)));
-    return new Set([...live, ...seeded].map((x) => x.id));
+    return runsActingFor(weft.db, c.var.session?.companyId ?? "cmp_larkspur", scope.viewerId);
   };
 
   r.post("/v1/agent/runs", async (c) => {
     const session = c.get("session");
     if (!session) throw new Unauthorized();
     const body = StartBody.parse(await c.req.json());
+    // A thread is one person's conversation: a follow-up into a thread whose runs acted for someone else is refused as
+    // if the thread did not exist (its earlier turns would otherwise reach this person's context pack).
+    if (body.threadId && await threadBelongsToSomeoneElse(weft.db, session.companyId, body.threadId, session.principalId)) throw new NotFound(`No conversation ${body.threadId}`);
     // Harness 5.3 wave 3 amendment: code picks the chat tools (reads, or proposals when the setting is on and the
     // request reads as an action). With no registry wired (route tests), the wave 1 list stays.
     const choice = await chooseChatTools({ db: weft.db, registry: weft.executor.registry, liveProvider: weft.provider?.live === true }, session, body.text);
     const allowlist = choice.allowlist ?? [...CHAT_TOOLS];
     const handle = await weft.executor.runs.openChatRun(session, { threadId: body.threadId ?? null, surface: "human_ui", allowlist });
-    await weft.agent.startChat(handle, { text: body.text, recipe: "chat", pageContext: body.pageContext ?? null, ...(choice.allowlist ? { allowlist } : {}) });
-    return c.json({ runId: handle.runId, chatMode: choice.mode }, 202);
+    await weft.agent.startChat(handle, { text: body.text, recipe: "chat", pageContext: body.pageContext ?? null, ...(choice.allowlist ? { allowlist } : {}), ...(body.threadId ? { threadId: body.threadId } : {}) });
+    return c.json({ runId: handle.runId, chatMode: choice.mode, ...(body.threadId ? { threadId: body.threadId } : {}) }, 202);
   });
 
+  // Filters (the Agent page, all optional; none keeps the list exactly as before): `thread_id` one conversation thread,
+  // `trigger=chat` conversations, `trigger=background` routine and notice runs. Conversations are personal: `chat` and
+  // `thread_id` keep only the runs that acted for the viewer, and add each run's question and where it was asked
+  // (ConversationRunRow). `background` keeps the usual visibility (ownRuns for a narrowed person).
   r.get("/v1/agent/runs", async (c) => {
     const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 25) || 25));
     const session = c.get("session");
-    const mine = await ownRuns(c);
-    const rows = mine
-      ? (await store.listRuns({ companyId: session?.companyId, limit: 100_000 })).filter((x) => mine.has(x.id)).slice(0, limit + 1)
-      : await store.listRuns({ companyId: session?.companyId, limit: limit + 1 });
-    return c.json({ hasMore: rows.length > limit, count: Math.min(rows.length, limit), data: rows.slice(0, limit) });
+    const rawTrigger = c.req.query("trigger");
+    const rawThread = c.req.query("thread_id");
+    if (rawTrigger !== undefined && !(AGENT_RUN_TRIGGERS as readonly string[]).includes(rawTrigger)) throw new ValidationError(`trigger is one of ${AGENT_RUN_TRIGGERS.join(", ")}`);
+    if (rawThread !== undefined && !isThreadId(rawThread)) throw new ValidationError("thread_id is thr_ and 8 to 40 letters, digits, _ or -");
+    const trigger = rawTrigger as AgentRunTriggerFilter | undefined;
+    const conversation = trigger === "chat" || rawThread !== undefined;
+    const companyId = session?.companyId;
+    const scoped = conversation
+      ? (session ? await runsActingFor(weft.db, session.companyId, session.principalId) : new Set<string>())
+      : await ownRuns(c);
+    const filter = { companyId, ...(trigger ? { trigger } : {}), ...(rawThread ? { threadId: rawThread } : {}) };
+    const rows = scoped
+      ? (await store.listRuns({ ...filter, limit: 100_000 })).filter((x) => scoped.has(x.id)).slice(0, limit + 1)
+      : await store.listRuns({ ...filter, limit: limit + 1 });
+    const page = rows.slice(0, limit);
+    if (!conversation) return c.json({ hasMore: rows.length > limit, count: Math.min(rows.length, limit), data: page });
+    const questions = await questionsOf(weft.db, page.filter((x) => x.trigger === "chat"));
+    const data: ConversationRunRow[] = page.map((x) => ({ ...x, question: questions.get(x.id)?.question ?? null, askedFrom: questions.get(x.id)?.askedFrom ?? "agent" }));
+    return c.json({ hasMore: rows.length > limit, count: Math.min(rows.length, limit), data });
   });
 
   // Additive long poll (docs/cloudflare/design.md 5.3, remote MCP agent_ask): ?wait=N (1 to 25 seconds) answers when the

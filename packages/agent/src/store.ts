@@ -1,6 +1,6 @@
 // The run store (SPEC 6.5): agent_runs and run_steps only. agent_runs.id equals exec_runs.id (the RunAuthority mints
 // the id first and the brain reuses it). Brain writes are single statements under the process write lock.
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, type SQL } from "drizzle-orm";
 import { agentRuns, runSteps, routineRuns, type Db } from "@weft/db";
 import { lockedWrite } from "./busy";
 import type { AgentRunRow, RunStepRow, RunStatus, TerminalReason, Usage } from "@weft/contracts";
@@ -54,7 +54,9 @@ export interface RunStore {
   appendStep(runId: string, step: NewStep): Promise<RunStepRow>;
   steps(runId: string): Promise<RunStepRow[]>;
   runsWithStatus(statuses: RunStatus[]): Promise<AgentRunRow[]>;
-  listRuns(filter: { companyId?: string; limit?: number }): Promise<AgentRunRow[]>;
+  /** Newest first. `threadId` keeps one conversation thread; `trigger` keeps chat runs or everything else (routine and
+   * notice runs). Without them the list is every run of the company, as before. */
+  listRuns(filter: { companyId?: string; limit?: number; threadId?: string; trigger?: "chat" | "background" }): Promise<AgentRunRow[]>;
   failRoutineRun(routineRunId: string, summary: string, at: string): Promise<void>;
 }
 
@@ -123,7 +125,12 @@ export function createRunStore(db: Db, opts: { wallNow?: () => string; onStep?: 
     },
     async listRuns(filter) {
       const q = db.select().from(agentRuns);
-      const rows = filter.companyId ? await q.where(eq(agentRuns.companyId, filter.companyId)) : await q;
+      const where: SQL[] = [];
+      if (filter.companyId) where.push(eq(agentRuns.companyId, filter.companyId));
+      if (filter.threadId) where.push(eq(agentRuns.threadId, filter.threadId));
+      if (filter.trigger === "chat") where.push(eq(agentRuns.trigger, "chat"));
+      else if (filter.trigger === "background") where.push(ne(agentRuns.trigger, "chat"));
+      const rows = where.length ? await q.where(and(...where)) : await q;
       return rows.map(toRow).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, filter.limit ?? 50);
     },
     async failRoutineRun(routineRunId, summary, at) {

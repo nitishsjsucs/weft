@@ -25,6 +25,7 @@ import type { ProviderPool } from "./providers/hosted";
 import { parseContext, scriptedProviderFrom } from "./providers/scripted-core";
 import { noteRunRecall, traceRoutineRunSpan, type RecallNote, type RoutineRunSpan } from "./otel";
 import { immediateRunHost } from "./run-host";
+import { earlierConversationBlock, type EarlierTurn } from "./threads";
 import type { ScriptSource } from "./script-source";
 import type { RunHost } from "../../contracts/src/ext/cf-agent";
 
@@ -45,6 +46,12 @@ export interface ChatContextSource {
   channels?(companyId: string): Promise<string[]>;
   /** Wave 2 (w2-memory): a <recall> block for the run start, or "" for none. */
   recall?(input: { companyId: string; runId: string; kind: "chat" | "routine"; query: string; subjectRefs: string[] }): Promise<string>;
+  /**
+   * The Agent page: the earlier turns of the run's conversation thread, oldest first, that a follow-up may read (the
+   * same person's, untainted, finished with an answer). apps/api decides which turns qualify; the runtime bounds and
+   * renders them (threads.ts). Absent, a follow-up gets no prior conversation.
+   */
+  earlier?(input: { companyId: string; runId: string; threadId: string }): Promise<EarlierTurn[]>;
 }
 
 /** The acting principal for telemetry (user.id): the source's id, else the "(prn_...)" id inside actingFor. */
@@ -380,11 +387,11 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     });
   }
 
-  function baseRow(handle: RunHandle, p: { trigger: string; attended: boolean; routineRunId: string | null; routineId: string | null; kind: PromptKind; provider: ModelProvider; budget?: { steps: number; usd: number; minutes: number } }): AgentRunRow {
+  function baseRow(handle: RunHandle, p: { trigger: string; attended: boolean; routineRunId: string | null; routineId: string | null; kind: PromptKind; provider: ModelProvider; budget?: { steps: number; usd: number; minutes: number }; threadId?: string | null }): AgentRunRow {
     const b = p.budget ?? BUDGETS[p.kind];
     const provider = p.kind === "routine" && useTemplates(p.provider, p.attended) ? templateProvider : p.provider;
     return {
-      id: handle.runId, companyId, kind: "main", parentRunId: null, threadId: null, routineRunId: p.routineRunId, trigger: p.trigger, attended: p.attended,
+      id: handle.runId, companyId, kind: "main", parentRunId: null, threadId: p.threadId ?? null, routineRunId: p.routineRunId, trigger: p.trigger, attended: p.attended,
       provider: provider.id, model: provider.model, effort: effortFor(provider), cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
       status: "queued", terminalReason: null, tainted: false, taintedBy: null, checklist: null, budget: { steps: b.steps, usd: b.usd, minutes: b.minutes },
       stepsUsed: 0, requeues: 0, consecutiveErrors: 0, costUsdMicros: 0, tokens: { ...ZERO_USAGE }, createdAt: opts.clock.now(), endedAt: null, summary: null,
@@ -416,7 +423,9 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     async startChat(handle, input) {
       await remember(handle);
       const kind: PromptKind = input.recipe === "routine_draft" ? "routine_draft" : "chat";
-      const row = baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind, provider: opts.providers ? await chooseProvider(kind, true) : opts.provider });
+      // A conversation thread (the Agent page) is recorded on the run row; the side panel and every other caller pass none.
+      const threadId = kind === "chat" && typeof input.threadId === "string" && input.threadId ? input.threadId : null;
+      const row = baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind, provider: opts.providers ? await chooseProvider(kind, true) : opts.provider, threadId });
       await store.createRun(row);
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
       let text: string;
@@ -430,7 +439,12 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
           text = `${portalPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, request: input.text })}\n${ROLE_PORTAL}`;
           noteRunRecall(handle.runId, { query: input.text, reason: "portal_run", chars: 0 });
         } else {
-          text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext });
+          // A follow-up reads the thread's earlier turns (question and final answer only, bounded); a source that
+          // throws leaves them out and the run still starts.
+          const earlier = threadId && opts.contextSource?.earlier
+            ? earlierConversationBlock(await opts.contextSource.earlier({ companyId, runId: handle.runId, threadId }).catch(() => []))
+            : "";
+          text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext, ...(earlier ? { earlier } : {}) });
           text = withRecall(text, await recallFor(handle.runId, { kind: "chat", query: input.text, subjectRefs: [] }));
         }
       } else {

@@ -31,8 +31,8 @@ const KEEP_HEADERS = ["content-type", "etag", "x-weft-tables", "cache-control"];
 export const MEMO_QUERY_PARAMS: ReadonlySet<string> = new Set([
   "afterId", "approver", "asOf", "at", "band", "beforeId", "category", "channel", "courseCode", "day", "departmentId", "detail",
   "folders", "form", "from", "group", "groupBy", "group_by", "include", "jurisdiction", "kind", "limit", "month", "offerId",
-  "order", "path", "period", "policyId", "prefix", "q", "runId", "source", "state", "status", "surface", "to", "type",
-  "vendor", "wait", "windowId", "workerId", "year",
+  "order", "path", "period", "policyId", "prefix", "q", "runId", "source", "state", "status", "surface", "thread_id", "to", "trigger",
+  "type", "vendor", "wait", "windowId", "workerId", "year",
 ]);
 /** A query value longer than this is dropped (no route takes one). */
 export const MEMO_MAX_QUERY_VALUE = 256;
