@@ -57,6 +57,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private module: EngineModule | null = null;
   private bootError: string | null = null;
   private unsubscribe: (() => void) | null = null;
+  /** The boot in progress or done (startEngine); null before one and after a failed one or stopEngine. */
+  private starting: Promise<void> | null = null;
   private config = new Map<string, string | null>();
   private lastActivity: number | null = null;
   private usage: UsageDelta = zeroUsage();
@@ -110,7 +112,20 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     await this.startEngine();
   }
 
-  private async startEngine(): Promise<void> {
+  /**
+   * Boots the world once: the cold boot, the alarm, the extras RPCs and the reset and restore steps can all ask at
+   * the same time (this.engine is set only after several awaits), so concurrent callers share one boot. A boot that
+   * failed, or stopEngine, lets the next call boot again.
+   */
+  private startEngine(): Promise<void> {
+    if (!this.starting) {
+      const p: Promise<void> = this.bootEngine().then(() => { if (!this.engine && this.starting === p) this.starting = null; });
+      this.starting = p;
+    }
+    return this.starting;
+  }
+
+  private async bootEngine(): Promise<void> {
     if (!this.stamp) return;
     const stamp = this.stamp;
     try {
@@ -169,6 +184,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   }
 
   private async stopEngine(): Promise<void> {
+    // A boot in progress finishes first, so the world it brings up is the one closed here.
+    if (this.starting) await this.starting;
+    this.starting = null;
     const engine = this.engine;
     this.engine = null;
     this.unsubscribe?.();

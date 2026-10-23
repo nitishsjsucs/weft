@@ -252,3 +252,33 @@ describe("the alarm", () => {
     expect(started).toBe(1);
   });
 });
+
+describe("the world's boot", () => {
+  it("is shared by concurrent callers: alarms and an RPC on a world whose cold boot failed boot it once", async () => {
+    world.failBoots = 1;
+    const c = company();
+    await c.ready();
+    expect(world.boots).toBe(1);
+    world.bootDelayMs = 20;
+    // The alarm, a retried alarm and a queue consumer's RPC (the fake world has no extras port, so it is refused after
+    // the boot) all find no engine at once.
+    await Promise.allSettled([c.co.alarm(), c.co.runAlarmNow(), c.co.extrasWorld()]);
+    expect(world.boots).toBe(2);
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
+  });
+
+  it("tries again after a boot that failed, and boots again after the world was stopped (a reset)", async () => {
+    world.failBoots = 2;
+    const c = company();
+    await c.ready();
+    await c.co.alarm();
+    expect(world.boots).toBe(2);
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(503);
+    await c.co.alarm();
+    expect(world.boots).toBe(3);
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
+    await c.co.applyStamp({ ...c.stamp!, gen: 4 });
+    expect(world.boots).toBe(4);
+    expect((await c.co.fetch(await req("/v1/workers", { gen: 4 }))).status).toBe(200);
+  });
+});
