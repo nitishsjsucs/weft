@@ -88,3 +88,40 @@ describe("LobbyDO.status after a hosted reset", () => {
     expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen + 1 })).lease).toBeNull();
   });
 });
+
+describe("LobbyDO's rebuild of a slot the reset could not return to the seed", () => {
+  it("deletes the vectors the slot's generations upserted, as a reset in place does", async () => {
+    const m = memorySql();
+    const ctx = { storage: { sql: m.sql, transactionSync: <T>(fn: () => T) => m.transactionSync(fn) }, waitUntil: () => undefined };
+    const deleted: string[][] = [];
+    const created: unknown[] = [];
+    const env = {
+      WEFT_POOL_SIZE: "2",
+      WEFT_CONFIG_MEMO_MS: "0",
+      CONFIG: { get: async (keys: string[] | string) => (Array.isArray(keys) ? new Map(keys.map((k) => [k, k === "lobby.provision_rows_ceiling" ? "400000" : null])) : null) },
+      SPEND: { idFromName: (n: string) => n, get: () => ({ status: async () => ({ caps: { dayUsd: 2, neuronsDay: 5000 }, spentMicros: { day: 0 }, neurons: { used: 0 } }) }) },
+      MEMVEC: { deleteByIds: async (ids: string[]) => { deleted.push(ids); return { mutationId: "m" }; } },
+      RESEED: { create: async (o: unknown) => { created.push(o); return {}; } },
+      COMPANY: {
+        idFromName: (n: string) => n,
+        get: () => ({
+          applyStamp: async () => ({ ok: true, gen: 1 }),
+          heartbeat: async () => ({ stamped: null, lastActivityMs: null, clean: false, usage: { rowsRead: 0, rowsWritten: 0, requests: 0 }, snapshot: null }),
+          // The delta reset finds a digest mismatch: the slot goes to a full restore.
+          deltaReset: async () => ({ ok: false, method: "delta", gen: 1, rowsWritten: 0, mismatches: ["notes"], ms: 1 }),
+          endLease: async () => undefined,
+        }),
+      },
+    };
+    const lobby = new LobbyDO(ctx as never, env as never);
+    m.sql.exec(`UPDATE slots SET state = 'ready', gen = 1`);
+    const l = await lobby.assign({ visitor: visitor(60), ipHash: "e".repeat(32) });
+    if (l.status !== "leased") throw new Error(`not leased: ${l.status}`);
+    await lobby.recordVectors({ slot: l.slot, gen: 1, ids: ["v1", "v2"] });
+    await lobby.recordVectors({ slot: "slot-other", gen: 1, ids: ["keep"] });
+    await lobby.release({ slot: l.slot, reason: "test" });
+    expect(created).toHaveLength(1);
+    expect(deleted).toEqual([["v1", "v2"]]);
+    expect(m.sql.exec(`SELECT slot, id FROM vectors ORDER BY id`).toArray()).toEqual([{ slot: "slot-other", id: "keep" }]);
+  });
+});

@@ -478,6 +478,9 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const step = await this.startRestore(s.name, now, why, { claimed: true });
     // startRestore leaves the slot restoring or failed; anything else (it found a lease) must not stay resetting.
     this.sql.exec(`UPDATE slots SET state = 'failed', error = ?, updated_at = ? WHERE name = ? AND state = 'resetting'`, `reset failed (${why}): ${step.action}`, now, s.name);
+    // The world comes back at a later generation either way (a restore, now or deferred, starts at gen + 1), so the
+    // vectors its visitors upserted up to this generation are gone for good, as after a reset in place.
+    await this.dropVectors(s.name, s.gen);
     return { ...out, ok: false, leaseKept: false };
   }
 
