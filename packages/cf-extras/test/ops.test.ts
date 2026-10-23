@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { HostedSpendStatus } from "../../contracts/src/ext/cf-agent";
 import { HOSTED_CAP_DEFAULTS } from "../../contracts/src/ext/cf-agent";
 import type { RunCatalogRow } from "../../contracts/src/ext/cf-extras";
-import { COMPARE_MEMO_MS, compareRows, createRunCatalog, MAX_COMPARE_ROWS } from "../src/catalog";
+import { COMPARE_MEMO_MS, compareRows, createRunCatalog, MAX_COMPARE_DAYS, MAX_COMPARE_ROWS, refreshComparison } from "../src/catalog";
 import { COUNTERS, memoryDailyCounters } from "../src/counters";
 import { d1JobLedger, parseJob, pruneOps, queueOfJob } from "../src/jobs";
 import { createAnalyticsEngineSink, createD1MetricsSink, metricsForDay, noopMetricsSink, selectMetricsSink } from "../src/metrics";
@@ -41,6 +41,9 @@ describe("RunCatalog", () => {
       row({ runId: "run_5", endedAt: "2026-10-01T10:00:00.000Z" }),
     ];
     for (const r of rows) await cat.record(r);
+    // Before the cron's first run there is no comparison; then it answers every window from the one stored row.
+    expect(await cat.compare({ days: 7 })).toEqual([]);
+    await refreshComparison(db, new Date("2026-10-27T12:00:00Z"));
     const cmp = await cat.compare({ days: 7 });
     expect(cmp).toEqual([
       { provider: "openai", model: "gpt-5.6-luna", runs: 3, avgSteps: 4, groundedRate: 0.5, avgCostUsdMicros: 3700, avgNeurons: 0, p50LatencyMs: 5000, outcomes: { done: 2, waiting: 1 } },
@@ -50,43 +53,61 @@ describe("RunCatalog", () => {
     expect(compareRows([])).toEqual([]);
   });
 
-  it("reads the newest runs of the window through the ended_at index and stops at the limit, never every run of 30 days", async () => {
+  it("is computed in the cron from the newest runs through the ended_at index, at most MAX_COMPARE_ROWS of them; a visitor's read is one row", async () => {
+    expect(MAX_COMPARE_ROWS).toBe(500);
     const db = d1Shim();
-    const cat = createRunCatalog(db, { now: () => new Date("2026-10-27T12:00:00Z") });
-    await cat.compare({ days: 30 });
-    const q = db.statements.at(-1)!;
+    const now = new Date("2026-10-27T12:00:00Z");
+    const cat = createRunCatalog(db, { now: () => now });
+    await refreshComparison(db, now);
+    const q = db.statements.find((x) => /FROM run_catalog/.test(x))!;
     expect(q).toMatch(/ORDER BY ended_at DESC LIMIT \?/);
     const plan = (db.sqlite.prepare(`EXPLAIN QUERY PLAN ${q}`).all("2026-09-28T00:00:00.000Z", MAX_COMPARE_ROWS) as { detail: string }[]).map((p) => p.detail);
     // A range of the index read backwards, in the order asked: no sort of the whole window before the limit.
     expect(plan).toEqual([expect.stringMatching(/^SEARCH run_catalog USING INDEX run_catalog_ended \(ended_at>\?\)$/)]);
+    // 2,000 runs this month: the cron reads 500 and stores every window in one row.
+    const insert = db.sqlite.prepare(`INSERT INTO run_catalog (slot, gen, run_id, provider, model, trigger, steps, grounded, cost_usd_micros, neurons, latency_ms, status, terminal_reason, ended_at, day)
+      VALUES ('slot-1', 1, ?, 'openai', 'gpt-5.6-luna', 'chat', 3, 1, 1000, 0, 900, 'done', 'DONE', ?, ?)`);
+    for (let i = 0; i < 2_000; i++) { const at = new Date(now.getTime() - i * 20 * 60_000).toISOString(); insert.run(`run_${i}`, at, at.slice(0, 10)); }
+    const stored = await refreshComparison(db, now);
+    expect(stored.rows).toBe(MAX_COMPARE_ROWS);
+    expect(Object.keys(stored.windows)).toHaveLength(MAX_COMPARE_DAYS);
+    expect(db.rows("model_comparison")).toHaveLength(1);
+    // A visitor's read is that row, for any window.
+    const n = db.statements.length;
+    for (const days of [1, 7, 30, 365]) expect((await cat.compare({ days }))[0]!.runs).toBeGreaterThan(0);
+    expect(db.statements.slice(n)).toEqual(Array.from({ length: 4 }, () => "SELECT body FROM model_comparison WHERE id = 1"));
     // The window still starts at UTC midnight days - 1 back: a run at 23:59 the day before is out, one at 00:00 is in.
-    await cat.record(row({ runId: "run_out", endedAt: "2026-10-20T23:59:59.999Z" }));
-    await cat.record(row({ runId: "run_in", endedAt: "2026-10-21T00:00:00.000Z" }));
-    expect((await cat.compare({ days: 7 }))[0]!.runs).toBe(1);
+    const db2 = d1Shim();
+    const cat2 = createRunCatalog(db2, { now: () => now });
+    await cat2.record(row({ runId: "run_out", endedAt: "2026-10-20T23:59:59.999Z" }));
+    await cat2.record(row({ runId: "run_in", endedAt: "2026-10-21T00:00:00.000Z" }));
+    await refreshComparison(db2, now);
+    expect((await cat2.compare({ days: 7 }))[0]!.runs).toBe(1);
   });
 
-  it("memoizes a window's comparison for a minute when asked, and a record through it drops the memo", async () => {
+  it("memoizes the stored comparison for a minute when asked, for every window, and a record through it drops the memo", async () => {
     const db = d1Shim();
     let now = Date.parse("2026-10-27T12:00:00Z");
     const cat = createRunCatalog(db, { now: () => new Date(now), memoMs: COMPARE_MEMO_MS });
     await cat.record(row({ runId: "run_1" }));
-    const reads = () => db.statements.filter((x) => /^SELECT/.test(x)).length;
+    await refreshComparison(db, new Date(now));
+    const reads = () => db.statements.filter((x) => /^SELECT body FROM model_comparison/.test(x)).length;
     const first = await cat.compare({ days: 7 });
     expect(reads()).toBe(1);
-    // Many visitors within the minute, at once and one after another: one read.
-    await Promise.all(Array.from({ length: 20 }, () => cat.compare({ days: 7 })));
+    // Many visitors within the minute, at once and one after another, any window: one read.
+    await Promise.all(Array.from({ length: 20 }, (_, i) => cat.compare({ days: 1 + (i % 30) })));
     now += COMPARE_MEMO_MS - 1;
     expect(await cat.compare({ days: 7 })).toEqual(first);
     expect(reads()).toBe(1);
-    // Another window is its own read; a minute on, the window is read again.
-    await cat.compare({ days: 30 });
-    expect(reads()).toBe(2);
+    // A minute on, the row is read again.
     now += 1;
     await cat.compare({ days: 7 });
-    expect(reads()).toBe(3);
+    expect(reads()).toBe(2);
+    // A new run shows once the cron has compared again; a record through this catalog drops the memo.
     await cat.record(row({ runId: "run_2" }));
+    await refreshComparison(db, new Date(now));
     expect((await cat.compare({ days: 7 }))[0]!.runs).toBe(2);
-    expect(reads()).toBe(4);
+    expect(reads()).toBe(3);
   });
 });
 

@@ -3,7 +3,7 @@
 // downloads that stay inside their world and generation. The bindings are fakes shaped like the real ones: the
 // Lobby counters run over DO SQLite semantics, SpendDO's ledger over the neuron budget.
 import { describe, expect, it } from "vitest";
-import { createHelpSearch, createRunCatalog, DICTATION_MODEL, memoryDailyCounters, memoryNeuronBudget, type LobbyReadout } from "@weft/cf-extras";
+import { createHelpSearch, createRunCatalog, DICTATION_MODEL, memoryDailyCounters, memoryNeuronBudget, refreshComparison, type LobbyReadout } from "@weft/cf-extras";
 import type { HostedSpendStatus } from "../../../../packages/contracts/src/ext/cf-agent";
 import { HOSTED_SETTINGS } from "../../../../packages/contracts/src/ext/cf-hosted";
 import { createHostedExtras } from "../../src/extras/hosted";
@@ -72,6 +72,9 @@ describe("HostedExtras", () => {
     const { api, db, metrics } = deps();
     await api.recordRun({ runId: "run_0001", slot: "slot-1", gen: 3, provider: "openai", model: "gpt-5.6-luna", trigger: "chat", steps: 3, grounded: true, costUsdMicros: 3100, neurons: 0, latencyMs: 4100, status: "done", terminalReason: "DONE", endedAt: new Date().toISOString() });
     expect(db.rows("run_catalog")).toHaveLength(1);
+    // The comparison is the cron's (refreshComparison): until it runs there is none, then it is the stored row.
+    expect(await api.models({ days: 7 })).toEqual([]);
+    await refreshComparison(db as never);
     expect(await api.models({ days: 7 })).toMatchObject([{ provider: "openai", runs: 1, groundedRate: 1 }]);
     expect(metrics.points[0]).toMatchObject({ name: "run.ended", slot: "slot-1" });
     expect(await deps({ catalog: null }).api.models()).toEqual([]);

@@ -162,10 +162,12 @@ describe("OCR jobs", () => {
     expect(deps.metrics.points.at(-1)!.tags!.outcome).toBe("repeat:deferred");
     const sent: HostedJob[] = [];
     const queue = { async send(b: HostedJob) { sent.push(b); } };
-    expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toEqual({ requeued: 0, pruned: false });
+    expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toEqual({ requeued: 0, pruned: false, compared: 0 });
+    // The cron also stores the model comparison, in its one row.
+    expect(deps.db.rows("model_comparison")).toHaveLength(1);
     // After 00:00 UTC the share is new: the cron sends the job again once, and it reads and writes back.
     now = new Date("2026-10-27T00:05:00Z");
-    expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toEqual({ requeued: 1, pruned: true });
+    expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toEqual({ requeued: 1, pruned: true, compared: 0 });
     expect(await extrasCron({ OPS: deps.db, JOBS: queue, RENDER: queue }, now, () => {})).toMatchObject({ requeued: 0 });
     expect(sent).toEqual([job]);
     expect(deps.db.rows("jobs")[0]).toMatchObject({ state: "requeued" });
