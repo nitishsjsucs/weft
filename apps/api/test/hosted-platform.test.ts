@@ -610,6 +610,60 @@ describe("hosted origins, the read-only guard and the hidden write-backs", () =>
   });
 });
 
+describe("a closed world's database", () => {
+  const count = (w: DurableTestWorld, key: string) => Number(w.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM kv_state WHERE key = ?", key).toArray()[0]!.n);
+  /** The ENGINE_CLOSED a query rejects with (drizzle wraps the driver's error as its cause). */
+  const closed = (p: Promise<unknown>) => p.then(
+    () => { throw new Error("the statement ran on a closed world"); },
+    (e: { code?: string; cause?: { code?: string } }) => { expect(e.code ?? e.cause?.code).toBe("ENGINE_CLOSED"); },
+  );
+
+  it("refuses every statement and transaction after close() with ENGINE_CLOSED, while the next world on the same storage runs", async () => {
+    let w = await openDurableWorld(seed, { copy: true });
+    try {
+      const db = w.weft.db;
+      const state = w.weft.platform.state;
+      // A normal shutdown (scheduler stop, drains, executor close) trips nothing.
+      await w.weft.close();
+      // A write-back or an alarm-hosted run that outlived the bounds still holds this world's db.
+      await closed(db.insert(kvState).values({ key: "test.late_insert", value: "1" }));
+      await expect(db.transaction(async (tx) => { await tx.insert(kvState).values({ key: "test.late_tx", value: "1" }); })).rejects.toMatchObject({ code: "ENGINE_CLOSED" });
+      await closed(db.select().from(kvState).limit(1));
+      expect(() => state.set("test.late_state", "1")).toThrow(/ENGINE_CLOSED/);
+      for (const key of ["test.late_insert", "test.late_tx", "test.late_state"]) expect(count(w, key)).toBe(0);
+      // The storage belongs to the Durable Object: the next generation's world opens on it and writes as usual.
+      w = await w.reboot();
+      expect((await get(w, "/v1/health")).status).toBe(200);
+      await w.weft.db.insert(kvState).values({ key: "test.next_world", value: "1" });
+      expect(count(w, "test.next_world")).toBe(1);
+    } finally { await w.close(); }
+  });
+
+  it("rolls back a transaction that was open when the world closed, at its next statement", async () => {
+    const w = await openDurableWorld(seed, { copy: true });
+    let next: DurableTestWorld | null = null;
+    try {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      let wrote!: () => void;
+      const first = new Promise<void>((r) => { wrote = r; });
+      const late = w.weft.db.transaction(async (tx) => {
+        await tx.insert(kvState).values({ key: "test.open_tx_a", value: "1" });
+        wrote();
+        await gate;
+        await tx.insert(kvState).values({ key: "test.open_tx_b", value: "1" });
+      });
+      await first;
+      await w.weft.close();
+      release();
+      await closed(late);
+      for (const key of ["test.open_tx_a", "test.open_tx_b"]) expect(count(w, key)).toBe(0);
+      next = await w.reboot();
+      expect((await get(next, "/v1/health")).status).toBe(200);
+    } finally { await (next ?? w).close(); }
+  });
+});
+
 describe("Node keeps today's parts", () => {
   it("files for uploads, run files and run handles; no hosted table is written by a Node world's flows", async () => {
     const prev = { blobs: process.env.WEFT_BLOBS, hash: process.env.WEFT_PREBUILT_HASH };
