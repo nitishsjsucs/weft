@@ -688,8 +688,13 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     return this.outboxAttempts;
   }
   private saveAttempts(m: Map<string, number>): void {
-    if (m.size) this.ctx.storage.kv.put(OUTBOX_ATTEMPTS_KEY, Object.fromEntries(m));
-    else this.ctx.storage.kv.delete(OUTBOX_ATTEMPTS_KEY);
+    // The flush runs from a microtask nobody awaits: a storage error here is logged, never left unhandled.
+    try {
+      if (m.size) this.ctx.storage.kv.put(OUTBOX_ATTEMPTS_KEY, Object.fromEntries(m));
+      else this.ctx.storage.kv.delete(OUTBOX_ATTEMPTS_KEY);
+    } catch (e) {
+      logError("outbox.attempts", e, { slot: this.stamp?.slot });
+    }
   }
 
   /**
