@@ -55,6 +55,25 @@ change, and leaves the agency filing waiting. It works on the scripted provider 
 gets stuck. There is no auto-start. The arrow keys move between steps, Escape exits, and the tour honours reduced
 motion and the phone layout. How it works and the measured timings: [docs/tour.md](docs/tour.md).
 
+### The Agent page
+
+**Agent** in the sidebar (after Inbox) opens the agent at full width on `/app/agent`:
+
+- **Conversations**, newest first: each is titled by its first question and shows a relative time on the simulated
+  clock and a status dot. **New chat** starts one; a follow-up stays in the same conversation (a thread) and the agent
+  sees its last three turns, each your question and its final answer, about 2,000 characters at most, never a tool
+  result. A turn that read untrusted content gives the follow-up nothing and makes it untrusted too. Runs with no
+  thread, such as the seeded history and the side panel's runs, are one-turn conversations.
+- **Background work**: routine and notice runs that started on their own, with their summaries, each linking to its
+  run view.
+- **The conversation**: every turn as the side panel shows it (tool steps, charts, approval cards with Approve and Deny,
+  the grounded answer, Open run), a header with the latest turn's model and the conversation's cost, suggested prompts
+  when it is empty, and a composer (with Dictate on the hosted demo). The top bar reads "Agent", then the
+  conversation's title.
+- The selection is in the link (`/app/agent?thread=thr_...` or `?run=run_...`), so a conversation can be bookmarked or
+  reloaded. Below 768 px the list becomes a drawer. The side panel starts closed on this page so the agent is not on
+  screen twice; its toggle still opens it.
+
 Things to try in the demo:
 
 1. **Simulators**: deliver the "CA EDD DE 2088" notice. The agent drafts a SUI rate change and a reply to the agency; both wait in the **Inbox** for you.
@@ -78,6 +97,8 @@ Things to try in the demo:
     open draft. Switch Viewing as to Imani Ferreira (demo) to decide as her manager.
 12. **Agent panel**: ask "Show payroll cost by month" for a chart with a table fallback. With Settings > Agent > Chat
     can propose turned on, asking for an off-cycle payment files a proposal whose card has Approve, Deny and Open.
+    The **Agent** page holds the same answers as conversations: ask there, then ask "Why is the NY raise flagged in
+    the Oct 30 payroll?" as a follow-up in the same thread.
 13. **Integrations**: every card says Simulated until you connect it. Simulate a Greenhouse hire (a signed delivery
     becomes a linked draft offer), sync Workday (people, pay and approved time off), and on Hiring order a background
     check after an offer is accepted; the hire authorizes it in the portal and it completes on the simulated clock.
@@ -283,8 +304,8 @@ Found by this gate and not fixed here (each is in "Wave 3: left" below):
 All in [docs/screenshots/](docs/screenshots), at 1440 by 900 with the agent panel docked unless noted. Before each shot
 the capture moves focus and the pointer off the control it last clicked, so the images show the resting state.
 
-On the rich profile (retaken on 2026-10-18 with `pnpm screenshots:rich`, `e2e/screens/rich.screens.ts`: a fresh rich
-world, as Dana), every main route. `pnpm screenshots` still writes base versions of the shared names, so run
+On the rich profile (retaken on 2026-10-23, when Agent joined the sidebar, with `pnpm screenshots:rich`,
+`e2e/screens/rich.screens.ts`: a fresh rich world, as Dana), every main route. `pnpm screenshots` still writes base versions of the shared names, so run
 `pnpm screenshots:rich` after it:
 
 - `01-landing`, `01b-landing-full` (full page) and `12-landing-mobile` (390 by 844).
@@ -294,13 +315,16 @@ world, as Dana), every main route. `pnpm screenshots` still writes base versions
   `11-compliance`, `34-reports` (payroll cost by month, January to October), `09-routines`, `35-routine-detail` (the
   pre-payroll review with its runs), `10-audit`, `17-memory`, `24-integrations`, `03-simulators`, `36-settings`,
   `37-permissions`, `39-run-view` (a recorded agent run with its steps) and `40-portal-persona` (a new hire at 5 of 7).
+- The Agent page: `41-agent-page` (a conversation of two turns, a chart answer and then a follow-up in the same
+  thread, beside the seeded conversations), `41b-agent-background` (the Background work tab) and `41c-agent-mobile`
+  (the same conversation at 390 by 844, the list in a drawer).
 
 The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`, retaken on
-2026-10-20 after the Integrations stop left the tour), in
+2026-10-23 for the sidebar's Agent item), in
 [docs/screenshots/tour/](docs/screenshots/tour): `01-welcome` to `20-finish`, named by step.
 
-Flows on the base world, retaken in the final wave 3 gate with `pnpm screenshots` (`e2e/screens/capture.screens.ts`:
-the e2e dev runner and a fresh world for each group):
+Flows on the base world, retaken on 2026-10-23 for the sidebar's Agent item with `pnpm screenshots`
+(`e2e/screens/capture.screens.ts`: the e2e dev runner and a fresh world for each group):
 
 - `04-agent-run` (the agency notice run waiting for approval) and `05-inbox` (the SUI rate change and the response).
 - `07-payroll-draft` (the Oct 16 to 31 draft after the pre-payroll review).
@@ -309,7 +333,8 @@ the e2e dev runner and a fresh world for each group):
 - New in wave 3:
   - `21-topbar`: the top bar as one strip (sidebar toggle, breadcrumb, the environment pill with the simulated clock
     and Viewing as, then the agent toggle), with search and New thread at the top of the sidebar. The four top bar
-    shots were retaken on 2026-10-20, when the model chip left the pill; other screens taken before that still show it.
+    shots were retaken on 2026-10-20, when the model chip left the pill, and again with every other shot on
+    2026-10-23.
   - `21b-topbar-persona-menu` (the Viewing as menu grouped into Admins and Managers), `21c-topbar-clock` (the clock
     popover with +1 hour, +1 day and Next routine) and `21d-topbar-mobile` (390 wide: search icon, compact pill,
     avatar).
