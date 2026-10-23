@@ -42,6 +42,33 @@ test("an unleased visitor browses the shared read-only showcase; a deep link ren
   expect(consoleErrors.filter((e) => !/409 POST \/api\/v1\/sim\/clock\/advance/.test(e)), "no console errors").toEqual([]);
 });
 
+// The Agent page in the export (README "The Agent page"): one prerendered page that reads its selection from the query,
+// so a deep link needs no shell. The showcase is the rich world, so its seeded conversations and routine runs are there;
+// nothing here writes, so it costs no lease.
+test("the Agent page renders from the export: conversations, background work, a deep link and the hosted composer", async ({ page, consoleErrors }) => {
+  const res = await page.goto("/app/agent/");
+  expect(res?.status()).toBe(200);
+  await expect(page.getByTestId("agent-page")).toBeVisible();
+  await expect(page.getByTestId("nav-agent")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("agent-composer"), "the side panel stays closed on the Agent page").toHaveCount(0);
+  const threads = page.getByTestId("agent-page-thread");
+  await expect(threads.first()).toBeVisible();
+  await page.getByTestId("agent-page-tab-background").click();
+  await expect(page.getByTestId("agent-page-background").first()).toBeVisible();
+  await page.getByTestId("agent-page-tab-threads").click();
+  await threads.first().click();
+  await expect(page).toHaveURL(/\/app\/agent\/\?(run|thread)=/);
+  await expect(page.getByTestId("agent-page-turn").first().getByTestId("agent-answer")).toBeVisible();
+  const deep = page.url();
+  await page.goto(deep);
+  expect(new URL(page.url()).search, "the deep link keeps its query").toBe(new URL(deep).search);
+  await expect(page.getByTestId("agent-page-turn").first().getByTestId("agent-answer")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(await page.getByTestId("agent-page-title").innerText());
+  await expect(page.getByTestId("agent-page-composer")).toBeVisible();
+  await expect(page.getByTestId("agent-page").getByTestId("hosted-dictate"), "Dictate sits in the page's composer").toBeVisible();
+  expect(consoleErrors, "no console errors").toEqual([]);
+});
+
 test("a leased tab reads its own slot: the banner, the lease countdown and the session status", async ({ page, operator }) => {
   await page.goto("/app/");
   expect(await bannerWorld(page)).toBe("slot");

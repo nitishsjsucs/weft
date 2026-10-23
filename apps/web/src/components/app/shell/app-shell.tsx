@@ -35,9 +35,17 @@ function Frame({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState(false);
   // Agent panel docks at desktop width; below it the panel overlays the page.
   const [prefLoaded, setPrefLoaded] = useState(false);
-  useEffect(() => { if (desktop && !prefLoaded) { agent.setOpen((o) => o || readPref()); setPrefLoaded(true); } }, [desktop]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The Agent page is the agent at full width, so the side panel starts closed there (the toggle still opens it) and
+  // what the person does with it on that page is not saved as their preference. Leaving the page restores the
+  // saved state on a desktop window.
+  const onAgentPage = isAgentPage(pathname);
+  useEffect(() => { if (desktop && !prefLoaded) { agent.setOpen((o) => o || (!onAgentPage && readPref())); setPrefLoaded(true); } }, [desktop]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (onAgentPage) agent.setOpen(false);
+    else if (prefLoaded && desktop) agent.setOpen(readPref());
+  }, [onAgentPage]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setMobileNav(false); }, [pathname]);
-  useEffect(() => { if (prefLoaded) try { window.localStorage.setItem("weft.agentOpen", agent.open ? "1" : "0"); } catch { /* blocked */ } }, [agent.open, prefLoaded]);
+  useEffect(() => { if (prefLoaded && !onAgentPage) try { window.localStorage.setItem("weft.agentOpen", agent.open ? "1" : "0"); } catch { /* blocked */ } }, [agent.open, prefLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showSidebar = laptop && !sidebarHidden;
   const dockAgent = desktop && agent.open;
@@ -71,6 +79,11 @@ function Frame({ children }: { children: ReactNode }) {
       <TourShellBridge setMobileNav={setMobileNav} laptop={laptop} desktop={desktop} />
     </div>
   );
+}
+
+/** The full-page agent (/app/agent, any query). */
+export function isAgentPage(pathname: string): boolean {
+  return pathname === "/app/agent";
 }
 
 function readPref(): boolean {

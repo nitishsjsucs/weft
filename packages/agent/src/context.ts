@@ -46,6 +46,9 @@ export function routinePack(p: RoutinePackInput): string {
 export interface ChatPackInput {
   nonce: string; now: string; actingFor: string; grants: Record<string, string>;
   companySummary: string; openLoops: OpenLoop[]; request: string; pageContext: string | null;
+  /** A follow-up in a conversation thread: the rendered <earlier_conversation> block (threads.ts), placed just before
+   * the request. Empty or omitted leaves the pack byte-identical to a single run's. */
+  earlier?: string;
 }
 
 export const CHAT_BUDGET_TOKENS = 4000;
@@ -59,12 +62,14 @@ export function chatPack(p: ChatPackInput): string {
     p.pageContext ? `page: ${escapeTagText(p.pageContext)}` : null,
   ].filter(Boolean).join("\n");
   const request = `<request>${escapeTagText(p.request)}</request>`;
-  // Overflow drops open-loop rows beyond 20, then truncates the company summary; never the request.
+  // Overflow drops open-loop rows beyond 20, then truncates the company summary; never the request or the earlier
+  // conversation (threads.ts bounds that itself).
   const loops = p.openLoops.slice(0, 20).map((l) => `${l.id} | ${escapeTagText(l.title)} | ${l.owner} | ${l.due ?? "none"}`);
   const loopsBlock = `<open_loops>\nid | title | owner | due\n${loops.join("\n")}\n</open_loops>`;
-  const room = Math.max(100, CHAT_BUDGET_TOKENS - approxTokens(fixed) - approxTokens(request) - approxTokens(loopsBlock) - 30);
+  const earlier = p.earlier ? `${p.earlier}\n` : "";
+  const room = Math.max(100, CHAT_BUDGET_TOKENS - approxTokens(fixed) - approxTokens(request) - approxTokens(loopsBlock) - (earlier ? approxTokens(earlier) : 0) - 30);
   const summary = `<company>${clip(escapeTagText(p.companySummary), room)}</company>`;
-  return `<context n="${p.nonce}">\n${fixed}\n${summary}\n${loopsBlock}\n${request}\n</context>`;
+  return `<context n="${p.nonce}">\n${fixed}\n${summary}\n${loopsBlock}\n${earlier}${request}\n</context>`;
 }
 
 export interface DraftPackInput { nonce: string; now: string; actingFor: string; request: string; channels: string[]; tools: string[] }

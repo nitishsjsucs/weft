@@ -17,8 +17,10 @@ const APP_DIR = fileURLToPath(new URL("../src/app", import.meta.url));
 describe("appRoutes", () => {
   it("lists the Node pages, with one `_` shell per dynamic section", () => {
     const routes = appRoutes(APP_DIR, false);
-    expect(routes).toHaveLength(27);
+    expect(routes).toHaveLength(28);
     expect(routes.map((r) => r.path)).toContain("/");
+    // The Agent page selects by query (?thread=, ?run=), so it is one static page with no shell.
+    expect(routes.find((r) => r.path === "/app/agent")).toEqual({ path: "/app/agent", shellOf: null });
     expect(routes.map((r) => r.path)).toContain("/portal");
     expect(routes.map((r) => r.path)).toContain("/app/settings/permissions");
     expect(routes.filter((r) => r.shellOf).map((r) => `${r.shellOf}:${r.path}`).sort()).toEqual([
