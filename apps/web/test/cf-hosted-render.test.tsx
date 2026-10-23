@@ -89,7 +89,10 @@ describe("the Platform page", () => {
     const r: PlatformReadout = {
       day: "2026-10-26", level: 1, dollars: { spentUsd: 0.0012, dayCapUsd: 2, runCapUsd: 0.1 }, neurons: { used: 210, cap: 5000 }, restoresLeft: 2,
       leases: { active: 1, pool: 2, waitlist: 0 }, deadLetters: 0, lastSweepAt: "2026-10-26T15:45:00.000Z",
-      shares: { doRowsWritten: { used: 45000, share: 60000 }, workerRequests: { used: 300, share: 60000 } },
+      shares: {
+        doRowsWritten: { used: 45000, share: 60000 }, doRowsRead: { used: 1200, share: 3_000_000 }, doRequests: { used: 800, share: 60000 },
+        workersRequests: { used: 300, share: 60000 }, "help.queries": { used: 2, share: 30 }, "pdf.browser_seconds": { used: 6.6, share: 300 },
+      },
     };
     state.data = r;
     const html = renderToStaticMarkup(<PlatformView />);
@@ -101,6 +104,9 @@ describe("the Platform page", () => {
     expect(html).toContain("15:45 UTC");
     expect(html).toContain("Durable Object rows written");
     expect(html).toContain("45,000 of 60,000 (75%)");
+    // Every key the Lobby and the extras send reads as a name, never as the raw key.
+    for (const label of ["Durable Object rows read", "Durable Object requests", "Workers requests", "Help searches", "PDF rendering (browser seconds)"]) expect(html).toContain(`>${label}<`);
+    for (const key of ["doRowsRead", "doRequests", "workersRequests", "help.queries", "pdf.browser_seconds"]) expect(html).not.toContain(`>${key}<`);
     expect(html).toContain("Level 1");
   });
 });

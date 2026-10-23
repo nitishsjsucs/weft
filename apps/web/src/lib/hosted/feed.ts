@@ -103,8 +103,9 @@ export class LiveFeed {
     ws.onopen = () => {
       this.openedAt = this.t.now();
       this.o.scheduler.setEnv({ feed: "connected" });
-      // Frames sent while the socket was down are gone: refetch everything once on a reconnect.
-      if (this.everOpened) this.o.scheduler.refreshAll();
+      // Frames sent while the socket was down are gone: refetch everything once on a reconnect. That refetch covers
+      // every missed seq, so the next frame starts a new count instead of reading as a gap (a second full refresh).
+      if (this.everOpened) { this.o.scheduler.refreshAll(); this.lastSeq = null; }
       this.everOpened = true;
       this.armPing();
     };

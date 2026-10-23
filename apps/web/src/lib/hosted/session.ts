@@ -8,6 +8,7 @@ import {
 import { invalidate, onInvalidate } from "../api/invalidate";
 import { scheduler } from "../api/poll";
 import { LiveFeed, liveUrl } from "./feed";
+import { HUMAN_CHECK_WAIT_MS } from "./flags";
 import { writeLeaseHint } from "./hint";
 import { createStore } from "./store";
 
@@ -138,6 +139,8 @@ export function resetHostedSession(): void {
   feed = null;
   hostedStore.set(INITIAL);
   grantWaiters = [];
+  clearGrantTimer();
+  leasing = false;
 }
 
 /** The lease ends at the earlier of its total and idle deadlines. */
@@ -167,14 +170,23 @@ export function dismissEnded(): void {
   void refreshSession().then(() => invalidate());
 }
 
+/** A lease request is out: its answer decides what the Start dialog shows next. */
+let leasing = false;
+
+/** Opens the Start dialog. Ignored while a lease request is out, so the dialog never starts a second check (and a
+ * second lease request) over the first. */
 export function requestStart(reason: "button" | "mutation" = "button"): void {
+  if (leasing) return;
   hostedStore.set((s) => ({ startAsk: s.startAsk + 1, startReason: reason, blocked: null }));
 }
 export function closeStart(): void { hostedStore.set({ startReason: null }); }
 
 /** POST /api/_session/lease with a Turnstile token. "leased" switches the tab to the visitor's own world. */
 export async function startLease(token: string): Promise<LeaseResult> {
-  const r = await call<LeaseResult>("POST", HOSTED_PATHS.lease, { token });
+  leasing = true;
+  let r: LeaseResult;
+  try { r = await call<LeaseResult>("POST", HOSTED_PATHS.lease, { token }); }
+  finally { leasing = false; }
   if (r.status === "leased") {
     hostedStore.set({ ended: null, blocked: null, startReason: null });
     const s = await refreshSession();
@@ -193,28 +205,40 @@ export async function startLease(token: string): Promise<LeaseResult> {
 // ---- the human grant -----------------------------------------------------------------------------------------
 
 let grantWaiters: { ok: () => void; fail: (e: Error) => void }[] = [];
+let grantTimer: ReturnType<typeof setTimeout> | null = null;
+function clearGrantTimer(): void {
+  if (grantTimer !== null) { clearTimeout(grantTimer); grantTimer = null; }
+}
 
 /**
  * Resolves once a fresh human grant is in place: the Turnstile host runs the widget (usually without interaction),
- * posts its token to /api/_session/verify and calls grantDone. Concurrent 428s share one check.
+ * posts its token to /api/_session/verify and calls grantDone. Concurrent 428s share one check. A check still open
+ * after HUMAN_CHECK_WAIT_MS fails, so a waiting mutation gets its 428 instead of hanging (a verify call that keeps
+ * failing, a visitor who walked away).
  */
 export function ensureHumanGrant(): Promise<void> {
   return new Promise((ok, fail) => {
     grantWaiters.push({ ok, fail });
-    if (hostedStore.get().grantAsk === null) hostedStore.set({ grantAsk: Date.now() });
+    if (hostedStore.get().grantAsk === null) {
+      hostedStore.set({ grantAsk: Date.now() });
+      clearGrantTimer();
+      grantTimer = setTimeout(() => { grantTimer = null; grantFailed("The human check took too long. Try again."); }, HUMAN_CHECK_WAIT_MS);
+    }
   });
 }
 
 export async function verifyGrant(token: string): Promise<VerifyResult> {
   const r = await call<VerifyResult>("POST", HOSTED_PATHS.verify, { token });
+  clearGrantTimer();
   hostedStore.set((s) => ({ grantAsk: null, status: s.status ? { ...s.status, grantExpiresAt: r.grantExpiresAt } : s.status }));
   const w = grantWaiters; grantWaiters = [];
   w.forEach((x) => x.ok());
   return r;
 }
 
-/** The check was cancelled or failed: every waiting mutation gets its original 428. */
+/** The check was cancelled, failed or timed out: every waiting mutation gets its original 428. */
 export function grantFailed(message: string): void {
+  clearGrantTimer();
   hostedStore.set({ grantAsk: null });
   const w = grantWaiters; grantWaiters = [];
   w.forEach((x) => x.fail(new Error(message)));

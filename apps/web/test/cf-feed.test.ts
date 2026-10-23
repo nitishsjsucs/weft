@@ -120,6 +120,24 @@ describe("LiveFeed", () => {
     expect(calls.refreshAll).toBe(1);
   });
 
+  it("after a reconnect's full refresh, the next frame starts a new count instead of a second full refresh", async () => {
+    const { t, feed, sockets, calls } = setup();
+    feed.start(); sockets[0]!.open();
+    sockets[0]!.frame({ type: "commit", seq: 4, tables: ["a"] });
+    sockets[0]!.drop();
+    t.advance(1_000);
+    await Promise.resolve(); await Promise.resolve();
+    sockets[1]!.open();
+    expect(calls.refreshAll).toBe(1);
+    // Frames 5 to 8 went out while the socket was down (or the object restarted and counts from 1 again).
+    sockets[1]!.frame({ type: "commit", seq: 9, tables: ["b"] });
+    sockets[1]!.frame({ type: "commit", seq: 10, tables: ["c"] });
+    expect(calls.refreshAll).toBe(1);
+    expect(calls.commit).toEqual([["a"], ["b"], ["c"]]);
+    sockets[1]!.frame({ type: "commit", seq: 12, tables: ["d"] });   // a gap on the new socket is still one
+    expect(calls.refreshAll).toBe(2);
+  });
+
   it("does not reconnect while the tab is hidden, and reconnects once it is visible", async () => {
     const { t, s, feed, sockets } = setup();
     feed.start(); sockets[0]!.open();

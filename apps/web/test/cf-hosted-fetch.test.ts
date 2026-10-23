@@ -50,6 +50,19 @@ describe("hosted fetch", () => {
     expect(h.calls).toHaveLength(2);
   });
 
+  it("acts on a lease or session answer to the retry after the check", async () => {
+    const ended = harness([json(428, { code: "TURNSTILE_REQUIRED" }), json(409, { _tag: "Conflict", code: "LEASE_ENDED", message: "old generation" })]);
+    expect((await ended.f("/api/v1/sim/clock/advance", { method: "POST", body: "{}" })).status).toBe(409);
+    expect(ended.events).toEqual(["grant", "ended:server"]);
+    const required = harness([json(428, { code: "TURNSTILE_REQUIRED" }), json(409, { _tag: "Conflict", code: "LEASE_REQUIRED", message: "read only" })]);
+    await required.f("/api/v1/proposals/p/approve", { method: "POST" });
+    expect(required.events).toEqual(["grant", "start:mutation"]);
+    const invalid = harness([json(428, { code: "TURNSTILE_REQUIRED" }), json(401, { _tag: "Unauthorized", code: "SESSION_INVALID", message: "bad cookie" })]);
+    await invalid.f("/api/_hosted/pdf/pay_stub/pyc_1");
+    expect(invalid.events).toEqual(["grant", "session"]);
+    expect(invalid.calls).toHaveLength(2);
+  });
+
   it("leaves a 428 with another code alone", async () => {
     const h = harness([json(428, { code: "SOMETHING_ELSE" })]);
     expect((await h.f("/api/v1/x", { method: "POST", body: "{}" })).status).toBe(428);

@@ -1,9 +1,11 @@
 // The hosted web on Workers static assets (track cf5-web; docs/cloudflare/design.md 3.5, 4.5 and 6.2), against the
 // real export served by wrangler's asset Worker: deep links render from the `_` shells through `_redirects`, the CSP
 // from `_headers` lets the app run, a hidden tab makes no request, an idle tab with the change feed connected makes at
-// most one request a minute, commit frames refetch only what they touched, and the hosted shell's Start, 428 and
-// lease-ended flows work. /api and the socket are answered by the test (e2e/hosted-fixtures.ts).
+// most one request a minute, commit frames refetch only what they touched, the hosted shell's Start, 428 and
+// lease-ended flows work, and dictation, PDFs and the model switch work against stand-ins that refuse what the real
+// routes refuse. /api and the socket are answered by the test (e2e/hosted-fixtures.ts).
 import { expect, test } from "@playwright/test";
+import { pcmWavInfo } from "../../../packages/cf-extras/src/wav";
 import { cspViolations, hide, installHosted, settle, status } from "./hosted-fixtures";
 
 test.describe("static export on Workers assets", () => {
@@ -231,42 +233,85 @@ test.describe("hosted shell", () => {
     expect(h.api.filter((r) => r.path.startsWith("/api/_hosted/help"))).toEqual([expect.objectContaining({ path: "/api/_hosted/help?q=guided%20tour" })]);
   });
 
-  test("Dictate records a clip, fills the composer and sends nothing to the agent", async ({ browser }) => {
-    // A stand-in recorder: the check is the button's own flow (record, stop, transcribe, fill), not the device.
+  test("Dictate records a clip, sends it as 16 kHz mono WAV, fills the composer and sends nothing to the agent", async ({ browser }) => {
+    // The microphone is a Web Audio tone, so the button's own MediaRecorder makes a real compressed clip (WebM with
+    // Opus in Chromium). Dictation (the extras' own code, in the stand-in) refuses that unless the button converts it.
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     await page.addInitScript(() => {
-      navigator.mediaDevices.getUserMedia = async () => new MediaStream();
-      (window as unknown as { MediaRecorder: unknown }).MediaRecorder = class {
-        state = "inactive"; mimeType = "audio/webm"; ondataavailable: ((e: { data: Blob }) => void) | null = null; onstop: (() => void) | null = null;
-        constructor(readonly stream: MediaStream) {}
-        start() { this.state = "recording"; }
-        stop() { this.state = "inactive"; this.ondataavailable?.({ data: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }) }); this.onstop?.(); }
+      navigator.mediaDevices.getUserMedia = async () => {
+        const ac = new AudioContext();
+        const tone = ac.createOscillator();
+        const out = ac.createMediaStreamDestination();
+        tone.connect(out);
+        tone.start();
+        await ac.resume();
+        return out.stream;
       };
     });
     const h = await installHosted(page);
-    h.queue("POST /api/_hosted/dictate", { status: 200, body: { ok: true, text: "when do we pay salaries", seconds: 2, neurons: 1.6 } });
     await page.goto("/app/");
+    // The stand-in refuses what hosted refuses: the recorder's clip as it comes.
+    const raw = await page.evaluate(async () => {
+      const r = await fetch("/api/_hosted/dictate", { method: "POST", headers: { "content-type": "audio/webm" }, body: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]) });
+      return (await r.json()) as { ok: boolean; code?: string };
+    });
+    expect(raw).toMatchObject({ ok: false, code: "DICTATION_UNREADABLE" });
     const dictate = page.getByTestId("hosted-dictate");
     await dictate.click();
     await expect(dictate).toHaveAttribute("data-state", "recording");
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1_200);
     await dictate.click();
     await expect(page.getByTestId("agent-composer")).toHaveValue("when do we pay salaries");
-    expect(h.api.some((r) => r.path === "/api/_hosted/dictate" && r.method === "POST")).toBe(true);
+    const clip = h.dictated.at(-1)!;
+    expect(h.dictated).toHaveLength(2);
+    expect(clip.contentType).toBe("audio/wav");
+    expect(clip.result).toMatchObject({ ok: true, text: "when do we pay salaries" });
+    const wav = pcmWavInfo(new Uint8Array(clip.bytes));
+    expect(wav).toMatchObject({ format: "pcm", sampleRate: 16_000, channels: 1, bitsPerSample: 16, dataOffset: 44 });
+    expect(wav!.seconds).toBeGreaterThan(0.5);
+    expect(wav!.seconds).toBeLessThan(10);
     expect(h.api.some((r) => r.path === "/api/v1/agent/runs" && r.method === "POST")).toBe(false);
     await ctx.close();
   });
 
-  test("a PDF button downloads the rendered document", async ({ page }) => {
+  const OFFER = { candidateFirst: "Noor", candidateLast: "Castellanos", title: "Senior Firmware Engineer", workState: "CO", baseCents: 16_800_000, startDate: "2026-11-02", expiresOn: null, allowed: [], personaPrincipalId: null };
+
+  test("a PDF button names the offer's document, waits while it renders and downloads it; an offer without one has none", async ({ page }) => {
     const h = await installHosted(page);
-    h.override("GET /api/v1/offers", { status: 200, body: { hasMore: false, count: 1, data: [{ id: "offr_0001", candidateFirst: "Noor", candidateLast: "Castellanos", title: "Senior Firmware Engineer", workState: "CO", baseCents: 16_800_000, startDate: "2026-11-02", expiresOn: null, status: "accepted", allowed: [], personaPrincipalId: null }] } });
-    h.override("GET /api/_hosted/pdf/offer_letter/offr_0001", { status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.4\n%fake\n") });
+    h.override("GET /api/v1/offers", { status: 200, body: { hasMore: false, count: 2, data: [
+      { ...OFFER, id: "offr_0003", status: "accepted", documentId: "doc_0229" },
+      { ...OFFER, id: "offr_0001", candidateFirst: "Ravi", status: "sent", documentId: null },
+    ] } });
     await page.goto("/app/hiring/");
-    const download = page.waitForEvent("download");
+    const accepted = page.locator('[data-offer="offr_0003"]');
+    await expect(page.locator('[data-offer="offr_0001"]')).toBeVisible();
+    await expect(page.locator('[data-offer="offr_0001"] [data-testid^="hosted-pdf-"]')).toHaveCount(0);
+    await expect(accepted.getByTestId("hosted-pdf-signed_agreement")).toHaveAttribute("data-subject", "doc_0229");
+    const download = page.waitForEvent("download", { timeout: 30_000 });
+    await accepted.getByTestId("hosted-pdf-offer_letter").click();
+    await expect(accepted.getByTestId("hosted-pdf-offer_letter")).toContainText("Making the PDF...");
+    expect((await download).suggestedFilename()).toBe("offer-letter-doc_0229.pdf");
+    // The first request enqueued the render and answered 202; the button waited the 5 s it asked for and asked again.
+    const asks = h.api.filter((r) => r.path === "/api/_hosted/pdf/offer_letter/doc_0229");
+    expect(asks).toHaveLength(2);
+    expect(asks[1]!.at - asks[0]!.at).toBeGreaterThanOrEqual(4_500);
+    await expect(accepted.getByTestId("hosted-pdf-offer_letter")).toContainText("Offer letter PDF");
+  });
+
+  test("a render that fails while the button waits ends with the route's message and saves nothing", async ({ page }) => {
+    const h = await installHosted(page);
+    h.override("GET /api/v1/offers", { status: 200, body: { hasMore: false, count: 1, data: [{ ...OFFER, id: "offr_0003", status: "sent", documentId: "doc_0229" }] } });
+    h.queue("GET /api/_hosted/pdf/offer_letter/doc_0229",
+      { status: 202, body: { status: "rendering", retryAfterS: 1 } },
+      { status: 503, body: { _tag: "Refused", code: "PDF_RENDER_FAILED", message: "This document could not be rendered; try again in a few minutes", retryAfterS: 600 } });
+    let downloads = 0;
+    page.on("download", () => { downloads++; });
+    await page.goto("/app/hiring/");
     await page.getByTestId("hosted-pdf-offer_letter").click();
-    expect((await download).suggestedFilename()).toBe("offer-letter-offr_0001.pdf");
-    await expect(page.getByTestId("hosted-pdf-signed_agreement")).toBeVisible();
+    await expect(page.getByTestId("hosted-pdf-offer_letter").locator("xpath=..").getByRole("alert")).toHaveText("This document could not be rendered; try again in a few minutes");
+    expect(h.api.filter((r) => r.path === "/api/_hosted/pdf/offer_letter/doc_0229")).toHaveLength(2);
+    expect(downloads).toBe(0);
   });
 
   test("the model switch writes the world's provider and the session shows it", async ({ page }) => {
@@ -277,5 +322,10 @@ test.describe("hosted shell", () => {
     await page.locator('input[data-provider="workers_ai"]').check();
     await expect(page.getByTestId("hosted-model-current")).toContainText("New runs use Workers AI gpt-oss-120b.");
     expect(h.since(t0).filter((r) => r.method === "PUT").map((r) => r.path)).toEqual(["/api/_hosted/model"]);
+    expect(h.worldProvider).toBe("workers_ai");
+    // A fresh load reads the world's choice from the session alone.
+    await page.reload();
+    await expect(page.getByTestId("hosted-model-current")).toContainText("New runs use Workers AI gpt-oss-120b.");
+    await expect(page.locator('input[data-provider="workers_ai"]')).toBeChecked();
   });
 });

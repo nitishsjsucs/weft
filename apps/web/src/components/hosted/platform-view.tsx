@@ -18,11 +18,13 @@ export function shareLine(used: number, share: number): string {
   return `${f.format(used)} of ${f.format(share)} (${pct}%)`;
 }
 
-/** Human names for the Lobby's share keys; unknown keys read as themselves. */
+/**
+ * Human names for the readout's share keys: the Lobby's (apps/cf/src/core/lobby/policy.ts SHARES) and the extras'
+ * daily counters (packages/cf-extras/src/platform.ts); an unknown key reads as itself.
+ */
 export const SHARE_LABEL: Record<string, string> = {
   doRowsWritten: "Durable Object rows written", doRowsRead: "Durable Object rows read", doRequests: "Durable Object requests",
-  workerRequests: "Workers requests", do_rows_written: "Durable Object rows written", do_rows_read: "Durable Object rows read",
-  do_requests: "Durable Object requests", worker_requests: "Workers requests",
+  workersRequests: "Workers requests", "help.queries": "Help searches", "pdf.browser_seconds": "PDF rendering (browser seconds)",
 };
 
 function Tile({ icon, label, value, note, testid }: { icon: ReactNode; label: string; value: ReactNode; note?: ReactNode; testid: string }) {

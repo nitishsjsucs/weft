@@ -5,7 +5,8 @@
 // - 409 LEASE_REQUIRED (a mutation on the shared showcase): offer "Start my demo company";
 // - 409 LEASE_ENDED (the cookie's generation is older than the world's): show the lease-ended screen;
 // - 401 SESSION_INVALID: re-read the session.
-// The response the caller sees is the retried one, or the original when the check was cancelled.
+// The response the caller sees is the retried one, or the original when the check was cancelled. The lease and
+// session answers are acted on whichever response carries them, the first or the retried one.
 import { TABLES_HEADER, type HostedErrorCode } from "../../../../../packages/contracts/src/ext/cf-hosted";
 import { recordTables } from "../api/poll";
 import { ensureHumanGrant, markEnded, refreshSession, requestStart } from "./session";
@@ -42,11 +43,13 @@ export function createHostedFetch(deps: () => HostedFetchDeps = defaultDeps): ty
     const method = methodOf(input, init);
     const send = () => d.fetch(input, { credentials: "same-origin", ...init });
     let res = await send();
-    const code = await gateCode(res);
+    let code = await gateCode(res);
     if (res.status === 428 && code === "TURNSTILE_REQUIRED") {
       try { await d.ensureHumanGrant(); } catch { return res; }
       res = await send();
-    } else if (code === "LEASE_REQUIRED") {
+      code = await gateCode(res);
+    }
+    if (code === "LEASE_REQUIRED") {
       d.requestStart("mutation");
     } else if (code === "LEASE_ENDED") {
       d.markEnded("server");

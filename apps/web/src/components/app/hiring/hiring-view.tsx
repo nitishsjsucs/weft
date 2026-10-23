@@ -56,6 +56,18 @@ function OfferForm() {
   );
 }
 
+/**
+ * The hosted PDF buttons an offer shows, both for its offer letter document (`documentId`, a doc_ id: the PDF route
+ * reads documents, not offers): the offer letter once sent, and the signed agreement once accepted. An offer without
+ * a document (a seeded one can have none) shows neither.
+ */
+export function offerPdfs(o: Pick<W2OnboardingOfferDetail, "status" | "documentId">): { kind: "offer_letter" | "signed_agreement"; subjectId: string }[] {
+  if (!o.documentId || o.status === "draft" || o.status === "voided") return [];
+  return o.status === "accepted"
+    ? [{ kind: "offer_letter", subjectId: o.documentId }, { kind: "signed_agreement", subjectId: o.documentId }]
+    : [{ kind: "offer_letter", subjectId: o.documentId }];
+}
+
 function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
   const send = useMutation(async () => client.post("/v1/offers/:id/send", { params: { id: o.id } }));
   const voidIt = useMutation(async () => client.post("/v1/offers/:id/void", { params: { id: o.id } }));
@@ -79,8 +91,7 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
         </span>
       ) : null}
       {o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted") ? <a data-testid={T.offerPortalLink} className="text-1 text-blue-11 hover:underline" href={`/portal?as=${o.personaPrincipalId}`}>Open portal as new hire</a> : null}
-      {HOSTED && o.status !== "draft" && o.status !== "voided" ? <PdfButton kind="offer_letter" subjectId={o.id} size="xs" /> : null}
-      {HOSTED && o.status === "accepted" ? <PdfButton kind="signed_agreement" subjectId={o.id} size="xs" /> : null}
+      {HOSTED ? offerPdfs(o).map((p) => <PdfButton key={p.kind} kind={p.kind} subjectId={p.subjectId} size="xs" />) : null}
       {err ? <span role="alert" className="w-full text-1 text-red-11">{errorText(err)}</span> : null}
       <OfferScreening offerId={o.id} accepted={o.status === "accepted"} />
     </li>

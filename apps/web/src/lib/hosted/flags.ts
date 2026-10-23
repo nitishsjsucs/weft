@@ -21,6 +21,8 @@ export const DEGRADED_POLL_MULTIPLIER = 3;
 export const IDLE_AFTER_MS = 120_000;
 export const IDLE_MULTIPLIER = 4;
 export const IDLE_CAP_MS = 60_000;
+/** A human check (a 428's Turnstile run) still open after this long fails, and the waiting requests get their 428. */
+export const HUMAN_CHECK_WAIT_MS = 60_000;
 /** The run trace fallback poll while SSE is unavailable: 1 s on Node, 5 s hosted (design 3.4). */
 export const HOSTED_TRACE_POLL_MS = 5_000;
 /** Client keepalive on /api/_live: the slot answers with the hibernation auto-response, so it never wakes the object. */
