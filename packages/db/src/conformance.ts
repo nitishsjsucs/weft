@@ -620,6 +620,21 @@ export interface ConformanceRunOptions {
   includeSlow?: boolean;
 }
 export interface ConformanceCaseResult { name: string; ok: boolean; skipped?: boolean; detail?: string }
+
+/** Names only the fields that differ (top level, then inside `value`), so a long result never hides the difference. */
+function mismatch(expected: unknown, got: unknown): string {
+  const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  const diffs: string[] = [];
+  const walk = (e: unknown, g: unknown, at: string) => {
+    if (obj(e) && obj(g)) {
+      for (const k of new Set([...Object.keys(e), ...Object.keys(g)])) walk(e[k], g[k], at ? `${at}.${k}` : k);
+      return;
+    }
+    if (JSON.stringify(e) !== JSON.stringify(g)) diffs.push(`${at || "result"}: expected ${JSON.stringify(e)?.slice(0, 300)}, got ${JSON.stringify(g)?.slice(0, 300)}`);
+  };
+  walk(expected, got, "");
+  return diffs.join("; ").slice(0, 1500) || `expected ${JSON.stringify(expected).slice(0, 400)}, got ${JSON.stringify(got).slice(0, 400)}`;
+}
 export interface ConformanceRun { passed: number; failed: number; skipped: number; cases: ConformanceCaseResult[] }
 
 /**
@@ -655,7 +670,7 @@ export async function runConformance(storage: DurableStorageLike, opts: Conforma
       continue;
     }
     let ok = same(got, c.expect);
-    let detail = ok ? undefined : `expected ${JSON.stringify(c.expect).slice(0, 400)}, got ${JSON.stringify(got).slice(0, 400)}`;
+    let detail = ok ? undefined : mismatch(c.expect, got);
     if (ok && c.after) {
       let after: Outcome;
       try { after = { ok: true, value: await c.after(host) }; } catch (e) { after = { ok: false, error: messageOf(e) }; }
