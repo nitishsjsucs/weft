@@ -7,7 +7,7 @@ import {
   type HostedResetResult,
 } from "../shared/contracts";
 import { agentEnabled, envConfig } from "../shared/config";
-import type { FrontEnv } from "../shared/env";
+import { isPoolSlot, type FrontEnv } from "../shared/env";
 import { ADMIN_MAX_BODY_BYTES, hostedError, isMutation, json, plainError, readJson, readTextCapped } from "../shared/http";
 import { logError } from "../shared/log";
 import { DO_PATHS, HEALTH_PATH, isModelAdmission, isUpload, SIM_RESET_PATH } from "../shared/routes";
@@ -189,14 +189,19 @@ async function forwardToExtras(req: Request, env: FrontEnv, url: URL, ctx: Retur
   return env.CORE.fetch(new Request(url.toString(), init));
 }
 
-/** /mcp (design 6.3 and 6.4): routed by the key prefix wk_mcp_<slot>_<gen>_<rand>, never by the URL. */
+/**
+ * /mcp (design 6.3 and 6.4): routed by the key prefix wk_mcp_<slot>_<gen>_<rand>, never by the URL. Only a real pool
+ * slot is routed (a key naming slot-99 or anything else would otherwise create a Durable Object), and RL_MCP is
+ * asked per IP hash before it is asked per key, so random well-formed keys from one address are limited like one.
+ */
 async function mcp(req: Request, env: FrontEnv, url: URL): Promise<Response> {
   const auth = req.headers.get("authorization") ?? "";
   const key = /^Bearer\s+(\S+)$/i.exec(auth)?.[1] ?? req.headers.get("x-api-key") ?? "";
   const parsed = key ? parseHostedMcpKey(key) : null;
-  if (!parsed || !/^slot-\d+$/.test(parsed.slot)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "Use the MCP key from your demo company (Bearer wk_mcp_...)");
-  if (await rateLimited(env.RL_MCP, `mcp:${await mcpKeyId(key)}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
+  if (!parsed || !isPoolSlot(env, parsed.slot)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "Use the MCP key from your demo company (Bearer wk_mcp_...)");
   const v = await resolveVisit(req, env);
+  if (await rateLimited(env.RL_MCP, `mcp-ip:${v.ipHash}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
+  if (await rateLimited(env.RL_MCP, `mcp:${await mcpKeyId(key)}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
   return forwardToWorld(req, env, {
     slot: parsed.slot, ctx: { slot: parsed.slot, gen: parsed.gen, visitor: null, ipHash: v.ipHash, human: false, smoke: false },
     path: DO_PATHS.mcp, search: url.search,

@@ -6,6 +6,7 @@ import front from "../../src/front/index";
 import { ADMIN_MAX_BODY_BYTES } from "../../src/shared/http";
 import type { FrontEnv } from "../../src/shared/env";
 import { signAdmin } from "../../src/shared/tokens";
+import { formatHostedMcpKey, HOSTED_RATE_LIMITS } from "../../src/shared/contracts";
 
 export interface FakeFront {
   env: FrontEnv;
@@ -102,5 +103,34 @@ describe("admin bodies", () => {
     const sig = await signAdmin({ token: f.env.WEFT_ADMIN_TOKEN!, method: "POST", path: "/api/_admin/sweep", body });
     const res = await call(f, "/api/_admin/sweep", { method: "POST", body, headers: { "x-weft-admin": sig, "content-type": "application/json" } });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("/mcp", () => {
+  const key = (slot: string, rand = "A".repeat(24)) => formatHostedMcpKey(slot, 1, rand);
+  const mcpCall = (f: FakeFront, k: string, ip?: string) => call(f, "/mcp", { method: "POST", body: "{}", headers: { authorization: `Bearer ${k}` }, ip });
+
+  it("routes only a real pool slot's key, so a key cannot name a Durable Object into existence", async () => {
+    const f = fakeFront({ pool: 2 });
+    expect((await mcpCall(f, key("slot-1"))).status).toBe(200);
+    expect((await mcpCall(f, key("slot-2"))).status).toBe(200);
+    for (const slot of ["slot-3", "slot-99", "slot-0", "slot-01", "slot-smoke", "showcase", "conformance", "x"]) {
+      const r = await mcpCall(f, key(slot));
+      expect(r.status, slot).toBe(401);
+      expect(await r.json(), slot).toMatchObject({ code: "MCP_KEY_REQUIRED" });
+    }
+    expect(f.worlds.map((w) => w.slot)).toEqual(["slot-1", "slot-2"]);
+  });
+
+  it("limits random well-formed keys from one address by its IP hash, not only per key", async () => {
+    const f = fakeFront({ pool: 2 });
+    const statuses: number[] = [];
+    for (let i = 0; i < HOSTED_RATE_LIMITS.RL_MCP.limit + 5; i++) statuses.push((await mcpCall(f, key("slot-1", `K${String(i).padStart(23, "0")}`), "203.0.113.50")).status);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(5);
+    expect(f.worlds).toHaveLength(HOSTED_RATE_LIMITS.RL_MCP.limit);
+    // Another address has its own allowance; every key was also checked on its own.
+    expect((await mcpCall(f, key("slot-1", "Z".repeat(24)), "203.0.113.51")).status).toBe(200);
+    expect(f.limits.filter((l) => l.binding === "RL_MCP" && l.key.startsWith("mcp-ip:"))).toHaveLength(HOSTED_RATE_LIMITS.RL_MCP.limit + 6);
+    expect(f.limits.filter((l) => l.binding === "RL_MCP" && l.key.startsWith("mcp:"))).toHaveLength(HOSTED_RATE_LIMITS.RL_MCP.limit + 1);
   });
 });
