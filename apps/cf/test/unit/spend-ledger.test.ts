@@ -1,9 +1,10 @@
 // SpendDO's ledger on node:sqlite: the file ledger's fold, the frozen run, day and live caps, and the hosted
-// visitor, IP-hash and neuron caps, orphans settled at their worst case (design 4.3, 5.2, 6.3, section 0).
+// visitor, IP-hash and neuron caps, orphans settled at their worst case (design 4.3, 5.2, 6.3, section 0), and the
+// persisted day totals that keep every read flat on a ledger that just woke from hibernation (design 5.5).
 import { describe, expect, it } from "vitest";
 import { HOSTED_CAP_DEFAULTS, ORPHAN_SETTLE_MS, type HostedCaps } from "../../src/shared/contracts";
-import { createSqlSpendLedger, fold, migrateSpend, PRUNE_BATCH, type SpendRow } from "../../src/core/spend/ledger";
-import { memorySql } from "./sqlite";
+import { createSqlSpendLedger, fold, migrateSpend, PRUNE_BATCH, rebuildSpendTotals, SPEND_SCHEMA_VERSION, type SpendRow } from "../../src/core/spend/ledger";
+import { memorySql, readMeter } from "./sqlite";
 
 const USD = 1e6;
 
@@ -28,25 +29,77 @@ describe("SpendDO ledger", () => {
     expect(() => migrateSpend(s)).toThrow(/newer/);
   });
 
-  it("adds the partial indexes to a ledger made before them, and creating them again changes nothing", () => {
+  it("adds the indexes to a ledger made before them, and creating them again changes nothing", () => {
     const s = memorySql();
     const indexes = () => s.sql.exec<{ name: string; sql: string }>(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL ORDER BY name`).toArray();
-    // The schema as it was before the live and reservation-time indexes, with an entry in it.
-    s.sql.exec(`CREATE TABLE spend_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
-    s.sql.exec(`INSERT INTO spend_meta (k, v) VALUES ('schema', '1')`);
-    s.sql.exec(`CREATE TABLE spend_entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, day TEXT NOT NULL, world TEXT, run_id TEXT,
-      kind TEXT NOT NULL, reservation_id TEXT NOT NULL, usd_micros INTEGER NOT NULL, model TEXT NOT NULL, live INTEGER NOT NULL, visitor TEXT,
-      ip_hash TEXT, neurons INTEGER NOT NULL DEFAULT 0, product TEXT)`);
-    s.sql.exec(`CREATE INDEX spend_entries_day ON spend_entries(day)`);
+    // The schema as it was before the reservation-time, visitor and IP-hash indexes, with an entry in it.
+    legacySchema(s, { indexes: false });
     s.sql.exec(`INSERT INTO spend_entries (at, day, kind, reservation_id, usd_micros, model, live) VALUES ('2026-10-26T11:00:00.000Z', '2026-10-26', 'reserve', 'rsv_old', 7, 'm', 1)`);
     migrateSpend(s);
     const once = indexes();
-    expect(once.map((i) => i.name)).toEqual(expect.arrayContaining(["spend_entries_day", "spend_entries_live", "spend_entries_reserve_at", "spend_entries_rsv", "spend_entries_run", "neuron_entries_day"]));
+    expect(once.map((i) => i.name)).toEqual(expect.arrayContaining(["spend_entries_day", "spend_entries_reserve_at", "spend_entries_rsv", "spend_entries_run", "spend_entries_visitor", "spend_entries_ip", "neuron_entries_day"]));
+    // The live index only the in-memory totals were built through is gone.
+    expect(once.map((i) => i.name)).not.toContain("spend_entries_live");
     migrateSpend(s);
     migrateSpend(s);
     expect(indexes()).toEqual(once);
+    expect(s.sql.exec(`SELECT v FROM spend_meta WHERE k = 'schema'`).toArray()).toEqual([{ v: SPEND_SCHEMA_VERSION }]);
     const l = createSqlSpendLedger(s, { caps: () => HOSTED_CAP_DEFAULTS, wallNow: () => new Date("2026-10-26T12:00:00.000Z") });
     expect(l.committed({ day: "2026-10-26" })).toEqual({ settledMicros: 0, openMicros: 7, neurons: 0 });
+  });
+
+  it("upgrades a schema 1 ledger once: its day totals are built from the entries it holds, and a later start builds nothing", () => {
+    const s = memorySql();
+    legacySchema(s, { indexes: true });
+    const row = s.db.prepare(`INSERT INTO spend_entries (at, day, world, run_id, kind, reservation_id, usd_micros, model, live, visitor, ip_hash, neurons, product)
+      VALUES (?, ?, 'slot-1:gen-1', ?, ?, ?, ?, 'gpt-5.6-luna', ?, ?, 'ip_a', ?, ?)`);
+    // Three days of history: settled, released and still open reservations, some live, some with neurons.
+    for (let i = 0; i < 3_000; i++) {
+      const day = ["2026-10-24", "2026-10-25", "2026-10-26"][i % 3]!;
+      const product = i % 7 === 0 ? "ocr" : i % 5 === 0 ? "agent" : null;
+      row.run(`${day}T10:00:00.000Z`, day, `run_m${i}`, "reserve", `rsv_m${i}`, 1000, i % 2, `vis_${i % 11}`, product ? 40 : 0, product);
+      if (i % 4 === 0) row.run(`${day}T10:01:00.000Z`, day, `run_m${i}`, "settle", `rsv_m${i}`, 700, i % 2, `vis_${i % 11}`, product ? 30 : 0, product);
+      else if (i % 4 === 1) row.run(`${day}T10:01:00.000Z`, day, `run_m${i}`, "release", `rsv_m${i}`, 0, i % 2, `vis_${i % 11}`, 0, product);
+    }
+    const nrow = s.db.prepare(`INSERT INTO neuron_entries (at, day, product, model, neurons) VALUES (?, ?, ?, '@cf/x', 3)`);
+    for (let i = 0; i < 300; i++) nrow.run("2026-10-26T09:00:00.000Z", "2026-10-26", ["ocr", "dictation", "embeddings"][i % 3]!);
+    // The live totals of entries pruned before the upgrade, carried in spend_meta.
+    s.sql.exec(`INSERT INTO spend_meta (k, v) VALUES ('live.carry', ?)`, JSON.stringify({ settledMicros: 5_000, openMicros: 0, neurons: 9 }));
+    const caps = { ...HOSTED_CAP_DEFAULTS, dayUsd: 1_000, runUsd: 1_000, visitorDayUsd: 1_000, ipDayUsd: 1_000 };
+    // What schema 1 answered (it folded the entries in memory), computed here from the entries.
+    const folded = (keep: (r: SpendRow) => boolean) => {
+      const t = { settledMicros: 0, openMicros: 0, neurons: 0 };
+      for (const f of fold(s.db.prepare(`SELECT * FROM spend_entries ORDER BY seq`).all() as unknown as SpendRow[]).values()) {
+        if (!keep(f.r)) continue;
+        if (f.open) t.openMicros += f.micros; else t.settledMicros += f.micros;
+        t.neurons += f.neurons;
+      }
+      return t;
+    };
+    const meter = readMeter(s);
+    migrateSpend(s);
+    // The upgrade reads each entry once (and each direct neuron entry once, summed by day and product).
+    expect(meter.rows).toBeLessThanOrEqual(5_000);
+    expect(s.sql.exec(`SELECT v FROM spend_meta WHERE k = 'schema'`).toArray()).toEqual([{ v: "2" }]);
+    expect(persistedDays(s)).toEqual(foldedDays(s));
+    const l = createSqlSpendLedger(s, { caps: () => caps, wallNow: () => new Date("2026-10-26T12:00:00.000Z") });
+    for (const day of ["2026-10-24", "2026-10-25", "2026-10-26"]) {
+      expect(l.committed({ day }), day).toEqual(folded((r) => r.day === day));
+      expect(l.committed({ day, live: false }), day).toEqual(folded((r) => r.day === day && r.live === 0));
+    }
+    const live = folded((r) => r.live === 1);
+    expect(l.committed({ live: true })).toEqual({ settledMicros: live.settledMicros + 5_000, openMicros: live.openMicros, neurons: live.neurons + 9 });
+    const st = l.status({});
+    expect(st.neurons.byProduct).toEqual({
+      agent: folded((r) => r.day === "2026-10-26" && r.product === "agent").neurons, ocr: folded((r) => r.day === "2026-10-26" && r.product === "ocr").neurons + 300,
+      embeddings: 300, dictation: 300,
+    });
+    expect(st.openReservations).toBe((s.db.prepare(`SELECT COUNT(*) AS n FROM spend_entries r WHERE day = '2026-10-26' AND kind = 'reserve' AND NOT EXISTS (SELECT 1 FROM spend_entries x WHERE x.reservation_id = r.reservation_id AND x.kind != 'reserve')`).get() as { n: number }).n);
+    // A later start (every cold start runs the migration) reads the schema row and builds nothing.
+    const before = meter.rows;
+    migrateSpend(s);
+    expect(meter.rows - before).toBe(1);
+    expect(persistedDays(s)).toEqual(foldedDays(s));
   });
 
   it("prunes a backlog of old entries a bounded batch per sweep, never splitting a reservation from its close", () => {
@@ -63,6 +116,8 @@ describe("SpendDO ledger", () => {
     row.run("2026-10-20T11:00:00.000Z", "2026-10-20", "run_x", "settle", "rsv_gone", 5, 1);
     const nrow = s.db.prepare(`INSERT INTO neuron_entries (at, day, product, model, neurons) VALUES (?, ?, 'ocr', '@cf/x', 1)`);
     for (let i = 0; i < n; i++) nrow.run(`${day(i)}T10:00:00.000Z`, day(i));
+    // Written past the ledger: its day totals are built from them, as the schema 1 upgrade builds them.
+    rebuildSpendTotals(s);
     const live = Array.from({ length: n }, (_, i) => i).filter((i) => i % 3);
     const expected = live.reduce((t, i) => t + (i === n - 1 ? 1000 : 900), 0);
     expect(l.status({}).spentMicros.live).toBe(expected);
@@ -74,8 +129,10 @@ describe("SpendDO ledger", () => {
       sweeps += 1;
       const read = meter.rows;
       l.settleOrphans();
-      // What a sweep reads is bounded by its batch, not by the backlog (no statement scans a table).
-      expect(meter.rows - read).toBeLessThanOrEqual(2 * PRUNE_BATCH + 2);
+      // What a sweep reads is bounded by its batches (spend rows, then direct neuron rows), not by the backlog.
+      expect(meter.rows - read).toBeLessThanOrEqual(3 * PRUNE_BATCH + 10);
+      // Each batch left its days' rows: what is persisted is the fold of what is left.
+      expect(persistedDays(s)).toEqual(foldedDays(s));
       const s2 = count("spend_entries"), n2 = count("neuron_entries");
       expect(spend - s2).toBeLessThanOrEqual(2 * PRUNE_BATCH);
       expect(neurons - n2).toBeLessThanOrEqual(PRUNE_BATCH);
@@ -83,6 +140,8 @@ describe("SpendDO ledger", () => {
       expect(sweeps).toBeLessThan(10);
     }
     expect(sweeps).toBe(3);
+    // Every old day's row went with its last entry.
+    expect(s.sql.exec(`SELECT day FROM spend_days`).toArray()).toEqual([]);
     // The pruned live rows' totals carried over whole: each reservation went with its close.
     const fresh = createSqlSpendLedger(s, { caps: () => ({ ...HOSTED_CAP_DEFAULTS, liveUsd: 1_000 }), wallNow: () => new Date("2026-10-26T13:00:00.000Z") });
     expect(fresh.status({}).spentMicros.live).toBe(expected);
@@ -240,110 +299,177 @@ describe("SpendDO ledger", () => {
   });
 });
 
-/**
- * Rows read, as workerd bills them, cannot be asked of node:sqlite, so each statement here is charged by its query
- * plan: a scan of a table (through an index or not) costs the table's rows, an index search costs the rows it returns
- * (index rows and the correlated subqueries' lookups are left out, as they are bounded by what the search returns).
- * Statements that write read nothing here. Enough to tell a read that grows with the table from one that does not.
- */
-function readMeter(s: ReturnType<typeof memorySql>) {
-  const meter = { rows: 0, statements: 0 };
-  const exec = s.sql.exec.bind(s.sql);
-  s.sql.exec = ((query: string, ...b: unknown[]) => {
-    const cur = exec(query, ...b);
-    if (/^\s*(select|with)/i.test(query)) {
-      meter.statements += 1;
-      const plan = s.db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...(b as never[])) as { detail: string }[];
-      let scanned = 0;
-      for (const p of plan) {
-        const m = /^SCAN (\w+)\b/.exec(p.detail);
-        if (m) scanned += Number((s.db.prepare(`SELECT COUNT(*) AS n FROM ${m[1]}`).get() as { n: number }).n);
-      }
-      meter.rows += scanned || cur.toArray().length;
-    }
-    return cur;
-  }) as typeof s.sql.exec;
-  return meter;
+
+/** The ledger's tables as schema "1" made them (no spend_days); `indexes` adds the indexes it had by then. */
+function legacySchema(s: ReturnType<typeof memorySql>, o: { indexes: boolean }): void {
+  s.sql.exec(`CREATE TABLE spend_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
+  s.sql.exec(`INSERT INTO spend_meta (k, v) VALUES ('schema', '1')`);
+  s.sql.exec(`CREATE TABLE spend_entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, day TEXT NOT NULL, world TEXT, run_id TEXT,
+    kind TEXT NOT NULL, reservation_id TEXT NOT NULL, usd_micros INTEGER NOT NULL, model TEXT NOT NULL, live INTEGER NOT NULL, visitor TEXT,
+    ip_hash TEXT, neurons INTEGER NOT NULL DEFAULT 0, product TEXT)`);
+  s.sql.exec(`CREATE INDEX spend_entries_day ON spend_entries(day)`);
+  if (!o.indexes) return;
+  s.sql.exec(`CREATE INDEX spend_entries_rsv ON spend_entries(reservation_id)`);
+  s.sql.exec(`CREATE INDEX spend_entries_run ON spend_entries(world, run_id) WHERE run_id IS NOT NULL`);
+  s.sql.exec(`CREATE INDEX spend_entries_live ON spend_entries(seq) WHERE live = 1`);
+  s.sql.exec(`CREATE INDEX spend_entries_reserve_at ON spend_entries(at) WHERE kind = 'reserve'`);
+  s.sql.exec(`CREATE TABLE neuron_entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, day TEXT NOT NULL, product TEXT NOT NULL, model TEXT NOT NULL, neurons INTEGER NOT NULL)`);
+  s.sql.exec(`CREATE INDEX neuron_entries_day ON neuron_entries(day)`);
 }
 
-describe("SpendDO ledger reads", () => {
-  /** A ledger with `history` rows on earlier days (half of them live) and `today` reservations today. */
+type DayRow = Record<string, number | string>;
+const DAY_KEYS = ["settled_micros", "open_micros", "open_count", "neurons", "agent_neurons", "ocr_neurons", "embeddings_neurons", "dictation_neurons", "live_settled_micros", "live_open_micros", "live_neurons"];
+const nonZero = (r: DayRow) => DAY_KEYS.some((k) => Number(r[k]) !== 0);
+
+/** spend_days as persisted, without rows that are all zeros (a day whose reservations were all released). */
+function persistedDays(s: ReturnType<typeof memorySql>): DayRow[] {
+  return s.db.prepare(`SELECT * FROM spend_days ORDER BY day`).all().map((r) => ({ ...(r as DayRow) })).filter(nonZero);
+}
+
+/** spend_days as a full fold of every entry left (and every direct neuron entry) would make it, computed here. */
+function foldedDays(s: ReturnType<typeof memorySql>): DayRow[] {
+  const days = new Map<string, DayRow>();
+  const at = (day: string) => { let r = days.get(day); if (!r) { r = { day, ...Object.fromEntries(DAY_KEYS.map((k) => [k, 0])) }; days.set(day, r); } return r; };
+  const add = (r: DayRow, k: string, n: number) => { r[k] = Number(r[k]) + n; };
+  const rows = s.db.prepare(`SELECT * FROM spend_entries ORDER BY seq`).all() as unknown as SpendRow[];
+  for (const f of fold(rows).values()) {
+    const r = at(f.r.day);
+    const settled = f.open ? 0 : f.micros, open = f.open ? f.micros : 0;
+    add(r, "settled_micros", settled); add(r, "open_micros", open); add(r, "open_count", f.open ? 1 : 0); add(r, "neurons", f.neurons);
+    const p = f.r.product ?? "agent";
+    if (["agent", "ocr", "embeddings", "dictation"].includes(p)) add(r, `${p}_neurons`, f.neurons);
+    if (f.r.live === 1) { add(r, "live_settled_micros", settled); add(r, "live_open_micros", open); add(r, "live_neurons", f.neurons); }
+  }
+  for (const d of s.db.prepare(`SELECT day, product, neurons FROM neuron_entries`).all() as { day: string; product: string; neurons: number }[]) {
+    if (["agent", "ocr", "embeddings", "dictation"].includes(d.product)) add(at(d.day), `${d.product}_neurons`, d.neurons);
+  }
+  return [...days.values()].filter(nonZero).sort((a, b) => String(a.day).localeCompare(String(b.day)));
+}
+
+/** The live totals as a full fold of the live entries left plus the carry of the pruned ones. */
+function foldedLive(s: ReturnType<typeof memorySql>) {
+  const carry = s.db.prepare(`SELECT v FROM spend_meta WHERE k = 'live.carry'`).get() as { v: string } | undefined;
+  const t = { settledMicros: 0, openMicros: 0, neurons: 0, ...(carry ? JSON.parse(carry.v) as object : {}) };
+  for (const f of fold(s.db.prepare(`SELECT * FROM spend_entries ORDER BY seq`).all() as unknown as SpendRow[]).values()) {
+    if (f.r.live !== 1) continue;
+    if (f.open) t.openMicros += f.micros; else t.settledMicros += f.micros;
+    t.neurons += f.neurons;
+  }
+  return t;
+}
+
+describe("SpendDO ledger reads, cold", () => {
+  const CAPS: HostedCaps = { ...HOSTED_CAP_DEFAULTS, dayUsd: 1_000, runUsd: 1_000, visitorDayUsd: 1_000, ipDayUsd: 1_000 };
+  /**
+   * A ledger with `history` rows on yesterday (half of them live) and `today` reservations today, each settled, all of
+   * other visitors and addresses than the ones measured. Then the object hibernates: what is measured is a FRESH
+   * ledger over the same storage, built after the writes, with nothing in memory.
+   */
   function seeded(o: { history: number; today: number; liveUsd?: number | null }) {
-    const caps: HostedCaps = { ...HOSTED_CAP_DEFAULTS, dayUsd: 1_000, runUsd: 1_000, visitorDayUsd: 1_000, ipDayUsd: 1_000, liveUsd: o.liveUsd ?? null };
+    const caps: HostedCaps = { ...CAPS, liveUsd: o.liveUsd ?? null };
     const s = memorySql();
     migrateSpend(s);
     let now = new Date("2026-10-26T12:00:00.000Z");
     const insert = s.db.prepare(`INSERT INTO spend_entries (at, day, world, run_id, kind, reservation_id, usd_micros, model, live, visitor, ip_hash, neurons, product)
-      VALUES (?, ?, 'slot-1:gen-1', ?, ?, ?, 1000, 'gpt-5.6-luna', ?, 'vis_a', 'ip_a', 0, NULL)`);
+      VALUES (?, ?, 'slot-1:gen-1', ?, ?, ?, 1000, 'gpt-5.6-luna', ?, ?, ?, 0, NULL)`);
     for (let i = 0; i < o.history; i += 2) {
       const at = new Date(now.getTime() - 86_400_000 - i * 1000).toISOString();
-      insert.run(at, at.slice(0, 10), `run_h${i}`, "reserve", `rsv_h${i}`, i % 4 === 0 ? 1 : 0);
-      insert.run(at, at.slice(0, 10), `run_h${i}`, "settle", `rsv_h${i}`, i % 4 === 0 ? 1 : 0);
+      insert.run(at, at.slice(0, 10), `run_h${i}`, "reserve", `rsv_h${i}`, i % 4 === 0 ? 1 : 0, `vis_h${i % 13}`, `ip_h${i % 5}`);
+      insert.run(at, at.slice(0, 10), `run_h${i}`, "settle", `rsv_h${i}`, i % 4 === 0 ? 1 : 0, `vis_h${i % 13}`, `ip_h${i % 5}`);
     }
-    const l = createSqlSpendLedger(s, { caps: () => caps, wallNow: () => now });
+    // Written past the ledger: their day totals are built once, as the schema 1 upgrade builds them.
+    rebuildSpendTotals(s);
+    const writer = createSqlSpendLedger(s, { caps: () => caps, wallNow: () => now });
     for (let i = 0; i < o.today; i++) {
-      const r = l.reserve({ runId: `run_t${i}`, usdMicros: 1000, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: "vis_a", ipHash: "ip_a" });
-      if (r.ok) l.settle(r.reservationId, 900);
+      const r = writer.reserve({ runId: `run_t${i}`, usdMicros: 1000, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: `vis_t${i % 7}`, ipHash: `ip_t${i % 3}` });
+      if (r.ok) writer.settle(r.reservationId, 900);
     }
     now = new Date(now.getTime() + 1000);
-    // The object has been up: whatever it rebuilds once is behind it.
-    l.status({});
     const meter = readMeter(s);
-    return { l, meter, advance: (ms: number) => { now = new Date(now.getTime() + ms); } };
+    const fresh = () => createSqlSpendLedger(s, { caps: () => caps, wallNow: () => now });
+    return { s, meter, fresh, advance: (ms: number) => { now = new Date(now.getTime() + ms); } };
   }
 
-  const perCall = (o: { history: number; today: number; liveUsd?: number | null }) => {
-    const { l, meter, advance } = seeded(o);
-    l.status({ visitor: "vis_a", ipHash: "ip_a" });
-    const status = meter.rows;
-    const r = l.reserve({ runId: "run_new", usdMicros: 1000, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: "vis_a", ipHash: "ip_a" });
-    expect(r.ok).toBe(true);
-    const reserve = meter.rows - status;
-    if (r.ok) l.settle(r.reservationId, 500);
-    const settle = meter.rows - status - reserve;
-    // The cron's orphan sweep, 15 minutes on: the first one after a start looks back two days, the next ones only at
-    // what crossed the orphan age since.
-    advance(ORPHAN_SETTLE_MS + 1000);
-    l.settleOrphans();
-    advance(ORPHAN_SETTLE_MS);
-    const before = meter.rows;
-    l.settleOrphans();
-    return { status, reserve, settle, sweep: meter.rows - before };
+  /** Rows read by `fn` on a fresh (just woken) ledger, the tables it read and its index searches of the entries. */
+  const cold = (x: ReturnType<typeof seeded>, fn: (l: SqlSpendLedgerT) => unknown) => {
+    const l = x.fresh();
+    const rows = x.meter.rows, n = x.meter.searches.length;
+    x.meter.tables.clear();
+    fn(l);
+    return { rows: x.meter.rows - rows, tables: [...x.meter.tables].sort(), searches: x.meter.searches.slice(n).filter((d) => /^SEARCH spend_entries\b/.test(d)) };
   };
 
-  it("do not grow with the table or with today's steps, with the live cap off (section 0)", () => {
+  const perCall = (o: { history: number; today: number; liveUsd?: number | null }) => {
+    const x = seeded(o);
+    const status = cold(x, (l) => l.status({})).rows;
+    const visitorStatus = cold(x, (l) => l.status({ visitor: "vis_new", ipHash: "ip_new" })).rows;
+    let id = "";
+    const reserve = cold(x, (l) => {
+      const r = l.reserve({ runId: "run_new", usdMicros: 1000, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: "vis_new", ipHash: "ip_new" });
+      expect(r.ok).toBe(true);
+      if (r.ok) id = r.reservationId;
+    }).rows;
+    const settle = cold(x, (l) => l.settle(id, 500)).rows;
+    // The cron's orphan sweep, 15 minutes on: the first one after a start looks back two days, the next ones only at
+    // what crossed the orphan age since.
+    x.advance(ORPHAN_SETTLE_MS + 1000);
+    cold(x, (l) => l.settleOrphans());
+    x.advance(ORPHAN_SETTLE_MS);
+    const sweep = cold(x, (l) => l.settleOrphans()).rows;
+    return { status, visitorStatus, reserve, settle, sweep };
+  };
+
+  it("do not grow with the table, with today's steps or with other visitors' rows, with the live cap off (section 0)", () => {
     const small = perCall({ history: 10, today: 5 });
     const large = perCall({ history: 4_000, today: 1_000 });
     expect(large).toEqual(small);
-    expect(small.status).toBe(0);
-    // The run cap reads the run's own rows; the reservation and its close are found by id.
+    // A status reads today's row, the day rows' live parts (yesterday and today here) and the live carry.
+    expect(small.status).toBeLessThanOrEqual(4);
+    expect(small.visitorStatus).toBeLessThanOrEqual(4);
+    // The run cap reads the run's own rows; the day cap today's row; the reservation and its close are found by id.
     expect(small.reserve).toBeLessThanOrEqual(2);
     expect(small.settle).toBeLessThanOrEqual(4);
-    expect(small.sweep).toBeLessThanOrEqual(2);
+    expect(small.sweep).toBeLessThanOrEqual(3);
   });
 
   it("do not grow with the table with the live cap on either", () => {
     const small = perCall({ history: 10, today: 5, liveUsd: 1_000 });
     const large = perCall({ history: 4_000, today: 1_000, liveUsd: 1_000 });
     expect(large).toEqual(small);
-    expect(small.status).toBe(0);
+    expect(small.reserve).toBeLessThanOrEqual(5);
   });
 
-  it("answer GET /v1/agent/costs?day=<yesterday> from memory: after the day's one build, spent({ day }) reads no row", () => {
-    // 2,000 entries on yesterday (2026-10-25), the costs route's two calls per request, many requests.
-    const { l, meter } = seeded({ history: 2_000, today: 5 });
+  it("answer status({}), GET /v1/agent/costs?day=<yesterday> and the live totals from the day rows: a few rows each, never an entry", () => {
+    // 4,000 entries on yesterday (2026-10-25), 2,000 today, and every request reaches a ledger that just woke up.
+    const x = seeded({ history: 4_000, today: 1_000 });
     const yesterday = "2026-10-25";
-    const total = l.spent({ day: yesterday });
-    expect(total).toBe(2_000 / 2 * 1000);
-    const warm = meter.rows;
-    for (let i = 0; i < 100; i++) {
-      expect(l.spent({ day: yesterday })).toBe(total);
-      l.spent({ live: true });
+    for (let i = 0; i < 20; i++) {
+      const st = cold(x, (l) => expect(l.status({})).toMatchObject({ day: "2026-10-26", spentMicros: { day: 900_000, live: 900_000 + 1_000 * 1_000 }, openReservations: 0 }));
+      expect(st.rows).toBeLessThanOrEqual(4);
+      expect(st.tables).toEqual(["spend_days", "spend_meta"]);
+      // The costs route's two calls.
+      const day = cold(x, (l) => expect(l.spent({ day: yesterday })).toBe(2_000 * 1000));
+      expect(day.rows).toBe(1);
+      expect(day.tables).toEqual(["spend_days"]);
+      const live = cold(x, (l) => expect(l.spent({ live: true })).toBe(900_000 + 1_000 * 1_000));
+      expect(live.rows).toBeLessThanOrEqual(3);
+      expect(live.tables).toEqual(["spend_days", "spend_meta"]);
     }
-    expect(meter.rows - warm).toBe(0);
     // A day outside the retained three (older, or not yet begun) answers nothing and reads nothing, every time.
-    for (const day of ["2026-10-23", "2026-10-01", "2026-10-27", "2099-01-01"]) expect(l.committed({ day })).toEqual({ settledMicros: 0, openMicros: 0, neurons: 0 });
-    expect(meter.rows - warm).toBe(0);
+    for (const day of ["2026-10-23", "2026-10-01", "2026-10-27", "2099-01-01"]) {
+      expect(cold(x, (l) => expect(l.committed({ day })).toEqual({ settledMicros: 0, openMicros: 0, neurons: 0 })).rows).toBe(0);
+    }
+  });
+
+  it("read a visitor's and an address's caps through their own indexes, never the whole day", () => {
+    const x = seeded({ history: 2_000, today: 700 });
+    // vis_t0 holds a seventh of today's reservations, ip_t0 a third: each reads only its own.
+    const v = cold(x, (l) => expect(l.status({ visitor: "vis_t0", ipHash: "ip_t0" }).spentMicros).toMatchObject({ visitor: 100 * 900, ip: 234 * 900 }));
+    expect(v.rows).toBeLessThanOrEqual(4 + 2 * 100 + 2 * 234);
+    expect(v.searches.every((d) => /USING INDEX spend_entries_(visitor|ip) /.test(d))).toBe(true);
+    const r = cold(x, (l) => expect(l.reserve({ runId: "run_v", usdMicros: 1000, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: "vis_t0", ipHash: "ip_t0" }).ok).toBe(true));
+    expect(r.searches.length).toBeGreaterThan(0);
+    expect(r.searches.every((d) => /USING INDEX spend_entries_(run|visitor|ip) /.test(d))).toBe(true);
   });
 
   it("keep another day's totals in step with the writes that land on it, and with pruning, as a fresh read folds them", () => {
@@ -371,14 +497,16 @@ describe("SpendDO ledger reads", () => {
       }
       for (const scope of scopes) expect(l.committed(scope)).toEqual(f.committed(scope));
       expect(l.status({ visitor: "vis_b", ipHash: "ip_a" })).toEqual(f.status({ visitor: "vis_b", ipHash: "ip_a" }));
+      expect(persistedDays(s)).toEqual(foldedDays(s));
+      expect(f.committed({ live: true })).toEqual(foldedLive(s));
     };
     l.spent({ day: "2026-10-25" });
-    // Closed after midnight: the settle and release rows land on the reservations' day, and memory follows them.
+    // Closed after midnight: the settle and release rows land on the reservations' day, and so do their totals.
     if (a.ok) l.settle(a.reservationId, 5_000);
     if (b.ok) l.release(b.reservationId);
     const rows = meter.rows;
     expect(l.committed({ day: "2026-10-25" })).toEqual({ settledMicros: 5_000, openMicros: 10_000, neurons: 0 });
-    expect(meter.rows - rows).toBe(0);
+    expect(meter.rows - rows).toBe(1);
     same("2026-10-26T01:00:00.000Z");
     // The orphan settles at its reserved worst case, on its own day.
     at("2026-10-26T01:00:00.000Z");
@@ -396,3 +524,81 @@ describe("SpendDO ledger reads", () => {
     same("2026-10-28T01:00:00.000Z");
   });
 });
+
+describe("SpendDO ledger's persisted totals", () => {
+  /** A small deterministic generator (mulberry32), so a failure replays. */
+  const rng = (seed: number) => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  it("always equal a full fold of the entries, across reserves, settles and releases of earlier days' reservations, direct neurons, orphan sweeps and pruning", () => {
+    const { l, s, caps, advance } = ledger({ dayUsd: 1_000, runUsd: 1_000, visitorDayUsd: 1_000, ipDayUsd: 1_000, neuronsDay: 1e9 }, "2026-10-20T08:00:00.000Z");
+    const r = rng(20261026);
+    const pick = <T,>(xs: readonly T[]) => xs[Math.floor(r() * xs.length)]!;
+    const open: string[] = [];
+    let wrote = 0;
+    const check = (what: string) => {
+      expect(persistedDays(s), what).toEqual(foldedDays(s));
+      // A fresh object (after a hibernation) answers the live totals from the day rows and the carry.
+      const f = createSqlSpendLedger(s, { caps: () => caps });
+      expect(f.committed({ live: true }), what).toEqual(foldedLive(s));
+    };
+    for (let step = 0; step < 1_200; step++) {
+      const op = r();
+      if (op < 0.4) {
+        const neurons = r() < 0.3 ? Math.ceil(r() * 50) : 0;
+        const x = l.reserve({
+          runId: r() < 0.9 ? `run_${Math.floor(r() * 40)}` : null, usdMicros: Math.ceil(r() * 3000), model: "m", live: r() < 0.6, world: pick(["slot-1:gen-1", "slot-2:gen-4"]),
+          visitor: pick(["vis_a", "vis_b", null]), ipHash: pick(["ip_a", "ip_b", null]), ...(neurons ? { neurons, product: pick(["agent", "ocr", "embeddings", "dictation"] as const) } : {}),
+        });
+        if (x.ok) { open.push(x.reservationId); wrote += 1; }
+      } else if (op < 0.65 && open.length) {
+        // Any open reservation, often one made on an earlier day.
+        const id = open.splice(Math.floor(r() * open.length), 1)[0]!;
+        if (r() < 0.7) l.settle(id, Math.floor(r() * 4000), r() < 0.5 ? { neurons: Math.floor(r() * 60) } : undefined);
+        else l.release(id);
+        // A replayed close changes nothing.
+        if (r() < 0.1) l.settle(id, 99_999);
+      } else if (op < 0.75) {
+        l.recordNeurons({ product: pick(["agent", "ocr", "embeddings", "dictation"] as const), model: "@cf/x", neurons: Math.ceil(r() * 20) });
+      } else if (op < 0.85) {
+        l.settleOrphans();
+      } else {
+        // Time moves on: minutes, or across midnight, or days (so pruning starts).
+        advance(pick([60_000, 20 * 60_000, 5 * 3_600_000, 26 * 3_600_000]));
+      }
+      if (step % 25 === 0) check(`step ${step}`);
+    }
+    check("end");
+    expect(wrote).toBeGreaterThan(300);
+    // Days on, everything is pruned: no day row is left, and the carry holds every live reservation ever made.
+    advance(5 * 86_400_000);
+    for (let i = 0; i < 10; i++) l.settleOrphans();
+    expect(s.sql.exec(`SELECT COUNT(*) AS n FROM spend_entries`).toArray()[0]!.n).toBe(0);
+    expect(s.sql.exec(`SELECT COUNT(*) AS n FROM spend_days`).toArray()[0]!.n).toBe(0);
+    check("pruned");
+  });
+
+  it("are written in the same transaction as the entry: a write that throws leaves neither", () => {
+    const { l, s } = ledger();
+    const r = reserve(l, 0.01);
+    expect(r.ok).toBe(true);
+    const days = persistedDays(s);
+    // The day row's upsert fails (a storage error), so the settle's entry rolls back with it.
+    const exec = s.sql.exec.bind(s.sql);
+    s.sql.exec = ((q: string, ...b: unknown[]) => { if (/INSERT INTO spend_days/.test(q)) throw new Error("storage busy"); return exec(q, ...b); }) as typeof s.sql.exec;
+    expect(() => l.settle(r.ok ? r.reservationId : "", 5_000)).toThrow(/storage busy/);
+    expect(() => reserve(l, 0.01, { runId: "run_0002" })).toThrow(/storage busy/);
+    expect(() => l.recordNeurons({ product: "ocr", model: "@cf/x", neurons: 3 })).toThrow(/storage busy/);
+    s.sql.exec = exec;
+    expect(persistedDays(s)).toEqual(days);
+    expect(l.entries()).toHaveLength(1);
+    expect(s.sql.exec(`SELECT COUNT(*) AS n FROM neuron_entries`).toArray()[0]!.n).toBe(0);
+    expect(persistedDays(s)).toEqual(foldedDays(s));
+  });
+});
+
+type SqlSpendLedgerT = ReturnType<typeof createSqlSpendLedger>;

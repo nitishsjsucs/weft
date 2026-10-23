@@ -45,12 +45,19 @@ const PUSH_AT = { rowsWritten: 1_000, rowsRead: 100_000, requests: 500 } as cons
 /** How long a clean check, a reset or a restore waits for mutations already in flight (an MCP agent_ask long-polls). */
 export const QUIESCE_MS = 10_000;
 /**
- * An outbox row whose send failed in this many flushes in a row is dead-lettered: recorded in D1 failed_jobs (and
- * logged), then deleted, so it stops costing an alarm (a DO request and a setAlarm row) every 5 minutes for good.
- * With the retry's backoff (2 s doubling, at most 5 minutes) the 12th failed flush comes about 23 minutes after the
- * first; the count is kept in the object's storage, so an eviction between two retries does not start it again.
+ * An outbox row whose send failed in this many flushes in a row, over at least OUTBOX_DEAD_AFTER_MS since the first of
+ * them, is dead-lettered: recorded in D1 failed_jobs (and logged), then deleted, so it stops costing an alarm (a DO
+ * request and a setAlarm row) every 5 minutes for good. With the retry's backoff alone (2 s doubling, at most 5
+ * minutes) the 12th failed flush comes about 23 minutes after the first, but every commit that writes an outbox row
+ * and every boot flush too, so 12 failures can come within seconds of a short Queue outage: the time since the first
+ * failure is what makes it a row that cannot be sent. Both are kept in the object's storage, so an eviction between
+ * two retries starts neither again.
  */
 export const OUTBOX_DEAD_AFTER = 12;
+/** How long an outbox row must have kept failing (from its first failed flush) before it is dead-lettered. */
+export const OUTBOX_DEAD_AFTER_MS = 20 * 60_000;
+/** One outbox row's failed flushes in a row, and when the first of them was (wall ms). */
+interface OutboxAttempts { n: number; first: number }
 const RESTORE_KEY = "weft.restore";
 /** Failed flushes in a row per outbox row id (OUTBOX_DEAD_AFTER), kept while any row has one. */
 const OUTBOX_ATTEMPTS_KEY = "weft.outbox_attempts";
@@ -95,8 +102,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private alarmFailures = 0;
   /** Outbox flushes in a row that left a row unsent (the outbox retry backs off with it; a clean flush resets it). */
   private outboxFailures = 0;
-  /** Per outbox row, the flushes in a row whose send of it failed: read from storage once per instance, then kept. */
-  private outboxAttempts: Map<string, number> | null = null;
+  /** Per outbox row, the flushes in a row whose send of it failed and when the first was: read from storage once per
+   * instance, then kept. */
+  private outboxAttempts: Map<string, OutboxAttempts> | null = null;
   private readonly counter = fetchCounter(MAX_FETCHES_PER_ALARM);
   private runHost: DurableRunHost;
   private scheduler: DurableSchedulerHost;
@@ -189,6 +197,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const runHost = this.newRunHost();
     const scheduler = this.newScheduler();
     let engine: WorldEngine | null = null;
+    let installed = false;
     try {
       this.module = await loadEngine();
       this.config = await envConfig(this.env);
@@ -237,6 +246,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         return;
       }
       this.engine = engine;
+      installed = true;
       this.engineFor = stamp;
       this.runHost = runHost;
       this.scheduler = scheduler;
@@ -251,9 +261,20 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       await this.flushOutbox();
     } catch (e) {
       logError("world.boot", e, { slot: stamp.slot, gen: stamp.gen });
+      // An engine this boot brought up is closed, so its fence shuts and its scheduler stops: nothing serves it now.
+      // One that stopEngine took over meanwhile (this.engine is no longer it) is closed there instead.
+      const own = engine !== null && (!installed || this.engine === engine);
+      if (engine && this.engine === engine) {
+        this.engine = null;
+        this.engineFor = null;
+        this.unsubscribe?.();
+        this.unsubscribe = null;
+        this.alarms.cancel("runs");
+        this.alarms.cancel("tick");
+      }
+      if (own) await engine!.close().catch((err: unknown) => logError("world.close", err, { slot: stamp.slot, gen: stamp.gen }));
       // A failed boot of a world that is no longer the object's leaves the current one alone.
       if (!sameWorld(this.stamp, stamp)) return;
-      if (engine && this.engine === engine) { this.engine = null; this.engineFor = null; }
       this.bootError = e instanceof Error ? e.message : String(e);
     }
   }
@@ -599,7 +620,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
    * The Queue send itself is I/O, outside the lock and outside any transaction. A row whose send fails is tried once
    * per flush and skipped, so it never holds back the rows behind it; it stays for the retry, which backs off with
    * the flushes in a row that left a row unsent (alarmRetryDelayMs: 2 s doubling, at most 5 minutes). A row whose
-   * send failed in OUTBOX_DEAD_AFTER flushes in a row (counted in storage, so across evictions) is dead-lettered.
+   * send failed in OUTBOX_DEAD_AFTER flushes in a row over at least OUTBOX_DEAD_AFTER_MS (both counted in storage, so
+   * across evictions) is dead-lettered.
    */
   async flushOutbox(): Promise<number> {
     const engine = this.engine;
@@ -643,14 +665,16 @@ export class CompanyDO extends DurableObject<CoreEnv> {
           attempts.delete(row.id);
         }
       }
-      // Each row left unsent failed one more flush in a row; one that reached OUTBOX_DEAD_AFTER is dead-lettered, so
-      // it no longer keeps the retry alarm going. Once the flush has read every pending row, a row it no longer finds
-      // (sent, dead-lettered, or gone with a reset) is forgotten.
+      // Each row left unsent failed one more flush in a row; one that reached OUTBOX_DEAD_AFTER failures over
+      // OUTBOX_DEAD_AFTER_MS is dead-lettered, so it no longer keeps the retry alarm going. Once the flush has read
+      // every pending row, a row it no longer finds (sent, dead-lettered, or gone with a reset) is forgotten.
+      const now = Date.now();
       for (const [id, u] of unsent) {
-        const n = (attempts.get(id) ?? 0) + 1;
-        attempts.set(id, n);
-        if (n < OUTBOX_DEAD_AFTER) continue;
-        await this.deadLetterOutbox(engine, u.row, n, u.error);
+        const prev = attempts.get(id);
+        const a: OutboxAttempts = { n: (prev?.n ?? 0) + 1, first: prev?.first ?? now };
+        attempts.set(id, a);
+        if (a.n < OUTBOX_DEAD_AFTER || now - a.first < OUTBOX_DEAD_AFTER_MS) continue;
+        await this.deadLetterOutbox(engine, u.row, a.n, u.error);
         attempts.delete(id);
         unsent.delete(id);
       }
@@ -679,15 +703,22 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     return sent;
   }
 
-  /** The failed-flush counts per outbox row, from the object's storage on first use. */
-  private attemptsOf(): Map<string, number> {
+  /** The failed flushes per outbox row, from the object's storage on first use. A count saved by an earlier build
+   * (a bare number, with no first failure) starts its time now, so it is never dead-lettered sooner than before. */
+  private attemptsOf(): Map<string, OutboxAttempts> {
     if (!this.outboxAttempts) {
-      const saved = this.ctx.storage.kv.get<Record<string, number>>(OUTBOX_ATTEMPTS_KEY) ?? {};
-      this.outboxAttempts = new Map(Object.entries(saved).filter((e): e is [string, number] => typeof e[1] === "number"));
+      const saved = this.ctx.storage.kv.get<Record<string, unknown>>(OUTBOX_ATTEMPTS_KEY) ?? {};
+      const now = Date.now();
+      const m = new Map<string, OutboxAttempts>();
+      for (const [id, v] of Object.entries(saved)) {
+        if (typeof v === "number") m.set(id, { n: v, first: now });
+        else if (v && typeof (v as OutboxAttempts).n === "number" && typeof (v as OutboxAttempts).first === "number") m.set(id, { n: (v as OutboxAttempts).n, first: (v as OutboxAttempts).first });
+      }
+      this.outboxAttempts = m;
     }
     return this.outboxAttempts;
   }
-  private saveAttempts(m: Map<string, number>): void {
+  private saveAttempts(m: Map<string, OutboxAttempts>): void {
     // The flush runs from a microtask nobody awaits: a storage error here is logged, never left unhandled.
     try {
       if (m.size) this.ctx.storage.kv.put(OUTBOX_ATTEMPTS_KEY, Object.fromEntries(m));
@@ -698,8 +729,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   }
 
   /**
-   * An outbox row that could never be sent (its send failed in OUTBOX_DEAD_AFTER flushes in a row): recorded in D1
-   * failed_jobs as OUTBOX_UNSENT and logged, then deleted. Outside any transaction, as the send was.
+   * An outbox row that could never be sent (its send failed in OUTBOX_DEAD_AFTER flushes in a row, over at least
+   * OUTBOX_DEAD_AFTER_MS): recorded in D1 failed_jobs as OUTBOX_UNSENT and logged, then deleted. Outside any
+   * transaction, as the send was.
    */
   private async deadLetterOutbox(engine: WorldEngine, row: SendableRow, attempts: number, error: unknown): Promise<void> {
     const job = row.job;
@@ -867,7 +899,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.lastActivity = null;
   }
 
-  async heartbeat(opts: { provider?: boolean } = {}): Promise<SlotHeartbeat> {
+  async heartbeat(opts: { provider?: boolean; clean?: boolean } = {}): Promise<SlotHeartbeat> {
     // The Lobby's heartbeats (its sweep, session reads) reach a slot that no request reaches: a slot whose last ask
     // for an alarm failed while jobs wait, or whose clock started, gets its alarm here too.
     this.runHost.poke();
@@ -875,8 +907,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const usage = this.usage;
     this.usage = zeroUsage();
     const worldProvider = opts.provider ? this.worldProvider() : null;
-    let clean = true;
-    if (this.stamp && hasKvState(this.ctx.storage.sql)) {
+    // Only the reset path asks whether the world is clean; a lease holder's GET /api/_session heartbeats this slot on
+    // every poll and never uses the answer.
+    let clean: boolean | null = opts.clean ? true : null;
+    if (opts.clean && this.stamp && hasKvState(this.ctx.storage.sql)) {
       try {
         clean = (this.module ?? (await loadEngine())).store.isClean(this.storage);
       } catch (e) {

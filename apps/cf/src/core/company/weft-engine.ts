@@ -15,7 +15,7 @@ import { newId } from "@weft/core";
 import { SqlRepo } from "@weft/executor";
 import { createRecallSource, type HostedJob } from "@weft/cf-extras";
 import {
-  formatHostedMcpKey, hostedWorldId, MCP_AGENT_ASK_PER_KEY_DAY, SMALL_STATE_KEYS, WORLD_MODEL_SETTING,
+  DIRTY_TABLE, formatHostedMcpKey, hostedWorldId, MCP_AGENT_ASK_PER_KEY_DAY, SMALL_STATE_KEYS, WORLD_MODEL_SETTING,
   type DurableStorageLike, type DurableWeftPlatform, type PlatformDb, type SqlMeter, type TxGuard,
 } from "../../shared/contracts";
 import { randomAlnum } from "../../shared/crypto";
@@ -256,8 +256,11 @@ const store: WorldStore = {
   },
   isClean(storage) {
     // kv_state is never tracked now; a world armed by an earlier build may still list it, and it is not world content.
-    for (const t of weftDeps().dirtyKeys(storage).keys()) if (!UNTRACKED_TABLES.includes(t)) return false;
-    return true;
+    // One dirty key is enough to answer, so this reads at most one row past those (dirtyKeys would read every key a
+    // whole session recorded).
+    if (!storage.sql.exec(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`, DIRTY_TABLE).toArray().length) return true;
+    const skip = UNTRACKED_TABLES.map(() => "?").join(", ");
+    return storage.sql.exec(`SELECT 1 FROM ${DIRTY_TABLE} WHERE tbl NOT IN (${skip}) LIMIT 1`, ...UNTRACKED_TABLES).toArray().length === 0;
   },
   deltaReset(storage, a) {
     try {

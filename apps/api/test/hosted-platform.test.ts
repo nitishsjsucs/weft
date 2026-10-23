@@ -639,6 +639,23 @@ describe("a closed world's database", () => {
     } finally { await w.close(); }
   });
 
+  it("shuts the fence even when the scheduler's stop or the executor's close throws", async () => {
+    for (const part of ["scheduler", "executor"] as const) {
+      const w = await openDurableWorld(seed, { copy: true });
+      let next: DurableTestWorld | null = null;
+      try {
+        const db = w.weft.db;
+        if (part === "scheduler") w.weft.scheduler.stop = async () => { throw new Error("scheduler stop failed"); };
+        else w.weft.executor.close = async () => { throw new Error("executor close failed"); };
+        await expect(w.weft.close()).rejects.toThrow(`${part === "scheduler" ? "scheduler stop" : "executor close"} failed`);
+        await closed(db.insert(kvState).values({ key: `test.after_${part}`, value: "1" }));
+        expect(count(w, `test.after_${part}`)).toBe(0);
+        next = await w.reboot();
+        expect((await get(next, "/v1/health")).status).toBe(200);
+      } finally { await (next ?? w).close().catch(() => undefined); }
+    }
+  });
+
   it("rolls back a transaction that was open when the world closed, at its next statement", async () => {
     const w = await openDurableWorld(seed, { copy: true });
     let next: DurableTestWorld | null = null;

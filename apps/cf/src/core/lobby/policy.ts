@@ -131,3 +131,5 @@ export function etaMinutes(leases: readonly LeaseTimes[], now: number): number |
 
 /** Waitlist entries not refreshed for this long are dropped. */
 export const WAITLIST_TTL_MS = 10 * 60_000;
+/** The waitlist holds at most this many live entries; a new visitor past it is answered `full` (LeaseResult). */
+export const WAITLIST_MAX = 50;

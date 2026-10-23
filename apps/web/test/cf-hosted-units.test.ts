@@ -98,6 +98,8 @@ describe("hosted copy", () => {
   it("says why a lease was not given", () => {
     expect(blockedText({ status: "waitlist", position: 1, poolSize: 2, etaMinutes: 7.4 })).toBe("All 2 demo companies are in use. One frees in about 7 min. You are number 1 in line.");
     expect(blockedText({ status: "waitlist", position: 3, poolSize: 2, etaMinutes: null })).toBe("All 2 demo companies are in use. You are number 3 in line.");
+    expect(blockedText({ status: "full", poolSize: 2, etaMinutes: 4.2 })).toBe("All 2 demo companies are in use and the line is full. One frees in about 4 min. Try again in a few minutes.");
+    expect(blockedText({ status: "full", poolSize: 2, etaMinutes: null })).toBe("All 2 demo companies are in use and the line is full. Try again in a few minutes.");
     expect(blockedText({ status: "budget", reopensAt: "2026-10-27T00:00:00.000Z" })).toBe("Today's demo budget is used up; back after 00:00 UTC.");
     expect(blockedText({ status: "ip_limit", reopensAt: "bad" })).toBe("This network has started its 20 demo companies for today; back after 00:00 UTC.");
     expect(blockedText({ status: "closed", level: 3 })).toContain("paused for today");

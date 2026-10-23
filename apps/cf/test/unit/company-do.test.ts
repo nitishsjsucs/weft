@@ -11,7 +11,7 @@ import { signCtx } from "../../src/shared/tokens";
 import { memorySql } from "./sqlite";
 
 (globalThis as { WebSocketRequestResponsePair?: unknown }).WebSocketRequestResponsePair ??= class { constructor(readonly request: string, readonly response: string) {} };
-const { CompanyDO, OUTBOX_DEAD_AFTER } = await import("../../src/core/company/company-do");
+const { CompanyDO, OUTBOX_DEAD_AFTER, OUTBOX_DEAD_AFTER_MS } = await import("../../src/core/company/company-do");
 
 const CTX = "c".repeat(64);
 const VISITOR = "vis_" + "a".repeat(32);
@@ -42,9 +42,11 @@ interface FakeWorld {
   scopedGens: number[];
   /** How long each KV config read takes (envConfig, which the alarm and the boot await). */
   configDelayMs: number;
+  /** Boots whose engine fails right after CompanyDO installs it (its change-feed subscription throws). */
+  failAfterInstall: number;
 }
 let world: FakeWorld;
-const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0 });
+const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0, failAfterInstall: 0 });
 
 function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]): { toArray(): Record<string, unknown>[] } }): WorldEngine {
   const guard: TxGuard = {
@@ -60,7 +62,8 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
     meter: {
       measure: async (fn) => ({ value: await fn(), usage: { statements: 0, rowsRead: 0, rowsWritten: 0, tablesRead: [], tablesWritten: [] } }),
       totals: () => ({ statements: 0, rowsRead: 0, rowsWritten: 0, tablesRead: [], tablesWritten: [] }),
-      reset() {}, version: () => 0, versions: () => ({}), onCommit: () => () => undefined,
+      reset() {}, version: () => 0, versions: () => ({}),
+      onCommit: () => { if (world.failAfterInstall > 0) { world.failAfterInstall -= 1; throw new Error("fake subscription failure"); } return () => undefined; },
     },
     guard,
     fetch: async (req) => new Response(JSON.stringify({ path: new URL(req.url).pathname }), { headers: { "content-type": "application/json" } }),
@@ -283,7 +286,44 @@ describe("the alarm", () => {
   });
 });
 
+describe("the Lobby's heartbeat", () => {
+  it("asks whether the world is clean only when the reset path asks, never on a lease holder's session read or the sweep", async () => {
+    const c = company();
+    await c.ready();
+    const store = fakeModule.store as unknown as { isClean: () => boolean };
+    const was = store.isClean;
+    let checks = 0;
+    store.isClean = () => { checks += 1; return false; };
+    try {
+      // GET /api/_session from the lease holder (the provider too) and the sweep's reclaim.
+      expect((await c.co.heartbeat({ provider: true })).clean).toBeNull();
+      expect((await c.co.heartbeat()).clean).toBeNull();
+      expect(checks).toBe(0);
+      // The reset's own heartbeat.
+      expect((await c.co.heartbeat({ clean: true })).clean).toBe(false);
+      expect(checks).toBe(1);
+    } finally {
+      store.isClean = was;
+    }
+  });
+});
+
 describe("the world's boot", () => {
+  it("closes the engine it brought up when it fails after installing it (fence shut, scheduler stopped), and the next boot starts clean", async () => {
+    world.failAfterInstall = 1;
+    const c = company();
+    await c.ready();
+    expect(world.boots).toBe(1);
+    // The engine was installed, then the boot failed: it is closed, and the object serves nothing from it.
+    expect(world.closedGens).toEqual([3]);
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(503);
+    // The next alarm boots the world again, and that engine is kept.
+    await c.co.alarm();
+    expect(world.boots).toBe(2);
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
+    expect(world.closedGens).toEqual([3]);
+  });
+
   it("is shared by concurrent callers: alarms and an RPC on a world whose cold boot failed boot it once", async () => {
     world.failBoots = 1;
     const c = company();
@@ -536,35 +576,90 @@ describe("a row the outbox can never send", () => {
   const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
   const poison = `obx_${"1".padStart(16, "0")}`;
 
-  it(`is dead-lettered after ${OUTBOX_DEAD_AFTER} failed flushes, counted across a restart: recorded in failed_jobs, dropped, and no longer retried`, async () => {
+  it(`is dead-lettered after ${OUTBOX_DEAD_AFTER} failed flushes over ${OUTBOX_DEAD_AFTER_MS / MIN} minutes, counted across a restart: recorded in failed_jobs, dropped, and no longer retried`, async () => {
     expect(OUTBOX_DEAD_AFTER).toBe(12);
+    expect(OUTBOX_DEAD_AFTER_MS).toBe(20 * MIN);
     let tries = 0;
     const c = company({ failSend: (b) => (b as { jobId: string }).jobId === poison && ++tries > 0 });
     await c.ready();
     c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES ('obx_a', 'ocr.receipt', ?, '2026-10-26T15:00:00.000Z')`, job(1));
-    let now = T0 + MIN;
+    const first = T0 + MIN;
+    let now = first;
     at(now);
     let co = c.co;
     await co.flushOutbox();
     for (let i = 0; i < 5; i++) { now = c.alarms.at(-1)!; at(now); await co.alarm(); }
     expect(tries).toBe(6);
-    // Evicted between two retries (the backoff reaches minutes): the next instance's boot flush is the 7th try.
+    // Evicted between two retries (the backoff reaches minutes): the next instance's boot flush is the 7th try, and
+    // it keeps both the count and the time of the first failure.
     const again = c.restart();
     await again.ready();
     co = again.co;
     expect(tries).toBe(7);
-    while (tries < OUTBOX_DEAD_AFTER) { now = c.alarms.at(-1)!; at(now); await co.alarm(); }
-    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([]);
+    const outbox = () => c.m.sql.exec(`SELECT id FROM outbox WHERE id = 'obx_a'`).toArray();
+    while (outbox().length && tries < 100) { now = c.alarms.at(-1)!; at(now); await co.alarm(); }
+    expect(outbox()).toEqual([]);
+    // The first failed flush that was both the 12th or later and 20 minutes or more after the first failure.
+    expect(tries).toBeGreaterThanOrEqual(OUTBOX_DEAD_AFTER);
+    expect(now - first).toBeGreaterThanOrEqual(OUTBOX_DEAD_AFTER_MS);
     const dead = c.ops.filter((o) => /INSERT[^]*failed_jobs/i.test(o.sql));
     expect(dead).toHaveLength(1);
-    expect(dead[0]!.binds.slice(0, 7)).toEqual([poison, "ocr.receipt", "slot-1", 3, "weft-jobs", OUTBOX_DEAD_AFTER, "OUTBOX_UNSENT"]);
+    expect(dead[0]!.binds.slice(0, 7)).toEqual([poison, "ocr.receipt", "slot-1", 3, "weft-jobs", tries, "OUTBOX_UNSENT"]);
     expect(String(dead[0]!.binds[7])).toContain("Queue.send refused");
     // No more retries: the outbox purpose is not asked for again, and later flushes send nothing and arm nothing.
     const asked = c.alarms.length;
+    const total = tries;
     expect(await co.flushOutbox()).toBe(0);
     expect(c.alarms.length).toBe(asked);
-    expect(tries).toBe(OUTBOX_DEAD_AFTER);
+    expect(tries).toBe(total);
     expect([...c.kv.keys()].filter((k) => k.includes("outbox"))).toEqual([]);
+  });
+
+  it(`is not dead-lettered by ${OUTBOX_DEAD_AFTER} quick failed flushes (commits and boots during a short Queue outage) before ${OUTBOX_DEAD_AFTER_MS / MIN} minutes`, async () => {
+    let failing = true;
+    let tries = 0;
+    const c = company({ failSend: (b) => failing && (b as { jobId: string }).jobId === poison && ++tries > 0 });
+    await c.ready();
+    c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES ('obx_a', 'ocr.receipt', ?, '2026-10-26T15:00:00.000Z')`, job(1));
+    const first = T0 + MIN;
+    // Three times the count within a minute: every commit with an outbox row and every boot flushes.
+    for (let i = 0; i < 3 * OUTBOX_DEAD_AFTER; i++) { at(first + i * 1_000); await c.co.flushOutbox(); }
+    const again = c.restart();
+    await again.ready();
+    expect(tries).toBe(3 * OUTBOX_DEAD_AFTER + 1);
+    expect(c.ops.filter((o) => /failed_jobs/i.test(o.sql))).toEqual([]);
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([{ id: "obx_a" }]);
+    // Still failing just short of 20 minutes after the first failure: kept.
+    at(first + OUTBOX_DEAD_AFTER_MS - 1_000);
+    await again.co.flushOutbox();
+    expect(c.ops.filter((o) => /failed_jobs/i.test(o.sql))).toEqual([]);
+    // The Queue is back: the row is sent, not dead-lettered, and forgotten.
+    failing = false;
+    at(first + OUTBOX_DEAD_AFTER_MS - 500);
+    await again.co.flushOutbox();
+    expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([poison]);
+    expect(c.ops.filter((o) => /failed_jobs/i.test(o.sql))).toEqual([]);
+    expect([...c.kv.keys()].filter((k) => k.includes("outbox"))).toEqual([]);
+  });
+
+  it("reads a count an earlier build saved (a bare number) as failures whose time starts now", async () => {
+    let tries = 0;
+    const c = company({ failSend: (b) => (b as { jobId: string }).jobId === poison && ++tries > 0 });
+    await c.ready();
+    // What an earlier build left in storage, read by the next instance's boot flush (at T0).
+    c.kv.set("weft.outbox_attempts", { obx_a: OUTBOX_DEAD_AFTER + 5 });
+    c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES ('obx_a', 'ocr.receipt', ?, '2026-10-26T15:00:00.000Z')`, job(1));
+    const restarted = c.restart();
+    await restarted.ready();
+    expect(tries).toBe(1);
+    expect(c.kv.get("weft.outbox_attempts")).toEqual({ obx_a: { n: OUTBOX_DEAD_AFTER + 6, first: T0 } });
+    at(T0 + 5 * MIN);
+    await restarted.co.flushOutbox();
+    expect(c.ops.filter((o) => /failed_jobs/i.test(o.sql))).toEqual([]);
+    at(T0 + OUTBOX_DEAD_AFTER_MS + MIN);
+    await restarted.co.flushOutbox();
+    expect(c.ops.filter((o) => /INSERT[^]*failed_jobs/i.test(o.sql))).toHaveLength(1);
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([]);
   });
 
   it("counts only flushes that failed the row in a row, and forgets a row once it is sent", async () => {

@@ -7,8 +7,19 @@ import type { ModelComparisonRow, RunCatalog, RunCatalogRow } from "../../contra
 import type { D1Like } from "./bindings";
 
 export const MAX_COMPARE_DAYS = 30;
-/** The comparison reads at most this many rows (D1 bills rows read; a day holds far fewer hosted runs). */
+/** The comparison reads at most this many rows (D1 bills rows read; a day holds far fewer hosted runs): the newest of
+ * the window, through the `run_catalog_ended` index (apps/cf/d1/0002_run_catalog_ended.sql), so D1 stops there. */
 export const MAX_COMPARE_ROWS = 5000;
+/** How long the Worker reuses a comparison per window of days: GET /api/_hosted/models is anonymous and not cached
+ * anywhere else, so an isolate reads D1 for it at most once a minute per window. */
+export const COMPARE_MEMO_MS = 60_000;
+
+export interface RunCatalogOptions {
+  now?: () => Date;
+  /** Reuse a window's comparison this long (0, the default, reads D1 every time); a record() made through this
+   * catalog drops what it kept. */
+  memoMs?: number;
+}
 
 const UPSERT = `INSERT INTO run_catalog (slot, gen, run_id, provider, model, trigger, steps, grounded, cost_usd_micros, neurons, latency_ms, status, terminal_reason, ended_at, day)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -57,15 +68,32 @@ export function compareRows(rows: readonly Row[]): ModelComparisonRow[] {
   }).sort((a, b) => b.runs - a.runs || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
 }
 
-export function createRunCatalog(db: D1Like, opts: { now?: () => Date } = {}): RunCatalog {
+export function createRunCatalog(db: D1Like, opts: RunCatalogOptions = {}): RunCatalog {
   const now = opts.now ?? (() => new Date());
+  const memoMs = Math.max(0, opts.memoMs ?? 0);
+  /** Per window of days: when it was read and the comparison (a promise, so concurrent requests share one read). */
+  const memo = new Map<number, { at: number; rows: Promise<ModelComparisonRow[]> }>();
   return {
-    async record(row) { await catalogStatement(db, row).run(); },
-    async compare(o = {}) {
+    async record(row) {
+      await catalogStatement(db, row).run();
+      memo.clear();
+    },
+    compare(o = {}) {
       const days = Math.max(1, Math.min(MAX_COMPARE_DAYS, Math.floor(o.days ?? 7)));
-      const since = new Date(now().getTime() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
-      const res = await db.prepare(`SELECT provider, model, steps, grounded, cost_usd_micros, neurons, latency_ms, status FROM run_catalog WHERE day >= ? ORDER BY ended_at DESC LIMIT ${MAX_COMPARE_ROWS}`).bind(since).all<Row>();
-      return compareRows(res.results ?? []);
+      const t = now().getTime();
+      const hit = memo.get(days);
+      if (memoMs > 0 && hit && t >= hit.at && t - hit.at < memoMs) return hit.rows;
+      // The window starts at UTC midnight `days - 1` days back. ended_at is the run's normalized ISO time (day is its
+      // first 10 characters), so `ended_at >=` that midnight is the same window as `day >=`, read newest first through
+      // the ended_at index and cut at the limit in SQL.
+      const since = `${new Date(t - (days - 1) * 86_400_000).toISOString().slice(0, 10)}T00:00:00.000Z`;
+      const rows = db.prepare(`SELECT provider, model, steps, grounded, cost_usd_micros, neurons, latency_ms, status FROM run_catalog WHERE ended_at >= ? ORDER BY ended_at DESC LIMIT ?`)
+        .bind(since, MAX_COMPARE_ROWS).all<Row>().then((res) => compareRows(res.results ?? []));
+      if (memoMs > 0) {
+        memo.set(days, { at: t, rows });
+        rows.catch(() => { if (memo.get(days)?.rows === rows) memo.delete(days); });
+      }
+      return rows;
     },
   };
 }

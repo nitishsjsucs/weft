@@ -173,8 +173,10 @@ describe("restore steps", () => {
     const done = await co.restoreFinish({ bookmark: null });
     // Three chunk rows plus what arming wrote (the fake's two).
     expect(done).toMatchObject({ slot: "slot-6", gen: 50, snapshot: FAKE_SNAPSHOT_VERSION, rowsWritten: 5 });
-    const hb = await co.heartbeat();
+    const hb = await co.heartbeat({ clean: true });
     expect(hb).toMatchObject({ stamped: { slot: "slot-6", gen: 50, mode: "slot" }, clean: true, snapshot: FAKE_SNAPSHOT_VERSION });
+    // The Lobby's session and sweep heartbeats do not ask.
+    expect((await co.heartbeat()).clean).toBeNull();
   });
 
   it("answers 503 while a world is rebuilt", async () => {

@@ -27,8 +27,9 @@ export interface SlotHeartbeat {
   stamped: WorldStamp | null;
   /** Wall-clock ms of the last request from the lease's visitor, kept in memory only (design 6.2). */
   lastActivityMs: number | null;
-  /** No domain row was written since the last reset (the dirty-key table is empty). */
-  clean: boolean;
+  /** No domain row was written since the last reset (the dirty-key table is empty); null unless asked for
+   * (`heartbeat({ clean: true })`, the reset path), so the Lobby's session and sweep heartbeats read no dirty key. */
+  clean: boolean | null;
   /** Usage since the previous heartbeat or usage push. */
   usage: UsageDelta;
   /** The snapshot this world was restored from. */

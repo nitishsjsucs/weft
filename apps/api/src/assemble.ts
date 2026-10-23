@@ -291,16 +291,23 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
     async close() {
       if (closed) return;
       closed = true;
-      await scheduler.stop();
-      // Drain (gate report item 1): let in-flight agent runs settle, then let the routine finalizations their terminal
-      // steps started write, each within a bound, before the database closes. A run still going after the bound is
-      // left as running; the boot rule fails it with PROCESS_RESTART on the next start, and its late writes are caught.
-      const bound = Number(env.WEFT_CLOSE_DRAIN_MS ?? 5_000);
-      const quiet = async (fn: () => Promise<unknown> | undefined) => { try { await fn(); } catch { /* a stubbed part has nothing to drain */ } };
-      await quiet(() => (agent as { drain?: (ms: number) => Promise<boolean> }).drain?.(bound));
-      await quiet(() => (routines as { drain?: (ms: number, closing: boolean) => Promise<boolean> }).drain?.(bound, true));
-      try { await executor.close(); } catch (e) { if (!isStubError(e)) throw e; }
-      await pdb.close();
+      // The database closes last however the steps before it end: on the durable platform pdb.close() shuts this
+      // world's fence (closableStorage), so a scheduler stop or an executor close that throws must not leave it open
+      // for the late writes of a world a reset is replacing.
+      try {
+        await scheduler.stop();
+        // Drain (gate report item 1): let in-flight agent runs settle, then let the routine finalizations their
+        // terminal steps started write, each within a bound, before the database closes. A run still going after the
+        // bound is left as running; the boot rule fails it with PROCESS_RESTART on the next start, and its late writes
+        // are caught.
+        const bound = Number(env.WEFT_CLOSE_DRAIN_MS ?? 5_000);
+        const quiet = async (fn: () => Promise<unknown> | undefined) => { try { await fn(); } catch { /* a stubbed part has nothing to drain */ } };
+        await quiet(() => (agent as { drain?: (ms: number) => Promise<boolean> }).drain?.(bound));
+        await quiet(() => (routines as { drain?: (ms: number, closing: boolean) => Promise<boolean> }).drain?.(bound, true));
+        try { await executor.close(); } catch (e) { if (!isStubError(e)) throw e; }
+      } finally {
+        await pdb.close();
+      }
     },
   };
   // The hosted layer (ETag/304, x-weft-tables, the read-only guard) wraps the app only where a facade meter exists.
