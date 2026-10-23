@@ -8,7 +8,7 @@
 // _redirects serves one shell per dynamic section: `/app/<section>/<id>/...` rewrites (200) to the `_` shell's HTML,
 // RSC payload and segment files. _headers sets the security headers on every path and, per route, a CSP whose
 // script-src lists the sha256 of each inline script in that route's HTML (the export inlines its RSC payload).
-// The check proves: every route the app directory defines was exported (the 30 Node routes, plus the hosted pages
+// The check proves: every route the app directory defines was exported (every Node route, plus the hosted pages
 // on a hosted build), no proxy code reached the export, both files are within Workers' rule limits, and every inline
 // script is covered by its route's CSP. Self-contained (node: modules only), so Node runs it without a build step.
 import { createHash } from "node:crypto";

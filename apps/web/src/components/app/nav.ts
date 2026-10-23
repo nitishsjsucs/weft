@@ -1,4 +1,4 @@
-import { Banknote, BookOpen, Cable, ChartColumn, FlaskConical, Gauge, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, Scale, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
+import { Banknote, BookOpen, BotMessageSquare, Cable, ChartColumn, FlaskConical, Gauge, Globe, HeartPulse, House, Inbox, Landmark, Laptop, Plane, Receipt, Repeat, Scale, ScrollText, Settings, UserMinus, UserPlus, Users, type LucideIcon } from "lucide-react";
 import { HOSTED } from "@/lib/hosted/flags";
 
 /** `domain`: the grant a section reads; a person whose grants close it (a manager: payroll, benefits, IT) does not see the item. */
@@ -10,6 +10,7 @@ const BASE_NAV: NavGroup[] = [
   { label: null, items: [
     { slug: "home", label: "Home", href: "/app", icon: House },
     { slug: "inbox", label: "Inbox", href: "/app/inbox", icon: Inbox, badge: "inbox" },
+    { slug: "agent", label: "Agent", href: "/app/agent", icon: BotMessageSquare },   // the full-page agent: conversations and background work
     { slug: "payroll", label: "Payroll", href: "/app/payroll", icon: Banknote, domain: "payroll" },
     { slug: "people", label: "People", href: "/app/people", icon: Users },
     { slug: "hiring", label: "Hiring", href: "/app/hiring", icon: UserPlus },   // wave 2: offers and onboarding (w2-onboarding)
@@ -56,7 +57,8 @@ export interface Crumb { label: string; href?: string; /** a raw record id shown
 /**
  * Breadcrumb trail for a pathname: section label, then a record crumb when deeper. A detail view registers its title
  * (shell/crumbs.tsx) and the record crumb reads it; until then the crumb is the raw id, marked so the bar can set it
- * in a small mono face.
+ * in a small mono face. The Agent page selects a conversation by query (?thread= or ?run=), so its crumb is the
+ * conversation title it registers, with no path segment.
  */
 export function crumbs(pathname: string, recordTitle?: string | null): Crumb[] {
   const item = activeNav(pathname);
@@ -68,5 +70,6 @@ export function crumbs(pathname: string, recordTitle?: string | null): Crumb[] {
   const rest = pathname.slice(item.href.length).split("/").filter(Boolean);
   const out: Crumb[] = [{ label: item.label, href: item.href }];
   if (rest[0]) out.push(recordTitle ? { label: recordTitle } : { label: decodeURIComponent(rest[0]), id: true });
+  else if (item.slug === "agent" && recordTitle) out.push({ label: recordTitle });
   return out;
 }
