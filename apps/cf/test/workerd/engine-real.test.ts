@@ -300,7 +300,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     }
   }, 120_000);
 
-  it("reads an uploaded receipt through weft-jobs: one write-back action, none on a redelivery, nothing but the two write-backs as svc_jobs", async () => {
+  it("reads an uploaded receipt through weft-jobs: one write-back action, none on a redelivery through queue(), nothing but the write-backs as svc_jobs", async () => {
     // cf6-extras end to end on the real stack: expenses.submit appends an outbox row in its transaction, CompanyDO sends
     // it after the commit, the weft-jobs consumer reads the receipt (the fakes worker stands in for Workers AI) and
     // writes the extract back through CompanyDO.extrasWriteBack, which runs the executor's svc_jobs system path.
@@ -330,6 +330,19 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     const args = { job_id: extract.ocrJobId, expense_id: id, upload_id: row.upl, extract: null, model: "@cf/mistralai/mistral-small-3.1-24b-instruct", neurons: 0 };
     expect(await co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args } as never)).toEqual({ ok: true, status: "already", reason: null });
     expect(await co.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+    expect(await writeBacks()).toBe(1);
+    // The same job delivered a second time through weft-core's queue(), as after a consumer that wrote back but lost
+    // its ledger row: the OCR reads the receipt again, and svc_jobs' write-back is refused before it writes anything.
+    const e = await env();
+    const ops = e.OPS as unknown as D1Like;
+    const ledger = d1JobLedger(ops);
+    expect(await ledger.get(extract.ocrJobId)).toMatchObject({ state: "done", outcome: "attached" });
+    await ops.prepare("DELETE FROM jobs WHERE job_id = ?").bind(extract.ocrJobId).run();
+    const [up] = (await sql.exec("SELECT sha256, storage_path AS path FROM uploads WHERE id = ?", row.upl)) as { sha256: string; path: string }[];
+    const gen = (await h.ops()).lobby.slots.find((s) => s.name === DO_NAMES.smoke)!.gen;
+    const again: HostedJob = { v: 1, kind: "ocr.receipt", jobId: extract.ocrJobId, slot: DO_NAMES.smoke, gen, uploadId: row.upl, expenseId: id, sha256: up!.sha256, storagePath: up!.path, contentType: "image/png" };
+    await (e.JOBS as unknown as { send(body: unknown, o?: unknown): Promise<void> }).send(again, { contentType: "json" });
+    expect(await until(() => ledger.get(extract.ocrJobId), (x) => x?.state === "done", 60_000)).toMatchObject({ state: "done", outcome: "already" });
     expect(await writeBacks()).toBe(1);
     expect(await count("SELECT count(*) AS n FROM actions")).toBe(actionsBefore + 2);   // expenses.submit and its one write-back
     expect((await smokeJson<{ ok: boolean }>("/api/v1/actions/verify")).body.ok).toBe(true);
