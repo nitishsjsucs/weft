@@ -14,14 +14,14 @@
 // weft-config (budget.lease_rows_written, budget.lease_rows_read, budget.showcase_rows_read).
 
 /**
- * Defaults. Measured with pnpm e2e:cf on the local stack (scripted provider, rich world, 2026-10-23), each on its own
- * generation: the guided tour read 23,899 rows and wrote 417 (238 requests and alarms); all eight demo scenarios read
- * 55,790 and wrote 2,525 (107). leaseRowsRead is three times the two together (79,689), rounded up; leaseRowsWritten
- * is the 5,000 design 6.3 sets, about 1.7 times the two together (2,942).
+ * Defaults. Measured with pnpm e2e:cf on the local stack (scripted provider, rich world, two runs on 2026-10-23), each
+ * on its own generation: the guided tour read 23,899 and 24,237 rows and wrote 417 (238 and 250 requests and alarms);
+ * all eight demo scenarios read 55,790 and 55,865 and wrote 2,525 (107). leaseRowsRead is over three times the larger
+ * sum (80,102), rounded up; leaseRowsWritten is the 5,000 design 6.3 sets, about 1.7 times the two together (2,942).
  */
 export const WORLD_BUDGET = {
   leaseRowsWritten: 5_000,
-  leaseRowsRead: 240_000,
+  leaseRowsRead: 250_000,
   showcaseRowsReadPerDay: 1_000_000,
   persistEvery: 20,
   writeStep: 250,
