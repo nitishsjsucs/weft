@@ -272,7 +272,7 @@ These must show:
    ```
    WEFT_DB=durable-emu WEFT_MEMORY=sqlite WEFT_BLOBS=sqlite WEFT_EPHEMERAL_READ_IDS=1 pnpm test
    pnpm test && pnpm e2e && pnpm e2e:tour && pnpm eval:ci
-   pnpm cf:test
+   pnpm cf:snapshot && pnpm cf:test
    pnpm cf:dev
    pnpm exec playwright test -c playwright.cf.config.ts --project local
    ```

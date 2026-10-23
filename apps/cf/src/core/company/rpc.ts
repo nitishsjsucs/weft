@@ -30,6 +30,8 @@ export interface SlotHeartbeat {
   usage: UsageDelta;
   /** The snapshot this world was restored from. */
   snapshot: string | null;
+  /** The world's WORLD_MODEL_SETTING (the model switch), when asked for (`heartbeat({ provider: true })`). */
+  worldProvider?: string | null;
 }
 
 export interface ResetOutcome {

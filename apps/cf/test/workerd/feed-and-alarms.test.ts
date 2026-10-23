@@ -2,7 +2,7 @@
 // and lease end), agent jobs started inside alarm invocations with at most one live run per invocation, the fetch
 // counter (at most 40 per alarm), and scheduler ticks only while the clock runs.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DO_NAMES, MAX_FETCHES_PER_ALARM, type LiveMessage } from "../../src/shared/contracts";
+import { DO_NAMES, LIVE_PING, LIVE_PONG, MAX_FETCHES_PER_ALARM, type LiveMessage } from "../../src/shared/contracts";
 import { Harness, type Visitor } from "../support/harness";
 
 let h: Harness;
@@ -56,6 +56,26 @@ describe("WebSocket change feed", () => {
     // The slot closes the socket after the frame (code 4001); the local proxy delivers the close event late, so the
     // frame is what this case checks.
     s.ws.close(1000);
+  });
+
+  it("answers the tab's keepalive ping with pong (the hibernation auto-response) and ignores anything else", async () => {
+    const v = h.visitor();
+    await v.lease();
+    const r = await v.fetch("/api/_live", { headers: { upgrade: "websocket" } });
+    expect(r.status).toBe(101);
+    const ws = (r as unknown as { webSocket: WebSocket }).webSocket;
+    ws.accept();
+    const frames: string[] = [];
+    ws.addEventListener("message", (e) => frames.push(String(e.data)));
+    ws.send(LIVE_PING);
+    await until(() => frames.length, (n) => n === 1);
+    // CompanyDO's webSocketMessage ignores every client frame, so only the auto-response can answer.
+    ws.send("hello");
+    ws.send(LIVE_PING);
+    await until(() => frames.length, (n) => n === 2);
+    await new Promise((res) => setTimeout(res, 200));
+    expect(frames).toEqual([LIVE_PONG, LIVE_PONG]);
+    ws.close(1000);
   });
 
   it("tells the tab when its lease ended", async () => {

@@ -9,6 +9,8 @@
 //   and every per-table digest match the source.
 // - Dirty tracking: AFTER INSERT, UPDATE and DELETE triggers record each touched key in _weft_dirty(tbl, pk) with
 //   INSERT ... WHERE NOT EXISTS (an INSERT OR IGNORE inside a trigger fails under an outer UPSERT, verified locally).
+//   kv_state (UNTRACKED_TABLES) is restored with the chunks and checked by the restore, but never tracked and left out
+//   of the standing verify (verifiedTables): a hosted world stamps itself there after every restore and reset.
 // - The delta reset runs in one transactionSync with defer_foreign_keys on: delete the dirty rows, reinsert their seed
 //   rows, drop and recreate the append-only triggers around those deletions, put sqlite_sequence back, wipe
 //   _weft_dirty with DROP TABLE (0 rows written) and recreate it, then check the dirty tables' digests against the
@@ -83,6 +85,19 @@ class Meter implements SqlCost {
 
 const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
 const isUserTable = (name: string) => !name.startsWith("sqlite_") && !name.startsWith(RESERVED_TABLE_PREFIX) && name !== MIGRATIONS_TABLE && name !== DIRTY_TABLE;
+
+/**
+ * Tables a snapshot restores (and finishRestore checks) but the dirty triggers never track and the standing verify
+ * leaves out. kv_state is the world's small runtime state, never world content (the world digest skips it too): a
+ * hosted world keeps its own stamp there (world.id, the lease) beside the seed's routines.prebuilt_hash, so a stamped
+ * world always differs from the seed in kv_state while its content is clean. Tracked, every clean world would look
+ * dirty and every weekly verify would fail and start a full restore.
+ */
+export const UNTRACKED_TABLES: readonly string[] = ["kv_state"];
+const tracked = (t: { name: string }) => !UNTRACKED_TABLES.includes(t.name);
+
+/** The tables the standing verify of a restored, stamped world checks: every manifest table but UNTRACKED_TABLES. */
+export const verifiedTables = (manifest: { tables: readonly { name: string }[] }): string[] => manifest.tables.filter(tracked).map((t) => t.name);
 
 // ---- schema ---------------------------------------------------------------------------------------------------
 
@@ -242,7 +257,8 @@ export function restoreChunks(storage: DurableStorageLike, chunks: readonly Snap
   return m.cost();
 }
 
-/** Step 3: triggers back, sqlite_sequence as the source had it, dirty tracking armed, then the full verify. */
+/** Step 3: triggers back, sqlite_sequence as the source had it, dirty tracking armed, then the full verify of every
+ * table (kv_state included: nothing has stamped the world yet). */
 export function finishRestore(storage: DurableStorageLike, snap: Pick<Snapshot, "manifest">, triggers: readonly { sql: string }[], opts: { arm?: boolean } = {}): RestoreOutcome {
   const m = new Meter(storage);
   storage.transactionSync(() => {
@@ -303,13 +319,19 @@ function recordKey(table: string, prefix: "NEW" | "OLD", key: readonly string[])
   return `INSERT INTO ${DIRTY_TABLE} (tbl, pk) SELECT ${lit}, ${keyExpr(prefix, key)} WHERE NOT EXISTS (SELECT 1 FROM ${DIRTY_TABLE} WHERE tbl = ${lit} AND pk = ${keyExpr(prefix, key)});`;
 }
 
-/** Creates _weft_dirty and one AFTER INSERT, UPDATE and DELETE trigger per table. Idempotent. */
+/**
+ * Creates _weft_dirty and one AFTER INSERT, UPDATE and DELETE trigger per table, skipping UNTRACKED_TABLES (and
+ * dropping a trigger one of them still has from an earlier build). Idempotent.
+ */
 export function armDirtyTracking(storage: DurableStorageLike, tables: readonly SnapshotTable[]): SqlCost {
   const m = new Meter(storage);
   storage.transactionSync(() => {
     m.exec(DIRTY_DDL);
     const existing = new Set((m.exec("SELECT name FROM sqlite_master WHERE type = 'trigger' AND substr(name, 1, ?) = ?", DIRTY_TRIGGER_PREFIX.length, DIRTY_TRIGGER_PREFIX)).map((r) => String(r.name)));
-    for (const t of tables) {
+    for (const name of UNTRACKED_TABLES) {
+      for (const op of ["i", "u", "d"]) if (existing.has(`${DIRTY_TRIGGER_PREFIX}${name}_${op}`)) m.exec(`DROP TRIGGER ${q(`${DIRTY_TRIGGER_PREFIX}${name}_${op}`)}`);
+    }
+    for (const t of tables.filter(tracked)) {
       const base = `${DIRTY_TRIGGER_PREFIX}${t.name}`;
       const defs: [string, string][] = [
         [`${base}_i`, `CREATE TRIGGER ${q(`${base}_i`)} AFTER INSERT ON ${q(t.name)} BEGIN ${recordKey(t.name, "NEW", t.key)} END`],

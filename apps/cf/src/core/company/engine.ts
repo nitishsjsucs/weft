@@ -80,6 +80,9 @@ export interface WorldEngine {
   pdf?(request: Request, input: WorldPdfInput): Promise<Response>;
   /** The run catalog row of a run that settled (done, failed or waiting), or null while it runs. */
   catalogRow?(runId: string): Promise<RunCatalogRow | null>;
+  /** One step of the seed memory index from this world's memory (the showcase's is the snapshot's), from `fromChunk`
+   * until SpendDO's embeddings share stops it (design 5.4); absent without Workers AI and Vectorize. */
+  indexSeedMemory?(input: { fromChunk: number }): Promise<{ namespace: string; notes: number; chunks: number; nextChunk: number | null }>;
   /** Drains in-flight work within a bound and closes the world. */
   close(): Promise<void>;
 }
@@ -127,9 +130,9 @@ export interface WorldStore {
   restoreChunk(storage: DurableStorageLike, a: SnapshotArtifacts, index: number): { rowsWritten: number };
   /** Triggers back, sequences as the source had them, the dirty-tracking triggers armed, then a full digest check. */
   finishRestore(storage: DurableStorageLike, a: SnapshotArtifacts, triggers: readonly RestoreTrigger[]): { ok: boolean; mismatches: string[]; rowsWritten: number };
-  /** Counts, digests and chain head against the manifest; `full` digests every table. */
+  /** Counts, digests and chain head against the manifest; `full` digests every table but kv_state (the world's stamp). */
   verify(storage: DurableStorageLike, a: SnapshotArtifacts, opts: { full: boolean }): VerifyResult;
-  /** True when no domain row was written since the last reset (the dirty-key table holds nothing but kv_state). */
+  /** True when no domain row was written since the last reset (no dirty key outside kv_state, which is never tracked). */
   isClean(storage: DurableStorageLike): boolean;
   deltaReset(storage: DurableStorageLike, a: SnapshotArtifacts): DeltaResetResult;
   /** The design 11.3 conformance cases on this object's storage (the deployed `conformance` scratch object); `deliver`

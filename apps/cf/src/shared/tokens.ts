@@ -1,6 +1,7 @@
 // The signed values the hosted path trusts (design 3.4, 6.2 and 6.4): the session cookie and the human grant
 // (WEFT_SESSION_SECRET), the x-weft-ctx header the front sets for a Durable Object (WEFT_CTX_SECRET), the smoke
-// header (WEFT_SMOKE_TOKEN) and the admin signature (WEFT_ADMIN_TOKEN). The scripts (cf7's smoke, cf:dev) import
+// header (WEFT_SMOKE_TOKEN) and the admin signature (WEFT_ADMIN_TOKEN), which also derives the operator lease's
+// visitor id. The scripts (cf7's smoke, cf:dev) import
 // signAdmin and signSmoke from here, so the format lives in one file.
 import { hmac, hmacVerify, signToken, fromHex, sha256Hex, toHex, utf8, verifyToken } from "./crypto";
 import type { HumanGrantClaims, SessionClaims, WeftCtx } from "./contracts";
@@ -93,6 +94,16 @@ export async function verifyAdmin(input: { token: string | undefined; header: st
   if (Math.abs((input.nowS ?? Math.floor(Date.now() / 1000)) - ts) > SIGNATURE_WINDOW_S) return false;
   const bodyHash = await sha256Hex(input.body);
   return hmacVerify(input.token, `weft-admin|${input.method.toUpperCase()}|${input.path}|${ts}|${bodyHash}`, fromHex(m[2]!)!);
+}
+
+/** Operator lease names (POST /api/_admin/lease): one lease per name, so a smoke and a walkthrough can hold two. */
+export const OPERATOR_NAME_RE = /^[a-z0-9-]{1,32}$/;
+export const DEFAULT_OPERATOR = "operator";
+
+/** The visitor id an operator lease runs as (design 6.2): derived from WEFT_ADMIN_TOKEN and the lease name, so it is
+ * stable per name (asking again returns the same lease), has the cookie's shape, and cannot be made without the token. */
+export async function operatorVisitorId(adminToken: string, name: string): Promise<string> {
+  return `vis_${toHex(await hmac(adminToken, `weft-operator|${name}`)).slice(0, 32)}`;
 }
 
 /** The daily-salted IP hash (design 6.4): the salt is derived from WEFT_SESSION_SECRET and the UTC day, so raw IPs

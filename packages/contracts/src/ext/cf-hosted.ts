@@ -50,9 +50,11 @@ export const HOSTED_SETTINGS = {
   configMemoMs: 60_000,
 } as const;
 
-/** Rate Limiting binding settings (coarse and per location, never the cap; design 6.3). */
+/** Rate Limiting binding settings (coarse and per location, never the cap; design 6.3). RL_API fits the guided tour
+ * (a peak of 158 /api requests in 60 s, measured on cf:dev) about four times over: two tabs, or two visitors behind
+ * one address, never see a rate-limited banner. */
 export const HOSTED_RATE_LIMITS = {
-  RL_API: { limit: 120, period: 60 },
+  RL_API: { limit: 600, period: 60 },
   RL_MUTATE: { limit: 30, period: 60 },
   RL_MCP: { limit: 60, period: 60 },
   RL_RUN: { limit: 6, period: 60 },
@@ -144,10 +146,32 @@ export const HOSTED_PATHS = {
   pdf: "/api/_hosted/pdf",
   /** POST: McpKeyMint, the lease's MCP key, shown once. */
   mcpKey: "/api/_hosted/mcp-key",
-  /** HMAC with WEFT_ADMIN_TOKEN and a 5-minute timestamp: provision, conformance, ops. */
+  /** HMAC with WEFT_ADMIN_TOKEN and a 5-minute timestamp: provision, conformance, ops, seed-index (SeedIndexProgress). */
   admin: "/api/_admin",
   mcp: "/mcp",
 } as const;
+
+/**
+ * POST /api/_admin/seed-index (design 5.4): one metered step of the seed memory index. The showcase embeds the
+ * snapshot's memory notes into `seed-<snapshot>` from `from` until SpendDO's embeddings share refuses a batch; the
+ * Lobby keeps `nextChunk` per snapshot, so the operator calls it once a day until `done`. Semantic recall (KV
+ * recall.semantic) stays off until then.
+ */
+export interface SeedIndexProgress {
+  snapshot: string;
+  namespace: string;
+  notes: number;
+  chunks: number;
+  /** The chunk this step started from. */
+  from: number;
+  /** The first chunk not indexed yet, or null once every chunk is. */
+  nextChunk: number | null;
+  done: boolean;
+  /** When this step ran (ISO); a step on a complete index runs nothing and keeps the time of the last one. */
+  at: string;
+  /** False when the index was already complete (or another step was running) and nothing ran. */
+  ran: boolean;
+}
 
 export interface TurnstileTokenBody { token: string }
 export interface LeaseInfo { slot: string; gen: number; expiresAt: string; idleExpiresAt: string; resetsLeft: number }
@@ -187,6 +211,10 @@ export type LiveMessage =
   | { type: "lease"; state: "ended" | "reset"; gen: number };
 /** With the socket connected, polling drops to this safety net. */
 export const LIVE_POLL_FALLBACK_MS = 60_000;
+/** The client's keepalive text frame on /api/_live and the slot's answer. CompanyDO answers it with the hibernation
+ * auto-response (setWebSocketAutoResponse), so a ping never wakes the object; neither is a LiveMessage. */
+export const LIVE_PING = "ping";
+export const LIVE_PONG = "pong";
 
 // Errors --------------------------------------------------------------------------------------------------------
 

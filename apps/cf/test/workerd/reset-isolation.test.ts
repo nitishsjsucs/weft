@@ -159,3 +159,33 @@ describe("a reset the Lobby lost", () => {
     await (await lobby()).release({ slot: SLOT, reason: "test" });
   });
 });
+
+describe("an MCP key whose world cannot be reset in place", () => {
+  it("stops with its lease while the world waits for a deferred full restore at the same generation", async () => {
+    const env = await h.coreEnv();
+    await h.waitReady(60_000, [SLOT]);
+    const a = visitor();
+    const la = await a.lease();
+    expect(la).toMatchObject({ status: "leased", slot: SLOT });
+    const { key } = await (await a.fetch("/api/_hosted/mcp-key", { method: "POST" })).json() as { key: string };
+    const call = () => h.fetch("/mcp", { method: "POST", body: "{}", headers: { authorization: `Bearer ${key}` } }, { origin: null });
+    expect((await call()).status).toBe(200);
+    expect((await note(a, FAKE_FORCE_MISMATCH)).status).toBe(201);
+    await env.CONFIG.put("lobby.full_restore_rows", "100000000");   // no full restore fits today: the rebuild waits
+    try {
+      await sleep(400);
+      await (await lobby()).release({ slot: SLOT, reason: "test" });
+      // The world was not reset: it keeps the lease's generation until the deferred restore runs.
+      expect(await slotRow()).toMatchObject({ state: "failed", gen: la.gen });
+      const r = await call();
+      expect(r.status).toBe(409);
+      expect(await r.json()).toMatchObject({ code: "LEASE_ENDED" });
+    } finally {
+      await env.CONFIG.delete("lobby.full_restore_rows");
+      await sleep(400);
+    }
+    await (await lobby()).sweep();
+    await h.waitReady(60_000, [SLOT]);
+    expect((await call()).status).toBe(409);
+  });
+});

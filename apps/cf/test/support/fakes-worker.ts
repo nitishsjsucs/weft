@@ -39,10 +39,17 @@ export class FakeVectorize extends WorkerEntrypoint {
   }
 }
 
+/**
+ * Browser Run is not emulated: @cloudflare/puppeteer's launch() asks the binding for a session (POST
+ * /v1/devtools/browser) and then speaks the DevTools protocol over a WebSocket, which a stand-in cannot serve. The
+ * session request is refused with 501 at once, so a render fails with that reason (it retries and ends in weft-dlq)
+ * instead of failing later on a reply that is not JSON. The renderer's own cases use a fake launcher; the deployed
+ * smoke renders real PDFs.
+ */
 export class FakeBrowser extends WorkerEntrypoint {
   override async fetch(req: Request): Promise<Response> {
     calls.push({ binding: "BROWSER", method: "fetch", args: new URL(req.url).pathname });
-    return new Response("%PDF-1.4 fake", { headers: { "content-type": "application/pdf" } });
+    return Response.json({ success: false, errors: [{ message: "Browser Run is not emulated locally (fakes worker): PDFs render on the deployed Worker only" }] }, { status: 501 });
   }
 }
 

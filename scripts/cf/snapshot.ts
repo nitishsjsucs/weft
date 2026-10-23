@@ -1,12 +1,14 @@
 // pnpm cf:snapshot (docs/cloudflare/design.md 4.1 and 9.2 step 2): seeds the rich world on Node into
 // .scratch/cf-snapshot/ with WEFT_MEMORY=sqlite, WEFT_BLOBS=sqlite, WEFT_CLOCK_RATE=0 and the vault key, boots it once
-// (so routine rows match the code), takes it apart with cf1-db's buildSnapshot (INSERT chunks under 90 KB, per-table
-// seed rows, the manifest of per-table counts and digests) and writes, in apps/cf/generated/ (gitignored, private):
+// (so routine rows match the code) with the seeded API keys revoked (a snapshot holding a live one is refused), takes
+// it apart with cf1-db's buildSnapshot (INSERT chunks under 90 KB, per-table seed rows, the manifest of per-table
+// counts and digests) and writes, in apps/cf/generated/ (gitignored, private):
 //
 //   snapshot-rich.sql.gz  the INSERT chunks          seed-rows.json.gz  per-table seed rows for the delta reset
 //   manifest.json         cf1's manifest plus extra: the snapshot id, db:digest, the chain head, the memory HEAD,
 //                         the vault key's fingerprint and the landing page's stats
-//   stats.json            the stats alone (pnpm cf:build copies it into the web export)
+//   stats.json            the stats alone (pnpm cf:build puts it in apps/web/public before the web export; pnpm
+//                         cf:dev copies it beside the assets it serves)
 //
 // The build fails when the migrations' journal hash differs from the bundled migrations (apps/cf/generated/
 // fixtures.ts). `--deploy` seals the world with the deploy WEFT_VAULT_KEY from the cf secrets file (read with awk,
@@ -14,7 +16,7 @@
 // such a snapshot.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as weftDb from "../../packages/db/src/index";
 import { CF_SECRETS_FILE, hex, readEnvValue, REPO_ROOT } from "./lib/env-file";
@@ -78,6 +80,24 @@ export function snapshotMemoryProblem(b: Pick<BootedWorld, "memoryHead" | "memor
     + "WEFT_MEMORY=sqlite did not reach the SQL memory repo (createExecutor's memory options, contract request cf2 item 6), so the snapshot is refused";
 }
 
+/** A snapshot's seed rows as far as the key check reads them (cf1's SeedRows). */
+export type SeedRowsLike = Record<string, { columns: string[]; rowid: boolean; rows: unknown[][] }>;
+
+/**
+ * The ids of API keys a snapshot would restore unrevoked. The seed mints an admin and an MCP key whose plaintexts sit
+ * in the Node data dir; every world restored from the snapshot would accept them, so snapshot-boot.ts revokes them
+ * and the build refuses a snapshot that still holds a live one. A hosted world's keys are minted per lease.
+ */
+export function unrevokedSeedKeys(seed: SeedRowsLike): string[] {
+  const t = seed.api_keys;
+  if (!t) return [];
+  const id = t.columns.indexOf("id");
+  const revoked = t.columns.indexOf("revoked_at");
+  if (id < 0 || revoked < 0) throw new Error("snapshot: api_keys has no id or revoked_at column");
+  const off = t.rowid ? 1 : 0;   // the rowid leads each row when it is not a column
+  return t.rows.filter((r) => r[off + revoked] === null || r[off + revoked] === undefined).map((r) => String(r[off + id]));
+}
+
 /** cf1-db's exports this script needs; `--check-deps` exits 3 when one is missing (pnpm cf:build reads it). */
 export const SNAPSHOT_DEPS = ["openDurableEmulator", "buildSnapshot", "encodeSnapshot", "readMigrationsFromDir", "journalHash", "migrationEntries"] as const;
 export const missingSnapshotDeps = (): string[] => SNAPSHOT_DEPS.filter((n) => (weftDb as Db)[n] === undefined);
@@ -92,7 +112,7 @@ async function main(argv: string[]): Promise<void> {
   const deploy = argv.includes("--deploy");
   // Fail before seeding when cf1's snapshot code is not here.
   const openDurableEmulator = need<(o: { path: string }) => unknown>("openDurableEmulator");
-  const buildSnapshot = need<(s: unknown, o: { journalHash: string }) => { manifest: { digest: string; chunks: number; rows: number; journalHash: string; extra?: Record<string, unknown> } }>("buildSnapshot");
+  const buildSnapshot = need<(s: unknown, o: { journalHash: string }) => { manifest: { digest: string; chunks: number; rows: number; journalHash: string; extra?: Record<string, unknown> }; seed: SeedRowsLike }>("buildSnapshot");
   const encodeSnapshot = need<(s: unknown) => Promise<{ chunks: Uint8Array; seed: Uint8Array; manifest: string }>>("encodeSnapshot");
   const readMigrationsFromDir = need<(dir: string) => unknown[]>("readMigrationsFromDir");
   const journalHash = need<(e: unknown[]) => string>("journalHash");
@@ -121,6 +141,10 @@ async function main(argv: string[]): Promise<void> {
 
   const storage = openDurableEmulator({ path: join(DATA_DIR, "weft.db") });
   const snap = buildSnapshot(storage, { journalHash: bundled });
+  const live = unrevokedSeedKeys(snap.seed);
+  if (live.length) throw new Error(`the snapshot would restore API keys that are not revoked (${live.join(", ")}); every world would accept them`);
+  // Their plaintexts are of no use now; they do not stay beside the seeded world either.
+  for (const f of readdirSync(DATA_DIR)) if (/^demo-.*key\.txt$/.test(f)) rmSync(join(DATA_DIR, f), { force: true });
   const id = snapshotId(snap.manifest.digest, bundled);
   snap.manifest.extra = {
     snapshotId: id, createdAt: new Date().toISOString(), profile: "rich", worldDigest: booted.worldDigest, chainHead: booted.chainHead,

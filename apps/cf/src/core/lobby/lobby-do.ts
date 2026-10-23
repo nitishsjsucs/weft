@@ -5,7 +5,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   DO_NAMES, HOSTED_CONFIG_KEYS, HOSTED_SETTINGS, slotName,
-  type DegradationLevel, type HostedErrorCode, type HostedResetResult, type LeaseInfo, type LeaseResult, type WorldMode,
+  type DegradationLevel, type HostedErrorCode, type HostedResetResult, type LeaseInfo, type LeaseResult, type SeedIndexProgress, type WorldMode,
 } from "../../shared/contracts";
 import { agentEnabled, CF4_CONFIG_KEYS, configNumber, envConfig } from "../../shared/config";
 import { poolSize, type CoreEnv } from "../../shared/env";
@@ -45,6 +45,8 @@ export interface LobbyStatus {
   lease: LeaseInfo | null;
   /** The visitor's place on the waitlist, if any. */
   waitlistPosition: number | null;
+  /** The leased world's own model choice (WORLD_MODEL_SETTING), from the slot's heartbeat; null without a lease. */
+  worldProvider: string | null;
 }
 
 export interface ProvisionStep { slot: string; action: "restore" | "deferred" | "ready" | "leased" | "restoring" | "error"; detail?: string }
@@ -73,6 +75,8 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   /** Slots this instance has claimed and is resetting now. A slot left `resetting` by an earlier instance (the object
    * restarted mid-reset) is not here, and the sweep sends it to a full restore. */
   private readonly resetsRunning = new Set<string>();
+  /** A seed index step is running in this instance (seedIndex). */
+  private seedIndexRunning = false;
 
   constructor(ctx: DurableObjectState, env: CoreEnv) {
     super(ctx, env);
@@ -222,11 +226,16 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     // visitor that got here first wins, and this one returns its lease.
     const raced = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
     if (raced) return { status: "leased", ...this.leaseInfo(raced) };
-    this.ctx.storage.transactionSync(() => {
+    // The IP-hash cap is checked again in the step that takes the lease: the awaits above (KV, the reclaim's
+    // heartbeats) let concurrent starts from one IP hash all pass the first check.
+    const reserved = this.ctx.storage.transactionSync(() => {
+      if (this.count(`ip:${input.ipHash}`, day) >= HOSTED_SETTINGS.leasesPerIpHashPerDay) return false;
       this.sql.exec(`INSERT INTO leases (slot, visitor, ip_hash, gen, started_at, last_seen, resets) VALUES (?, ?, ?, ?, ?, ?, 0)`, free!.name, input.visitor, input.ipHash, free!.gen, now, now);
       this.sql.exec(`DELETE FROM waitlist WHERE visitor = ?`, input.visitor);
       this.bump(`ip:${input.ipHash}`, 1, day);
+      return true;
     });
+    if (!reserved) return { status: "ip_limit", reopensAt: nextUtcMidnight(now) };
     try {
       await this.company(free.name).applyStamp({ slot: free.name, gen: free.gen, mode: "slot", visitor: input.visitor, ipHash: input.ipHash });
     } catch (e) {
@@ -283,12 +292,14 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const free = pool.filter((s) => s.state === "ready" && !leased.some((l) => l.slot === s.name)).length;
     const waitlistN = this.one<{ n: number }>(`SELECT COUNT(*) AS n FROM waitlist WHERE seen > ?`, now - WAITLIST_TTL_MS)?.n ?? 0;
     let lease: LeaseInfo | null = null;
+    let worldProvider: string | null = null;
     if (input.visitor) {
       const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
       if (l && (input.slot == null || l.slot === input.slot) && (input.gen == null || l.gen === input.gen)) {
         try {
-          const hb = await this.company(l.slot).heartbeat();
+          const hb = await this.company(l.slot).heartbeat({ provider: true });
           this.absorbUsage(hb.usage);
+          worldProvider = hb.worldProvider ?? null;
           if (hb.lastActivityMs !== null && hb.lastActivityMs > l.last_seen) {
             this.sql.exec(`UPDATE leases SET last_seen = ? WHERE slot = ?`, hb.lastActivityMs, l.slot);
             l.last_seen = hb.lastActivityMs;
@@ -301,7 +312,10 @@ export class LobbyDO extends DurableObject<CoreEnv> {
         else lease = this.leaseInfo(l);
       }
     }
-    return { level, pool: { size: pool.length, free, waitlist: waitlistN }, lease, waitlistPosition: input.visitor ? this.waitlistPosition(input.visitor, now) : null };
+    return {
+      level, pool: { size: pool.length, free, waitlist: waitlistN }, lease,
+      waitlistPosition: input.visitor ? this.waitlistPosition(input.visitor, now) : null, worldProvider: lease ? worldProvider : null,
+    };
   }
 
   /**
@@ -750,6 +764,39 @@ export class LobbyDO extends DurableObject<CoreEnv> {
       lastSweepAt: this.meta("sweep.at"),
       shares: shareUse(u, b),
     };
+  }
+
+  /**
+   * POST /api/_admin/seed-index (design 5.4): one step of the seed memory index on the showcase, resumed from the
+   * chunk the last step reached. Progress is kept here per snapshot (lobby_meta seed_index.<snapshot>), so a new
+   * snapshot starts again from chunk 0 and a complete index runs nothing. One step at a time.
+   */
+  async seedIndex(input: { now?: number } = {}): Promise<SeedIndexProgress | { error: "WORLD_NOT_READY" | "SEED_INDEX_FAILED"; message: string }> {
+    const show = this.slot(DO_NAMES.showcase);
+    if (!show || show.state !== "ready" || !show.snapshot) return { error: "WORLD_NOT_READY", message: "The showcase is not provisioned yet (POST /api/_admin/provision)" };
+    const key = `seed_index.${show.snapshot}`;
+    const prev = (() => { try { return JSON.parse(this.meta(key) ?? "null") as SeedIndexProgress | null; } catch { return null; } })();
+    if (prev?.done) return { ...prev, ran: false };
+    if (this.seedIndexRunning) return { ...(prev ?? { snapshot: show.snapshot, namespace: "", notes: 0, chunks: 0, from: 0, nextChunk: 0, done: false, at: "" }), ran: false };
+    this.seedIndexRunning = true;
+    try {
+      const from = prev?.nextChunk ?? 0;
+      let r: { namespace: string; notes: number; chunks: number; nextChunk: number | null };
+      try {
+        r = await this.company(DO_NAMES.showcase).indexSeedMemory({ fromChunk: from });
+      } catch (e) {
+        logError("seed.index", e, { slot: DO_NAMES.showcase });
+        return { error: "SEED_INDEX_FAILED", message: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+      }
+      const out: SeedIndexProgress = {
+        snapshot: show.snapshot, namespace: r.namespace, notes: r.notes, chunks: r.chunks, from, nextChunk: r.nextChunk, done: r.nextChunk === null,
+        at: new Date(input.now ?? Date.now()).toISOString(), ran: true,
+      };
+      this.setMeta(key, JSON.stringify(out));
+      return out;
+    } finally {
+      this.seedIndexRunning = false;
+    }
   }
 
   /** The admin-only GET /api/_admin/ops readout (no visitor ids, no IP hashes). */

@@ -31,6 +31,17 @@ describe("AlarmPlan", () => {
     expect(plan.next()).toBeNull();
   });
 
+  it("sets the alarm again after a setAlarm that failed, instead of believing it armed", async () => {
+    const s = storage();
+    let fail = true;
+    const plan = new AlarmPlan({ setAlarm: (t) => { if (fail) throw new Error("storage busy"); s.setAlarm(t); }, getAlarm: () => s.alarm });
+    await expect(plan.arm("runs", 1_000)).rejects.toThrow("storage busy");
+    expect(s.alarm).toBeNull();
+    fail = false;
+    await plan.arm("runs", 1_000);
+    expect(s.alarm).toBe(1_000);
+  });
+
   it("reads the stored alarm once before deciding", async () => {
     const s = storage();
     s.setAlarm(2_000);
@@ -72,6 +83,31 @@ describe("durable run host", () => {
     const r = await host.drain();
     expect(r).toMatchObject({ started: 2, remaining: 0 });
     expect(log).toContain("end run_2");
+  });
+
+  it("reports a failed alarm ask and asks again on the next poke while jobs wait", async () => {
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    let fail = true;
+    let arms = 0;
+    const errors: unknown[] = [];
+    const host = durableRunHost({ arm: () => { arms += 1; if (fail) throw new Error("setAlarm failed"); }, onArmError: (e) => errors.push(e) });
+    host.poke();
+    await tick();
+    expect(arms).toBe(0);   // nothing waits and nothing failed: a poke asks for nothing
+    host.submit(job("run_1", false, []));
+    await tick();
+    expect(arms).toBe(1);
+    expect(errors).toHaveLength(1);
+    expect(host.armFailed).toBe(true);
+    fail = false;
+    host.poke();
+    await tick();
+    expect(arms).toBe(2);
+    expect(host.armFailed).toBe(false);
+    host.poke();
+    await tick();
+    expect(arms).toBe(2);   // armed now: no further asks
+    expect((await host.drain()).started).toBe(1);
   });
 
   it("keeps draining after a job throws", async () => {

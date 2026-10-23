@@ -2,10 +2,14 @@
 // isolation, the WebSocket feed, alarms, the outbox, resets and restores) without the Weft stack. It keeps a
 // `notes` table in the object's own SQLite, a meter that feeds commits to the feed, an IO_IN_TX-style guard, a
 // "seed" of three notes restored in chunks, dirty tracking by trigger, and a delta reset back to the seed.
-import type { DurableStorageLike, SqlCommit, SqlMeter, SqlUsage, TxGuard } from "../../src/shared/contracts";
+import { WORLD_MODEL_SETTING, type DurableStorageLike, type SqlCommit, type SqlMeter, type SqlUsage, type TxGuard } from "../../src/shared/contracts";
 import type { EngineModule, SnapshotArtifacts, WorldBootInput, WorldEngine, WorldStore } from "../../src/core/company/engine";
 
 const SEED = ["Larkspur Robotics (demo) handbook", "Payroll runs on Fridays", "Benefits renew in January"];
+/** What a run's counted fetches ask for: the discard port on loopback, refused at once with no DNS lookup and no
+ * proxy (loopback is in every NO_PROXY), so 40 of them take milliseconds on any machine. A name that does not
+ * resolve would go through an HTTPS proxy where one is set and take about 0.3 s each. */
+const UNREACHABLE_URL = "http://127.0.0.1:9/";
 
 export const FAKE_SNAPSHOT_VERSION = "fake-snapshot-1";
 /** A note with this text makes the fake delta reset report a digest mismatch and change nothing (cf1's deltaReset
@@ -18,6 +22,8 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, status TEXT NOT NULL, live INTEGER NOT NULL, fetches INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS ticks (n INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL)`,
+  // The real schema's settings table (packages/db/src/schema.ts): the model switch's WORLD_MODEL_SETTING row lives here.
+  `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)`,
 ];
 
 function meterFor(): SqlMeter & { note(read: number, written: number, tables: string[]): void } {
@@ -118,7 +124,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
           let made = 0;
           const cfg = runs.get(id);
           for (let i = 0; i < (cfg?.fetches ?? 0); i++) {
-            try { await (cfg?.global ? globalThis.fetch : input.fetch)("https://fetch-count.invalid/"); } catch { /* unreachable on purpose */ }
+            try { await (cfg?.global ? globalThis.fetch : input.fetch)(UNREACHABLE_URL); } catch { /* unreachable on purpose */ }
             made += 1;
           }
           exec(`UPDATE runs SET status = 'done', fetches = ? WHERE id = ?`, made, id);
@@ -174,7 +180,9 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
       return { key: `wk_mcp_${m.slot}_${m.gen}_${rand}`, url: m.publicUrl, expiresAt: m.expiresAt };
     },
     async setWorldProvider({ provider }) {
-      exec(`INSERT INTO kv_state (key, value) VALUES ('fake.provider', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, provider ?? "");
+      // As the real engine writes it: the JSON string under WORLD_MODEL_SETTING, deleted when cleared.
+      if (provider === null) exec(`DELETE FROM settings WHERE key = ?`, WORLD_MODEL_SETTING);
+      else exec(`INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json`, WORLD_MODEL_SETTING, JSON.stringify(provider));
     },
     addSecret: (v) => { secrets.push(v.slice(0, 7)); },
     async close() { await input.schedulerHost.stop(); },
@@ -201,6 +209,8 @@ const store: WorldStore = {
       const ref = op === "DELETE" ? "OLD" : "NEW";
       storage.sql.exec(`CREATE TRIGGER IF NOT EXISTS notes_dirty_${op.toLowerCase()} AFTER ${op} ON notes BEGIN
         INSERT INTO _weft_dirty (tbl, pk) SELECT 'notes', ${ref}.id WHERE NOT EXISTS (SELECT 1 FROM _weft_dirty WHERE tbl = 'notes' AND pk = ${ref}.id); END`);
+      storage.sql.exec(`CREATE TRIGGER IF NOT EXISTS settings_dirty_${op.toLowerCase()} AFTER ${op} ON settings BEGIN
+        INSERT INTO _weft_dirty (tbl, pk) SELECT 'settings', ${ref}.key WHERE NOT EXISTS (SELECT 1 FROM _weft_dirty WHERE tbl = 'settings' AND pk = ${ref}.key); END`);
     }
     const n = storage.sql.exec(`SELECT COUNT(*) AS n FROM notes`).one().n as number;
     return { ok: n === SEED.length, mismatches: n === SEED.length ? [] : [`notes ${n} != ${SEED.length}`], rowsWritten: 2 };
@@ -215,6 +225,7 @@ const store: WorldStore = {
     storage.transactionSync(() => {
       const dirty = storage.sql.exec(`SELECT COUNT(*) AS n FROM _weft_dirty`).one().n as number;
       storage.sql.exec(`DELETE FROM notes`);
+      storage.sql.exec(`DELETE FROM settings`);
       for (let i = 0; i < SEED.length; i++) storage.sql.exec(`INSERT INTO notes (id, text) VALUES (?, ?)`, i + 1, SEED[i]!);
       storage.sql.exec(`DELETE FROM outbox`);
       storage.sql.exec(`DELETE FROM runs`);

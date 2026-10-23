@@ -27,7 +27,7 @@
   "services": [{ "binding": "CORE", "service": "weft-core", "entrypoint": "HostedExtras" }],
   "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
   "ratelimits": [
-    { "name": "RL_API", "namespace_id": "4101", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_API", "namespace_id": "4101", "simple": { "limit": 600, "period": 60 } },
     { "name": "RL_MUTATE", "namespace_id": "4102", "simple": { "limit": 30, "period": 60 } },
     { "name": "RL_MCP", "namespace_id": "4104", "simple": { "limit": 60, "period": 60 } }
   ],

@@ -10,8 +10,8 @@
 // (engine.ts) and is imported lazily inside blockConcurrencyWhile, so an unprovisioned object never evaluates it.
 import { DurableObject } from "cloudflare:workers";
 import {
-  HOSTED_SETTINGS, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
-  DO_NAMES, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
+  HOSTED_SETTINGS, LIVE_PING, LIVE_PONG, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
+  DO_NAMES, WORLD_MODEL_SETTING, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
 } from "../../shared/contracts";
 import { envConfig } from "../../shared/config";
 import { mcpKeyId, readCtx } from "../../shared/tokens";
@@ -72,7 +72,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.alarms = new AlarmPlan({ setAlarm: (t) => ctx.storage.setAlarm(t), getAlarm: () => ctx.storage.getAlarm() });
     this.runHost = this.newRunHost();
     this.scheduler = this.newScheduler();
-    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    // The tab's keepalive: answered by the runtime without waking a hibernated object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(LIVE_PING, LIVE_PONG));
     void ctx.blockConcurrencyWhile(() => this.boot());
   }
 
@@ -87,7 +88,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   }
 
   private newRunHost(): DurableRunHost {
-    return durableRunHost({ arm: () => this.alarms.arm("runs"), counter: this.counter });
+    return durableRunHost({
+      arm: () => this.alarms.arm("runs"), counter: this.counter,
+      onArmError: (e) => logError("alarm.arm", e, { slot: this.stamp?.slot, gen: this.stamp?.gen }),
+    });
   }
   private newScheduler(): DurableSchedulerHost {
     return durableSchedulerHost({ arm: (at) => this.alarms.arm("tick", at), cancel: () => this.alarms.cancel("tick") });
@@ -212,6 +216,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       return await this.serveApp(request, url, stamp);
     } finally {
       if (counted) this.leave();
+      this.runHost.poke();
       this.scheduler.poke();
       this.maybePushUsage();
     }
@@ -256,7 +261,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         return null;
       case "slot":
         if (c.gen !== stamp.gen) return ended();
-        if (path === DO_PATHS.mcp) return null;   // MCP keys carry no visitor; the generation and the key hash gate them
+        // MCP keys carry no visitor: the generation, the key hash and a live lease gate them. endLease clears the
+        // stamp's visitor, so a key stops working the moment its lease ends, even while the world is not yet reset.
+        if (path === DO_PATHS.mcp) return stamp.visitor ? null : ended();
         if (!c.visitor || c.visitor !== stamp.visitor) return ended();
         return null;
       case "smoke":
@@ -562,9 +569,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.lastActivity = null;
   }
 
-  async heartbeat(): Promise<SlotHeartbeat> {
+  async heartbeat(opts: { provider?: boolean } = {}): Promise<SlotHeartbeat> {
     const usage = this.usage;
     this.usage = zeroUsage();
+    const worldProvider = opts.provider ? this.worldProvider() : null;
     let clean = true;
     if (this.stamp && hasKvState(this.ctx.storage.sql)) {
       try {
@@ -574,7 +582,22 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         clean = false;
       }
     }
-    return { stamped: this.stamp, lastActivityMs: this.lastActivity, clean, usage, snapshot: this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? null };
+    return { stamped: this.stamp, lastActivityMs: this.lastActivity, clean, usage, snapshot: this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? null, ...(opts.provider ? { worldProvider } : {}) };
+  }
+
+  /**
+   * The world's own model choice (the Simulators model switch, WORLD_MODEL_SETTING), read with plain SQL so the
+   * session status shows it without booting anything (design 5.2). Null when unset, unreadable or not a string.
+   */
+  private worldProvider(): string | null {
+    if (!this.stamp || this.stamp.mode !== "slot" || !hasKvState(this.ctx.storage.sql)) return null;
+    try {
+      const row = this.ctx.storage.sql.exec(`SELECT value_json AS v FROM settings WHERE key = ?`, WORLD_MODEL_SETTING).toArray()[0];
+      const v = row ? (JSON.parse(String(row.v)) as unknown) : null;
+      return typeof v === "string" ? v : null;
+    } catch {
+      return null;
+    }
   }
 
   /** The default reset after a lease (design 4.6): delete dirty rows, reinsert their seed rows, check the digests. */
@@ -730,6 +753,23 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (!mod.store.isClean(this.storage) || this.stamp.visitor) return { ok: true, skipped: true, mismatches: [], rows: 0 };
     const v = mod.store.verify(this.storage, await mod.artifacts(), { full: true });
     return { ok: v.ok && v.chainValid, skipped: false, mismatches: v.mismatches.slice(0, 20), rows: v.rows };
+  }
+
+  /**
+   * One step of the seed memory index (design 5.4; the Lobby's seedIndex drives it and keeps the next chunk). It runs
+   * on the showcase only: its memory is the snapshot's, so the vectors hold for every world restored from it.
+   */
+  async indexSeedMemory(input: { fromChunk: number }): Promise<{ snapshot: string; namespace: string; notes: number; chunks: number; nextChunk: number | null }> {
+    this.assertName(DO_NAMES.showcase);
+    if (!this.stamp || this.stamp.mode !== "showcase") throw new Error("the seed index runs on the provisioned showcase only");
+    if (!this.engine && !this.ctx.storage.kv.get(RESTORE_KEY)) await this.startEngine();
+    const engine = this.engine;
+    if (!engine) throw new Error(`WORLD_NOT_READY: the showcase is not running${this.bootError ? ` (${this.bootError})` : ""}`);
+    if (!engine.indexSeedMemory) throw new Error("SEED_INDEX_DISABLED: this deployment has no Workers AI or Vectorize binding");
+    const fromChunk = Math.max(0, Math.floor(input.fromChunk));
+    const r = await engine.indexSeedMemory({ fromChunk });
+    logEvent("seed.index", { slot: this.stamp.slot, outcome: r.nextChunk === null ? "done" : "partial", from: fromChunk, next: r.nextChunk, chunks: r.chunks });
+    return { snapshot: this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? "none", ...r };
   }
 
   /** A fresh point-in-time bookmark of a clean world (bookmarks cover 30 days); null when unavailable or dirty. */

@@ -49,6 +49,41 @@ describe("caps", () => {
   });
 });
 
+describe("a failing KV", () => {
+  const failing = (state: { down: boolean; reads: number }) => ({
+    async get(k: string | string[]) {
+      state.reads += 1;
+      if (state.down) throw new Error("KV unavailable");
+      return Array.isArray(k) ? new Map(k.map((x) => [x, x === HOSTED_CONFIG_KEYS.capDayUsd ? "1.5" : null])) : null;
+    },
+  }) as unknown as KVNamespace;
+
+  it("pauses the agent on a cold isolate (no values to keep) instead of failing open, and reads KV again next time", async () => {
+    const state = { down: true, reads: 0 };
+    const kv = failing(state);
+    const cold = await readConfig(kv, 1_000);
+    expect(agentEnabled(cold)).toBe(false);
+    expect(cold.get(HOSTED_CONFIG_KEYS.capDayUsd) ?? null).toBeNull();
+    const reads = state.reads;
+    await readConfig(kv, 1_001);
+    expect(state.reads).toBeGreaterThan(reads);   // the failure is not memoized
+    state.down = false;
+    const back = await readConfig(kv, 1_002);
+    expect(agentEnabled(back)).toBe(true);
+    expect(back.get(HOSTED_CONFIG_KEYS.capDayUsd)).toBe("1.5");
+  });
+
+  it("keeps the last values it read when KV fails later", async () => {
+    const state = { down: false, reads: 0 };
+    const kv = failing(state);
+    expect((await readConfig(kv, 1_000)).get(HOSTED_CONFIG_KEYS.capDayUsd)).toBe("1.5");
+    state.down = true;
+    const stale = await readConfig(kv, 100_000);
+    expect(stale.get(HOSTED_CONFIG_KEYS.capDayUsd)).toBe("1.5");
+    expect(agentEnabled(stale)).toBe(true);
+  });
+});
+
 describe("world env", () => {
   it("folds KV values in under the names the Weft stack reads, and forces scripted on slot-smoke", () => {
     const values = m({ [HOSTED_CONFIG_KEYS.agentEnabled]: "false", [HOSTED_CONFIG_KEYS.modelProvider]: "workers_ai", [HOSTED_CONFIG_KEYS.recallSemantic]: "on", [HOSTED_CONFIG_KEYS.capDayUsd]: "3" });

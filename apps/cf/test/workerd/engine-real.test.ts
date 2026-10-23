@@ -8,19 +8,20 @@
 // execution; GP5 taint; an alarm-driven run with an SSE subscriber; PROCESS_RESTART at boot; alarms replayed while a
 // run is queued and after it execute nothing twice (exec_calls unchanged, one proposal per command); a
 // showcase cold start plus GET sweep writes 0 rows; ETag 304s read 0 rows; a warm tick writes 0 rows; the fetch
-// counter stays at or under 40; /mcp lists 122 tools and refuses approve, rollback and vault; 4 slots in one isolate
-// stay under 100 MB (engine-memory.test.ts); no node:fs, node:child_process or node:net is reachable from the weft-core entry.
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+// counter stays at or under 40; /mcp lists 122 tools and refuses approve, rollback and vault; agent_ask over /mcp
+// settles through the ?wait=25 long poll while alarms run the run; the deployed cron handler sweeps and sends a due
+// parked job again; the seed memory index runs from the admin route, metered and resumed; clean stamped worlds pass
+// the full verify and the weekly sweep restores none of them; 4 slots in one isolate stay under 100 MB
+// (engine-memory.test.ts). The import scan of the weft-core entry is import-scan.test.ts (it needs no snapshot).
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { d1JobLedger, seedNamespace, type D1Like, type HostedJob } from "@weft/cf-extras";
 import { ROUTES } from "../../../../packages/contracts/src/api";
-import { DO_NAMES, MAX_FETCHES_PER_ALARM } from "../../src/shared/contracts";
-import { scanImports, type Metafile } from "../../../../scripts/cf/lib/import-scan";
-import { CF_DIR, Harness, ORIGIN } from "../support/harness";
+import { DO_NAMES, MAX_FETCHES_PER_ALARM, type SeedIndexProgress } from "../../src/shared/contracts";
+import { exportObjectKey } from "../../src/extras/queues";
+import { Harness, ORIGIN } from "../support/harness";
 import { MANIFEST_FILE as manifestFile, realEngine, realEngineProblems, skipReason } from "../support/real-engine";
 
 describe("real engine gate", () => {
@@ -51,15 +52,16 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
   let manifest: { digests: Record<string, { rows: number }>; extra?: { chainHead: string | null; snapshotId: string } };
   beforeAll(async () => {
     manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as typeof manifest;
-    h = await Harness.start({ engine: "real", poolSize: 4 });
-    // Six worlds restore in one day here (the deployed pool of 2 makes four): lift the provisioning ceiling.
+    // One pool slot per case that leases (five), so no case waits for another's lease to end.
+    h = await Harness.start({ engine: "real", poolSize: 5 });
+    // Seven worlds restore in one day here (the deployed pool of 2 makes four): lift the provisioning ceiling.
     await (await h.coreEnv()).CONFIG.put("lobby.provision_rows_ceiling", "400000");
     await sleep(400);
     await h.provision(300_000);
   }, 360_000);
   afterAll(async () => { await h?.close(); });
 
-  // Each smoke call comes from its own address, so the polling loops stay clear of RL_API (120 per 60 s per IP hash).
+  // Smoke calls skip RL_API (design 6.3); each still comes from its own address, as separate checks would.
   let ipSeq = 0;
   const smoke = async (path: string, init: RequestInit = {}) => h.fetch(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(await h.smokeHeaders()) } }, { origin: null, principal: "usr_dana", ip: `192.0.2.${(ipSeq++ % 200) + 20}` });
   const smokeJson = async <T>(path: string, init: RequestInit = {}) => { const r = await smoke(path, init); return { status: r.status, body: (await r.json()) as T }; };
@@ -265,6 +267,36 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     }
   });
 
+  it("answers agent_ask over /mcp: the run settles in alarm invocations while GET /v1/agent/runs/:id?wait=25 waits", async () => {
+    const v = h.visitor();
+    const l = await v.lease();
+    expect(l.status).toBe("leased");
+    const { key } = await (await v.fetch("/api/_hosted/mcp-key", { method: "POST", headers: { "x-weft-principal": "usr_dana" } })).json() as { key: string };
+    const client = new Client({ name: "weft-miniflare", version: "0.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${ORIGIN}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${key}` } },
+      fetch: ((url: string | URL, init?: RequestInit) => h.server.fetch(String(url), init as never)) as never,
+    });
+    await client.connect(transport);
+    try {
+      const t0 = Date.now();
+      const r = await client.callTool({ name: "agent_ask", arguments: { question: "Show payroll cost by month" } });
+      const text = (r.content as { type: string; text: string }[])[0]!.text;
+      expect(r.isError, text).toBeFalsy();
+      const run = JSON.parse(text) as { id: string; status: string };
+      // A settled run, not the "still running" answer after the third request.
+      expect(["done", "waiting"]).toContain(run.status);
+      expect(run.id).toMatch(/^run_/);
+      // Within the POST and two long polls of 25 s.
+      expect(Date.now() - t0).toBeLessThan(55_000);
+      const sql = await h.core.getDurableObjectStorage("CompanyDO", { name: l.slot! });
+      const [row] = (await sql.exec(`SELECT status FROM agent_runs WHERE id = ?`, run.id)) as { status: string }[];
+      expect(row!.status).toBe(run.status);
+    } finally {
+      await client.close();
+    }
+  }, 120_000);
+
   it("reads an uploaded receipt through weft-jobs: one write-back action, none on a redelivery, nothing but the two write-backs as svc_jobs", async () => {
     // cf6-extras end to end on the real stack: expenses.submit appends an outbox row in its transaction, CompanyDO sends
     // it after the commit, the weft-jobs consumer reads the receipt (the fakes worker stands in for Workers AI) and
@@ -300,6 +332,24 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect((await smokeJson<{ ok: boolean }>("/api/v1/actions/verify")).body.ok).toBe(true);
   }, 120_000);
 
+  it("runs weft-core's deployed cron handler: the Lobby sweep, then a parked job that is due goes back to its queue and runs", async () => {
+    const e = await env();
+    const ledger = d1JobLedger(e.OPS as unknown as D1Like);
+    const gen = (await h.ops()).lobby.slots.find((s) => s.name === DO_NAMES.smoke)!.gen;
+    // A job a daily share refused yesterday, parked until a minute ago (the queue consumer parks such jobs).
+    const job: HostedJob = { v: 1, kind: "export.world", jobId: `obx_${"c".repeat(12)}${Date.now().toString(16).slice(-4)}`, slot: DO_NAMES.smoke, gen, what: "world", requestedBy: "usr_dana" };
+    await ledger.defer(job, new Date(Date.now() - 60_000).toISOString(), "share");
+    const sweptBefore = ((await h.ops()).lobby.readout as unknown as { lastSweepAt: string | null }).lastSweepAt;
+    // src/core/index.ts's scheduled(): coreHandler's Lobby sweep, then extrasCron with the JOBS and RENDER producers.
+    const r = await h.core.scheduled({ cron: "*/15 * * * *", scheduledTime: new Date() });
+    expect(r.outcome).toBe("ok");
+    const rec = await until(() => ledger.get(job.jobId), (x) => x?.state === "done", 60_000);
+    expect(rec).toMatchObject({ state: "done", outcome: "stored" });
+    expect(await e.FILES!.head(exportObjectKey(job))).toBeTruthy();
+    const swept = await until(async () => ((await h.ops()).lobby.readout as unknown as { lastSweepAt: string | null }).lastSweepAt, (at) => !!at && at !== sweptBefore);
+    expect(Date.parse(swept!)).toBeGreaterThan(Date.now() - 120_000);
+  }, 120_000);
+
   it("runs the design 11.3 conformance cases on the scratch conformance object (the deployed route), which wipes itself", async () => {
     const r = await h.admin("POST", "/api/_admin/conformance", {});
     expect(r.status).toBe(200);
@@ -312,14 +362,56 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect(await sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_cf_%'")).toEqual([]);
   }, 120_000);
 
-  it("reaches no node:fs, node:child_process or node:net from the weft-core entry", () => {
-    const out = mkdtempSync(join(tmpdir(), "weft-core-meta-"));
-    try {
-      execFileSync(join(CF_DIR, "node_modules/.bin/wrangler"), ["deploy", "--dry-run", "--outdir", out, "--metafile", join(out, "meta.json"), "-c", "wrangler.core.jsonc"], { cwd: CF_DIR, stdio: "pipe" });
-      const r = scanImports(JSON.parse(readFileSync(join(out, "meta.json"), "utf8")) as Metafile, (p) => p.endsWith("src/core/index.ts"));
-      expect(r.reachable).toEqual([]);
-    } finally {
-      rmSync(out, { recursive: true, force: true });
+  it("indexes the snapshot's memory notes from the admin route, metered by SpendDO's embeddings share and resumed by the Lobby", async () => {
+    const e = await env();
+    const spend = e.SPEND.get(e.SPEND.idFromName(DO_NAMES.spend));
+    const used = async () => (await spend.status({})).neurons.byProduct.embeddings;
+    const before = await used();
+    const step = async () => { const r = await h.admin("POST", "/api/_admin/seed-index", {}); expect(r.status).toBe(200); return (await r.json()) as SeedIndexProgress; };
+    const first = await step();
+    const snapshot = manifest.extra!.snapshotId;
+    expect(first).toMatchObject({ snapshot, namespace: seedNamespace(snapshot), from: 0, ran: true });
+    expect(first.notes).toBeGreaterThan(20);
+    expect(first.chunks).toBeGreaterThan(first.notes - 1);
+    // Every batch went through the embeddings share: it paid for some, and never past the day's 200 neurons.
+    const after = await used();
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeLessThanOrEqual(200);
+    // The vectors are in the shared seed namespace, at generation 0 (every world restored from the snapshot reads them).
+    const found = await (e.MEMVEC as unknown as { query(v: number[], o: { namespace: string; topK: number }): Promise<{ matches: { metadata?: { gen?: number; path?: string } }[] }> })
+      .query(new Array(768).fill(0.5), { namespace: seedNamespace(snapshot), topK: 5 });
+    expect(found.matches.length).toBeGreaterThan(0);
+    expect(found.matches.every((m) => m.metadata?.gen === 0 && /\.md$/.test(m.metadata?.path ?? ""))).toBe(true);
+    // The next step starts where this one stopped; today's share is spent, so it indexes nothing more today.
+    const second = await step();
+    if (first.nextChunk === null) {
+      expect(second).toMatchObject({ done: true, ran: false, nextChunk: null });
+    } else {
+      expect(first.nextChunk).toBeGreaterThan(0);
+      expect(second).toMatchObject({ from: first.nextChunk, nextChunk: first.nextChunk, done: false, ran: true });
+      expect(await used()).toBe(after);
     }
+  }, 120_000);
+
+  it("verifies clean stamped worlds against the manifest (kv_state, the stamp's table, left out), and the weekly sweep restores none", async () => {
+    const e = await env();
+    const lobby = e.LOBBY.get(e.LOBBY.idFromName(DO_NAMES.lobby));
+    // slot-smoke after a reset (the delta reset, then its new stamp in kv_state); the showcase stamped at provisioning.
+    expect(await lobby.resetWorld({ slot: DO_NAMES.smoke })).toMatchObject({ ok: true });
+    for (const name of [DO_NAMES.showcase, DO_NAMES.smoke]) {
+      const v = await (await company(name)).verifyWorld();
+      expect(v, name).toMatchObject({ ok: true, skipped: false, mismatches: [] });
+      expect(v.rows, name).toBeGreaterThan(5_000);
+    }
+    const before = (await h.ops()).lobby.slots;
+    // Eight days on: every lease has ended and its world is reset, and every idle world is due its weekly full verify.
+    const r = await lobby.sweep({ now: Date.now() + 8 * 86_400_000 });
+    expect(r.restores).toEqual([]);
+    const after = (await h.ops()).lobby.slots;
+    for (const name of [DO_NAMES.showcase, DO_NAMES.smoke]) {
+      const b = before.find((s) => s.name === name)!, a = after.find((s) => s.name === name)!;
+      expect(a, name).toMatchObject({ state: "ready", gen: b.gen, error: null });
+    }
+    expect(after.filter((s) => s.state !== "ready")).toEqual([]);
   }, 180_000);
 });

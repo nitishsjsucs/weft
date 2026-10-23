@@ -5,35 +5,46 @@
 //   1. git worktree add --detach <build dir> HEAD; pnpm install --frozen-lockfile
 //   2. the fixtures module is fresh (pnpm cf:fixtures --check)
 //   3. the snapshot (pnpm cf:snapshot, `--deploy` sealed with the deploy vault key), or `--snapshot-from <dir>`
-//   4. WEFT_STATIC_EXPORT=1 NEXT_PUBLIC_WEFT_HOSTED=1 pnpm --filter @weft/web build; stats.json into the export
-//   5. the deploy configs rendered from apps/cf/resources.json (placeholders before pnpm cf:resources)
-//   6. wrangler deploy --dry-run for both configs: the size and binding check (front under 1 MiB, core under 16 MiB),
+//   4. apps/cf/resources.json (pnpm cf:resources), read before the web build: it holds the weft widget's sitekey
+//   5. the web export: the snapshot's stats.json into apps/web/public (the landing's HTML carries its numbers), then
+//      WEFT_STATIC_EXPORT=1 NEXT_PUBLIC_WEFT_HOSTED=1 pnpm --filter @weft/web build with
+//      NEXT_PUBLIC_WEFT_TURNSTILE_SITEKEY from the resources and WEFT_PUBLIC_ORIGIN from weft-core's config (the CSP's
+//      wss origin); an export that still carries Turnstile's always-pass test sitekey is a placeholder
+//   6. the deploy configs rendered from the resources (placeholders before pnpm cf:resources)
+//   7. wrangler deploy --dry-run for both configs: the size and binding check (front under 1 MiB, core under 16 MiB),
 //      and the import scan of weft-core (design 6.4: it fails when node:fs, node:child_process or node:net is
 //      reachable from the entry)
 //
 // A commit without cf1-db's snapshot code, cf3-agent's @weft/mcp entry or cf5-web's static export still bundles: the
-// missing part is replaced by a placeholder, said so loudly, and recorded in the build record. Such a build, a
-// failed import scan and a snapshot without company memory make the build not deployable, and pnpm cf:deploy
-// refuses it.
+// missing part is replaced by a placeholder, said so loudly, and recorded in the build record. Such a build, a build
+// without resources (its export has the test sitekey), a failed import scan and a snapshot without company memory
+// are not deployable, and pnpm cf:deploy refuses them. Without resources the build still succeeds, as a dry run.
 // Output: <build dir>/apps/cf/dist/build.json, and .scratch/cf-build/last.json in this checkout pointing at it.
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { deployConfigs, readResources, usesMcpPlaceholder, writeDeployConfigs } from "./lib/configs";
+import { extname, join } from "node:path";
+import { deployConfigs, readResources, readWranglerConfig, usesMcpPlaceholder, writeDeployConfigs, type CfResources } from "./lib/configs";
 import { REPO_ROOT } from "./lib/env-file";
 import { scanImports, type Metafile } from "./lib/import-scan";
 
 export const LIMITS = { frontKiB: 1024, coreKiB: 16 * 1024 } as const;
 const LOG_DIR = join(REPO_ROOT, ".scratch/cf-build");
+/** Cloudflare's published always-pass Turnstile sitekey. The hosted shell falls back to it when the build sets no
+ * NEXT_PUBLIC_WEFT_TURNSTILE_SITEKEY (apps/web/src/lib/hosted/flags.ts); the deployed widget's secret rejects its
+ * tokens, so an export that carries it would refuse every lease. */
+export const TURNSTILE_TEST_SITEKEY = "1x00000000000000000000AA";
+/** The deployed origin, when weft-core's config names none. */
+export const DEPLOY_ORIGIN = "https://weft.nitish-ratakonda.workers.dev";
 
 export interface BuildRecord {
   sha: string;
   dirty: boolean;
   dir: string;
   createdAt: string;
-  /** mcp: @weft/mcp was the placeholder (cf3-agent not merged), so the real engine cannot boot. */
-  placeholders: { snapshot: boolean; web: boolean; resources: boolean; mcp: boolean };
+  /** mcp: @weft/mcp was the placeholder (cf3-agent not merged), so the real engine cannot boot. sitekey: the web export
+   * carries Turnstile's always-pass test sitekey (no resources), so the deployed site would refuse every lease. */
+  placeholders: { snapshot: boolean; web: boolean; resources: boolean; mcp: boolean; sitekey: boolean };
   sizes: Record<"core" | "front", { uploadKiB: number; gzipKiB: number }>;
   importScan: { reachable: { module: string; chain: string[] }[]; inputs: number };
   snapshot: { id: string | null; vaultKeyFingerprint: string | null; memoryHead: string | null };
@@ -52,7 +63,7 @@ export function parseUploadSize(out: string): { uploadKiB: number; gzipKiB: numb
  * memory, and no uncommitted changes (pnpm cf:deploy checks the same through deployRefusals). */
 export function buildDeployable(b: Pick<BuildRecord, "placeholders" | "sizes" | "importScan" | "snapshot" | "dirty">): boolean {
   const p = b.placeholders;
-  return !p.snapshot && !p.web && !p.resources && !p.mcp && sizeProblems(b.sizes).length === 0 && b.importScan.reachable.length === 0 && !!b.snapshot.memoryHead && !b.dirty;
+  return !p.snapshot && !p.web && !p.resources && !p.mcp && p.sitekey === false && sizeProblems(b.sizes).length === 0 && b.importScan.reachable.length === 0 && !!b.snapshot.memoryHead && !b.dirty;
 }
 
 export function sizeProblems(sizes: BuildRecord["sizes"]): string[] {
@@ -60,6 +71,31 @@ export function sizeProblems(sizes: BuildRecord["sizes"]): string[] {
   if (sizes.front.uploadKiB >= LIMITS.frontKiB) out.push(`front ${sizes.front.uploadKiB.toFixed(0)} KiB is not under 1 MiB`);
   if (sizes.core.uploadKiB >= LIMITS.coreKiB) out.push(`core ${sizes.core.uploadKiB.toFixed(0)} KiB is not under 16 MiB`);
   return out;
+}
+
+/** The web export's build environment: the hosted switches, the deployed origin (the CSP's wss origin) and, with
+ * resources, the weft widget's sitekey. Without resources no sitekey is passed, so the export falls back to the test
+ * sitekey and the build is a dry run (the sitekey placeholder). */
+export function webBuildEnv(base: NodeJS.ProcessEnv, o: { resources: CfResources | null; publicOrigin: string }): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, WEFT_STATIC_EXPORT: "1", NEXT_PUBLIC_WEFT_HOSTED: "1", WEFT_PUBLIC_ORIGIN: o.publicOrigin };
+  if (o.resources) env.NEXT_PUBLIC_WEFT_TURNSTILE_SITEKEY = o.resources.turnstile.sitekey;
+  else delete env.NEXT_PUBLIC_WEFT_TURNSTILE_SITEKEY;   // the sitekey comes from apps/cf/resources.json only
+  return env;
+}
+
+const TEXT_EXPORT_FILES = new Set([".html", ".js", ".mjs", ".txt", ".json", ".css"]);
+/** The export's files (relative paths) that carry the always-pass test sitekey. */
+export function filesWithTestSitekey(outDir: string): string[] {
+  const hits: string[] = [];
+  const walk = (rel: string) => {
+    for (const e of readdirSync(join(outDir, rel), { withFileTypes: true })) {
+      const p = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(p);
+      else if (TEXT_EXPORT_FILES.has(extname(e.name)) && readFileSync(join(outDir, p), "utf8").includes(TURNSTILE_TEST_SITEKEY)) hits.push(p);
+    }
+  };
+  if (existsSync(outDir)) walk("");
+  return hits.sort();
 }
 
 function sh(cmd: string, args: string[], o: ExecFileSyncOptions & { log: string; quiet?: boolean }): string {
@@ -123,14 +159,27 @@ async function main(argv: string[]): Promise<void> {
     }
   }
 
-  // 4. Web export.
+  // 4. Resources, before the web build: the export inlines the widget's sitekey.
+  const resourcesFile = join(REPO_ROOT, "apps/cf/resources.json");
+  if (existsSync(resourcesFile)) copyFileSync(resourcesFile, join(dir, "apps/cf/resources.json"));
+  const resources = readResources(join(dir, "apps/cf/resources.json"));
+  if (!resources) say("resource ids are placeholders (run pnpm cf:resources before pnpm cf:deploy)");
+
+  // 5. Web export: the snapshot's stats in public/ (Next copies them into the export, and the landing's HTML is built
+  // from them), the widget's sitekey and the deployed origin.
   let placeholderWeb = false;
-  sh("pnpm", ["--filter", "@weft/web", "build"], { cwd: dir, log, env: { ...process.env, WEFT_STATIC_EXPORT: "1", NEXT_PUBLIC_WEFT_HOSTED: "1" } });
+  const publicOrigin = String((readWranglerConfig("core", join(dir, "apps/cf")).vars as Record<string, string> | undefined)?.WEFT_PUBLIC_ORIGIN ?? DEPLOY_ORIGIN).replace(/\/$/, "");
+  mkdirSync(join(dir, "apps/web/public"), { recursive: true });
+  copyFileSync(join(gen, "stats.json"), join(dir, "apps/web/public/stats.json"));
+  sh("pnpm", ["--filter", "@weft/web", "build"], { cwd: dir, log, env: webBuildEnv(process.env, { resources, publicOrigin }) });
   const out = join(dir, "apps/web/out");
   let assetsDir: string | undefined;
+  let testSitekeyFiles: string[] = [];
   if (existsSync(join(out, "index.html"))) {
-    copyFileSync(join(gen, "stats.json"), join(out, "stats.json"));
-    say("web export built");
+    if (!existsSync(join(out, "stats.json"))) copyFileSync(join(gen, "stats.json"), join(out, "stats.json"));
+    testSitekeyFiles = filesWithTestSitekey(out);
+    say(`web export built for ${publicOrigin}`);
+    if (testSitekeyFiles.length) say(`PLACEHOLDER sitekey: the export carries Turnstile's always-pass test sitekey (${testSitekeyFiles.slice(0, 3).join(", ")}${testSitekeyFiles.length > 3 ? ", ..." : ""}); ${resources ? "the resources' sitekey did not reach it" : "no apps/cf/resources.json"} (not deployable)`);
   } else {
     placeholderWeb = true;
     assetsDir = join(dir, "apps/cf/dist/placeholder-assets");
@@ -139,17 +188,13 @@ async function main(argv: string[]): Promise<void> {
     say("PLACEHOLDER assets: this commit's web build emits no static export (cf5-web), not deployable");
   }
 
-  // 5. Deploy configs.
-  const resourcesFile = join(REPO_ROOT, "apps/cf/resources.json");
-  if (existsSync(resourcesFile)) copyFileSync(resourcesFile, join(dir, "apps/cf/resources.json"));
-  const resources = readResources(join(dir, "apps/cf/resources.json"));
+  // 6. Deploy configs.
   const cfgs = deployConfigs({ resources, accountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? null, assetsDir, appsCf: join(dir, "apps/cf") });
   const paths = writeDeployConfigs(cfgs, "deploy", join(dir, "apps/cf"));
-  if (!resources) say("resource ids are placeholders (run pnpm cf:resources before pnpm cf:deploy)");
   const placeholderMcp = usesMcpPlaceholder(cfgs.core);
   if (placeholderMcp) say("PLACEHOLDER @weft/mcp: this commit has no cf3-agent apps/mcp/src/index.ts, so the real engine cannot boot (not deployable)");
 
-  // 6. Dry runs and the import scan.
+  // 7. Dry runs and the import scan.
   const sizes = {} as BuildRecord["sizes"];
   let scan: BuildRecord["importScan"] = { reachable: [], inputs: 0 };
   for (const name of ["core", "front"] as const) {
@@ -165,7 +210,7 @@ async function main(argv: string[]): Promise<void> {
   }
   const problems = sizeProblems(sizes);
   const manifest = JSON.parse(readFileSync(join(gen, "manifest.json"), "utf8")) as { extra?: { snapshotId?: string; vaultKeyFingerprint?: string; memoryHead?: string | null } };
-  const placeholders = { snapshot: placeholderSnapshot, web: placeholderWeb, resources: !resources, mcp: placeholderMcp };
+  const placeholders = { snapshot: placeholderSnapshot, web: placeholderWeb, resources: !resources, mcp: placeholderMcp, sitekey: testSitekeyFiles.length > 0 };
   const snapshot = { id: manifest.extra?.snapshotId ?? null, vaultKeyFingerprint: manifest.extra?.vaultKeyFingerprint ?? null, memoryHead: manifest.extra?.memoryHead ?? null };
   const record: BuildRecord = {
     sha, dirty, dir, createdAt: new Date().toISOString(), placeholders, sizes, importScan: scan, snapshot,
@@ -179,7 +224,7 @@ async function main(argv: string[]): Promise<void> {
   say(scan.reachable.length
     ? `import scan FAILED (design 6.4): ${scan.reachable.map((r) => `${r.module} via ${r.chain.join(" -> ")}`).join("; ")} (${scan.inputs} modules)`
     : `import scan: no node:fs, node:child_process or node:net (${scan.inputs} modules)`);
-  say(`wrangler deploy --dry-run succeeded for both configs; ${record.deployable ? "deployable" : "not deployable (placeholders, resources, size, the import scan, no memory HEAD or uncommitted changes)"}`);
+  say(`wrangler deploy --dry-run succeeded for both configs; ${record.deployable ? "deployable" : "not deployable (placeholders, resources, the test sitekey, size, the import scan, no memory HEAD or uncommitted changes)"}`);
   if (problems.length) {
     console.error(`cf:build: ${problems.join("; ")}`);
     process.exit(1);

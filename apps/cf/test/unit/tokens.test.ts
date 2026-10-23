@@ -2,7 +2,7 @@
 // the smoke header, the admin signature and the daily IP hash.
 import { describe, expect, it } from "vitest";
 import {
-  grantToken, ipHash, mcpKeyId, newVisitorId, readCtx, readGrant, readSession, sessionToken, signAdmin, signCtx, signSmoke, verifyAdmin, verifySmoke,
+  grantToken, ipHash, mcpKeyId, newVisitorId, operatorVisitorId, readCtx, readGrant, readSession, sessionToken, signAdmin, signCtx, signSmoke, verifyAdmin, verifySmoke,
 } from "../../src/shared/tokens";
 import { formatHostedMcpKey, parseHostedMcpKey } from "../../src/shared/contracts";
 import { fromBase64Url, randomAlnum, toBase64Url } from "../../src/shared/crypto";
@@ -76,6 +76,19 @@ describe("smoke and admin signatures", () => {
     expect(await ok({ body: '{"force":true}' })).toBe(false);
     expect(await ok({ nowS: nowS + 301 })).toBe(false);
     expect(await ok({ token: "short" })).toBe(false);
+  });
+});
+
+describe("operator lease visitors", () => {
+  it("are stable per name, distinct across names and admin tokens, and of the session cookie's shape", async () => {
+    const token = "k".repeat(48);
+    const a = await operatorVisitorId(token, "operator");
+    expect(a).toMatch(/^vis_[0-9a-f]{32}$/);
+    expect(await operatorVisitorId(token, "operator")).toBe(a);
+    expect(await operatorVisitorId(token, "smoke")).not.toBe(a);
+    expect(await operatorVisitorId("j".repeat(48), "operator")).not.toBe(a);
+    const cookie = await sessionToken(SECRET, { visitor: a, slot: "slot-1", gen: 2, exp: nowS + 60 });
+    expect(await readSession(SECRET, cookie, nowS)).toMatchObject({ ok: true, claims: { visitor: a } });
   });
 });
 

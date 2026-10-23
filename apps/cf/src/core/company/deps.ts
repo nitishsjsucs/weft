@@ -18,7 +18,7 @@ import type { DurablePlatformInput, DurableStorageLike, DurableWeftPlatform, Fet
 export interface MigrationEntryLike { tag: string; folderMillis: number; hash: string; statements: string[] }
 export interface SqlCostLike { statements: number; rowsRead: number; rowsWritten: number }
 /** cf1-db's Snapshot, as far as CompanyDO reads it. */
-export interface SnapshotLike { manifest: { journalHash: string; digest: string; chunks: number; rows: number; extra?: Record<string, unknown> }; chunks: unknown[]; seed: unknown }
+export interface SnapshotLike { manifest: { journalHash: string; digest: string; chunks: number; rows: number; tables: { name: string }[]; extra?: Record<string, unknown> }; chunks: unknown[]; seed: unknown }
 
 export interface WeftDeps {
   /** cf1-db: migrate-durable.ts, migrations.ts, scope.ts, snapshot.ts */
