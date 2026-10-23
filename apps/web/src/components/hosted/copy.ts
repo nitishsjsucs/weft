@@ -86,6 +86,7 @@ export function resetNote(resetsLeft: number | null | undefined): string {
 
 /** The reset error line for the hosted gate codes; null leaves the tour's own wording. */
 export function hostedResetError(status: number | null, code: string | null): string | null {
+  if (code === "RESETS_PAUSED") return "Weft has used most of today's free Cloudflare quota, so resets are paused until 00:00 UTC. Your demo company keeps working.";
   if (code === "RESET_LIMIT" || status === 429) return `You have used the ${HOSTED_SETTINGS.resetsPerLease} resets for this demo company.`;
   if (code === "HOSTED_RESET_PROFILE") return "The hosted demo resets to the rich demo data only.";
   if (code === "LEASE_REQUIRED") return "Start your own demo company first; the shared one cannot be reset.";

@@ -260,6 +260,8 @@ export const HOSTED_ERRORS = {
   DEMO_LIMIT: { status: 429, tag: "RateLimitExceeded" },
   /** The shared showcase read its rows for the UTC day (design 6.3); leased demo companies and the static pages work. */
   SHOWCASE_LIMIT: { status: 503, tag: "Refused" },
+  /** Past level 3 of the day's share no reset starts (a reset would refill a generation's rows budget); the lease goes on. */
+  RESETS_PAUSED: { status: 503, tag: "Refused" },
 } as const satisfies Record<string, { status: number; tag: ErrorTag }>;
 export type HostedErrorCode = keyof typeof HOSTED_ERRORS;
 export interface HostedErrorBody { _tag: ErrorTag; code: HostedErrorCode; message: string; retryAfterS?: number }

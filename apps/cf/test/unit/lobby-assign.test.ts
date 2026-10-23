@@ -15,7 +15,7 @@ const yieldTick = () => new Promise((r) => setTimeout(r, 1));
 /** A pool slot as the Lobby sees it: its usage since the last drain, its visitor's last activity, and every heartbeat. */
 interface FakeSlot { usage: { rowsRead: number; rowsWritten: number; requests: number }; lastActivityMs: number | null; heartbeats: Record<string, unknown>[]; dirty?: boolean }
 
-function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql>; wake: () => LobbyDO; slots: Map<string, FakeSlot> } {
+function lobbyOver(pool: number, cfg: Record<string, string> = {}): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql>; wake: () => LobbyDO; slots: Map<string, FakeSlot> } {
   const m = memorySql();
   const ctx = { storage: { sql: m.sql, transactionSync: <T>(fn: () => T) => m.transactionSync(fn) }, waitUntil: () => undefined };
   const stamps: string[] = [];
@@ -24,7 +24,7 @@ function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnT
   const env = {
     WEFT_POOL_SIZE: String(pool),
     WEFT_CONFIG_MEMO_MS: "0",
-    CONFIG: { get: async (keys: string[] | string) => { await yieldTick(); return Array.isArray(keys) ? new Map(keys.map((k) => [k, null])) : null; } },
+    CONFIG: { get: async (keys: string[] | string) => { await yieldTick(); return Array.isArray(keys) ? new Map(keys.map((k) => [k, cfg[k] ?? null])) : cfg[keys] ?? null; } },
     SPEND: {
       idFromName: (n: string) => n,
       get: () => ({
@@ -79,6 +79,23 @@ describe("LobbyDO.assign under interleaving", () => {
     expect(new Set(leased.map((r) => r.slot)).size).toBe(4);
     expect(results.filter((r) => r.status === "waitlist")).toHaveLength(1);
     expect(stamps).toHaveLength(4);
+  });
+});
+
+describe("LobbyDO.reset at the day's last degradation level", () => {
+  it("refuses a reset once the day's share is spent past level 3, so a held lease cannot refill its rows budget", async () => {
+    const cfg: Record<string, string> = {};
+    const { lobby } = lobbyOver(2, cfg);
+    const me = visitor(50);
+    const start = Date.now();
+    const l = await lobby.assign({ visitor: me, ipHash: "e".repeat(32), now: start });
+    if (l.status !== "leased") throw new Error(`not leased: ${l.status}`);
+    cfg["degradation.level_floor"] = "3";
+    // Past the 30 s level memo, the Lobby reads level 3: the reset is refused and the lease and its resets are untouched.
+    const r = await lobby.reset({ visitor: me, slot: l.slot, gen: l.gen, now: start + 31_000 });
+    expect(r).toMatchObject({ error: "RESETS_PAUSED" });
+    const st = await lobby.status({ visitor: me, slot: l.slot, gen: l.gen, leaseExpiresMs: Date.parse(l.expiresAt), now: start + 32_000 });
+    expect(st.lease).toMatchObject({ slot: l.slot, gen: l.gen, resetsLeft: 3 });
   });
 });
 

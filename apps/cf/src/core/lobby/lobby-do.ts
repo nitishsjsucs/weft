@@ -463,6 +463,10 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE slot = ? AND visitor = ?`, input.slot, input.visitor);
     if (!l || l.gen !== input.gen || leaseEnded({ startedAt: l.started_at, lastSeen: this.lastSeenOf(l) }, now)) return { error: "LEASE_ENDED", message: "This demo company's lease has ended; start a new one" };
     if (l.resets >= HOSTED_SETTINGS.resetsPerLease) return { error: "RESET_LIMIT", message: `A lease allows ${HOSTED_SETTINGS.resetsPerLease} resets` };
+    // Past 90% of the day's share (level 3) no new lease starts, and a reset would start a generation with a fresh rows
+    // budget, so the leases already held could keep spending past the account's caps. Resets wait for 00:00 UTC too;
+    // the lease itself goes on (design 6.5).
+    if ((await this.levelNow(now)).level >= 3) return { error: "RESETS_PAUSED", message: "Weft has used most of today's free Cloudflare quota, so resets are paused until 00:00 UTC" };
     const claimed = this.ctx.storage.transactionSync(() => {
       const s = this.claim(l.slot, now);
       if (s) this.sql.exec(`UPDATE leases SET resets = resets + 1, last_seen = ? WHERE slot = ?`, now, l.slot);

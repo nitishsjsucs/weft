@@ -356,7 +356,7 @@ The Lobby computes a level from its daily counters against Weft's shares (8.2):
 
 1. **At 70% of any share:** hosted poll intervals triple and refresh comes from the WebSocket feed only.
 2. **Day dollar cap, neuron cap or kill switch:** new runs use the scripted provider with its badge and a banner.
-3. **At 90% of DO rows written, rows read or DO requests:** no new leases; the showcase stays.
+3. **At 90% of DO rows written, rows read or DO requests:** no new leases, and no resets of the leases already held (`RESETS_PAUSED`: a reset starts a generation with a fresh rows budget, so held leases could otherwise keep spending past the account caps; the lease itself goes on until it ends); the showcase stays, up to its own daily read cap. With resets refused here, the worst case one client can reach is about 2.7M (to level 3) plus 2 held generations of 250,000 plus the showcase's 1,000,000, about 4.2M rows read, and about 64,000 rows written, both under the account caps.
 4. **Account Workers request cap reached:** the platform returns 429 on `run_worker_first` paths (research: static assets billing); the landing and app shells still load from assets and show a static notice.
 
 ## 7. Cloudflare products
