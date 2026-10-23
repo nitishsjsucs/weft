@@ -432,7 +432,11 @@ export const CASES: ConformanceCase[] = [
       drop.toArray();
       return {
         upd, delr, firstRowsWritten: first.rowsWritten, orIgnore, dirty,
-        log: s.exec("SELECT id, v FROM log ORDER BY id").toArray(), delAgain, dropRowsWritten: drop.rowsWritten,
+        log: s.exec("SELECT id, v FROM log ORDER BY id").toArray(), delAgain,
+        // DROP TABLE's rowsWritten is a billing count, not a behavior: Miniflare's workerd reports 0 and the deployed
+        // runtime 2 (measured 2026-10-23 on weft.nitish-ratakonda.workers.dev). The delta reset's DROP TABLE wipes cost
+        // that much more in production; nothing depends on the exact value.
+        dropRowsWrittenAtMost2: drop.rowsWritten <= 2,
       };
     },
     expect: { ok: true, value: {
@@ -443,7 +447,7 @@ export const CASES: ConformanceCase[] = [
       dirty: [{ tbl: "st", pk: "x" }],
       log: [{ id: 1, v: "a" }],
       delAgain: "log is append-only: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)",
-      dropRowsWritten: 0,
+      dropRowsWrittenAtMost2: true,
     } },
   },
   {
