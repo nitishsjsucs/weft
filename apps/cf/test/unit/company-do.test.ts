@@ -793,6 +793,10 @@ describe("the rows budget (defense in depth)", () => {
       expect(r.status, method).toBe(429);
       expect(await r.json()).toMatchObject({ code: "DEMO_LIMIT" });
     }
+    // Refused requests move no row, so any number of them write the tally no more.
+    const writes = kvWrites(c);
+    for (let i = 0; i < 100; i++) expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(429);
+    expect(kvWrites(c)).toBe(writes);
     // A restart keeps the refusal (the tally was written when it crossed the limit).
     const again = c.restart();
     await again.ready();

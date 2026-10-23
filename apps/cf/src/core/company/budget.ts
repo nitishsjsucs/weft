@@ -82,7 +82,9 @@ export class RowsTally {
     t.events += 1;
     const s = this.saved && this.saved.key === key ? this.saved : { key, rowsWritten: 0, rowsRead: 0, events: 0 };
     const crossed = (n: number, prev: number, limit: number | null) => limit !== null && n >= limit && prev < limit;
-    const due = t.events - s.events >= cadence.persistEvery
+    // Requests that moved no row (a refused one past its limit, say) never write the tally on their count alone.
+    const moved = t.rowsRead !== s.rowsRead || t.rowsWritten !== s.rowsWritten;
+    const due = (moved && t.events - s.events >= cadence.persistEvery)
       || stepOf(t.rowsWritten, cadence.writeStep) !== stepOf(s.rowsWritten, cadence.writeStep)
       || stepOf(t.rowsRead, cadence.readStep) !== stepOf(s.rowsRead, cadence.readStep)
       || crossed(t.rowsWritten, s.rowsWritten, limits.rowsWritten) || crossed(t.rowsRead, s.rowsRead, limits.rowsRead);
