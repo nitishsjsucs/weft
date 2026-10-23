@@ -6,12 +6,12 @@ import { describe, expect, it } from "vitest";
 import { HOSTED_SETTINGS } from "../../src/shared/contracts";
 import { utcDay } from "../../src/shared/http";
 import { LobbyDO } from "../../src/core/lobby/lobby-do";
-import { FULL_RESTORE_ROWS } from "../../src/core/lobby/policy";
-import { memorySql } from "./sqlite";
+import { FULL_RESTORE_ROWS, WAITLIST_MAX, WAITLIST_TTL_MS } from "../../src/core/lobby/policy";
+import { memorySql, readMeter } from "./sqlite";
 
 const yieldTick = () => new Promise((r) => setTimeout(r, 1));
 
-function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql> } {
+function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql>; wake: () => LobbyDO } {
   const m = memorySql();
   const ctx = { storage: { sql: m.sql, transactionSync: <T>(fn: () => T) => m.transactionSync(fn) }, waitUntil: () => undefined };
   const stamps: string[] = [];
@@ -38,7 +38,9 @@ function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnT
   };
   const lobby = new LobbyDO(ctx as never, env as never);
   m.sql.exec(`UPDATE slots SET state = 'ready'`);
-  return { lobby, stamps, m };
+  /** The same object after a hibernation: a new instance over the same storage, with nothing in memory. */
+  const wake = () => new LobbyDO(ctx as never, env as never);
+  return { lobby, stamps, m, wake };
 }
 
 const visitor = (i: number) => `vis_${i.toString(16).padStart(32, "0")}`;
@@ -176,5 +178,61 @@ describe("LobbyDO's Platform readout", () => {
     const n = reads;
     await lobby.ops({ now: now + 31_000 });
     expect(reads).toBeGreaterThan(n);
+  });
+});
+
+describe("LobbyDO's waitlist", () => {
+  const count = (m: ReturnType<typeof memorySql>) => Number(m.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM waitlist`).toArray()[0]!.n);
+
+  it(`holds at most ${WAITLIST_MAX} live entries: a new visitor past it is answered full and not added, one in line keeps its place, and stale entries free their places`, async () => {
+    expect(WAITLIST_MAX).toBe(50);
+    const { lobby, m } = lobbyOver(1);
+    const t0 = Date.now();
+    expect((await lobby.assign({ visitor: visitor(1), ipHash: "a".repeat(32), now: t0 })).status).toBe("leased");
+    // A cookie-less visitor retrying: every attempt is a new visitor id.
+    const results = [];
+    for (let i = 0; i < 3 * WAITLIST_MAX; i++) results.push(await lobby.assign({ visitor: visitor(1000 + i), ipHash: "b".repeat(32), now: t0 + i }));
+    expect(results.slice(0, WAITLIST_MAX).map((r) => r.status === "waitlist" && r.position)).toEqual(Array.from({ length: WAITLIST_MAX }, (_, i) => i + 1));
+    expect(results.slice(WAITLIST_MAX).every((r) => r.status === "full" && r.poolSize === 1)).toBe(true);
+    expect(count(m)).toBe(WAITLIST_MAX);
+    expect((await lobby.status({ visitor: null, now: t0 + 200 })).pool.waitlist).toBe(WAITLIST_MAX);
+    // One already in line asks again: same place, no new entry.
+    expect(await lobby.assign({ visitor: visitor(1003), ipHash: "b".repeat(32), now: t0 + 1_000 })).toMatchObject({ status: "waitlist", position: 4 });
+    // Ten of them keep asking; the TTL passes for the rest, whose places free up for new visitors.
+    for (let i = 0; i < 10; i++) await lobby.assign({ visitor: visitor(1000 + i), ipHash: "b".repeat(32), now: t0 + WAITLIST_TTL_MS - 1_000 });
+    const later = t0 + WAITLIST_TTL_MS + 3 * WAITLIST_MAX;
+    expect(await lobby.assign({ visitor: visitor(5000), ipHash: "c".repeat(32), now: later })).toMatchObject({ status: "waitlist", position: 11 });
+    expect(count(m)).toBe(11);
+    expect((await lobby.status({ visitor: visitor(5000), now: later })).waitlistPosition).toBe(11);
+  });
+
+  it("answers a cookie-less status and the Platform readout with bounded reads on a Lobby that just woke up, however many counters and stale entries today holds", async () => {
+    const reads = async (n: number) => {
+      const { lobby, m, wake } = lobbyOver(2);
+      const now = Date.now();
+      for (const i of [1, 2]) expect((await lobby.assign({ visitor: visitor(i), ipHash: String(i).repeat(32), now })).status).toBe("leased");
+      // Today's other counters: a row per IP hash that leased, per visitor upload, per admin signature.
+      const day = utcDay(now);
+      const counter = m.db.prepare(`INSERT INTO counters (day, key, n) VALUES (?, ?, 1)`);
+      for (let i = 0; i < n; i++) { counter.run(day, `ip:${i}`); counter.run(day, `upload:vis_${i}`); counter.run(day, `admin_sig:${i}`); }
+      // A full line, and stale entries the sweep has not deleted yet.
+      const entry = m.db.prepare(`INSERT INTO waitlist (visitor, ip_hash, at, seen) VALUES (?, 'x', ?, ?)`);
+      for (let i = 0; i < n; i++) entry.run(`vis_stale_${i}`, now - 2 * WAITLIST_TTL_MS, now - 2 * WAITLIST_TTL_MS);
+      for (let i = 0; i < WAITLIST_MAX; i++) entry.run(`vis_live_${i}`, now, now);
+      const meter = readMeter(m);
+      // Each read reaches a Lobby with no memo: the object hibernated since the last one.
+      const status = await wake().status({ visitor: null, now });
+      expect(status.pool).toEqual({ size: 2, free: 0, waitlist: WAITLIST_MAX });
+      const afterStatus = meter.rows;
+      const readout = await wake().readout({ now });
+      expect(readout.leases).toEqual({ active: 2, pool: 2, waitlist: WAITLIST_MAX });
+      return { status: afterStatus, readout: meter.rows - afterStatus };
+    };
+    const small = await reads(10);
+    const large = await reads(3_000);
+    expect(large).toEqual(small);
+    // The six usage counters, the slots and leases of the pool, and one count of the line through its index.
+    expect(small.status).toBeLessThanOrEqual(20);
+    expect(small.readout).toBeLessThanOrEqual(30);
   });
 });

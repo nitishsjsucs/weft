@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { HOSTED_CAP_DEFAULTS, ORPHAN_SETTLE_MS, type HostedCaps } from "../../src/shared/contracts";
 import { createSqlSpendLedger, fold, migrateSpend, PRUNE_BATCH, rebuildSpendTotals, SPEND_SCHEMA_VERSION, type SpendRow } from "../../src/core/spend/ledger";
-import { memorySql } from "./sqlite";
+import { memorySql, readMeter } from "./sqlite";
 
 const USD = 1e6;
 
@@ -300,37 +300,6 @@ describe("SpendDO ledger", () => {
 });
 
 
-/**
- * Rows read, as workerd bills them, cannot be asked of node:sqlite, so each statement here is charged by its query
- * plan: a scan of a table (through an index or not) costs the table's rows, an index search costs the rows it returns
- * (index rows and the correlated subqueries' lookups are left out, as they are bounded by what the search returns).
- * Statements that write read nothing here. Enough to tell a read that grows with the table from one that does not.
- * `tables` collects every table a read touched, and `searches` every index search on spend_entries, so a test can
- * show a path never reads an entry, or reads entries only through the run, reservation, visitor or IP-hash index.
- */
-function readMeter(s: ReturnType<typeof memorySql>) {
-  const meter = { rows: 0, statements: 0, tables: new Set<string>(), searches: [] as string[] };
-  const exec = s.sql.exec.bind(s.sql);
-  s.sql.exec = ((query: string, ...b: unknown[]) => {
-    const cur = exec(query, ...b);
-    if (/^\s*(select|with)/i.test(query)) {
-      meter.statements += 1;
-      const plan = s.db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...(b as never[])) as { detail: string }[];
-      let scanned = 0;
-      for (const p of plan) {
-        const m = /^SCAN (\w+)\b/.exec(p.detail);
-        if (m) scanned += Number((s.db.prepare(`SELECT COUNT(*) AS n FROM ${m[1]}`).get() as { n: number }).n);
-        const t = /^(?:SCAN|SEARCH) (\w+)\b/.exec(p.detail);
-        if (t) meter.tables.add(t[1]!);
-        if (/^SEARCH (spend_entries|r|x)\b/.test(p.detail)) meter.searches.push(p.detail);
-      }
-      meter.rows += scanned || cur.toArray().length;
-    }
-    return cur;
-  }) as typeof s.sql.exec;
-  return meter;
-}
-
 /** The ledger's tables as schema "1" made them (no spend_days); `indexes` adds the indexes it had by then. */
 function legacySchema(s: ReturnType<typeof memorySql>, o: { indexes: boolean }): void {
   s.sql.exec(`CREATE TABLE spend_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
@@ -421,13 +390,13 @@ describe("SpendDO ledger reads, cold", () => {
     return { s, meter, fresh, advance: (ms: number) => { now = new Date(now.getTime() + ms); } };
   }
 
-  /** Rows read by `fn` on a fresh (just woken) ledger, and the tables it read. */
+  /** Rows read by `fn` on a fresh (just woken) ledger, the tables it read and its index searches of the entries. */
   const cold = (x: ReturnType<typeof seeded>, fn: (l: SqlSpendLedgerT) => unknown) => {
     const l = x.fresh();
     const rows = x.meter.rows, n = x.meter.searches.length;
     x.meter.tables.clear();
     fn(l);
-    return { rows: x.meter.rows - rows, tables: [...x.meter.tables].sort(), searches: x.meter.searches.slice(n) };
+    return { rows: x.meter.rows - rows, tables: [...x.meter.tables].sort(), searches: x.meter.searches.slice(n).filter((d) => /^SEARCH spend_entries\b/.test(d)) };
   };
 
   const perCall = (o: { history: number; today: number; liveUsd?: number | null }) => {

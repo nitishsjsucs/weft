@@ -14,7 +14,7 @@ import { logError, logEvent } from "../../shared/log";
 import type { ResetOutcome, RestoreFinish, UsageDelta, WorldStamp } from "../company/rpc";
 import {
   defaultBudget, degradationLevel, emptyUsage, etaMinutes, FULL_RESTORE_ROWS, leaseEnded, leaseExpiresAt, leaseIdleExpiresAt,
-  PROVISION_ROWS_CEILING, restoreFits, restoresLeft, sessionFits, SHARES, shareUse, WAITLIST_TTL_MS,
+  PROVISION_ROWS_CEILING, restoreFits, restoresLeft, sessionFits, SHARES, shareUse, WAITLIST_MAX, WAITLIST_TTL_MS,
   type BudgetConfig, type DayUsage, type LevelResult,
 } from "./policy";
 
@@ -31,6 +31,8 @@ const SCHEMA = [
      started_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, resets INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS counters (day TEXT NOT NULL, key TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, key))`,
   `CREATE TABLE IF NOT EXISTS waitlist (visitor TEXT PRIMARY KEY, ip_hash TEXT NOT NULL, at INTEGER NOT NULL, seen INTEGER NOT NULL)`,
+  // Every cookie-less GET /api/_session counts the waitlist's live entries: through this index, at most WAITLIST_MAX.
+  `CREATE INDEX IF NOT EXISTS waitlist_seen ON waitlist(seen)`,
   `CREATE TABLE IF NOT EXISTS vectors (slot TEXT NOT NULL, gen INTEGER NOT NULL, id TEXT NOT NULL, PRIMARY KEY (slot, gen, id))`,
 ];
 
@@ -70,6 +72,9 @@ const COUNTER = {
   visitorRows: "rows_written", restoreRows: "restore_rows", restores: "restores", rowsRead: "rows_read",
   doRequests: "do_requests", workersRequests: "workers_requests",
 } as const;
+/** The day's usage counters, read by key: the table also holds a row per IP hash, visitor upload, MCP key and admin
+ * signature of the day, which a read of the usage must never fold. */
+const USAGE_KEYS = Object.values(COUNTER);
 
 /**
  * Whether a session cookie's claims name the visitor's lease `l` (the row is already the visitor's). The cookie must
@@ -162,9 +167,11 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     return this.poolSlots().find((s) => s.state === "ready" && !this.one(`SELECT 1 FROM leases WHERE slot = ?`, s.name));
   }
 
+  /** Today's usage counters: six rows by key (the levelNow and readout memos are gone after a hibernation, so every
+   * cold session read and Platform read runs this). */
   private usage(day = utcDay()): DayUsage {
     const u = emptyUsage();
-    for (const r of this.all<{ key: string; n: number }>(`SELECT key, n FROM counters WHERE day = ?`, day)) {
+    for (const r of this.all<{ key: string; n: number }>(`SELECT key, n FROM counters WHERE day = ? AND key IN (${USAGE_KEYS.map(() => "?").join(", ")})`, day, ...USAGE_KEYS)) {
       if (r.key === COUNTER.visitorRows) u.visitorRowsWritten = r.n;
       else if (r.key === COUNTER.restoreRows) u.restoreRows = r.n;
       else if (r.key === COUNTER.restores) u.restores = r.n;
@@ -212,11 +219,18 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     };
   }
 
-  /** Place in arrival order (the row id), counting only entries refreshed within the waitlist TTL. */
+  /** Place in arrival order (the row id), counting only entries refreshed within the waitlist TTL (at most
+   * WAITLIST_MAX, through the seen index). */
   private waitlistPosition(visitor: string, now = Date.now()): number | null {
     const me = this.one<{ r: number }>(`SELECT rowid AS r FROM waitlist WHERE visitor = ?`, visitor);
     if (!me) return null;
     return this.one<{ n: number }>(`SELECT COUNT(*) AS n FROM waitlist WHERE rowid <= ? AND seen > ?`, me.r, now - WAITLIST_TTL_MS)?.n ?? 1;
+  }
+
+  /** Waitlist entries refreshed within the TTL: an index range of at most WAITLIST_MAX entries, however many stale
+   * ones the sweep has not deleted yet. */
+  private waitlistLength(now: number): number {
+    return this.one<{ n: number }>(`SELECT COUNT(*) AS n FROM waitlist WHERE seen > ?`, now - WAITLIST_TTL_MS)?.n ?? 0;
   }
 
   // Leases -----------------------------------------------------------------------------------------------------
@@ -274,10 +288,22 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     return { status: "leased", ...this.leaseInfo(lease) };
   }
 
+  /**
+   * A place in line for a visitor the pool has no slot for. A cookie-less visitor gets a new visitor id at each
+   * attempt, so the line is capped: a visitor already in it keeps its place, and a new one past WAITLIST_MAX live
+   * entries is answered `full` and not added. Stale entries (past the TTL) are deleted first, so they never hold a
+   * place and the table stays near the cap between sweeps. Synchronous, so the count and the insert are one step.
+   */
   private waitlist(visitor: string, ipHash: string, now: number): LeaseResult {
-    this.sql.exec(`INSERT INTO waitlist (visitor, ip_hash, at, seen) VALUES (?, ?, ?, ?) ON CONFLICT (visitor) DO UPDATE SET seen = excluded.seen`, visitor, ipHash, now, now);
     const leases = this.leases().map((l) => ({ startedAt: l.started_at, lastSeen: l.last_seen }));
-    return { status: "waitlist", position: this.waitlistPosition(visitor, now) ?? 1, poolSize: this.poolSlots().length, etaMinutes: etaMinutes(leases, now) };
+    const poolSize = this.poolSlots().length;
+    const cutoff = now - WAITLIST_TTL_MS;
+    if (!this.one(`SELECT 1 FROM waitlist WHERE visitor = ? AND seen > ?`, visitor, cutoff)) {
+      this.sql.exec(`DELETE FROM waitlist WHERE seen <= ?`, cutoff);
+      if (this.waitlistLength(now) >= WAITLIST_MAX) return { status: "full", poolSize, etaMinutes: etaMinutes(leases, now) };
+    }
+    this.sql.exec(`INSERT INTO waitlist (visitor, ip_hash, at, seen) VALUES (?, ?, ?, ?) ON CONFLICT (visitor) DO UPDATE SET seen = excluded.seen`, visitor, ipHash, now, now);
+    return { status: "waitlist", position: this.waitlistPosition(visitor, now) ?? 1, poolSize, etaMinutes: etaMinutes(leases, now) };
   }
 
   /** Ends leases past their total time, and leases whose slot reports no activity for the idle time. */
@@ -308,7 +334,10 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   /**
    * Session status for the front's GET /api/_session (and the front's other lease checks). `slot`, `gen` and
    * `leaseExpiresMs` are the session cookie's claims; a Durable Object asking about its own stamp sends no lease
-   * expiry and is answered only for the stamp's own generation (see namesLease).
+   * expiry and is answered only for the stamp's own generation (see namesLease). Anyone can call it without a cookie,
+   * and the Lobby hibernates after about 10 s idle (its memos go with it), so every read here is bounded cold: the
+   * level (SpendDO's few-row status and six counters), the slots and leases (the pool's size), the waitlist count (at
+   * most WAITLIST_MAX index entries), and with a lease the visitor's own rows.
    */
   async status(input: { visitor: string | null; slot?: string | null; gen?: number | null; leaseExpiresMs?: number | null; now?: number }): Promise<LobbyStatus> {
     const now = input.now ?? Date.now();
@@ -316,7 +345,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const pool = this.poolSlots();
     const leased = this.leases();
     const free = pool.filter((s) => s.state === "ready" && !leased.some((l) => l.slot === s.name)).length;
-    const waitlistN = this.one<{ n: number }>(`SELECT COUNT(*) AS n FROM waitlist WHERE seen > ?`, now - WAITLIST_TTL_MS)?.n ?? 0;
+    const waitlistN = this.waitlistLength(now);
     let lease: LeaseInfo | null = null;
     let worldProvider: string | null = null;
     if (input.visitor) {
@@ -814,7 +843,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
       leases: {
         active: this.leases().length,
         pool: this.poolSlots().length,
-        waitlist: this.one<{ n: number }>(`SELECT COUNT(*) AS n FROM waitlist WHERE seen > ?`, now - WAITLIST_TTL_MS)?.n ?? 0,
+        waitlist: this.waitlistLength(now),
       },
       lastSweepAt: this.meta("sweep.at"),
       shares: shareUse(u, b),

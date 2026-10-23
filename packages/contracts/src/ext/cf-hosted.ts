@@ -185,6 +185,8 @@ export type LeaseResult =
   | ({ status: "leased" } & LeaseInfo)
   /** "All N demo companies are in use; one frees in about M min". */
   | { status: "waitlist"; position: number; poolSize: number; etaMinutes: number | null }
+  /** Every demo company is in use and the waitlist is full (the Lobby's cap on live entries): no place in line. */
+  | { status: "full"; poolSize: number; etaMinutes: number | null }
   /** "Today's demo budget is used up; back after 00:00 UTC". */
   | { status: "budget"; reopensAt: string }
   | { status: "ip_limit"; reopensAt: string }

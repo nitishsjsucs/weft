@@ -38,6 +38,10 @@ export function blockedText(r: Exclude<LeaseResult, { status: "leased" }>): stri
       const eta = r.etaMinutes === null ? "" : ` One frees in about ${Math.max(1, Math.round(r.etaMinutes))} min.`;
       return `All ${r.poolSize} demo companies are in use.${eta} You are number ${r.position} in line.`;
     }
+    case "full": {
+      const eta = r.etaMinutes === null ? "" : ` One frees in about ${Math.max(1, Math.round(r.etaMinutes))} min.`;
+      return `All ${r.poolSize} demo companies are in use and the line is full.${eta} Try again in a few minutes.`;
+    }
     case "budget": return "Today's demo budget is used up; back after 00:00 UTC.";
     case "ip_limit": return `This network has started its ${HOSTED_SETTINGS.leasesPerIpHashPerDay} demo companies for today; back after 00:00 UTC.`;
     case "closed": return "New demo companies are paused for today to stay inside the shared daily limits. The shared demo stays open.";
