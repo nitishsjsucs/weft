@@ -70,6 +70,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private readonly alarms: AlarmPlan;
   /** Alarm invocations in a row whose work threw (the retry backs off with it; one that succeeds resets it). */
   private alarmFailures = 0;
+  /** Outbox flushes in a row that left a row unsent (the outbox retry backs off with it; a clean flush resets it). */
+  private outboxFailures = 0;
   private readonly counter = fetchCounter(MAX_FETCHES_PER_ALARM);
   private runHost: DurableRunHost;
   private scheduler: DurableSchedulerHost;
@@ -495,7 +497,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
    * After the outer commit: send each outbox row to its queue, then delete it (design 3.4). At least once. Each read
    * and each delete runs under the world's write lock, which every executor transaction holds, so no row of a
    * transaction that is still open (in this request or another) is read, and none that later rolls back is sent.
-   * The Queue send itself is I/O, outside the lock and outside any transaction.
+   * The Queue send itself is I/O, outside the lock and outside any transaction. A row whose send fails is tried once
+   * per flush and skipped, so it never holds back the rows behind it; it stays for the retry, which backs off with
+   * the flushes in a row that left a row unsent (alarmRetryDelayMs: 2 s doubling, at most 5 minutes).
    */
   async flushOutbox(): Promise<number> {
     const engine = this.engine;
@@ -507,10 +511,12 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     }
     this.flushing = true;
     let sent = 0;
+    const unsent = new Set<string>();
+    let error: unknown = null;
     try {
       for (let round = 0; round < 50; round++) {
         this.flushAgain = false;
-        const rows = await engine.outboxPending();
+        const rows = (await engine.outboxPending()).filter((r) => !unsent.has(r.id));
         if (!rows.length) {
           if (this.flushAgain) continue;
           break;
@@ -521,18 +527,36 @@ export class CompanyDO extends DurableObject<CoreEnv> {
             await engine.outboxAck(row.id);
             continue;
           }
-          engine.guard.assertNotInTx("Queue.send");
-          await (queueFor(row.job.kind) === QUEUES.render ? this.env.RENDER : this.env.JOBS).send(row.job, { contentType: "json" });
+          try {
+            engine.guard.assertNotInTx("Queue.send");
+            await (queueFor(row.job.kind) === QUEUES.render ? this.env.RENDER : this.env.JOBS).send(row.job, { contentType: "json" });
+          } catch (e) {
+            unsent.add(row.id);
+            error ??= e;
+            continue;
+          }
           await engine.outboxAck(row.id);
           sent += 1;
         }
       }
-      this.alarms.cancel("outbox");
     } catch (e) {
-      logError("outbox.flush", e, { slot: this.stamp?.slot });
-      await this.alarms.arm("outbox", Date.now() + 30_000);
+      // Reading or deleting failed: the rows left are sent by the retry.
+      error = e;
     } finally {
       this.flushing = false;
+    }
+    if (error === null) {
+      this.outboxFailures = 0;
+      this.alarms.cancel("outbox");
+      return sent;
+    }
+    const retryMs = alarmRetryDelayMs(this.outboxFailures);
+    this.outboxFailures += 1;
+    logError("outbox.flush", error, { slot: this.stamp?.slot, unsent: unsent.size, sent, retryMs, failures: this.outboxFailures });
+    try {
+      await this.alarms.arm("outbox", Date.now() + retryMs);
+    } catch (e) {
+      logError("alarm.arm", e, { slot: this.stamp?.slot });
     }
     return sent;
   }

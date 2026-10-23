@@ -86,7 +86,7 @@ setEngineLoader(async () => fakeModule);
 
 type LobbyStatusFn = (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown;
 
-function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number } = {}) {
+function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean } = {}) {
   const m = memorySql();
   currentSql = m;
   m.sql.exec(`CREATE TABLE kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
@@ -130,7 +130,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     LOBBY: { idFromName: (n: string) => n, get: () => lobbyStub },
     SPEND: { idFromName: (n: string) => n, get: () => ({}) },
     COMPANY: { idFromName: (n: string) => n, get: () => ({}) },
-    JOBS: { send: async (body: unknown) => { sent.push({ queue: "jobs", body }); } },
+    JOBS: { send: async (body: unknown) => { if (o.failSend?.(body)) throw new Error("Queue.send refused the message"); sent.push({ queue: "jobs", body }); } },
     RENDER: { send: async (body: unknown) => { sent.push({ queue: "render", body }); } },
     RL_RUN: { limit: async () => ({ success: true }) },
     OPS: { prepare: () => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); return {}; } }) }) },
@@ -327,6 +327,45 @@ describe("the outbox flush", () => {
     expect(await flush).toBe(2);
     expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([`obx_${"2".padStart(16, "0")}`, `obx_${"3".padStart(16, "0")}`]);
     expect(c.m.sql.exec(`SELECT COUNT(*) AS n FROM outbox`).toArray()[0]!.n).toBe(0);
+  });
+});
+
+describe("the outbox retry", () => {
+  const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
+  const append = (c: ReturnType<typeof company>, id: string, body: string, at: string) => c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES (?, 'ocr.receipt', ?, ?)`, id, body, at);
+  const poison = `obx_${"1".padStart(16, "0")}`;
+
+  it("sends the rows behind one whose send keeps failing, and backs off exponentially (capped) instead of every 30 s", async () => {
+    let failing = true;
+    const c = company({ failSend: (b) => failing && (b as { jobId: string }).jobId === poison });
+    await c.ready();
+    // The row that cannot be sent is the oldest: the rows behind it go anyway.
+    append(c, "obx_a", job(1), "2026-10-26T15:00:00.000Z");
+    append(c, "obx_b", job(2), "2026-10-26T15:00:01.000Z");
+    append(c, "obx_c", job(3), "2026-10-26T15:00:02.000Z");
+    let now = T0 + MIN;
+    at(now);
+    expect(await c.co.flushOutbox()).toBe(2);
+    expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([job(2), job(3)].map((b) => (JSON.parse(b) as { jobId: string }).jobId));
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([{ id: "obx_a" }]);
+    const delays: number[] = [c.alarms.at(-1)! - now];
+    for (let i = 0; i < 9; i++) {
+      now = c.alarms.at(-1)!;
+      at(now);
+      await c.co.alarm();
+      delays.push(c.alarms.at(-1)! - now);
+    }
+    expect(delays).toEqual([2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 300_000, 300_000]);
+    // Once it goes, the backoff starts again from the beginning.
+    failing = false;
+    now = c.alarms.at(-1)!;
+    at(now);
+    await c.co.alarm();
+    expect(c.m.sql.exec(`SELECT id FROM outbox`).toArray()).toEqual([]);
+    failing = true;
+    append(c, "obx_d", job(1), "2026-10-26T16:00:00.000Z");
+    expect(await c.co.flushOutbox()).toBe(0);
+    expect(c.alarms.at(-1)! - now).toBe(2_000);
   });
 });
 
