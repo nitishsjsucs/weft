@@ -8,7 +8,7 @@ import {
 } from "../shared/contracts";
 import { agentEnabled, envConfig } from "../shared/config";
 import type { FrontEnv } from "../shared/env";
-import { hostedError, isMutation, json, plainError, readJson } from "../shared/http";
+import { ADMIN_MAX_BODY_BYTES, hostedError, isMutation, json, plainError, readJson, readTextCapped } from "../shared/http";
 import { logError } from "../shared/log";
 import { DO_PATHS, HEALTH_PATH, isModelAdmission, isUpload, SIM_RESET_PATH } from "../shared/routes";
 import { ADMIN_HEADER, mcpKeyId, signCtx, verifyAdmin } from "../shared/tokens";
@@ -205,8 +205,9 @@ async function mcp(req: Request, env: FrontEnv, url: URL): Promise<Response> {
 
 /** /api/_admin/* (design 6.2, 9.2 and 10): HMAC with WEFT_ADMIN_TOKEN over method, path, timestamp and body. */
 async function admin(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Response> {
-  const body = req.method === "GET" || req.method === "HEAD" ? "" : await req.text();
-  if (body.length > 64 * 1024) return plainError(413, "ValidationError", "TOO_LARGE", "Admin bodies are small");
+  // Refused from the Content-Length before reading, or as soon as a chunked body passes the cap.
+  const body = req.method === "GET" || req.method === "HEAD" ? "" : await readTextCapped(req, ADMIN_MAX_BODY_BYTES);
+  if (body === null) return plainError(413, "ValidationError", "TOO_LARGE", "Admin bodies are small");
   const check = await verifyAdmin({ token: env.WEFT_ADMIN_TOKEN, header: req.headers.get(ADMIN_HEADER), method: req.method, path: url.pathname, body });
   if (!check.ok) return plainError(401, "Unauthorized", "ADMIN_SIGNATURE", "A valid admin signature is required");
   // Each signature is good for one request: a captured one cannot be replayed within its window. The counter is
