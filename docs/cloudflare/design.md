@@ -334,7 +334,7 @@ The Rate Limiting binding is per location and eventually consistent (measured: 2
 - **Module state.** `WorldScope` keys the write-lock tail, the auth `Window` limiters (`usr_dana` exists in every world), otel `learned`, `recallNotes` and the trace redactor, and the integrations webhook receivers. A test runs two slots in one isolate and checks they share nothing. An import scan fails if `node:fs`, `node:child_process` or `node:net` is reachable from the weft-core entry.
 - **"Viewing as".** `WEFT_DEV_AUTH=1` keeps the persona switch inside the visitor's own world; on the showcase it only changes what is read.
 - **Cross-world data.** D1 and the Platform page hold cross-world rows, but visitors see aggregates only (provider, model, steps, cost, outcome), never content.
-- **IPs.** Hashed with a daily salt derived from `WEFT_SESSION_SECRET`, never stored raw. Workers Logs events carry the client IP as platform metadata (measured), so head sampling stays low and log dumps stay out of the repo.
+- **IPs.** Hashed with a daily salt derived from `WEFT_SESSION_SECRET`, never stored raw. Every per-IP key (the per-IP-hash lease count, the rate limits, the IP-hash spend cap) hashes an IPv4 address as it is, an IPv6 address by its /56 prefix (ISPs commonly delegate a whole /56 to one subscriber, so its 256 /64s count once) and an IPv4-mapped IPv6 address as its IPv4 address. Workers Logs events carry the client IP as platform metadata (measured), so head sampling stays low and log dumps stay out of the repo.
 - **PDF rendering.** HTML comes from Weft templates with escaped text and is loaded with `page.setContent`; JavaScript is off and every network request is intercepted and aborted, so Browser Run cannot be used for SSRF.
 
 ### 6.5 Degradation ladder
