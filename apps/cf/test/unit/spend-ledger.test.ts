@@ -123,6 +123,46 @@ describe("SpendDO ledger", () => {
     expect(l.spent({ day: "2026-10-27" })).toBe(0);
   });
 
+  it("prunes entries older than three days in the orphan sweep, and the live cap still counts the pruned ones", () => {
+    const { l, s, advance, caps } = ledger({ dayUsd: 100, runUsd: 100, visitorDayUsd: 100, ipDayUsd: 100, liveUsd: 0.5 });
+    const r = reserve(l, 0.3);
+    if (r.ok) l.settle(r.reservationId, 300_000);
+    // An orphan that is never closed counts at its reserved amount, before and after it is pruned.
+    expect(reserve(l, 0.1, { runId: "run_0002" }).ok).toBe(true);
+    l.recordNeurons({ product: "ocr", model: "@cf/x", neurons: 10 });
+    advance(86_400_000);
+    expect(l.settleOrphans()).toBe(1);
+    expect(l.entries("2026-10-26")).toHaveLength(4);
+    advance(2 * 86_400_000);
+    l.settleOrphans();
+    expect(l.entries("2026-10-26")).toEqual([]);
+    expect(s.sql.exec(`SELECT COUNT(*) AS n FROM spend_entries`).toArray()[0]!.n).toBe(0);
+    expect(s.sql.exec(`SELECT COUNT(*) AS n FROM neuron_entries`).toArray()[0]!.n).toBe(0);
+    expect(l.status({}).spentMicros.live).toBe(400_000);
+    expect(reserve(l, 0.2, { runId: "run_0003" })).toMatchObject({ ok: false, hostedCap: "live", spentMicros: 400_000 });
+    // A restarted object (a fresh ledger over the same storage) reads the carried totals back.
+    const again = createSqlSpendLedger(s, { caps: () => caps, wallNow: () => new Date("2026-10-29T12:00:00.000Z") });
+    expect(again.status({}).spentMicros.live).toBe(400_000);
+    expect(again.reserve({ runId: "run_0004", usdMicros: 0.2 * USD, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1" })).toMatchObject({ ok: false, hostedCap: "live" });
+    expect(again.reserve({ runId: "run_0005", usdMicros: 0.05 * USD, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1" }).ok).toBe(true);
+  });
+
+  it("keeps today's totals in step with every write, as a fresh read of the day would fold them", () => {
+    const { l, s, caps, advance } = ledger({ neuronsDay: 5000 });
+    const a = reserve(l, 0.02, { visitor: "vis_a", ipHash: "ip_a" });
+    const b = l.reserve({ runId: "run_0002", usdMicros: 1000, model: "@cf/openai/gpt-oss-120b", live: true, neurons: 300, product: "agent", world: "slot-1:gen-1", visitor: "vis_b", ipHash: "ip_a" });
+    reserve(l, 0.01, { runId: "run_0003", visitor: "vis_b", ipHash: "ip_b" });
+    l.recordNeurons({ product: "dictation", model: "@cf/w", neurons: 20 });
+    if (a.ok) l.settle(a.reservationId, 5_000);
+    if (b.ok) l.release(b.reservationId);
+    advance(ORPHAN_SETTLE_MS + 1000);
+    l.settleOrphans();
+    const fresh = createSqlSpendLedger(s, { caps: () => caps, wallNow: () => new Date("2026-10-26T12:16:01.000Z") });
+    for (const scope of [{}, { visitor: "vis_a", ipHash: "ip_a" }, { visitor: "vis_b", ipHash: "ip_b" }]) expect(l.status(scope)).toEqual(fresh.status(scope));
+    expect(l.committed({ day: "2026-10-26", visitor: "vis_b" })).toEqual(fresh.committed({ day: "2026-10-26", visitor: "vis_b" }));
+    expect(l.status({}).spentMicros).toMatchObject({ day: 15_000, live: 15_000 });
+  });
+
   it("reports today's status per visitor and IP hash", () => {
     const { l } = ledger();
     reserve(l, 0.01, { visitor: "vis_a", ipHash: "ip_a" });
@@ -135,5 +175,95 @@ describe("SpendDO ledger", () => {
   it("fold ignores a settle without its reservation", () => {
     const rows: SpendRow[] = [{ at: "x", day: "d", world: null, run_id: null, kind: "settle", reservation_id: "rsv_x", usd_micros: 5, model: "m", live: 1, visitor: null, ip_hash: null, neurons: 0, product: null }];
     expect(fold(rows).size).toBe(0);
+  });
+});
+
+/**
+ * Rows read, as workerd bills them, cannot be asked of node:sqlite, so each statement here is charged by its query
+ * plan: a scan of a table (through an index or not) costs the table's rows, an index search costs the rows it returns
+ * (index rows and the correlated subqueries' lookups are left out, as they are bounded by what the search returns).
+ * Statements that write read nothing here. Enough to tell a read that grows with the table from one that does not.
+ */
+function readMeter(s: ReturnType<typeof memorySql>) {
+  const meter = { rows: 0, statements: 0 };
+  const exec = s.sql.exec.bind(s.sql);
+  s.sql.exec = ((query: string, ...b: unknown[]) => {
+    const cur = exec(query, ...b);
+    if (/^\s*(select|with)/i.test(query)) {
+      meter.statements += 1;
+      const plan = s.db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...(b as never[])) as { detail: string }[];
+      let scanned = 0;
+      for (const p of plan) {
+        const m = /^SCAN (\w+)\b/.exec(p.detail);
+        if (m) scanned += Number((s.db.prepare(`SELECT COUNT(*) AS n FROM ${m[1]}`).get() as { n: number }).n);
+      }
+      meter.rows += scanned || cur.toArray().length;
+    }
+    return cur;
+  }) as typeof s.sql.exec;
+  return meter;
+}
+
+describe("SpendDO ledger reads", () => {
+  /** A ledger with `history` rows on earlier days (half of them live) and `today` reservations today. */
+  function seeded(o: { history: number; today: number; liveUsd?: number | null }) {
+    const caps: HostedCaps = { ...HOSTED_CAP_DEFAULTS, dayUsd: 1_000, runUsd: 1_000, visitorDayUsd: 1_000, ipDayUsd: 1_000, liveUsd: o.liveUsd ?? null };
+    const s = memorySql();
+    migrateSpend(s);
+    let now = new Date("2026-10-26T12:00:00.000Z");
+    const insert = s.db.prepare(`INSERT INTO spend_entries (at, day, world, run_id, kind, reservation_id, usd_micros, model, live, visitor, ip_hash, neurons, product)
+      VALUES (?, ?, 'slot-1:gen-1', ?, ?, ?, 1000, 'gpt-5.6-luna', ?, 'vis_a', 'ip_a', 0, NULL)`);
+    for (let i = 0; i < o.history; i += 2) {
+      const at = new Date(now.getTime() - 86_400_000 - i * 1000).toISOString();
+      insert.run(at, at.slice(0, 10), `run_h${i}`, "reserve", `rsv_h${i}`, i % 4 === 0 ? 1 : 0);
+      insert.run(at, at.slice(0, 10), `run_h${i}`, "settle", `rsv_h${i}`, i % 4 === 0 ? 1 : 0);
+    }
+    const l = createSqlSpendLedger(s, { caps: () => caps, wallNow: () => now });
+    for (let i = 0; i < o.today; i++) {
+      const r = l.reserve({ runId: `run_t${i}`, usdMicros: 1000, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: "vis_a", ipHash: "ip_a" });
+      if (r.ok) l.settle(r.reservationId, 900);
+    }
+    now = new Date(now.getTime() + 1000);
+    // The object has been up: whatever it rebuilds once is behind it.
+    l.status({});
+    const meter = readMeter(s);
+    return { l, meter, advance: (ms: number) => { now = new Date(now.getTime() + ms); } };
+  }
+
+  const perCall = (o: { history: number; today: number; liveUsd?: number | null }) => {
+    const { l, meter, advance } = seeded(o);
+    l.status({ visitor: "vis_a", ipHash: "ip_a" });
+    const status = meter.rows;
+    const r = l.reserve({ runId: "run_new", usdMicros: 1000, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: "vis_a", ipHash: "ip_a" });
+    expect(r.ok).toBe(true);
+    const reserve = meter.rows - status;
+    if (r.ok) l.settle(r.reservationId, 500);
+    const settle = meter.rows - status - reserve;
+    // The cron's orphan sweep, 15 minutes on: the first one after a start looks back two days, the next ones only at
+    // what crossed the orphan age since.
+    advance(ORPHAN_SETTLE_MS + 1000);
+    l.settleOrphans();
+    advance(ORPHAN_SETTLE_MS);
+    const before = meter.rows;
+    l.settleOrphans();
+    return { status, reserve, settle, sweep: meter.rows - before };
+  };
+
+  it("do not grow with the table or with today's steps, with the live cap off (section 0)", () => {
+    const small = perCall({ history: 10, today: 5 });
+    const large = perCall({ history: 4_000, today: 1_000 });
+    expect(large).toEqual(small);
+    expect(small.status).toBe(0);
+    // The run cap reads the run's own rows; the reservation and its close are found by id.
+    expect(small.reserve).toBeLessThanOrEqual(2);
+    expect(small.settle).toBeLessThanOrEqual(4);
+    expect(small.sweep).toBeLessThanOrEqual(2);
+  });
+
+  it("do not grow with the table with the live cap on either", () => {
+    const small = perCall({ history: 10, today: 5, liveUsd: 1_000 });
+    const large = perCall({ history: 4_000, today: 1_000, liveUsd: 1_000 });
+    expect(large).toEqual(small);
+    expect(small.status).toBe(0);
   });
 });
