@@ -136,8 +136,9 @@ export class Harness {
     return this.fetch(path, { method, body: text || undefined, headers: { "x-weft-admin": sig, ...(text ? { "content-type": "application/json" } : {}) } }, { ...o, origin: null });
   }
 
-  async smokeHeaders(): Promise<Record<string, string>> {
-    return { "x-weft-smoke": await signSmoke(this.secrets.smoke) };
+  /** The x-weft-smoke header for one request shape (it is bound to the method and path). */
+  async smokeHeaders(path: string, method = "GET"): Promise<Record<string, string>> {
+    return { "x-weft-smoke": await signSmoke(this.secrets.smoke, { method, path }) };
   }
 
   /** POST /api/_admin/provision and wait until every world is ready (the fake engine restores in a second). */

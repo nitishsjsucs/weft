@@ -63,18 +63,25 @@ export function newVisitorId(): string {
 
 // Smoke and admin --------------------------------------------------------------------------------------------------
 
-/** `x-weft-smoke: <unix seconds>.<hex HMAC(WEFT_SMOKE_TOKEN, "weft-smoke|<ts>")>`. */
-export async function signSmoke(token: string, nowS = Math.floor(Date.now() / 1000)): Promise<string> {
-  return `${nowS}.${toHex(await hmac(token, `weft-smoke|${nowS}`))}`;
+/** The request a smoke header was signed for: its method and URL path (no query). */
+export interface SmokeRequest { method: string; path: string }
+const smokeMessage = (r: SmokeRequest, ts: number) => `weft-smoke|${r.method.toUpperCase()}|${r.path}|${ts}`;
+
+/**
+ * `x-weft-smoke: <unix seconds>.<hex HMAC(WEFT_SMOKE_TOKEN, "weft-smoke|<METHOD>|<path>|<ts>")>`. Bound to the method
+ * and path, so a header that leaks (a log, a proxy) works only for that one request shape within its window.
+ */
+export async function signSmoke(token: string, req: SmokeRequest, nowS = Math.floor(Date.now() / 1000)): Promise<string> {
+  return `${nowS}.${toHex(await hmac(token, smokeMessage(req, nowS)))}`;
 }
 
-export async function verifySmoke(token: string | undefined, header: string | null, nowS = Math.floor(Date.now() / 1000)): Promise<boolean> {
+export async function verifySmoke(token: string | undefined, header: string | null, req: SmokeRequest, nowS = Math.floor(Date.now() / 1000)): Promise<boolean> {
   if (!token || !header) return false;
   const m = /^(\d{9,11})\.([0-9a-f]{64})$/.exec(header);
   if (!m) return false;
   const ts = Number(m[1]);
   if (Math.abs(nowS - ts) > SIGNATURE_WINDOW_S) return false;
-  return hmacVerify(token, `weft-smoke|${ts}`, fromHex(m[2]!)!);
+  return hmacVerify(token, smokeMessage(req, ts), fromHex(m[2]!)!);
 }
 
 export const ADMIN_HEADER = "x-weft-admin";

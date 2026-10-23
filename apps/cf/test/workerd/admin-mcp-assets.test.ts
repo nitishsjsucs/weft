@@ -180,7 +180,7 @@ describe("rate limits", () => {
   });
 
   it("lets a valid smoke visit past RL_API, and an unsigned one from the same address still counts", async () => {
-    const smoke = await h.smokeHeaders();
+    const smoke = await h.smokeHeaders("/api/_no_such_route");
     const statuses = await burst(limit + 100, "203.0.113.201", smoke);
     expect(statuses.filter((s) => s === 429)).toEqual([]);
     expect(new Set(statuses)).toEqual(new Set([404]));

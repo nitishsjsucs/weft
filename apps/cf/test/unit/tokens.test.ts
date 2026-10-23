@@ -57,12 +57,22 @@ describe("x-weft-ctx", () => {
 describe("smoke and admin signatures", () => {
   it("accepts a smoke header within 5 minutes and nothing else", async () => {
     const tok = "t".repeat(48);
-    const h = await signSmoke(tok, nowS);
-    expect(await verifySmoke(tok, h, nowS + 299)).toBe(true);
-    expect(await verifySmoke(tok, h, nowS + 301)).toBe(false);
-    expect(await verifySmoke("u".repeat(48), h, nowS)).toBe(false);
-    expect(await verifySmoke(undefined, h, nowS)).toBe(false);
-    expect(await verifySmoke(tok, "123.abc", nowS)).toBe(false);
+    const req = { method: "GET", path: "/api/v1/health" };
+    const h = await signSmoke(tok, req, nowS);
+    expect(await verifySmoke(tok, h, req, nowS + 299)).toBe(true);
+    expect(await verifySmoke(tok, h, req, nowS + 301)).toBe(false);
+    expect(await verifySmoke("u".repeat(48), h, req, nowS)).toBe(false);
+    expect(await verifySmoke(undefined, h, req, nowS)).toBe(false);
+    expect(await verifySmoke(tok, "123.abc", req, nowS)).toBe(false);
+  });
+
+  it("binds the smoke header to the method and path it was signed for", async () => {
+    const tok = "t".repeat(48);
+    const h = await signSmoke(tok, { method: "get", path: "/api/v1/notes" }, nowS);
+    expect(await verifySmoke(tok, h, { method: "GET", path: "/api/v1/notes" }, nowS)).toBe(true);
+    expect(await verifySmoke(tok, h, { method: "POST", path: "/api/v1/notes" }, nowS)).toBe(false);
+    expect(await verifySmoke(tok, h, { method: "GET", path: "/api/v1/workers" }, nowS)).toBe(false);
+    expect(await verifySmoke(tok, h, { method: "GET", path: "/api/v1/notes/" }, nowS)).toBe(false);
   });
 
   it("binds the admin signature to the method, path, time and body", async () => {

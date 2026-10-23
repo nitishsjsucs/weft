@@ -63,7 +63,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
 
   // Smoke calls skip RL_API (design 6.3); each still comes from its own address, as separate checks would.
   let ipSeq = 0;
-  const smoke = async (path: string, init: RequestInit = {}) => h.fetch(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(await h.smokeHeaders()) } }, { origin: null, principal: "usr_dana", ip: `192.0.2.${(ipSeq++ % 200) + 20}` });
+  const smoke = async (path: string, init: RequestInit = {}) => h.fetch(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(await h.smokeHeaders(new URL(path, ORIGIN).pathname, init.method ?? "GET")) } }, { origin: null, principal: "usr_dana", ip: `192.0.2.${(ipSeq++ % 200) + 20}` });
   const smokeJson = async <T>(path: string, init: RequestInit = {}) => { const r = await smoke(path, init); return { status: r.status, body: (await r.json()) as T }; };
   const post = (path: string, body: unknown) => smokeJson(path, { method: "POST", body: JSON.stringify(body) });
   const env = () => h.coreEnv();
