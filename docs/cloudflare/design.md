@@ -128,14 +128,14 @@ weft-core (workers_dev false, preview_urls false: no public route)
 
 - **Page load.** Every `/`, `/app/**` and `/portal/**` page is a static asset: no Worker invocation and no request count (research: static assets billing).
 - **API call.** The browser sends `/api/v1/...`. The front Worker:
-  1. verifies `__Host-weft` (HMAC over `visitor, slot, gen, exp`, about 0.1 ms);
+  1. verifies `__Host-weft` (HMAC over `visitor, slot, gen, exp, leaseExpiresMs`, about 0.1 ms; `leaseExpiresMs` names the lease, 6.4);
   2. applies `RL_API` keyed on the daily-salted IP hash (a valid `x-weft-smoke` visit skips it; 6.3);
   3. routes to the visitor's slot, or to `showcase` when there is no lease;
   4. for POST, PUT, PATCH and DELETE, checks `Origin`, the human grant `__Host-weft-h` and `RL_MUTATE`, and refuses showcase mutations with 409 `LEASE_REQUIRED`;
   5. deletes client copies of `x-weft-proxy`, `x-weft-ctx` and `x-weft-smoke`;
   6. sets `x-weft-proxy` (secret) and `x-weft-ctx = hmac({slot, gen, visitor, ipHash, human})`;
   7. rewrites `/api/v1/*` to `/v1/*` and forwards to `COMPANY.get(idFromName(slot))`, streaming the body.
-  The DO answers 409 `LEASE_ENDED` when the cookie's generation is older than the world's.
+  The DO answers 409 `LEASE_ENDED` when the cookie's generation is older than the world's; which of those cookies the front keeps and reissues is in 6.4.
 - **Live updates.** `/api/_live` upgrades to a WebSocket. The front Worker authorizes it the same way and forwards it to the visitor's slot (never a slot named by the client). The DO accepts it hibernatably and sends `{seq, tables}` after every commit. Outgoing messages are free and the client sends none (pings use the auto-response), so an idle open tab costs nothing (research: hibernatable WebSockets).
 - **Active run steps.** The existing SSE route stays for active runs only (it ends at a terminal status). The hosted web raises its trace-poll fallback from 1 s to 5 s.
 - **Model step.** Inside the alarm: reserve in `SpendDO` (RPC), call the provider (AI Gateway fetch or `env.AI.run` with `{ gateway }`), settle, then run executor calls in short transactions.
@@ -330,7 +330,7 @@ The Rate Limiting binding is per location and eventually consistent (measured: 2
 ### 6.4 Isolation guarantees
 
 - **Database.** One DO per world is one SQLite database per world. The slot comes from the signed cookie or the mcp key prefix `wk_mcp_<slot>_<gen>_<rand>`, never from the URL. DO bindings are not publicly reachable, and client trust headers are stripped.
-- **Generations.** Every reset bumps `gen`. R2 keys and slot vectors carry it, recall filters on it, and cookies, admin keys and mcp keys from an older generation fail.
+- **Generations.** Every reset bumps `gen`. R2 keys and slot vectors carry it, recall filters on it, and admin keys and mcp keys from an older generation fail. A world answers a session cookie of an older generation with 409 `LEASE_ENDED`, and the front accepts such a cookie in exactly one case: it was issued for the same lease, meaning the same visitor and slot and a `leaseExpiresMs` claim equal to the lease's total expiry to the millisecond (a reset keeps the lease's start; the visitor's next lease has another), that lease still lasts, and its generation is newer than the cookie's. That is a cookie from before the visitor's own "Reset demo data...": `GET /api/_session` reissues it for the lease's current generation, and a request that got the 409 with it keeps its cookies. A cookie of an earlier, ended lease of the same visitor (operator visitor ids are stable per name) is never moved onto a later lease of that slot: it gets the 409 and its cookies cleared, so a cookie that leaked stops working when its lease ends. A cookie whose generation is newer than its lease's names no lease.
 - **Module state.** `WorldScope` keys the write-lock tail, the auth `Window` limiters (`usr_dana` exists in every world), otel `learned`, `recallNotes` and the trace redactor, and the integrations webhook receivers. A test runs two slots in one isolate and checks they share nothing. An import scan fails if `node:fs`, `node:child_process` or `node:net` is reachable from the weft-core entry.
 - **"Viewing as".** `WEFT_DEV_AUTH=1` keeps the persona switch inside the visitor's own world; on the showcase it only changes what is read.
 - **Cross-world data.** D1 and the Platform page hold cross-world rows, but visitors see aggregates only (provider, model, steps, cost, outcome), never content.

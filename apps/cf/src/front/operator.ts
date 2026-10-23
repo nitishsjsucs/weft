@@ -9,7 +9,7 @@ import type { FrontEnv } from "../shared/env";
 import { hostedError, json, plainError } from "../shared/http";
 import { logEvent } from "../shared/log";
 import { DEFAULT_OPERATOR, OPERATOR_NAME_RE, operatorVisitorId } from "../shared/tokens";
-import { clearSessionCookies, grantCookie, sessionCookies, withCookies, type Visit } from "./visit";
+import { clearSessionCookies, grantCookie, leaseClaims, sessionCookies, withCookies, type Visit } from "./visit";
 
 const lobby = (env: FrontEnv) => env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
 
@@ -31,8 +31,7 @@ export async function operatorLease(env: FrontEnv, v: Visit, body: Record<string
   logEvent("lease.operator", { slot: r.status === "leased" ? r.slot : null, gen: r.status === "leased" ? r.gen : null, outcome: r.status });
   const res = json({ ...r, operator: name });
   if (r.status !== "leased") return res;
-  const exp = Math.floor(Date.parse(r.expiresAt) / 1000);
-  return withCookies(res, await sessionCookies(env, { visitor, slot: r.slot, gen: r.gen, exp }, true));
+  return withCookies(res, await sessionCookies(env, leaseClaims(visitor, r), true));
 }
 
 /**
@@ -59,7 +58,7 @@ export async function operatorGrant(env: FrontEnv, v: Visit, body: Record<string
   if (name === null) return plainError(400, "ValidationError", "OPERATOR_NAME", "name is 1 to 32 of a-z, 0-9 and -");
   const visitor = await operatorVisitorId(env.WEFT_ADMIN_TOKEN!, name);
   if (!v.session || v.session.visitor !== visitor) return hostedError("LEASE_REQUIRED", `Send the session cookie of the operator lease "${name}"`);
-  const st = await lobby(env).status({ visitor, slot: v.session.slot, gen: v.session.gen });
+  const st = await lobby(env).status({ visitor, slot: v.session.slot, gen: v.session.gen, leaseExpiresMs: v.session.leaseExpiresMs });
   if (!st.lease) return withCookies(hostedError("LEASE_ENDED", "This operator lease has ended; start a new one"), clearSessionCookies());
   const nowS = Math.floor(Date.now() / 1000);
   const cookie = await grantCookie(env, visitor, nowS);

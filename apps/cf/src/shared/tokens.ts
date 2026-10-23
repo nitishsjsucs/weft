@@ -31,9 +31,9 @@ export async function readSession(secret: string, token: string, nowS = Math.flo
   if (!r.ok) return r;
   const c = r.claims;
   if (typeof c?.visitor !== "string" || !VISITOR_RE.test(c.visitor) || typeof c.slot !== "string" || !SLOT_RE.test(c.slot)
-    || !Number.isInteger(c.gen) || c.gen < 0 || !Number.isInteger(c.exp)) return { ok: false, reason: "malformed" };
+    || !Number.isInteger(c.gen) || c.gen < 0 || !Number.isInteger(c.exp) || !Number.isInteger(c.leaseExpiresMs)) return { ok: false, reason: "malformed" };
   if (c.exp <= nowS) return { ok: false, reason: "expired" };
-  return { ok: true, claims: { visitor: c.visitor, slot: c.slot, gen: c.gen, exp: c.exp } };
+  return { ok: true, claims: { visitor: c.visitor, slot: c.slot, gen: c.gen, exp: c.exp, leaseExpiresMs: c.leaseExpiresMs } };
 }
 
 export async function readGrant(secret: string, token: string, nowS = Math.floor(Date.now() / 1000)): Promise<Checked<HumanGrantClaims>> {

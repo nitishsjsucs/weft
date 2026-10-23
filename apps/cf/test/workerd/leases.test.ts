@@ -65,12 +65,19 @@ describe("leases", () => {
     expect(v.jar.cookies.get(SESSION_COOKIE)).not.toBe(oldCookie);
     expect(await notes(v)).not.toContain("before reset");
 
+    // A request that left with the cookie from before the reset of this same lease: 409 LEASE_ENDED, but the lease
+    // lives on, so the cookies stay and the next session read reissues them for the new generation.
     const stale = h.visitor("198.51.100.103");
     stale.jar.cookies.set(SESSION_COOKIE, oldCookie);
     const old = await stale.fetch("/api/v1/notes");
     expect(old.status).toBe(409);
     expect(await old.json()).toMatchObject({ code: "LEASE_ENDED" });
-    expect(stale.jar.cookies.has(SESSION_COOKIE)).toBe(false);
+    expect(old.headers.getSetCookie()).toEqual([]);
+    expect(stale.jar.cookies.get(SESSION_COOKIE)).toBe(oldCookie);
+    const reissued = await stale.json<{ world: string; lease: { slot: string; gen: number } | null }>("/api/_session");
+    expect(reissued.body).toMatchObject({ world: "slot", lease: { slot: l.slot, gen: l.gen! + 1 } });
+    expect(stale.jar.cookies.get(SESSION_COOKIE)).not.toBe(oldCookie);
+    expect((await stale.json("/api/v1/notes")).status).toBe(200);
 
     // The session read the app sends right after its reset may still carry the old cookie: it gets the lease as it is
     // now and a cookie for the new generation, never a logout.
@@ -89,6 +96,36 @@ describe("leases", () => {
     const limit = await v.fetch("/api/v1/sim/reset", { method: "POST", body: "{}" });
     expect(limit.status).toBe(429);
     expect(await limit.json()).toMatchObject({ code: "RESET_LIMIT" });
+  });
+
+  it("never moves a cookie of the visitor's earlier, ended lease onto a later lease of the same slot", async () => {
+    await releaseAll();
+    const v = h.visitor("198.51.100.108");
+    const first = await v.lease();
+    const firstCookie = v.jar.cookies.get(SESSION_COOKIE)!;
+    await (await lobby()).release({ slot: first.slot!, reason: "test" });
+    // The same visitor (the jar still holds its id, as an operator name always gives the same one) leases again and
+    // gets the same slot, one generation on.
+    const second = await v.lease();
+    expect(second).toMatchObject({ status: "leased", slot: first.slot, gen: first.gen! + 1 });
+    const secondCookie = v.jar.cookies.get(SESSION_COOKIE)!;
+    expect(secondCookie).not.toBe(firstCookie);
+
+    // The first lease's cookie (unexpired, authentic, same visitor and slot, an older generation): 409 and cleared.
+    const thief = h.visitor("198.51.100.109");
+    thief.jar.cookies.set(SESSION_COOKIE, firstCookie);
+    const r = await thief.fetch("/api/v1/notes");
+    expect(r.status).toBe(409);
+    expect(await r.json()).toMatchObject({ code: "LEASE_ENDED" });
+    expect(thief.jar.cookies.has(SESSION_COOKIE)).toBe(false);
+    // Nor does a session read upgrade it: no lease, the showcase, and the cookies cleared.
+    thief.jar.cookies.set(SESSION_COOKIE, firstCookie);
+    const st = await thief.json<{ world: string; lease: unknown }>("/api/_session");
+    expect(st.body).toMatchObject({ world: "showcase", lease: null });
+    expect(thief.jar.cookies.has(SESSION_COOKIE)).toBe(false);
+    // The second lease is untouched.
+    expect((await v.json("/api/v1/notes")).status).toBe(200);
+    expect(v.jar.cookies.get(SESSION_COOKIE)).toBe(secondCookie);
   });
 
   it("ends idle leases at the sweep and resets the slot, so the next visitor gets a clean world", async () => {

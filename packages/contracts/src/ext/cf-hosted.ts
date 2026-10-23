@@ -98,11 +98,17 @@ export type DegradationLevel = 0 | 1 | 2 | 3 | 4;
 
 // Cookies and trust headers -------------------------------------------------------------------------------------
 
-/** HMAC over {visitor, slot, gen, exp}. HttpOnly, Secure, SameSite=Strict, Path=/. */
+/** HMAC over {visitor, slot, gen, exp, leaseExpiresMs}. HttpOnly, Secure, SameSite=Strict, Path=/. */
 export const SESSION_COOKIE = "__Host-weft";
 /** The human grant, HMAC over {visitor, exp}, set after a passed Turnstile check. Same attributes. */
 export const HUMAN_GRANT_COOKIE = "__Host-weft-h";
-export interface SessionClaims { visitor: string; slot: string; gen: number; exp: number }
+/**
+ * `exp` is when the cookie expires (unix seconds, the lease's total expiry). `leaseExpiresMs` is the lease's total
+ * expiry to the millisecond (LeaseInfo.expiresAt): it names the lease the cookie was issued for, since a reset keeps
+ * the lease's start and the visitor's next lease has another, so only a cookie of the same lease moves to the lease's
+ * newer generation after a reset.
+ */
+export interface SessionClaims { visitor: string; slot: string; gen: number; exp: number; leaseExpiresMs: number }
 export interface HumanGrantClaims { visitor: string; exp: number }
 
 /** Headers the front Worker deletes from every client request, then sets itself. */

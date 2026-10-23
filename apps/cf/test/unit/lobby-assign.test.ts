@@ -65,16 +65,41 @@ describe("LobbyDO.assign under interleaving", () => {
 });
 
 describe("LobbyDO.status after a hosted reset", () => {
+  const sql = (lobby: LobbyDO) => (lobby as unknown as { sql: { exec(q: string, ...b: unknown[]): unknown } }).sql;
+  const leaseMs = (l: { expiresAt?: string }) => Date.parse(l.expiresAt!);
+
   it("answers a cookie of an older generation of the visitor's own lease with the lease as it is now", async () => {
     const { lobby } = lobbyOver(2);
     const me = visitor(40);
     const l = await lobby.assign({ visitor: me, ipHash: "c".repeat(32) });
     if (l.status !== "leased") throw new Error(`not leased: ${l.status}`);
-    // What a reset that kept the lease leaves behind: the lease row on the next generation.
-    (lobby as unknown as { sql: { exec(q: string, ...b: unknown[]): unknown } }).sql.exec(`UPDATE leases SET gen = gen + 1 WHERE visitor = ?`, me);
-    const now = await lobby.status({ visitor: me, slot: l.slot, gen: l.gen });
+    // What a reset that kept the lease leaves behind: the lease row on the next generation, with the same start.
+    sql(lobby).exec(`UPDATE leases SET gen = gen + 1 WHERE visitor = ?`, me);
+    const now = await lobby.status({ visitor: me, slot: l.slot, gen: l.gen, leaseExpiresMs: leaseMs(l) });
     expect(now.lease).toMatchObject({ slot: l.slot, gen: l.gen + 1 });
+    expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen + 1, leaseExpiresMs: leaseMs(l) })).lease).toMatchObject({ gen: l.gen + 1 });
+    // Without the lease it was issued for, an older generation names nothing; the lease's own generation still does.
+    expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen })).lease).toBeNull();
     expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen + 1 })).lease).toMatchObject({ gen: l.gen + 1 });
+  });
+
+  it("never moves a cookie of an earlier, ended lease of the same visitor onto a later lease of that slot", async () => {
+    const { lobby } = lobbyOver(1);
+    // An operator visitor id is stable per name, so the same visitor leases the same slot again.
+    const me = visitor(43);
+    const first = await lobby.assign({ visitor: me, ipHash: "c".repeat(32), now: Date.now() - 5 * 60_000 });
+    if (first.status !== "leased") throw new Error(`not leased: ${first.status}`);
+    // The first lease ends and its slot is reset (the next generation); the visitor leases the slot again.
+    sql(lobby).exec(`DELETE FROM leases WHERE visitor = ?`, me);
+    sql(lobby).exec(`UPDATE slots SET gen = gen + 1 WHERE name = ?`, first.slot);
+    const second = await lobby.assign({ visitor: me, ipHash: "c".repeat(32) });
+    if (second.status !== "leased") throw new Error(`not leased: ${second.status}`);
+    expect(second).toMatchObject({ slot: first.slot, gen: first.gen + 1 });
+    // The first lease's cookie: an older generation of the slot, the same visitor, another lease. No lease.
+    expect((await lobby.status({ visitor: me, slot: first.slot, gen: first.gen, leaseExpiresMs: leaseMs(first) })).lease).toBeNull();
+    expect((await lobby.status({ visitor: me, slot: first.slot, gen: second.gen, leaseExpiresMs: leaseMs(first) })).lease).toBeNull();
+    // The second lease's own cookie still names it.
+    expect((await lobby.status({ visitor: me, slot: second.slot, gen: second.gen, leaseExpiresMs: leaseMs(second) })).lease).toMatchObject({ gen: second.gen });
   });
 
   it("still answers no lease for another visitor, another slot or a cookie newer than the lease", async () => {
@@ -83,9 +108,9 @@ describe("LobbyDO.status after a hosted reset", () => {
     const l = await lobby.assign({ visitor: me, ipHash: "d".repeat(32) });
     if (l.status !== "leased") throw new Error(`not leased: ${l.status}`);
     const other = l.slot === "slot-1" ? "slot-2" : "slot-1";
-    expect((await lobby.status({ visitor: visitor(42), slot: l.slot, gen: l.gen })).lease).toBeNull();
-    expect((await lobby.status({ visitor: me, slot: other, gen: l.gen })).lease).toBeNull();
-    expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen + 1 })).lease).toBeNull();
+    expect((await lobby.status({ visitor: visitor(42), slot: l.slot, gen: l.gen, leaseExpiresMs: leaseMs(l) })).lease).toBeNull();
+    expect((await lobby.status({ visitor: me, slot: other, gen: l.gen, leaseExpiresMs: leaseMs(l) })).lease).toBeNull();
+    expect((await lobby.status({ visitor: me, slot: l.slot, gen: l.gen + 1, leaseExpiresMs: leaseMs(l) })).lease).toBeNull();
   });
 });
 

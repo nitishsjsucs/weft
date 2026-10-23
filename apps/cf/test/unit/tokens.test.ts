@@ -13,8 +13,8 @@ const visitor = "vis_" + "a".repeat(32);
 
 describe("session and grant tokens", () => {
   it("round-trips a session and rejects tampering, expiry and malformed claims", async () => {
-    const t = await sessionToken(SECRET, { visitor, slot: "slot-1", gen: 3, exp: nowS + 60 });
-    expect(await readSession(SECRET, t, nowS)).toEqual({ ok: true, claims: { visitor, slot: "slot-1", gen: 3, exp: nowS + 60 } });
+    const t = await sessionToken(SECRET, { visitor, slot: "slot-1", gen: 3, exp: nowS + 60, leaseExpiresMs: (nowS + 60) * 1000 + 123 });
+    expect(await readSession(SECRET, t, nowS)).toEqual({ ok: true, claims: { visitor, slot: "slot-1", gen: 3, exp: nowS + 60, leaseExpiresMs: (nowS + 60) * 1000 + 123 } });
     expect(await readSession(SECRET, t, nowS + 60)).toEqual({ ok: false, reason: "expired" });
     expect((await readSession("x".repeat(64), t, nowS)).ok).toBe(false);
     const [v, body, sig] = t.split(".");
@@ -23,15 +23,19 @@ describe("session and grant tokens", () => {
     const forgedBody = toBase64Url(new TextEncoder().encode(JSON.stringify(forged)));
     expect(await readSession(SECRET, `${v}.${forgedBody}.${sig}`, nowS)).toEqual({ ok: false, reason: "signature" });
     expect(await readSession(SECRET, "garbage", nowS)).toEqual({ ok: false, reason: "malformed" });
-    const bad = await sessionToken(SECRET, { visitor: "nope", slot: "slot-1", gen: 1, exp: nowS + 60 });
+    const bad = await sessionToken(SECRET, { visitor: "nope", slot: "slot-1", gen: 1, exp: nowS + 60, leaseExpiresMs: (nowS + 60) * 1000 });
     expect(await readSession(SECRET, bad, nowS)).toEqual({ ok: false, reason: "malformed" });
+    // A cookie that does not name its lease (no lease expiry) is malformed too: it could never be told apart from a
+    // cookie of the visitor's earlier lease.
+    const unnamed = await sessionToken(SECRET, { visitor, slot: "slot-1", gen: 1, exp: nowS + 60 } as never);
+    expect(await readSession(SECRET, unnamed, nowS)).toEqual({ ok: false, reason: "malformed" });
   });
 
   it("never accepts a grant as a session or a session as a grant (labels differ)", async () => {
     const g = await grantToken(SECRET, { visitor, exp: nowS + 600 });
     expect(await readGrant(SECRET, g, nowS)).toEqual({ ok: true, claims: { visitor, exp: nowS + 600 } });
     expect((await readSession(SECRET, g, nowS)).ok).toBe(false);
-    const s = await sessionToken(SECRET, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600 });
+    const s = await sessionToken(SECRET, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600, leaseExpiresMs: (nowS + 600) * 1000 });
     expect((await readGrant(SECRET, s, nowS)).ok).toBe(false);
   });
 
@@ -124,7 +128,7 @@ describe("operator lease visitors", () => {
     expect(await operatorVisitorId(token, "operator")).toBe(a);
     expect(await operatorVisitorId(token, "smoke")).not.toBe(a);
     expect(await operatorVisitorId("j".repeat(48), "operator")).not.toBe(a);
-    const cookie = await sessionToken(SECRET, { visitor: a, slot: "slot-1", gen: 2, exp: nowS + 60 });
+    const cookie = await sessionToken(SECRET, { visitor: a, slot: "slot-1", gen: 2, exp: nowS + 60, leaseExpiresMs: (nowS + 60) * 1000 });
     expect(await readSession(SECRET, cookie, nowS)).toMatchObject({ ok: true, claims: { visitor: a } });
   });
 });
