@@ -195,7 +195,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
         world: { slot: input.world.slot, gen: input.world.gen, mode: input.world.mode, snapshot: x.snapshot() },
         ctx: p.ctx,
         app: (path) => appFetch(new Request(`${url.origin}${path}`, { headers })),
-        files: x.files, render: x.render, flags: x.flags, browserMsUsed: p.browserMsUsed, newJobId: p.newJobId, pending: pendingPdfs,
+        files: x.files, render: x.render, flags: x.flags, browserMsUsed: p.browserMsUsed, newJobId: p.newJobId, pending: pendingPdfs, guard,
       });
     },
     catalogRow: (runId) => inScope(() => catalogRowFor(weft.db as never, runId, { slot: input.world.slot, gen: input.world.gen })),

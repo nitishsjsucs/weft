@@ -163,7 +163,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         },
         mcpAskAllowed: async (apiKey) => {
           const keyId = await mcpKeyId(apiKey);
-          const r = await this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby)).take({ key: `mcp_ask:${keyId}`, limit: MCP_AGENT_ASK_PER_KEY_DAY });
+          // A cross-object call inside a transaction would hold the slot's input gate (IO_IN_TX, design 4.2).
+          this.engine?.guard.assertNotInTx("LobbyDO.take");
+          const r = await this.lobby().take({ key: `mcp_ask:${keyId}`, limit: MCP_AGENT_ASK_PER_KEY_DAY });
           return r.ok;
         },
       });
@@ -426,10 +428,13 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (request.method !== "GET") return plainError(405, "ValidationError", "METHOD", "GET a PDF");
     const engine = this.engine!;
     if (!engine.pdf) return plainError(503, "NotImplemented", "PDF_DISABLED", "PDF rendering is off on this deployment");
-    const lobby = this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby));
+    const lobby = this.lobby();
     const { value: res, usage } = await engine.meter.measure(() => engine.pdf!(request, {
       ctx: { human: c.human, smoke: c.smoke },
-      browserMsUsed: () => lobby.extrasCounterPeek(COUNTERS.browserMs),
+      browserMsUsed: () => {
+        engine.guard.assertNotInTx("LobbyDO.extrasCounterPeek");
+        return lobby.extrasCounterPeek(COUNTERS.browserMs);
+      },
       newJobId: newGlobalJobId,
     }));
     this.usage.rowsRead += usage.rowsRead;
@@ -596,10 +601,17 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private maybePushUsage(): void {
     const u = this.usage;
     if (!this.stamp || (u.rowsWritten < PUSH_AT.rowsWritten && u.rowsRead < PUSH_AT.rowsRead && u.requests < PUSH_AT.requests)) return;
+    // Never from inside a transaction (IO_IN_TX): the counts are kept for the next push.
+    try {
+      this.engine?.guard.assertNotInTx("LobbyDO.reportUsage");
+    } catch (e) {
+      logError("usage.push", e, { slot: this.stamp.slot });
+      return;
+    }
     const delta = u;
     this.usage = zeroUsage();
     const slot = this.stamp.slot;
-    this.ctx.waitUntil(this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby)).reportUsage({ slot, usage: delta }).catch((e: unknown) => {
+    this.ctx.waitUntil(this.lobby().reportUsage({ slot, usage: delta }).catch((e: unknown) => {
       logError("usage.push", e, { slot });
       this.usage.rowsRead += delta.rowsRead;
       this.usage.rowsWritten += delta.rowsWritten;

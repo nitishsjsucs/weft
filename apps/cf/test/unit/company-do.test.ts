@@ -63,6 +63,7 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
     outboxPending: () => writeLocked(async () => sql.exec(`SELECT id, kind, body FROM outbox ORDER BY created_at, id`).toArray()
       .map((r) => { try { return { id: String(r.id), kind: String(r.kind), job: JSON.parse(String(r.body)) as HostedJob }; } catch { return { id: String(r.id), kind: String(r.kind), job: null }; } })),
     outboxAck: (id: string) => writeLocked(async () => { sql.exec(`DELETE FROM outbox WHERE id = ?`, id); }),
+    pdf: async (_req: Request, p: { browserMsUsed: () => Promise<number> }) => new Response(String(await p.browserMsUsed())),
     close: async () => undefined,
   } as WorldEngine;
 }
@@ -322,5 +323,27 @@ describe("the outbox flush", () => {
     expect(await flush).toBe(2);
     expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([`obx_${"2".padStart(16, "0")}`, `obx_${"3".padStart(16, "0")}`]);
     expect(c.m.sql.exec(`SELECT COUNT(*) AS n FROM outbox`).toArray()[0]!.n).toBe(0);
+  });
+});
+
+describe("cross-object calls", () => {
+  it("assert they are not inside a transaction: the MCP ask limit, the PDF route's browser counter and the usage push", async () => {
+    const c = company();
+    await c.ready();
+    world.inTx = true;
+    await expect(world.input!.mcpAskAllowed(`wk_mcp_slot-1_3_${"k".repeat(24)}`)).rejects.toThrow(/IO_IN_TX: LobbyDO\.take/);
+    await expect(c.co.fetch(await req("/_hosted/pdf/offer_letter/doc_0001"))).rejects.toThrow(/IO_IN_TX: LobbyDO\.extrasCounterPeek/);
+    expect(c.lobbyCalls.filter((x) => x.method === "take" || x.method === "extrasCounterPeek")).toEqual([]);
+    world.inTx = false;
+    expect(await world.input!.mcpAskAllowed(`wk_mcp_slot-1_3_${"k".repeat(24)}`)).toBe(true);
+    expect(await (await c.co.fetch(await req("/_hosted/pdf/offer_letter/doc_0001"))).text()).toBe("0");
+
+    // The usage push goes after 500 requests; one that would go while a transaction is open waits for the next.
+    world.inTx = true;
+    for (let i = 0; i < 500; i++) await c.co.fetch(await req("/v1/workers"));
+    expect(c.lobbyCalls.filter((x) => x.method === "reportUsage")).toEqual([]);
+    world.inTx = false;
+    await c.co.fetch(await req("/v1/workers"));
+    expect(c.lobbyCalls.filter((x) => x.method === "reportUsage")).toHaveLength(1);
   });
 });

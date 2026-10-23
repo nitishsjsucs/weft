@@ -28,6 +28,8 @@ export interface PdfRouteDeps {
   /** Per DO instance: object key to the time its render was enqueued. */
   pending?: Map<string, number>;
   now?: () => number;
+  /** The world's IO_IN_TX guard (design 4.2): R2, the render queue and the Lobby are never called inside a transaction. */
+  guard?: { assertNotInTx(what: string): void } | null;
 }
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
@@ -108,6 +110,8 @@ export async function handleHostedPdf(path: string, deps: PdfRouteDeps): Promise
   // The showcase is immutable per snapshot, so its PDFs are shared under the seed prefix; a slot's live under its generation.
   const key: PdfKey = deps.world.mode === "showcase" ? { scope: "seed", snapshot: deps.world.snapshot, sha256 } : { scope: "world", slot: deps.world.slot, gen: deps.world.gen, sha256 };
   const objectKey = pdfObjectKey(key);
+  const io = (what: string) => deps.guard?.assertNotInTx(what);
+  io("R2.get");
   const cached = await deps.files.get(objectKey);
   if (cached) {
     return new Response(await cached.arrayBuffer(), { status: 200, headers: {
@@ -123,9 +127,13 @@ export async function handleHostedPdf(path: string, deps: PdfRouteDeps): Promise
   const now = deps.now ?? Date.now;
   const budgetSpent = () => refused(503, "PDF_BUDGET", "Today's PDF rendering time is used up; try again after 00:00 UTC", secondsToUtcMidnight(now()));
   // A render reserves its worst case, so a day with less than that left cannot start one.
-  if (deps.browserMsUsed && (await deps.browserMsUsed()) + pdfBrowserReserveMs() > BROWSER_SECONDS_PER_DAY * 1000) return budgetSpent();
+  if (deps.browserMsUsed) {
+    io("LobbyDO.extrasCounterPeek");
+    if ((await deps.browserMsUsed()) + pdfBrowserReserveMs() > BROWSER_SECONDS_PER_DAY * 1000) return budgetSpent();
+  }
   const pending = deps.pending;
   // A render that failed for good: answer with its failure until the marker is PDF_FAILURE_TTL_MS old.
+  io("R2.head");
   const marker = await deps.files.head(pdfFailureKey(objectKey));
   const markedAt = marker?.customMetadata?.at ? Date.parse(marker.customMetadata.at) : NaN;
   if (marker && Number.isFinite(markedAt) && now() - markedAt < PDF_FAILURE_TTL_MS) {
@@ -136,6 +144,7 @@ export async function handleHostedPdf(path: string, deps: PdfRouteDeps): Promise
   const since = pending?.get(objectKey);
   if (since === undefined || now() - since > PDF_REENQUEUE_MS || (Number.isFinite(markedAt) && markedAt >= since)) {
     if (deps.world.mode !== "slot" && deps.world.mode !== "smoke") return hostedError("WORLD_READ_ONLY", "This world cannot render documents");
+    io("Queue.send");
     await deps.render.send({ v: 1, kind: "render.pdf", jobId: deps.newJobId(), slot: deps.world.slot, gen: deps.world.gen, pdf: parsed.kind, subjectId: parsed.subjectId, sha256, html }, { contentType: "json" });
     pending?.set(objectKey, now());
   }

@@ -51,6 +51,18 @@ const renderAll = async (sent: HostedJob[], files: ReturnType<typeof memoryR2>, 
 };
 
 describe("hosted PDF route", () => {
+  it("never reaches R2, the Lobby or the render queue from inside a transaction (IO_IN_TX)", async () => {
+    const asked: string[] = [];
+    const s = setup({ guard: { assertNotInTx(what) { asked.push(what); throw Object.assign(new Error(`IO_IN_TX: ${what}`), { code: "IO_IN_TX" }); } } });
+    await expect(handleHostedPdf(`/api/_hosted/pdf/offer_letter/${letterId}`, s.deps)).rejects.toThrow(/IO_IN_TX: R2\.get/);
+    expect(s.sent).toEqual([]);
+    // Outside a transaction every I/O step asks first: R2, the Lobby's browser counter, R2 again and the render queue.
+    const t = setup({ guard: { assertNotInTx(what) { asked.push(what); } } });
+    asked.length = 0;
+    expect((await handleHostedPdf(`/api/_hosted/pdf/offer_letter/${letterId}`, t.deps)).status).toBe(202);
+    expect(asked).toEqual(["R2.get", "LobbyDO.extrasCounterPeek", "R2.head", "Queue.send"]);
+  });
+
   it("renders an offer letter once: 202 and one job, then the PDF from R2", async () => {
     const s = setup();
     const path = `/api/_hosted/pdf/offer_letter/${letterId}`;
