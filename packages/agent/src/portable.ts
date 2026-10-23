@@ -1,8 +1,9 @@
 // The Worker entry of @weft/agent (package.json `workerd` condition; docs/cloudflare/design.md 6.4): shared.ts plus
 // counterparts, under the same names, of the Node entry's file-backed parts. Secrets come from the environment only
 // (Worker secrets and vars), scripts from the source the host registers (setScriptSource) or passes, and the JSONL
-// ledger does not exist here: a world's ledger is the SpendDO adapter (bindSpendLedger). No module reachable from
-// this file imports node:fs, node:os, node:child_process or node:net (test/portable.test.ts).
+// ledger does not exist here: a world's ledger is apps/api's hostedSpendLedger over apps/cf's SpendDO (design 5.5;
+// bindSpendLedger here is test-only). No module reachable from this file imports node:fs, node:os,
+// node:child_process or node:net (test/portable.test.ts).
 import type { ModelProvider } from "@weft/contracts";
 import { createProviderFor, createProviderWith, type CreateProviderOptions, type ProviderPorts } from "./providers/factory-core";
 import { scriptedProviderFrom, type ScriptedProviderOptions } from "./providers/scripted-core";
@@ -19,7 +20,7 @@ export class SpendLockTimeout extends Error {
   readonly code = "SPEND_LOCK_TIMEOUT";
 }
 
-/** The JSONL ledger: Node only. The durable platform's ledger is bindSpendLedger over SpendDO. */
+/** The JSONL ledger: Node only. The durable platform's ledger is hostedSpendLedger over SpendDO (design 5.5). */
 export function createSpendLedger(_opts: { dir: string }): never {
   throw nodeOnly("createSpendLedger (the JSONL spend ledger)");
 }
