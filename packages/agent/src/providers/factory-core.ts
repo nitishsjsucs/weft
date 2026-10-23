@@ -7,7 +7,7 @@
 // durable platform reads only Worker secrets and its bundled scripts (factory.ts wires Node's file-backed ports).
 import { LocalProviderConfig, type Effort, type ModelProvider, type SpendLedger } from "@weft/contracts";
 import { WORKERS_AI_PROVIDER_ID, type FetchCounter, type HostedProviderId, type WorkersAiBindingLike } from "../../../contracts/src/ext/cf-agent";
-import type { TxGuardLike } from "../run-host";
+import { guardedFetch, type TxGuardLike } from "../run-host";
 import type { ScriptSource } from "../script-source";
 import type { Env } from "../secrets-core";
 import { chatCompletionsProvider, LOCAL_DEFAULT_MODELS, type LocalMode } from "./chat-completions";
@@ -130,7 +130,12 @@ export function createProviderFor(which: string, opts: CreateProviderOptions, po
       const transport = gateway
         ? openAiGatewayTransport({ gateway, byok, world: opts.world, counter: opts.counter, guard: opts.guard, ...(opts.collectLog ? { collectLog: opts.collectLog } : {}), ...(opts.fetch ? { fetch: opts.fetch } : {}) })
         : undefined;
-      return openaiProvider({ apiKey, ...openaiSettingsFromEnv(env), ...(transport ? { gateway: transport } : opts.fetch ? { fetch: opts.fetch } : {}) });
+      // Without a gateway the SDK fetches OpenAI directly: the same IO_IN_TX guard and fetch budget as the gateway and
+      // Workers AI paths. With neither (Node) the SDK keeps its own fetch, exactly as before.
+      const direct = !transport && (opts.guard || opts.counter)
+        ? guardedFetch(opts.fetch ?? ((input, init) => fetch(input, init)), { what: "openai fetch", guard: opts.guard, counter: opts.counter })
+        : opts.fetch;
+      return openaiProvider({ apiKey, ...openaiSettingsFromEnv(env), ...(transport ? { gateway: transport } : direct ? { fetch: direct } : {}) });
     }
     case "claude": {
       const apiKey = ports.secret("ANTHROPIC_API_KEY");

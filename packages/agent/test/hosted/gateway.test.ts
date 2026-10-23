@@ -3,6 +3,7 @@
 // the request differs from a direct one only in URL and headers; a gateway cache HIT settles $0; BYOK sends no
 // Authorization; a call inside a transaction is IO_IN_TX; and a routine run inside one alarm stays within the
 // invocation's fetch budget.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -123,6 +124,24 @@ describe("AI Gateway transport", () => {
     const guard = { assertNotInTx: (what: string) => { throw Object.assign(new Error(`IO_IN_TX: ${what} inside a transaction`), { code: "IO_IN_TX" }); } };
     await expect(viaGateway(n.fetch, { guard }).step(req)).rejects.toMatchObject({ code: "IO_IN_TX" });
     expect(n.seen).toEqual([]);
+  });
+
+  it("without a gateway the direct OpenAI call is guarded too: inside a transaction it throws IO_IN_TX and sends nothing", async () => {
+    const env = { VITEST: "true", WEFT_LLM: "openai", OPENAI_API_KEY: "sk-test-not-real", WEFT_LIVE_OPENAI: "1" };
+    // Scoped to the async context of its transaction, as the facade's guard is (packages/db/src/tx-guard.ts; the brain
+    // may not import it, tests/boundaries.test.ts).
+    const tx = new AsyncLocalStorage<true>();
+    const guard = { assertNotInTx: (what: string) => { if (tx.getStore()) throw Object.assign(new Error(`IO_IN_TX: ${what} inside a transaction`), { code: "IO_IN_TX" }); } };
+    const n = network();
+    const p = createProvider({ env, ledger: null as never, testMode: true, envOnlySecrets: true, fetch: n.fetch, guard });
+    await expect(tx.run(true, () => p.step(req))).rejects.toMatchObject({ code: "IO_IN_TX" });
+    expect(n.seen).toEqual([]);
+    // Outside the transaction the same provider reaches OpenAI directly, and the fetch budget applies as on the gateway.
+    expect(await p.step(req)).toMatchObject({ stop: "tool_calls" });
+    expect(n.seen.map((r) => r.url)).toEqual(["https://api.openai.com/v1/responses"]);
+    const counted = createProvider({ env, ledger: null as never, testMode: true, envOnlySecrets: true, fetch: n.fetch, counter: createFetchCounter({ max: 0 }) });
+    expect((await counted.step(req)).error?.message).toMatch(/FETCH_BUDGET/);
+    expect(n.seen).toHaveLength(1);
   });
 
   it("a fetch past the invocation's budget is refused before it is sent and is not retried", async () => {
