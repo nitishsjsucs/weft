@@ -2,7 +2,7 @@
 // before anything is read, and which keys the Rate Limiting bindings are asked about. The Miniflare suite runs the
 // same Worker in workerd; these cases need control the bindings there do not give (a body that never ends).
 import { describe, expect, it } from "vitest";
-import front from "../../src/front/index";
+import front, { showcaseMemo } from "../../src/front/index";
 import { ADMIN_MAX_BODY_BYTES } from "../../src/shared/http";
 import type { FrontEnv } from "../../src/shared/env";
 import { signAdmin } from "../../src/shared/tokens";
@@ -132,5 +132,30 @@ describe("/mcp", () => {
     expect((await mcpCall(f, key("slot-1", "Z".repeat(24)), "203.0.113.51")).status).toBe(200);
     expect(f.limits.filter((l) => l.binding === "RL_MCP" && l.key.startsWith("mcp-ip:"))).toHaveLength(HOSTED_RATE_LIMITS.RL_MCP.limit + 6);
     expect(f.limits.filter((l) => l.binding === "RL_MCP" && l.key.startsWith("mcp:"))).toHaveLength(HOSTED_RATE_LIMITS.RL_MCP.limit + 1);
+  });
+});
+
+describe("the showcase memo", () => {
+  it("answers cache-busting queries and made-up principals from the memo, asking the showcase the normalized read", async () => {
+    showcaseMemo.clear();
+    const f = fakeFront({ worldHeaders: { "cache-control": "private, no-cache" } });
+    const get = (path: string, principal?: string) => call(f, path, { headers: principal ? { "x-weft-principal": principal } : {} });
+    const first = await get("/api/v1/time-off/requests?status=pending&cb=1", "usr_dana");
+    expect(first.headers.get("x-weft-memo")).toBe("miss");
+    for (const path of ["/api/v1/time-off/requests?cb=2&status=pending", "/api/v1/time-off/requests?status=pending&x=y&status=other"]) {
+      const r = await get(path, "usr_dana");
+      expect(r.headers.get("x-weft-memo"), path).toBe("hit");
+      expect(r.headers.get("cache-control"), path).toBe("private, no-cache");
+    }
+    expect(f.worlds).toHaveLength(1);
+    expect(new URL(f.worlds[0]!.url).search).toBe("?status=pending");
+    // Junk principals are one key, and the showcase never sees the junk header.
+    for (const p of ["usr_evil, usr_dana", "x".repeat(40), "vis_123"]) await get("/api/v1/workers", p);
+    await get("/api/v1/workers");
+    expect(f.worlds.slice(1).map((w) => w.principal)).toEqual([null]);
+    // A persona is its own read.
+    await get("/api/v1/workers", "usr_sam");
+    expect(f.worlds.at(-1)).toMatchObject({ slot: "showcase", principal: "usr_sam" });
+    expect(f.worlds).toHaveLength(3);
   });
 });

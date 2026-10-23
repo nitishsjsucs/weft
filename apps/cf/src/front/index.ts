@@ -111,13 +111,17 @@ async function api(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Res
     return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
   }
   // Reads. The showcase is immutable per snapshot: memoized in the isolate (health is always fresh).
+  // The showcase is asked the normalized read the key names (memo.ts), so nothing else a client adds can vary it.
   if (!t.leased && req.method === "GET" && apiPath !== HEALTH_PATH) {
     const cfg = await envConfig(env);
-    const key = ResponseMemo.key({ path: apiPath, search: url.search, principal: req.headers.get("x-weft-principal"), snapshot: cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? "none" });
-    const hit = showcaseMemo.get(key);
+    const read = ResponseMemo.normalize({ path: apiPath, search: url.search, principal: req.headers.get("x-weft-principal"), snapshot: cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? "none" });
+    const hit = showcaseMemo.get(read.key);
     if (hit) return hit;
-    const res = await forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
-    return showcaseMemo.put(key, res);
+    const headers = new Headers(req.headers);
+    if (read.principal) headers.set("x-weft-principal", read.principal);
+    else headers.delete("x-weft-principal");
+    const res = await forwardToWorld(new Request(req.url, { method: "GET", headers }), env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: read.search });
+    return showcaseMemo.put(read.key, res);
   }
   return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
 }
