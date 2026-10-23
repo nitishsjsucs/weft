@@ -95,6 +95,25 @@ test("rich profile screens", async ({ page, request }) => {
   await page.goto(`/portal?as=${encodeURIComponent(persona!)}`);
   await shot(page, "40-portal-persona");
 
+  // The Agent page: a conversation of two turns (a chart answer, then a follow-up in the same thread) beside the
+  // seeded conversations, the Background work tab, and the same thread at phone width with the list as a drawer.
+  await openApp(page, "/app/agent");
+  await viewAs(page, "dana");
+  for (const q of ["Show payroll cost by month", "Why is the NY raise flagged in the Oct 30 payroll?"]) {
+    await page.getByTestId("agent-page-composer").fill(q);
+    await page.getByTestId("agent-page-send").click();
+    await expect(page.getByTestId("agent-page-turn").last().getByTestId("agent-status")).toHaveAttribute("data-status", "done");
+  }
+  await shot(page, "41-agent-page");
+  const thread = page.url();
+  await page.getByTestId("agent-page-tab-background").click();
+  await expect(page.getByTestId("agent-page-background").first()).toBeVisible();
+  await shot(page, "41b-agent-background");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(thread);
+  await expect(page.getByTestId("agent-page-turn")).toHaveCount(2);
+  await shot(page, "41c-agent-mobile");
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await shot(page, "12-landing-mobile");
