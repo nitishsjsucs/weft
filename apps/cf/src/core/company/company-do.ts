@@ -27,6 +27,7 @@ import { countFetchesIn, installCountedFetch, rawFetch } from "./fetch-scope";
 import { durableRunHost, durableSchedulerHost, fetchCounter, type DurableRunHost, type DurableSchedulerHost } from "./hosts";
 import { zeroUsage, type ResetOutcome, type RestoreBeginInput, type RestoreFinish, type RestoreVerify, type SlotHeartbeat, type UsageDelta, type WorldStamp } from "./rpc";
 import { addLeaseKey, hasKvState, leaseKeys, modeOf, readStamp, writeStamp } from "./world-state";
+import { leaseEnded, leaseExpiresAt } from "../lobby/policy";
 import { COUNTERS, createRunCatalog, gatewayOption, neuronBudgetFromLedger, type D1Like, type HostedJob as ExtrasJob, type QueueLike, type R2BucketLike, type VectorizeLike } from "@weft/cf-extras";
 import { flagsFor } from "../../extras/env";
 import type { HiddenWriteBack, SlotExport, SlotExtrasPort, SlotWorldInfo, WriteBackOutcome } from "../../extras/ports";
@@ -47,6 +48,8 @@ const SNAPSHOT_KEY = "weft.snapshot";
 interface RestoreProgress { slot: string; gen: number; mode: WorldMode; next: number; rowsWritten: number; triggers: RestoreTrigger[] }
 interface RestoreDone { slot: string; gen: number; rowsWritten: number }
 const RESTORE_DONE_KEY = "weft.restore_done";
+
+const leaseEndedError = () => hostedError("LEASE_ENDED", "This demo company's lease has ended", { headers: { [LEASE_HEADER]: "ended" } });
 
 export class CompanyDO extends DurableObject<CoreEnv> {
   private stamp: WorldStamp | null = null;
@@ -186,14 +189,20 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const checked = await readCtx(this.env.WEFT_CTX_SECRET ?? "", request.headers.get(TRUST_HEADERS.ctx));
     if (!checked.ok) return hostedError("SESSION_INVALID", "This request did not come through Weft's front door");
     const c = checked.claims;
-    const stamp = this.stamp;
-    if (!stamp || !this.engine) {
-      const restoring = !!this.ctx.storage.kv.get(RESTORE_KEY);
-      return plainError(503, "NotImplemented", restoring ? "WORLD_REBUILDING" : "WORLD_NOT_READY",
-        restoring ? "This demo company is being rebuilt; try again in a minute" : this.bootError ? "This demo company failed to start" : "This demo company is not provisioned yet");
-    }
-    const refused = this.gate(c, stamp, request.method, url.pathname);
+    let stamp = this.stamp;
+    if (!stamp || !this.engine) return this.notReady();
+    let refused = this.gate(c, stamp, request.method, url.pathname);
     if (refused) return refused;
+    // An MCP key works only while its lease lasts by the lease's own times, not only until the Lobby releases it (a
+    // sweep can be 15 minutes later). The check can ask the Lobby, and a lease end or a reset can run meanwhile, so
+    // the stamp as it is now is gated again, and nothing awaits from there until the request is counted.
+    if (url.pathname === DO_PATHS.mcp && stamp.mode === "slot") {
+      if (!(await this.mcpLeaseOpen(stamp))) return leaseEndedError();
+      stamp = this.stamp;
+      if (!stamp || !this.engine) return this.notReady();
+      refused = this.gate(c, stamp, request.method, url.pathname);
+      if (refused) return refused;
+    }
     // A mutation is counted from here (no await since the gate) until it is answered, so a clean check or a reset
     // sees every row it writes; while one of those runs, new mutations wait outside.
     const counted = isMutation(request.method);
@@ -219,6 +228,42 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       this.runHost.poke();
       this.scheduler.poke();
       this.maybePushUsage();
+    }
+  }
+
+  private notReady(): Response {
+    const restoring = !!this.ctx.storage.kv.get(RESTORE_KEY);
+    return plainError(503, "NotImplemented", restoring ? "WORLD_REBUILDING" : "WORLD_NOT_READY",
+      restoring ? "This demo company is being rebuilt; try again in a minute" : this.bootError ? "This demo company failed to start" : "This demo company is not provisioned yet");
+  }
+
+  private lobby() {
+    return this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby));
+  }
+
+  /**
+   * Whether the stamped lease still lasts for MCP (design 6.3: the key stops when its lease ends). The total expiry
+   * comes from the stamp's start; the idle expiry from this object's own last activity of the lease's visitor. An
+   * instance that has seen none since it started (a restart) asks the Lobby, which holds the lease's last-seen time,
+   * once: its answer becomes this instance's last activity. Fails closed when the Lobby cannot answer.
+   */
+  private async mcpLeaseOpen(stamp: WorldStamp, now = Date.now()): Promise<boolean> {
+    if (!stamp.visitor) return false;
+    const startedAt = stamp.leaseStartedAt;
+    if (startedAt !== null) {
+      if (this.lastActivity !== null) return leaseEnded({ startedAt, lastSeen: this.lastActivity }, now) === null;
+      if (leaseEnded({ startedAt, lastSeen: now }, now) === "total") return false;
+    }
+    try {
+      this.engine?.guard.assertNotInTx("LobbyDO.status");
+      const st = await this.lobby().status({ visitor: stamp.visitor, slot: stamp.slot, gen: stamp.gen, now });
+      if (!st.lease || st.lease.gen !== stamp.gen) return false;
+      const lastSeen = Date.parse(st.lease.idleExpiresAt) - HOSTED_SETTINGS.leaseIdleMinutes * 60_000;
+      if (startedAt !== null && this.lastActivity === null && this.stamp === stamp) this.lastActivity = Math.min(now, lastSeen);
+      return true;
+    } catch (e) {
+      logError("mcp.lease", e, { slot: stamp.slot, gen: stamp.gen });
+      return false;
     }
   }
 
@@ -252,7 +297,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   /** The DO's own gate (the front checks the same things first; design 6.1 and 6.4). */
   private gate(c: WeftCtx, stamp: WorldStamp, method: string, path: string): Response | null {
-    const ended = () => hostedError("LEASE_ENDED", "This demo company's lease has ended", { headers: { [LEASE_HEADER]: "ended" } });
+    const ended = leaseEndedError;
     if (c.slot !== stamp.slot) return ended();
     switch (stamp.mode) {
       case "showcase":
@@ -262,7 +307,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       case "slot":
         if (c.gen !== stamp.gen) return ended();
         // MCP keys carry no visitor: the generation, the key hash and a live lease gate them. endLease clears the
-        // stamp's visitor, so a key stops working the moment its lease ends, even while the world is not yet reset.
+        // stamp's visitor, so a key stops working the moment its lease ends, even while the world is not yet reset;
+        // fetch also checks the lease's own expiry first (mcpLeaseOpen), since the Lobby ends it only at a sweep.
         if (path === DO_PATHS.mcp) return stamp.visitor ? null : ended();
         if (!c.visitor || c.visitor !== stamp.visitor) return ended();
         return null;
@@ -343,9 +389,11 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (request.method !== "POST") return plainError(405, "ValidationError", "METHOD", "POST to mint the lease's MCP key");
     if (stamp.mode !== "slot") return hostedError("LEASE_REQUIRED", "MCP keys belong to a leased demo company");
     const origin = (this.env.WEFT_PUBLIC_ORIGIN ?? "").replace(/\/$/, "");
+    // The key lives as long as its lease: the lease's own total expiry, not the minute it was minted plus a lease.
+    const startedAt = stamp.leaseStartedAt ?? Date.now();
     const minted = await this.engine!.mintMcpKey({
       slot: stamp.slot, gen: stamp.gen, principalId: request.headers.get("x-weft-principal"), publicUrl: `${origin}/mcp`,
-      expiresAt: new Date(Date.now() + HOSTED_SETTINGS.leaseTotalMinutes * 60_000).toISOString(),
+      expiresAt: new Date(leaseExpiresAt({ startedAt, lastSeen: startedAt })).toISOString(),
     });
     this.ctx.storage.transactionSync(() => addLeaseKey(this.ctx.storage.sql, minted.key));
     this.engine!.addSecret(minted.key);
@@ -563,7 +611,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   async endLease(input: { gen: number; reason: string }): Promise<void> {
     if (!this.stamp) return;
     this.closeSockets({ type: "lease", state: "ended", gen: input.gen }, null);
-    const s: WorldStamp = { ...this.stamp, visitor: null, ipHash: null };
+    const s: WorldStamp = { ...this.stamp, visitor: null, ipHash: null, leaseStartedAt: null };
     if (hasKvState(this.ctx.storage.sql)) this.ctx.storage.transactionSync(() => writeStamp(this.ctx.storage.sql, s));
     this.stamp = s;
     this.lastActivity = null;
@@ -730,7 +778,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const a = await mod.artifacts();
     const p = this.ctx.storage.kv.get<RestoreProgress>(RESTORE_KEY);
     if (p) {
-      const s: WorldStamp = { slot: p.slot, gen: p.gen, mode: p.mode, visitor: null, ipHash: null };
+      const s: WorldStamp = { slot: p.slot, gen: p.gen, mode: p.mode, visitor: null, ipHash: null, leaseStartedAt: null };
       this.ctx.storage.transactionSync(() => {
         writeStamp(this.ctx.storage.sql, s);
         this.ctx.storage.kv.put(SNAPSHOT_KEY, a.version);

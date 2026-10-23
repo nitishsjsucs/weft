@@ -67,6 +67,8 @@ export const SMALL_STATE_KEYS = {
   /** The lease's visitor and IP hash: background runs are charged to them. */
   leaseVisitor: "lease.visitor",
   leaseIpHash: "lease.ip_hash",
+  /** The lease's start (epoch ms): the slot checks the lease's own total and idle expiry against it (MCP keys). */
+  leaseStartedAt: "lease.started_at",
   /** JSON array of the plaintext keys minted for the current lease, for the redactor only; gone with the lease. */
   leaseKeys: "lease.keys",
 } as const;
