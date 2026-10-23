@@ -65,9 +65,11 @@ export async function sessionStatus(env: FrontEnv, v: Visit): Promise<Response> 
   const enabled = agentEnabled(cfg);
   const want = wantedProvider({ agentEnabled: enabled, configured: cfg.get(HOSTED_CONFIG_KEYS.modelProvider) ?? null, world: st.lease ? st.worldProvider : null });
   let provider = want;
-  if (want.id !== "scripted" && want.reason !== "paused") {
+  // Only a leased visitor can start a run, so only a leased visitor's session read asks SpendDO for the caps: a
+  // cookie-less GET /api/_session (anyone, any number of times) never reaches the ledger.
+  if (st.lease && v.session && want.id !== "scripted" && want.reason !== "paused") {
     try {
-      const s = await env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({ visitor: st.lease ? v.session?.visitor ?? null : null, ipHash: v.ipHash });
+      const s = await env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({ visitor: v.session.visitor, ipHash: v.ipHash });
       provider = sessionProvider(want, s);
     } catch { /* the status still answers; the run admission decides for itself */ }
   }

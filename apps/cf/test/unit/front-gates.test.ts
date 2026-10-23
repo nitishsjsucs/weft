@@ -16,10 +16,12 @@ export interface FakeFront {
   /** Every Rate Limiting call: the binding and the key. */
   limits: { binding: string; key: string }[];
   takes: { key: string; limit: number }[];
+  /** SpendDO.status calls (what each asked for). */
+  spend: unknown[];
 }
 
 export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldStatus?: number; worldHeaders?: Record<string, string>; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
-  const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [] };
+  const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [], spend: [] };
   const rl = (binding: string, max: number) => {
     const seen = new Map<string, number>();
     return { limit: async ({ key }: { key: string }) => { out.limits.push({ binding, key }); const n = (seen.get(key) ?? 0) + 1; seen.set(key, n); return { success: n <= max }; } };
@@ -54,7 +56,7 @@ export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown;
         sweep: async () => ({ released: 0 }),
       }),
     },
-    SPEND: { idFromName: (n: string) => n, get: () => ({ status: async () => ({}) }) },
+    SPEND: { idFromName: (n: string) => n, get: () => ({ status: async (scope: unknown) => { out.spend.push(scope); return {}; } }) },
   } as unknown as FrontEnv;
   return out;
 }
@@ -261,6 +263,15 @@ describe("GET /api/_session after a hosted reset", () => {
     const gone = (await sessionWith(fakeFront({ status: () => status(null) }), 3)).headers.getSetCookie();
     expect(gone).toHaveLength(2);
     expect(gone.every((c) => c.includes("Max-Age=0"))).toBe(true);
+  });
+
+  it("asks SpendDO for the caps only for a leased visitor, never for a cookie-less read", async () => {
+    const f = fakeFront({ status: (input) => status(input.visitor ? 3 : null) });
+    for (let i = 0; i < 5; i++) expect((await call(f, "/api/_session")).status).toBe(200);
+    expect(f.spend).toEqual([]);
+    expect((await sessionWith(f, 3)).status).toBe(200);
+    expect(f.spend).toHaveLength(1);
+    expect(f.spend[0]).toMatchObject({ visitor });
   });
 
   it("keeps the cookies of a request the world answers 409 LEASE_ENDED only while the Lobby says the same lease moved on", async () => {
