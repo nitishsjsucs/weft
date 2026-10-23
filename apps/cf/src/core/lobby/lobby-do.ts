@@ -5,8 +5,9 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   DO_NAMES, HOSTED_CONFIG_KEYS, HOSTED_SETTINGS, slotName,
-  type DegradationLevel, type HostedErrorCode, type HostedResetResult, type LeaseInfo, type LeaseResult, type SeedIndexProgress, type WorldMode,
+  type DegradationLevel, type HostedErrorCode, type HostedResetResult, type HostedSpendStatus, type LeaseInfo, type LeaseResult, type SeedIndexProgress, type WorldMode,
 } from "../../shared/contracts";
+import { COUNTERS as EXTRAS_COUNTERS } from "../../../../../packages/cf-extras/src/counters";
 import { agentEnabled, CF4_CONFIG_KEYS, configNumber, envConfig } from "../../shared/config";
 import { poolSize, type CoreEnv } from "../../shared/env";
 import { nextUtcMidnight, utcDay } from "../../shared/http";
@@ -61,6 +62,10 @@ export interface LobbyReadout {
   leases: { active: number; pool: number; waitlist: number };
   lastSweepAt: string | null;
   shares: Record<string, { used: number; share: number }>;
+  /** Today's extras counters (Help queries, Browser Run ms), read with the readout so the Platform page asks no peek. */
+  counters: Record<string, number>;
+  /** SpendDO's status({}) as the level last read it (at most 30 s old), so the Platform page makes no SpendDO call. */
+  spend: HostedSpendStatus | null;
 }
 
 type ResetError = { error: HostedErrorCode; message: string };
@@ -103,7 +108,7 @@ export function namesLease(l: Pick<LeaseRow, "slot" | "gen" | "started_at" | "la
 
 export class LobbyDO extends DurableObject<CoreEnv> {
   private readonly sql: SqlStorage;
-  private levelMemo: { at: number; result: LevelResult } | null = null;
+  private levelMemo: { at: number; result: LevelResult; spend: HostedSpendStatus | null } | null = null;
   /** The Platform readout, memoized for READOUT_MEMO_MS: any visitor's GET /api/_hosted/platform reads it. */
   private readoutMemo: { at: number; result: LobbyReadout } | null = null;
   /** Slots this instance has claimed and is resetting now. A slot left `resetting` by an earlier instance (the object
@@ -231,15 +236,16 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     if (this.levelMemo && now - this.levelMemo.at < 30_000) return this.levelMemo.result;
     const cfg = await this.config();
     let spent = false;
+    let spend: HostedSpendStatus | null = null;
     try {
-      const st = await this.env.SPEND.get(this.env.SPEND.idFromName(DO_NAMES.spend)).status({});
-      spent = st.spentMicros.day >= st.caps.dayUsd * 1e6 || st.neurons.used >= st.caps.neuronsDay;
+      spend = await this.env.SPEND.get(this.env.SPEND.idFromName(DO_NAMES.spend)).status({});
+      spent = spend.spentMicros.day >= spend.caps.dayUsd * 1e6 || spend.neurons.used >= spend.caps.neuronsDay;
     } catch (e) {
       logError("lobby.level.spend", e);
     }
     const floor = Math.min(4, Math.max(0, Math.floor(configNumber(cfg, CF4_CONFIG_KEYS.levelFloor, 0)))) as DegradationLevel;
     const result = degradationLevel({ usage: this.usage(), budget: this.budget(cfg), dollarsOrNeuronsSpent: spent, agentPaused: !agentEnabled(cfg), floor });
-    this.levelMemo = { at: now, result };
+    this.levelMemo = { at: now, result, spend };
     return result;
   }
 
@@ -868,7 +874,12 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const b = this.budget(cfg);
     const u = this.usage(utcDay(now));
     const lv = await this.levelNow(now);
+    const names = Object.values(EXTRAS_COUNTERS);
+    const counters: Record<string, number> = Object.fromEntries(names.map((n) => [n, 0]));
+    for (const r of this.all<{ key: string; n: number }>(`SELECT key, n FROM counters WHERE day = ? AND key IN (${names.map(() => "?").join(", ")})`, utcDay(now), ...names)) counters[r.key] = r.n;
     return {
+      counters,
+      spend: this.levelMemo?.spend ?? null,
       day: utcDay(now),
       level: lv.level,
       levelReasons: lv.reasons,

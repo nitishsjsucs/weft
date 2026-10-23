@@ -187,6 +187,11 @@ describe("LobbyDO's Platform readout", () => {
     const later = await lobby.readout({ now: now + 30_000 });
     expect(reads).toBeGreaterThan(once);
     expect(later.restoresLeft).toBe(first.restoresLeft - 1);
+    // It carries the extras' counters and the SpendDO status the level read, so the Platform page asks neither.
+    expect(first.counters).toEqual({ "help.queries": 0, "pdf.browser_ms": 0 });
+    expect(first.spend).toMatchObject({ caps: { dayUsd: 2 } });
+    await lobby.extrasCounterAdd("help.queries", 3, utcDay(now));
+    expect((await lobby.readout({ now: now + 61_000 })).counters["help.queries"]).toBe(3);
     // The admin ops readout is always fresh.
     const n = reads;
     await lobby.ops({ now: now + 31_000 });

@@ -9,7 +9,7 @@ import { COMPARE_MEMO_MS, compareRows, createRunCatalog, MAX_COMPARE_DAYS, MAX_C
 import { COUNTERS, memoryDailyCounters } from "../src/counters";
 import { d1JobLedger, parseJob, pruneOps, queueOfJob } from "../src/jobs";
 import { createAnalyticsEngineSink, createD1MetricsSink, metricsForDay, noopMetricsSink, selectMetricsSink } from "../src/metrics";
-import { buildPlatformReadout } from "../src/platform";
+import { buildPlatformReadout, DEAD_LETTERS_MAX, deadLettersSince } from "../src/platform";
 import { d1Shim } from "./fakes";
 
 const row = (o: Partial<RunCatalogRow> = {}): RunCatalogRow => ({
@@ -211,5 +211,26 @@ describe("Platform readout", () => {
       leases: { active: 1, pool: 2, waitlist: 0 }, deadLetters: 1, lastSweepAt: "2026-10-26T17:45:00.000Z",
       shares: { "do.rows_written": { used: 41_000, share: 60_000 }, "help.queries": { used: 4, share: 30 }, "pdf.browser_seconds": { used: 6.6, share: 300 } },
     });
+  });
+
+  it("asks nothing else when the Lobby's readout carries the spend status and the counters, and counts dead letters to a bound", async () => {
+    const db = d1Shim();
+    const now = new Date("2026-10-26T18:00:00Z");
+    const status: HostedSpendStatus = { day: "2026-10-26", caps: HOSTED_CAP_DEFAULTS, spentMicros: { day: 41_200, visitor: null, ip: null, live: 0 }, neurons: { used: 133, byProduct: { agent: 100, ocr: 22, embeddings: 1, dictation: 10 } }, openReservations: 0 };
+    const asked: string[] = [];
+    const counters = { take: async () => { throw new Error("unused"); }, add: async () => { throw new Error("unused"); }, peek: async (n: string) => { asked.push(`peek:${n}`); return 0; } };
+    const out = await buildPlatformReadout({
+      lobby: async () => ({ day: "2026-10-26", level: 0, restoresLeft: 2, leases: { active: 1, pool: 2, waitlist: 0 }, lastSweepAt: null, shares: {}, counters: { [COUNTERS.help]: 7, [COUNTERS.browserMs]: 1200 }, spend: status }),
+      spend: { status: async () => { asked.push("spend.status"); return status; } }, ops: db, counters, now: () => now,
+    });
+    expect(asked).toEqual([]);
+    expect(out).toMatchObject({ dollars: { spentUsd: 0.0412 }, neurons: { used: 133 }, shares: { "help.queries": { used: 7 }, "pdf.browser_seconds": { used: 1.2 } } });
+    // Thousands of dead letters today: the count stops at its bound, through the failed_at index.
+    const insert = db.sqlite.prepare(`INSERT INTO failed_jobs (job_id, kind, slot, gen, queue, attempts, code, message, failed_at) VALUES (?, 'ocr.receipt', NULL, NULL, 'weft-dlq', 6, 'DEAD_LETTER', '', ?)`);
+    for (let i = 0; i < DEAD_LETTERS_MAX + 500; i++) insert.run(`j${i}`, "2026-10-26T10:00:00.000Z");
+    expect(await deadLettersSince(db, "2026-10-26T00:00:00.000Z")).toBe(DEAD_LETTERS_MAX);
+    const q = db.statements.at(-1)!;
+    const plan = (db.sqlite.prepare(`EXPLAIN QUERY PLAN ${q}`).all("2026-10-26T00:00:00.000Z", DEAD_LETTERS_MAX) as { detail: string }[]).map((p) => p.detail);
+    expect(plan.some((d) => /SEARCH failed_jobs USING COVERING INDEX failed_jobs_at/.test(d))).toBe(true);
   });
 });

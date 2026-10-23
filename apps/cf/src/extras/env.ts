@@ -4,8 +4,8 @@
 // that is absent switches its extra off instead of failing the Worker. Track cf6-extras.
 import {
   buildPlatformReadout, COMPARE_MEMO_MS, createFlagReader, createHelpSearch, createRunCatalog, d1JobLedger, gatewayOption, lobbyCounters, messageOf, neuronBudgetFromLedger,
-  puppeteerLauncher, selectMetricsSink,
-  type AiSearchLike, type AnalyticsEngineLike, type D1Like, type ExtrasFlags, type ImagesLike, type KvLike, type R2BucketLike, type RunCatalog, type VectorizeLike,
+  PLATFORM_MEMO_MS, puppeteerLauncher, selectMetricsSink,
+  type AiSearchLike, type AnalyticsEngineLike, type D1Like, type ExtrasFlags, type ImagesLike, type KvLike, type PlatformReadout, type R2BucketLike, type RunCatalog, type VectorizeLike,
   type WorkersAiBindingLike,
 } from "@weft/cf-extras";
 import { DO_NAMES } from "../../../../packages/contracts/src/ext/cf-hosted";
@@ -56,6 +56,18 @@ export function catalogFor(db: D1Like): RunCatalog {
   return c;
 }
 
+/** The Platform readout per D1 binding (per isolate), reused PLATFORM_MEMO_MS: GET /api/_hosted/platform is anonymous,
+ * and each fresh readout is a Lobby RPC (and a SpendDO one when the Lobby's level memo is cold) plus a D1 count. */
+const platformMemos = new WeakMap<object, { at: number; value: Promise<PlatformReadout> }>();
+export function memoizedPlatform(key: object, read: () => Promise<PlatformReadout>, now = Date.now()): Promise<PlatformReadout> {
+  const m = platformMemos.get(key);
+  if (m && now >= m.at && now - m.at < PLATFORM_MEMO_MS) return m.value;
+  const value = read();
+  platformMemos.set(key, { at: now, value });
+  value.catch(() => { if (platformMemos.get(key)?.value === value) platformMemos.delete(key); });
+  return value;
+}
+
 const lobby = (env: ExtrasEnv) => env.LOBBY.get(env.LOBBY.idFromName(DO_NAMES.lobby));
 const spend = (env: ExtrasEnv) => env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend));
 
@@ -87,7 +99,7 @@ export function hostedDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike, log
     neurons: neuronBudgetFromLedger(spend(env)),
     dictationEnabled: async () => (await flags()).dictation,
     catalog: catalogFor(env.OPS),
-    platform: () => buildPlatformReadout({ lobby: () => lobby(env).extrasReadout(), spend: spend(env), ops: env.OPS, counters }),
+    platform: () => memoizedPlatform(env.OPS as object, () => buildPlatformReadout({ lobby: () => lobby(env).extrasReadout(), spend: spend(env), ops: env.OPS, counters })),
     files: env.FILES,
     metrics: selectMetricsSink(env, { waitUntil: (p) => ctx.waitUntil(p), onError: (e) => log({ evt: "extras.metrics", outcome: "flush_failed", message: messageOf(e) }) }),
     gatewayFor: (meta) => gatewayOption(env as unknown as Record<string, unknown>, meta),

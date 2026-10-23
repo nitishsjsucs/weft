@@ -130,6 +130,21 @@ describe("wiring from weft-core's bindings", () => {
     expect(await createHostedExtras(hostedDepsFromEnv(env({ HELP: undefined }), ctx)).help("tour")).toMatchObject({ ok: false, code: "HELP_DISABLED" });
   });
 
+  it("reuses the Platform readout for 30 s per isolate: any number of anonymous reads make one Lobby RPC and no SpendDO or counter call", async () => {
+    const asked: string[] = [];
+    const lobbyStub = {
+      extrasReadout: async () => { asked.push("readout"); return { ...readout, counters: { "help.queries": 2, "pdf.browser_ms": 0 }, spend: status }; },
+      extrasCounterPeek: async () => { asked.push("peek"); return 0; },
+    };
+    const e = env({ LOBBY: ns(() => lobbyStub) as never, SPEND: ns(() => ({ status: async () => { asked.push("spend.status"); return status; } })) as never });
+    const api = () => createHostedExtras(hostedDepsFromEnv(e, ctx));
+    const first = await api().platform();
+    expect(first).toMatchObject({ dollars: { spentUsd: 0.012 }, shares: { "help.queries": { used: 2 } } });
+    for (let i = 0; i < 50; i++) expect(await api().platform()).toEqual(first);
+    // One readout, and nothing else: the Lobby's readout carried the spend status and the counters.
+    expect(asked).toEqual(["readout"]);
+  });
+
   it("the KV kill flags switch extras off, read once per isolate memo window", async () => {
     const kv = memoryKv({ "extras.help": "off", "extras.dictation": "off" });
     const e = env({ CONFIG: kv });
