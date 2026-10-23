@@ -49,6 +49,9 @@ interface RestoreProgress { slot: string; gen: number; mode: WorldMode; next: nu
 interface RestoreDone { slot: string; gen: number; rowsWritten: number }
 const RESTORE_DONE_KEY = "weft.restore_done";
 
+/** POST /v1/agent/runs/:id/cancel (apps/api/src/routes/agent.ts). */
+const CANCEL_RUN_PATH = /^\/v1\/agent\/runs\/([^/]+)\/cancel$/;
+
 const leaseEndedError = () => hostedError("LEASE_ENDED", "This demo company's lease has ended", { headers: { [LEASE_HEADER]: "ended" } });
 
 export class CompanyDO extends DurableObject<CoreEnv> {
@@ -351,6 +354,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const { value: res, usage } = await engine.meter.measure(() => engine.fetch(inner));
     this.usage.rowsRead += usage.rowsRead;
     this.usage.rowsWritten += usage.rowsWritten;
+    // A run cancelled directly ends here, not in an alarm drain: it goes to the run catalog too (the row is read only
+    // once the run is terminal, so a running run that stops later is recorded by the drain that ends it).
+    const cancelled = request.method === "POST" && res.ok ? CANCEL_RUN_PATH.exec(url.pathname)?.[1] : undefined;
+    if (cancelled) this.recordRuns([decodeURIComponent(cancelled)]);
     if (url.pathname === HEALTH_PATH && res.ok && (res.headers.get("content-type") ?? "").includes("json")) {
       const body = (await res.json()) as Record<string, unknown>;
       return json({ ...body, runtime: "cloudflare", world: { slot: stamp.slot, gen: stamp.gen, mode: stamp.mode } }, { status: res.status });

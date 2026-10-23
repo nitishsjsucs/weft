@@ -63,6 +63,7 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
     outboxPending: () => writeLocked(async () => sql.exec(`SELECT id, kind, body FROM outbox ORDER BY created_at, id`).toArray()
       .map((r) => { try { return { id: String(r.id), kind: String(r.kind), job: JSON.parse(String(r.body)) as HostedJob }; } catch { return { id: String(r.id), kind: String(r.kind), job: null }; } })),
     outboxAck: (id: string) => writeLocked(async () => { sql.exec(`DELETE FROM outbox WHERE id = ?`, id); }),
+    catalogRow: async (runId: string) => (runId === "run_0002" ? null : { runId, slot: input.world.slot, gen: input.world.gen, provider: "scripted", model: "fake", trigger: "chat", steps: 1, grounded: null, costUsdMicros: 0, neurons: 0, latencyMs: 0, status: "cancelled", terminalReason: "CANCELLED", endedAt: new Date().toISOString() }),
     pdf: async (_req: Request, p: { browserMsUsed: () => Promise<number> }) => new Response(String(await p.browserMsUsed())),
     close: async () => undefined,
   } as WorldEngine;
@@ -94,6 +95,8 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   if (stamp) m.transactionSync(() => writeStamp(m.sql, stamp));
   const kv = new Map<string, unknown>();
   const failing = { n: o.failSetAlarms ?? 0 };
+  const waits: Promise<unknown>[] = [];
+  const recorded: unknown[][] = [];
   const alarms: number[] = [];
   let alarm: number | null = null;
   let ready: Promise<unknown> = Promise.resolve();
@@ -112,7 +115,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     },
     blockConcurrencyWhile: (fn: () => Promise<unknown>) => (ready = fn()),
     setWebSocketAutoResponse: () => undefined, acceptWebSocket: () => undefined, getWebSockets: () => [], getTags: () => [],
-    waitUntil: () => undefined, abort: () => undefined,
+    waitUntil: (p: Promise<unknown>) => { waits.push(p); }, abort: () => undefined,
   };
   const noLease = { level: 0, pool: { size: 2, free: 1, waitlist: 0 }, lease: null, waitlistPosition: null, worldProvider: null };
   const lobbyStub = {
@@ -130,9 +133,10 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     JOBS: { send: async (body: unknown) => { sent.push({ queue: "jobs", body }); } },
     RENDER: { send: async (body: unknown) => { sent.push({ queue: "render", body }); } },
     RL_RUN: { limit: async () => ({ success: true }) },
+    OPS: { prepare: () => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); return {}; } }) }) },
   };
   const co = new CompanyDO(ctx as never, env as never);
-  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp };
+  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded };
 }
 
 async function req(path: string, o: { method?: string; visitor?: string | null; slot?: string; gen?: number; body?: string; headers?: Record<string, string> } = {}): Promise<Request> {
@@ -345,5 +349,19 @@ describe("cross-object calls", () => {
     world.inTx = false;
     await c.co.fetch(await req("/v1/workers"));
     expect(c.lobbyCalls.filter((x) => x.method === "reportUsage")).toHaveLength(1);
+  });
+});
+
+describe("the run catalog", () => {
+  it("records a run cancelled directly through the API, not only runs that end in an alarm drain", async () => {
+    const c = company();
+    await c.ready();
+    expect((await c.co.fetch(await req("/v1/agent/runs/run_0001/cancel", { method: "POST", body: "{}" }))).status).toBe(200);
+    // A run still running when the cancel answered has no terminal row yet: nothing is recorded for it here.
+    await c.co.fetch(await req("/v1/agent/runs/run_0002/cancel", { method: "POST", body: "{}" }));
+    await c.co.fetch(await req("/v1/agent/runs/run_0003", { method: "GET" }));
+    await Promise.all(c.waits);
+    expect(c.recorded).toHaveLength(1);
+    expect(JSON.stringify(c.recorded[0])).toContain("run_0001");
   });
 });
