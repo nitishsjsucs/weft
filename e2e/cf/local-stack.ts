@@ -13,7 +13,7 @@
 //   node_modules/.bin/tsx e2e/cf/local-stack.ts [--port 5800] [--dir .scratch/cf7/cf-dev-e2e] [--stub-port 5809] [--real-budget]
 //
 // A fresh state dir is always a provisioning day: the four full restores (84,412 rows written) leave visitors 5,588 of
-// the 90,000-row ceiling, and the Lobby admits a lease only while one more engaged session (1,550 rows) fits, so a whole
+// the 90,000-row ceiling, and the Lobby admits a lease only while one more engaged session (2,065 rows) fits, so a whole
 // run (about 4,100 rows: the scenarios, the tour and their resets) would close leasing before the visitor spec. Like
 // cf4's real-engine suite, the stack therefore lifts KV lobby.provision_rows_ceiling to 150,000 before cf:dev starts
 // (visitors then get the normal day's 60,000-row share). `--real-budget` keeps the provisioning-day ceiling; the
