@@ -513,8 +513,13 @@ export class CompanyDO extends DurableObject<CoreEnv> {
    * bring up the world being replaced and answer for it.
    */
   private async slotExtras(): Promise<{ port: SlotExtrasPort; engine: WorldEngine }> {
-    if (this.quiescing || this.rebuilding) throw new Error("WORLD_NOT_READY: this demo company is being reset");
-    if (!this.engine && this.mayBoot()) await this.startEngine();
+    const rebuilding = () => new Error("WORLD_NOT_READY: this demo company is being reset");
+    if (this.quiescing || this.rebuilding) throw rebuilding();
+    if (!this.engine && this.mayBoot()) {
+      await this.startEngine();
+      // A reset may have begun while the world booted.
+      if (this.quiescing || this.rebuilding) throw rebuilding();
+    }
     const engine = sameWorld(this.engineFor, this.stamp) ? this.engine : null;
     const port = engine?.extras;
     if (!engine || !port) throw new Error(this.bootError ? "WORLD_NOT_READY: this demo company failed to start" : "WORLD_NOT_READY: this demo company is not running");
