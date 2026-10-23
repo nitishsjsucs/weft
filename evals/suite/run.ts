@@ -7,7 +7,7 @@
 // --gate (CI: `pnpm eval:ci`, the scripted provider over both splits and both variants, no network) exits 1 on any unsafe
 // action, taint miss, canary hit or harness error. Task success is reported, never gated: the scripted model cannot branch.
 // Live runs are opt-in (WEFT_LIVE_OPENAI=1 WEFT_LLM=openai, the key only from WEFT_SECRETS_FILE). --provider workers_ai is
-// the hosted switch's offline side by side (docs/models.md, "Hosted"): the same opt-in with WEFT_LLM=workers_ai, the
+// the hosted switch's live side by side (docs/models.md, "Hosted"): the same opt-in with WEFT_LLM=workers_ai, the
 // gateway's Workers AI REST path (WEFT_AIG_ACCOUNT_ID, WEFT_AIG_GATEWAY) and WEFT_WORKERS_AI_TOKEN; eval:ci and the
 // tests never select it. WEFT_TRACE=phoenix or
 // --phoenix records every trial as a Phoenix experiment run on the local Phoenix (WEFT_PHOENIX_URL, default
@@ -132,9 +132,13 @@ export async function digests(tasks: EvalTask[], opts: { write: boolean; baseDir
   return out;
 }
 
-function previousResult(outDir: string, exclude: string): SuiteResultFile | null {
+function providerOfFile(name: string): string {
+  return name.includes(`-${WORKERS_AI_PROVIDER_ID}`) ? WORKERS_AI_PROVIDER_ID : name.includes("-scripted") ? "scripted" : "live";
+}
+
+function previousResult(outDir: string, exclude: string, provider: string): SuiteResultFile | null {
   if (!existsSync(outDir)) return null;
-  const files = readdirSync(outDir).filter((f) => f.endsWith("-suite.json") && join(outDir, f) !== exclude).sort();
+  const files = readdirSync(outDir).filter((f) => f.endsWith("-suite.json") && join(outDir, f) !== exclude && providerOfFile(f) === provider).sort();
   for (const f of files.reverse()) { try { return JSON.parse(readFileSync(join(outDir, f), "utf8")) as SuiteResultFile; } catch { /* skip */ } }
   return null;
 }
@@ -157,6 +161,8 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const live = args.provider !== "scripted";
+  // Scripted worlds take their provider from WEFT_LLM, so a shell with live settings exported must not make eval:ci live.
+  if (!live) process.env.WEFT_LLM = "scripted";
   if (live) {
     const refusal = liveRefusal(args.provider);
     if (refusal) { console.error(refusal); return 2; }
@@ -226,7 +232,7 @@ export async function main(argv: string[]): Promise<number> {
   };
   mkdirSync(args.outDir, { recursive: true });
   const stem = join(args.outDir, `${startedAt.slice(0, 10)}-${harnessSha}${args.provider === "live" ? "" : `-${args.provider}`}${process.env.WEFT_EVAL_TAG ? `-${process.env.WEFT_EVAL_TAG}` : ""}-suite`);
-  const prev = previousResult(args.outDir, `${stem}.json`);
+  const prev = previousResult(args.outDir, `${stem}.json`, args.provider);
   writeFileSync(`${stem}.json`, `${JSON.stringify(result, null, 2)}\n`);
   writeFileSync(`${stem}.md`, renderReport(result, prev));
   const pass = state.trials.filter((t) => t.success).length;

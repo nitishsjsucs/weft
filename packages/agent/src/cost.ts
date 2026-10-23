@@ -59,6 +59,9 @@ export function stepCostUsd(u: Usage, p: Prices = LUNA): number {
 
 /** Run cap factor per provider: Claude Opus 5.5 output costs about 17x Luna, so its runs get 6x the Luna cap. */
 export const RUN_CAP_SCALE: Partial<Record<ProviderId, number>> = { claude: 6 };
+// workers_ai stays at 1: its worst-case reservation per step is about Luna's (the 8,000-token output budget dominates and
+// its output costs 0.625x Luna), so the first step always fits. Raise it through RUN_CAP_SCALE_BY_MODEL only if live
+// runs are refused BUDGET_EXCEEDED on tasks Luna passes (tests/evals-workers-ai.test.ts pins 1).
 /** Run cap factor per model, ahead of the provider's: gpt-5.6-terra is priced 10x Luna on every token class. */
 export const RUN_CAP_SCALE_BY_MODEL: Record<string, number> = { "gpt-5.6-terra": 10 };
 

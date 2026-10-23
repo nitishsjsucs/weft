@@ -53,8 +53,11 @@ async function gp1NoticeRun(weft: WeftApi): Promise<string> {
   return rate!.proposerRunId!;
 }
 
-/** The widest classic scrollbar (17 px on Windows, 15 px in Chromium on Linux); overlay scrollbars take none. */
-const SCROLLBAR_MAX = 17;
+/**
+ * The gutter allowed beside the docked panel. macOS uses overlay scrollbars, which keep none, so the Mac keeps the old
+ * 1 px tolerance; headless Chromium on Linux keeps 15 px for `scrollbar-gutter: stable`. Windows is not a target.
+ */
+const SCROLLBAR_MAX = process.platform === "darwin" ? 1 : 15;
 
 /**
  * The agent panel is docked against the right edge of the page: where the root element's box ends, which is the

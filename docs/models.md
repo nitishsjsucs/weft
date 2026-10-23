@@ -106,19 +106,19 @@ The hosted copy on Cloudflare Workers (`docs/cloudflare/design.md` section 5) ke
 | `WEFT_WORKERS_AI_TOKEN` | workers_ai on Node | A narrow Workers AI token for the gateway's Workers AI REST path, from the environment or `WEFT_SECRETS_FILE`; never printed | Not used: the Worker calls the `AI` binding |
 | `WEFT_HOSTED_PROVIDER`, `WEFT_AGENT_ENABLED`, `WEFT_AIG_COLLECT_LOG` | the durable platform only | The provider a new run starts on (`openai`, `workers_ai` or `scripted`; a world's Simulators setting overrides it), the kill switch, and `false` to turn the gateway's log off for Weft's calls | Folded per world from KV `weft-config` (`model.provider`, `agent.enabled`, `aig.collect_log`); never set by hand |
 
-`workers_ai` runs `@cf/openai/gpt-oss-120b` with the per-stage reasoning effort; it reads neither `WEFT_MODEL` nor `WEFT_EFFORT`. It is live, so the run and day caps apply, and the ledger prices it in USD equivalents of neurons: $0.011 per 1,000 neurons at 31,818 neurons per million input tokens and 68,182 per million output tokens (about $0.35 and $0.75 per million). Its run cap factor is 1, so a run keeps the $0.10 cap. The hosted ledger also counts its neurons against `WEFT_NEURON_DAY_CAP` (5,000 a day, the agent's share 4,000).
+`workers_ai` runs `@cf/openai/gpt-oss-120b` with the per-stage reasoning effort; it reads neither `WEFT_MODEL` nor `WEFT_EFFORT`. It is live, so the run and day caps apply, and the ledger prices it in USD equivalents of neurons: $0.011 per 1,000 neurons at 31,818 neurons per million input tokens and 68,182 per million output tokens (about $0.35 and $0.75 per million). Its run cap factor is 1, so a run keeps its usual cap ($0.10, or $0.05 for a routine draft). The hosted ledger also counts its neurons against `WEFT_NEURON_DAY_CAP` (5,000 a day, the agent's share 4,000).
 
 ### Workers AI side by side on Node
 
-The design keeps evals on Node: `pnpm eval:suite --provider workers_ai` runs the suite against the switch over the gateway's Workers AI REST path, beside an OpenAI live run of the same split. It sits behind the same opt-in as the OpenAI live run, with `WEFT_LLM` naming the provider, and refuses before any world is built, naming only the missing variable, unless all of these are set. `pnpm eval:ci` and the tests never select it, and the factory refuses it under vitest.
+The design keeps evals on Node: `pnpm eval:suite --provider workers_ai` runs the suite against the switch over the gateway's Workers AI REST path, beside an OpenAI live run of the same split. It sits behind the same opt-in as the OpenAI live run, with `WEFT_LLM` naming the provider, and refuses before any world is built, naming the variables it needs, unless all of these are set. `pnpm eval:ci` and the tests never select it (a scripted suite run sets `WEFT_LLM=scripted` itself), and the factory refuses it under vitest.
 
 ```sh
 WEFT_LIVE_OPENAI=1 WEFT_LLM=workers_ai WEFT_AIG_ACCOUNT_ID=<account id> WEFT_AIG_GATEWAY=<gateway name> \
   WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env \
-  pnpm eval:suite --provider workers_ai --split dev --variant default --cap 0.30 --experiment workers-ai-dev
+  pnpm eval:suite --provider workers_ai --split dev --variant default --cap 0.05 --experiment workers-ai-dev
 ```
 
-The token comes from `WEFT_SECRETS_FILE` (or the environment), and `CF_AIG_TOKEN` is sent when it is set. The result file records the model as `@cf/openai/gpt-oss-120b` and is named `<date>-<sha>-workers_ai-suite.json`, so it never overwrites the OpenAI run's file. Each task's worst case and G8's dollar budget use the same factor as the run cap (1), and `WEFT_LIVE_USD_CAP` defaults to the suite cap, as for every live suite run.
+The Workers AI token comes from `WEFT_SECRETS_FILE` (or the environment). `CF_AIG_TOKEN` is read from the environment only, so export it for an authenticated gateway; in the secrets file it is ignored. Keep `--cap` small: the Node path does not count neurons, and $0.05 is about 4,500 neurons of the free plan's 10,000 a day, which the hosted copy shares. The result file records the model as `@cf/openai/gpt-oss-120b` and is named `<date>-<sha>-workers_ai-suite.json`, so it never overwrites the OpenAI run's file. Each task's worst case and G8's dollar budget use the same factor as the run cap (1), and `WEFT_LIVE_USD_CAP` defaults to the suite cap, as for every live suite run.
 
 ## Sandboxes and the Cloudflare free tier
 
