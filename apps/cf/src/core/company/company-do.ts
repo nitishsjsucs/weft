@@ -21,7 +21,7 @@ import { logError, logEvent } from "../../shared/log";
 import { DO_PATHS, HEALTH_PATH, isModelAdmission, LEASE_HEADER, SIM_RESET_PATH } from "../../shared/routes";
 import { configEnv, liveEnv } from "./company-do-env";
 import { spendClient } from "../spend/client";
-import { AlarmPlan } from "./alarms";
+import { AlarmPlan, alarmRetryDelayMs } from "./alarms";
 import { loadEngine, type EngineModule, type RestoreTrigger, type WorldEngine } from "./engine";
 import { countFetchesIn, installCountedFetch, rawFetch } from "./fetch-scope";
 import { durableRunHost, durableSchedulerHost, fetchCounter, type DurableRunHost, type DurableSchedulerHost } from "./hosts";
@@ -62,6 +62,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private usage: UsageDelta = zeroUsage();
   private flushing = false;
   private readonly alarms: AlarmPlan;
+  /** Alarm invocations in a row whose work threw (the retry backs off with it; one that succeeds resets it). */
+  private alarmFailures = 0;
   private readonly counter = fetchCounter(MAX_FETCHES_PER_ALARM);
   private runHost: DurableRunHost;
   private scheduler: DurableSchedulerHost;
@@ -521,9 +523,12 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       this.usage.rowsRead += usage.rowsRead;
       this.usage.rowsWritten += usage.rowsWritten;
       if (due.has("outbox")) await this.flushOutbox();
+      this.alarmFailures = 0;
     } catch (e) {
-      logError("alarm", e, { slot: this.stamp?.slot, gen: this.stamp?.gen, ms: Date.now() - t0 });
-      for (const p of due) await this.alarms.arm(p, Date.now() + 2_000);
+      const retryMs = alarmRetryDelayMs(this.alarmFailures);
+      this.alarmFailures += 1;
+      logError("alarm", e, { slot: this.stamp?.slot, gen: this.stamp?.gen, ms: Date.now() - t0, retryMs, failures: this.alarmFailures });
+      for (const p of due) await this.alarms.arm(p, Date.now() + retryMs);
     } finally {
       this.maybePushUsage();
     }
@@ -618,6 +623,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   }
 
   async heartbeat(opts: { provider?: boolean } = {}): Promise<SlotHeartbeat> {
+    // The Lobby's heartbeats (its sweep, session reads) reach a slot that no request reaches: a slot whose last ask
+    // for an alarm failed while jobs wait, or whose clock started, gets its alarm here too.
+    this.runHost.poke();
+    this.scheduler.poke();
     const usage = this.usage;
     this.usage = zeroUsage();
     const worldProvider = opts.provider ? this.worldProvider() : null;

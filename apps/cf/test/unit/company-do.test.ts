@@ -82,7 +82,7 @@ setEngineLoader(async () => fakeModule);
 
 type LobbyStatusFn = (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown;
 
-function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn } = {}) {
+function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number } = {}) {
   const m = memorySql();
   currentSql = m;
   m.sql.exec(`CREATE TABLE kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
@@ -90,6 +90,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   const stamp: WorldStamp | null = o.stamp === null ? null : { slot: "slot-1", gen: 3, mode: "slot", visitor: VISITOR, ipHash: "i".repeat(32), leaseStartedAt: T0, ...o.stamp };
   if (stamp) m.transactionSync(() => writeStamp(m.sql, stamp));
   const kv = new Map<string, unknown>();
+  const failing = { n: o.failSetAlarms ?? 0 };
   const alarms: number[] = [];
   let alarm: number | null = null;
   let ready: Promise<unknown> = Promise.resolve();
@@ -100,7 +101,11 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     storage: {
       sql: m.sql, transactionSync: <T>(fn: () => T) => m.transactionSync(fn),
       kv: { get: (k: string) => kv.get(k), put: (k: string, v: unknown) => { kv.set(k, v); }, delete: (k: string) => kv.delete(k) },
-      setAlarm: (t: number) => { alarms.push(t); alarm = t; }, getAlarm: () => alarm, deleteAll: async () => undefined,
+      setAlarm: (t: number) => {
+        if (failing.n > 0) { failing.n -= 1; throw new Error("storage busy"); }
+        alarms.push(t); alarm = t;
+      },
+      getAlarm: () => alarm, deleteAll: async () => undefined,
     },
     blockConcurrencyWhile: (fn: () => Promise<unknown>) => (ready = fn()),
     setWebSocketAutoResponse: () => undefined, acceptWebSocket: () => undefined, getWebSockets: () => [], getTags: () => [],
@@ -124,7 +129,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     RL_RUN: { limit: async () => ({ success: true }) },
   };
   const co = new CompanyDO(ctx as never, env as never);
-  return { co, ready: () => ready, m, alarms, lobbyCalls, sent, stamp };
+  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp };
 }
 
 async function req(path: string, o: { method?: string; visitor?: string | null; slot?: string; gen?: number; body?: string; headers?: Record<string, string> } = {}): Promise<Request> {
@@ -204,5 +209,46 @@ describe("the MCP key's lease", () => {
     const r = await c.co.fetch(await req("/_hosted/mcp-key", { method: "POST", body: "{}" }));
     expect(r.status).toBe(201);
     expect(await r.json()).toMatchObject({ expiresAt: new Date(T0 + HOSTED_SETTINGS.leaseTotalMinutes * MIN).toISOString() });
+  });
+});
+
+describe("the alarm", () => {
+  it("backs off when its work keeps throwing (2 s, 4 s, 8 s ... at most 5 minutes), and starts again at 2 s after a success", async () => {
+    const c = company();
+    await c.ready();
+    world.scoped = async () => { throw new Error("the world is broken"); };
+    let now = T0 + MIN;
+    at(now);
+    await c.co.runAlarmNow();
+    const delays: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      delays.push(c.alarms.at(-1)! - now);
+      now = c.alarms.at(-1)!;
+      at(now);
+      await c.co.alarm();
+    }
+    expect(delays).toEqual([2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 300_000]);
+    world.scoped = null;
+    now = c.alarms.at(-1)!;
+    at(now);
+    await c.co.alarm();
+    world.scoped = async () => { throw new Error("broken again"); };
+    await c.co.runAlarmNow();
+    expect(c.alarms.at(-1)! - now).toBe(2_000);
+  });
+
+  it("is asked for again from the Lobby's heartbeat when the last ask failed and jobs wait, with no request coming", async () => {
+    const c = company();
+    await c.ready();
+    c.failing.n = 1;
+    let started = 0;
+    world.input!.runHost.submit({ runId: "run_0001", live: false, start: async () => { started += 1; } });
+    await sleep(5);
+    expect(c.alarms).toEqual([]);
+    await c.co.heartbeat();
+    await sleep(5);
+    expect(c.alarms).toHaveLength(1);
+    await c.co.alarm();
+    expect(started).toBe(1);
   });
 });
