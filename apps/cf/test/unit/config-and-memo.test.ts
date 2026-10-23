@@ -2,7 +2,7 @@
 // the world env the Weft stack reads, and the showcase memo's bounds.
 import { describe, expect, it } from "vitest";
 import { HOSTED_CAP_DEFAULTS, HOSTED_CONFIG_KEYS } from "../../src/shared/contracts";
-import { agentEnabled, capsFrom, CONFIG_KEYS, readConfig } from "../../src/shared/config";
+import { agentEnabled, capsFrom, CONFIG_KEYS, envConfig, readConfig } from "../../src/shared/config";
 import { configEnv, liveEnv } from "../../src/core/company/company-do-env";
 import { MEMO_MAX_ENTRY_BYTES, ResponseMemo } from "../../src/front/memo";
 
@@ -71,6 +71,13 @@ describe("a failing KV", () => {
     const back = await readConfig(kv, 1_002);
     expect(agentEnabled(back)).toBe(true);
     expect(back.get(HOSTED_CONFIG_KEYS.capDayUsd)).toBe("1.5");
+  });
+
+  it("pauses the agent when the Worker has no KV binding at all", async () => {
+    const none = await readConfig(undefined, 1_000);
+    expect(agentEnabled(none)).toBe(false);
+    expect(none.get(HOSTED_CONFIG_KEYS.capDayUsd) ?? null).toBeNull();
+    expect(agentEnabled(await envConfig({}, 1_000))).toBe(false);
   });
 
   it("keeps the last values it read when KV fails later", async () => {
