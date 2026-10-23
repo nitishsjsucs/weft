@@ -1,6 +1,7 @@
 // Semantic recall candidates (design 5.4): seed notes in the shared `seed-<snapshot>` namespace, slot notes in the
 // slot's namespace with their generation; a query keeps only the current generation, honours trustedOnly, returns
 // paths and commits (never text), and indexing is idempotent with deterministic vector ids.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, expect, it } from "vitest";
 import { EMBEDDING_MODEL, seedNamespace } from "../../contracts/src/ext/cf-extras";
 import { embeddingNeurons, embeddingTokenBound, memoryNeuronBudget } from "../src/neurons";
@@ -54,6 +55,24 @@ describe("RecallSource", () => {
     const calls = ai.calls.length;
     expect(await src.candidates({ text: "   ", slot: "slot-1", gen: 3, snapshot: "snap1", k: 5, trustedOnly: false })).toEqual([]);
     expect(ai.calls.length).toBe(calls);
+  });
+
+  it("a recall or an index inside a database transaction throws IO_IN_TX before any reservation, model call or vector read", async () => {
+    const { ai, vectors } = await world();
+    // Scoped to the async context of its transaction, as the facade's guard is (packages/db/src/tx-guard.ts).
+    const tx = new AsyncLocalStorage<true>();
+    const guard = { assertNotInTx: (what: string) => { if (tx.getStore()) throw Object.assign(new Error(`IO_IN_TX: ${what} inside a database transaction`), { code: "IO_IN_TX" }); } };
+    const reserved: unknown[] = [];
+    const neurons = { reserve: async (r: unknown) => { reserved.push(r); return { ok: true as const, reservationId: "rsv_1" }; }, settle: async () => undefined };
+    const src = createRecallSource({ ai, vectors, guard, neurons: neurons as never, minScore: 0.1 });
+    const q = { text: "when do we pay salaries", slot: "slot-1", gen: 3, snapshot: "snap1", k: 5, trustedOnly: false };
+    const [calls, queries] = [ai.calls.length, vectors.queries.length];
+    await expect(tx.run(true, () => src.candidates(q))).rejects.toMatchObject({ code: "IO_IN_TX" });
+    await expect(tx.run(true, () => indexNotes({ ai, vectors, guard }, { namespace: "slot-1", gen: 3, notes: [{ path: "knowledge/facts/x.md", commit: C3, tainted: false, kind: "knowledge", text: doc("X", "Some text.") }] }))).rejects.toMatchObject({ code: "IO_IN_TX" });
+    expect([ai.calls.length, vectors.queries.length, reserved.length]).toEqual([calls, queries, 0]);
+    // Outside the transaction the same source works.
+    expect((await src.candidates(q)).length).toBeGreaterThan(0);
+    expect(reserved).toHaveLength(1);
   });
 
   it("indexing is idempotent: the same notes upsert the same vector ids", async () => {
