@@ -21,6 +21,7 @@
     "screenshots": "playwright test -c playwright.screens.config.ts",
     "screenshots:rich": "playwright test -c playwright.screens-rich.config.ts",
     "e2e:tour": "playwright test -c playwright.tour.config.ts",
+    "e2e:cf": "tsx e2e/cf/run.ts",
     "lint:prose": "tsx scripts/check-prose.ts",
     "lint:brand": "tsx scripts/check-brand.ts",
     "brand:overlap": "tsx scripts/brand-overlap.ts",
