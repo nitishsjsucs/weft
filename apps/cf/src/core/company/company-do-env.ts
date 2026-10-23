@@ -1,6 +1,7 @@
 // The env a hosted world reads (design 3.3, 5.2 and 6.3): Worker vars and secrets with the KV weft-config values
 // folded in under the names the Weft stack reads, as a live read-only view, so a KV change reaches the world within
 // the 60 s config memo without a reboot. Pure, so the unit suite pins it.
+import { optIn } from "@weft/cf-extras";
 import { HOSTED_CONFIG_KEYS, type WorldMode } from "../../shared/contracts";
 
 /** KV weft-config values folded into the world's env under the names the Weft stack reads (at most 60 s old). */
@@ -10,7 +11,8 @@ export function configEnv(values: Map<string, string | null>, mode: WorldMode): 
   set("WEFT_AGENT_ENABLED", values.get(HOSTED_CONFIG_KEYS.agentEnabled));
   set("WEFT_HOSTED_PROVIDER", values.get(HOSTED_CONFIG_KEYS.modelProvider));
   const recall = values.get(HOSTED_CONFIG_KEYS.recallSemantic);
-  if (recall) out.WEFT_SEMANTIC_RECALL = recall.trim().toLowerCase() === "on" ? "1" : "0";
+  // The same accepted values as the extras' own flag reader (on, true, 1, yes), so the world and the extras agree.
+  if (recall) out.WEFT_SEMANTIC_RECALL = optIn(recall) ? "1" : "0";
   set("WEFT_AIG_COLLECT_LOG", values.get(HOSTED_CONFIG_KEYS.aigCollectLog));
   set("WEFT_RUN_USD_CAP", values.get(HOSTED_CONFIG_KEYS.capRunUsd));
   set("WEFT_DAY_USD_CAP", values.get(HOSTED_CONFIG_KEYS.capDayUsd));

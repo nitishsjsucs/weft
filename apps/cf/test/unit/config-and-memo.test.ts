@@ -5,6 +5,7 @@ import { HOSTED_CAP_DEFAULTS, HOSTED_CONFIG_KEYS } from "../../src/shared/contra
 import { agentEnabled, capsFrom, CONFIG_KEYS, envConfig, readConfig } from "../../src/shared/config";
 import { configEnv, liveEnv } from "../../src/core/company/company-do-env";
 import { MEMO_MAX_ENTRY_BYTES, MEMO_QUERY_PARAMS, ResponseMemo } from "../../src/front/memo";
+import { flagsFrom } from "@weft/cf-extras";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO } from "../support/config-files";
@@ -99,6 +100,18 @@ describe("world env", () => {
     const values = m({ [HOSTED_CONFIG_KEYS.agentEnabled]: "false", [HOSTED_CONFIG_KEYS.modelProvider]: "workers_ai", [HOSTED_CONFIG_KEYS.recallSemantic]: "on", [HOSTED_CONFIG_KEYS.capDayUsd]: "3" });
     expect(configEnv(values, "slot")).toEqual({ WEFT_AGENT_ENABLED: "false", WEFT_HOSTED_PROVIDER: "workers_ai", WEFT_SEMANTIC_RECALL: "1", WEFT_DAY_USD_CAP: "3" });
     expect(configEnv(new Map(), "smoke")).toEqual({ WEFT_LLM: "scripted", WEFT_HOSTED_PROVIDER: "scripted" });
+  });
+
+  it("turns semantic recall on for every value the extras' flag reader accepts, and off for anything else", () => {
+    const recall = (v: string) => configEnv(m({ [HOSTED_CONFIG_KEYS.recallSemantic]: v }), "slot").WEFT_SEMANTIC_RECALL;
+    for (const v of ["on", "true", "1", "yes", " YES ", "On"]) {
+      expect(recall(v), v).toBe("1");
+      expect(flagsFrom({ recallSemantic: v }).recallSemantic, v).toBe(true);
+    }
+    for (const v of ["off", "false", "0", "no", "maybe"]) {
+      expect(recall(v), v).toBe("0");
+      expect(flagsFrom({ recallSemantic: v }).recallSemantic, v).toBe(false);
+    }
   });
 
   it("is a live, read-only view: later KV values show through, writes do not", () => {
