@@ -726,6 +726,9 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
       ["cobra_notice", "done", "COBRA notice prepared and sent ahead of the last day"], ["benefits_terminate", "pending", "Coverage ends Nov 30"],
     ];
     for (const [kind, status, detail] of plan) await tx.insert(offboardingSteps).values({ id: await newId(tx, "ofs_"), caseId: open, kind, status, detail, doneAt: status === "done" ? pt("2026-10-20", 11) : null });
+    // What offboarding.start does to the person: they are offboarding from the day the case opens, with the last day as
+    // their end date, so every screen and the agent's people reads agree with the open case.
+    await tx.update(workers).set({ status: "offboarding", endDate: "2026-11-13", updatedAt: pt("2026-10-16", 15) }).where(eq(workers.id, jonah.id));
     L.action({ ts: pt("2026-10-16", 15), actorKind: "human", actorId: "usr_sam", command: "offboarding.start", args: { worker_id: jonah.id, last_day: "2026-11-13" }, summary: `Started offboarding for ${name(jonah)} (${jonah.id}), last day 2026-11-13`, reversible: "no" });
   }
   // Owen Mercer (demo): the base world gives him a last day of Oct 23 (the carrier reconciliation reads it) and pays him

@@ -47,8 +47,10 @@ async function planted(db: Db): Promise<string> {
     filings: await q(`SELECT * FROM filings WHERE id <= 'fil_0013' ORDER BY id`),
     items: await q(`SELECT * FROM compliance_items WHERE id <= 'cal_0052' ORDER BY id`),
     action1: await q(`SELECT * FROM actions WHERE seq = 1`),
-    // Owen Mercer's row is the one planted worker the rich layer moves: it offboards him (status and updated_at).
-    workers: (await q(`SELECT * FROM workers WHERE id <= 'wrk_0051' ORDER BY id`)).map((w) => (w.first_name === "Owen" && w.last_name === "Mercer" ? { ...w, status: null, updated_at: null } : w)),
+    // The two planted workers the rich layer offboards, as offboarding.start does: Owen Mercer (status and updated_at)
+    // and Jonah Pell, whose open resignation also sets his end date to his last day.
+    workers: (await q(`SELECT * FROM workers WHERE id <= 'wrk_0051' ORDER BY id`)).map((w) => (w.first_name === "Owen" && w.last_name === "Mercer" ? { ...w, status: null, updated_at: null }
+      : w.id === "wrk_0016" ? { ...w, status: null, end_date: null, updated_at: null } : w)),
     recon: await q(`SELECT * FROM benefit_recon_findings WHERE month = '2026-10'`),
   });
 }
@@ -234,6 +236,13 @@ describe("seed profiles", () => {
       const owen = await db.all<{ st: string; c: string; open: number }>(sql`SELECT w.status AS st, c.status AS c, (SELECT COUNT(*) FROM offboarding_steps s WHERE s.case_id = c.id AND s.status != 'done') AS open
         FROM workers w JOIN offboarding_cases c ON c.worker_id = w.id WHERE w.first_name = 'Owen' AND w.last_name = 'Mercer'`);
       expect(owen).toEqual([{ st: "offboarding", c: "open", open: 1 }]);
+      // Jonah Pell's open resignation reads the same way everywhere: he is offboarding, with his last day as his end date.
+      const jonah = await db.all<{ st: string; end: string | null; c: string }>(sql`SELECT w.status AS st, w.end_date AS end, c.status AS c FROM workers w JOIN offboarding_cases c ON c.worker_id = w.id WHERE w.id = 'wrk_0016'`);
+      expect(jonah).toEqual([{ st: "offboarding", end: "2026-11-13", c: "open" }]);
+      // Every open offboarding case belongs to a worker whose status says so, so the agent's people reads agree with the
+      // Offboarding page.
+      const mismatched = await db.all<{ id: string }>(sql`SELECT c.id FROM offboarding_cases c JOIN workers w ON w.id = c.worker_id WHERE c.status = 'open' AND w.status != 'offboarding'`);
+      expect(mismatched).toEqual([]);
       // Base channel posts carry the day they talk about, and no two people share a surname and a near first name.
       const welcome = await db.all<{ ts: string }>(sql`SELECT ts FROM sim_chat_messages WHERE text = 'Welcome Ana and Ben to Larkspur (demo)!'`);
       expect(welcome[0]!.ts.slice(0, 10)).toBe("2026-10-01");
