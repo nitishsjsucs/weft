@@ -15,6 +15,11 @@ export const CF4_CONFIG_KEYS = {
   provisionRowsCeiling: "lobby.provision_rows_ceiling",
   /** Rows written one full restore costs (default 20,556, verified locally on the rich world). */
   fullRestoreRows: "lobby.full_restore_rows",
+  /** A leased generation's rows budget (core/company/budget.ts WORLD_BUDGET): written, then read. */
+  leaseRowsWritten: "budget.lease_rows_written",
+  leaseRowsRead: "budget.lease_rows_read",
+  /** The showcase's rows read per UTC day. */
+  showcaseRowsRead: "budget.showcase_rows_read",
 } as const;
 
 export const CONFIG_KEYS: readonly string[] = [...Object.values(HOSTED_CONFIG_KEYS), ...Object.values(CF4_CONFIG_KEYS)];

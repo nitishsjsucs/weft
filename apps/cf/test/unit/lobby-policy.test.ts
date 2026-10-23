@@ -17,7 +17,7 @@ describe("the engaged session's rows", () => {
     expect(Number.isInteger(DELTA_RESET_SQL_MEMORY_BASELINE_ROWS)).toBe(true);
     expect(HOSTED_DELTA_RESET_BASELINE_ROWS).toBe(DELTA_RESET_SQL_MEMORY_BASELINE_ROWS);
     expect(SESSION_ROWS_ESTIMATE).toBe(SESSION_ACTIVITY_ROWS + HOSTED_DELTA_RESET_BASELINE_ROWS + SESSION_OVERHEAD_ROWS);
-    expect(SESSION_ROWS_ESTIMATE).toBe(1_711);
+    expect(SESSION_ROWS_ESTIMATE).toBe(894 + 717 + SESSION_OVERHEAD_ROWS);
     // The Mac's measured reset (634 rows) sits inside the 25% band too.
     expect(634).toBeLessThanOrEqual(Math.floor(HOSTED_DELTA_RESET_BASELINE_ROWS * 1.25));
   });

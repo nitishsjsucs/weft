@@ -14,6 +14,9 @@ import { createStore } from "./store";
 
 export type BlockedResult = Exclude<LeaseResult, { status: "leased" }>;
 export type EndedReason = "expired" | "server" | "reset_elsewhere";
+/** A world answered past its rows budget (design 6.3): the visitor's own demo company (DEMO_LIMIT, until a reset gives
+ * it a new generation), or the shared showcase (SHOWCASE_LIMIT, until 00:00 UTC). */
+export type LimitKind = "demo" | "showcase";
 
 export interface HostedState {
   status: SessionStatus | null;
@@ -33,9 +36,11 @@ export interface HostedState {
   startReason: "button" | "mutation" | null;
   /** A pending human-grant request (a mutation answered 428); the Turnstile host renders the widget for it. */
   grantAsk: number | null;
+  /** The world this tab reads answered past its rows budget, and the lease generation it was (null on the showcase). */
+  limited: { kind: LimitKind; gen: number | null } | null;
 }
 
-const INITIAL: HostedState = { status: null, loaded: false, error: null, errorStatus: null, errorCode: null, ended: null, blocked: null, startAsk: 0, startReason: null, grantAsk: null };
+const INITIAL: HostedState = { status: null, loaded: false, error: null, errorStatus: null, errorCode: null, ended: null, blocked: null, startAsk: 0, startReason: null, grantAsk: null, limited: null };
 export const hostedStore = createStore<HostedState>(INITIAL);
 
 // ---- requests ------------------------------------------------------------------------------------------------
@@ -76,6 +81,9 @@ function onLease(m: Extract<LiveMessage, { type: "lease" }>): void {
 
 /** Points the scheduler and the feed at the world the status names. */
 function applyStatus(s: SessionStatus): void {
+  // A reset gave the visitor's world a new generation (its budget starts again), or the tab now reads another world.
+  const lim = hostedStore.get().limited;
+  if (lim && (lim.kind === "demo" ? s.lease?.gen !== lim.gen : s.world !== "showcase")) hostedStore.set({ limited: null });
   const sch = scheduler();
   sch.setEnv({ level: s.level });
   if (s.world === "slot" && s.lease) {
@@ -177,6 +185,14 @@ export function fmtLeft(ms: number): string {
   if (min < 60) return `${min} min left`;
   const h = Math.floor(min / 60), m = min % 60;
   return m ? `${h} h ${m} min left` : `${h} h left`;
+}
+
+/** A request was refused past its world's rows budget (DEMO_LIMIT or SHOWCASE_LIMIT): the banner says so. */
+export function markLimited(kind: LimitKind): void {
+  const gen = kind === "demo" ? hostedStore.get().status?.lease?.gen ?? null : null;
+  const cur = hostedStore.get().limited;
+  if (cur?.kind === kind && cur.gen === gen) return;
+  hostedStore.set({ limited: { kind, gen } });
 }
 
 export function markEnded(reason: EndedReason): void {

@@ -45,6 +45,14 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>));
 }
 
+/** Whether two secrets are equal, in time that depends only on their length (which a key's format already shows). */
+export function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
 export function randomHex(bytes: number): string {
   const b = new Uint8Array(bytes);
   crypto.getRandomValues(b);

@@ -79,3 +79,75 @@ export function readMeter(s: MemorySql) {
   }) as typeof s.sql.exec;
   return meter;
 }
+
+/**
+ * Rows written, counted as SQLite's changes() after each INSERT, UPDATE or DELETE (an upsert with RETURNING too, which
+ * memorySql's own cursor reports as a read). workerd also bills index entries, so this is a lower bound; enough to
+ * show a path writes nothing, or writes a row only when it should. `tables` collects the tables written.
+ */
+export function writeMeter(s: MemorySql) {
+  const meter = { rows: 0, statements: 0, tables: new Set<string>() };
+  const exec = s.sql.exec.bind(s.sql);
+  s.sql.exec = ((query: string, ...b: unknown[]) => {
+    const cur = exec(query, ...b);
+    const m = /^\s*(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from)\s+(\w+)/i.exec(query);
+    if (m) {
+      const n = Number((s.db.prepare("SELECT changes() AS n").get() as { n: number }).n);
+      meter.statements += 1;
+      meter.rows += n;
+      if (n) meter.tables.add(m[1]!);
+    }
+    return cur;
+  }) as typeof s.sql.exec;
+  return meter;
+}
+
+/**
+ * Rows written as workerd bills them (design 4.2), approximated on node:sqlite: an inserted row is 1 plus one per index
+ * of its table (partial indexes included, so an upper bound), an updated row 1 plus one per index over a column the
+ * statement sets, a deleted row 1. An upsert's rows count as inserts as far as the table grew and as updates beyond.
+ * A WITHOUT ROWID table's primary key is the table itself, not an index.
+ */
+export function billedWriteMeter(s: MemorySql) {
+  const meter = { rows: 0, byTable: new Map<string, number>() };
+  const indexes = new Map<string, string[][]>();
+  const indexCols = (table: string): string[][] => {
+    let ix = indexes.get(table);
+    if (!ix) {
+      const withoutRowid = /without\s+rowid/i.test(String((s.db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table) as { sql?: string } | undefined)?.sql ?? ""));
+      ix = (s.db.prepare(`PRAGMA index_list(${table})`).all() as { name: string; origin: string }[])
+        .filter((i) => !(withoutRowid && i.origin === "pk"))
+        .map((i) => (s.db.prepare(`PRAGMA index_info(${i.name})`).all() as { name: string }[]).map((c) => c.name));
+      indexes.set(table, ix);
+    }
+    return ix;
+  };
+  const setCols = (q: string): string[] => {
+    const m = /\bset\s+([\s\S]*?)(?:\bwhere\b|\breturning\b|$)/i.exec(q);
+    return m ? [...m[1]!.matchAll(/(\w+)\s*=/g)].map((x) => x[1]!) : [];
+  };
+  const count = (table: string) => Number((s.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n);
+  const exec = s.sql.exec.bind(s.sql);
+  s.sql.exec = ((query: string, ...b: unknown[]) => {
+    const m = /^\s*(insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from)\s+(\w+)/i.exec(query);
+    if (!m) return exec(query, ...b);
+    const table = m[2]!;
+    const kind = m[1]!.toLowerCase();
+    const before = kind.startsWith("insert") ? count(table) : 0;
+    const cur = exec(query, ...b);
+    const n = Number((s.db.prepare("SELECT changes() AS n").get() as { n: number }).n);
+    const ix = indexCols(table);
+    const touched = (cols: string[]) => ix.filter((c) => c.some((x) => cols.includes(x))).length;
+    let rows = 0;
+    if (kind.startsWith("delete")) rows = n;
+    else if (kind === "update") rows = n * (1 + touched(setCols(query)));
+    else {
+      const inserted = Math.max(0, Math.min(n, count(table) - before));
+      rows = inserted * (1 + ix.length) + (n - inserted) * (1 + touched(setCols(query)));
+    }
+    meter.rows += rows;
+    meter.byTable.set(table, (meter.byTable.get(table) ?? 0) + rows);
+    return cur;
+  }) as typeof s.sql.exec;
+  return meter;
+}

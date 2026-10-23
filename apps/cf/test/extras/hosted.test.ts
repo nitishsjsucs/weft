@@ -3,7 +3,7 @@
 // downloads that stay inside their world and generation. The bindings are fakes shaped like the real ones: the
 // Lobby counters run over DO SQLite semantics, SpendDO's ledger over the neuron budget.
 import { describe, expect, it } from "vitest";
-import { createHelpSearch, createRunCatalog, DICTATION_MODEL, memoryDailyCounters, memoryNeuronBudget, type LobbyReadout } from "@weft/cf-extras";
+import { createHelpSearch, createRunCatalog, DICTATION_MODEL, memoryDailyCounters, memoryNeuronBudget, refreshComparison, type LobbyReadout } from "@weft/cf-extras";
 import type { HostedSpendStatus } from "../../../../packages/contracts/src/ext/cf-agent";
 import { HOSTED_SETTINGS } from "../../../../packages/contracts/src/ext/cf-hosted";
 import { createHostedExtras } from "../../src/extras/hosted";
@@ -72,6 +72,9 @@ describe("HostedExtras", () => {
     const { api, db, metrics } = deps();
     await api.recordRun({ runId: "run_0001", slot: "slot-1", gen: 3, provider: "openai", model: "gpt-5.6-luna", trigger: "chat", steps: 3, grounded: true, costUsdMicros: 3100, neurons: 0, latencyMs: 4100, status: "done", terminalReason: "DONE", endedAt: new Date().toISOString() });
     expect(db.rows("run_catalog")).toHaveLength(1);
+    // The comparison is the cron's (refreshComparison): until it runs there is none, then it is the stored row.
+    expect(await api.models({ days: 7 })).toEqual([]);
+    await refreshComparison(db as never);
     expect(await api.models({ days: 7 })).toMatchObject([{ provider: "openai", runs: 1, groundedRate: 1 }]);
     expect(metrics.points[0]).toMatchObject({ name: "run.ended", slot: "slot-1" });
     expect(await deps({ catalog: null }).api.models()).toEqual([]);
@@ -125,6 +128,21 @@ describe("wiring from weft-core's bindings", () => {
     expect(e.calls).toContain("lobby:lobby");
     expect(e.calls).toContain("spend:spend");
     expect(await createHostedExtras(hostedDepsFromEnv(env({ HELP: undefined }), ctx)).help("tour")).toMatchObject({ ok: false, code: "HELP_DISABLED" });
+  });
+
+  it("reuses the Platform readout for 30 s per isolate: any number of anonymous reads make one Lobby RPC and no SpendDO or counter call", async () => {
+    const asked: string[] = [];
+    const lobbyStub = {
+      extrasReadout: async () => { asked.push("readout"); return { ...readout, counters: { "help.queries": 2, "pdf.browser_ms": 0 }, spend: status }; },
+      extrasCounterPeek: async () => { asked.push("peek"); return 0; },
+    };
+    const e = env({ LOBBY: ns(() => lobbyStub) as never, SPEND: ns(() => ({ status: async () => { asked.push("spend.status"); return status; } })) as never });
+    const api = () => createHostedExtras(hostedDepsFromEnv(e, ctx));
+    const first = await api().platform();
+    expect(first).toMatchObject({ dollars: { spentUsd: 0.012 }, shares: { "help.queries": { used: 2 } } });
+    for (let i = 0; i < 50; i++) expect(await api().platform()).toEqual(first);
+    // One readout, and nothing else: the Lobby's readout carried the spend status and the counters.
+    expect(asked).toEqual(["readout"]);
   });
 
   it("the KV kill flags switch extras off, read once per isolate memo window", async () => {

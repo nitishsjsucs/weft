@@ -7,7 +7,7 @@
 import { writeFileSync } from "node:fs";
 import { TOUR_STEPS } from "../../apps/web/src/components/tour/steps";
 import { expect, LIVE, pinProvider, test } from "./fixtures";
-import { mutationHeadroom } from "./world";
+import { budgetLine, mutationHeadroom, recentRuns, runsSince, type BudgetReadout } from "./world";
 import { allPages } from "./scenarios";
 
 const SEED_NOW = "2026-10-26T15:30:00.000Z";
@@ -34,6 +34,7 @@ test("the guided tour autoplays on a leased hosted world within 180 s, every ste
   // The tour's own mutations (deliver, approve, the chart question, the portal) need RL_MUTATE headroom.
   await mutationHeadroom(15);
   const executedBefore = new Set((await allPages<{ id: string }>(w, "/api/v1/proposals?status=executed")).map((p) => p.id));
+  const runsBefore = await recentRuns(w);
   const errorsBefore = consoleErrors.length;
 
   await page.goto("/app/?tour=1&autoplay=1");
@@ -64,8 +65,11 @@ test("the guided tour autoplays on a leased hosted world within 180 s, every ste
   } finally { clearInterval(poll); }
   const total = Date.now() - t0;
 
-  const out = { total, steps: seen.length, seen, at, match, notes, live: LIVE, slot: operator.lease.slot };
+  // The rows this generation (the reset above, then the tour) read and wrote, against its budget (design 6.3).
+  const budget = (await w.get<{ budget?: BudgetReadout }>("/api/v1/health")).budget ?? null;
+  const out = { total, steps: seen.length, seen, at, match, notes, live: LIVE, slot: operator.lease.slot, budget };
   console.log(`hosted tour ${(total / 1000).toFixed(1)} s over ${seen.length} steps on ${operator.lease.slot}${LIVE ? " (live)" : " (scripted)"}; step starts (ms) ${JSON.stringify(at)}`);
+  console.log(`hosted tour rows budget: ${budgetLine(budget)}; ${(await runsSince(w, runsBefore)).line}`);
   await info.attach("cf-tour.json", { body: JSON.stringify(out, null, 2), contentType: "application/json" });
   if (process.env.WEFT_CF_TOUR_OUT) writeFileSync(process.env.WEFT_CF_TOUR_OUT, JSON.stringify(out, null, 2));
 

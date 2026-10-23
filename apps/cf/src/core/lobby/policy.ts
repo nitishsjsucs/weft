@@ -23,10 +23,23 @@ export const PROVISION_ROWS_CEILING = 90_000;
 export const FULL_RESTORE_ROWS = 20_556;
 /** Rows written by an engaged session's own activity with dirty tracking (verified locally, design 2). */
 export const SESSION_ACTIVITY_ROWS = 894;
-/** About what the Lobby and the spend ledger write for one session. */
-export const SESSION_OVERHEAD_ROWS = 100;
+/**
+ * Rows the Lobby writes for one engaged session, as workerd bills them (index entries included): the lease, 30 minutes
+ * of GET /api/_session polls every 30 s (the last-seen time written once a minute), a usage push, two sweeps that
+ * collect usage, a visitor reset and the lease's end with its delta reset. Measured on node:sqlite with the billed-rows
+ * meter on 2026-10-23: 63 (lobby-assign.test.ts keeps it within this bound and above 80% of it).
+ */
+export const SESSION_LOBBY_ROWS = 70;
+/** Rows SpendDO writes for one live model step: its reservation and settle entries with their index rows, the day's
+ * row and the visitor's and address's rows (spend-ledger.test.ts measures it). A $0 scripted step writes none. */
+export const SPEND_ROWS_PER_LIVE_STEP = 16;
+/** Model steps in one engaged session: the guided tour's runs (2 runs, 4 steps) and the eight demo scenarios' (10 runs,
+ * 20 steps), as pnpm e2e:cf measured them on 2026-10-23, scripted steps standing for live ones. */
+export const SESSION_LIVE_STEPS = 24;
+/** What the Lobby and the spend ledger write for one engaged session with a live provider: 70 + 16 x 24 = 454. */
+export const SESSION_OVERHEAD_ROWS = SESSION_LOBBY_ROWS + SPEND_ROWS_PER_LIVE_STEP * SESSION_LIVE_STEPS;
 /** Rows written by one engaged session: its activity, the delta reset after it on the SQL memory repo hosted worlds
- * run (cf1's measured baseline, HOSTED_DELTA_RESET_BASELINE_ROWS), and the Lobby and ledger rows: 1,711. */
+ * run (cf1's measured baseline, HOSTED_DELTA_RESET_BASELINE_ROWS), and the Lobby and ledger rows: 2,065. */
 export const SESSION_ROWS_ESTIMATE = SESSION_ACTIVITY_ROWS + HOSTED_DELTA_RESET_BASELINE_ROWS + SESSION_OVERHEAD_ROWS;
 
 export interface DayUsage {

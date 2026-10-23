@@ -14,9 +14,9 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-const state = vi.hoisted(() => ({ status: null as SessionStatus | null, blocked: null as unknown, data: null as unknown, error: null as string | null, errorStatus: null as number | null, errorCode: null as string | null }));
+const state = vi.hoisted(() => ({ status: null as SessionStatus | null, blocked: null as unknown, data: null as unknown, error: null as string | null, errorStatus: null as number | null, errorCode: null as string | null, limited: null as unknown }));
 vi.mock("../src/components/hosted/use-hosted", () => ({
-  useHostedState: () => ({ status: state.status, loaded: true, error: state.error, errorStatus: state.errorStatus, errorCode: state.errorCode, ended: null, blocked: state.blocked, startAsk: 0, startReason: null, grantAsk: null }),
+  useHostedState: () => ({ status: state.status, loaded: true, error: state.error, errorStatus: state.errorStatus, errorCode: state.errorCode, ended: null, blocked: state.blocked, startAsk: 0, startReason: null, grantAsk: null, limited: state.limited }),
   useNow: () => Date.parse("2026-10-26T16:00:00.000Z"),
   useHostedGet: () => ({ data: state.data, error: null, loading: false, reload: () => {} }),
 }));
@@ -81,6 +81,18 @@ describe("the hosted banner", () => {
   it("says when new runs fall back to the scripted provider", () => {
     state.status = status({ world: "slot", lease, provider: { id: "scripted", reason: "budget" } });
     expect(renderToStaticMarkup(<HostedBanner />)).toContain("budget is used up, so new agent runs use the scripted provider");
+  });
+  it("says when the visitor's demo company, or the shared one, has hit its daily limit", () => {
+    state.status = status({ world: "slot", lease });
+    state.limited = { kind: "demo", gen: lease.gen };
+    expect(renderToStaticMarkup(<HostedBanner />)).toContain("This demo company has hit its daily limit. Reset it from Viewing as, or come back later.");
+    state.status = status();
+    state.limited = { kind: "showcase", gen: null };
+    const html = renderToStaticMarkup(<HostedBanner />);
+    expect(html).toContain("The shared demo company has hit its daily limit.");
+    expect(html).toContain('data-testid="hosted-start-cta"');
+    state.limited = null;
+    expect(renderToStaticMarkup(<HostedBanner />)).not.toContain("hosted-limit");
   });
 });
 

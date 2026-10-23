@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { HOSTED_CAP_DEFAULTS, HOSTED_CONFIG_KEYS } from "../../src/shared/contracts";
 import { agentEnabled, capsFrom, CONFIG_KEYS, envConfig, readConfig } from "../../src/shared/config";
 import { configEnv, liveEnv } from "../../src/core/company/company-do-env";
-import { MEMO_MAX_ENTRY_BYTES, MEMO_QUERY_PARAMS, ResponseMemo } from "../../src/front/memo";
+import { MEMO_FREE_TEXT_MISSES, MEMO_MAX_ENTRY_BYTES, MEMO_MISS_WINDOW_MS, MEMO_MISSES_PER_FAMILY, MEMO_QUERY_PARAMS, readNames, ResponseMemo } from "../../src/front/memo";
 import { flagsFrom } from "@weft/cf-extras";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -133,7 +133,7 @@ describe("showcase memo", () => {
   it("keys by snapshot, principal, path and query, and serves hits without the world", async () => {
     const memo = new ResponseMemo();
     const k = ResponseMemo.key({ path: "/v1/workers", search: "?limit=1", principal: "usr_dana", snapshot: "s1" });
-    expect(k).toBe("s1|usr_dana|/v1/workers?limit=1");
+    expect(k).toBe("s1|usr_dana|/v1/workers|*?limit=1");
     const first = await memo.put(k, ok('{"a":1}', { etag: 'W/"1.x"' }));
     expect(first.headers.get("x-weft-memo")).toBe("miss");
     expect(await first.text()).toBe('{"a":1}');
@@ -147,20 +147,79 @@ describe("showcase memo", () => {
   it("normalizes the read: unknown parameters and non-persona principals cannot vary the key", () => {
     const n = (search: string, principal: string | null = "usr_dana") => ResponseMemo.normalize({ path: "/v1/time-off/requests", search, principal, snapshot: "s1" });
     const base = n("?status=pending&limit=50");
-    expect(base).toEqual({ key: "s1|usr_dana|/v1/time-off/requests?limit=50&status=pending", search: "?limit=50&status=pending", principal: "usr_dana" });
+    expect(base).toEqual({ key: "s1|usr_dana|/v1/time-off/requests|*?limit=50&status=pending", search: "?limit=50&status=pending", principal: "usr_dana", dropped: [], freeText: false });
     // Unknown names, order, repeats and over-long values all land on the same key and the same forwarded query.
     for (const variant of ["?limit=50&status=pending&cb=1", "?status=pending&r=xyz&limit=50", "?status=pending&limit=50&status=approved", `?status=pending&limit=50&q=${"x".repeat(300)}`]) {
       expect(n(variant), variant).toEqual(base);
     }
-    expect(n("?sweep=1&_=123")).toMatchObject({ search: "", key: "s1|usr_dana|/v1/time-off/requests" });
+    expect(n("?sweep=1&_=123")).toMatchObject({ search: "", key: "s1|usr_dana|/v1/time-off/requests|*" });
     // A known parameter still varies it.
     expect(n("?status=approved&limit=50").key).not.toBe(base.key);
     // Personas vary it; anything else is dropped (no header reaches the world).
     expect(n("", "usr_sam").principal).toBe("usr_sam");
     expect(n("", "usr_0003").principal).toBe("usr_0003");
     for (const p of ["USR_DANA", "usr_dana, usr_dana", "usr_x".padEnd(80, "x"), "vis_abc", "", "usr_dana\u0000"]) {
-      expect(n("", p), p).toMatchObject({ principal: null, key: "s1|-|/v1/time-off/requests" });
+      expect(n("", p), p).toMatchObject({ principal: null, key: "s1|-|/v1/time-off/requests|*" });
     }
+  });
+
+  it("keeps only the parameters a learned route reads, and names that set in the key", () => {
+    const reads = new Set(["afterId", "beforeId", "limit", "state", "status", "type"]);
+    const n = (search: string) => ResponseMemo.normalize({ path: "/v1/workers", search, principal: "usr_dana", snapshot: "s1", reads });
+    const base = n("?status=active");
+    expect(base).toEqual({ key: "s1|usr_dana|/v1/workers|afterId,beforeId,limit,state,status,type?status=active", search: "?status=active", principal: "usr_dana", dropped: [], freeText: false });
+    // An allowlisted parameter this route ignores (q, order, wait) no longer varies the key, and is named as dropped.
+    for (let i = 0; i < 20; i++) expect(n(`?status=active&q=${i}&order=${i}`)).toMatchObject({ key: base.key, search: base.search, dropped: ["order", "q"] });
+    // The same query under another parameter set is another key, so no entry crosses sets.
+    expect(ResponseMemo.normalize({ path: "/v1/workers", search: "?status=active", principal: "usr_dana", snapshot: "s1" }).key).not.toBe(base.key);
+    // A search text marks the read as free text (its misses have their own cap).
+    expect(ResponseMemo.normalize({ path: "/v1/memory/search", search: "?q=pay", principal: null, snapshot: "s1" }).freeText).toBe(true);
+    expect(ResponseMemo.normalize({ path: "/v1/memory/search", search: "?q=%20", principal: null, snapshot: "s1" }).freeText).toBe(false);
+  });
+
+  it("learns per path what a route reads from x-weft-query: the set only grows, and all stays all", () => {
+    const memo = new ResponseMemo();
+    const res = (h: string | null) => new Response("{}", { headers: h === null ? {} : { "x-weft-query": h } });
+    expect(readNames(res("limit,status"))).toEqual(new Set(["limit", "status"]));
+    expect(readNames(res(""))).toEqual(new Set());
+    expect(readNames(res("*"))).toBeNull();
+    expect(readNames(res(null))).toBeNull();
+    expect(memo.readsFor("/v1/a")).toBeNull();
+    expect(memo.hasLearned("/v1/a")).toBe(false);
+    memo.learn("/v1/a", new Set(["kind"]));
+    expect(memo.learn("/v1/a", new Set(["status"]))).toEqual(new Set(["kind", "status"]));
+    expect(memo.readsFor("/v1/a")).toEqual(new Set(["kind", "status"]));
+    expect(memo.learn("/v1/a", null)).toBeNull();
+    expect(memo.learn("/v1/a", new Set(["kind"]))).toBeNull();
+    expect(memo.hasLearned("/v1/a")).toBe(true);
+  });
+
+  it(`admits at most ${MEMO_MISSES_PER_FAMILY} distinct missed keys per path family a minute, and ${MEMO_FREE_TEXT_MISSES} with a search text`, () => {
+    const memo = new ResponseMemo();
+    const t0 = 1_000_000;
+    const read = (path: string, search: string) => ResponseMemo.normalize({ path, search, principal: null, snapshot: "s1" });
+    for (let i = 0; i < MEMO_MISSES_PER_FAMILY; i++) expect(memo.admitMiss("/v1/reports/payroll-cost", read("/v1/reports/payroll-cost", `?from=2026-01-${i}`), t0 + i)).toBe(true);
+    // Another route of the family, or a random id under it, counts against the same family.
+    expect(memo.admitMiss("/v1/reports/x", read("/v1/reports/x", ""), t0 + 100)).toBe(false);
+    // A key already missed in this window (a concurrent request, a response the memo cannot keep) does not count again.
+    expect(memo.admitMiss("/v1/reports/payroll-cost", read("/v1/reports/payroll-cost", "?from=2026-01-3"), t0 + 101)).toBe(true);
+    // Other families have their own windows, and search texts theirs.
+    expect(memo.admitMiss("/v1/workers", read("/v1/workers", ""), t0 + 102)).toBe(true);
+    for (let i = 0; i < MEMO_FREE_TEXT_MISSES; i++) expect(memo.admitMiss("/v1/memory/search", read("/v1/memory/search", `?q=t${i}`), t0 + 200 + i)).toBe(true);
+    expect(memo.admitMiss("/v1/memory/search", read("/v1/memory/search", "?q=one-more"), t0 + 300)).toBe(false);
+    expect(memo.admitMiss("/v1/memory/tree", read("/v1/memory/tree", ""), t0 + 301)).toBe(true);
+    expect(memo.refused).toBe(2);
+    // A minute on, each family starts a new window.
+    expect(memo.admitMiss("/v1/reports/x", read("/v1/reports/x", ""), t0 + MEMO_MISS_WINDOW_MS)).toBe(true);
+    expect(memo.admitMiss("/v1/memory/search", read("/v1/memory/search", "?q=one-more"), t0 + 300 + MEMO_MISS_WINDOW_MS)).toBe(true);
+  });
+
+  it("serves an entry no older than a caller's maximum age", async () => {
+    const memo = new ResponseMemo();
+    await memo.put("h", ok('{"ok":true}'), 1_000);
+    expect(memo.get("h", 60_000, 60_999)).not.toBeNull();
+    expect(memo.get("h", 60_000, 61_000)).toBeNull();
+    expect(memo.get("h", undefined, 999_999)).not.toBeNull();
   });
 
   it("keeps the world's cache-control on a hit", async () => {

@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import type { HostedSpendStatus } from "../../contracts/src/ext/cf-agent";
 import { HOSTED_CAP_DEFAULTS } from "../../contracts/src/ext/cf-agent";
 import type { RunCatalogRow } from "../../contracts/src/ext/cf-extras";
-import { COMPARE_MEMO_MS, compareRows, createRunCatalog, MAX_COMPARE_ROWS } from "../src/catalog";
+import { COMPARE_MEMO_MS, compareRows, createRunCatalog, MAX_COMPARE_DAYS, MAX_COMPARE_ROWS, refreshComparison } from "../src/catalog";
 import { COUNTERS, memoryDailyCounters } from "../src/counters";
 import { d1JobLedger, parseJob, pruneOps, queueOfJob } from "../src/jobs";
 import { createAnalyticsEngineSink, createD1MetricsSink, metricsForDay, noopMetricsSink, selectMetricsSink } from "../src/metrics";
-import { buildPlatformReadout } from "../src/platform";
+import { buildPlatformReadout, DEAD_LETTERS_MAX, deadLettersSince } from "../src/platform";
 import { d1Shim } from "./fakes";
 
 const row = (o: Partial<RunCatalogRow> = {}): RunCatalogRow => ({
@@ -41,6 +41,9 @@ describe("RunCatalog", () => {
       row({ runId: "run_5", endedAt: "2026-10-01T10:00:00.000Z" }),
     ];
     for (const r of rows) await cat.record(r);
+    // Before the cron's first run there is no comparison; then it answers every window from the one stored row.
+    expect(await cat.compare({ days: 7 })).toEqual([]);
+    await refreshComparison(db, new Date("2026-10-27T12:00:00Z"));
     const cmp = await cat.compare({ days: 7 });
     expect(cmp).toEqual([
       { provider: "openai", model: "gpt-5.6-luna", runs: 3, avgSteps: 4, groundedRate: 0.5, avgCostUsdMicros: 3700, avgNeurons: 0, p50LatencyMs: 5000, outcomes: { done: 2, waiting: 1 } },
@@ -50,43 +53,61 @@ describe("RunCatalog", () => {
     expect(compareRows([])).toEqual([]);
   });
 
-  it("reads the newest runs of the window through the ended_at index and stops at the limit, never every run of 30 days", async () => {
+  it("is computed in the cron from the newest runs through the ended_at index, at most MAX_COMPARE_ROWS of them; a visitor's read is one row", async () => {
+    expect(MAX_COMPARE_ROWS).toBe(500);
     const db = d1Shim();
-    const cat = createRunCatalog(db, { now: () => new Date("2026-10-27T12:00:00Z") });
-    await cat.compare({ days: 30 });
-    const q = db.statements.at(-1)!;
+    const now = new Date("2026-10-27T12:00:00Z");
+    const cat = createRunCatalog(db, { now: () => now });
+    await refreshComparison(db, now);
+    const q = db.statements.find((x) => /FROM run_catalog/.test(x))!;
     expect(q).toMatch(/ORDER BY ended_at DESC LIMIT \?/);
     const plan = (db.sqlite.prepare(`EXPLAIN QUERY PLAN ${q}`).all("2026-09-28T00:00:00.000Z", MAX_COMPARE_ROWS) as { detail: string }[]).map((p) => p.detail);
     // A range of the index read backwards, in the order asked: no sort of the whole window before the limit.
     expect(plan).toEqual([expect.stringMatching(/^SEARCH run_catalog USING INDEX run_catalog_ended \(ended_at>\?\)$/)]);
+    // 2,000 runs this month: the cron reads 500 and stores every window in one row.
+    const insert = db.sqlite.prepare(`INSERT INTO run_catalog (slot, gen, run_id, provider, model, trigger, steps, grounded, cost_usd_micros, neurons, latency_ms, status, terminal_reason, ended_at, day)
+      VALUES ('slot-1', 1, ?, 'openai', 'gpt-5.6-luna', 'chat', 3, 1, 1000, 0, 900, 'done', 'DONE', ?, ?)`);
+    for (let i = 0; i < 2_000; i++) { const at = new Date(now.getTime() - i * 20 * 60_000).toISOString(); insert.run(`run_${i}`, at, at.slice(0, 10)); }
+    const stored = await refreshComparison(db, now);
+    expect(stored.rows).toBe(MAX_COMPARE_ROWS);
+    expect(Object.keys(stored.windows)).toHaveLength(MAX_COMPARE_DAYS);
+    expect(db.rows("model_comparison")).toHaveLength(1);
+    // A visitor's read is that row, for any window.
+    const n = db.statements.length;
+    for (const days of [1, 7, 30, 365]) expect((await cat.compare({ days }))[0]!.runs).toBeGreaterThan(0);
+    expect(db.statements.slice(n)).toEqual(Array.from({ length: 4 }, () => "SELECT body FROM model_comparison WHERE id = 1"));
     // The window still starts at UTC midnight days - 1 back: a run at 23:59 the day before is out, one at 00:00 is in.
-    await cat.record(row({ runId: "run_out", endedAt: "2026-10-20T23:59:59.999Z" }));
-    await cat.record(row({ runId: "run_in", endedAt: "2026-10-21T00:00:00.000Z" }));
-    expect((await cat.compare({ days: 7 }))[0]!.runs).toBe(1);
+    const db2 = d1Shim();
+    const cat2 = createRunCatalog(db2, { now: () => now });
+    await cat2.record(row({ runId: "run_out", endedAt: "2026-10-20T23:59:59.999Z" }));
+    await cat2.record(row({ runId: "run_in", endedAt: "2026-10-21T00:00:00.000Z" }));
+    await refreshComparison(db2, now);
+    expect((await cat2.compare({ days: 7 }))[0]!.runs).toBe(1);
   });
 
-  it("memoizes a window's comparison for a minute when asked, and a record through it drops the memo", async () => {
+  it("memoizes the stored comparison for a minute when asked, for every window, and a record through it drops the memo", async () => {
     const db = d1Shim();
     let now = Date.parse("2026-10-27T12:00:00Z");
     const cat = createRunCatalog(db, { now: () => new Date(now), memoMs: COMPARE_MEMO_MS });
     await cat.record(row({ runId: "run_1" }));
-    const reads = () => db.statements.filter((x) => /^SELECT/.test(x)).length;
+    await refreshComparison(db, new Date(now));
+    const reads = () => db.statements.filter((x) => /^SELECT body FROM model_comparison/.test(x)).length;
     const first = await cat.compare({ days: 7 });
     expect(reads()).toBe(1);
-    // Many visitors within the minute, at once and one after another: one read.
-    await Promise.all(Array.from({ length: 20 }, () => cat.compare({ days: 7 })));
+    // Many visitors within the minute, at once and one after another, any window: one read.
+    await Promise.all(Array.from({ length: 20 }, (_, i) => cat.compare({ days: 1 + (i % 30) })));
     now += COMPARE_MEMO_MS - 1;
     expect(await cat.compare({ days: 7 })).toEqual(first);
     expect(reads()).toBe(1);
-    // Another window is its own read; a minute on, the window is read again.
-    await cat.compare({ days: 30 });
-    expect(reads()).toBe(2);
+    // A minute on, the row is read again.
     now += 1;
     await cat.compare({ days: 7 });
-    expect(reads()).toBe(3);
+    expect(reads()).toBe(2);
+    // A new run shows once the cron has compared again; a record through this catalog drops the memo.
     await cat.record(row({ runId: "run_2" }));
+    await refreshComparison(db, new Date(now));
     expect((await cat.compare({ days: 7 }))[0]!.runs).toBe(2);
-    expect(reads()).toBe(4);
+    expect(reads()).toBe(3);
   });
 });
 
@@ -190,5 +211,26 @@ describe("Platform readout", () => {
       leases: { active: 1, pool: 2, waitlist: 0 }, deadLetters: 1, lastSweepAt: "2026-10-26T17:45:00.000Z",
       shares: { "do.rows_written": { used: 41_000, share: 60_000 }, "help.queries": { used: 4, share: 30 }, "pdf.browser_seconds": { used: 6.6, share: 300 } },
     });
+  });
+
+  it("asks nothing else when the Lobby's readout carries the spend status and the counters, and counts dead letters to a bound", async () => {
+    const db = d1Shim();
+    const now = new Date("2026-10-26T18:00:00Z");
+    const status: HostedSpendStatus = { day: "2026-10-26", caps: HOSTED_CAP_DEFAULTS, spentMicros: { day: 41_200, visitor: null, ip: null, live: 0 }, neurons: { used: 133, byProduct: { agent: 100, ocr: 22, embeddings: 1, dictation: 10 } }, openReservations: 0 };
+    const asked: string[] = [];
+    const counters = { take: async () => { throw new Error("unused"); }, add: async () => { throw new Error("unused"); }, peek: async (n: string) => { asked.push(`peek:${n}`); return 0; } };
+    const out = await buildPlatformReadout({
+      lobby: async () => ({ day: "2026-10-26", level: 0, restoresLeft: 2, leases: { active: 1, pool: 2, waitlist: 0 }, lastSweepAt: null, shares: {}, counters: { [COUNTERS.help]: 7, [COUNTERS.browserMs]: 1200 }, spend: status }),
+      spend: { status: async () => { asked.push("spend.status"); return status; } }, ops: db, counters, now: () => now,
+    });
+    expect(asked).toEqual([]);
+    expect(out).toMatchObject({ dollars: { spentUsd: 0.0412 }, neurons: { used: 133 }, shares: { "help.queries": { used: 7 }, "pdf.browser_seconds": { used: 1.2 } } });
+    // Thousands of dead letters today: the count stops at its bound, through the failed_at index.
+    const insert = db.sqlite.prepare(`INSERT INTO failed_jobs (job_id, kind, slot, gen, queue, attempts, code, message, failed_at) VALUES (?, 'ocr.receipt', NULL, NULL, 'weft-dlq', 6, 'DEAD_LETTER', '', ?)`);
+    for (let i = 0; i < DEAD_LETTERS_MAX + 500; i++) insert.run(`j${i}`, "2026-10-26T10:00:00.000Z");
+    expect(await deadLettersSince(db, "2026-10-26T00:00:00.000Z")).toBe(DEAD_LETTERS_MAX);
+    const q = db.statements.at(-1)!;
+    const plan = (db.sqlite.prepare(`EXPLAIN QUERY PLAN ${q}`).all("2026-10-26T00:00:00.000Z", DEAD_LETTERS_MAX) as { detail: string }[]).map((p) => p.detail);
+    expect(plan.some((d) => /SEARCH failed_jobs USING COVERING INDEX failed_jobs_at/.test(d))).toBe(true);
   });
 });

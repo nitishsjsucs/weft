@@ -7,6 +7,7 @@ import { sqlDailyCounters, sha256Hex, type CounterTake, type LobbyReadout } from
 import { extrasQueue } from "../../../src/extras/entrypoint";
 import { jobDepsFromEnv, type ExtrasEnv } from "../../../src/extras/env";
 import { handleExtrasBatch } from "../../../src/extras/queues";
+import { extrasCron } from "../../../src/extras/cron";
 import type { HiddenWriteBack, SlotWorldInfo, WriteBackOutcome } from "../../../src/extras/ports";
 
 export { HostedExtras } from "../../../src/extras/entrypoint";
@@ -120,6 +121,8 @@ export default {
       await (b.queue === "jobs" ? env.JOBS : env.RENDER).send(b.body, { contentType: "json" });
       return Response.json({ ok: true });
     }
+    // The extras' part of the deployed cron (parked jobs, the model comparison's row, the daily prune).
+    if (url.pathname === "/cron") return Response.json(await extrasCron(env, new Date(), () => {}));
     if (url.pathname === "/writebacks") {
       return Response.json(await slotStub(env, url.searchParams.get("slot")!).writeBacks());
     }

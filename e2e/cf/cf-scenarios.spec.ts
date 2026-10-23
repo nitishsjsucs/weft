@@ -6,6 +6,7 @@
 import { expect, test } from "@playwright/test";
 import { operatorLease, OPERATOR, pinProvider, PwWorld, targetFor, type LeaseInfo } from "./fixtures";
 import { resetWorld, SCENARIOS, type ScenarioContext } from "./scenarios";
+import { budgetLine, recentRuns, runsSince, type BudgetReadout } from "./world";
 import type { BrowserContext } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
@@ -13,6 +14,8 @@ test.describe.configure({ mode: "serial" });
 let context: BrowserContext;
 let world: PwWorld;
 let lease: LeaseInfo;
+/** The runs the world had before the scenarios (the seed's), so the scenarios' own runs can be counted. */
+let seedRuns: { id: string }[] = [];
 
 test.beforeAll(async ({ browser }, info) => {
   test.setTimeout(180_000);
@@ -28,6 +31,7 @@ test.beforeAll(async ({ browser }, info) => {
   const s = await world.get<{ world: string; lease: { slot: string; gen: number } | null }>("/api/_session");
   expect(s.world).toBe("slot");
   expect(s.lease?.gen, "the cookie carries the new generation").toBe(r.gen);
+  seedRuns = await recentRuns(world);
   console.log(`scenarios on ${world.label}: reset to gen ${r.gen} (${r.method ?? "reset"}), ${r.resetsLeft ?? "?"} resets left`);
 });
 
@@ -58,6 +62,12 @@ for (const s of SCENARIOS) {
   });
 }
 
-test("after the scenarios the audit chain verifies", async () => {
+test("after the scenarios the audit chain verifies", async ({}, info) => {
   expect((await world.get<{ ok: boolean }>("/api/v1/actions/verify")).ok).toBe(true);
+  // The rows this generation (the reset, then all eight scenarios) read and wrote, against its budget (design 6.3).
+  const budget = (await world.get<{ budget?: BudgetReadout }>("/api/v1/health")).budget ?? null;
+  const runs = await runsSince(world, seedRuns);
+  console.log(`scenarios rows budget: ${budgetLine(budget)}; ${runs.line}`);
+  info.annotations.push({ type: "rows budget", description: `${budgetLine(budget)}; ${runs.line}` });
+  expect(budget, "a leased world reports its rows budget").not.toBeNull();
 });

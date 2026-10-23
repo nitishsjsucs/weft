@@ -391,13 +391,42 @@ describe("platform parts", () => {
     const broken = hostedSpendLedger(spend, { world: { slot: "slot-1", gen: 7, mode: "slot" }, state: () => ({ ...state, get: () => { throw new Error("kv_state unreadable"); } }), guard: () => null });
     expect(await broken.reserve({ runId: "run_0003", usdMicros: 1, model: "gpt-5.6-luna", live: true })).toMatchObject({ ok: false, hostedCap: "visitor" });
     expect(spend.reserves.length).toBe(n);
-    expect(await broken.reserve({ runId: "run_0003", usdMicros: 0, model: "scripted", live: false })).toMatchObject({ ok: true });
-    expect(spend.reserves.at(-1)).toMatchObject({ runId: "run_0003", world: "slot-1:gen-7", visitor: null, ipHash: null, live: false });
+    // A scripted attempt at zero passes without a lease, and makes no SpendDO call at all (it can spend nothing).
+    const calls = spend.calls.length;
+    const free = await broken.reserve({ runId: "run_0003", usdMicros: 0, model: "scripted", live: false });
+    expect(free).toMatchObject({ ok: true, reservationId: expect.stringMatching(/^rsv_free_[0-9a-f]{16}$/) });
+    await broken.settle((free as { reservationId: string }).reservationId, 0);
+    await broken.release((free as { reservationId: string }).reservationId);
+    expect(spend.calls.length).toBe(calls);
     state.delete(SMALL_STATE_KEYS.leaseVisitor); state.delete(SMALL_STATE_KEYS.leaseIpHash);
     // The world's own ledger is that adapter.
     expect(w.weft.ledger).not.toBe(w.spend);
     await w.weft.ledger.spent({ day: "2026-10-26" });
     expect(w.spend.calls).toContain("spent");
+  });
+
+  it("writes no spend entry for a scripted run's steps: $0 reservations of a provider that is not live never reach SpendDO", async () => {
+    const state = sqlSmallState(w.storage.sql);
+    state.set(SMALL_STATE_KEYS.leaseVisitor, "vis_abc");
+    state.set(SMALL_STATE_KEYS.leaseIpHash, "iph_123");
+    try {
+      const before = w.spend.calls.length;
+      const run = await json(await post(w, "/v1/agent/runs", { text: "How many people work here?" }));
+      expect(run.id ?? run.runId ?? JSON.stringify(run)).toMatch(/^run_/);
+      await (w.weft.agent as unknown as { idle(): Promise<void> }).idle();
+      const r = await json(await get(w, `/v1/agent/runs/${run.id ?? run.runId}`));
+      expect(r.status).toBe("done");
+      expect(Number(w.storage.sql.exec("SELECT count(*) AS n FROM run_steps WHERE run_id = ? AND stage = 'model'", r.id).one().n)).toBeGreaterThan(0);
+      expect(w.spend.calls.slice(before).filter((c) => c === "reserve" || c === "settle" || c === "release")).toEqual([]);
+      // A $0 step settled above zero (no provider does this) is still recorded, charged to the lease.
+      const ledger = hostedSpendLedger(w.spend, { world: { slot: "slot-1", gen: 1, mode: "slot" }, state: () => state, guard: () => null });
+      const free = await ledger.reserve({ runId: "run_0999", usdMicros: 0, model: "scripted", live: false });
+      await ledger.settle((free as { reservationId: string }).reservationId, 1_500);
+      expect(w.spend.reserves.at(-1)).toMatchObject({ runId: "run_0999", usdMicros: 1_500, live: false, visitor: "vis_abc", ipHash: "iph_123" });
+      expect(w.spend.settles.at(-1)).toMatchObject({ usd: 1_500 });
+    } finally {
+      state.delete(SMALL_STATE_KEYS.leaseVisitor); state.delete(SMALL_STATE_KEYS.leaseIpHash);
+    }
   });
 
   it("hands periodic ticks to the SchedulerHost, with the clock rate, instead of setInterval", async () => {

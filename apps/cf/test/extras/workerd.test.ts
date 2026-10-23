@@ -133,6 +133,8 @@ describe("extras in workerd", () => {
     expect(await (await front("/dictate", { method: "POST", body: wav })).json()).toEqual({ ok: true, text: "Show payroll cost by month", seconds: 2, neurons: 2 });
     const row = { runId: "run_0001", slot: "slot-1", gen: 1, provider: "workers_ai", model: "@cf/openai/gpt-oss-120b", trigger: "chat", steps: 5, grounded: true, costUsdMicros: 4400, neurons: 400, latencyMs: 2100, status: "done", terminalReason: "DONE", endedAt: new Date().toISOString() };
     expect((await front("/record", { method: "POST", body: JSON.stringify(row) })).status).toBe(200);
+    // The comparison is the cron's row (refreshComparison): the run shows once the cron has run.
+    expect(await core("/cron", {})).toMatchObject({ compared: 1 });
     expect(await (await front("/models")).json()).toMatchObject([{ provider: "workers_ai", runs: 1, avgNeurons: 400, groundedRate: 1 }]);
   }, 60_000);
 });

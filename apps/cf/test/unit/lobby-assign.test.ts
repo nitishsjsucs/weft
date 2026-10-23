@@ -6,15 +6,21 @@ import { describe, expect, it } from "vitest";
 import { HOSTED_SETTINGS } from "../../src/shared/contracts";
 import { utcDay } from "../../src/shared/http";
 import { LobbyDO } from "../../src/core/lobby/lobby-do";
-import { FULL_RESTORE_ROWS, WAITLIST_MAX, WAITLIST_TTL_MS } from "../../src/core/lobby/policy";
-import { memorySql, readMeter } from "./sqlite";
+import { FULL_RESTORE_ROWS, SESSION_LOBBY_ROWS, WAITLIST_MAX, WAITLIST_TTL_MS } from "../../src/core/lobby/policy";
+import { LAST_SEEN_WRITE_MS } from "../../src/core/lobby/lobby-do";
+import { billedWriteMeter, memorySql, readMeter, writeMeter } from "./sqlite";
 
 const yieldTick = () => new Promise((r) => setTimeout(r, 1));
 
-function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql>; wake: () => LobbyDO } {
+/** A pool slot as the Lobby sees it: its usage since the last drain, its visitor's last activity, and every heartbeat. */
+interface FakeSlot { usage: { rowsRead: number; rowsWritten: number; requests: number }; lastActivityMs: number | null; heartbeats: Record<string, unknown>[]; dirty?: boolean }
+
+function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql>; wake: () => LobbyDO; slots: Map<string, FakeSlot> } {
   const m = memorySql();
   const ctx = { storage: { sql: m.sql, transactionSync: <T>(fn: () => T) => m.transactionSync(fn) }, waitUntil: () => undefined };
   const stamps: string[] = [];
+  const slots = new Map<string, FakeSlot>();
+  const slotOf = (name: string) => { let f = slots.get(name); if (!f) { f = { usage: { rowsRead: 0, rowsWritten: 0, requests: 0 }, lastActivityMs: null, heartbeats: [] }; slots.set(name, f); } return f; };
   const env = {
     WEFT_POOL_SIZE: String(pool),
     WEFT_CONFIG_MEMO_MS: "0",
@@ -32,7 +38,16 @@ function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnT
       idFromName: (n: string) => n,
       get: (slot: string) => ({
         applyStamp: async (s: { visitor: string }) => { await yieldTick(); stamps.push(`${slot}:${s.visitor}`); return { ok: true, gen: 1 }; },
-        heartbeat: async () => { await yieldTick(); return { stamped: null, lastActivityMs: null, clean: true, usage: { rowsRead: 0, rowsWritten: 0, requests: 0 }, snapshot: null }; },
+        heartbeat: async (opts: { keepUsage?: boolean } = {}) => {
+          await yieldTick();
+          const f = slotOf(slot);
+          f.heartbeats.push(opts);
+          const usage = opts.keepUsage ? { rowsRead: 0, rowsWritten: 0, requests: 0 } : f.usage;
+          if (!opts.keepUsage) f.usage = { rowsRead: 0, rowsWritten: 0, requests: 0 };
+          return { stamped: null, lastActivityMs: f.lastActivityMs, clean: !f.dirty, usage, snapshot: null };
+        },
+        deltaReset: async (st: { gen: number }) => { await yieldTick(); return { ok: true, method: "delta", gen: st.gen, rowsWritten: 717, mismatches: [], ms: 1 }; },
+        endLease: async () => { await yieldTick(); },
       }),
     },
   };
@@ -40,7 +55,7 @@ function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnT
   m.sql.exec(`UPDATE slots SET state = 'ready'`);
   /** The same object after a hibernation: a new instance over the same storage, with nothing in memory. */
   const wake = () => new LobbyDO(ctx as never, env as never);
-  return { lobby, stamps, m, wake };
+  return { lobby, stamps, m, wake, slots };
 }
 
 const visitor = (i: number) => `vis_${i.toString(16).padStart(32, "0")}`;
@@ -174,6 +189,11 @@ describe("LobbyDO's Platform readout", () => {
     const later = await lobby.readout({ now: now + 30_000 });
     expect(reads).toBeGreaterThan(once);
     expect(later.restoresLeft).toBe(first.restoresLeft - 1);
+    // It carries the extras' counters and the SpendDO status the level read, so the Platform page asks neither.
+    expect(first.counters).toEqual({ "help.queries": 0, "pdf.browser_ms": 0 });
+    expect(first.spend).toMatchObject({ caps: { dayUsd: 2 } });
+    await lobby.extrasCounterAdd("help.queries", 3, utcDay(now));
+    expect((await lobby.readout({ now: now + 61_000 })).counters["help.queries"]).toBe(3);
     // The admin ops readout is always fresh.
     const n = reads;
     await lobby.ops({ now: now + 31_000 });
@@ -234,5 +254,75 @@ describe("LobbyDO's waitlist", () => {
     // The six usage counters, the slots and leases of the pool, and one count of the line through its index.
     expect(small.status).toBeLessThanOrEqual(20);
     expect(small.readout).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("a lease holder's GET /api/_session", () => {
+  const counter = (m: ReturnType<typeof memorySql>, key: string) => Number(m.sql.exec<{ n: number }>(`SELECT n FROM counters WHERE day = ? AND key = ?`, utcDay(), key).toArray()[0]?.n ?? 0);
+  const storedLastSeen = (m: ReturnType<typeof memorySql>) => Number(m.sql.exec<{ t: number }>(`SELECT last_seen AS t FROM leases`).toArray()[0]!.t);
+
+  it("writes no Lobby row per poll: the heartbeat leaves the slot's usage in the slot, and the last-seen time is written once a minute", async () => {
+    const { lobby, m, slots, wake } = lobbyOver(2);
+    const t0 = Date.now();
+    const v = visitor(7);
+    const lease = await lobby.assign({ visitor: v, ipHash: "7".repeat(32), now: t0 });
+    expect(lease.status).toBe("leased");
+    const slot = (lease as { slot: string }).slot;
+    const f = slots.get(slot) ?? (slots.set(slot, { usage: { rowsRead: 0, rowsWritten: 0, requests: 0 }, lastActivityMs: null, heartbeats: [] }), slots.get(slot)!);
+    const w = writeMeter(m);
+    // A tab polls every 2 s for 3 minutes while its visitor works: each poll finds new usage and newer activity.
+    let last = null as Awaited<ReturnType<LobbyDO["status"]>> | null;
+    for (let i = 1; i <= 90; i++) {
+      const now = t0 + i * 2_000;
+      f.usage = { rowsRead: f.usage.rowsRead + 400, rowsWritten: f.usage.rowsWritten + 3, requests: f.usage.requests + 2 };
+      f.lastActivityMs = now - 500;
+      last = await lobby.status({ visitor: v, slot, gen: 0, now });
+      expect(last.lease?.slot).toBe(slot);
+    }
+    // 180 s of polls: the last-seen time was written about once a minute (3 rows), nothing else.
+    expect(w.rows).toBeLessThanOrEqual(Math.ceil((90 * 2_000) / LAST_SEEN_WRITE_MS));
+    expect([...w.tables]).toEqual(["leases"]);
+    expect(f.heartbeats.every((h) => h.keepUsage === true)).toBe(true);
+    // The lease answer still reads the freshest activity (kept in memory), not the stored one.
+    expect(Date.parse(last!.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + 30 * 60_000);
+    expect(t0 + 180_000 - storedLastSeen(m)).toBeLessThanOrEqual(LAST_SEEN_WRITE_MS + 500);
+    expect(counter(m, "rows_read")).toBe(0);
+    // A Lobby that just woke up still finds the lease live, from the stored time and the slot's heartbeat.
+    const cold = await wake().status({ visitor: v, slot, gen: 0, now: t0 + 181_000 });
+    expect(Date.parse(cold.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + 30 * 60_000);
+    // The sweep collects what the polls left in the slot.
+    await lobby.sweep({ now: t0 + 182_000 });
+    expect(counter(m, "rows_read")).toBe(90 * 400);
+    expect(counter(m, "rows_written")).toBe(90 * 3);
+    expect(counter(m, "do_requests")).toBe(90 * 2);
+    expect(f.usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
+  });
+});
+
+describe("one engaged session's own Lobby rows", () => {
+  it(`stay within SESSION_LOBBY_ROWS (${SESSION_LOBBY_ROWS}), as workerd bills them: the lease, 30 minutes of session polls, a usage push, two sweeps, a reset and the lease's end`, async () => {
+    const { lobby, m, slots } = lobbyOver(2);
+    const w = billedWriteMeter(m);
+    const t0 = Date.now();
+    const v = visitor(9);
+    const lease = await lobby.assign({ visitor: v, ipHash: "9".repeat(32), now: t0 });
+    const slot = (lease as { slot: string }).slot;
+    const f = slots.get(slot) ?? (slots.set(slot, { usage: { rowsRead: 0, rowsWritten: 0, requests: 0 }, lastActivityMs: null, heartbeats: [] }), slots.get(slot)!);
+    f.dirty = true;
+    let gen = (lease as { gen: number }).gen;
+    // A tab polls GET /api/_session every 30 s while its visitor works for 30 minutes.
+    for (let i = 1; i <= 60; i++) {
+      const now = t0 + i * 30_000;
+      f.lastActivityMs = now - 1_000;
+      f.usage = { rowsRead: f.usage.rowsRead + 1_000, rowsWritten: f.usage.rowsWritten + 15, requests: f.usage.requests + 8 };
+      if (i === 20) gen = ((await lobby.reset({ visitor: v, slot, gen, now })) as { gen: number }).gen;
+      if (i === 30 || i === 60) await lobby.sweep({ now });
+      if (i === 40) await lobby.reportUsage({ slot, usage: { rowsRead: 100_000, rowsWritten: 1_000, requests: 500 } });
+      expect((await lobby.status({ visitor: v, slot, gen, now })).lease?.slot).toBe(slot);
+    }
+    await lobby.releaseVisitor({ visitor: v, reason: "idle", now: t0 + 61 * 60_000 });
+    // 63 measured on 2026-10-23 (leases 34, counters 22, slots 4, lobby_meta 3); the bound keeps it a measured value.
+    expect(w.rows).toBeLessThanOrEqual(SESSION_LOBBY_ROWS);
+    expect(w.rows).toBeGreaterThanOrEqual(Math.floor(SESSION_LOBBY_ROWS * 0.8));
   });
 });

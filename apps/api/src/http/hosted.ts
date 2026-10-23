@@ -1,6 +1,8 @@
 // The hosted request layer (docs/cloudflare/design.md 4.5 and 6.1, track cf2-platform). It wraps the frozen app only
 // when the platform has a facade meter (the durable platform), so Node's app is exactly buildApp(weft):
 // - x-weft-tables: every GET response lists the tables it read (sorted, comma-separated);
+// - x-weft-query: every GET response lists the query parameter names its route read (sorted, comma-separated), so the
+//   front Worker's showcase memo keys a read by those only (design 4.5);
 // - ETag/304: a polled GET's ETag is W/"<gen>.<hash(boot epoch, route, query, principal, clock, versions of the tables
 //   it read)>", and a request whose If-None-Match matches a remembered ETag whose tables have not been written since
 //   gets 304 without running the route, auth included, so it reads 0 rows. Table versions live in memory and restart
@@ -17,8 +19,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
+import { HonoRequest } from "hono/request";
 import type { SqlMeter } from "../../../../packages/contracts/src/ext/cf-db";
-import { HOSTED_ERRORS, hostedEtag, TABLES_HEADER } from "../../../../packages/contracts/src/ext/cf-hosted";
+import { HOSTED_ERRORS, hostedEtag, QUERY_HEADER, TABLES_HEADER } from "../../../../packages/contracts/src/ext/cf-hosted";
 import { SMALL_STATE_KEYS } from "../../../../packages/contracts/src/ext/cf-platform";
 import type { Weft, WeftEnv } from "./context";
 import { allowedHostsFor } from "./auth";
@@ -42,6 +45,23 @@ const requestScope = new AsyncLocalStorage<{ uncachable: string | null }>();
 export function markUncachable(reason: string): void {
   const s = requestScope.getStore();
   if (s && !s.uncachable) s.uncachable = reason;
+}
+
+/** The query parameter names the running hosted GET's route has read. */
+const queryReads = new AsyncLocalStorage<Set<string>>();
+let trackingQueries = false;
+/**
+ * Records each query parameter a route reads (HonoRequest's query and queries; "*" when it asks for all of them)
+ * while a hosted GET runs. Installed once per isolate, the first time a hosted app is built (so never on Node's own
+ * app); outside a hosted GET it only delegates.
+ */
+function trackQueryReads(): void {
+  if (trackingQueries) return;
+  trackingQueries = true;
+  const proto = HonoRequest.prototype as unknown as { query(key?: string): unknown; queries(key?: string): unknown };
+  const query = proto.query, queries = proto.queries;
+  proto.query = function (this: unknown, key?: string) { queryReads.getStore()?.add(key ?? "*"); return query.call(this, key); };
+  proto.queries = function (this: unknown, key?: string) { queryReads.getStore()?.add(key ?? "*"); return queries.call(this, key); };
 }
 
 interface Remembered { etag: string; tables: string[]; versions: Record<string, number> }
@@ -87,6 +107,7 @@ export interface HostedAppStats { computed: number; notModified: number; remembe
 /** Wraps the app with the hosted layer; `meter` is the world's facade meter. */
 export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | null): Hono<WeftEnv> & { hostedStats: HostedAppStats } {
   const outer = new Hono<WeftEnv>() as Hono<WeftEnv> & { hostedStats: HostedAppStats };
+  trackQueryReads();
   const memo = new Map<string, Remembered>();
   const stats: HostedAppStats = { computed: 0, notModified: 0, remembered: 0 };
   outer.hostedStats = stats;
@@ -120,10 +141,12 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
 
     const scope = { uncachable: null as string | null };
     const before = commitSeq;
-    const { value: res, usage } = await requestScope.run(scope, () => meter.measure(async () => inner.fetch(req, c.env)));
+    const reads = new Set<string>();
+    const { value: res, usage } = await queryReads.run(reads, () => requestScope.run(scope, () => meter.measure(async () => inner.fetch(req, c.env))));
     stats.computed++;
     const headers = new Headers(res.headers);
     headers.set(TABLES_HEADER, usage.tablesRead.join(","));
+    headers.set(QUERY_HEADER, reads.has("*") ? "*" : [...reads].sort().join(","));
     if (scope.uncachable) headers.set("cache-control", "no-store");
     else if (key && !headers.has("cache-control")) headers.set("cache-control", REVALIDATE);
     // Remember only a clean read: a 200 that read company tables and wrote nothing, during which no commit landed (its

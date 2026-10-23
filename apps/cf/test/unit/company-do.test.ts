@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_SETTINGS, type HostedJob, type TxGuard } from "../../src/shared/contracts";
 import { setEngineLoader, type EngineModule, type WorldBootInput, type WorldEngine } from "../../src/core/company/engine";
 import type { WorldStamp } from "../../src/core/company/rpc";
-import { readStamp, writeStamp } from "../../src/core/company/world-state";
+import { addLeaseKey, readStamp, writeStamp } from "../../src/core/company/world-state";
+import { WORLD_BUDGET } from "../../src/core/company/budget";
 import { signCtx } from "../../src/shared/tokens";
 import { memorySql } from "./sqlite";
 
@@ -44,9 +45,13 @@ interface FakeWorld {
   configDelayMs: number;
   /** Boots whose engine fails right after CompanyDO installs it (its change-feed subscription throws). */
   failAfterInstall: number;
+  /** What each metered call (a request, an alarm's work) reads and writes, by method. */
+  rows: (method: string) => { rowsRead: number; rowsWritten: number };
 }
 let world: FakeWorld;
-const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0, failAfterInstall: 0 });
+const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0, failAfterInstall: 0, rows: () => ({ rowsRead: 0, rowsWritten: 0 }) });
+/** The method of the request a fake engine call is serving (set by its fetch), for world.rows. */
+let servingMethod = "GET";
 
 function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]): { toArray(): Record<string, unknown>[] } }): WorldEngine {
   const guard: TxGuard = {
@@ -60,13 +65,13 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
   };
   return {
     meter: {
-      measure: async (fn) => ({ value: await fn(), usage: { statements: 0, rowsRead: 0, rowsWritten: 0, tablesRead: [], tablesWritten: [] } }),
+      measure: async (fn) => { servingMethod = "ALARM"; const value = await fn(); return { value, usage: { statements: 0, ...world.rows(servingMethod), tablesRead: [], tablesWritten: [] } }; },
       totals: () => ({ statements: 0, rowsRead: 0, rowsWritten: 0, tablesRead: [], tablesWritten: [] }),
       reset() {}, version: () => 0, versions: () => ({}),
       onCommit: () => { if (world.failAfterInstall > 0) { world.failAfterInstall -= 1; throw new Error("fake subscription failure"); } return () => undefined; },
     },
     guard,
-    fetch: async (req) => new Response(JSON.stringify({ path: new URL(req.url).pathname }), { headers: { "content-type": "application/json" } }),
+    fetch: async (req) => { servingMethod = req.method; return new Response(JSON.stringify({ path: new URL(req.url).pathname }), { headers: { "content-type": "application/json" } }); },
     mcp: async () => new Response(JSON.stringify({ mcp: true }), { headers: { "content-type": "application/json" } }),
     inScope: async (fn) => { world.scopedGens.push(input.world.gen); if (world.scoped) await world.scoped(); return fn(); },
     clockRate: () => 0,
@@ -108,14 +113,18 @@ setEngineLoader(async () => fakeModule);
 
 type LobbyStatusFn = (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown;
 
-function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean } = {}) {
+/** The MCP key the lease minted (the fake engine's mintMcpKey makes the same one); company() stores it unless told not to. */
+const MINTED_KEY = `wk_mcp_slot-1_3_${"k".repeat(24)}`;
+
+function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean; mintedKeys?: string[] } = {}) {
   const m = memorySql();
   currentSql = m;
   m.sql.exec(`CREATE TABLE kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
   m.sql.exec(`CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL)`);
   const stamp: WorldStamp | null = o.stamp === null ? null : { slot: "slot-1", gen: 3, mode: "slot", visitor: VISITOR, ipHash: "i".repeat(32), leaseStartedAt: T0, ...o.stamp };
-  if (stamp) m.transactionSync(() => writeStamp(m.sql, stamp));
+  if (stamp) m.transactionSync(() => { writeStamp(m.sql, stamp); for (const k of o.mintedKeys ?? [MINTED_KEY]) addLeaseKey(m.sql, k); });
   const kv = new Map<string, unknown>();
+  const kvPuts: string[] = [];
   const failing = { n: o.failSetAlarms ?? 0 };
   const waits: Promise<unknown>[] = [];
   const recorded: unknown[][] = [];
@@ -130,7 +139,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     id: { name: stamp?.slot ?? "slot-1" },
     storage: {
       sql: m.sql, transactionSync: <T>(fn: () => T) => m.transactionSync(fn),
-      kv: { get: (k: string) => kv.get(k), put: (k: string, v: unknown) => { kv.set(k, v); }, delete: (k: string) => kv.delete(k) },
+      kv: { get: (k: string) => kv.get(k), put: (k: string, v: unknown) => { kvPuts.push(k); kv.set(k, structuredClone(v)); }, delete: (k: string) => kv.delete(k) },
       setAlarm: (t: number) => {
         if (failing.n > 0) { failing.n -= 1; throw new Error("storage busy"); }
         alarms.push(t); alarm = t;
@@ -162,14 +171,14 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   const co = new CompanyDO(ctx as never, env as never);
   /** The same object started again (an eviction or a deploy): a new instance over the same storage. */
   const restart = () => { const again = new CompanyDO(ctx as never, env as never); return { co: again, ready: () => ready }; };
-  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded, ops, kv, restart };
+  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded, ops, kv, kvPuts, restart };
 }
 
 async function req(path: string, o: { method?: string; visitor?: string | null; slot?: string; gen?: number; body?: string; headers?: Record<string, string> } = {}): Promise<Request> {
   const ctx = await signCtx(CTX, { slot: o.slot ?? "slot-1", gen: o.gen ?? 3, visitor: o.visitor === undefined ? VISITOR : o.visitor, ipHash: "i".repeat(32), human: true, smoke: false, iat: Math.floor(Date.now() / 1000) });
   return new Request(`https://weft.test${path}`, { method: o.method ?? "GET", headers: { "x-weft-ctx": ctx, ...o.headers }, ...(o.body !== undefined ? { body: o.body } : {}) });
 }
-const mcp = (o: { gen?: number } = {}) => req("/mcp", { method: "POST", visitor: null, gen: o.gen, body: "{}", headers: { authorization: `Bearer wk_mcp_slot-1_3_${"k".repeat(24)}` } });
+const mcp = (o: { gen?: number; key?: string } = {}) => req("/mcp", { method: "POST", visitor: null, gen: o.gen, body: "{}", headers: { authorization: `Bearer ${o.key ?? MINTED_KEY}` } });
 const at = (ms: number) => vi.setSystemTime(ms);
 
 beforeEach(() => {
@@ -224,6 +233,31 @@ describe("the MCP key's lease", () => {
     await gone.ready();
     at(T0 + 5 * MIN);
     expect((await gone.co.fetch(await mcp())).status).toBe(409);
+  });
+
+  it("refuses a key this generation never minted from the slot's stored keys, without asking the Lobby, even on an instance that has seen no activity", async () => {
+    const lease = () => ({ slot: "slot-1", gen: 3, expiresAt: new Date(T0 + 180 * MIN).toISOString(), idleExpiresAt: new Date(T0 + 40 * MIN).toISOString(), resetsLeft: 3 });
+    const c = company({ lobbyStatus: () => ({ level: 0, pool: { size: 2, free: 0, waitlist: 0 }, lease: lease(), waitlistPosition: null, worldProvider: null }) });
+    await c.ready();
+    at(T0 + 15 * MIN);
+    // Well-formed keys for this slot and generation, as anyone can write them (the front routes by the prefix only).
+    for (let i = 0; i < 20; i++) {
+      const forged = `wk_mcp_slot-1_3_${String(i).padStart(24, "f")}`;
+      const r = await c.co.fetch(await mcp({ key: forged }));
+      expect(r.status).toBe(401);
+      expect(await r.json()).toMatchObject({ code: "MCP_KEY_INVALID" });
+    }
+    const viaApiKey = await c.co.fetch(await req("/mcp", { method: "POST", visitor: null, body: "{}", headers: { "x-api-key": `wk_mcp_slot-1_3_${"x".repeat(24)}` } }));
+    expect(viaApiKey.status).toBe(401);
+    expect(c.lobbyCalls).toEqual([]);
+    // The minted key still asks the Lobby once, as before.
+    expect((await c.co.fetch(await mcp())).status).toBe(200);
+    expect(c.lobbyCalls.map((x) => x.method)).toEqual(["status"]);
+    // A world with no minted key refuses every key.
+    const none = company({ mintedKeys: [] });
+    await none.ready();
+    expect((await none.co.fetch(await mcp())).status).toBe(401);
+    expect(none.lobbyCalls).toEqual([]);
   });
 
   it("keeps the lease's start with the stamp, and drops it when the lease ends", async () => {
@@ -305,6 +339,15 @@ describe("the Lobby's heartbeat", () => {
     } finally {
       store.isClean = was;
     }
+  });
+
+  it("leaves the usage in the slot for a lease holder's session read (keepUsage), and hands it over to the sweep's", async () => {
+    const c = company();
+    await c.ready();
+    for (let i = 0; i < 3; i++) await c.co.fetch(await req("/v1/workers"));
+    for (let i = 0; i < 5; i++) expect((await c.co.heartbeat({ provider: true, keepUsage: true })).usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
+    expect((await c.co.heartbeat()).usage).toMatchObject({ requests: 3 });
+    expect((await c.co.heartbeat()).usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
   });
 });
 
@@ -714,5 +757,78 @@ describe("the run catalog", () => {
     await Promise.all(c.waits);
     expect(c.recorded).toHaveLength(1);
     expect(JSON.stringify(c.recorded[0])).toContain("run_0001");
+  });
+});
+
+describe("the rows budget (defense in depth)", () => {
+  const limits = { written: WORLD_BUDGET.leaseRowsWritten, read: WORLD_BUDGET.leaseRowsRead };
+  const kvWrites = (c: ReturnType<typeof company>) => c.kvPuts.filter((k) => k === "weft.budget").length;
+
+  it("answers a leased slot's mutations 429 DEMO_LIMIT past its rows written for the generation, and keeps serving its reads", async () => {
+    const c = company();
+    await c.ready();
+    world.rows = (m) => (m === "POST" ? { rowsRead: 10, rowsWritten: 400 } : { rowsRead: 10, rowsWritten: 0 });
+    const statuses: number[] = [];
+    for (let i = 0; i < 20; i++) statuses.push((await c.co.fetch(await req("/v1/time-off/requests", { method: "POST", body: "{}" }))).status);
+    // 13 mutations of 400 rows reach 5,200 >= 5,000: the 14th and later are refused.
+    expect(statuses.filter((x) => x === 200)).toHaveLength(Math.ceil(limits.written / 400));
+    const refused = await c.co.fetch(await req("/v1/time-off/requests", { method: "POST", body: "{}" }));
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({ code: "DEMO_LIMIT", message: expect.stringContaining("daily limit") });
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
+    // The health readout names the generation's rows and the limits.
+    const h = await (await c.co.fetch(await req("/v1/health"))).json() as { budget: { rowsWritten: number; limits: { rowsWritten: number } } };
+    expect(h.budget).toMatchObject({ rowsWritten: 13 * 400, limits: { rowsWritten: limits.written, rowsRead: limits.read } });
+  });
+
+  it("answers every request 429 past the generation's rows read, counting alarm drains, and a new generation starts again", async () => {
+    const c = company();
+    await c.ready();
+    world.rows = (m) => (m === "ALARM" ? { rowsRead: limits.read / 2, rowsWritten: 0 } : { rowsRead: 1_000, rowsWritten: 0 });
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
+    await c.co.runAlarmNow();
+    await c.co.runAlarmNow();
+    for (const method of ["GET", "POST"]) {
+      const r = await c.co.fetch(await req("/v1/workers", { method, ...(method === "POST" ? { body: "{}" } : {}) }));
+      expect(r.status, method).toBe(429);
+      expect(await r.json()).toMatchObject({ code: "DEMO_LIMIT" });
+    }
+    // Refused requests move no row, so any number of them write the tally no more.
+    const writes = kvWrites(c);
+    for (let i = 0; i < 100; i++) expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(429);
+    expect(kvWrites(c)).toBe(writes);
+    // A restart keeps the refusal (the tally was written when it crossed the limit).
+    const again = c.restart();
+    await again.ready();
+    expect((await again.co.fetch(await req("/v1/workers"))).status).toBe(429);
+    // The visitor's reset is the next generation: its tally starts at zero.
+    await again.co.applyStamp({ ...c.stamp!, gen: 4 });
+    expect((await again.co.fetch(await req("/v1/workers", { gen: 4 }))).status).toBe(200);
+  });
+
+  it("writes its tally one row at a time, at most every 20 requests and at each step or limit, never per request", async () => {
+    const c = company();
+    await c.ready();
+    world.rows = () => ({ rowsRead: 50, rowsWritten: 1 });
+    for (let i = 0; i < 200; i++) await c.co.fetch(await req("/v1/workers"));
+    // 200 requests, 10,000 rows read and 200 written: 10 writes by count, a step of 250 written never crossed.
+    expect(kvWrites(c)).toBeLessThanOrEqual(10 + Math.ceil(10_000 / WORLD_BUDGET.readStep));
+    expect(kvWrites(c)).toBeGreaterThan(0);
+    expect(c.kv.get("weft.budget")).toMatchObject({ key: "g3", rowsRead: expect.any(Number), events: expect.any(Number) });
+  });
+
+  it("answers the showcase 503 SHOWCASE_LIMIT past its rows read for the UTC day, and serves again the next day", async () => {
+    const c = company({ stamp: { slot: "showcase", gen: 1, mode: "showcase", visitor: null, ipHash: null, leaseStartedAt: null } });
+    await c.ready();
+    world.rows = () => ({ rowsRead: 100_000, rowsWritten: 0 });
+    const show = (o: { gen?: number } = {}) => req("/v1/workers", { slot: "showcase", gen: o.gen ?? 0, visitor: null });
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i++) statuses.push((await c.co.fetch(await show())).status);
+    expect(statuses.filter((x) => x === 200)).toHaveLength(WORLD_BUDGET.showcaseRowsReadPerDay / 100_000);
+    const r = await c.co.fetch(await show());
+    expect(r.status).toBe(503);
+    expect(await r.json()).toMatchObject({ code: "SHOWCASE_LIMIT" });
+    at(T0 + 24 * 60 * MIN);
+    expect((await c.co.fetch(await show())).status).toBe(200);
   });
 });

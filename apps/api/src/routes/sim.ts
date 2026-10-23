@@ -15,7 +15,7 @@ import { readSeedProfile, seedWorldProfile, type SeedProfile } from "@weft/seed/
 import type { Weft, WeftEnv } from "../http/context";
 import { viewerScope } from "../http/scope";
 import { SimResetBody } from "../../../../packages/contracts/src/ext/tour";
-import { HOSTED_ERRORS } from "../../../../packages/contracts/src/ext/cf-hosted";
+import { HOSTED_CLOCK, HOSTED_CLOCK_LIMITS, HOSTED_ERRORS } from "../../../../packages/contracts/src/ext/cf-hosted";
 import { RESERVED_TABLE_PREFIX } from "../../../../packages/contracts/src/ext/cf-db";
 
 /** node:fs on first use, never a static import: this module is on the hosted import graph (docs/cloudflare/design.md
@@ -48,6 +48,23 @@ export function nextCronSlot(now: string): string {
     if (parts.weekday !== "Sat" && parts.weekday !== "Sun" && parts.hour === "09" && parts.minute === "00") return new Date(t).toISOString();
   }
   throw new Error("nextCronSlot: none within 8 days");
+}
+
+const DAY_MS = 86_400_000;
+const fmtDays = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
+
+/**
+ * Why a hosted world refuses to move its clock from `from` to `to`, or null (HOSTED_CLOCK_LIMITS, design 6.3). One
+ * advance to a far date would run every cron slot in between in one request: an advance from the seed morning to 2031
+ * wrote 10,162 rows, read 165,354 and queued 263 runs. Checked before anything is read or written.
+ */
+export function hostedClockRefusal(from: string, to: string): string | null {
+  const step = Date.parse(to) - Date.parse(from);
+  if (step > HOSTED_CLOCK_LIMITS.maxStepDays * DAY_MS) return `The hosted demo moves the clock at most ${fmtDays(HOSTED_CLOCK_LIMITS.maxStepDays)} at a time; move it in smaller steps`;
+  if (Date.parse(to) - Date.parse(HOSTED_CLOCK.at) > HOSTED_CLOCK_LIMITS.maxDaysFromStart * DAY_MS) {
+    return `The hosted demo's clock stays within ${fmtDays(HOSTED_CLOCK_LIMITS.maxDaysFromStart)} of its start; reset the demo company to start the clock again`;
+  }
+  return null;
 }
 
 function session(c: { var: { session: HumanSession | null } }): HumanSession {
@@ -155,6 +172,11 @@ export function simRoutes(weft: Weft): Hono<WeftEnv> {
     const from = weft.clock.now();
     const to = "to" in body ? new Date(Date.parse(body.to)).toISOString() : "by" in body ? new Date(Date.parse(from) + durationMs(body.by)).toISOString() : nextCronSlot(from);
     if (Number.isNaN(Date.parse(to)) || to < from) throw new ValidationError(`Cannot move the clock from ${from} to ${to}`);
+    const refused = weft.platform?.kind === "durable" ? hostedClockRefusal(from, to) : null;
+    if (refused) {
+      const e = HOSTED_ERRORS.CLOCK_LIMIT;
+      return c.json({ _tag: e.tag, code: "CLOCK_LIMIT", message: refused }, e.status);
+    }
     await weft.clock.advance(to);
     await withWriteLock(() => weft.db.transaction(async (tx) => {
       await emitEvent(tx, weft.clock, { body: { type: "clock.advanced", payload: { from, to } }, subjectRef: "clock", attended: true, requestedBy: c.var.session?.principalId ?? null });

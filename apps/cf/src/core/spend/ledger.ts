@@ -14,10 +14,12 @@
 // day, updated in the same transactionSync as every write that changes it (reserve, settle, release, the orphan
 // sweep's settles, direct neurons and pruning). A status, a day's totals and the live totals (GET /v1/agent/costs and
 // the Platform page, which any visitor can call) read only those rows and the live carry, never an entry; a day
-// outside the retained ones answers zero and reads nothing. A reservation reads its run's rows and, for the visitor
-// and IP-hash caps, that visitor's and that address's rows today (each through its own index). The orphan sweep reads
+// outside the retained ones answers zero and reads nothing. The visitor and IP-hash day caps have their own persisted
+// totals in `spend_who`, one row per day and visitor or address (settled and open micros), updated in the same
+// transactions, so a reservation and a leased visitor's status read one row for each instead of that visitor's or
+// that address's entries of the day. A reservation also reads its run's rows (the run cap). The orphan sweep reads
 // only the reservations that crossed the orphan age since its last run, and prunes entries older than RETAIN_DAYS a
-// bounded batch at a time, taking the batch's fold out of its day's row (the live part carries over in spend_meta,
+// bounded batch at a time, taking the batch's fold out of its day's rows (the live part carries over in spend_meta,
 // so the cumulative live cap still counts it).
 import {
   FROZEN_CAP, NEURON_SHARES, ORPHAN_SETTLE_MS,
@@ -26,8 +28,11 @@ import {
 } from "../../shared/contracts";
 import { randomHex } from "../../shared/crypto";
 
-/** "2" added `spend_days` (the persisted per-day totals) and the visitor and IP-hash indexes; "1" kept totals in memory. */
-export const SPEND_SCHEMA_VERSION = "2";
+/**
+ * "3" added `spend_who` (the persisted per-day totals of each visitor and IP hash) in place of the visitor and IP-hash
+ * indexes; "2" added `spend_days` (the persisted per-day totals); "1" kept totals in memory.
+ */
+export const SPEND_SCHEMA_VERSION = "3";
 
 const PRODUCTS: readonly NeuronProduct[] = ["agent", "ocr", "embeddings", "dictation"];
 
@@ -53,16 +58,17 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS spend_entries_run ON spend_entries(world, run_id) WHERE run_id IS NOT NULL`,
   // The orphan sweep's window of reservations by age.
   `CREATE INDEX IF NOT EXISTS spend_entries_reserve_at ON spend_entries(at) WHERE kind = 'reserve'`,
-  // The visitor and IP-hash day caps (a reservation, a leased visitor's status) read only that visitor's or that
-  // address's rows of the day.
-  `CREATE INDEX IF NOT EXISTS spend_entries_visitor ON spend_entries(day, visitor) WHERE visitor IS NOT NULL`,
-  `CREATE INDEX IF NOT EXISTS spend_entries_ip ON spend_entries(day, ip_hash) WHERE ip_hash IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS neuron_entries (
      seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, day TEXT NOT NULL, product TEXT NOT NULL,
      model TEXT NOT NULL, neurons INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS neuron_entries_day ON neuron_entries(day)`,
   `CREATE TABLE IF NOT EXISTS spend_days (day TEXT PRIMARY KEY, ${DAY_COLS.map((c) => `${c} INTEGER NOT NULL DEFAULT 0`).join(", ")}) WITHOUT ROWID`,
+  // The visitor and IP-hash day caps: one row per day and visitor (kind 'v') or IP hash (kind 'i').
+  `CREATE TABLE IF NOT EXISTS spend_who (day TEXT NOT NULL, kind TEXT NOT NULL, who TEXT NOT NULL, settled_micros INTEGER NOT NULL DEFAULT 0, open_micros INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, kind, who)) WITHOUT ROWID`,
 ];
+/** Schema 2's per-entry indexes for the visitor and IP-hash caps, which `spend_who` replaces (each cost two index
+ * rows written per entry). */
+const RETIRED_INDEXES = ["spend_entries_visitor", "spend_entries_ip"];
 
 export interface SyncSql {
   readonly sql: SqlStorageLike;
@@ -70,9 +76,10 @@ export interface SyncSql {
 }
 
 /**
- * Creates the ledger's tables and indexes (IF NOT EXISTS, so a start creates nothing once they exist) and upgrades a
- * schema "1" ledger once: its `spend_days` rows are built from the entries in the same transaction that records
- * schema "2" (rebuildSpendTotals), and the live index the in-memory totals were built through is dropped.
+ * Creates the ledger's tables and indexes (IF NOT EXISTS, so a start creates nothing once they exist) and upgrades an
+ * older ledger once: its `spend_days` and `spend_who` rows are built from the entries (each read once) in the same
+ * transaction that records schema "3" (rebuildSpendTotals), and the indexes they replace are dropped (schema 1's live
+ * index, schema 2's visitor and IP-hash indexes).
  */
 export function migrateSpend(s: SyncSql): void {
   s.transactionSync(() => {
@@ -83,17 +90,17 @@ export function migrateSpend(s: SyncSql): void {
       s.sql.exec(`INSERT INTO spend_meta (k, v) VALUES ('schema', ?)`, SPEND_SCHEMA_VERSION);
       return;
     }
-    if (v !== "1") throw new Error(`SpendDO schema ${v} is newer than this code (${SPEND_SCHEMA_VERSION})`);
-    s.sql.exec(`DROP INDEX IF EXISTS spend_entries_live`);
+    if (v !== "1" && v !== "2") throw new Error(`SpendDO schema ${v} is newer than this code (${SPEND_SCHEMA_VERSION})`);
+    for (const ix of ["spend_entries_live", ...RETIRED_INDEXES]) s.sql.exec(`DROP INDEX IF EXISTS ${ix}`);
     rebuildTotalsNow(s.sql);
     s.sql.exec(`UPDATE spend_meta SET v = ? WHERE k = 'schema'`, SPEND_SCHEMA_VERSION);
   });
 }
 
 /**
- * Rebuilds every `spend_days` row from the entries: each entry and direct neuron entry is read once (the table holds
- * RETAIN_DAYS of entries, since the sweep prunes older ones). The schema "1" upgrade runs it once; tests run it after
- * writing entries directly. The live carry (pruned live totals) is kept as it is.
+ * Rebuilds every `spend_days` and `spend_who` row from the entries: each entry and direct neuron entry is read once
+ * (the table holds RETAIN_DAYS of entries, since the sweep prunes older ones). An upgrade runs it once; tests run it
+ * after writing entries directly. The live carry (pruned live totals) is kept as it is.
  */
 export function rebuildSpendTotals(s: SyncSql): void {
   s.transactionSync(() => rebuildTotalsNow(s.sql));
@@ -102,14 +109,50 @@ export function rebuildSpendTotals(s: SyncSql): void {
 function rebuildTotalsNow(sql: SqlStorageLike): void {
   const byDay = new Map<string, DayTotals>();
   const at = (day: string) => { let t = byDay.get(day); if (!t) { t = zeroDay(); byDay.set(day, t); } return t; };
+  const byWho = new Map<string, { day: string; kind: WhoKind; who: string; t: WhoTotals }>();
   const rows = sql.exec(`SELECT ${ROW_COLS} FROM spend_entries ORDER BY seq`).toArray() as unknown as SpendRow[];
-  for (const f of fold(rows).values()) addInto(at(f.r.day), contribution(f));
+  for (const f of fold(rows).values()) {
+    addInto(at(f.r.day), contribution(f));
+    const w = whoContribution(f);
+    for (const [kind, who] of whoOf(f.r)) {
+      const k = `${f.r.day}|${kind}|${who}`;
+      const cur = byWho.get(k) ?? { day: f.r.day, kind, who, t: { settled: 0, open: 0 } };
+      cur.t.settled += w.settled;
+      cur.t.open += w.open;
+      byWho.set(k, cur);
+    }
+  }
   for (const d of sql.exec<{ day: string; product: string; n: number }>(`SELECT day, product, SUM(neurons) AS n FROM neuron_entries GROUP BY day, product`).toArray()) {
     if ((PRODUCTS as readonly string[]).includes(d.product)) at(d.day)[productCol(d.product as NeuronProduct)] += Number(d.n);
   }
   sql.exec(`DELETE FROM spend_days`);
   for (const [day, t] of byDay) addToDay(sql, day, t);
+  sql.exec(`DELETE FROM spend_who`);
+  for (const w of byWho.values()) addToWho(sql, w.day, w.kind, w.who, w.t);
 }
+
+/** `spend_who` kinds: a visitor's day, an IP hash's day. */
+type WhoKind = "v" | "i";
+/** A visitor's or an address's day totals (or a change to them). */
+export interface WhoTotals { settled: number; open: number }
+/** The `spend_who` rows a reservation counts in: its visitor's and its address's, as they are set. */
+const whoOf = (r: Pick<SpendRow, "visitor" | "ip_hash">): [WhoKind, string][] =>
+  [...(r.visitor ? [["v", r.visitor] as [WhoKind, string]] : []), ...(r.ip_hash ? [["i", r.ip_hash] as [WhoKind, string]] : [])];
+/** What one folded reservation adds to its visitor's and its address's rows. */
+const whoContribution = (f: Folded): WhoTotals => (f.open ? { settled: 0, open: f.micros } : { settled: f.micros, open: 0 });
+/** Adds `t` to the visitor's or address's row of `day` (creating it), inside the caller's transaction; zeros write nothing. */
+function addToWho(sql: SqlStorageLike, day: string, kind: WhoKind, who: string, t: WhoTotals): void {
+  if (t.settled === 0 && t.open === 0) return;
+  sql.exec(`INSERT INTO spend_who (day, kind, who, settled_micros, open_micros) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (day, kind, who) DO UPDATE SET settled_micros = settled_micros + excluded.settled_micros, open_micros = open_micros + excluded.open_micros`,
+  day, kind, who, t.settled, t.open);
+}
+/** Adds `t` to every `spend_who` row reservation `r` counts in. */
+function addToWhoOf(sql: SqlStorageLike, r: SpendRow, t: WhoTotals): void {
+  for (const [kind, who] of whoOf(r)) addToWho(sql, r.day, kind, who, t);
+}
+/** What closing reservation `r` with entry `e` changes in its visitor's and address's rows. */
+const whoCloseChange = (r: SpendRow, e: SpendRow): WhoTotals => ({ settled: e.kind === "settle" ? e.usd_micros : 0, open: -r.usd_micros });
 
 export interface SpendRow {
   at: string; day: string; world: string | null; run_id: string | null; kind: "reserve" | "settle" | "release";
@@ -255,7 +298,8 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
   const rowsForRun = (world: string | null, runId: string) => world === null
     ? q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE world IS NULL AND run_id = ? ORDER BY seq`, runId)
     : q<SpendRow>(`SELECT ${ROW_COLS} FROM spend_entries WHERE world = ? AND run_id = ? ORDER BY seq`, world, runId);
-  /** A visitor's or an address's rows on `days` (through the visitor or the IP-hash index), for its day caps. */
+  /** A visitor's or an address's rows on `days` (through the day index), for a scope spend_who does not answer (a
+   * visitor and an address together, or with a live filter): no deployed caller asks one. */
   const rowsFor = (days: readonly string[], who: { visitor?: string; ipHash?: string }) => {
     const where = [`day IN (${marks(days.length)})`];
     const b: SqlStorageValue[] = [...days];
@@ -278,6 +322,10 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
   /** The rows of `days` added up (one row read per day that has one). */
   const daysTotals = (days: readonly string[]): DayTotals =>
     q<Record<string, unknown>>(`${DAY_SELECT} WHERE day IN (${marks(days.length)})`, ...days).reduce<DayTotals>((t, r) => addInto(t, asDay(r)), zeroDay());
+  /** A visitor's or an address's committed micros on `days`: one `spend_who` row per day that has one. */
+  const whoTotals = (days: readonly string[], kind: WhoKind, who: string): Totals =>
+    q<{ s: number; o: number }>(`SELECT settled_micros AS s, open_micros AS o FROM spend_who WHERE day IN (${marks(days.length)}) AND kind = ? AND who = ?`, ...days, kind, who)
+      .reduce<Totals>((t, r) => ({ settledMicros: t.settledMicros + (Number(r.s) || 0), openMicros: t.openMicros + (Number(r.o) || 0), neurons: 0 }), zeroTotals());
   /** Every live reservation ever made: the live carry (pruned ones) plus every day row's live part. Reads the carry and
    * the day rows: the retained days and the older ones the sweep has not pruned yet. */
   function live(): Totals {
@@ -294,14 +342,17 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       && (scope.visitor === undefined || r.visitor === scope.visitor)
       && (scope.ipHash === undefined || r.ip_hash === scope.ipHash)
       && (scope.runId === undefined || scope.world === undefined || r.world === scope.world);
-    // A run's totals read the run's own rows (through its index), and a visitor's or an address's read its own rows on
-    // the days asked for. Everything else comes from the day rows: a retained day's row, nothing for any other day (no
-    // query), the live totals, and otherwise the retained days together (older entries are pruned, so they are the
-    // whole table but for what the next sweep prunes).
+    // A run's totals read the run's own rows (through its index), and a visitor's or an address's its persisted rows on
+    // the days asked for (micros only, as the caps use them). Everything else comes from the day rows: a retained
+    // day's row, nothing for any other day (no query), the live totals, and otherwise the retained days together
+    // (older entries are pruned, so they are the whole table but for what the next sweep prunes).
     if (scope.runId !== undefined) return totalsOf(fold(rowsForRun(scope.world ?? null, scope.runId)).values(), keep);
     const kept = retainedDays(wallNow());
     const days = scope.day === undefined ? kept : kept.includes(scope.day) ? [scope.day] : [];
     if (!days.length) return zeroTotals();
+    const alone = scope.live === undefined && (scope.visitor === undefined) !== (scope.ipHash === undefined);
+    if (alone && scope.visitor !== undefined) return whoTotals(days, "v", scope.visitor);
+    if (alone && scope.ipHash !== undefined) return whoTotals(days, "i", scope.ipHash);
     if (scope.visitor !== undefined || scope.ipHash !== undefined) return totalsOf(fold(rowsFor(days, scope)).values(), keep);
     if (scope.day === undefined && scope.live === true) return live();
     const t = daysTotals(days);
@@ -331,6 +382,7 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       const e: SpendRow = { ...r, kind, usd_micros: Math.max(0, Math.ceil(usd)), neurons: Math.max(0, Math.ceil(neurons ?? r.neurons)) };
       insert(e);
       addToDay(s.sql, r.day, closeChange(r, e));
+      addToWhoOf(s.sql, r, whoCloseChange(r, e));
     });
   }
 
@@ -356,6 +408,8 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
         const c = contribution(f);
         addInto(change(f.r.day), c, -1);
         carry = addTotals(carry, liveOfDay(c));
+        const w = whoContribution(f);
+        addToWhoOf(s.sql, f.r, { settled: -w.settled, open: -w.open });
       }
       if (rows.length) s.sql.exec(`DELETE FROM spend_entries WHERE reservation_id IN (${batch})`, keepFrom, PRUNE_BATCH);
       if (folded.size < PRUNE_BATCH) {
@@ -372,6 +426,8 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
         AND NOT EXISTS (SELECT 1 FROM neuron_entries WHERE neuron_entries.day = spend_days.day)`;
       for (const r of q<Record<string, unknown>>(`${DAY_SELECT} WHERE ${empty}`, keepFrom)) carry = addTotals(carry, liveOfDay(asDay(r)));
       s.sql.exec(`DELETE FROM spend_days WHERE ${empty}`, keepFrom);
+      // A pruned day's visitor and address rows go once none of its entries is left (the batches took them to zero).
+      s.sql.exec(`DELETE FROM spend_who WHERE day < ? AND NOT EXISTS (SELECT 1 FROM spend_entries WHERE spend_entries.day = spend_who.day)`, keepFrom);
       if (carry.settledMicros || carry.openMicros || carry.neurons) setMeta(META.liveCarry, JSON.stringify(addTotals(parseCarry(meta(META.liveCarry)), carry)));
     });
   }
@@ -393,8 +449,8 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
         }
         checks.push({ cap: "day", capMicros: caps.dayUsd * 1e6, committed: () => committedOf(totalsOfDay(st)) });
         if (input.live && caps.liveUsd !== null) checks.push({ cap: "live", capMicros: caps.liveUsd * 1e6, committed: () => committedOf(live()) });
-        if (input.visitor) checks.push({ cap: "visitor", capMicros: caps.visitorDayUsd * 1e6, committed: () => committedOf(totalsOf(fold(rowsFor([day], { visitor: input.visitor! })).values())) });
-        if (input.ipHash) checks.push({ cap: "ip", capMicros: caps.ipDayUsd * 1e6, committed: () => committedOf(totalsOf(fold(rowsFor([day], { ipHash: input.ipHash! })).values())) });
+        if (input.visitor) checks.push({ cap: "visitor", capMicros: caps.visitorDayUsd * 1e6, committed: () => committedOf(whoTotals([day], "v", input.visitor!)) });
+        if (input.ipHash) checks.push({ cap: "ip", capMicros: caps.ipDayUsd * 1e6, committed: () => committedOf(whoTotals([day], "i", input.ipHash!)) });
         for (const c of checks) {
           const committed = c.committed();
           if (committed + usd > c.capMicros) {
@@ -416,6 +472,7 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
         };
         insert(row);
         addToDay(s.sql, day, contribution({ r: row, micros: usd, neurons, open: true }));
+        addToWhoOf(s.sql, row, { settled: 0, open: usd });
         return { ok: true, reservationId };
       });
     },
@@ -435,14 +492,13 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
       const day = today();
       const caps = opts.caps();
       const st = dayTotals(day);
-      const who = (w: { visitor?: string; ipHash?: string }) => committedOf(totalsOf(fold(rowsFor([day], w)).values()));
       return {
         day,
         caps,
         spentMicros: {
           day: committedOf(totalsOfDay(st)),
-          visitor: scope.visitor ? who({ visitor: scope.visitor }) : null,
-          ip: scope.ipHash ? who({ ipHash: scope.ipHash }) : null,
+          visitor: scope.visitor ? committedOf(whoTotals([day], "v", scope.visitor)) : null,
+          ip: scope.ipHash ? committedOf(whoTotals([day], "i", scope.ipHash)) : null,
           live: committedOf(live()),
         },
         neurons: (({ total, byProduct }) => ({ used: total, byProduct }))(neuronUse(st)),
@@ -465,6 +521,7 @@ export function createSqlSpendLedger(s: SyncSql, opts: SqlSpendLedgerOptions): S
           const e: SpendRow = { ...r, kind: "settle" };   // worst case: the reserved amount and neurons
           insert(e);
           addToDay(s.sql, r.day, closeChange(r, e));
+          addToWhoOf(s.sql, r, whoCloseChange(r, e));
         }
         if (scannedTo === null || cutoff > scannedTo) setMeta(META.orphansScannedTo, cutoff);
         return open.length;

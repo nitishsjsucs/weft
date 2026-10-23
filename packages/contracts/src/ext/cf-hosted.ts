@@ -24,6 +24,13 @@ export const hostedWorldId = (w: { slot: string; gen: number }): string => `${w.
 /** The clock every hosted world starts frozen at: Mon 2026-10-26 08:30 PT. Time moves only through the Simulators
  * advance buttons (WEFT_CLOCK_RATE=0). */
 export const HOSTED_CLOCK = { at: "2026-10-26T15:30:00.000Z", rate: 0 } as const;
+/**
+ * How far a hosted world's clock moves (design 6.3). One advance moves it at most `maxStepDays` (so "+1 hour",
+ * "+1 day" and "next routine" work and one request cannot jump years, which writes and reads the rows of every cron
+ * slot and queues a run for each), and never past `maxDaysFromStart` after HOSTED_CLOCK.at; past it the visitor
+ * resets the demo company. A refusal is 400 CLOCK_LIMIT. Node worlds have no such bound.
+ */
+export const HOSTED_CLOCK_LIMITS = { maxStepDays: 7, maxDaysFromStart: 60 } as const;
 
 // Settings ------------------------------------------------------------------------------------------------------
 
@@ -118,6 +125,9 @@ export const TRUST_HEADERS = { proxy: "x-weft-proxy", ctx: "x-weft-ctx", smoke: 
 export interface WeftCtx { slot: string; gen: number; visitor: string | null; ipHash: string | null; human: boolean; smoke: boolean; iat: number }
 /** GET responses list the tables they read (comma-separated, sorted); the web refetches queries whose tables a commit wrote. */
 export const TABLES_HEADER = "x-weft-tables";
+/** GET responses list the query parameter names their route read (sorted, comma-separated; "*" for all of them), so the
+ * front's showcase memo keys a read by those parameters only and a parameter the route ignores cannot vary the key. */
+export const QUERY_HEADER = "x-weft-query";
 /** ETag on polled GETs: W/"<gen>.<hash(route, query, principal, versions of the tables it read)>". */
 export const hostedEtag = (gen: number, hash: string): string => `W/"${gen}.${hash}"`;
 
@@ -207,8 +217,11 @@ export interface HostedResetResult { ok: true; gen: number; resetsLeft: number }
 export interface ModelSwitchBody { provider: HostedProviderId | null }
 export interface McpKeyMint { key: string; url: string; expiresAt: string }
 
+/** A world's rows budget as GET /api/v1/health reports it (design 6.3): this generation's (a leased slot) or this UTC
+ * day's (the showcase) rows against the limits; a null limit is not enforced there. */
+export interface HostedBudgetReadout { rowsWritten: number; rowsRead: number; events: number; limits: { rowsWritten: number | null; rowsRead: number } }
 /** GET /api/v1/health on hosted adds these fields (additive). */
-export interface HostedHealthFields { runtime: "node" | "cloudflare"; world?: HostedWorldRef }
+export interface HostedHealthFields { runtime: "node" | "cloudflare"; world?: HostedWorldRef; budget?: HostedBudgetReadout }
 
 // WebSocket feed ------------------------------------------------------------------------------------------------
 
@@ -241,6 +254,12 @@ export const HOSTED_ERRORS = {
   HOSTED_RESET_PROFILE: { status: 400, tag: "ValidationError" },
   WORLD_READ_ONLY: { status: 409, tag: "Conflict" },
   AGENT_PAUSED: { status: 503, tag: "Refused" },
+  /** A hosted clock advance past HOSTED_CLOCK_LIMITS. */
+  CLOCK_LIMIT: { status: 400, tag: "ValidationError" },
+  /** This demo company used its rows budget for this generation (design 6.3): reset it, or come back later. */
+  DEMO_LIMIT: { status: 429, tag: "RateLimitExceeded" },
+  /** The shared showcase read its rows for the UTC day (design 6.3); leased demo companies and the static pages work. */
+  SHOWCASE_LIMIT: { status: 503, tag: "Refused" },
 } as const satisfies Record<string, { status: number; tag: ErrorTag }>;
 export type HostedErrorCode = keyof typeof HOSTED_ERRORS;
 export interface HostedErrorBody { _tag: ErrorTag; code: HostedErrorCode; message: string; retryAfterS?: number }
