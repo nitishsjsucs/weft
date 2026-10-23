@@ -1,7 +1,8 @@
 // pnpm cf:dev (docs/cloudflare/design.md 11.5): both Workers under `wrangler dev` on one port (default 5780, track
 // cf4-worker's) with their state under .scratch/cf4-worker/cf-dev/, then provisions the pool so the guided tour runs
 // against it. The configs are the deploy configs made local (scripts/cf/lib/configs.ts): the scripted provider,
-// Turnstile's always-pass test secret, local random secrets in .dev.vars (mode 600, never printed), the bindings
+// Turnstile's always-pass test secret, local random secrets in .dev.vars (mode 600, never printed) with the vault key
+// the snapshot was sealed with (the local key pnpm cf:snapshot writes; a deploy-sealed snapshot is refused), the bindings
 // Miniflare does not emulate swapped for the fakes worker, the web export from apps/web/out when it exists, with the
 // snapshot's stats.json copied beside it (the hosted landing fetches /stats.json).
 //
@@ -30,6 +31,7 @@ import { defaultBudget, emptyUsage, restoresLeft, type BudgetConfig } from "../.
 import { signAdmin } from "../../apps/cf/src/shared/tokens";
 import { APPS_CF, writeLocalConfigs } from "./lib/configs";
 import { ensureEnvValue, hex, REPO_ROOT } from "./lib/env-file";
+import { snapshotVaultKey } from "./lib/vault-key";
 
 export const DEFAULT_DEV_DIR = join(REPO_ROOT, ".scratch/cf4-worker/cf-dev");
 /** --dir (repo-relative or absolute), so each track keeps its own state (cf7 runs on port 5800 under .scratch/cf7). */
@@ -50,14 +52,19 @@ export function portInUse(port: number): boolean {
   }
 }
 
-/** The local secrets every Worker reads from .dev.vars (generated once, kept under the dev dir). */
-export function devVars(dir: string): Record<string, string> {
+/**
+ * The local secrets every Worker reads from .dev.vars (generated once, kept under the dev dir). `vaultKey`, for the
+ * real engine, is the key the snapshot was sealed with (snapshotVaultKey); it is never stored in the dev dir. The fake
+ * engine restores no snapshot and keeps a generated one.
+ */
+export function devVars(dir: string, opts: { vaultKey?: string } = {}): Record<string, string> {
   mkdirSync(dir, { recursive: true });
   const file = join(dir, "secrets.env");
   const v: Record<string, string> = {};
-  for (const name of ["WEFT_SESSION_SECRET", "WEFT_CTX_SECRET", "WEFT_PROXY_SECRET", "WEFT_SMOKE_TOKEN", "WEFT_ADMIN_TOKEN", "WEFT_VAULT_KEY"]) {
+  for (const name of ["WEFT_SESSION_SECRET", "WEFT_CTX_SECRET", "WEFT_PROXY_SECRET", "WEFT_SMOKE_TOKEN", "WEFT_ADMIN_TOKEN"]) {
     v[name] = ensureEnvValue(file, name, () => hex(32)).value;
   }
+  v.WEFT_VAULT_KEY = opts.vaultKey ?? ensureEnvValue(file, "WEFT_VAULT_KEY", () => hex(32)).value;
   v.TURNSTILE_SECRET = TURNSTILE_PASS;
   return v;
 }
@@ -141,7 +148,7 @@ async function main(argv: string[]): Promise<void> {
     ...(verifyUrl ? { frontVars: { TURNSTILE_VERIFY_URL: verifyUrl } } : {}),
   });
   if (verifyUrl) console.log(`cf:dev: siteverify goes to ${verifyUrl}`);
-  const vars = devVars(DEV_DIR);
+  const vars = devVars(DEV_DIR, fake ? {} : { vaultKey: snapshotVaultKey() });
   writeFileSync(join(DEV_DIR, ".dev.vars"), Object.entries(vars).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 0o600 });
 
   const log = openSync(join(DEV_DIR, "dev.log"), "a");

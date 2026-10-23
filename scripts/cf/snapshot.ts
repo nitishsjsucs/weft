@@ -20,15 +20,12 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, wr
 import { join } from "node:path";
 import * as weftDb from "../../packages/db/src/index";
 import { CF_SECRETS_FILE, hex, readEnvValue, REPO_ROOT } from "./lib/env-file";
+import { LOCAL_FINGERPRINT_PREFIX, LOCAL_VAULT_KEY_FILE as LOCAL_KEY_FILE, vaultFingerprint } from "./lib/vault-key";
 import { FIXTURE_FILES } from "../../apps/cf/generated/fixtures";
 
 export const OUT_DIR = join(REPO_ROOT, "apps/cf/generated");
 export const DATA_DIR = join(REPO_ROOT, ".scratch/cf-snapshot");
-const LOCAL_KEY_FILE = join(REPO_ROOT, ".scratch/cf-snapshot.local-vault-key");
-
-/** The fingerprint the manifest records for the vault key (the vault's own formula, design 4.1). */
-export const vaultFingerprint = (keyHex: string): string => "fp_" + createHash("sha256").update("weft-vault-fingerprint:" + keyHex).digest("hex").slice(0, 12);
-export const LOCAL_FINGERPRINT_PREFIX = "local:";
+export { LOCAL_FINGERPRINT_PREFIX, vaultFingerprint };
 
 export const snapshotId = (digest: string, journalHash: string): string => createHash("sha256").update(`${digest}|${journalHash}`).digest("hex").slice(0, 16);
 
