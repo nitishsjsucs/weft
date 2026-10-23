@@ -35,6 +35,7 @@ export function HostedBanner() {
     return (
       <div data-testid="hosted-banner" data-world="showcase" className={cn(bar, "bg-blue-3 text-blue-11")}>
         <span className="min-w-0 flex-1">{s.blocked ? blockedText(s.blocked) : `${C.showcase} ${C.showcaseMore}`}</span>
+        {s.limited?.kind === "showcase" ? <span className="w-full text-amber-11" data-testid="hosted-limit">{C.showcaseLimit}</span> : null}
         {s.status.level >= 3 ? null : <Button size="xs" variant="primary" data-testid="hosted-start-cta" onClick={() => requestStart("button")}>{C.showcaseCta}</Button>}
         {note ? <span className="w-full text-amber-11">{note}</span> : null}
       </div>
@@ -45,6 +46,7 @@ export function HostedBanner() {
       <span className="font-medium text-gray-12">{C.leased}</span>
       <span data-testid="hosted-lease-left" className="tabular">{left === null ? "" : fmtLeft(Math.max(0, left))}</span>
       <span className="min-w-0 flex-1">{C.fictional}</span>
+      {s.limited?.kind === "demo" ? <span className="w-full text-amber-11" data-testid="hosted-limit">{C.demoLimit}</span> : null}
       {note ? <span className="w-full text-amber-11" data-testid="hosted-provider-note">{note}</span> : null}
     </div>
   );

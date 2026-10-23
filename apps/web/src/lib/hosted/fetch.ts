@@ -4,12 +4,14 @@
 //   and so may a GET the edge treats as one (a PDF render);
 // - 409 LEASE_REQUIRED (a mutation on the shared showcase): offer "Start my demo company";
 // - 409 LEASE_ENDED (the cookie's generation is older than the world's): show the lease-ended screen;
-// - 401 SESSION_INVALID: re-read the session.
+// - 401 SESSION_INVALID: re-read the session;
+// - 429 DEMO_LIMIT and 503 SHOWCASE_LIMIT (the world's rows budget, design 6.3): the banner says the demo company (or
+//   the shared one) has hit its daily limit.
 // The response the caller sees is the retried one, or the original when the check was cancelled. The lease and
 // session answers are acted on whichever response carries them, the first or the retried one.
 import { TABLES_HEADER, type HostedErrorCode } from "../../../../../packages/contracts/src/ext/cf-hosted";
 import { recordTables } from "../api/poll";
-import { ensureHumanGrant, markEnded, refreshSession, requestStart } from "./session";
+import { ensureHumanGrant, markEnded, markLimited, refreshSession, requestStart } from "./session";
 
 function urlOf(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
@@ -22,7 +24,7 @@ function methodOf(input: RequestInfo | URL, init?: RequestInit): string {
 
 /** The hosted error code of a gate answer, read from a clone (the caller still reads the body). */
 export async function gateCode(res: Response): Promise<HostedErrorCode | null> {
-  if (res.status !== 428 && res.status !== 409 && res.status !== 401) return null;
+  if (res.status !== 428 && res.status !== 409 && res.status !== 401 && res.status !== 429 && res.status !== 503) return null;
   try { const b = (await res.clone().json()) as { code?: unknown }; return typeof b.code === "string" ? (b.code as HostedErrorCode) : null; }
   catch { return null; }
 }
@@ -33,8 +35,9 @@ export interface HostedFetchDeps {
   markEnded: typeof markEnded;
   requestStart: typeof requestStart;
   refreshSession: () => Promise<unknown>;
+  markLimited?: typeof markLimited;
 }
-const defaultDeps = (): HostedFetchDeps => ({ fetch: (...a) => fetch(...a), ensureHumanGrant, markEnded, requestStart, refreshSession });
+const defaultDeps = (): HostedFetchDeps => ({ fetch: (...a) => fetch(...a), ensureHumanGrant, markEnded, requestStart, refreshSession, markLimited });
 
 /** Builds a hosted fetch over `deps` (tests pass fakes). */
 export function createHostedFetch(deps: () => HostedFetchDeps = defaultDeps): typeof fetch {
@@ -55,6 +58,8 @@ export function createHostedFetch(deps: () => HostedFetchDeps = defaultDeps): ty
       d.markEnded("server");
     } else if (code === "SESSION_INVALID") {
       void d.refreshSession();
+    } else if (code === "DEMO_LIMIT" || code === "SHOWCASE_LIMIT") {
+      d.markLimited?.(code === "DEMO_LIMIT" ? "demo" : "showcase");
     }
     if (method === "GET" && res.ok) recordTables(urlOf(input), res.headers.get(TABLES_HEADER));
     return res;

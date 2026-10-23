@@ -217,8 +217,11 @@ export interface HostedResetResult { ok: true; gen: number; resetsLeft: number }
 export interface ModelSwitchBody { provider: HostedProviderId | null }
 export interface McpKeyMint { key: string; url: string; expiresAt: string }
 
+/** A world's rows budget as GET /api/v1/health reports it (design 6.3): this generation's (a leased slot) or this UTC
+ * day's (the showcase) rows against the limits; a null limit is not enforced there. */
+export interface HostedBudgetReadout { rowsWritten: number; rowsRead: number; events: number; limits: { rowsWritten: number | null; rowsRead: number } }
 /** GET /api/v1/health on hosted adds these fields (additive). */
-export interface HostedHealthFields { runtime: "node" | "cloudflare"; world?: HostedWorldRef }
+export interface HostedHealthFields { runtime: "node" | "cloudflare"; world?: HostedWorldRef; budget?: HostedBudgetReadout }
 
 // WebSocket feed ------------------------------------------------------------------------------------------------
 
@@ -253,6 +256,10 @@ export const HOSTED_ERRORS = {
   AGENT_PAUSED: { status: 503, tag: "Refused" },
   /** A hosted clock advance past HOSTED_CLOCK_LIMITS. */
   CLOCK_LIMIT: { status: 400, tag: "ValidationError" },
+  /** This demo company used its rows budget for this generation (design 6.3): reset it, or come back later. */
+  DEMO_LIMIT: { status: 429, tag: "RateLimitExceeded" },
+  /** The shared showcase read its rows for the UTC day (design 6.3); leased demo companies and the static pages work. */
+  SHOWCASE_LIMIT: { status: 503, tag: "Refused" },
 } as const satisfies Record<string, { status: number; tag: ErrorTag }>;
 export type HostedErrorCode = keyof typeof HOSTED_ERRORS;
 export interface HostedErrorBody { _tag: ErrorTag; code: HostedErrorCode; message: string; retryAfterS?: number }

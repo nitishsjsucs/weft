@@ -15,6 +15,7 @@ function harness(answers: Response[], grant: () => Promise<void> = async () => {
     markEnded: (r) => { events.push(`ended:${r}`); },
     requestStart: (r) => { events.push(`start:${r}`); },
     refreshSession: async () => { events.push("session"); },
+    markLimited: (k) => { events.push(`limited:${k}`); },
   };
   return { f: createHostedFetch(() => deps), calls, events };
 }
@@ -90,6 +91,22 @@ describe("hosted fetch", () => {
     await h.f("/api/v1/sim/clock");
     expect([...(tablesFor("/api/v1/proposals?status=pending") ?? [])]).toEqual(["proposals", "proposal_votes"]);
     expect(tablesFor("/api/v1/sim/clock")).toBeNull();
+  });
+
+  it("says when a world answers past its rows budget: the visitor's demo company (429) or the shared showcase (503)", async () => {
+    const demo = harness([json(429, { _tag: "RateLimitExceeded", code: "DEMO_LIMIT", message: "daily limit" })]);
+    const res = await demo.f("/api/v1/workers");
+    expect(res.status).toBe(429);
+    expect((await res.json()).code).toBe("DEMO_LIMIT");
+    expect(demo.events).toEqual(["limited:demo"]);
+    const show = harness([json(503, { _tag: "Refused", code: "SHOWCASE_LIMIT", message: "daily limit" })]);
+    await show.f("/api/v1/workers");
+    expect(show.events).toEqual(["limited:showcase"]);
+    // A rate limit or a paused agent is not a budget.
+    const other = harness([json(429, { code: "RATE_LIMITED" }), json(503, { code: "AGENT_PAUSED" })]);
+    await other.f("/api/v1/workers");
+    await other.f("/api/v1/agent/runs", { method: "POST", body: "{}" });
+    expect(other.events).toEqual([]);
   });
 
   it("gateCode reads the code from a clone and ignores other statuses", async () => {

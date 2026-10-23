@@ -13,16 +13,17 @@ import {
   HOSTED_SETTINGS, LIVE_PING, LIVE_PONG, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
   DO_NAMES, WORLD_MODEL_SETTING, type DurableStorageLike, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
 } from "../../shared/contracts";
-import { envConfig } from "../../shared/config";
+import { CF4_CONFIG_KEYS, configNumber, envConfig } from "../../shared/config";
 import { mcpKeyId, readCtx } from "../../shared/tokens";
 import { sameSecret } from "../../shared/crypto";
 import { stringEnv, type CoreEnv } from "../../shared/env";
-import { hostedError, isMutation, json, plainError, readJson } from "../../shared/http";
+import { hostedError, isMutation, json, nextUtcMidnight, plainError, readJson, utcDay } from "../../shared/http";
 import { logError, logEvent } from "../../shared/log";
 import { DO_PATHS, HEALTH_PATH, isModelAdmission, LEASE_HEADER, SIM_RESET_PATH } from "../../shared/routes";
 import { configEnv, liveEnv } from "./company-do-env";
 import { spendClient } from "../spend/client";
 import { AlarmPlan, alarmRetryDelayMs, type AlarmPurpose } from "./alarms";
+import { overLimit, RowsTally, SHOWCASE_TALLY_CADENCE, WORLD_BUDGET, type BudgetLimits, type BudgetTally } from "./budget";
 import { loadEngine, type EngineModule, type OutboxRow, type RestoreTrigger, type WorldEngine } from "./engine";
 import { recordFailedJob } from "../failed-jobs";
 import { countFetchesIn, installCountedFetch, rawFetch } from "./fetch-scope";
@@ -60,6 +61,8 @@ export const OUTBOX_DEAD_AFTER_MS = 20 * 60_000;
 /** One outbox row's failed flushes in a row, and when the first of them was (wall ms). */
 interface OutboxAttempts { n: number; first: number }
 const RESTORE_KEY = "weft.restore";
+/** The world's rows budget tally (budget.ts): one row, written cheaply. */
+const BUDGET_KEY = "weft.budget";
 /** Failed flushes in a row per outbox row id (OUTBOX_DEAD_AFTER), kept while any row has one. */
 const OUTBOX_ATTEMPTS_KEY = "weft.outbox_attempts";
 const SNAPSHOT_KEY = "weft.snapshot";
@@ -120,12 +123,20 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   /** Steps that stop the world and start the next one (a new generation's stamp, a reset, a restore) running now:
    * meanwhile only they boot the world (mayBoot). */
   private rebuilding = 0;
+  /** The rows this world's generation (a leased slot) or UTC day (the showcase) read and wrote (budget.ts). */
+  private readonly tally: RowsTally;
+  /** The tally key and limit last logged as reached (one log line per world and limit, not one per refusal). */
+  private limitLogged: string | null = null;
 
   constructor(ctx: DurableObjectState, env: CoreEnv) {
     super(ctx, env);
     this.alarms = new AlarmPlan({ setAlarm: (t) => ctx.storage.setAlarm(t), getAlarm: () => ctx.storage.getAlarm() });
     this.runHost = this.newRunHost();
     this.scheduler = this.newScheduler();
+    this.tally = new RowsTally({
+      get: () => ctx.storage.kv.get<BudgetTally>(BUDGET_KEY) ?? null,
+      put: (t) => ctx.storage.kv.put(BUDGET_KEY, t),
+    });
     // The tab's keepalive: answered by the runtime without waking a hibernated object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(LIVE_PING, LIVE_PONG));
     void ctx.blockConcurrencyWhile(() => this.boot());
@@ -257,9 +268,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       this.scheduler = scheduler;
       this.bootError = null;
       // What the boot itself read and wrote counts too (design 4.4: a cold start on a restored snapshot writes 0 rows).
-      const booted = engine.meter.totals();
-      this.usage.rowsRead += booted.rowsRead;
-      this.usage.rowsWritten += booted.rowsWritten;
+      this.account(engine.meter.totals(), stamp);
       for (const k of leaseKeys(this.ctx.storage.sql)) engine.addSecret(k);
       this.unsubscribe = engine.meter.onCommit((c) => this.broadcast({ type: "commit", seq: c.seq, tables: c.tables }));
       logEvent("world.boot", { slot: stamp.slot, gen: stamp.gen, outcome: "ok" });
@@ -339,6 +348,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
     try {
       this.config = await envConfig(this.env);
+      const limited = this.budgetRefusal(stamp, request.method);
+      if (limited) return limited;
       if (url.pathname === DO_PATHS.live) return this.acceptLive(request, stamp);
       if (url.pathname === DO_PATHS.mcp) return await this.serveMcp(request);
       if (url.pathname === DO_PATHS.model) return await this.switchModel(request, stamp);
@@ -352,6 +363,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       return await this.serveApp(request, url, stamp);
     } finally {
       if (counted) this.leave();
+      this.budgetEvent();
       this.runHost.poke();
       this.scheduler.poke();
       this.maybePushUsage();
@@ -463,15 +475,17 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     headers.delete(TRUST_HEADERS.smoke);
     const inner = new Request(request.url, { method: request.method, headers, body: request.body, redirect: "manual", ...(request.body ? { duplex: "half" } : {}) } as RequestInit);
     const { value: res, usage } = await engine.meter.measure(() => engine.fetch(inner));
-    this.usage.rowsRead += usage.rowsRead;
-    this.usage.rowsWritten += usage.rowsWritten;
+    this.account(usage);
     // A run cancelled directly ends here, not in an alarm drain: it goes to the run catalog too (the row is read only
     // once the run is terminal, so a running run that stops later is recorded by the drain that ends it).
     const cancelled = request.method === "POST" && res.ok ? CANCEL_RUN_PATH.exec(url.pathname)?.[1] : undefined;
     if (cancelled) this.recordRuns([decodeURIComponent(cancelled)]);
     if (url.pathname === HEALTH_PATH && res.ok && (res.headers.get("content-type") ?? "").includes("json")) {
       const body = (await res.json()) as Record<string, unknown>;
-      return json({ ...body, runtime: "cloudflare", world: { slot: stamp.slot, gen: stamp.gen, mode: stamp.mode } }, { status: res.status });
+      const key = this.tallyKey(stamp);
+      const t = key ? this.tally.read(key) : null;
+      const budget = t ? { rowsWritten: t.rowsWritten, rowsRead: t.rowsRead, events: t.events, limits: this.budgetLimits(stamp) } : undefined;
+      return json({ ...body, runtime: "cloudflare", world: { slot: stamp.slot, gen: stamp.gen, mode: stamp.mode }, ...(budget ? { budget } : {}) }, { status: res.status });
     }
     return res;
   }
@@ -509,8 +523,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (!mcpKeyOf(request)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "An MCP key is required");
     const engine = this.engine!;
     const { value: res, usage } = await engine.meter.measure(() => engine.mcp(request));
-    this.usage.rowsRead += usage.rowsRead;
-    this.usage.rowsWritten += usage.rowsWritten;
+    this.account(usage);
     return res;
   }
 
@@ -553,8 +566,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       },
       newJobId: newGlobalJobId,
     }));
-    this.usage.rowsRead += usage.rowsRead;
-    this.usage.rowsWritten += usage.rowsWritten;
+    this.account(usage);
     return res;
   }
 
@@ -593,8 +605,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.inflight += 1;
     try {
       const { value, usage } = await engine.meter.measure(() => port.extrasWriteBack(w, gen));
-      this.usage.rowsRead += usage.rowsRead;
-      this.usage.rowsWritten += usage.rowsWritten;
+      this.account(usage);
       return value;
     } finally {
       this.leave();
@@ -796,8 +807,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
           this.recordRuns(r.runIds);
         }
       })));
-      this.usage.rowsRead += usage.rowsRead;
-      this.usage.rowsWritten += usage.rowsWritten;
+      this.account(usage);
       if (due.has("outbox")) await this.flushOutbox();
       this.alarmFailures = 0;
     } catch (e) {
@@ -806,6 +816,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       logError("alarm", e, { slot: this.stamp?.slot, gen: this.stamp?.gen, ms: Date.now() - t0, retryMs, failures: this.alarmFailures });
       for (const p of due) await this.alarms.arm(p, Date.now() + retryMs);
     } finally {
+      this.budgetEvent();
       this.maybePushUsage();
     }
     await this.alarms.sync();
@@ -846,6 +857,64 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   /** Fetches made by the last alarm invocation (tests assert at most MAX_FETCHES_PER_ALARM). */
   async alarmFetches(): Promise<{ count: number; peak: number; max: number }> {
     return { count: this.counter.count, peak: this.counter.peak, max: this.counter.max };
+  }
+
+  // Rows budget (budget.ts) ------------------------------------------------------------------------------------
+
+  /** What the world's rows are tallied under: the generation of a leased slot, the UTC day of the showcase. */
+  private tallyKey(stamp: WorldStamp | null): string | null {
+    if (stamp?.mode === "slot") return `g${stamp.gen}`;
+    if (stamp?.mode === "showcase") return `d${utcDay()}`;
+    return null;
+  }
+
+  private budgetLimits(stamp: WorldStamp): BudgetLimits {
+    const n = (key: string, fallback: number) => Math.max(1, configNumber(this.config, key, fallback));
+    if (stamp.mode === "showcase") return { rowsWritten: null, rowsRead: n(CF4_CONFIG_KEYS.showcaseRowsRead, WORLD_BUDGET.showcaseRowsReadPerDay) };
+    return { rowsWritten: n(CF4_CONFIG_KEYS.leaseRowsWritten, WORLD_BUDGET.leaseRowsWritten), rowsRead: n(CF4_CONFIG_KEYS.leaseRowsRead, WORLD_BUDGET.leaseRowsRead) };
+  }
+
+  /** Rows read and written for the world: the Lobby's usage, and the budget tally of `stamp` (the current one). */
+  private account(u: { rowsRead: number; rowsWritten: number }, stamp: WorldStamp | null = this.stamp): void {
+    this.usage.rowsRead += u.rowsRead;
+    this.usage.rowsWritten += u.rowsWritten;
+    const key = this.tallyKey(stamp);
+    if (key) this.tally.add(key, u);
+  }
+
+  /** Counts a request or an alarm against the tally, which writes itself when due. */
+  private budgetEvent(): void {
+    const stamp = this.stamp;
+    const key = this.tallyKey(stamp);
+    if (!stamp || !key) return;
+    try {
+      this.tally.event(key, this.budgetLimits(stamp), stamp.mode === "showcase" ? SHOWCASE_TALLY_CADENCE : WORLD_BUDGET);
+    } catch (e) {
+      logError("budget.event", e, { slot: stamp.slot });
+    }
+  }
+
+  /**
+   * The answer for a request past the world's rows budget, or null to serve it: a leased slot's mutations past its
+   * rows written, and all its requests past its rows read, get 429 DEMO_LIMIT; the showcase past its day's rows read
+   * gets 503 SHOWCASE_LIMIT.
+   */
+  private budgetRefusal(stamp: WorldStamp, method: string): Response | null {
+    const key = this.tallyKey(stamp);
+    if (!key) return null;
+    const limits = this.budgetLimits(stamp);
+    const t = this.tally.read(key);
+    const over = overLimit(t, limits, isMutation(method));
+    if (!over) return null;
+    if (this.limitLogged !== `${key}:${over}`) {
+      this.limitLogged = `${key}:${over}`;
+      logEvent("budget.limit", { slot: stamp.slot, gen: stamp.gen, outcome: over, rowsRead: t.rowsRead, rowsWritten: t.rowsWritten });
+    }
+    if (stamp.mode === "showcase") {
+      return hostedError("SHOWCASE_LIMIT", "The shared demo company has hit its daily limit; start your own demo company, or come back after 00:00 UTC",
+        { retryAfterS: Math.max(60, Math.ceil((Date.parse(nextUtcMidnight(Date.now())) - Date.now()) / 1000)) });
+    }
+    return hostedError("DEMO_LIMIT", "This demo company has hit its daily limit; reset it, or come back later");
   }
 
   // Usage ------------------------------------------------------------------------------------------------------

@@ -246,6 +246,52 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect(warm).toMatchObject({ ran: true, rowsWritten: 0 });
   });
 
+  it("holds a leased world to its rows budget (429 DEMO_LIMIT, a reset starts the next generation's) and the showcase to its day's (503 SHOWCASE_LIMIT)", async () => {
+    const e = await env();
+    // Small budgets for this case only (KV weft-config, read within the harness's 200 ms config memo).
+    await e.CONFIG.put("budget.lease_rows_read", "4000");
+    await sleep(400);
+    try {
+      // An operator lease, released at the end, so the cases after this one still find their pool slots.
+      const v = h.visitor();
+      const l = await v.operatorLease("budget");
+      expect(l.status).toBe("leased");
+      const statuses: number[] = [];
+      for (let i = 0; i < 400 && statuses.at(-1) !== 429; i++) statuses.push((await v.fetch(`/api/v1/payrolls?limit=100&cb=${i}`, {}, { principal: "usr_dana" })).status);
+      const seen = await v.json<{ budget?: { rowsRead: number } }>("/api/v1/health");
+      expect(statuses.at(-1), `a 429 once the generation read 4,000 rows (${statuses.length} requests; ${JSON.stringify(seen.body)})`).toBe(429);
+      expect(statuses.slice(0, -1).every((x) => x === 200)).toBe(true);
+      const refused = await v.fetch("/api/v1/tax/rates", {}, { principal: "usr_dana" });
+      expect(refused.status).toBe(429);
+      expect(await refused.json()).toMatchObject({ code: "DEMO_LIMIT" });
+      // The visitor's reset is the next generation, with a budget of its own.
+      const r = await v.fetch("/api/v1/sim/reset", { method: "POST", body: "{}" });
+      expect(r.status).toBe(200);
+      const health = await v.json<{ world: { gen: number }; budget: { rowsRead: number; limits: { rowsRead: number } } }>("/api/v1/health");
+      expect(health.status).toBe(200);
+      expect(health.body.world.gen).toBeGreaterThan(l.gen!);
+      expect(health.body.budget.limits.rowsRead).toBe(4000);
+      expect(health.body.budget.rowsRead).toBeLessThan(4000);
+      expect((await h.admin("POST", "/api/_admin/release", { name: "budget" }, { ip: v.ip, jar: v.jar })).status).toBe(200);
+    } finally {
+      await e.CONFIG.delete("budget.lease_rows_read");
+    }
+    await e.CONFIG.put("budget.showcase_rows_read", "1");
+    await sleep(400);
+    try {
+      // A read the front's memo has not kept yet reaches the showcase, which has read more than 1 row today.
+      const s = h.visitor();
+      const answers: number[] = [];
+      for (let i = 0; i < 3; i++) answers.push((await s.fetch(`/api/v1/workers?status=s${i}`, {}, { principal: "usr_dana" })).status);
+      expect(answers.at(-1)).toBe(503);
+      const r = await s.fetch("/api/v1/workers?status=other", {}, { principal: "usr_dana" });
+      expect(await r.json()).toMatchObject({ code: "SHOWCASE_LIMIT" });
+    } finally {
+      await e.CONFIG.delete("budget.showcase_rows_read");
+    }
+    await sleep(400);
+  });
+
   it("serves remote MCP: 122 tools, approve, rollback and vault refused, a payout proposal pending approval", async () => {
     const v = h.visitor();
     await v.lease();

@@ -6,7 +6,7 @@ import type { LeaseResult, SessionStatus } from "../../../packages/contracts/src
 import { PollScheduler, setScheduler, type Timers } from "../src/lib/api/poll";
 import { readLeaseHint } from "../src/lib/hosted/hint";
 import {
-  afterHostedReset, bootSession, dismissEnded, ensureHumanGrant, fmtLeft, grantFailed, hostedStore, leaseDeadline, markEnded, refreshSession, requestStart, resetHostedSession, startLease, verifyGrant,
+  afterHostedReset, bootSession, dismissEnded, ensureHumanGrant, fmtLeft, grantFailed, hostedStore, leaseDeadline, markEnded, markLimited, refreshSession, requestStart, resetHostedSession, startLease, verifyGrant,
 } from "../src/lib/hosted/session";
 import { HUMAN_CHECK_WAIT_MS } from "../src/lib/hosted/flags";
 
@@ -176,6 +176,27 @@ describe("leases", () => {
   it("throws the gate code when the check fails", async () => {
     answers["POST /api/_session/lease"] = () => ({ status: 403, body: { _tag: "Forbidden", code: "TURNSTILE_FAILED", message: "nope" } });
     await expect(startLease("bad")).rejects.toMatchObject({ status: 403, code: "TURNSTILE_FAILED" });
+  });
+
+  it("keeps a rows-budget limit until the visitor's reset gives the world a new generation", async () => {
+    answers["GET /api/_session"] = () => ({ status: 200, body: status({ world: "slot", lease }) });
+    await refreshSession();
+    markLimited("demo");
+    expect(hostedStore.get().limited).toEqual({ kind: "demo", gen: 3 });
+    await refreshSession();
+    expect(hostedStore.get().limited).toEqual({ kind: "demo", gen: 3 });
+    answers["GET /api/_session"] = () => ({ status: 200, body: status({ world: "slot", lease: { ...lease, gen: 4 } }) });
+    await refreshSession();
+    expect(hostedStore.get().limited).toBeNull();
+    // The showcase's limit holds while the tab reads the showcase, and goes once it reads its own world.
+    answers["GET /api/_session"] = () => ({ status: 200, body: status() });
+    await refreshSession();
+    markLimited("showcase");
+    await refreshSession();
+    expect(hostedStore.get().limited).toEqual({ kind: "showcase", gen: null });
+    answers["GET /api/_session"] = () => ({ status: 200, body: status({ world: "slot", lease }) });
+    await refreshSession();
+    expect(hostedStore.get().limited).toBeNull();
   });
 
   it("markEnded and dismissEnded", async () => {

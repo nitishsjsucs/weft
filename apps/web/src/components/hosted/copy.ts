@@ -29,6 +29,8 @@ export const HOSTED_COPY = {
   requestCap: "The demo has used today's shared request allowance. Pages still load; demo data comes back after 00:00 UTC.",
   apiDown: "The demo's API is not answering right now. Pages still load; try again in a minute.",
   rateLimited: "Too many requests from this network for a moment. Pages still load; try again in a minute.",
+  demoLimit: "This demo company has hit its daily limit. Reset it from Viewing as, or come back later.",
+  showcaseLimit: "The shared demo company has hit its daily limit. Start your own demo company, or come back after 00:00 UTC.",
 } as const;
 
 /** The line for a lease attempt that did not lease. */

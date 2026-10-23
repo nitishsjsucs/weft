@@ -210,3 +210,24 @@ export async function until<T>(what: string, fn: () => Promise<T>, ok: (v: T) =>
     await sleep(every);
   }
 }
+
+/** The newest 100 runs' ids and model steps (GET /api/v1/agent/runs lists the newest first). */
+export async function recentRuns(w: WorldApi): Promise<{ id: string; stepsUsed: number }[]> {
+  return (await w.get<{ data: { id: string; stepsUsed?: number }[] }>("/api/v1/agent/runs?limit=100")).data.map((r) => ({ id: r.id, stepsUsed: Number(r.stepsUsed ?? 0) }));
+}
+/** The runs started since `before` (an earlier recentRuns) and their model steps, as one log phrase. */
+export async function runsSince(w: WorldApi, before: { id: string }[]): Promise<{ runs: number; steps: number; line: string }> {
+  const seen = new Set(before.map((r) => r.id));
+  const fresh = (await recentRuns(w)).filter((r) => !seen.has(r.id));
+  const steps = fresh.reduce((n, r) => n + r.stepsUsed, 0);
+  return { runs: fresh.length, steps, line: `${fresh.length} runs, ${steps} model steps` };
+}
+
+/** A world's rows budget as GET /api/v1/health reports it (HostedBudgetReadout, design 6.3). */
+export interface BudgetReadout { rowsWritten: number; rowsRead: number; events: number; limits: { rowsWritten: number | null; rowsRead: number } }
+/** One line for the log: the rows against the limits. */
+export function budgetLine(b: BudgetReadout | null): string {
+  if (!b) return "not reported";
+  const pct = (n: number, of: number | null) => (of ? ` (${((100 * n) / of).toFixed(1)}% of ${of})` : "");
+  return `${b.rowsRead} rows read${pct(b.rowsRead, b.limits.rowsRead)}, ${b.rowsWritten} written${pct(b.rowsWritten, b.limits.rowsWritten)}, over ${b.events} requests and alarms`;
+}
