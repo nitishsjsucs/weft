@@ -10,7 +10,7 @@ import { NOTICE_HANDLING } from "@weft/contracts";
 import { emitEvent } from "@weft/core";
 import { filings, notices, proposals, routineRuns, simChatMessages, taxAccounts } from "@weft/db";
 import { scriptedProvider } from "../../packages/agent/src/providers/scripted";
-import { DEFAULT_SCRIPTS_DIR } from "../../packages/agent/src/providers/factory";
+import { defaultScriptsDir } from "../../packages/agent/src/providers/factory";
 import { complianceNoticeVariant } from "../../packages/core/src/compliance/script-variant";
 import { PREBUILT } from "../../packages/routines/src/prebuilt";
 import { createTestWeft, type TestWeft } from "./helpers";
@@ -18,7 +18,7 @@ import { createTestWeft, type TestWeft } from "./helpers";
 let weft: TestWeft;
 beforeAll(async () => {
   const variant = (info: { routineId: string; trigger: Record<string, unknown> }) => complianceNoticeVariant(weft.db)(info);
-  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR, variant }) });
+  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: defaultScriptsDir(), variant }) });
   await weft.scheduler.tick();   // seeds the prebuilt routines
 });
 const NOTICE_ROUTINE = "rt_agency_notice";

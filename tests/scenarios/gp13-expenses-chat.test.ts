@@ -7,12 +7,12 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AgentRunRow } from "@weft/contracts";
 import { actions, expenses, proposals } from "@weft/db";
-import { DEFAULT_SCRIPTS_DIR, scriptedProvider } from "../../packages/agent/src/index";
+import { defaultScriptsDir, scriptedProvider } from "../../packages/agent/src/index";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 const SCRIPT = "chat_expenses_approve_all";
 let weft: TestWeft;
-beforeAll(async () => { weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR, scenario: SCRIPT }) }); });
+beforeAll(async () => { weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: defaultScriptsDir(), scenario: SCRIPT }) }); });
 afterAll(async () => { await weft.close(); });
 
 describe("GP13 no bulk approval in chat", () => {

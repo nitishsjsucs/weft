@@ -28,7 +28,9 @@ export function createFileSpendStore(_opts: { dir: string }): SpendStore {
 }
 
 /** There is no scenarios directory in a Worker; the name is kept so imports resolve. */
-export const DEFAULT_SCRIPTS_DIR = "scenarios";
+export function defaultScriptsDir(): string {
+  return "scenarios";
+}
 
 /** Environment-only secrets and the registered (or passed) script source. */
 export function nodeProviderPorts(opts: Pick<CreateProviderOptions, "env" | "scriptSource">): ProviderPorts {

@@ -131,12 +131,11 @@ describe("the fs guard on the durable path", () => {
 });
 
 /**
- * Module-level import.meta reads that cannot throw in workerd, each for a reason the integration checked:
- * providers/factory.ts is @weft/agent's Node entry, which a Worker bundle never evaluates (the workerd condition
- * resolves src/portable.ts, pinned by packages/agent/test/hosted/portable.test.ts). Script entries the hosted entry
- * never imports are not scanned.
+ * Module-level import.meta reads that cannot throw in workerd, each for a reason the integration checked. None are
+ * left: providers/factory.ts resolves the repo root lazily too, so even a Worker bundle that reached @weft/agent's
+ * Node entry would evaluate it. Script entries the hosted entry never imports are not scanned.
  */
-const MODULE_LEVEL_IMPORT_META_PENDING = new Set(["packages/agent/src/providers/factory.ts"]);
+const MODULE_LEVEL_IMPORT_META_PENDING = new Set<string>();
 const ENTRY_SCRIPTS = new Set(["apps/api/src/demo.ts", "packages/seed/src/cli.ts"]);
 
 /** Top-level statements that read import.meta while the module evaluates (outside any function body). */
@@ -158,7 +157,7 @@ function moduleLevelImportMeta(root: string): string[] {
 }
 
 describe("module evaluation on workerd", () => {
-  it("no module the hosted entry imports reads import.meta at module level, but the listed other-track ones", () => {
+  it("no module the hosted entry imports reads import.meta at module level", () => {
     // In workerd import.meta.dirname is undefined and import.meta.url is null, so a path built while the module
     // evaluates throws before the world exists; cf2's modules resolve theirs lazily, on Node only.
     const found = ["apps/api/src", "packages"].flatMap(moduleLevelImportMeta).filter((x) => /\/src\//.test(x));

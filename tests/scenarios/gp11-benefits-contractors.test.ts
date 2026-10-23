@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import type { AgentRunRow, ContractorPayout, ReconFinding, RoutineRun } from "@weft/contracts";
 import { contractorPayments, events, proposals, routines, simChatMessages, simRailTransfers } from "@weft/db";
-import { DEFAULT_SCRIPTS_DIR, scriptedProvider } from "../../packages/agent/src/index";
+import { defaultScriptsDir, scriptedProvider } from "../../packages/agent/src/index";
 import { OPEN_ENROLLMENT_CLOSES, RT_OPEN_ENROLLMENT } from "../../packages/routines/src/wave2/benefits";
 import { createTestWeft, type TestWeft } from "./helpers";
 
@@ -23,7 +23,7 @@ const OE_SCRIPT = {
   },
 };
 beforeAll(async () => {
-  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR, scripts: { rt_open_enrollment: OE_SCRIPT } }) });
+  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: defaultScriptsDir(), scripts: { rt_open_enrollment: OE_SCRIPT } }) });
 });
 afterAll(async () => { await weft?.close(); });
 

@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import type { AgentRunRow } from "@weft/contracts";
 import { actions, handoffCases, notices, principals, proposals, routineRuns, routines, trainingAssignments, uploads, workers } from "@weft/db";
 import { scriptedProvider } from "../../packages/agent/src/providers/scripted";
-import { DEFAULT_SCRIPTS_DIR } from "../../packages/agent/src/providers/factory";
+import { defaultScriptsDir } from "../../packages/agent/src/providers/factory";
 import { complianceNoticeVariant } from "../../packages/core/src/compliance/script-variant";
 import { COURSE_RULES, missingAssignments } from "../../packages/core/src/compliance/training";
 import { mailedSamples, parseSidecar } from "../../packages/sim/src/notices/mailed";
@@ -22,7 +22,7 @@ import { createTestWeft, type TestWeft } from "./helpers";
 let weft: TestWeft;
 beforeAll(async () => {
   const variant = (info: { routineId: string; trigger: Record<string, unknown> }) => complianceNoticeVariant(weft.db, () => weft.clock.now())(info);
-  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: DEFAULT_SCRIPTS_DIR, variant }) });
+  weft = await createTestWeft({ provider: scriptedProvider({ scriptsDir: defaultScriptsDir(), variant }) });
   await weft.scheduler.tick();   // seeds the prebuilt routines
 });
 afterAll(async () => {

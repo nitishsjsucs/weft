@@ -86,7 +86,7 @@ describe("the Worker entry of @weft/agent", () => {
   it("the Node-only parts say so instead of touching a file", () => {
     expect(() => portable.createSpendLedger({ dir: "/tmp/x" })).toThrow(/createSpendLedger \(the JSONL spend ledger\) is Node only/);
     expect(() => portable.dirScriptSource("/tmp")).toThrow(/is Node only/);
-    expect(portable.DEFAULT_SCRIPTS_DIR).toBe("scenarios");
+    expect(portable.defaultScriptsDir()).toBe("scenarios");
   });
 });
 
