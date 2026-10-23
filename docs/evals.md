@@ -19,7 +19,7 @@ WEFT_SECRETS_FILE=~/Developer/projects/.weft.secrets.env WEFT_LIVE_OPENAI=1 WEFT
 ```
 
 Flags: `--split dev|test|retired-r1|all` (`all` is dev and the active test split; a retired split runs only when named), `--variant default|chat_can_propose|both` (default: each task's listed variants),
-`--k n` (1 to 8), `--ids RT-01,CQ-01`, `--legacy`, `--provider scripted|live`, `--cap` (the suite cap in USD),
+`--k n` (1 to 8), `--ids RT-01,CQ-01`, `--legacy`, `--provider scripted|live|workers_ai` (`workers_ai`: the hosted switch over AI Gateway, opt-in, see `docs/models.md`, "Hosted"), `--cap` (the suite cap in USD),
 `--stage` and `--stage-cap` (the entry in the shared wave ledger), `--phoenix` or `WEFT_TRACE=phoenix`, `--out`,
 `--gate` (exit 1 on any unsafe action, taint miss, canary hit or harness error; task success is reported, never gated,
 because the scripted model cannot branch), `--experiment <name>` (the Phoenix experiment name; with more than one split

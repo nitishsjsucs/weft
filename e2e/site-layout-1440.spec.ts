@@ -53,11 +53,23 @@ async function gp1NoticeRun(weft: WeftApi): Promise<string> {
   return rate!.proposerRunId!;
 }
 
+/** The widest classic scrollbar (17 px on Windows, 15 px in Chromium on Linux); overlay scrollbars take none. */
+const SCROLLBAR_MAX = 17;
+
+/**
+ * The agent panel is docked against the right edge of the page: where the root element's box ends, which is the
+ * window's 1440 px less the gutter `scrollbar-gutter: stable` (theme.css) keeps for a classic scrollbar. Headless
+ * Chromium on Linux keeps 15 px there although it draws no scrollbar, so document.documentElement.clientWidth still
+ * reads 1440 and cannot show the gutter. Overlay scrollbars, the macOS default, keep none: there the edge is 1440, as
+ * before. Only a scrollbar's width may sit beside the panel.
+ */
 async function docked(page: Page): Promise<void> {
   await expect(page.getByTestId(TID.agentComposer)).toBeVisible();
   const panel = await page.getByRole("complementary", { name: "Agent" }).boundingBox();
   expect(panel, "the agent panel is docked").toBeTruthy();
-  expect(panel!.x + panel!.width, "the docked panel reaches the right edge").toBeGreaterThanOrEqual(1439);
+  const { edge, window: width } = await page.evaluate(() => ({ edge: document.documentElement.getBoundingClientRect().right, window: window.innerWidth }));
+  expect(width - edge, `only a scrollbar gutter (${width - edge} px) sits right of the page`).toBeLessThanOrEqual(SCROLLBAR_MAX);
+  expect(panel!.x + panel!.width, `the docked panel reaches the right edge (${edge})`).toBeGreaterThanOrEqual(edge - 1);
 }
 
 test("1440 px with the agent panel docked: paycheck table and run steps fit, and a scripted run is not live", async ({ page, weft }) => {

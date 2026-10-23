@@ -13,6 +13,7 @@ Weft puts every model behind one `ModelProvider` interface (`packages/contracts/
 | `claude` | Built in wave 2, snapshot-tested (no key on this machine) | `claude-opus-5-5` (`WEFT_CLAUDE_MODEL`) | Official `@anthropic-ai/sdk` 0.131.0, `beta.messages.stream` plus `finalMessage()`, adaptive thinking (summarized), an explicit `output_config.effort`, server-side fallbacks `"default"` (beta `server-side-fallback-2026-07-01`), strict tools, `tool_choice` auto, the frozen prompt as a cached system block; written only from the bundled Claude API docs | `Claude Opus 5.5` |
 | `mlx` | Built in wave 2, fake-server tested | `mlx-community/Qwen3.6-27B-4bit` (`WEFT_LOCAL_MODEL`) | Plain `fetch` to `<WEFT_LOCAL_BASE_URL>/v1/chat/completions` on `mlx_lm.server`; never started by builders | `Local Qwen3.6-27B` |
 | `llama` | Built in wave 2, smoke-tested on the 1.7B GGUF | `Qwen3-1.7B-Q4_0` (`WEFT_LOCAL_MODEL`) | The same chat-completions provider on `llama-server --jinja`, smoke use only | `Local Qwen3-1.7B (smoke)` |
+| `workers_ai` | The hosted switch, fake-binding and fake-fetch tested (see Hosted) | `@cf/openai/gpt-oss-120b` | The OpenAI Responses request builder and parser over the Worker's `AI` binding, or on Node over AI Gateway's Workers AI REST path | `Workers AI gpt-oss-120b` |
 
 Notes:
 
@@ -20,8 +21,8 @@ Notes:
 - `gpt-5.6-terra` is an optional escalation model id (`WEFT_ESCALATION_MODEL`), unset and off by default (P1). `WEFT_MODEL=gpt-5.6-terra` selects it for the agent and the eval runner; it is priced from its own row in `PRICES_BY_MODEL` ($2.00 input, $0.20 cached input, $12.00 output per million) and its runs get a 10x run cap (`RUN_CAP_SCALE_BY_MODEL`), or its first step would not fit the $0.10 cap.
 - `WEFT_EFFORT=low|medium|high` is an experiment-only override, unset by default. When set, the OpenAI provider sends that reasoning effort on every call, and the runtime records it on every run it opens with that provider (run row, prefix hash, trace). Unset, each stage keeps its own effort (`low` today). Any other value throws `PROVIDER_CONFIG`. It never changes a default.
 - Unattended cron runs use deterministic templates unless `WEFT_BACKGROUND_LLM` is set; attended runs ("Run review now", chat) use the configured provider.
-- Automated tests always use `scripted`. The provider factory throws `LIVE_PROVIDER_IN_TEST` for openai, claude, mlx and llama under vitest unless `WEFT_LIVE_OPENAI=1`.
-- A missing setting throws `PROVIDER_CONFIG` naming the variable: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `WEFT_LOCAL_BASE_URL` (validated with `LocalProviderConfig`).
+- Automated tests always use `scripted`. The provider factory throws `LIVE_PROVIDER_IN_TEST` for openai, claude, mlx, llama and workers_ai under vitest unless `WEFT_LIVE_OPENAI=1`.
+- A missing setting throws `PROVIDER_CONFIG` naming the variable: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `WEFT_LOCAL_BASE_URL` (validated with `LocalProviderConfig`), or for workers_ai on Node `WEFT_AIG_ACCOUNT_ID`, `WEFT_AIG_GATEWAY` and `WEFT_WORKERS_AI_TOKEN`.
 
 ### Claude (`WEFT_LLM=claude`)
 
@@ -91,6 +92,33 @@ WEFT_LIVE_OPENAI=1 WEFT_LLM=openai WEFT_SECRETS_FILE=$HOME/Developer/projects/.w
 | L4 Injection notice (if the cap allows) | run tainted, zero executed R2 to R4 actions, every send is a proposal |
 
 Results go to `evals/results/<date>-<sha>.json` (gitignored).
+
+## Hosted
+
+The hosted copy on Cloudflare Workers (`docs/cloudflare/design.md` section 5) keeps the provider contract above and adds two things: the OpenAI provider can call through Cloudflare AI Gateway, and `workers_ai` is a second live provider, the switch. Every variable below is unset on a plain Node run, and unset they change nothing: the OpenAI provider calls OpenAI directly, as above.
+
+| Variable | Read by | What it does | Where the hosted copy keeps it |
+|---|---|---|---|
+| `WEFT_AIG_ACCOUNT_ID` | openai, workers_ai | The account id in the gateway URL. With `WEFT_AIG_GATEWAY` set too, OpenAI calls go to `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai` with the same body; only the URL and the `cf-aig-*` headers change | A weft-core var that `pnpm cf:build` fills from `CLOUDFLARE_ACCOUNT_ID` at deploy time; never committed |
+| `WEFT_AIG_GATEWAY` | openai, workers_ai | The gateway name | A weft-core Worker secret while the gateway is unauthenticated |
+| `CF_AIG_TOKEN` | openai, workers_ai | Sent as `cf-aig-authorization` once the gateway is authenticated | A weft-core Worker secret, once Nitish creates the token |
+| `WEFT_AIG_BYOK` | openai | `1`: phase 2, the gateway holds the OpenAI key, so no `OPENAI_API_KEY` is sent; needs the gateway and `CF_AIG_TOKEN` | Unset (phase 1 keeps `OPENAI_API_KEY` as a weft-core secret) |
+| `WEFT_WORKERS_AI_TOKEN` | workers_ai on Node | A narrow Workers AI token for the gateway's Workers AI REST path, from the environment or `WEFT_SECRETS_FILE`; never printed | Not used: the Worker calls the `AI` binding |
+| `WEFT_HOSTED_PROVIDER`, `WEFT_AGENT_ENABLED`, `WEFT_AIG_COLLECT_LOG` | the durable platform only | The provider a new run starts on (`openai`, `workers_ai` or `scripted`; a world's Simulators setting overrides it), the kill switch, and `false` to turn the gateway's log off for Weft's calls | Folded per world from KV `weft-config` (`model.provider`, `agent.enabled`, `aig.collect_log`); never set by hand |
+
+`workers_ai` runs `@cf/openai/gpt-oss-120b` with the per-stage reasoning effort; it reads neither `WEFT_MODEL` nor `WEFT_EFFORT`. It is live, so the run and day caps apply, and the ledger prices it in USD equivalents of neurons: $0.011 per 1,000 neurons at 31,818 neurons per million input tokens and 68,182 per million output tokens (about $0.35 and $0.75 per million). Its run cap factor is 1, so a run keeps the $0.10 cap. The hosted ledger also counts its neurons against `WEFT_NEURON_DAY_CAP` (5,000 a day, the agent's share 4,000).
+
+### Workers AI side by side on Node
+
+The design keeps evals on Node: `pnpm eval:suite --provider workers_ai` runs the suite against the switch over the gateway's Workers AI REST path, beside an OpenAI live run of the same split. It sits behind the same opt-in as the OpenAI live run, with `WEFT_LLM` naming the provider, and refuses before any world is built, naming only the missing variable, unless all of these are set. `pnpm eval:ci` and the tests never select it, and the factory refuses it under vitest.
+
+```sh
+WEFT_LIVE_OPENAI=1 WEFT_LLM=workers_ai WEFT_AIG_ACCOUNT_ID=<account id> WEFT_AIG_GATEWAY=<gateway name> \
+  WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env \
+  pnpm eval:suite --provider workers_ai --split dev --variant default --cap 0.30 --experiment workers-ai-dev
+```
+
+The token comes from `WEFT_SECRETS_FILE` (or the environment), and `CF_AIG_TOKEN` is sent when it is set. The result file records the model as `@cf/openai/gpt-oss-120b` and is named `<date>-<sha>-workers_ai-suite.json`, so it never overwrites the OpenAI run's file. Each task's worst case and G8's dollar budget use the same factor as the run cap (1), and `WEFT_LIVE_USD_CAP` defaults to the suite cap, as for every live suite run.
 
 ## Sandboxes and the Cloudflare free tier
 
