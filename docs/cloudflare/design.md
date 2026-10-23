@@ -24,6 +24,7 @@ These are Nitish's and are not revisited here:
   - Pool: `WEFT_POOL_SIZE` 2 (plus the showcase and slot-smoke), so the whole pool seeds on the first UTC day.
   - Leases: 30 minutes idle and 3 hours total, 20 leases per IP hash per day, so a long demo is never cut off.
   - AI Search Help: kept, capped at 30 queries a day.
+  - Shared request quota (2026-10-23): a public Weft with no login shares the account's 100,000 Worker requests a day with Nitish's six other Workers, and RL_API (600 per 60 s per IP hash, also his decision) cannot stop requests from counting, so one abusive client could take every Worker on the account offline until 00:00 UTC. Nitish accepted this and chose to deploy as planned. If it is ever abused, the fastest remedy is a Cloudflare Access application (One-time PIN, his email) on weft.nitish-ratakonda.workers.dev, as his other apps use; it blocks strangers before a request reaches the Worker.
   - The OpenAI key stays a `weft-core` Worker secret (phase 1); Analytics Engine stays undeclared until Nitish enables it.
 
 ## 1. How this design was formed
