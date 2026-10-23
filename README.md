@@ -512,7 +512,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm demo:tests` | The golden path scenario tests (GP1 to GP18, S6 to S9) in process on fresh seeded worlds |
 | `pnpm demo:scenario <name>` | Resets the running dev world to its own seed profile (rich under `pnpm dev`; `--profile base` or `--profile rich` picks one) for one live demo scenario (`list` names them), checks it is clean (the seed clock, no pending proposal newer than the seed) and prints the click path and what to type; it calls no model. `--api-port` and `--web-port` follow `pnpm dev`, and the world should run with `WEFT_CLOCK_RATE=0` |
 | `pnpm test` | All vitest projects (scripted provider only) |
-| `pnpm typecheck` | `tsc --noEmit` in every package |
+| `pnpm typecheck` | `tsc --noEmit` in every package, then in `e2e/` (`pnpm typecheck:e2e`) |
 | `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP24 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm screenshots` | Retakes `docs/screenshots/` (or `SHOTS_DIR`) through the e2e dev runner at 1440 by 900; same ports and world reset as `pnpm e2e`, never part of it |
 | `pnpm e2e:rich` | Seeds the rich profile fresh into `.data-rich/` (ports 3270 and 4270; `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_RICH_DATA_DIR` move them) and crawls every audited screen and tab for empty states |
