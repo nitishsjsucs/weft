@@ -2,12 +2,11 @@
 // first once the digest wrote it (and dossiers and hits before that, wave 4), logged in memory_recalls, once per
 // run, and a tainted hit taints the run through the executor's taint path. Owner: w2-memory. The semantic recall
 // block at the end is cf6-extras (design 5.4).
-import { execFileSync } from "node:child_process";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { RECALL_BUDGET } from "@weft/contracts";
 import { memoryRecalls, runTaint } from "@weft/db";
-import { executorInternals } from "@weft/executor";
+import { executorInternals, memoryRepoFactory } from "@weft/executor";
 import { createTestWeft, type TestWeft } from "../src/testing";
 import { attachSemanticRecall, memoryBinding } from "../src/memory/binding";
 import { createMemoryRecall } from "../src/memory/recall";
@@ -113,11 +112,9 @@ describe("semantic recall (cf6-extras)", () => {
   const C_MISSING = "0123456789abcdef0123456789abcdef01234567";
   const note = (title: string, line: string, tainted: string | null = null) =>
     `---\nid: ${JSON.stringify(title.toLowerCase().replace(/\W+/g, "-"))}\ntype: "fact"\naliases: []\nlinks: []\nsources: ["meeting"]\nstatus: null\nupdated: "2026-10-26"\ntainted_by: ${JSON.stringify(tainted)}\n---\n# ${title}\n\n- ${line} (2026-10-26, src: meeting)\n`;
-  const git = (args: string[]) => {
-    try { return execFileSync("git", args, { cwd: memory().root()!, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; }
-  };
   const memory = () => weft.executor.memory as unknown as { root(): string | null; head(): Promise<string>; seedFiles(f: { path: string; text: string }[], msg: string): Promise<{ commit: string }> };
-  const readText = async (path: string, at?: string) => git(["show", `${at ?? "HEAD"}:${path}`]);
+  // Through the repository port, so the reads hold on git and on the SQL repo (WEFT_MEMORY=sqlite) alike.
+  const readText = async (path: string, at?: string) => memoryRepoFactory({ db: weft.db })(memory().root()!, "cmp_larkspur").read(path, at).catch(() => null);
   const source = (cands: RecallCandidate[] | (() => Promise<RecallCandidate[]>)): RecallSource & { queries: RecallQuery[] } => {
     const queries: RecallQuery[] = [];
     return { queries, async candidates(q) { queries.push(q); return typeof cands === "function" ? cands() : cands; } };

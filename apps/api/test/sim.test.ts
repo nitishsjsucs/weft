@@ -1,12 +1,17 @@
 // Contract tests for /v1/sim (demo controls) and sim.deliver_notice (owner: t2-world).
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { ChatMessageDto } from "@weft/contracts";
 import { directCtx, directDeps, directExecutors, ensureTestPrincipals, handlers, runDirect } from "@weft/core";
 import { digestDb } from "@weft/seed";
 import { createSimulators } from "@weft/sim";
+import { createWeft } from "../src/compose";
 import { createTestWeft, type TestWeft } from "../src/testing";
-import { durationMs, nextCronSlot } from "../src/routes/sim";
+import { durationMs, nextCronSlot, resetWorld } from "../src/routes/sim";
 
 let weft: TestWeft;
 beforeAll(async () => { weft = await createTestWeft(); await ensureTestPrincipals(weft.db); });
@@ -83,6 +88,26 @@ describe("POST /v1/sim/reset", () => {
     expect(await digestDb(weft.db)).toBe(expected);
     expect(weft.clock.now()).toBe("2026-10-26T15:30:00.000Z");
     await ensureTestPrincipals(weft.db);
+  });
+
+  it("drops every Weft table but never workerd's reserved _cf_ tables", async () => {
+    // workerd keeps its own _cf_KV in an object's database and refuses every statement on it (cf-db.ts
+    // RESERVED_TABLE_PREFIX). It is created outside Weft's SQL, so the stand-in is made the same way, before the world
+    // opens; the emulator (WEFT_DB=durable-emu) refuses a DROP of it as workerd does.
+    const dataDir = mkdtempSync(join(tmpdir(), "weft-reset-reserved-"));
+    const file = join(dataDir, "weft.db");
+    try {
+      const raw = new DatabaseSync(file);
+      try { raw.exec(`CREATE TABLE "_cf_KV" (key TEXT PRIMARY KEY, value BLOB); INSERT INTO "_cf_KV" (key, value) VALUES ('k', x'00ff');`); } finally { raw.close(); }
+      const w = await createWeft({ dataDir, testMode: true });
+      try {
+        await resetWorld(w);
+        expect(await w.db.all(sql`SELECT name FROM sqlite_master WHERE name = '_cf_KV'`)).toEqual([{ name: "_cf_KV" }]);
+        expect((await w.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM workers`))[0]!.n).toBeGreaterThan(0);
+      } finally { await w.close(); }
+      const after = new DatabaseSync(file);
+      try { expect(after.prepare(`SELECT key, hex(value) AS value FROM "_cf_KV"`).all()).toEqual([{ key: "k", value: "00FF" }]); } finally { after.close(); }
+    } finally { rmSync(dataDir, { recursive: true, force: true }); }
   });
 });
 

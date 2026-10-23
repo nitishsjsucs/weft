@@ -115,8 +115,9 @@ export function parseCommit(body: Uint8Array): ParsedCommit {
   return { tree: treeSha, parent, author, committer, message };
 }
 
-/** git's %cI: strict ISO 8601 in the commit's own zone; git (2.41 and later) writes a zero offset as "Z", for
- * example 2026-10-26T15:30:00Z, and any other offset as +hh:mm. */
+/** git's %cI: strict ISO 8601 in the commit's own zone; git 2.45.0 and later write a zero offset as "Z", for
+ * example 2026-10-26T15:30:00Z (older git wrote "+00:00"), and any other offset as +hh:mm. GitRepo formats its dates
+ * with this function too, so both repositories print the same text whatever the installed git. */
 export function strictIso(epoch: number, tz: string): string {
   const sign = tz.startsWith("-") ? -1 : 1;
   const minutes = sign * (Number(tz.slice(1, 3)) * 60 + Number(tz.slice(3, 5)));

@@ -4,6 +4,7 @@
 import { dirname, join, sep } from "node:path";
 import type { MemoryCommitInput, MemoryGrepLine, MemoryGrepQuery, MemoryLogEntry, MemoryLogQuery, MemoryRepo } from "../../../contracts/src/ext/cf-memory";
 import { childProcess, COMMITTER, git, GIT_FLAGS, gitEnv, nodeFs } from "./git";
+import { strictIso } from "./gitobj";
 
 // node:fs on first use (git.ts explains why): these wrappers keep the code below reading as before.
 const existsSync = (p: string) => nodeFs().existsSync(p);
@@ -16,6 +17,11 @@ const writeFileSync = (p: string, data: string) => nodeFs().writeFileSync(p, dat
 export class MemoryPathError extends Error {
   readonly code = "INVALID_INPUT" as const;
 }
+
+/** A committer date as `--date=raw` prints it ("<epoch> <+hhmm>"), shown as %cI with gitobj's strictIso, so the
+ * text is the same on every git version (git 2.45.0 changed %cI for a zero offset from "+00:00" to "Z") and the same
+ * as SqlRepo's. */
+const isoFromRaw = (raw: string) => { const [epoch, tz] = raw.trim().split(" "); return strictIso(Number(epoch), tz ?? "+0000"); };
 
 /** The pathspec git takes for folders: each folder and everything under it. */
 const FOLDER_SPEC = (folders: readonly string[]) => (folders.length ? ["--", ...folders] : []);
@@ -113,19 +119,19 @@ export class GitRepo implements MemoryRepo {
   }
 
   async log(q: MemoryLogQuery): Promise<MemoryLogEntry[]> {
-    const args = ["log", `-n${Math.max(1, Math.floor(q.n))}`, "--format=%x1e%H%x1f%P%x1f%cI%x1f%an%x1f%s%x1f%B%x1f",
+    const args = ["log", `-n${Math.max(1, Math.floor(q.n))}`, "--date=raw", "--format=%x1e%H%x1f%P%x1f%cd%x1f%an%x1f%s%x1f%B%x1f",
       ...(q.grep !== undefined ? ["--fixed-strings", "--grep", q.grep] : []), ...(q.patch ? ["-p", "--no-color", "--no-ext-diff"] : []), ...(q.path ? ["--", q.path] : [])];
     const out = await git(this.root, args).catch(() => "");
     return out.split("\x1e").filter((c) => c.length > 0).map((chunk) => {
       const [commit, parents, date, author, subject, body, rest] = chunk.split("\x1f");
-      const entry: MemoryLogEntry = { commit: commit!, parent: parents ? parents.split(" ")[0]! : null, date: date!, author: author!, subject: subject!, body: body! };
+      const entry: MemoryLogEntry = { commit: commit!, parent: parents ? parents.split(" ")[0]! : null, date: isoFromRaw(date!), author: author!, subject: subject!, body: body! };
       if (q.patch) entry.diff = (rest ?? "").replace(/^\n+/, "");
       return entry;
     });
   }
 
   /** The date of one commit, as %cI. */
-  async commitDate(sha: string): Promise<string> { return (await git(this.root, ["log", "-1", "--format=%cI", sha])).trim(); }
+  async commitDate(sha: string): Promise<string> { return isoFromRaw(await git(this.root, ["log", "-1", "--date=raw", "--format=%cd", sha])); }
 
   async exportFastImport(): Promise<Uint8Array> {
     return gitBytes(this.root, ["fast-export", "--all"]);

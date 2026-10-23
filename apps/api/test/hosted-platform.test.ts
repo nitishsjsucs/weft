@@ -131,12 +131,12 @@ describe("the fs guard on the durable path", () => {
 });
 
 /**
- * Module-level import.meta reads that cannot throw in workerd, each for a reason the integration checked: migrate.ts
- * builds MIGRATIONS_DIR only when import.meta.url is a file URL (else ""), and providers/factory.ts is @weft/agent's
- * Node entry, which a Worker bundle never evaluates (the workerd condition resolves src/portable.ts, pinned by
- * packages/agent/test/hosted/portable.test.ts). Script entries the hosted entry never imports are not scanned.
+ * Module-level import.meta reads that cannot throw in workerd, each for a reason the integration checked:
+ * providers/factory.ts is @weft/agent's Node entry, which a Worker bundle never evaluates (the workerd condition
+ * resolves src/portable.ts, pinned by packages/agent/test/hosted/portable.test.ts). Script entries the hosted entry
+ * never imports are not scanned.
  */
-const MODULE_LEVEL_IMPORT_META_PENDING = new Set(["packages/db/src/migrate.ts", "packages/agent/src/providers/factory.ts"]);
+const MODULE_LEVEL_IMPORT_META_PENDING = new Set(["packages/agent/src/providers/factory.ts"]);
 const ENTRY_SCRIPTS = new Set(["apps/api/src/demo.ts", "packages/seed/src/cli.ts"]);
 
 /** Top-level statements that read import.meta while the module evaluates (outside any function body). */

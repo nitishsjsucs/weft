@@ -4,7 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { RunHandle, ToolOutcome } from "@weft/contracts";
+import { DEFAULT_CODE_LIMITS, type RunHandle, type ToolOutcome } from "@weft/contracts";
 import { z } from "zod";
 import type { WeftCommand } from "@weft/core";
 import { createSandbox, encodings } from "../../src/index";
@@ -101,7 +101,7 @@ describe("code.run", () => {
     expect(await exec("for (let i = 0; i < 26; i++) await weft.call('actions__list', { limit: 1 }); return 1;")).toMatchObject({ ok: false, refusal: { code: "CALL_BUDGET" } });
     const err = await exec("throw new Error('bad math');");
     expect(dataOf(err)).toMatchObject({ ok: false, value: null, error: { code: "SANDBOX_ERROR", message: "Error: bad math" } });
-  });
+  }, 4 * DEFAULT_CODE_LIMITS.wallMs);   // four code.run calls, each ended by the sandbox wall deadline; the first burns the whole cpuMs on purpose
 
   it("weft.memory.search and read map to the memory commands, pinned to the commit captured at start", async () => {
     const allow = await w.executor.runs.openChatRun(w.ui("usr_dana"), { threadId: null, surface: "human_ui", allowlist: ["code.run", "memory.search", "memory.read"] });

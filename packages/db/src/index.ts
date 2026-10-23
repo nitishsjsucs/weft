@@ -1,7 +1,7 @@
 export * as schema from "./schema";
 export * from "./schema";
 export { openDb, closeDb, withWriteLock, ready, isBusyError, emulatorOf, currentTransaction, type Db, type DbTx, type Schema, type OpenDbOptions } from "./client";
-export { migrate, MIGRATIONS_DIR } from "./migrate";
+export { migrate, migrationsDir } from "./migrate";
 // Weft on Cloudflare (docs/cloudflare/design.md 4): the durable facade and everything around it.
 export { openDurableDb, durableHandleOf, DurableSession, DurableTransaction, DurableDbError, libsqlArg, sqlLiteral, type DurableDb, type DurableFacade } from "./durable";
 export { createSqlMeter, type SqlMeterControl, type StatementUsage } from "./meter";
