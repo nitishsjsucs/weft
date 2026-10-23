@@ -54,7 +54,7 @@ Fatal issues fixed:
 | Subrequests per invocation | 50 external (the 51st throws), 1,000 to Cloudflare services | measured and documented (probe: Subrequests) |
 | Worker size | 10.35 MiB of incompressible data deployed; documented 64 MiB uncompressed, no compressed limit | measured (probe: bundle size) |
 | Full rich restore | 20,556 rows written (99 tables, 160 indexes, 8 triggers, 7,957 data rows; index entries count either way) | verified locally (risk design, workerd) |
-| Delta reset after a 10-flow engaged session | 557 rows written, 6,789 rows read, 0 mismatches over 2 cycles | verified locally (risk design) |
+| Delta reset after a 10-flow engaged session | 557 rows written, 6,789 rows read, 0 mismatches over 2 cycles, with memory in git (hosted worlds keep it in SQL: 717 rows, section 4.6) | verified locally (risk design) |
 | 10-flow engaged session with dirty tracking | 894 rows written (824 without tracking), 29,044 rows read | verified locally (risk design) |
 | Idle Home tab | `/v1/time-off/requests` reads 1,092 rows in 145 statements every 10 s, about 0.39M rows read per tab-hour | verified locally (risk design; poll at `apps/web/src/components/app/home/home-view.tsx:43`) |
 | GET routes that write | nine GET routes write a `res_` id row on every call (`newId(sp, "res_")` at `packages/executor/src/pipeline.ts:281`) | verified locally (risk design) |
@@ -227,7 +227,7 @@ One semantic gets stronger: a `memory.write_note` inside a command that later ro
 | Method | How | Cost | Status |
 |---|---|---|---|
 | **Point-in-time recovery** | after a slot's full restore, store `getCurrentBookmark()` in the Lobby; reset is `onNextSessionRestoreBookmark(bm)` then `ctx.abort()` | rows written undocumented; bookmarks cover 30 days; not available locally | to verify on the first deploy (GraphQL rows written per slot name); used only if close to 0 rows |
-| **Delta reset** (default) | dirty-tracking triggers, armed at restore on every table but `kv_state` (the slot's own stamp; see below), record touched keys in `_weft_dirty(tbl, pk)` with `INSERT ... WHERE NOT EXISTS` (an `INSERT OR IGNORE` inside a trigger fails under an outer UPSERT, verified locally). Reset, inside one `transactionSync` with `defer_foreign_keys=ON`: delete dirty rows, reinsert their seed rows from the bundled `seed-rows.json.gz`, drop and recreate the append-only triggers around the log deletions, restore `sqlite_sequence` and `id_counters`, wipe `_weft_dirty` with DROP TABLE (0 rows written) and recreate it, then check per-table JS digests of the dirty tables against the manifest | 557 rows written and 6,789 rows read after a 10-flow session; tracking adds 8.5% to activity writes (verified locally) | default |
+| **Delta reset** (default) | dirty-tracking triggers, armed at restore on every table but `kv_state` (the slot's own stamp; see below), record touched keys in `_weft_dirty(tbl, pk)` with `INSERT ... WHERE NOT EXISTS` (an `INSERT OR IGNORE` inside a trigger fails under an outer UPSERT, verified locally). Reset, inside one `transactionSync` with `defer_foreign_keys=ON`: delete dirty rows, reinsert their seed rows from the bundled `seed-rows.json.gz`, drop and recreate the append-only triggers around the log deletions, restore `sqlite_sequence` and `id_counters`, wipe `_weft_dirty` with DROP TABLE (0 rows written) and recreate it, then check per-table JS digests of the dirty tables against the manifest | 717 rows written in workerd (716 on the emulator) after a 10-flow session on SQL memory, the repo every hosted world uses, so the band is 896 (25% above); recorded on 2026-10-21 in the cloud session's Linux container, not yet verified locally. The 557 rows written and 6,789 rows read (verified locally by the risk design) were measured with memory in git, outside the database, and bound only that case. Tracking adds 8.5% to activity writes (verified locally) | default |
 | **Full restore** | `ReseedWorkflow`: `deleteAll()` (also clears the alarm from compat date 2026-02-24), migrate, about 100 INSERT chunks under 90 KB, arm the dirty triggers, verify counts, digest and chain head, take a bookmark, mark the slot clean | 20,556 rows written (verified locally) | first seeding, snapshot or schema changes, digest mismatch |
 
 After any reset: `gen += 1` (the Lobby holds the authoritative generation and stamps it into the slot, which also covers a point-in-time restore), keys minted for the lease are gone with the dirty rows, the previous generation's slot vectors are deleted by id (ids recorded in the Lobby at upsert), and `ctx.abort()` rebuilds the in-memory runtime (otel state, redactor, ETag versions). A full verify (every table but `kv_state`, about 8k rows read with the JS digest, against 47,814 for an EXCEPT verify) runs weekly and on any mismatch. `kv_state` is restored with the snapshot (its seed row is `routines.prebuilt_hash`) and checked by the restore itself, but the slot stamps itself there after every restore and reset (`world.id`, the lease), so it is never dirty-tracked and the weekly verify leaves it out; otherwise every clean, stamped world would fail the verify and get a full restore it does not need (verified locally: a real-engine Miniflare case verifies the showcase and a reset slot, then sweeps eight days on and starts no restore).
@@ -419,7 +419,7 @@ Weft takes 60% of the request, row, duration and log caps and half of the AI, qu
 
 | Cap (account-wide) | Others' peak | Weft share | Per engaged session | Sessions a day at the share |
 |---|---|---|---|---|
-| DO rows written 100,000 | 6,672 | 60,000 | about 1,550: 894 activity with tracking plus 557 delta reset (verified locally) plus about 100 for Lobby and ledger rows | **about 38 (binding)**; about 60 if point-in-time recovery costs close to 0 |
+| DO rows written 100,000 | 6,672 | 60,000 | about 1,710 or more: 894 activity with tracking (verified locally, with memory in git; on SQL memory the session's memory commits add rows of their own, not yet measured) plus 717 delta reset on SQL memory (section 4.6: recorded in the cloud session's container, not yet verified locally) plus about 100 for Lobby and ledger rows | **about 35 (binding)**; about 60 if point-in-time recovery costs close to 0 |
 | DO rows read 5,000,000 | low | 3,000,000 | about 60,000: 29,044 for the 10 flows, about 15,000 for page GETs after the N+1 fix and ETag, 6,789 reset, about 8,000 digest | about 50 |
 | DO requests 100,000 | low | 60,000 | about 450 | about 130 |
 | Workers requests 100,000 | low | 60,000 | about 400 (304s still count; the WebSocket feed and pause-when-hidden keep it there) | about 150 |
@@ -475,7 +475,7 @@ The script reads the account's subscriptions (read only) before and after and st
 
    | UTC day | Full restores | Rows written by restores | Left for visitors under 80,000 |
    |---|---|---|---|
-   | 1 | showcase, slot-smoke, slot-1 | 61,668 | about 18,000 (about 11 sessions) |
+   | 1 | showcase, slot-smoke, slot-1 | 61,668 | about 18,000 (about 10 sessions) |
    | 2 | slot-2, slot-3 | 41,112 | about 38,900 |
    | 3 | slot-4 | 20,556 | about 59,400 |
 
@@ -620,7 +620,7 @@ The smoke loads `WEFT_SMOKE_TOKEN` into its own command environment only. The to
 ## 12. Risks
 
 1. **Transaction semantics are verified locally only.** Production workerd should match; the deployed conformance run is the first post-deploy step and gates everything else.
-2. **Rows written limits visitors to about 38 engaged sessions a day.** Point-in-time recovery cost on Free is undocumented; the delta reset is the default and the Lobby enforces Weft's share.
+2. **Rows written limits visitors to about 35 engaged sessions a day.** Point-in-time recovery cost on Free is undocumented; the delta reset is the default and the Lobby enforces Weft's share.
 3. **DO CPU on Free is documented both ways.** 30 s was measured, but it is leniency that could change. Restores stay chunkable and routes stay in milliseconds.
 4. **Shared account caps.** Weft can starve the six other demos or be starved by them. The shares, the kill switch, the WebSocket feed and the degradation ladder contain it.
 5. **The Rate Limiting binding and the gateway spend rule are eventually consistent.** SpendDO is the only real gate.

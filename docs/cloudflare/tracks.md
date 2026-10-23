@@ -87,7 +87,7 @@ pnpm typecheck
 These must show:
 - the conformance cases in design 11.3 pass on both the emulator and workerd, including the negative linear-transaction case and the rollback of writes issued after awaits, top level and nested;
 - a double approve gives one execution and one `NOT_PENDING`;
-- restore then delta reset after the 10 recorded flows reproduces the manifest digests twice, at no more than 25% above 557 rows written;
+- restore then delta reset after the 10 recorded flows reproduces the manifest digests twice, at no more than 25% above 717 rows written (896) on SQL memory, the repo hosted worlds use (557, measured with memory in git, bounds only that case);
 - both memory repos give identical HEAD, all 36 commit SHAs and identical search, read-at, history, tree and recall output, and `git fast-import` of the export reproduces the SHAs.
 
 ## cf2-platform
