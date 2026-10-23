@@ -30,6 +30,7 @@ import { addLeaseKey, hasKvState, leaseKeys, modeOf, readStamp, writeStamp } fro
 import { leaseEnded, leaseExpiresAt } from "../lobby/policy";
 import { COUNTERS, createRunCatalog, gatewayOption, neuronBudgetFromLedger, type D1Like, type HostedJob as ExtrasJob, type QueueLike, type R2BucketLike, type VectorizeLike } from "@weft/cf-extras";
 import { flagsFor } from "../../extras/env";
+import { STALE_GENERATION } from "../../extras/queues";
 import type { HiddenWriteBack, SlotExport, SlotExtrasPort, SlotWorldInfo, WriteBackOutcome } from "../../extras/ports";
 
 // Every global fetch an alarm invocation makes counts against its MAX_FETCHES_PER_ALARM (fetch-scope.ts).
@@ -52,16 +53,25 @@ const RESTORE_DONE_KEY = "weft.restore_done";
 /** POST /v1/agent/runs/:id/cancel (apps/api/src/routes/agent.ts). */
 const CANCEL_RUN_PATH = /^\/v1\/agent\/runs\/([^/]+)\/cancel$/;
 
+/** Two stamps name the same world when slot, generation and mode match (the visitor can change within one, at a
+ * lease start or end, without a new engine). */
+const sameWorld = (a: WorldStamp | null, b: WorldStamp | null): boolean =>
+  !!a && !!b && a.slot === b.slot && a.gen === b.gen && a.mode === b.mode;
+
 const leaseEndedError = () => hostedError("LEASE_ENDED", "This demo company's lease has ended", { headers: { [LEASE_HEADER]: "ended" } });
 
 export class CompanyDO extends DurableObject<CoreEnv> {
   private stamp: WorldStamp | null = null;
   private engine: WorldEngine | null = null;
+  /** The world `engine` was booted for (slot, generation, mode); an engine serves only while it is the stamp's. */
+  private engineFor: WorldStamp | null = null;
   private module: EngineModule | null = null;
   private bootError: string | null = null;
   private unsubscribe: (() => void) | null = null;
   /** The boot in progress or done (startEngine); null before one and after a failed one or stopEngine. */
   private starting: Promise<void> | null = null;
+  /** The world `starting` boots: a boot is shared only by callers that want that same world (sameWorld). */
+  private startingFor: WorldStamp | null = null;
   private config = new Map<string, string | null>();
   private lastActivity: number | null = null;
   private usage: UsageDelta = zeroUsage();
@@ -79,6 +89,9 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private inflight = 0;
   private quiescing = 0;
   private idleWaiters: (() => void)[] = [];
+  /** Steps that stop the world and start the next one (a new generation's stamp, a reset, a restore) running now:
+   * meanwhile only they boot the world (mayBoot). */
+  private rebuilding = 0;
 
   constructor(ctx: DurableObjectState, env: CoreEnv) {
     super(ctx, env);
@@ -120,27 +133,52 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   /**
    * Boots the world once: the cold boot, the alarm, the extras RPCs and the reset and restore steps can all ask at
-   * the same time (this.engine is set only after several awaits), so concurrent callers share one boot. A boot that
-   * failed, or stopEngine, lets the next call boot again.
+   * the same time (this.engine is set only after several awaits), so concurrent callers share one boot, as long as it
+   * boots the world they want: a boot started for an earlier stamp (another generation) is never shared, so a reset
+   * that stamped the next generation boots that one. A boot that failed, or stopEngine, lets the next call boot again.
    */
   private startEngine(): Promise<void> {
-    if (!this.starting) {
-      const p: Promise<void> = this.bootEngine().then(() => { if (!this.engine && this.starting === p) this.starting = null; });
+    if (!this.starting || !sameWorld(this.startingFor, this.stamp)) {
+      const p: Promise<void> = this.bootEngine().then(() => {
+        if (!this.engine && this.starting === p) { this.starting = null; this.startingFor = null; }
+      });
       this.starting = p;
+      this.startingFor = this.stamp;
     }
     return this.starting;
+  }
+
+  /**
+   * Whether a caller that is not the reset or restore itself (the alarm, an extras RPC, the seed index) may boot the
+   * world now: never while a reset, a restore or a new generation's stamp is stopping the world and starting the next
+   * one, since a boot then would bring up the world being replaced (the previous visitor's, at the old generation).
+   */
+  private mayBoot(): boolean {
+    return !!this.stamp && this.quiescing === 0 && this.rebuilding === 0 && !this.ctx.storage.kv.get(RESTORE_KEY);
+  }
+
+  /** Runs a step that stops the world and starts the next one; while it runs, mayBoot is false. */
+  private async rebuild<T>(fn: () => Promise<T>): Promise<T> {
+    this.rebuilding += 1;
+    try {
+      return await fn();
+    } finally {
+      this.rebuilding -= 1;
+    }
   }
 
   private async bootEngine(): Promise<void> {
     if (!this.stamp) return;
     const stamp = this.stamp;
+    // The hosts belong to this boot's engine; they become the object's only if the engine is kept.
+    const runHost = this.newRunHost();
+    const scheduler = this.newScheduler();
+    let engine: WorldEngine | null = null;
     try {
       this.module = await loadEngine();
       this.config = await envConfig(this.env);
-      this.runHost = this.newRunHost();
-      this.scheduler = this.newScheduler();
       const base = stringEnv(this.env);
-      const engine = await this.module.boot({
+      engine = await this.module.boot({
         storage: this.storage,
         env: liveEnv(base, () => configEnv(this.config, stamp.mode)),
         world: { slot: stamp.slot, gen: stamp.gen, mode: stamp.mode },
@@ -150,8 +188,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
           charge: () => ({ visitor: this.stamp?.visitor ?? null, ipHash: this.stamp?.ipHash ?? null }),
           guard: () => this.engine?.guard ?? null,
         }),
-        runHost: this.runHost,
-        schedulerHost: this.scheduler,
+        runHost,
+        schedulerHost: scheduler,
         onOutbox: () => queueMicrotask(() => void this.flushOutbox()),
         readOnly: stamp.mode === "showcase",
         fetch: this.counter.wrap(rawFetch),
@@ -174,7 +212,19 @@ export class CompanyDO extends DurableObject<CoreEnv> {
           return r.ok;
         },
       });
+      // The world this boot brought up must still be the object's: a reset or restore may have stamped another
+      // generation while it booted. Then it is the previous world, and it is closed, never served.
+      if (!sameWorld(this.stamp, stamp) || this.engine) {
+        logEvent("world.boot", { slot: stamp.slot, gen: stamp.gen, outcome: "stale" });
+        const stale = engine;
+        engine = null;
+        await stale.close().catch((e: unknown) => logError("world.close", e, { slot: stamp.slot, gen: stamp.gen }));
+        return;
+      }
       this.engine = engine;
+      this.engineFor = stamp;
+      this.runHost = runHost;
+      this.scheduler = scheduler;
       this.bootError = null;
       // What the boot itself read and wrote counts too (design 4.4: a cold start on a restored snapshot writes 0 rows).
       const booted = engine.meter.totals();
@@ -185,9 +235,11 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       logEvent("world.boot", { slot: stamp.slot, gen: stamp.gen, outcome: "ok" });
       await this.flushOutbox();
     } catch (e) {
-      this.engine = null;
-      this.bootError = e instanceof Error ? e.message : String(e);
       logError("world.boot", e, { slot: stamp.slot, gen: stamp.gen });
+      // A failed boot of a world that is no longer the object's leaves the current one alone.
+      if (!sameWorld(this.stamp, stamp)) return;
+      if (engine && this.engine === engine) { this.engine = null; this.engineFor = null; }
+      this.bootError = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -197,6 +249,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.starting = null;
     const engine = this.engine;
     this.engine = null;
+    this.engineFor = null;
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.alarms.cancel("runs");
@@ -218,7 +271,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (!checked.ok) return hostedError("SESSION_INVALID", "This request did not come through Weft's front door");
     const c = checked.claims;
     let stamp = this.stamp;
-    if (!stamp || !this.engine) return this.notReady();
+    if (!stamp || !this.engine || !sameWorld(this.engineFor, stamp)) return this.notReady();
     let refused = this.gate(c, stamp, request.method, url.pathname);
     if (refused) return refused;
     // An MCP key works only while its lease lasts by the lease's own times, not only until the Lobby releases it (a
@@ -227,7 +280,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (url.pathname === DO_PATHS.mcp && stamp.mode === "slot") {
       if (!(await this.mcpLeaseOpen(stamp))) return leaseEndedError();
       stamp = this.stamp;
-      if (!stamp || !this.engine) return this.notReady();
+      if (!stamp || !this.engine || !sameWorld(this.engineFor, stamp)) return this.notReady();
       refused = this.gate(c, stamp, request.method, url.pathname);
       if (refused) return refused;
     }
@@ -454,24 +507,47 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   // Extras (cf6-extras, apps/cf/src/extras/ports.ts SlotExtrasPort): the queue consumers' way back into this world.
   // Each runs outside any transaction; the write-back goes through the executor's own system path. ---------------
 
-  private async slotExtras(): Promise<SlotExtrasPort> {
-    if (!this.engine && this.stamp && !this.ctx.storage.kv.get(RESTORE_KEY)) await this.startEngine();
-    const port = this.engine?.extras;
-    if (!port) throw new Error(this.bootError ? "WORLD_NOT_READY: this demo company failed to start" : "WORLD_NOT_READY: this demo company is not running");
-    return port;
+  /**
+   * The running world's extras port. While a reset, a restore or a new generation's stamp is replacing the world it
+   * is refused with WORLD_NOT_READY (the queue consumer retries with backoff) and boots nothing: a boot then would
+   * bring up the world being replaced and answer for it.
+   */
+  private async slotExtras(): Promise<{ port: SlotExtrasPort; engine: WorldEngine }> {
+    if (this.quiescing || this.rebuilding) throw new Error("WORLD_NOT_READY: this demo company is being reset");
+    if (!this.engine && this.mayBoot()) await this.startEngine();
+    const engine = sameWorld(this.engineFor, this.stamp) ? this.engine : null;
+    const port = engine?.extras;
+    if (!engine || !port) throw new Error(this.bootError ? "WORLD_NOT_READY: this demo company failed to start" : "WORLD_NOT_READY: this demo company is not running");
+    return { port, engine };
   }
-  async extrasWorld(): Promise<SlotWorldInfo> { return (await this.slotExtras()).extrasWorld(); }
-  async extrasBlob(storagePath: string): Promise<Uint8Array | null> { return (await this.slotExtras()).extrasBlob(storagePath); }
-  async extrasWriteBack(w: HiddenWriteBack): Promise<WriteBackOutcome> {
-    const port = await this.slotExtras();
-    const engine = this.engine!;
-    const { value, usage } = await engine.meter.measure(() => port.extrasWriteBack(w));
-    this.usage.rowsRead += usage.rowsRead;
-    this.usage.rowsWritten += usage.rowsWritten;
-    return value;
+  /** A job's generation must be the world's: a late job of the previous visitor's generation writes nothing here. */
+  private staleGen(gen: number): string | null {
+    return this.stamp && this.stamp.gen === gen ? null : `a job of generation ${gen} for ${this.stamp ? `generation ${this.stamp.gen}` : "a world being rebuilt"}`;
   }
-  async extrasMemoryText(path: string, commit: string): Promise<string | null> { return (await this.slotExtras()).extrasMemoryText(path, commit); }
-  async extrasExport(what: "memory" | "world"): Promise<SlotExport> { return (await this.slotExtras()).extrasExport(what); }
+  async extrasWorld(): Promise<SlotWorldInfo> { return (await this.slotExtras()).port.extrasWorld(); }
+  async extrasBlob(storagePath: string): Promise<Uint8Array | null> { return (await this.slotExtras()).port.extrasBlob(storagePath); }
+  async extrasWriteBack(w: HiddenWriteBack, gen: number): Promise<WriteBackOutcome> {
+    const { port, engine } = await this.slotExtras();
+    const stale = this.staleGen(gen);
+    if (stale) return { ok: false, code: STALE_GENERATION, message: stale, retryable: false };
+    // Counted like a mutation: a reset or a clean check waits for it, and none starts while one is refused above.
+    this.inflight += 1;
+    try {
+      const { value, usage } = await engine.meter.measure(() => port.extrasWriteBack(w, gen));
+      this.usage.rowsRead += usage.rowsRead;
+      this.usage.rowsWritten += usage.rowsWritten;
+      return value;
+    } finally {
+      this.leave();
+    }
+  }
+  async extrasMemoryText(path: string, commit: string): Promise<string | null> { return (await this.slotExtras()).port.extrasMemoryText(path, commit); }
+  async extrasExport(what: "memory" | "world", gen: number): Promise<SlotExport> {
+    const { port } = await this.slotExtras();
+    const stale = this.staleGen(gen);
+    if (stale) throw new Error(`${STALE_GENERATION}: ${stale}`);
+    return port.extrasExport(what, gen);
+  }
 
   /** Run outcomes for the model comparison page (design 5.2): numbers only, recorded outside any transaction. */
   private recordRuns(runIds: readonly string[]): void {
@@ -568,7 +644,19 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const due = this.alarms.begin();
     const engine = this.engine;
     if (!engine) {
-      if (this.stamp && !this.ctx.storage.kv.get(RESTORE_KEY)) await this.startEngine();
+      if (this.mayBoot()) {
+        await this.startEngine();
+        return;
+      }
+      // A reset or restore is replacing the world (it boots the next one itself), or a restore waits for its
+      // Workflow: nothing boots here. The purposes that were due are asked for again after a backoff, so a step that
+      // ends without a running world still gets its boot from a later alarm.
+      if (this.stamp || this.quiescing || this.rebuilding) {
+        const retryMs = alarmRetryDelayMs(this.alarmFailures);
+        this.alarmFailures += 1;
+        logEvent("alarm.deferred", { slot: this.stamp?.slot, gen: this.stamp?.gen, outcome: "rebuilding", retryMs });
+        for (const p of due.size ? due : new Set(["runs"] as const)) await this.alarms.arm(p, Date.now() + retryMs);
+      }
       return;
     }
     this.counter.reset();
@@ -677,8 +765,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.lastActivity = s.visitor ? Date.now() : null;
     if (!prev || prev.gen !== s.gen || !this.engine) {
       if (prev && prev.gen !== s.gen) this.closeSockets({ type: "lease", state: "reset", gen: s.gen }, s.gen);
-      await this.stopEngine();
-      await this.startEngine();
+      await this.rebuild(async () => {
+        await this.stopEngine();
+        await this.startEngine();
+      });
     }
     return { ok: true, gen: s.gen };
   }
@@ -729,7 +819,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   /** The default reset after a lease (design 4.6): delete dirty rows, reinsert their seed rows, check the digests. */
   async deltaReset(s: WorldStamp): Promise<ResetOutcome> {
-    return this.quiesce(() => this.deltaResetNow(s));
+    return this.quiesce(() => this.rebuild(() => this.deltaResetNow(s)));
   }
 
   private async deltaResetNow(s: WorldStamp): Promise<ResetOutcome> {
@@ -761,12 +851,12 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   async resetToBookmark(input: { bookmark: string; stamp: WorldStamp }): Promise<ResetOutcome> {
     const t0 = Date.now();
     if (!this.storage.onNextSessionRestoreBookmark) return { ok: false, method: "pitr", gen: this.stamp?.gen ?? 0, rowsWritten: 0, mismatches: ["pitr unavailable"], ms: 0 };
-    return this.quiesce(async () => {
+    return this.quiesce(() => this.rebuild(async () => {
       await this.stopEngine();
       await this.storage.onNextSessionRestoreBookmark!(input.bookmark);
       setTimeout(() => this.ctx.abort("reset to bookmark"), 0);
-      return { ok: true, method: "pitr", gen: input.stamp.gen, rowsWritten: 0, mismatches: [], ms: Date.now() - t0 };
-    });
+      return { ok: true as const, method: "pitr" as const, gen: input.stamp.gen, rowsWritten: 0, mismatches: [], ms: Date.now() - t0 };
+    }));
   }
 
   // ReseedWorkflow RPC: a full restore in short steps (design 4.6 and 9.2) ----------------------------------------
@@ -774,7 +864,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   async restoreBegin(input: RestoreBeginInput): Promise<{ ok: true }> {
     this.assertName(input.slot);
     if (modeOf(input.slot) !== input.mode) throw new Error(`restore mode ${input.mode} does not match ${input.slot}`);
-    return this.quiesce(async () => {
+    return this.quiesce(() => this.rebuild(async () => {
       await this.stopEngine();
       this.closeSockets({ type: "lease", state: "ended", gen: input.gen }, null);
       this.alarms.clear();
@@ -782,7 +872,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       await this.ctx.storage.deleteAll();
       this.ctx.storage.kv.put<RestoreProgress>(RESTORE_KEY, { slot: input.slot, gen: input.gen, mode: input.mode, next: 0, rowsWritten: 0, triggers: [] });
       return { ok: true as const };
-    });
+    }));
   }
 
   private progress(): RestoreProgress {
@@ -853,6 +943,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
    * together and are remembered, so a retry after a failed boot only boots again.
    */
   async restoreFinish(input: { bookmark: string | null }): Promise<RestoreFinish> {
+    return this.rebuild(() => this.restoreFinishNow(input));
+  }
+
+  private async restoreFinishNow(input: { bookmark: string | null }): Promise<RestoreFinish> {
     const mod = this.module ?? (this.module = await loadEngine());
     const a = await mod.artifacts();
     const p = this.ctx.storage.kv.get<RestoreProgress>(RESTORE_KEY);
@@ -868,8 +962,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     }
     const done = this.ctx.storage.kv.get<RestoreDone>(RESTORE_DONE_KEY);
     if (!done) throw new Error("no restore in progress (restoreBegin first)");
+    // Only an engine of the restored world counts; a retried step boots it again.
+    if (this.engine && !sameWorld(this.engineFor, this.stamp)) await this.stopEngine();
     if (!this.engine) await this.startEngine();
-    if (!this.engine) throw new Error(`restored ${done.slot} but the world did not boot: ${this.bootError ?? "unknown"}`);
+    if (!this.engine || !sameWorld(this.engineFor, this.stamp)) throw new Error(`restored ${done.slot} but the world did not boot: ${this.bootError ?? "unknown"}`);
     return { slot: done.slot, gen: done.gen, snapshot: a.version, bookmark: input.bookmark, rowsWritten: done.rowsWritten };
   }
 
@@ -889,7 +985,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   async indexSeedMemory(input: { fromChunk: number }): Promise<{ snapshot: string; namespace: string; notes: number; chunks: number; nextChunk: number | null }> {
     this.assertName(DO_NAMES.showcase);
     if (!this.stamp || this.stamp.mode !== "showcase") throw new Error("the seed index runs on the provisioned showcase only");
-    if (!this.engine && !this.ctx.storage.kv.get(RESTORE_KEY)) await this.startEngine();
+    if (!this.engine && this.mayBoot()) await this.startEngine();
     const engine = this.engine;
     if (!engine) throw new Error(`WORLD_NOT_READY: the showcase is not running${this.bootError ? ` (${this.bootError})` : ""}`);
     if (!engine.indexSeedMemory) throw new Error("SEED_INDEX_DISABLED: this deployment has no Workers AI or Vectorize binding");
