@@ -47,6 +47,9 @@ export interface WorldBootInput {
   extras?: WorldExtrasBindings;
 }
 
+/** One after-commit outbox row (design 3.4); `job` is null when the row's body is not a job (dropped unsent). */
+export interface OutboxRow { id: string; kind: string; job: HostedJob | null }
+
 /** What the PDF route needs from CompanyDO beyond the world (design 6.3). */
 export interface WorldPdfInput {
   ctx: { human: boolean; smoke: boolean };
@@ -66,6 +69,16 @@ export interface WorldEngine {
   mcp(req: Request): Promise<Response>;
   /** Runs alarm-side work (scheduler ticks, run jobs) inside the world's scope. */
   inScope<T>(fn: () => Promise<T>): Promise<T>;
+  /**
+   * Runs `fn` under the world's write lock, inside the world's scope (the lock is keyed by WorldScope.current()).
+   * Every executor transaction runs under that lock, so while `fn` runs no transaction of this world is open, in this
+   * request or any other. Never do I/O inside it.
+   */
+  writeLocked<T>(fn: () => Promise<T>): Promise<T>;
+  /** The outbox rows not yet sent, oldest first (the executor's pendingOutbox), read under writeLocked. */
+  outboxPending(): Promise<OutboxRow[]>;
+  /** Deletes a row whose job was sent (the executor's ackOutbox), under writeLocked. */
+  outboxAck(id: string): Promise<void>;
   /** The sim clock rate; periodic ticks run only while it is above 0. */
   clockRate(): number;
   /** The lease's MCP key, minted through the executor's admin path (the plaintext is shown once). */

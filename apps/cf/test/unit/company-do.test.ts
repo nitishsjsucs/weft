@@ -30,9 +30,10 @@ interface FakeWorld {
   /** The world's write lock: writeLocked runs behind it. */
   lockTail: Promise<unknown>;
   input: WorldBootInput | null;
+  engine: WorldEngine | null;
 }
 let world: FakeWorld;
-const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null });
+const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null });
 
 function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]): { toArray(): Record<string, unknown>[] } }): WorldEngine {
   const guard: TxGuard = {
@@ -73,7 +74,8 @@ const fakeModule: EngineModule = {
     if (world.bootDelayMs) await sleep(world.bootDelayMs);
     if (world.failBoots > 0) { world.failBoots -= 1; throw new Error("fake boot failure"); }
     world.input = input;
-    return engineFor(input, currentSql!.sql);
+    world.engine = engineFor(input, currentSql!.sql);
+    return world.engine;
   },
   store: { isClean: () => true } as unknown as EngineModule["store"],
   artifacts: async () => ({ version: "fake", manifest: { journalHash: "x", digest: "x", chunks: 0, rows: 0 }, snapshot: {} }),
@@ -280,5 +282,45 @@ describe("the world's boot", () => {
     await c.co.applyStamp({ ...c.stamp!, gen: 4 });
     expect(world.boots).toBe(4);
     expect((await c.co.fetch(await req("/v1/workers", { gen: 4 }))).status).toBe(200);
+  });
+});
+
+describe("the outbox flush", () => {
+  const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
+  const append = (c: ReturnType<typeof company>, id: string, body: string) => c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES (?, 'ocr.receipt', ?, ?)`, id, body, new Date().toISOString());
+
+  it("never sends a row of a transaction still open in another request, so one that rolls back is never sent", async () => {
+    const c = company();
+    await c.ready();
+    // Another request's executor transaction: it holds the world's write lock, appends its row, and then rolls back.
+    // The guard this flush sees cannot tell (inTx is per async context), the lock can.
+    let rollBack!: () => void;
+    const open = world.engine!.writeLocked(async () => {
+      append(c, "obx_open", job(1));
+      await new Promise<void>((r) => { rollBack = r; });
+      c.m.sql.exec(`DELETE FROM outbox WHERE id = 'obx_open'`);
+    });
+    await sleep(1);
+    const flush = c.co.flushOutbox();
+    await sleep(10);
+    expect(c.sent).toEqual([]);
+    rollBack();
+    await open;
+    expect(await flush).toBe(0);
+    expect(c.sent).toEqual([]);
+  });
+
+  it("sends each committed row once and deletes it, drops a row that is not a job, and reads again for rows committed meanwhile", async () => {
+    const c = company();
+    await c.ready();
+    append(c, "obx_a", job(2));
+    append(c, "obx_bad", "{not json");
+    const flush = c.co.flushOutbox();
+    // Committed while the first flush runs: its onOutbox finds a flush running, which reads again before it ends.
+    append(c, "obx_b", job(3));
+    expect(await c.co.flushOutbox()).toBe(0);
+    expect(await flush).toBe(2);
+    expect(c.sent.map((x) => (x.body as { jobId: string }).jobId)).toEqual([`obx_${"2".padStart(16, "0")}`, `obx_${"3".padStart(16, "0")}`]);
+    expect(c.m.sql.exec(`SELECT COUNT(*) AS n FROM outbox`).toArray()[0]!.n).toBe(0);
   });
 });

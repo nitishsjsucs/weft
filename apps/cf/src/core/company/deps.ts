@@ -52,6 +52,11 @@ export interface WeftDeps {
   /** Today's executor exports (present on every branch). */
   adminChange: typeof executorModule.adminChange;
   executorInternals: typeof executorModule.executorInternals;
+  /** The after-commit outbox's reader and deleter (packages/executor/src/hosted/outbox.ts). */
+  pendingOutbox: typeof executorModule.pendingOutbox;
+  ackOutbox: typeof executorModule.ackOutbox;
+  /** cf1-db's per-world write mutex (packages/db/src/client.ts); every executor transaction runs under it. */
+  withWriteLock: typeof dbModule.withWriteLock;
 }
 
 export class MissingDependency extends Error {
@@ -110,6 +115,9 @@ export function weftDeps(): WeftDeps {
     createRemoteMcpHandler: get(mcpModule, "createRemoteMcpHandler") as WeftDeps["createRemoteMcpHandler"],
     adminChange: executorModule.adminChange,
     executorInternals: executorModule.executorInternals,
+    pendingOutbox: executorModule.pendingOutbox,
+    ackOutbox: executorModule.ackOutbox,
+    withWriteLock: dbModule.withWriteLock,
   };
   resolved = out;
   return out;

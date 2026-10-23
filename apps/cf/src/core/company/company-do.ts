@@ -11,7 +11,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   HOSTED_SETTINGS, LIVE_PING, LIVE_PONG, MAX_FETCHES_PER_ALARM, MCP_AGENT_ASK_PER_KEY_DAY, QUEUES, queueFor, TRUST_HEADERS,
-  DO_NAMES, WORLD_MODEL_SETTING, type DurableStorageLike, type HostedJob, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
+  DO_NAMES, WORLD_MODEL_SETTING, type DurableStorageLike, type HostedProviderId, type LiveMessage, type ModelSwitchBody, type WeftCtx, type WorkersAiBindingLike, type WorldMode,
 } from "../../shared/contracts";
 import { envConfig } from "../../shared/config";
 import { mcpKeyId, readCtx } from "../../shared/tokens";
@@ -63,6 +63,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private lastActivity: number | null = null;
   private usage: UsageDelta = zeroUsage();
   private flushing = false;
+  private flushAgain = false;
   private readonly alarms: AlarmPlan;
   /** Alarm invocations in a row whose work threw (the retry backs off with it; one that succeeds resets it). */
   private alarmFailures = 0;
@@ -478,31 +479,39 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   // Outbox -----------------------------------------------------------------------------------------------------
 
-  /** After the outer commit: send each outbox row to its queue, then delete it (design 3.4). At least once. */
+  /**
+   * After the outer commit: send each outbox row to its queue, then delete it (design 3.4). At least once. Each read
+   * and each delete runs under the world's write lock, which every executor transaction holds, so no row of a
+   * transaction that is still open (in this request or another) is read, and none that later rolls back is sent.
+   * The Queue send itself is I/O, outside the lock and outside any transaction.
+   */
   async flushOutbox(): Promise<number> {
     const engine = this.engine;
-    if (!engine || this.flushing || !hasKvState(this.ctx.storage.sql)) return 0;
+    if (!engine || !hasKvState(this.ctx.storage.sql)) return 0;
+    if (this.flushing) {
+      // Rows committed while a flush runs: it reads again before it ends.
+      this.flushAgain = true;
+      return 0;
+    }
     this.flushing = true;
     let sent = 0;
-    const sql = this.ctx.storage.sql;
-    const waitOutOfTx = async () => { for (let i = 0; i < 400 && engine.guard.inTx(); i++) await new Promise((r) => setTimeout(r, 5)); };
     try {
-      for (;;) {
-        await waitOutOfTx();
-        const rows = sql.exec(`SELECT id, kind, body FROM outbox ORDER BY created_at, id LIMIT 25`).toArray() as { id: string; kind: string; body: string }[];
-        if (!rows.length) break;
+      for (let round = 0; round < 50; round++) {
+        this.flushAgain = false;
+        const rows = await engine.outboxPending();
+        if (!rows.length) {
+          if (this.flushAgain) continue;
+          break;
+        }
         for (const row of rows) {
-          let job: HostedJob;
-          try { job = JSON.parse(row.body) as HostedJob; } catch {
+          if (row.job === null) {
             logEvent("outbox.poison", { slot: this.stamp?.slot, outcome: row.kind });
-            await waitOutOfTx();
-            sql.exec(`DELETE FROM outbox WHERE id = ?`, row.id);
+            await engine.outboxAck(row.id);
             continue;
           }
           engine.guard.assertNotInTx("Queue.send");
-          await (queueFor(job.kind) === QUEUES.render ? this.env.RENDER : this.env.JOBS).send(job, { contentType: "json" });
-          await waitOutOfTx();
-          sql.exec(`DELETE FROM outbox WHERE id = ?`, row.id);
+          await (queueFor(row.job.kind) === QUEUES.render ? this.env.RENDER : this.env.JOBS).send(row.job, { contentType: "json" });
+          await engine.outboxAck(row.id);
           sent += 1;
         }
       }
