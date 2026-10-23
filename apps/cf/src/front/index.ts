@@ -207,8 +207,12 @@ async function mcp(req: Request, env: FrontEnv, url: URL): Promise<Response> {
 async function admin(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Response> {
   const body = req.method === "GET" || req.method === "HEAD" ? "" : await req.text();
   if (body.length > 64 * 1024) return plainError(413, "ValidationError", "TOO_LARGE", "Admin bodies are small");
-  const ok = await verifyAdmin({ token: env.WEFT_ADMIN_TOKEN, header: req.headers.get(ADMIN_HEADER), method: req.method, path: url.pathname, body });
-  if (!ok) return plainError(401, "Unauthorized", "ADMIN_SIGNATURE", "A valid admin signature is required");
+  const check = await verifyAdmin({ token: env.WEFT_ADMIN_TOKEN, header: req.headers.get(ADMIN_HEADER), method: req.method, path: url.pathname, body });
+  if (!check.ok) return plainError(401, "Unauthorized", "ADMIN_SIGNATURE", "A valid admin signature is required");
+  // Each signature is good for one request: a captured one cannot be replayed within its window. The counter is
+  // keyed by the signature's own UTC day, so a replay across midnight finds it too.
+  const fresh = await lobby(env).take({ key: `admin_sig:${check.id}`, limit: 1, now: check.ts * 1000 });
+  if (!fresh.ok) return plainError(401, "Unauthorized", "ADMIN_SIGNATURE", "This admin signature was already used; sign each request");
   const parsed = (() => { try { return body ? (JSON.parse(body) as Record<string, unknown>) : {}; } catch { return null; } })();
   if (parsed === null) return plainError(400, "ValidationError", "BAD_BODY", "Admin bodies are JSON");
   const op = url.pathname.slice(`${HOSTED_PATHS.admin}/`.length);

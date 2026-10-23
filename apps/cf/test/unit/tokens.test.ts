@@ -2,7 +2,7 @@
 // the smoke header, the admin signature and the daily IP hash.
 import { describe, expect, it } from "vitest";
 import {
-  grantToken, ipHash, ipKeyOf, mcpKeyId, newVisitorId, operatorVisitorId, readCtx, readGrant, readSession, sessionToken, signAdmin, signCtx, signSmoke, verifyAdmin, verifySmoke,
+  grantToken, ipHash, ipKeyOf, mcpKeyId, newVisitorId, operatorVisitorId, readCtx, readGrant, readSession, sessionToken, SIGNATURE_FUTURE_S, SIGNATURE_WINDOW_S, signAdmin, signCtx, signSmoke, verifyAdmin, verifySmoke,
 } from "../../src/shared/tokens";
 import { formatHostedMcpKey, parseHostedMcpKey } from "../../src/shared/contracts";
 import { fromBase64Url, randomAlnum, toBase64Url } from "../../src/shared/crypto";
@@ -75,17 +75,44 @@ describe("smoke and admin signatures", () => {
     expect(await verifySmoke(tok, h, { method: "GET", path: "/api/v1/notes/" }, nowS)).toBe(false);
   });
 
-  it("binds the admin signature to the method, path, time and body", async () => {
+  it("binds the admin signature to the method, path, time, nonce and body", async () => {
     const token = "k".repeat(48);
     const sig = await signAdmin({ token, method: "post", path: "/api/_admin/provision", body: "{}", nowS });
-    const ok = (o: Partial<{ method: string; path: string; body: string; nowS: number; token: string }>) =>
+    const check = (o: Partial<{ method: string; path: string; body: string; nowS: number; token: string; header: string }>) =>
       verifyAdmin({ token, header: sig, method: "POST", path: "/api/_admin/provision", body: "{}", nowS, ...o });
-    expect(await ok({})).toBe(true);
+    const ok = async (o: Parameters<typeof check>[0]) => (await check(o)).ok;
+    expect(await check({})).toEqual({ ok: true, ts: nowS, id: sig.split(".")[2]!.slice(0, 32) });
     expect(await ok({ method: "GET" })).toBe(false);
     expect(await ok({ path: "/api/_admin/ops" })).toBe(false);
     expect(await ok({ body: '{"force":true}' })).toBe(false);
     expect(await ok({ nowS: nowS + 301 })).toBe(false);
     expect(await ok({ token: "short" })).toBe(false);
+    const [ts, nonce, mac] = sig.split(".");
+    expect(await ok({ header: `${ts}.${"0".repeat(16)}.${mac}` })).toBe(false);
+    expect(await ok({ header: `${ts}.${mac}` })).toBe(false);
+    expect(nonce).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("makes every admin signature distinct, even for one request in one second, so each can be taken once", async () => {
+    const token = "k".repeat(48);
+    const a = await signAdmin({ token, method: "GET", path: "/api/_admin/ops", nowS });
+    const b = await signAdmin({ token, method: "GET", path: "/api/_admin/ops", nowS });
+    expect(a).not.toBe(b);
+    const ids = await Promise.all([a, b].map(async (header) => verifyAdmin({ token, header, method: "GET", path: "/api/_admin/ops", body: "", nowS })));
+    expect(ids.every((c) => c.ok)).toBe(true);
+    expect(new Set(ids.map((c) => (c.ok ? c.id : ""))).size).toBe(2);
+  });
+
+  it("allows only clock skew ahead of now (30 s), on admin and smoke signatures alike", async () => {
+    const token = "k".repeat(48);
+    const ahead = (s: number) => signAdmin({ token, method: "GET", path: "/api/_admin/ops", nowS: nowS + s });
+    const at = async (header: string) => (await verifyAdmin({ token, header, method: "GET", path: "/api/_admin/ops", body: "", nowS })).ok;
+    expect(await at(await ahead(SIGNATURE_FUTURE_S))).toBe(true);
+    expect(await at(await ahead(SIGNATURE_FUTURE_S + 1))).toBe(false);
+    expect(await at(await ahead(SIGNATURE_WINDOW_S))).toBe(false);
+    const req = { method: "GET", path: "/api/v1/health" };
+    expect(await verifySmoke(token, await signSmoke(token, req, nowS + SIGNATURE_FUTURE_S), req, nowS)).toBe(true);
+    expect(await verifySmoke(token, await signSmoke(token, req, nowS + SIGNATURE_FUTURE_S + 1), req, nowS)).toBe(false);
   });
 });
 

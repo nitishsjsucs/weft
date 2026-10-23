@@ -3,7 +3,7 @@
 // header (WEFT_SMOKE_TOKEN) and the admin signature (WEFT_ADMIN_TOKEN), which also derives the operator lease's
 // visitor id. The scripts (cf7's smoke, cf:dev) import
 // signAdmin and signSmoke from here, so the format lives in one file.
-import { hmac, hmacVerify, signToken, fromHex, sha256Hex, toHex, utf8, verifyToken } from "./crypto";
+import { hmac, hmacVerify, signToken, fromHex, randomHex, sha256Hex, toHex, utf8, verifyToken } from "./crypto";
 import type { HumanGrantClaims, SessionClaims, WeftCtx } from "./contracts";
 
 const SESSION_LABEL = "weft-session";
@@ -13,6 +13,10 @@ const CTX_LABEL = "weft-ctx";
 export const CTX_MAX_AGE_S = 300;
 /** Smoke and admin signatures carry a timestamp that must be within this window (design 9.2: 5 minutes). */
 export const SIGNATURE_WINDOW_S = 300;
+/** How far ahead of this clock a signature's timestamp may be (clock skew only), so a signature cannot be dated
+ * ahead to last longer than the window. */
+export const SIGNATURE_FUTURE_S = 30;
+const tsFresh = (ts: number, nowS: number) => nowS - ts <= SIGNATURE_WINDOW_S && ts - nowS <= SIGNATURE_FUTURE_S;
 
 const SLOT_RE = /^[a-z0-9-]{1,32}$/;
 const VISITOR_RE = /^vis_[0-9a-f]{32}$/;
@@ -80,27 +84,40 @@ export async function verifySmoke(token: string | undefined, header: string | nu
   const m = /^(\d{9,11})\.([0-9a-f]{64})$/.exec(header);
   if (!m) return false;
   const ts = Number(m[1]);
-  if (Math.abs(nowS - ts) > SIGNATURE_WINDOW_S) return false;
+  if (!tsFresh(ts, nowS)) return false;
   return hmacVerify(token, smokeMessage(req, ts), fromHex(m[2]!)!);
 }
 
 export const ADMIN_HEADER = "x-weft-admin";
+const adminMessage = (method: string, path: string, ts: number, nonce: string, bodyHash: string) => `weft-admin|${method.toUpperCase()}|${path}|${ts}|${nonce}|${bodyHash}`;
 
-/** `x-weft-admin: <unix seconds>.<hex HMAC(WEFT_ADMIN_TOKEN, "weft-admin|<METHOD>|<path>|<ts>|<sha256(body)>")>`. */
-export async function signAdmin(input: { token: string; method: string; path: string; body?: string; nowS?: number }): Promise<string> {
+/**
+ * `x-weft-admin: <unix seconds>.<nonce>.<hex HMAC(WEFT_ADMIN_TOKEN, "weft-admin|<METHOD>|<path>|<ts>|<nonce>|<sha256(body)>")>`.
+ * The nonce (16 random hex digits) makes every signature distinct, even two identical requests in one second, so the
+ * front can take each one once (adminSignatureId).
+ */
+export async function signAdmin(input: { token: string; method: string; path: string; body?: string; nowS?: number; nonce?: string }): Promise<string> {
   const ts = input.nowS ?? Math.floor(Date.now() / 1000);
+  const nonce = input.nonce ?? randomHex(8);
   const bodyHash = await sha256Hex(input.body ?? "");
-  return `${ts}.${toHex(await hmac(input.token, `weft-admin|${input.method.toUpperCase()}|${input.path}|${ts}|${bodyHash}`))}`;
+  return `${ts}.${nonce}.${toHex(await hmac(input.token, adminMessage(input.method, input.path, ts, nonce, bodyHash)))}`;
 }
 
-export async function verifyAdmin(input: { token: string | undefined; header: string | null; method: string; path: string; body: string; nowS?: number }): Promise<boolean> {
-  if (!input.token || input.token.length < 32 || !input.header) return false;
-  const m = /^(\d{9,11})\.([0-9a-f]{64})$/.exec(input.header);
-  if (!m) return false;
+export type AdminCheck = { ok: true; ts: number; id: string } | { ok: false };
+
+/**
+ * Checks the admin signature: the token, the method, path, timestamp (at most SIGNATURE_WINDOW_S old and
+ * SIGNATURE_FUTURE_S ahead), nonce and body. `id` names the signature for the single-use check, and `ts` its day.
+ */
+export async function verifyAdmin(input: { token: string | undefined; header: string | null; method: string; path: string; body: string; nowS?: number }): Promise<AdminCheck> {
+  if (!input.token || input.token.length < 32 || !input.header) return { ok: false };
+  const m = /^(\d{9,11})\.([0-9a-f]{16})\.([0-9a-f]{64})$/.exec(input.header);
+  if (!m) return { ok: false };
   const ts = Number(m[1]);
-  if (Math.abs((input.nowS ?? Math.floor(Date.now() / 1000)) - ts) > SIGNATURE_WINDOW_S) return false;
+  if (!tsFresh(ts, input.nowS ?? Math.floor(Date.now() / 1000))) return { ok: false };
   const bodyHash = await sha256Hex(input.body);
-  return hmacVerify(input.token, `weft-admin|${input.method.toUpperCase()}|${input.path}|${ts}|${bodyHash}`, fromHex(m[2]!)!);
+  if (!(await hmacVerify(input.token, adminMessage(input.method, input.path, ts, m[2]!, bodyHash), fromHex(m[3]!)!))) return { ok: false };
+  return { ok: true, ts, id: m[3]!.slice(0, 32) };
 }
 
 /** Operator lease names (POST /api/_admin/lease): one lease per name, so a smoke and a walkthrough can hold two. */

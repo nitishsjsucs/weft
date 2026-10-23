@@ -27,6 +27,21 @@ describe("admin routes", () => {
     expect((await h.admin("GET", "/api/_admin/ops")).status).toBe(200);
   });
 
+  it("takes each signature once, and refuses one dated more than 30 s ahead", async () => {
+    const sig = await signAdmin({ token: h.secrets.admin, method: "GET", path: "/api/_admin/ops" });
+    expect((await h.fetch("/api/_admin/ops", { headers: { "x-weft-admin": sig } })).status).toBe(200);
+    const replay = await h.fetch("/api/_admin/ops", { headers: { "x-weft-admin": sig } });
+    expect(replay.status).toBe(401);
+    expect(await replay.json()).toMatchObject({ code: "ADMIN_SIGNATURE" });
+    const body = JSON.stringify({ slots: ["slot-1"] });
+    const post = await signAdmin({ token: h.secrets.admin, method: "POST", path: "/api/_admin/provision", body });
+    const send = () => h.fetch("/api/_admin/provision", { method: "POST", body, headers: { "x-weft-admin": post, "content-type": "application/json" } }, { origin: null });
+    expect((await send()).status).toBe(200);
+    expect((await send()).status).toBe(401);
+    const ahead = await signAdmin({ token: h.secrets.admin, method: "GET", path: "/api/_admin/ops", nowS: Math.floor(Date.now() / 1000) + 120 });
+    expect((await h.fetch("/api/_admin/ops", { headers: { "x-weft-admin": ahead } })).status).toBe(401);
+  });
+
   it("provisions idempotently: ready worlds are left alone, restored from the bundled snapshot", async () => {
     const r = await h.admin("POST", "/api/_admin/provision", {});
     const body = await r.json() as { steps: { slot: string; action: string }[] };
