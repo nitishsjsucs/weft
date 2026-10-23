@@ -352,6 +352,17 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     if (claimed) await this.resetClaimed(claimed, null, now);
   }
 
+  /**
+   * Ends a visitor's lease, if it has one, exactly as an expiry does (the slot is reset and goes back to the pool).
+   * POST /api/_admin/release uses it for an operator lease, so a smoke and a walkthrough never hold the pool.
+   */
+  async releaseVisitor(input: { visitor: string; reason: string; now?: number }): Promise<{ released: boolean; slot: string | null }> {
+    const l = this.one<{ slot: string }>(`SELECT slot FROM leases WHERE visitor = ?`, input.visitor);
+    if (!l) return { released: false, slot: null };
+    await this.release({ slot: l.slot, reason: input.reason, now: input.now });
+    return { released: true, slot: l.slot };
+  }
+
   /** "Reset demo data..." for the leased visitor: at most HOSTED_SETTINGS.resetsPerLease per lease. */
   async reset(input: { visitor: string; slot: string; gen: number; now?: number }): Promise<HostedResetResult | ResetError> {
     const now = input.now ?? Date.now();

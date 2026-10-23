@@ -15,7 +15,7 @@ import { ADMIN_HEADER, mcpKeyId, signCtx, verifyAdmin } from "../shared/tokens";
 import { serveAssets } from "./assets";
 import { forwardToWorld, stripTrust } from "./forward";
 import { ResponseMemo } from "./memo";
-import { operatorGrant, operatorLease } from "./operator";
+import { operatorGrant, operatorLease, operatorRelease } from "./operator";
 import { sessionStatus, startLease, verifyHuman } from "./session";
 import { clearSessionCookies, FrontConfigError, resolveVisit, secrets, sessionCookies, targetOf, withCookies, type Visit } from "./visit";
 
@@ -239,6 +239,8 @@ async function admin(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<R
       return operatorLease(env, v, parsed);
     case "POST grant":
       return operatorGrant(env, v, parsed);
+    case "POST release":
+      return operatorRelease(env, v, parsed);
     case "GET ops": {
       const [l, s] = await Promise.all([lobby(env).ops(), env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({})]);
       const cfg = await envConfig(env);

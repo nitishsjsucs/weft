@@ -38,6 +38,12 @@ describe("admin routes", () => {
     const send = () => h.fetch("/api/_admin/provision", { method: "POST", body, headers: { "x-weft-admin": post, "content-type": "application/json" } }, { origin: null });
     expect((await send()).status).toBe(200);
     expect((await send()).status).toBe(401);
+    // The operator release too: a captured release signature cannot end a second lease of that name.
+    const rel = JSON.stringify({ name: "replay-check" });
+    const relSig = await signAdmin({ token: h.secrets.admin, method: "POST", path: "/api/_admin/release", body: rel });
+    const release = () => h.fetch("/api/_admin/release", { method: "POST", body: rel, headers: { "x-weft-admin": relSig, "content-type": "application/json" } }, { origin: null });
+    expect((await release()).status).toBe(200);
+    expect((await release()).status).toBe(401);
     const ahead = await signAdmin({ token: h.secrets.admin, method: "GET", path: "/api/_admin/ops", nowS: Math.floor(Date.now() / 1000) + 120 });
     expect((await h.fetch("/api/_admin/ops", { headers: { "x-weft-admin": ahead } })).status).toBe(401);
   });
