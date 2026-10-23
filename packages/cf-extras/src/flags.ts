@@ -11,9 +11,12 @@ export interface ExtrasFlags { ocr: boolean; pdf: boolean; help: boolean; dictat
 export const EXTRAS_FLAGS_ALL_OFF: ExtrasFlags = { ocr: false, pdf: false, help: false, dictation: false, recallSemantic: false };
 
 const OFF = new Set(["off", "false", "0", "no"]);
-const ON = new Set(["on", "true", "1", "yes"]);
+/** The values that turn an opt-in flag on (recall.semantic, WEFT_SEMANTIC_RECALL), trimmed and lowercased. The one
+ * set: CompanyDO folds KV recall.semantic into the world's env with it too (apps/cf company-do-env.ts). */
+export const FLAG_ON_VALUES: ReadonlySet<string> = new Set(["on", "true", "1", "yes"]);
 const killFlag = (v: string | null) => v === null || !OFF.has(v.trim().toLowerCase());
-const optIn = (v: string | null | undefined) => v !== null && v !== undefined && ON.has(v.trim().toLowerCase());
+/** True when an opt-in flag's value is one of FLAG_ON_VALUES. */
+export const optIn = (v: string | null | undefined): boolean => v !== null && v !== undefined && FLAG_ON_VALUES.has(v.trim().toLowerCase());
 
 /** Pure: the flags from the raw KV values and the Worker env. */
 export function flagsFrom(values: Partial<Record<keyof typeof HOSTED_CONFIG_KEYS, string | null>>, env: { WEFT_SEMANTIC_RECALL?: string | undefined } = {}): ExtrasFlags {

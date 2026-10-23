@@ -2,7 +2,7 @@
 // the smoke header, the admin signature and the daily IP hash.
 import { describe, expect, it } from "vitest";
 import {
-  grantToken, ipHash, mcpKeyId, newVisitorId, operatorVisitorId, readCtx, readGrant, readSession, sessionToken, signAdmin, signCtx, signSmoke, verifyAdmin, verifySmoke,
+  grantToken, ipHash, ipKeyOf, mcpKeyId, newVisitorId, operatorVisitorId, readCtx, readGrant, readSession, sessionToken, SIGNATURE_FUTURE_S, SIGNATURE_WINDOW_S, signAdmin, signCtx, signSmoke, verifyAdmin, verifySmoke,
 } from "../../src/shared/tokens";
 import { formatHostedMcpKey, parseHostedMcpKey } from "../../src/shared/contracts";
 import { fromBase64Url, randomAlnum, toBase64Url } from "../../src/shared/crypto";
@@ -57,25 +57,62 @@ describe("x-weft-ctx", () => {
 describe("smoke and admin signatures", () => {
   it("accepts a smoke header within 5 minutes and nothing else", async () => {
     const tok = "t".repeat(48);
-    const h = await signSmoke(tok, nowS);
-    expect(await verifySmoke(tok, h, nowS + 299)).toBe(true);
-    expect(await verifySmoke(tok, h, nowS + 301)).toBe(false);
-    expect(await verifySmoke("u".repeat(48), h, nowS)).toBe(false);
-    expect(await verifySmoke(undefined, h, nowS)).toBe(false);
-    expect(await verifySmoke(tok, "123.abc", nowS)).toBe(false);
+    const req = { method: "GET", path: "/api/v1/health" };
+    const h = await signSmoke(tok, req, nowS);
+    expect(await verifySmoke(tok, h, req, nowS + 299)).toBe(true);
+    expect(await verifySmoke(tok, h, req, nowS + 301)).toBe(false);
+    expect(await verifySmoke("u".repeat(48), h, req, nowS)).toBe(false);
+    expect(await verifySmoke(undefined, h, req, nowS)).toBe(false);
+    expect(await verifySmoke(tok, "123.abc", req, nowS)).toBe(false);
   });
 
-  it("binds the admin signature to the method, path, time and body", async () => {
+  it("binds the smoke header to the method and path it was signed for", async () => {
+    const tok = "t".repeat(48);
+    const h = await signSmoke(tok, { method: "get", path: "/api/v1/notes" }, nowS);
+    expect(await verifySmoke(tok, h, { method: "GET", path: "/api/v1/notes" }, nowS)).toBe(true);
+    expect(await verifySmoke(tok, h, { method: "POST", path: "/api/v1/notes" }, nowS)).toBe(false);
+    expect(await verifySmoke(tok, h, { method: "GET", path: "/api/v1/workers" }, nowS)).toBe(false);
+    expect(await verifySmoke(tok, h, { method: "GET", path: "/api/v1/notes/" }, nowS)).toBe(false);
+  });
+
+  it("binds the admin signature to the method, path, time, nonce and body", async () => {
     const token = "k".repeat(48);
     const sig = await signAdmin({ token, method: "post", path: "/api/_admin/provision", body: "{}", nowS });
-    const ok = (o: Partial<{ method: string; path: string; body: string; nowS: number; token: string }>) =>
+    const check = (o: Partial<{ method: string; path: string; body: string; nowS: number; token: string; header: string }>) =>
       verifyAdmin({ token, header: sig, method: "POST", path: "/api/_admin/provision", body: "{}", nowS, ...o });
-    expect(await ok({})).toBe(true);
+    const ok = async (o: Parameters<typeof check>[0]) => (await check(o)).ok;
+    expect(await check({})).toEqual({ ok: true, ts: nowS, id: sig.split(".")[2]!.slice(0, 32) });
     expect(await ok({ method: "GET" })).toBe(false);
     expect(await ok({ path: "/api/_admin/ops" })).toBe(false);
     expect(await ok({ body: '{"force":true}' })).toBe(false);
     expect(await ok({ nowS: nowS + 301 })).toBe(false);
     expect(await ok({ token: "short" })).toBe(false);
+    const [ts, nonce, mac] = sig.split(".");
+    expect(await ok({ header: `${ts}.${"0".repeat(16)}.${mac}` })).toBe(false);
+    expect(await ok({ header: `${ts}.${mac}` })).toBe(false);
+    expect(nonce).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("makes every admin signature distinct, even for one request in one second, so each can be taken once", async () => {
+    const token = "k".repeat(48);
+    const a = await signAdmin({ token, method: "GET", path: "/api/_admin/ops", nowS });
+    const b = await signAdmin({ token, method: "GET", path: "/api/_admin/ops", nowS });
+    expect(a).not.toBe(b);
+    const ids = await Promise.all([a, b].map(async (header) => verifyAdmin({ token, header, method: "GET", path: "/api/_admin/ops", body: "", nowS })));
+    expect(ids.every((c) => c.ok)).toBe(true);
+    expect(new Set(ids.map((c) => (c.ok ? c.id : ""))).size).toBe(2);
+  });
+
+  it("allows only clock skew ahead of now (30 s), on admin and smoke signatures alike", async () => {
+    const token = "k".repeat(48);
+    const ahead = (s: number) => signAdmin({ token, method: "GET", path: "/api/_admin/ops", nowS: nowS + s });
+    const at = async (header: string) => (await verifyAdmin({ token, header, method: "GET", path: "/api/_admin/ops", body: "", nowS })).ok;
+    expect(await at(await ahead(SIGNATURE_FUTURE_S))).toBe(true);
+    expect(await at(await ahead(SIGNATURE_FUTURE_S + 1))).toBe(false);
+    expect(await at(await ahead(SIGNATURE_WINDOW_S))).toBe(false);
+    const req = { method: "GET", path: "/api/v1/health" };
+    expect(await verifySmoke(token, await signSmoke(token, req, nowS + SIGNATURE_FUTURE_S), req, nowS)).toBe(true);
+    expect(await verifySmoke(token, await signSmoke(token, req, nowS + SIGNATURE_FUTURE_S + 1), req, nowS)).toBe(false);
   });
 });
 
@@ -99,6 +136,23 @@ describe("IP hash and MCP keys", () => {
     expect(a).not.toContain("203");
     expect(await ipHash(SECRET, "203.0.113.7", "2026-10-26")).toBe(a);
     expect(await ipHash(SECRET, "203.0.113.7", "2026-10-27")).not.toBe(a);
+  });
+
+  it("counts an IPv6 visitor once per /64, in any spelling, and an IPv4-mapped address as its IPv4 address", async () => {
+    const day = "2026-10-26";
+    const a = await ipHash(SECRET, "2001:db8:1:2::1", day);
+    // Every address of one /64 is one visitor for leases, rate limits and caps.
+    expect(await ipHash(SECRET, "2001:db8:1:2:ffff:ffff:ffff:fffe", day)).toBe(a);
+    expect(await ipHash(SECRET, "2001:0DB8:0001:0002:0000:0000:0000:0042", day)).toBe(a);
+    expect(await ipHash(SECRET, "[2001:db8:1:2::7]", day)).toBe(a);
+    expect(await ipHash(SECRET, "2001:db8:1:2::9%eth0", day)).toBe(a);
+    // The next /64 is someone else.
+    expect(await ipHash(SECRET, "2001:db8:1:3::1", day)).not.toBe(a);
+    expect(await ipHash(SECRET, "::ffff:203.0.113.7", day)).toBe(await ipHash(SECRET, "203.0.113.7", day));
+    expect(ipKeyOf("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(ipKeyOf("::1")).toBe("0:0:0:0::/64");
+    expect(ipKeyOf("198.51.100.4")).toBe("198.51.100.4");
+    expect(ipKeyOf("not:an:address::x")).toBe("not:an:address::x");
   });
 
   it("routes MCP keys by their prefix and ids them without keeping them", async () => {

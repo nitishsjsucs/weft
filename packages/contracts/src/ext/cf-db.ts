@@ -142,6 +142,14 @@ export type HostedTable = (typeof HOSTED_TABLES)[number];
 /** The delta reset's dirty-key table (design 4.6). Created by the snapshot restore on the durable side only; never
  * in a migration, never in a digest. */
 export const DIRTY_TABLE = "_weft_dirty";
+/**
+ * Rows written by the delta reset after the 10-flow engaged session (design 4.6 and 8.2) on the SQL memory repo every
+ * hosted world runs: cf1's measured baseline, 717 in workerd (on Linux; 634 on the Mac), whose 25% band the Miniflare
+ * suite checks. packages/db/test-workerd/flows.ts records the same measurement as
+ * DELTA_RESET_SQL_MEMORY_BASELINE_ROWS; apps/cf's unit suite keeps the two equal. The Lobby's session estimate is built
+ * on it.
+ */
+export const HOSTED_DELTA_RESET_BASELINE_ROWS = 717;
 /** workerd lists its own `_cf_KV` table in sqlite_master and refuses every read of it (SQLITE_AUTH, verified locally
  * in Miniflare 5.20261019.1-beta): anything that walks sqlite_master skips this prefix. */
 export const RESERVED_TABLE_PREFIX = "_cf_";

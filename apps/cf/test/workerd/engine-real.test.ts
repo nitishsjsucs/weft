@@ -23,6 +23,7 @@ import { DO_NAMES, MAX_FETCHES_PER_ALARM, type SeedIndexProgress } from "../../s
 import { exportObjectKey } from "../../src/extras/queues";
 import { Harness, ORIGIN } from "../support/harness";
 import { MANIFEST_FILE as manifestFile, realEngine, realEngineProblems, skipReason } from "../support/real-engine";
+import { DELTA_RESET_SQL_MEMORY_BASELINE_ROWS, DELTA_RESET_SQL_MEMORY_MAX_ROWS } from "../../../../packages/db/test-workerd/flows";
 
 describe("real engine gate", () => {
   it("runs the real engine once cf1, cf2 and cf3 are merged, with every part they export and the snapshot", () => {
@@ -63,7 +64,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
 
   // Smoke calls skip RL_API (design 6.3); each still comes from its own address, as separate checks would.
   let ipSeq = 0;
-  const smoke = async (path: string, init: RequestInit = {}) => h.fetch(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(await h.smokeHeaders()) } }, { origin: null, principal: "usr_dana", ip: `192.0.2.${(ipSeq++ % 200) + 20}` });
+  const smoke = async (path: string, init: RequestInit = {}) => h.fetch(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(await h.smokeHeaders(new URL(path, ORIGIN).pathname, init.method ?? "GET")) } }, { origin: null, principal: "usr_dana", ip: `192.0.2.${(ipSeq++ % 200) + 20}` });
   const smokeJson = async <T>(path: string, init: RequestInit = {}) => { const r = await smoke(path, init); return { status: r.status, body: (await r.json()) as T }; };
   const post = (path: string, body: unknown) => smokeJson(path, { method: "POST", body: JSON.stringify(body) });
   const env = () => h.coreEnv();
@@ -120,7 +121,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     expect((await smokeJson<{ ok: boolean }>("/api/v1/actions/verify")).body.ok).toBe(true);
   });
 
-  it("returns slot-smoke to the seed with the delta reset after the ten flows, twice, within 25% of 557 rows written", async () => {
+  it(`returns slot-smoke to the seed with the delta reset after the ten flows, twice, within the SQL-memory band (25% over ${DELTA_RESET_SQL_MEMORY_BASELINE_ROWS} rows written)`, async () => {
     const lobby = async () => { const e = await env(); return e.LOBBY.get(e.LOBBY.idFromName(DO_NAMES.lobby)); };
     const co = await company(DO_NAMES.smoke);
     // Runs start in alarm invocations: drive them until none is queued or running.
@@ -171,7 +172,9 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
       const r = await (await lobby()).resetWorld({ slot: DO_NAMES.smoke });
       expect(r).toMatchObject({ ok: true, method: "delta" });
       console.log(`delta reset ${cycle + 1}: ${(r as { rowsWritten: number }).rowsWritten} rows written`);
-      expect((r as { rowsWritten: number }).rowsWritten).toBeLessThanOrEqual(Math.ceil(557 * 1.25));
+      // Hosted worlds always run the SQL memory repo, whose reset also returns the session's memory objects: cf1's
+      // measured baseline and band for it (717 in workerd on Linux, 634 on this Mac; the band is 896).
+      expect((r as { rowsWritten: number }).rowsWritten).toBeLessThanOrEqual(DELTA_RESET_SQL_MEMORY_MAX_ROWS);
       expect((await pending()).map((p) => p.id).sort()).toEqual(seedPending);
       expect((await smokeJson<{ ok: boolean; head: { hash: string } | null }>("/api/v1/actions/verify")).body.head?.hash ?? null).toBe(manifest.extra?.chainHead ?? null);
     }
@@ -297,7 +300,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     }
   }, 120_000);
 
-  it("reads an uploaded receipt through weft-jobs: one write-back action, none on a redelivery, nothing but the two write-backs as svc_jobs", async () => {
+  it("reads an uploaded receipt through weft-jobs: one write-back action, none on a redelivery through queue(), nothing but the write-backs as svc_jobs", async () => {
     // cf6-extras end to end on the real stack: expenses.submit appends an outbox row in its transaction, CompanyDO sends
     // it after the commit, the weft-jobs consumer reads the receipt (the fakes worker stands in for Workers AI) and
     // writes the extract back through CompanyDO.extrasWriteBack, which runs the executor's svc_jobs system path.
@@ -327,6 +330,19 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     const args = { job_id: extract.ocrJobId, expense_id: id, upload_id: row.upl, extract: null, model: "@cf/mistralai/mistral-small-3.1-24b-instruct", neurons: 0 };
     expect(await co.extrasWriteBack({ command: "expenses.attach_receipt_extract", args } as never)).toEqual({ ok: true, status: "already", reason: null });
     expect(await co.extrasWriteBack({ command: "payroll.submit_run", args: {} } as never)).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+    expect(await writeBacks()).toBe(1);
+    // The same job delivered a second time through weft-core's queue(), as after a consumer that wrote back but lost
+    // its ledger row: the OCR reads the receipt again, and svc_jobs' write-back is refused before it writes anything.
+    const e = await env();
+    const ops = e.OPS as unknown as D1Like;
+    const ledger = d1JobLedger(ops);
+    expect(await ledger.get(extract.ocrJobId)).toMatchObject({ state: "done", outcome: "attached" });
+    await ops.prepare("DELETE FROM jobs WHERE job_id = ?").bind(extract.ocrJobId).run();
+    const [up] = (await sql.exec("SELECT sha256, storage_path AS path FROM uploads WHERE id = ?", row.upl)) as { sha256: string; path: string }[];
+    const gen = (await h.ops()).lobby.slots.find((s) => s.name === DO_NAMES.smoke)!.gen;
+    const again: HostedJob = { v: 1, kind: "ocr.receipt", jobId: extract.ocrJobId, slot: DO_NAMES.smoke, gen, uploadId: row.upl, expenseId: id, sha256: up!.sha256, storagePath: up!.path, contentType: "image/png" };
+    await (e.JOBS as unknown as { send(body: unknown, o?: unknown): Promise<void> }).send(again, { contentType: "json" });
+    expect(await until(() => ledger.get(extract.ocrJobId), (x) => x?.state === "done", 60_000)).toMatchObject({ state: "done", outcome: "already" });
     expect(await writeBacks()).toBe(1);
     expect(await count("SELECT count(*) AS n FROM actions")).toBe(actionsBefore + 2);   // expenses.submit and its one write-back
     expect((await smokeJson<{ ok: boolean }>("/api/v1/actions/verify")).body.ok).toBe(true);

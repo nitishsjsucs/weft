@@ -1,5 +1,5 @@
 // The world stamp a slot keeps in its own storage: `kv_state('world.id') = "slot-N:gen-G"` (SMALL_STATE_KEYS) plus the
-// read-only flag and the lease's visitor and IP hash. CompanyDO reads it with plain SQL before any @weft/* module
+// read-only flag and the lease's visitor, IP hash and start time. CompanyDO reads it with plain SQL before any @weft/* module
 // loads, so an unprovisioned object never evaluates the Weft stack. The table comes from migration 0008_hosted.sql;
 // before the first restore it does not exist and the object is unprovisioned.
 import { DO_NAMES, hostedWorldId, SMALL_STATE_KEYS, type WorldMode } from "../../shared/contracts";
@@ -25,12 +25,16 @@ export function hasKvState(sql: SqlLike): boolean {
 
 export function readStamp(sql: SqlLike): WorldStamp | null {
   if (!hasKvState(sql)) return null;
-  const rows = sql.exec(`SELECT key, value FROM kv_state WHERE key IN (?, ?, ?, ?)`,
-    SMALL_STATE_KEYS.worldId, SMALL_STATE_KEYS.readOnly, SMALL_STATE_KEYS.leaseVisitor, SMALL_STATE_KEYS.leaseIpHash).toArray();
+  const rows = sql.exec(`SELECT key, value FROM kv_state WHERE key IN (?, ?, ?, ?, ?)`,
+    SMALL_STATE_KEYS.worldId, SMALL_STATE_KEYS.readOnly, SMALL_STATE_KEYS.leaseVisitor, SMALL_STATE_KEYS.leaseIpHash, SMALL_STATE_KEYS.leaseStartedAt).toArray();
   const get = (k: string) => (rows.find((r) => r.key === k)?.value as string | undefined) ?? null;
   const id = parseWorldId(get(SMALL_STATE_KEYS.worldId));
   if (!id) return null;
-  return { slot: id.slot, gen: id.gen, mode: modeOf(id.slot), visitor: get(SMALL_STATE_KEYS.leaseVisitor), ipHash: get(SMALL_STATE_KEYS.leaseIpHash) };
+  const started = Number(get(SMALL_STATE_KEYS.leaseStartedAt) ?? "NaN");
+  return {
+    slot: id.slot, gen: id.gen, mode: modeOf(id.slot), visitor: get(SMALL_STATE_KEYS.leaseVisitor), ipHash: get(SMALL_STATE_KEYS.leaseIpHash),
+    leaseStartedAt: Number.isSafeInteger(started) && started > 0 ? started : null,
+  };
 }
 
 /** Writes the stamp (inside the caller's transaction when there is one). */
@@ -42,6 +46,7 @@ export function writeStamp(sql: SqlLike, s: WorldStamp): void {
   else del(SMALL_STATE_KEYS.readOnly);
   if (s.visitor) put(SMALL_STATE_KEYS.leaseVisitor, s.visitor); else del(SMALL_STATE_KEYS.leaseVisitor);
   if (s.ipHash) put(SMALL_STATE_KEYS.leaseIpHash, s.ipHash); else del(SMALL_STATE_KEYS.leaseIpHash);
+  if (s.visitor && s.leaseStartedAt) put(SMALL_STATE_KEYS.leaseStartedAt, String(s.leaseStartedAt)); else del(SMALL_STATE_KEYS.leaseStartedAt);
   // Keys minted for an earlier lease die with it.
   del(SMALL_STATE_KEYS.leaseKeys);
 }

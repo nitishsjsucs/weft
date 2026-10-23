@@ -1,4 +1,4 @@
-// The operator lease (design 6.2 and 9.2): POST /api/_admin/lease and POST /api/_admin/grant, behind the same admin
+// The operator lease (design 6.2 and 9.2): POST /api/_admin/lease, /grant and /release, behind the same admin
 // signature as every /api/_admin/* route (WEFT_ADMIN_TOKEN, 5-minute timestamp, constant-time check; the caller has
 // checked it). They let the deploy's own checks (Playwright, the smoke's MCP and --live cases, the Verify walkthrough)
 // hold a pool slot without Turnstile, which nothing automated may solve. Nothing else is skipped: the Lobby assigns the
@@ -36,7 +36,22 @@ export async function operatorLease(env: FrontEnv, v: Visit, body: Record<string
 }
 
 /**
- * POST /api/_admin/grant `{ name? }`: a fresh human grant for the operator's lease, sent with that lease's session
+ * POST /api/_admin/release `{ name? }`: ends the operator lease of that name now, as its expiry would (the slot is
+ * reset and goes back to the pool), so a check that is done with its slot frees it for the next one. Clears the
+ * cookies when the caller holds that lease's session; answers `released: false` when the name holds no lease.
+ */
+export async function operatorRelease(env: FrontEnv, v: Visit, body: Record<string, unknown>): Promise<Response> {
+  const name = operatorName(body);
+  if (name === null) return plainError(400, "ValidationError", "OPERATOR_NAME", "name is 1 to 32 of a-z, 0-9 and -");
+  const visitor = await operatorVisitorId(env.WEFT_ADMIN_TOKEN!, name);
+  const r = await lobby(env).releaseVisitor({ visitor, reason: "operator" });
+  logEvent("lease.operator.release", { slot: r.slot, outcome: r.released ? "released" : "none" });
+  const res = json({ ok: true, operator: name, released: r.released, slot: r.slot });
+  return v.session?.visitor === visitor ? withCookies(res, clearSessionCookies()) : res;
+}
+
+/**
+ * POST /api/_admin/grant `{ name? }`:a fresh human grant for the operator's lease, sent with that lease's session
  * cookie. It never starts a lease: an ended one answers 409 LEASE_ENDED and clears the cookies.
  */
 export async function operatorGrant(env: FrontEnv, v: Visit, body: Record<string, unknown>): Promise<Response> {

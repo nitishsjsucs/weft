@@ -81,6 +81,13 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
   };
   const secrets: string[] = [];
   const runs = new Map<string, { live: boolean; fetches: number; global: boolean }>();
+  // The world's write lock, as cf1's withWriteLock: the fake's own write transactions take it, as executor ones do.
+  let tail: Promise<unknown> = Promise.resolve();
+  const writeLocked = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = tail.then(fn, fn);
+    tail = run.catch(() => undefined);
+    return run;
+  };
 
   const app = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
@@ -97,17 +104,19 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
       const text = String(body.text ?? "");
       // A slow mutation (awaiting I/O before it writes), to hold a request in flight across a lease's end.
       if (body.delayMs) await new Promise((r) => setTimeout(r, Math.min(5_000, body.delayMs!)));
-      inTx = true;
-      try {
-        input.storage.transactionSync(() => {
-          exec(`INSERT INTO notes (text) VALUES (?)`, text);
-          if (body.job) exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES (?, ?, ?, ?)`, `obx_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`, body.job,
-            JSON.stringify({ v: 1, kind: body.job, jobId: `obx_${Math.random().toString(16).slice(2, 18).padEnd(16, "0")}`, slot: input.world.slot, gen: input.world.gen, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" }),
-            new Date().toISOString());
-        });
-      } finally {
-        inTx = false;
-      }
+      await writeLocked(async () => {
+        inTx = true;
+        try {
+          input.storage.transactionSync(() => {
+            exec(`INSERT INTO notes (text) VALUES (?)`, text);
+            if (body.job) exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES (?, ?, ?, ?)`, `obx_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`, body.job,
+              JSON.stringify({ v: 1, kind: body.job, jobId: `obx_${Math.random().toString(16).slice(2, 18).padEnd(16, "0")}`, slot: input.world.slot, gen: input.world.gen, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" }),
+              new Date().toISOString());
+          });
+        } finally {
+          inTx = false;
+        }
+      });
       if (body.job) input.onOutbox();
       return json({ ok: true }, 201);
     }
@@ -174,6 +183,11 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
       return json({ mcp: true, method: body.method ?? null, key: key.slice(0, 7), world: input.world });
     },
     inScope: (fn) => fn(),
+    writeLocked,
+    outboxPending: () => writeLocked(async () => exec(`SELECT id, kind, body FROM outbox ORDER BY created_at, id`).map((r) => {
+      try { return { id: String(r.id), kind: String(r.kind), job: JSON.parse(String(r.body)) as never }; } catch { return { id: String(r.id), kind: String(r.kind), job: null }; }
+    })),
+    outboxAck: (id) => writeLocked(async () => { exec(`DELETE FROM outbox WHERE id = ?`, id); }),
     clockRate: () => rate,
     async mintMcpKey(m) {
       const rand = Array.from({ length: 24 }, (_, i) => "abcdefghijklmnopqrstuvwxyz0123456789"[(i * 7 + m.gen) % 36]).join("");

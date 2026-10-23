@@ -72,6 +72,16 @@ describe("leases", () => {
     expect(await old.json()).toMatchObject({ code: "LEASE_ENDED" });
     expect(stale.jar.cookies.has(SESSION_COOKIE)).toBe(false);
 
+    // The session read the app sends right after its reset may still carry the old cookie: it gets the lease as it is
+    // now and a cookie for the new generation, never a logout.
+    const late = h.visitor("198.51.100.103");
+    late.jar.cookies.set(SESSION_COOKIE, oldCookie);
+    const st = await late.json<{ world: string; lease: { slot: string; gen: number } | null }>("/api/_session");
+    expect(st.body).toMatchObject({ world: "slot", lease: { slot: l.slot, gen: l.gen! + 1 } });
+    expect(late.jar.cookies.get(SESSION_COOKIE)).not.toBe(oldCookie);
+    expect(await notes(late)).not.toContain("before reset");
+    expect((await late.json("/api/v1/notes")).status).toBe(200);
+
     const base = await v.fetch("/api/v1/sim/reset", { method: "POST", body: JSON.stringify({ profile: "base" }) });
     expect(base.status).toBe(400);
     expect(await base.json()).toMatchObject({ code: "HOSTED_RESET_PROFILE" });
@@ -179,6 +189,29 @@ describe("the operator lease", () => {
     expect(l.status).toBe("leased");
     expect((await (await lobby()).sweep({ now: Date.now() + (HOSTED_SETTINGS.leaseTotalMinutes + 1) * 60_000 })).released).toBeGreaterThanOrEqual(1);
     expect(await op.json("/api/v1/notes")).toMatchObject({ status: 409, body: { code: "LEASE_ENDED" } });
+  });
+
+  it("is released by POST /api/_admin/release { name }, which frees its slot for the next lease at once", async () => {
+    await releaseAll();
+    const ops = Array.from({ length: POOL }, (_, i) => h.visitor(`198.51.100.${170 + i}`));
+    for (const [i, op] of ops.entries()) expect((await op.operatorLease(`op-rel-${i}`)).status).toBe("leased");
+    const waiting = h.visitor("198.51.100.178");
+    expect((await waiting.lease()).status).toBe("waitlist");
+    await note(ops[0]!, "left by op-rel-0");
+    // Released with that lease's own cookie: the cookies are cleared too.
+    const r = await h.admin("POST", "/api/_admin/release", { name: "op-rel-0" }, { ip: ops[0]!.ip, jar: ops[0]!.jar });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ ok: true, operator: "op-rel-0", released: true, slot: expect.stringMatching(/^slot-\d+$/) });
+    expect(ops[0]!.jar.cookies.has(SESSION_COOKIE)).toBe(false);
+    const next = await waiting.lease();
+    expect(next.status).toBe("leased");
+    // The slot was reset before it went back to the pool.
+    expect(await notes(waiting)).not.toContain("left by op-rel-0");
+    // A name that holds no lease is answered, not refused; a bad name is 400.
+    expect(await (await h.admin("POST", "/api/_admin/release", { name: "op-rel-0" })).json()).toMatchObject({ ok: true, released: false, slot: null });
+    expect((await h.admin("POST", "/api/_admin/release", { name: "Not A Name" })).status).toBe(400);
+    expect((await h.fetch("/api/_admin/release", { method: "POST", body: JSON.stringify({ name: "op-rel-1" }) }, { origin: null })).status).toBe(401);
+    expect((await h.ops()).lobby.leases).toHaveLength(POOL);
   });
 });
 

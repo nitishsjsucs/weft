@@ -10,6 +10,9 @@ export interface WorldStamp {
   /** The lease's visitor and daily IP hash; background runs are charged to them (design 5.3). Null when unleased. */
   visitor: string | null;
   ipHash: string | null;
+  /** When the lease started (epoch ms, the Lobby's leases.started_at), so the slot knows the lease's own expiry before
+   * the Lobby releases it (the MCP gate, the minted key's expiresAt). Null when unleased. */
+  leaseStartedAt: number | null;
 }
 
 export interface UsageDelta {

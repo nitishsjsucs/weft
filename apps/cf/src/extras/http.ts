@@ -1,8 +1,9 @@
 // HostedExtras over HTTP (design 3.1 and 6.3): the front Worker forwards /api/_hosted/{platform,models,help,dictate,
 // export/...} to weft-core's CORE service binding with an HMAC'd x-weft-ctx, after its own gates (RL_API for reads;
 // the lease, the human grant and RL_MUTATE for dictation). This verifies the ctx and dispatches to the entrypoint's
-// RPC methods, so the visitor's slot, generation, visitor id and IP hash come from the signed ctx only. PDFs go to
-// the visitor's slot instead (CompanyDO answers /_hosted/pdf/...). It never evaluates @weft/* (design 3.2).
+// RPC methods, so the visitor's slot, generation, visitor id and IP hash come from the signed ctx only. Dictation is
+// a model call, so it also takes RL_RUN under the same per-visitor key as the slot's agent runs (design 6.3). PDFs
+// go to the visitor's slot instead (CompanyDO answers /_hosted/pdf/...). It never evaluates @weft/* (design 3.2).
 import { HOSTED_PATHS } from "../../../../packages/contracts/src/ext/cf-hosted";
 import { readCtx } from "../shared/tokens";
 import type { HostedExtrasApi } from "./ports";
@@ -11,11 +12,22 @@ import type { HostedExtrasApi } from "./ports";
 export const DICTATE_MAX_BYTES = 1024 * 1024;
 const EXPORT_PATH = "/api/_hosted/export/";
 
+/** What the forwarded routes need from weft-core's env: the ctx secret, and RL_RUN for dictation. */
+export interface ExtrasHttpEnv {
+  WEFT_CTX_SECRET?: string;
+  RL_RUN?: { limit(input: { key: string }): Promise<{ success: boolean }> };
+}
+
+/** RL_RUN's key: the visitor's, shared with the slot's agent runs (CompanyDO keys run:<visitor>); the smoke has its own. */
+export function runLimitKey(c: { visitor: string | null; smoke: boolean; ipHash: string | null }): string {
+  return c.visitor ? `run:${c.visitor}` : c.smoke ? "run:smoke" : `run:ip:${c.ipHash ?? "-"}`;
+}
+
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const refused = (status: number, tag: string, code: string, message: string) => json({ _tag: tag, code, message }, status);
 
-export async function extrasFetch(request: Request, api: HostedExtrasApi, ctxSecret: string): Promise<Response> {
-  const checked = await readCtx(ctxSecret, request.headers.get("x-weft-ctx"));
+export async function extrasFetch(request: Request, api: HostedExtrasApi, env: ExtrasHttpEnv): Promise<Response> {
+  const checked = await readCtx(env.WEFT_CTX_SECRET ?? "", request.headers.get("x-weft-ctx"));
   if (!checked.ok) return refused(401, "Unauthorized", "SESSION_INVALID", "This request did not come through Weft's front door");
   const c = checked.claims;
   const url = new URL(request.url);
@@ -33,6 +45,11 @@ export async function extrasFetch(request: Request, api: HostedExtrasApi, ctxSec
   if (method === "POST" && path === HOSTED_PATHS.dictate) {
     const len = Number(request.headers.get("content-length") ?? "NaN");
     if (Number.isFinite(len) && len > DICTATE_MAX_BYTES) return refused(413, "ValidationError", "DICTATION_TOO_LONG", "Dictation clips are at most 30 seconds");
+    if (env.RL_RUN) {
+      let ok = true;
+      try { ok = (await env.RL_RUN.limit({ key: runLimitKey(c) })).success; } catch { /* a coarse backstop; the neuron cap is the real one */ }
+      if (!ok) return json({ _tag: "RateLimitExceeded", code: "RATE_LIMITED", message: "Too many agent and dictation requests in a minute; try again shortly", retryAfterS: 60 }, 429);
+    }
     const audio = new Uint8Array(await request.arrayBuffer());
     if (audio.byteLength > DICTATE_MAX_BYTES) return refused(413, "ValidationError", "DICTATION_TOO_LONG", "Dictation clips are at most 30 seconds");
     const r = await api.dictate({ audio, contentType: request.headers.get("content-type") ?? "application/octet-stream", slot: c.slot, gen: c.gen, visitor: c.visitor, ipHash: c.ipHash });

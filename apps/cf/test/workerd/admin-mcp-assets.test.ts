@@ -27,6 +27,27 @@ describe("admin routes", () => {
     expect((await h.admin("GET", "/api/_admin/ops")).status).toBe(200);
   });
 
+  it("takes each signature once, and refuses one dated more than 30 s ahead", async () => {
+    const sig = await signAdmin({ token: h.secrets.admin, method: "GET", path: "/api/_admin/ops" });
+    expect((await h.fetch("/api/_admin/ops", { headers: { "x-weft-admin": sig } })).status).toBe(200);
+    const replay = await h.fetch("/api/_admin/ops", { headers: { "x-weft-admin": sig } });
+    expect(replay.status).toBe(401);
+    expect(await replay.json()).toMatchObject({ code: "ADMIN_SIGNATURE" });
+    const body = JSON.stringify({ slots: ["slot-1"] });
+    const post = await signAdmin({ token: h.secrets.admin, method: "POST", path: "/api/_admin/provision", body });
+    const send = () => h.fetch("/api/_admin/provision", { method: "POST", body, headers: { "x-weft-admin": post, "content-type": "application/json" } }, { origin: null });
+    expect((await send()).status).toBe(200);
+    expect((await send()).status).toBe(401);
+    // The operator release too: a captured release signature cannot end a second lease of that name.
+    const rel = JSON.stringify({ name: "replay-check" });
+    const relSig = await signAdmin({ token: h.secrets.admin, method: "POST", path: "/api/_admin/release", body: rel });
+    const release = () => h.fetch("/api/_admin/release", { method: "POST", body: rel, headers: { "x-weft-admin": relSig, "content-type": "application/json" } }, { origin: null });
+    expect((await release()).status).toBe(200);
+    expect((await release()).status).toBe(401);
+    const ahead = await signAdmin({ token: h.secrets.admin, method: "GET", path: "/api/_admin/ops", nowS: Math.floor(Date.now() / 1000) + 120 });
+    expect((await h.fetch("/api/_admin/ops", { headers: { "x-weft-admin": ahead } })).status).toBe(401);
+  });
+
   it("provisions idempotently: ready worlds are left alone, restored from the bundled snapshot", async () => {
     const r = await h.admin("POST", "/api/_admin/provision", {});
     const body = await r.json() as { steps: { slot: string; action: string }[] };
@@ -180,7 +201,7 @@ describe("rate limits", () => {
   });
 
   it("lets a valid smoke visit past RL_API, and an unsigned one from the same address still counts", async () => {
-    const smoke = await h.smokeHeaders();
+    const smoke = await h.smokeHeaders("/api/_no_such_route");
     const statuses = await burst(limit + 100, "203.0.113.201", smoke);
     expect(statuses.filter((s) => s === 429)).toEqual([]);
     expect(new Set(statuses)).toEqual(new Set([404]));
@@ -188,6 +209,20 @@ describe("rate limits", () => {
     expect((await burst(1, "203.0.113.201"))[0]).toBe(404);
     const forged = await burst(limit + 100, "203.0.113.202", { "x-weft-smoke": `${Math.floor(Date.now() / 1000)}.${"0".repeat(64)}` });
     expect(forged.filter((s) => s === 429).length).toBeGreaterThan(0);
+  });
+});
+
+describe("RL_MUTATE and the smoke", () => {
+  it("keys valid smoke mutations apart, so they leave the address's visitor allowance alone", async () => {
+    const ip = "203.0.113.210";
+    const limit = HOSTED_RATE_LIMITS.RL_MUTATE.limit;
+    const statuses = await Promise.all(Array.from({ length: limit }, async () =>
+      (await h.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "smoke" }), headers: await h.smokeHeaders("/api/v1/notes", "POST") }, { ip, origin: null })).status));
+    expect(statuses.filter((s) => s === 429)).toEqual([]);
+    // A visitor leasing from the same address still has its whole allowance.
+    const v = h.visitor(ip);
+    expect((await v.lease()).status).toBe("leased");
+    expect((await v.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "mine" }) })).status).toBe(201);
   });
 });
 

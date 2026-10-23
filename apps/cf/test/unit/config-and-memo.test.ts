@@ -2,9 +2,13 @@
 // the world env the Weft stack reads, and the showcase memo's bounds.
 import { describe, expect, it } from "vitest";
 import { HOSTED_CAP_DEFAULTS, HOSTED_CONFIG_KEYS } from "../../src/shared/contracts";
-import { agentEnabled, capsFrom, CONFIG_KEYS, readConfig } from "../../src/shared/config";
+import { agentEnabled, capsFrom, CONFIG_KEYS, envConfig, readConfig } from "../../src/shared/config";
 import { configEnv, liveEnv } from "../../src/core/company/company-do-env";
-import { MEMO_MAX_ENTRY_BYTES, ResponseMemo } from "../../src/front/memo";
+import { MEMO_MAX_ENTRY_BYTES, MEMO_QUERY_PARAMS, ResponseMemo } from "../../src/front/memo";
+import { flagsFrom } from "@weft/cf-extras";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { REPO } from "../support/config-files";
 
 const m = (o: Record<string, string>) => new Map<string, string | null>(Object.entries(o));
 
@@ -73,6 +77,13 @@ describe("a failing KV", () => {
     expect(back.get(HOSTED_CONFIG_KEYS.capDayUsd)).toBe("1.5");
   });
 
+  it("pauses the agent when the Worker has no KV binding at all", async () => {
+    const none = await readConfig(undefined, 1_000);
+    expect(agentEnabled(none)).toBe(false);
+    expect(none.get(HOSTED_CONFIG_KEYS.capDayUsd) ?? null).toBeNull();
+    expect(agentEnabled(await envConfig({}, 1_000))).toBe(false);
+  });
+
   it("keeps the last values it read when KV fails later", async () => {
     const state = { down: false, reads: 0 };
     const kv = failing(state);
@@ -89,6 +100,18 @@ describe("world env", () => {
     const values = m({ [HOSTED_CONFIG_KEYS.agentEnabled]: "false", [HOSTED_CONFIG_KEYS.modelProvider]: "workers_ai", [HOSTED_CONFIG_KEYS.recallSemantic]: "on", [HOSTED_CONFIG_KEYS.capDayUsd]: "3" });
     expect(configEnv(values, "slot")).toEqual({ WEFT_AGENT_ENABLED: "false", WEFT_HOSTED_PROVIDER: "workers_ai", WEFT_SEMANTIC_RECALL: "1", WEFT_DAY_USD_CAP: "3" });
     expect(configEnv(new Map(), "smoke")).toEqual({ WEFT_LLM: "scripted", WEFT_HOSTED_PROVIDER: "scripted" });
+  });
+
+  it("turns semantic recall on for every value the extras' flag reader accepts, and off for anything else", () => {
+    const recall = (v: string) => configEnv(m({ [HOSTED_CONFIG_KEYS.recallSemantic]: v }), "slot").WEFT_SEMANTIC_RECALL;
+    for (const v of ["on", "true", "1", "yes", " YES ", "On"]) {
+      expect(recall(v), v).toBe("1");
+      expect(flagsFrom({ recallSemantic: v }).recallSemantic, v).toBe(true);
+    }
+    for (const v of ["off", "false", "0", "no", "maybe"]) {
+      expect(recall(v), v).toBe("0");
+      expect(flagsFrom({ recallSemantic: v }).recallSemantic, v).toBe(false);
+    }
   });
 
   it("is a live, read-only view: later KV values show through, writes do not", () => {
@@ -109,8 +132,8 @@ describe("showcase memo", () => {
 
   it("keys by snapshot, principal, path and query, and serves hits without the world", async () => {
     const memo = new ResponseMemo();
-    const k = ResponseMemo.key({ path: "/v1/workers", search: "?page=1", principal: "usr_dana", snapshot: "s1" });
-    expect(k).toBe("s1|usr_dana|/v1/workers?page=1");
+    const k = ResponseMemo.key({ path: "/v1/workers", search: "?limit=1", principal: "usr_dana", snapshot: "s1" });
+    expect(k).toBe("s1|usr_dana|/v1/workers?limit=1");
     const first = await memo.put(k, ok('{"a":1}', { etag: 'W/"1.x"' }));
     expect(first.headers.get("x-weft-memo")).toBe("miss");
     expect(await first.text()).toBe('{"a":1}');
@@ -118,7 +141,51 @@ describe("showcase memo", () => {
     expect(hit.headers.get("x-weft-memo")).toBe("hit");
     expect(hit.headers.get("etag")).toBe('W/"1.x"');
     expect(await hit.text()).toBe('{"a":1}');
-    expect(memo.get(ResponseMemo.key({ path: "/v1/workers", search: "?page=1", principal: "usr_dana", snapshot: "s2" }))).toBeNull();
+    expect(memo.get(ResponseMemo.key({ path: "/v1/workers", search: "?limit=1", principal: "usr_dana", snapshot: "s2" }))).toBeNull();
+  });
+
+  it("normalizes the read: unknown parameters and non-persona principals cannot vary the key", () => {
+    const n = (search: string, principal: string | null = "usr_dana") => ResponseMemo.normalize({ path: "/v1/time-off/requests", search, principal, snapshot: "s1" });
+    const base = n("?status=pending&limit=50");
+    expect(base).toEqual({ key: "s1|usr_dana|/v1/time-off/requests?limit=50&status=pending", search: "?limit=50&status=pending", principal: "usr_dana" });
+    // Unknown names, order, repeats and over-long values all land on the same key and the same forwarded query.
+    for (const variant of ["?limit=50&status=pending&cb=1", "?status=pending&r=xyz&limit=50", "?status=pending&limit=50&status=approved", `?status=pending&limit=50&q=${"x".repeat(300)}`]) {
+      expect(n(variant), variant).toEqual(base);
+    }
+    expect(n("?sweep=1&_=123")).toMatchObject({ search: "", key: "s1|usr_dana|/v1/time-off/requests" });
+    // A known parameter still varies it.
+    expect(n("?status=approved&limit=50").key).not.toBe(base.key);
+    // Personas vary it; anything else is dropped (no header reaches the world).
+    expect(n("", "usr_sam").principal).toBe("usr_sam");
+    expect(n("", "usr_0003").principal).toBe("usr_0003");
+    for (const p of ["USR_DANA", "usr_dana, usr_dana", "usr_x".padEnd(80, "x"), "vis_abc", "", "usr_dana\u0000"]) {
+      expect(n("", p), p).toMatchObject({ principal: null, key: "s1|-|/v1/time-off/requests" });
+    }
+  });
+
+  it("keeps the world's cache-control on a hit", async () => {
+    const memo = new ResponseMemo();
+    await memo.put("k", ok("{}", { "cache-control": "private, no-cache", etag: 'W/"1.y"' }));
+    expect(memo.get("k")!.headers.get("cache-control")).toBe("private, no-cache");
+  });
+
+  it("knows every query parameter apps/api reads", () => {
+    const read = new Set<string>();
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.ts$/.test(e.name) && !/\.test\.ts$/.test(e.name)) {
+          const text = readFileSync(p, "utf8");
+          for (const re of [/req\.query\(\s*["'`]([A-Za-z_]+)["'`]\s*\)/g, /\bq\(\s*c\s*,\s*["'`]([A-Za-z_]+)["'`]\s*\)/g, /searchParams\.(?:get|has|getAll)\(\s*["'`]([A-Za-z_]+)["'`]\s*\)/g]) {
+            for (const m of text.matchAll(re)) read.add(m[1]!);
+          }
+        }
+      }
+    };
+    walk(join(REPO, "apps/api/src"));
+    expect(read.size).toBeGreaterThan(30);
+    expect([...read].filter((k) => !MEMO_QUERY_PARAMS.has(k)).sort()).toEqual([]);
   });
 
   it("keeps no stream, no no-store response and no error, and stays under its byte bound", async () => {

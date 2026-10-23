@@ -237,7 +237,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     });
     if (!reserved) return { status: "ip_limit", reopensAt: nextUtcMidnight(now) };
     try {
-      await this.company(free.name).applyStamp({ slot: free.name, gen: free.gen, mode: "slot", visitor: input.visitor, ipHash: input.ipHash });
+      await this.company(free.name).applyStamp({ slot: free.name, gen: free.gen, mode: "slot", visitor: input.visitor, ipHash: input.ipHash, leaseStartedAt: now });
     } catch (e) {
       logError("lobby.assign.stamp", e, { slot: free.name });
       this.ctx.storage.transactionSync(() => {
@@ -295,7 +295,11 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     let worldProvider: string | null = null;
     if (input.visitor) {
       const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
-      if (l && (input.slot == null || l.slot === input.slot) && (input.gen == null || l.gen === input.gen)) {
+      // A cookie from before the visitor's own "Reset demo data..." names an older generation of the same lease (the
+      // reset kept the lease and moved it on), so it is answered with the lease as it is now, and the front reissues
+      // the cookie. Only the visitor's own row on the cookie's slot qualifies: another slot, or a cookie generation
+      // newer than the lease's, is no lease.
+      if (l && (input.slot == null || l.slot === input.slot) && (input.gen == null || l.gen >= input.gen)) {
         try {
           const hb = await this.company(l.slot).heartbeat({ provider: true });
           this.absorbUsage(hb.usage);
@@ -352,6 +356,17 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     if (claimed) await this.resetClaimed(claimed, null, now);
   }
 
+  /**
+   * Ends a visitor's lease, if it has one, exactly as an expiry does (the slot is reset and goes back to the pool).
+   * POST /api/_admin/release uses it for an operator lease, so a smoke and a walkthrough never hold the pool.
+   */
+  async releaseVisitor(input: { visitor: string; reason: string; now?: number }): Promise<{ released: boolean; slot: string | null }> {
+    const l = this.one<{ slot: string }>(`SELECT slot FROM leases WHERE visitor = ?`, input.visitor);
+    if (!l) return { released: false, slot: null };
+    await this.release({ slot: l.slot, reason: input.reason, now: input.now });
+    return { released: true, slot: l.slot };
+  }
+
   /** "Reset demo data..." for the leased visitor: at most HOSTED_SETTINGS.resetsPerLease per lease. */
   async reset(input: { visitor: string; slot: string; gen: number; now?: number }): Promise<HostedResetResult | ResetError> {
     const now = input.now ?? Date.now();
@@ -369,7 +384,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
       this.sql.exec(`DELETE FROM leases WHERE slot = ? AND visitor = ?`, l.slot, l.visitor);
       return { error: "LEASE_ENDED", message: "This demo company is being rebuilt; start a new one in a few minutes" };
     }
-    const out = await this.resetClaimed(claimed, { visitor: l.visitor, ipHash: l.ip_hash }, now);
+    const out = await this.resetClaimed(claimed, { visitor: l.visitor, ipHash: l.ip_hash, startedAt: l.started_at }, now);
     // A reset that could not finish in place ended the lease and started a full restore; so did a lease that ended
     // while the reset ran. Either way the visitor never learns the new generation.
     if (!out.ok || !out.leaseKept) return { error: "LEASE_ENDED", message: "This demo company is being rebuilt; start a new one in a few minutes" };
@@ -397,7 +412,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
    * reset. A reset that fails (a digest mismatch, a failed stamp, an error) falls back to a full restore. The slot is
    * ready again only after a reset that succeeded; it never goes back to the pool as it was.
    */
-  private async resetClaimed(s: SlotRow, keep: { visitor: string; ipHash: string } | null, now: number): Promise<ResetOutcome & { leaseKept: boolean }> {
+  private async resetClaimed(s: SlotRow, keep: { visitor: string; ipHash: string; startedAt: number } | null, now: number): Promise<ResetOutcome & { leaseKept: boolean }> {
     try {
       return await this.resetInPlace(s, keep, now);
     } finally {
@@ -405,14 +420,15 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     }
   }
 
-  private async resetInPlace(s: SlotRow, keep: { visitor: string; ipHash: string } | null, now: number): Promise<ResetOutcome & { leaseKept: boolean }> {
+  private async resetInPlace(s: SlotRow, keep: { visitor: string; ipHash: string; startedAt: number } | null, now: number): Promise<ResetOutcome & { leaseKept: boolean }> {
     const name = s.name;
     const cfg = await this.config();
     const snapshot = cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? null;
     if (snapshot && s.snapshot && s.snapshot !== snapshot) {
       return this.rebuild(s, keep, now, "stale", { ok: false, method: "delta", gen: s.gen, rowsWritten: 0, mismatches: ["stale snapshot"], ms: 0 });
     }
-    const stamp: WorldStamp = { slot: name, gen: s.gen + 1, mode: s.mode, visitor: keep?.visitor ?? null, ipHash: keep?.ipHash ?? null };
+    // A kept lease keeps its start, so its total expiry stays where it was.
+    const stamp: WorldStamp = { slot: name, gen: s.gen + 1, mode: s.mode, visitor: keep?.visitor ?? null, ipHash: keep?.ipHash ?? null, leaseStartedAt: keep?.startedAt ?? null };
     let out: ResetOutcome;
     try {
       const co = this.company(name);
@@ -462,6 +478,9 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const step = await this.startRestore(s.name, now, why, { claimed: true });
     // startRestore leaves the slot restoring or failed; anything else (it found a lease) must not stay resetting.
     this.sql.exec(`UPDATE slots SET state = 'failed', error = ?, updated_at = ? WHERE name = ? AND state = 'resetting'`, `reset failed (${why}): ${step.action}`, now, s.name);
+    // The world comes back at a later generation either way (a restore, now or deferred, starts at gen + 1), so the
+    // vectors its visitors upserted up to this generation are gone for good, as after a reset in place.
+    await this.dropVectors(s.name, s.gen);
     return { ...out, ok: false, leaseKept: false };
   }
 

@@ -1,15 +1,21 @@
-// The Durable Object side of the extras against a real seeded world (createTestWeft on Node, the scripted provider):
-// the hidden OCR write-backs, the slot port, the outbox mapping and the queue handlers end to end. A receipt read by
-// OCR lands in the expense's untrusted receipt extract and reruns its policy checks; a chat run that reads it is
-// tainted and its writes are refused (a GP5-style test); the notice scan lands as the untrusted body of an uploaded
-// notice. Until the executor allows svc_jobs (a cf2 contract request), the write-backs run through `runHidden`, which
-// validates the input and runs the command in one transaction as the executor's system path does.
+// The Durable Object side of the extras against a real seeded world on Node (the scripted provider): the hidden OCR
+// write-backs, the slot port, the outbox mapping and the queue handlers end to end. A receipt read by OCR lands in the
+// expense's untrusted receipt extract and reruns its policy checks; a chat run that reads it is tainted and its writes
+// are refused (a GP5-style test); the notice scan lands as the untrusted body of an uploaded notice. The world
+// registers the hosted write-backs as the durable platform does (the executor's extraCommands), so every write-back
+// runs through the executor's own system path as svc_jobs, exactly as CompanyDO runs it. `runHidden` is kept only for
+// the malformed-input case: it checks the input shape on its own, before any transaction.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createTestWeft, type TestWeft } from "@weft/api";
+import { assembleWeft } from "@weft/api/assemble";
+import { hostedServiceCommands } from "@weft/executor";
+import { seedWorld } from "@weft/seed";
 import { DomainRefusal } from "@weft/core";
 import { expenses, notices, runTaint, uploads } from "@weft/db";
 import { OCR_MODEL, parseJob, sha256Hex, type HostedJob, type MessageBatchLike } from "@weft/cf-extras";
@@ -20,14 +26,30 @@ import { extrasOutboxJobs } from "../../src/extras/slot/outbox";
 import { handleExtrasBatch } from "../../src/extras/queues";
 import { batch, fakeAi, jobDeps, jpegOf, message } from "./helpers";
 
+/** A seeded Node world with the hosted write-backs registered (extraCommands), so svc_jobs exists as on hosted. */
+async function hostedTestWeft(): Promise<TestWeft> {
+  const dataDir = mkdtempSync(join(tmpdir(), "weft-cf-slot-"));
+  const weft = await assembleWeft({ kind: "node", executor: { extraCommands: hostedServiceCommands() as never } }, { dataDir, testMode: true });
+  await seedWorld(weft);
+  await weft.clock.set("2026-10-26T15:30:00.000Z", 0);
+  const close = weft.close.bind(weft);
+  return Object.assign(weft, {
+    uiHeaders: (principalId: string) => ({ "x-weft-principal": principalId, "x-weft-proxy": weft.proxySecret }),
+    async close() { await close(); rmSync(dataDir, { recursive: true, force: true }); },
+  });
+}
+
 let w: TestWeft;
-beforeAll(async () => { w = await createTestWeft(); await w.scheduler.tick(); });
+beforeAll(async () => { w = await hostedTestWeft(); await w.scheduler.tick(); });
 afterAll(async () => {
   await (w.routines as unknown as { drain(ms?: number): Promise<boolean> }).drain(5_000);
   await w?.close();
 });
 
-/** The executor's system path for one hidden command: validated input, one transaction, a refusal as a ToolOutcome. */
+/** A write-back as CompanyDO runs it: the executor's system path, as svc_jobs. */
+const svcJobs = (command: string, args: unknown): Promise<ToolOutcome> => w.executor.system.exec("svc_jobs", command, args, { eventId: null, attended: false, requestedBy: null });
+
+/** The input-shape check alone (the malformed-input case): validated input, one transaction, a refusal as a ToolOutcome. */
 async function runHidden(command: string, args: unknown): Promise<ToolOutcome> {
   const def = EXTRAS_COMMANDS.find((c) => c.name === command);
   if (!def) return { ok: false, refusal: { code: "UNKNOWN_COMMAND", message: command, hint: null, example: null }, tainted: false };
@@ -52,7 +74,7 @@ const slotDeps = (lease = { visitor: "v_test", ipHash: "ip_test" }): SlotExtrasD
   memoryText: async (path, commit) => { try { return execFileSync("git", ["show", `${commit}:${path}`], { cwd: memRoot(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } },
   exportMemory: async () => new TextEncoder().encode("blob\n"),
   exportWorld: () => worldExportJson(w.db, { slot: "slot-1", gen: 1, exportedAt: "2026-10-26T15:30:00.000Z" }),
-  exec: runHidden,
+  exec: svcJobs,
 });
 const slotPort = (lease = { visitor: "v_test", ipHash: "ip_test" }) => createSlotExtras(slotDeps(lease));
 let ids = 0;
@@ -72,15 +94,23 @@ const expense = async (id: string) => (await w.db.select().from(expenses).where(
 const ocrAi = (o: Record<string, unknown>) => fakeAi({ [OCR_MODEL]: () => ({ response: JSON.stringify(o) }) });
 
 describe("hidden write-back commands", () => {
-  it("are system only, hidden from MCP and every agent tier, and form the svc_jobs allowlist", () => {
+  it("are system only, hidden from MCP and every agent tier, and form the svc_jobs allowlist", async () => {
     for (const c of EXTRAS_COMMANDS) {
       expect(c).toMatchObject({ access: "system_only", mcp: "hidden", tiers: { main: "unavailable", task: "unavailable" }, sandbox: "hidden", effect: "write", approval: "never" });
       expect(c.risk({} as never)).toBe("R1");
     }
     expect(SVC_JOBS_ALLOWLIST).toEqual(["expenses.attach_receipt_extract", "notices.attach_scan_extract"]);
-    // Node's registry is unchanged: the core commands never include them.
-    expect(w.executor.registry.get("expenses.attach_receipt_extract")).toBeUndefined();
+    // Only a platform that registers them has them: Node's own registry is unchanged, and so is svc_jobs's absence.
+    expect(w.executor.registry.get("expenses.attach_receipt_extract")).toBeDefined();
+    const plain = await createTestWeft({ seed: false });
+    try {
+      expect(plain.executor.registry.get("expenses.attach_receipt_extract")).toBeUndefined();
+      expect(await plain.executor.system.exec("svc_jobs", "expenses.attach_receipt_extract", {}, { eventId: null, attended: false, requestedBy: null })).toMatchObject({ ok: false, refusal: { code: "NOT_PERMITTED" } });
+    } finally {
+      await plain.close();
+    }
   });
+
 
   it("refuse malformed extracts before any write", async () => {
     const id = await fileClaim(1_100);
@@ -118,7 +148,7 @@ describe("receipt OCR end to end", () => {
     await handleExtrasBatch(batch("weft-jobs", [message(job, 2)]) as MessageBatchLike<unknown>, deps);
     expect((await expense(id)).receiptExtractJson).toBe(before);
     expect((deps.ai as ReturnType<typeof fakeAi>).calls).toHaveLength(1);
-    const again = await runHidden(attachReceiptExtractCmd.name, { job_id: job.jobId, expense_id: id, upload_id: (job as { uploadId: string }).uploadId, extract: null, model: OCR_MODEL, neurons: 0 });
+    const again = await svcJobs(attachReceiptExtractCmd.name, { job_id: job.jobId, expense_id: id, upload_id: (job as { uploadId: string }).uploadId, extract: null, model: OCR_MODEL, neurons: 0 });
     expect(writeBackOutcome(again)).toEqual({ ok: true, status: "already", reason: null });
   });
 
@@ -141,11 +171,11 @@ describe("receipt OCR end to end", () => {
   it("a replaced receipt or an extract from elsewhere is left alone; an unreadable receipt is recorded as read nothing", async () => {
     const id2 = await fileClaim(1_234, new Uint8Array([...JPEG, 0x01]));
     const r = await expense(id2);
-    expect(writeBackOutcome(await runHidden(attachReceiptExtractCmd.name, { job_id: "j_other", expense_id: id2, upload_id: "upl_9999", extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "receipt_replaced" });
-    expect(writeBackOutcome(await runHidden(attachReceiptExtractCmd.name, { job_id: "j_none", expense_id: id2, upload_id: r.receiptUploadId!, extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "attached", reason: "unreadable" });
+    expect(writeBackOutcome(await svcJobs(attachReceiptExtractCmd.name, { job_id: "j_other", expense_id: id2, upload_id: "upl_9999", extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "receipt_replaced" });
+    expect(writeBackOutcome(await svcJobs(attachReceiptExtractCmd.name, { job_id: "j_none", expense_id: id2, upload_id: r.receiptUploadId!, extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "attached", reason: "unreadable" });
     expect(JSON.parse((await expense(id2)).receiptExtractJson!)).toMatchObject({ totalCents: null, read: false, source: "ocr" });
     await w.db.update(expenses).set({ receiptExtractJson: JSON.stringify({ totalCents: 100, date: "2026-10-01", merchant: "Email intake (demo)" }) }).where(eq(expenses.id, id2));
-    expect(writeBackOutcome(await runHidden(attachReceiptExtractCmd.name, { job_id: "j_new", expense_id: id2, upload_id: r.receiptUploadId!, extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "has_extract" });
+    expect(writeBackOutcome(await svcJobs(attachReceiptExtractCmd.name, { job_id: "j_new", expense_id: id2, upload_id: r.receiptUploadId!, extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "has_extract" });
   });
 });
 
@@ -186,7 +216,7 @@ describe("notice scan end to end", () => {
     const read = await w.executor.agent.exec(h, { callId: "n1", command: "notices__get", args: { notice_id: noticeId, response_format: "detailed" }, batch: 1 } as never);
     expect(read).toMatchObject({ ok: true, tainted: true });
     expect((read as { data: { notice: { body: string } } }).data.notice.body).toMatch(new RegExp(`^<untrusted n="[0-9a-f]{16}" source="notice:${noticeId}">`));
-    expect(writeBackOutcome(await runHidden(attachScanExtractCmd.name, { job_id: "j_x", notice_id: noticeId, upload_id: "upl_0000", extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "upload_mismatch" });
+    expect(writeBackOutcome(await svcJobs(attachScanExtractCmd.name, { job_id: "j_x", notice_id: noticeId, upload_id: "upl_0000", extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "upload_mismatch" });
   });
 });
 

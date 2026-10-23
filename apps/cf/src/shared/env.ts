@@ -74,3 +74,9 @@ export function poolSize(env: SharedVars): number {
   const n = Number(env.WEFT_POOL_SIZE ?? "2");
   return Number.isInteger(n) && n >= 1 && n <= 32 ? n : 2;
 }
+
+/** True only for the exact name of a pool slot, slot-1 to slot-<WEFT_POOL_SIZE> (not slot-0, slot-01 or slot-smoke). */
+export function isPoolSlot(env: SharedVars, slot: string): boolean {
+  const m = /^slot-([1-9]\d{0,1})$/.exec(slot);
+  return !!m && Number(m[1]) <= poolSize(env);
+}

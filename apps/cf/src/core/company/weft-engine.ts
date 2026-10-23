@@ -10,10 +10,10 @@
 // The parts come from deps.ts by name; until a track has exported its part the boot fails with a message naming it.
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { apiKeys, principals, settings, UNTRACKED_TABLES, verifiedTables, type Db, type DbTx } from "@weft/db";
+import { apiKeys, outbox, principals, settings, UNTRACKED_TABLES, verifiedTables, type Db, type DbTx } from "@weft/db";
 import { newId } from "@weft/core";
 import { SqlRepo } from "@weft/executor";
-import { createRecallSource } from "@weft/cf-extras";
+import { createRecallSource, type HostedJob } from "@weft/cf-extras";
 import {
   formatHostedMcpKey, hostedWorldId, MCP_AGENT_ASK_PER_KEY_DAY, SMALL_STATE_KEYS, WORLD_MODEL_SETTING,
   type DurableStorageLike, type DurableWeftPlatform, type PlatformDb, type SqlMeter, type TxGuard,
@@ -24,7 +24,7 @@ import { isModelAdmission } from "../../shared/routes";
 import { bundledFixtures } from "../fixtures";
 import { catalogRowFor, createSlotExtras, handleHostedPdf, indexSeedMemory, worldExportJson } from "../../extras/slot";
 import { weftDeps, type MigrationEntryLike, type SnapshotLike } from "./deps";
-import type { EngineModule, SnapshotArtifacts, SnapshotExtra, WorldBootInput, WorldEngine, WorldStore } from "./engine";
+import type { EngineModule, OutboxRow, SnapshotArtifacts, SnapshotExtra, WorldBootInput, WorldEngine, WorldStore } from "./engine";
 import { bundledSnapshotFiles } from "./snapshot-assets";
 
 type Session = { principalId: string; companyId: string; via: "ui"; keyScope: null };
@@ -128,6 +128,18 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     });
   }
   const pendingPdfs = new Map<string, number>();
+  // The world's write lock, taken inside its scope: the lock is keyed by WorldScope.current().
+  const writeLocked = <T>(fn: () => Promise<T>): Promise<T> => inScope(() => d.withWriteLock(fn));
+  const outboxPending = (): Promise<OutboxRow[]> => writeLocked(async () => {
+    try {
+      return (await d.pendingOutbox(weft.db as never)).map((r) => ({ id: r.id, kind: r.kind, job: r.job as HostedJob }));
+    } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e;
+      // A row whose body is not JSON (pendingOutbox parses every body): list it without a job, so the flush drops it.
+      const rows = await weft.db.select({ id: outbox.id, kind: outbox.kind, body: outbox.body }).from(outbox).orderBy(outbox.createdAt, outbox.id);
+      return rows.map((r) => { try { return { id: r.id, kind: r.kind, job: JSON.parse(r.body) as HostedJob }; } catch { return { id: r.id, kind: r.kind, job: null }; } });
+    }
+  });
 
   const mcp = d.createRemoteMcpHandler({
     apiUrl: origin,
@@ -141,6 +153,9 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     fetch: appFetch,
     mcp: (req) => inScope(() => mcp(req)),
     inScope: (fn) => inScope(fn),
+    writeLocked,
+    outboxPending,
+    outboxAck: (id) => writeLocked(() => d.ackOutbox(weft.db as never, id)),
     clockRate: () => weft.clock.rate(),
     async mintMcpKey(m) {
       if (!internals) throw new Error("executor internals unavailable");
@@ -180,7 +195,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
         world: { slot: input.world.slot, gen: input.world.gen, mode: input.world.mode, snapshot: x.snapshot() },
         ctx: p.ctx,
         app: (path) => appFetch(new Request(`${url.origin}${path}`, { headers })),
-        files: x.files, render: x.render, flags: x.flags, browserMsUsed: p.browserMsUsed, newJobId: p.newJobId, pending: pendingPdfs,
+        files: x.files, render: x.render, flags: x.flags, browserMsUsed: p.browserMsUsed, newJobId: p.newJobId, pending: pendingPdfs, guard,
       });
     },
     catalogRow: (runId) => inScope(() => catalogRowFor(weft.db as never, runId, { slot: input.world.slot, gen: input.world.gen })),

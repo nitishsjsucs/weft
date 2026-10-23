@@ -52,7 +52,7 @@ export async function resolveVisit(req: Request, env: FrontEnv): Promise<Visit> 
     visit.grant = g.ok && g.claims.visitor === visit.session.visitor;
     visit.grantExp = visit.grant && g.ok ? g.claims.exp : null;
   }
-  visit.smoke = await verifySmoke(env.WEFT_SMOKE_TOKEN, req.headers.get(TRUST_HEADERS.smoke));
+  visit.smoke = await verifySmoke(env.WEFT_SMOKE_TOKEN, req.headers.get(TRUST_HEADERS.smoke), { method: req.method, path: new URL(req.url).pathname });
   return visit;
 }
 

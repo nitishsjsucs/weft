@@ -29,6 +29,8 @@ export interface ExtrasEnv {
   WEFT_SEMANTIC_RECALL?: string;
   /** Verifies the front's x-weft-ctx on forwarded /api/_hosted/* requests. */
   WEFT_CTX_SECRET?: string;
+  /** Dictation's per-visitor rate limit, the same binding and key as the slot's agent runs (design 6.3). */
+  RL_RUN?: { limit(input: { key: string }): Promise<{ success: boolean }> };
 }
 export interface ExecutionContextLike { waitUntil(p: Promise<unknown>): void }
 export type ExtrasLog = (evt: Record<string, unknown>) => void;

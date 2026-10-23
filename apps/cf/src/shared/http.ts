@@ -50,6 +50,36 @@ export function nextUtcMidnight(ms: number = Date.now()): string {
 
 export const isMutation = (method: string): boolean => !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
 
+/** Admin bodies are small JSON objects (the front's /api/_admin/* routes). */
+export const ADMIN_MAX_BODY_BYTES = 64 * 1024;
+
+/**
+ * A request body as text, at most `maxBytes`, or null when it is larger: a declared Content-Length over the cap is
+ * refused before anything is read, and a body without one (chunked) is read only until it passes the cap.
+ */
+export async function readTextCapped(req: Request, maxBytes: number): Promise<string | null> {
+  const declared = req.headers.get("content-length");
+  if (declared !== null && !(Number(declared) <= maxBytes)) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      void reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) { all.set(c, at); at += c.byteLength; }
+  return new TextDecoder().decode(all);
+}
+
 export async function readJson<T>(req: Request, maxBytes = 16 * 1024): Promise<T | null> {
   const len = Number(req.headers.get("content-length") ?? "0");
   if (len > maxBytes) return null;

@@ -14,7 +14,7 @@ import { handleExtrasBatch } from "./queues";
 export class HostedExtras extends WorkerEntrypoint<ExtrasEnv> implements HostedExtrasApi {
   #api(): HostedExtrasApi { return createHostedExtras(hostedDepsFromEnv(this.env, this.ctx)); }
   /** The front's forwarded /api/_hosted/* requests (x-weft-ctx verified here); the RPC methods below serve them. */
-  override fetch(request: Request): Promise<Response> { return extrasFetch(request, this, this.env.WEFT_CTX_SECRET ?? ""); }
+  override fetch(request: Request): Promise<Response> { return extrasFetch(request, this, this.env); }
   help(query: string): Promise<HelpSearchResult> { return this.#api().help(query); }
   dictate(input: DictateInput): Promise<DictationResult> { return this.#api().dictate(input); }
   platform(): Promise<PlatformReadout> { return this.#api().platform(); }

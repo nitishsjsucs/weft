@@ -37,18 +37,30 @@ describe("trust headers", () => {
 
 describe("slot-smoke", () => {
   it("serves the smoke header as a human session on slot-smoke with the provider forced to scripted", async () => {
-    const r = await h.visitor().json<WhoAmI>("/api/v1/whoami", { headers: await h.smokeHeaders() });
+    const r = await h.visitor().json<WhoAmI>("/api/v1/whoami", { headers: await h.smokeHeaders("/api/v1/whoami") });
     expect(r.body.world).toMatchObject({ slot: DO_NAMES.smoke, mode: "smoke" });
     expect(r.body.envLlm).toBe("scripted");
     expect(r.body.provider).toBe("scripted");
-    const w = await h.visitor().fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "smoke note" }), headers: await h.smokeHeaders() }, { origin: null });
+    const w = await h.visitor().fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "smoke note" }), headers: await h.smokeHeaders("/api/v1/notes", "POST") }, { origin: null });
     expect(w.status).toBe(201);
-    const reset = await h.visitor().fetch("/api/v1/sim/reset", { method: "POST", body: "{}", headers: await h.smokeHeaders() }, { origin: null });
+    const reset = await h.visitor().fetch("/api/v1/sim/reset", { method: "POST", body: "{}", headers: await h.smokeHeaders("/api/v1/sim/reset", "POST") }, { origin: null });
     expect(reset.status).toBe(200);
-    const after = await h.visitor().json<{ text: string }[]>("/api/v1/notes", { headers: await h.smokeHeaders() });
+    const after = await h.visitor().json<{ text: string }[]>("/api/v1/notes", { headers: await h.smokeHeaders("/api/v1/notes") });
     expect(after.body.map((n) => n.text)).not.toContain("smoke note");
     // The showcase never sees the smoke world's changes.
     expect((await h.visitor().json<{ text: string }[]>("/api/v1/notes")).body.map((n) => n.text)).not.toContain("smoke note");
+  });
+
+  it("honours a smoke header only for the method and path it was signed for", async () => {
+    // A header signed for GET /api/v1/notes, sent elsewhere, is an ordinary visit: the showcase, read-only.
+    const forNotes = await h.smokeHeaders("/api/v1/notes");
+    expect((await h.visitor().json<WhoAmI>("/api/v1/whoami", { headers: forNotes })).body.world.slot).toBe(DO_NAMES.showcase);
+    const write = await h.visitor().fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "replayed smoke" }), headers: forNotes });
+    expect(write.status).toBe(409);
+    expect(await write.json()).toMatchObject({ code: "LEASE_REQUIRED" });
+    // The request shape it was signed for is still the smoke's.
+    const forWhoami = await h.smokeHeaders("/api/v1/whoami");
+    expect((await h.visitor().json<WhoAmI>("/api/v1/whoami", { headers: forWhoami })).body.world.slot).toBe(DO_NAMES.smoke);
   });
 });
 

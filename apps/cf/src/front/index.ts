@@ -7,15 +7,15 @@ import {
   type HostedResetResult,
 } from "../shared/contracts";
 import { agentEnabled, envConfig } from "../shared/config";
-import type { FrontEnv } from "../shared/env";
-import { hostedError, isMutation, json, plainError, readJson } from "../shared/http";
+import { isPoolSlot, type FrontEnv } from "../shared/env";
+import { ADMIN_MAX_BODY_BYTES, hostedError, isMutation, json, plainError, readJson, readTextCapped } from "../shared/http";
 import { logError } from "../shared/log";
 import { DO_PATHS, HEALTH_PATH, isModelAdmission, isUpload, SIM_RESET_PATH } from "../shared/routes";
 import { ADMIN_HEADER, mcpKeyId, signCtx, verifyAdmin } from "../shared/tokens";
 import { serveAssets } from "./assets";
 import { forwardToWorld, stripTrust } from "./forward";
 import { ResponseMemo } from "./memo";
-import { operatorGrant, operatorLease } from "./operator";
+import { operatorGrant, operatorLease, operatorRelease } from "./operator";
 import { sessionStatus, startLease, verifyHuman } from "./session";
 import { clearSessionCookies, FrontConfigError, resolveVisit, secrets, sessionCookies, targetOf, withCookies, type Visit } from "./visit";
 
@@ -75,13 +75,18 @@ export default {
   },
 } satisfies ExportedHandler<FrontEnv>;
 
+/** RL_MUTATE's key for valid smoke visits (slot-smoke only, never a visitor's world). */
+const SMOKE_MUTATE_KEY = "mut:smoke";
+
 /** The gates every mutation passes (design 6.3): same origin, a lease, a fresh human grant, RL_MUTATE. */
 async function mutationGate(req: Request, env: FrontEnv, v: Visit): Promise<Response | null> {
   // A GET gated like a mutation (a PDF) sends no Origin; the SameSite=Strict cookies already keep it same-site.
   if (!v.smoke && isMutation(req.method) && !originAllowed(req, env)) return hostedError("ORIGIN_REFUSED", "Cross-origin requests are refused");
   if (!v.smoke && !v.session) return hostedError("LEASE_REQUIRED", "The shared demo company is read-only; start your own demo company to make changes");
   if (!v.smoke && !v.grant) return hostedError("TURNSTILE_REQUIRED", "Confirm you are human to keep making changes");
-  if (await rateLimited(env.RL_MUTATE, `mut:${v.ipHash}`)) return hostedError("RATE_LIMITED", "Too many changes in a minute; slow down a little", { retryAfterS: 60 });
+  // A valid smoke visit (the deploy's own checks, signed with WEFT_SMOKE_TOKEN) has its own key, so automated checks
+  // from the operator's address never spend that address's visitor budget; a forged or unsigned one is a visitor.
+  if (await rateLimited(env.RL_MUTATE, v.smoke ? SMOKE_MUTATE_KEY : `mut:${v.ipHash}`)) return hostedError("RATE_LIMITED", "Too many changes in a minute; slow down a little", { retryAfterS: 60 });
   return null;
 }
 
@@ -111,13 +116,17 @@ async function api(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Res
     return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
   }
   // Reads. The showcase is immutable per snapshot: memoized in the isolate (health is always fresh).
+  // The showcase is asked the normalized read the key names (memo.ts), so nothing else a client adds can vary it.
   if (!t.leased && req.method === "GET" && apiPath !== HEALTH_PATH) {
     const cfg = await envConfig(env);
-    const key = ResponseMemo.key({ path: apiPath, search: url.search, principal: req.headers.get("x-weft-principal"), snapshot: cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? "none" });
-    const hit = showcaseMemo.get(key);
+    const read = ResponseMemo.normalize({ path: apiPath, search: url.search, principal: req.headers.get("x-weft-principal"), snapshot: cfg.get(HOSTED_CONFIG_KEYS.snapshotVersion) ?? "none" });
+    const hit = showcaseMemo.get(read.key);
     if (hit) return hit;
-    const res = await forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
-    return showcaseMemo.put(key, res);
+    const headers = new Headers(req.headers);
+    if (read.principal) headers.set("x-weft-principal", read.principal);
+    else headers.delete("x-weft-principal");
+    const res = await forwardToWorld(new Request(req.url, { method: "GET", headers }), env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: read.search });
+    return showcaseMemo.put(read.key, res);
   }
   return forwardToWorld(req, env, { slot: t.slot, ctx: ctxOf(v, t.slot, t.gen), path: apiPath, search: url.search });
 }
@@ -189,14 +198,19 @@ async function forwardToExtras(req: Request, env: FrontEnv, url: URL, ctx: Retur
   return env.CORE.fetch(new Request(url.toString(), init));
 }
 
-/** /mcp (design 6.3 and 6.4): routed by the key prefix wk_mcp_<slot>_<gen>_<rand>, never by the URL. */
+/**
+ * /mcp (design 6.3 and 6.4): routed by the key prefix wk_mcp_<slot>_<gen>_<rand>, never by the URL. Only a real pool
+ * slot is routed (a key naming slot-99 or anything else would otherwise create a Durable Object), and RL_MCP is
+ * asked per IP hash before it is asked per key, so random well-formed keys from one address are limited like one.
+ */
 async function mcp(req: Request, env: FrontEnv, url: URL): Promise<Response> {
   const auth = req.headers.get("authorization") ?? "";
   const key = /^Bearer\s+(\S+)$/i.exec(auth)?.[1] ?? req.headers.get("x-api-key") ?? "";
   const parsed = key ? parseHostedMcpKey(key) : null;
-  if (!parsed || !/^slot-\d+$/.test(parsed.slot)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "Use the MCP key from your demo company (Bearer wk_mcp_...)");
-  if (await rateLimited(env.RL_MCP, `mcp:${await mcpKeyId(key)}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
+  if (!parsed || !isPoolSlot(env, parsed.slot)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "Use the MCP key from your demo company (Bearer wk_mcp_...)");
   const v = await resolveVisit(req, env);
+  if (await rateLimited(env.RL_MCP, `mcp-ip:${v.ipHash}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
+  if (await rateLimited(env.RL_MCP, `mcp:${await mcpKeyId(key)}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
   return forwardToWorld(req, env, {
     slot: parsed.slot, ctx: { slot: parsed.slot, gen: parsed.gen, visitor: null, ipHash: v.ipHash, human: false, smoke: false },
     path: DO_PATHS.mcp, search: url.search,
@@ -205,10 +219,15 @@ async function mcp(req: Request, env: FrontEnv, url: URL): Promise<Response> {
 
 /** /api/_admin/* (design 6.2, 9.2 and 10): HMAC with WEFT_ADMIN_TOKEN over method, path, timestamp and body. */
 async function admin(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Response> {
-  const body = req.method === "GET" || req.method === "HEAD" ? "" : await req.text();
-  if (body.length > 64 * 1024) return plainError(413, "ValidationError", "TOO_LARGE", "Admin bodies are small");
-  const ok = await verifyAdmin({ token: env.WEFT_ADMIN_TOKEN, header: req.headers.get(ADMIN_HEADER), method: req.method, path: url.pathname, body });
-  if (!ok) return plainError(401, "Unauthorized", "ADMIN_SIGNATURE", "A valid admin signature is required");
+  // Refused from the Content-Length before reading, or as soon as a chunked body passes the cap.
+  const body = req.method === "GET" || req.method === "HEAD" ? "" : await readTextCapped(req, ADMIN_MAX_BODY_BYTES);
+  if (body === null) return plainError(413, "ValidationError", "TOO_LARGE", "Admin bodies are small");
+  const check = await verifyAdmin({ token: env.WEFT_ADMIN_TOKEN, header: req.headers.get(ADMIN_HEADER), method: req.method, path: url.pathname, body });
+  if (!check.ok) return plainError(401, "Unauthorized", "ADMIN_SIGNATURE", "A valid admin signature is required");
+  // Each signature is good for one request: a captured one cannot be replayed within its window. The counter is
+  // keyed by the signature's own UTC day, so a replay across midnight finds it too.
+  const fresh = await lobby(env).take({ key: `admin_sig:${check.id}`, limit: 1, now: check.ts * 1000 });
+  if (!fresh.ok) return plainError(401, "Unauthorized", "ADMIN_SIGNATURE", "This admin signature was already used; sign each request");
   const parsed = (() => { try { return body ? (JSON.parse(body) as Record<string, unknown>) : {}; } catch { return null; } })();
   if (parsed === null) return plainError(400, "ValidationError", "BAD_BODY", "Admin bodies are JSON");
   const op = url.pathname.slice(`${HOSTED_PATHS.admin}/`.length);
@@ -234,6 +253,8 @@ async function admin(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<R
       return operatorLease(env, v, parsed);
     case "POST grant":
       return operatorGrant(env, v, parsed);
+    case "POST release":
+      return operatorRelease(env, v, parsed);
     case "GET ops": {
       const [l, s] = await Promise.all([lobby(env).ops(), env.SPEND.get(env.SPEND.idFromName(DO_NAMES.spend)).status({})]);
       const cfg = await envConfig(env);

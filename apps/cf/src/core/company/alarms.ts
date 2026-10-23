@@ -5,6 +5,13 @@
 
 export type AlarmPurpose = "runs" | "tick" | "outbox" | "watchdog";
 
+/** After an alarm whose work threw, its purposes are asked for again after this backoff: 2 s, doubling with each
+ * failure in a row, at most 5 minutes, so a body that keeps throwing does not write a setAlarm row every 2 s. */
+export const ALARM_RETRY = { baseMs: 2_000, maxMs: 5 * 60_000 } as const;
+export function alarmRetryDelayMs(failuresInARow: number): number {
+  return Math.min(ALARM_RETRY.maxMs, ALARM_RETRY.baseMs * 2 ** Math.min(Math.max(0, failuresInARow), 20));
+}
+
 export interface AlarmStorage {
   setAlarm(at: number): Promise<void> | void;
   getAlarm(): Promise<number | null> | number | null;

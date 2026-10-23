@@ -104,3 +104,29 @@ describe("the siteverify stub (Cloudflare's published test secrets)", () => {
     expect(JSON.stringify(stub.calls)).not.toContain(TEST_SECRETS.pass);
   });
 });
+
+describe("siteverify's hostname check", () => {
+  const LIVE = "0x4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const live = (o: Partial<FrontEnv> = {}) => env({ TURNSTILE_SECRET: LIVE, WEFT_PUBLIC_ORIGIN: "https://weft.nitish-ratakonda.workers.dev", ...o });
+
+  it("accepts a success only when it names this deployment's hostname", async () => {
+    const good = scripted([ok({ success: true, "error-codes": [], hostname: "weft.nitish-ratakonda.workers.dev" })]);
+    expect(await siteverify(live(), "a.real.token", "198.51.100.7", good.fetch)).toEqual({ success: true, codes: [], hostname: "weft.nitish-ratakonda.workers.dev" });
+    const elsewhere = scripted([ok({ success: true, "error-codes": [], hostname: "copycat.example" })]);
+    expect(await siteverify(live(), "a.real.token", "198.51.100.7", elsewhere.fetch)).toEqual({ success: false, codes: ["hostname-mismatch"], hostname: "copycat.example" });
+    const none = scripted([ok({ success: true, "error-codes": [] })]);
+    expect(await siteverify(live(), "a.real.token", "198.51.100.7", none.fetch)).toMatchObject({ success: false, codes: ["hostname-mismatch"] });
+  });
+
+  it("fails closed without WEFT_PUBLIC_ORIGIN, and leaves a refusal as it was", async () => {
+    const s = scripted([ok({ success: true, hostname: "weft.nitish-ratakonda.workers.dev" })]);
+    expect(await siteverify(live({ WEFT_PUBLIC_ORIGIN: undefined }), "a.real.token", "198.51.100.7", s.fetch)).toMatchObject({ success: false, codes: ["hostname-unconfigured"] });
+    const refused = scripted([ok({ success: false, "error-codes": ["invalid-input-response"], hostname: "copycat.example" })]);
+    expect(await siteverify(live(), "a.real.token", "198.51.100.7", refused.fetch)).toMatchObject({ success: false, codes: ["invalid-input-response"] });
+  });
+
+  it("does not apply to Cloudflare's test secrets, which answer every dummy token with a fixed hostname", async () => {
+    const s = scripted([ok({ success: true, "error-codes": [], hostname: "example.com" })]);
+    expect((await siteverify(env({ WEFT_PUBLIC_ORIGIN: "https://weft.test" }), DUMMY_TOKEN, "198.51.100.7", s.fetch)).success).toBe(true);
+  });
+});
