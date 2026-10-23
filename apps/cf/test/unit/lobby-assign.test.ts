@@ -6,11 +6,12 @@ import { describe, expect, it } from "vitest";
 import { HOSTED_SETTINGS } from "../../src/shared/contracts";
 import { utcDay } from "../../src/shared/http";
 import { LobbyDO } from "../../src/core/lobby/lobby-do";
+import { FULL_RESTORE_ROWS } from "../../src/core/lobby/policy";
 import { memorySql } from "./sqlite";
 
 const yieldTick = () => new Promise((r) => setTimeout(r, 1));
 
-function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[] } {
+function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[]; m: ReturnType<typeof memorySql> } {
   const m = memorySql();
   const ctx = { storage: { sql: m.sql, transactionSync: <T>(fn: () => T) => m.transactionSync(fn) }, waitUntil: () => undefined };
   const stamps: string[] = [];
@@ -37,7 +38,7 @@ function lobbyOver(pool: number): { lobby: LobbyDO; stamps: string[] } {
   };
   const lobby = new LobbyDO(ctx as never, env as never);
   m.sql.exec(`UPDATE slots SET state = 'ready'`);
-  return { lobby, stamps };
+  return { lobby, stamps, m };
 }
 
 const visitor = (i: number) => `vis_${i.toString(16).padStart(32, "0")}`;
@@ -148,5 +149,32 @@ describe("LobbyDO's rebuild of a slot the reset could not return to the seed", (
     expect(created).toHaveLength(1);
     expect(deleted).toEqual([["v1", "v2"]]);
     expect(m.sql.exec(`SELECT slot, id FROM vectors ORDER BY id`).toArray()).toEqual([{ slot: "slot-other", id: "keep" }]);
+  });
+});
+
+describe("LobbyDO's Platform readout", () => {
+  it("is memoized for 30 s, so GET /api/_hosted/platform reads the day's counters at most once per 30 s", async () => {
+    const { lobby, m } = lobbyOver(4);
+    const exec = m.sql.exec.bind(m.sql);
+    let reads = 0;
+    m.sql.exec = ((q: string, ...b: unknown[]) => { if (/\bFROM (counters|leases|slots|waitlist)\b/i.test(q)) reads += 1; return exec(q, ...b); }) as typeof m.sql.exec;
+    const now = Date.now();
+    const first = await lobby.readout({ now });
+    const once = reads;
+    expect(once).toBeGreaterThan(0);
+    // Any number of visitors in the next 30 s, through either RPC the Platform page uses, read nothing more.
+    for (let i = 0; i < 50; i++) expect(await lobby.readout({ now: now + 29_000 })).toEqual(first);
+    expect(await lobby.extrasReadout()).toEqual(first);
+    expect(reads).toBe(once);
+    // After 30 s it is read again, and what changed shows.
+    // A full restore's rows written today: one restore fewer is left.
+    await lobby.extrasCounterAdd("restore_rows", FULL_RESTORE_ROWS, utcDay(now));
+    const later = await lobby.readout({ now: now + 30_000 });
+    expect(reads).toBeGreaterThan(once);
+    expect(later.restoresLeft).toBe(first.restoresLeft - 1);
+    // The admin ops readout is always fresh.
+    const n = reads;
+    await lobby.ops({ now: now + 31_000 });
+    expect(reads).toBeGreaterThan(n);
   });
 });

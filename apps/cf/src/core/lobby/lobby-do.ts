@@ -64,6 +64,8 @@ export interface LobbyReadout {
 type ResetError = { error: HostedErrorCode; message: string };
 /** World upkeep periods (design 4.6: the full verify runs weekly; bookmarks cover 30 days). */
 export const MAINTAIN = { verifyEveryMs: 7 * 86_400_000, bookmarkEveryMs: 25 * 86_400_000 } as const;
+/** How long the Platform readout is reused (as levelNow is): it reads today's counters, the leases and the slots. */
+export const READOUT_MEMO_MS = 30_000;
 const COUNTER = {
   visitorRows: "rows_written", restoreRows: "restore_rows", restores: "restores", rowsRead: "rows_read",
   doRequests: "do_requests", workersRequests: "workers_requests",
@@ -90,6 +92,8 @@ export function namesLease(l: Pick<LeaseRow, "slot" | "gen" | "started_at" | "la
 export class LobbyDO extends DurableObject<CoreEnv> {
   private readonly sql: SqlStorage;
   private levelMemo: { at: number; result: LevelResult } | null = null;
+  /** The Platform readout, memoized for READOUT_MEMO_MS: any visitor's GET /api/_hosted/platform reads it. */
+  private readoutMemo: { at: number; result: LobbyReadout } | null = null;
   /** Slots this instance has claimed and is resetting now. A slot left `resetting` by an earlier instance (the object
    * restarted mid-reset) is not here, and the sweep sends it to a full restore. */
   private readonly resetsRunning = new Set<string>();
@@ -705,6 +709,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     this.sql.exec(`DELETE FROM waitlist WHERE seen < ?`, now - WAITLIST_TTL_MS);
     this.sql.exec(`DELETE FROM counters WHERE day < ?`, utcDay(now - 8 * 86_400_000));
     this.levelMemo = null;
+    this.readoutMemo = null;
     const { level } = await this.levelNow(now);
     await this.writeBudgetRow(now, level);
     this.setMeta("sweep.at", new Date(now).toISOString());
@@ -782,8 +787,21 @@ export class LobbyDO extends DurableObject<CoreEnv> {
 
   // Readouts ---------------------------------------------------------------------------------------------------
 
-  async readout(input: { now?: number } = {}): Promise<LobbyReadout> {
+  /**
+   * The Platform page's readout (HostedExtras.platform, behind the public GET /api/_hosted/platform), memoized for
+   * READOUT_MEMO_MS so the page's polls and any number of visitors read the counters at most once per 30 s; `fresh`
+   * (the admin ops readout) reads it now.
+   */
+  async readout(input: { now?: number; fresh?: boolean } = {}): Promise<LobbyReadout> {
     const now = input.now ?? Date.now();
+    const memo = this.readoutMemo;
+    if (!input.fresh && memo && now >= memo.at && now - memo.at < READOUT_MEMO_MS) return memo.result;
+    const result = await this.readNow(now);
+    this.readoutMemo = { at: now, result };
+    return result;
+  }
+
+  private async readNow(now: number): Promise<LobbyReadout> {
     const cfg = await this.config();
     const b = this.budget(cfg);
     const u = this.usage(utcDay(now));
@@ -838,7 +856,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
 
   /** The admin-only GET /api/_admin/ops readout (no visitor ids, no IP hashes). */
   async ops(input: { now?: number } = {}): Promise<{ readout: LobbyReadout; slots: Omit<SlotRow, "bookmark">[]; leases: { slot: string; gen: number; startedAt: string; lastSeen: string; resets: number }[]; usage: DayUsage; shares: typeof SHARES }> {
-    const readout = await this.readout(input);
+    const readout = await this.readout({ ...input, fresh: true });
     return {
       readout,
       slots: this.all<SlotRow>(`SELECT name, mode, gen, state, snapshot, bookmark, workflow, restored_at, error FROM slots ORDER BY name`).map(({ bookmark: _b, ...s }) => s),
