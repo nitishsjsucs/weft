@@ -17,6 +17,7 @@ import { DurableEmulator, type RecordedWrite } from "../src/emu";
 import { migrationsDir } from "../src/migrate";
 import { journalHash, readMigrationsFromDir, type MigrationEntry } from "../src/migrations";
 import { buildSnapshot, deltaReset, restoreSnapshot, verifyAgainstManifest, type DeltaResetOutcome, type RestoreOutcome, type Snapshot } from "../src/snapshot";
+import { HOSTED_DELTA_RESET_BASELINE_ROWS } from "../../contracts/src/ext/cf-db";
 
 type Weft = Awaited<ReturnType<typeof createWeft>>;
 
@@ -39,7 +40,7 @@ export const DELTA_RESET_MAX_ROWS = Math.floor(DELTA_RESET_BASELINE_ROWS * 1.25)
  * locally: 717 rows written in workerd (the billing count) and 716 on the emulator, against 630 and 629 for the same
  * session on git memory.
  */
-export const DELTA_RESET_SQL_MEMORY_BASELINE_ROWS = 717;
+export const DELTA_RESET_SQL_MEMORY_BASELINE_ROWS = HOSTED_DELTA_RESET_BASELINE_ROWS;
 export const DELTA_RESET_SQL_MEMORY_MAX_ROWS = Math.floor(DELTA_RESET_SQL_MEMORY_BASELINE_ROWS * 1.25);
 /** The rows-written band of a delta reset after the session on `memory`. */
 export const deltaResetMaxRows = (memory: SessionMemory): number => (memory === "sqlite" ? DELTA_RESET_SQL_MEMORY_MAX_ROWS : DELTA_RESET_MAX_ROWS);

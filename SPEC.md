@@ -236,7 +236,7 @@ From research/oss.md section 5, each pin at least 3 days old so pnpm 12's releas
 | Area | Package and exact version |
 |---|---|
 | Runtime | Node 25.9.0, pnpm 12.3.4, turbo 2.11.7, typescript 7.0.2 (fallback 6.0.3 if any tool breaks), tsx 4.23.15, @types/node 26.6.5 |
-| Web | next 16.4.0, react and react-dom 19.3.0, @types/react and @types/react-dom 19.3.0, tailwindcss and @tailwindcss/postcss 4.3.3, radix-ui 1.8.0, motion 14.1.0 (`motion/react`), recharts 3.10.1, @tanstack/react-table 9.3.1 (`useTable`, not `useReactTable`), lucide-react 1.55.0, class-variance-authority 0.7.1, clsx 2.1.1, tailwind-merge 3.7.0, shadcn CLI 4.21.4 (copy components only) |
+| Web | next 16.4.2 (16.4.0 had GHSA-2464-fhr4-w9xw, GHSA-673q-mjm6-r5xr and GHSA-p3m5-59mp-jv5r), react and react-dom 19.3.0, @types/react and @types/react-dom 19.3.0, tailwindcss and @tailwindcss/postcss 4.3.3, radix-ui 1.8.0, motion 14.1.0 (`motion/react`), recharts 3.10.1, @tanstack/react-table 9.3.1 (`useTable`, not `useReactTable`), lucide-react 1.55.0, class-variance-authority 0.7.1, clsx 2.1.1, tailwind-merge 3.7.0, shadcn CLI 4.21.4 (copy components only) |
 | Fonts | @fontsource-variable/inter and @fontsource-variable/jetbrains-mono: the scaffold picks the newest version published at least 3 days ago (`npm view <pkg> time`) and records it here |
 | API | hono 4.13.13, @hono/node-server 2.1.4, @hono/zod-validator 0.9.1, zod 4.6.7, croner 10.0.1 |
 | Data | drizzle-orm 0.45.4, drizzle-kit 0.31.11, @libsql/client 0.18.0 (not better-sqlite3), @faker-js/faker 10.6.0, decimal.js 10.6.0 |

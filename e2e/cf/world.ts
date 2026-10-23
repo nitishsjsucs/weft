@@ -145,7 +145,7 @@ export class SmokeWorld extends BaseWorld implements WorldApi {
   readonly label = "slot-smoke (smoke header)";
   constructor(readonly origin: string, private readonly sign: Signers) { super(); }
   protected async send<T>(method: string, path: string, body: unknown, o: RequestOptions): Promise<WorldResponse<T>> {
-    return parse<T>(await frontFetch(this.origin, method, path, body, { [SMOKE_HEADER]: await this.sign.smoke() }, o));
+    return parse<T>(await frontFetch(this.origin, method, path, body, { [SMOKE_HEADER]: await this.sign.smoke(method, path) }, o));
   }
 }
 

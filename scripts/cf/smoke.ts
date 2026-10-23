@@ -253,7 +253,7 @@ const EXTRAS: Check[] = [
       const t0 = Date.now();
       let first: Response | null = null;
       for (;;) {
-        const res = await fetch(`${e.o.url}${path}`, { headers: { "x-weft-smoke": await e.sign.smoke() }, signal: AbortSignal.timeout(30_000) });
+        const res = await fetch(`${e.o.url}${path}`, { headers: { "x-weft-smoke": await e.sign.smoke("GET", path) }, signal: AbortSignal.timeout(30_000) });
         if (res.status === 200) { first = res; break; }
         ensure(res.status === 202, `the PDF route answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
         await res.arrayBuffer();
@@ -262,7 +262,7 @@ const EXTRAS: Check[] = [
       }
       const bytes = new Uint8Array(await first.arrayBuffer());
       ensure(first.headers.get("content-type") === "application/pdf" && Buffer.from(bytes.slice(0, 5)).toString("latin1") === "%PDF-", "the download is not a PDF");
-      const again = await fetch(`${e.o.url}${path}`, { headers: { "x-weft-smoke": await e.sign.smoke() }, signal: AbortSignal.timeout(30_000) });
+      const again = await fetch(`${e.o.url}${path}`, { headers: { "x-weft-smoke": await e.sign.smoke("GET", path) }, signal: AbortSignal.timeout(30_000) });
       await again.arrayBuffer();
       ensure(again.status === 200 && again.headers.get("x-weft-pdf") === "cached", `the second request answered ${again.status}, x-weft-pdf ${again.headers.get("x-weft-pdf")}`);
       return `${offer.documentId} downloads as a ${bytes.byteLength} byte PDF after ${((Date.now() - t0) / 1000).toFixed(0)} s; the second request is served from R2 (x-weft-pdf: cached)`;

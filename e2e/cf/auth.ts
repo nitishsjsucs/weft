@@ -51,7 +51,7 @@ export interface Signers {
   /** Where the tokens came from (a path, never a value). */
   readonly file: string;
   /** A fresh x-weft-smoke header value. */
-  smoke(): Promise<string>;
+  smoke(method: string, path: string): Promise<string>;
   /** A fresh x-weft-admin header value for this request. */
   admin(method: string, path: string, body?: string): Promise<string>;
 }
@@ -64,7 +64,8 @@ export function signers(file: string): Signers {
   if (missing.length) throw new Error(`${missing.join(" and ")} not found in ${file.replace(homedir(), "~")}`);
   return {
     file,
-    smoke: () => signSmoke(smokeToken!),
+    // The front verifies the pathname only (no query string), so the signature covers the same.
+    smoke: (method, path) => signSmoke(smokeToken!, { method, path: path.split("?")[0]! }),
     admin: (method, path, body = "") => signAdmin({ token: adminToken!, method, path, body }),
   };
 }

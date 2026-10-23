@@ -2,7 +2,7 @@
 // sees (the shared read-only showcase, Start my demo company, a deep link rendered from its section's shell, the
 // security headers), what a leased tab sees (its own slot, the lease countdown, the session status), the model switch
 // on the Simulators page, and the Platform page's readout. Leased checks use the operator lease, never Turnstile. The
-// last case (the app's own Reset demo data) is a known failure, kept as test.fixme until contract request cf7 item 1.
+// last case is the app's own Reset demo data, which keeps the visitor's lease and cookies.
 import { bannerWorld, expect, LIVE, pinProvider, test } from "./fixtures";
 import { mutationHeadroom } from "./world";
 import { HOSTED_COPY, providerLabel } from "../../apps/web/src/components/hosted/copy";
@@ -101,9 +101,7 @@ test("the Platform page reads today's caps, shares and Lobby state", async ({ pa
 // GET /api/_session already in flight carries the old one; the front then finds no lease for that generation and
 // answers with both cookies cleared (Max-Age=0), which deletes the new cookie too. The Lobby still holds the lease. Seen
 // every time in Chrome on the local stack (with the operator lease's cookies and with a browser-set lease alike).
-// Remove the fixme once the front reissues the cookie for the same visitor's lease instead of clearing it.
 test("the app's Reset demo data keeps the visitor's own demo company", async ({ page, operator }) => {
-  test.fixme(true, "contract request cf7 item 1: a session read in flight during the hosted reset clears the reissued cookie");
   await mutationHeadroom(4);
   await page.goto("/app/");
   expect(await bannerWorld(page)).toBe("slot");
