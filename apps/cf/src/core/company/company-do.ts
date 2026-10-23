@@ -15,6 +15,7 @@ import {
 } from "../../shared/contracts";
 import { envConfig } from "../../shared/config";
 import { mcpKeyId, readCtx } from "../../shared/tokens";
+import { sameSecret } from "../../shared/crypto";
 import { stringEnv, type CoreEnv } from "../../shared/env";
 import { hostedError, isMutation, json, plainError, readJson } from "../../shared/http";
 import { logError, logEvent } from "../../shared/log";
@@ -79,6 +80,10 @@ const sameWorld = (a: WorldStamp | null, b: WorldStamp | null): boolean =>
 type SendableRow = OutboxRow & { job: NonNullable<OutboxRow["job"]> };
 
 const leaseEndedError = () => hostedError("LEASE_ENDED", "This demo company's lease has ended", { headers: { [LEASE_HEADER]: "ended" } });
+
+/** The MCP key a request carries (Bearer, or x-api-key), or "" (the front reads it the same way). */
+const mcpKeyOf = (request: Request): string =>
+  /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1] ?? request.headers.get("x-api-key") ?? "";
 
 export class CompanyDO extends DurableObject<CoreEnv> {
   private stamp: WorldStamp | null = null;
@@ -314,8 +319,11 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (refused) return refused;
     // An MCP key works only while its lease lasts by the lease's own times, not only until the Lobby releases it (a
     // sweep can be 15 minutes later). The check can ask the Lobby, and a lease end or a reset can run meanwhile, so
-    // the stamp as it is now is gated again, and nothing awaits from there until the request is counted.
+    // the stamp as it is now is gated again, and nothing awaits from there until the request is counted. A key this
+    // generation never minted is refused first, from the slot's own stored keys: a forged wk_mcp_<slot>_<gen>_... key
+    // on an idle leased slot never reaches the Lobby (each such call would be a Lobby request and its rows).
     if (url.pathname === DO_PATHS.mcp && stamp.mode === "slot") {
+      if (!this.mcpKeyMinted(request)) return plainError(401, "Unauthorized", "MCP_KEY_INVALID", "This MCP key is not one this demo company minted");
       if (!(await this.mcpLeaseOpen(stamp))) return leaseEndedError();
       stamp = this.stamp;
       if (!stamp || !this.engine || !sameWorld(this.engineFor, stamp)) return this.notReady();
@@ -358,6 +366,16 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   private lobby() {
     return this.env.LOBBY.get(this.env.LOBBY.idFromName(DO_NAMES.lobby));
+  }
+
+  /** Whether the request carries an MCP key this generation minted (the lease's keys in kv_state, design 4.1). The
+   * engine's own MCP handler checks the key's hash again; this only keeps unknown keys away from the Lobby. */
+  private mcpKeyMinted(request: Request): boolean {
+    const key = mcpKeyOf(request);
+    if (!key) return false;
+    let found = false;
+    for (const k of leaseKeys(this.ctx.storage.sql)) found = sameSecret(k, key) || found;
+    return found;
   }
 
   /**
@@ -488,9 +506,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   }
 
   private async serveMcp(request: Request): Promise<Response> {
-    const auth = request.headers.get("authorization") ?? "";
-    const key = /^Bearer\s+(\S+)$/i.exec(auth)?.[1] ?? request.headers.get("x-api-key") ?? "";
-    if (!key) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "An MCP key is required");
+    if (!mcpKeyOf(request)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "An MCP key is required");
     const engine = this.engine!;
     const { value: res, usage } = await engine.meter.measure(() => engine.mcp(request));
     this.usage.rowsRead += usage.rowsRead;
@@ -899,13 +915,18 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     this.lastActivity = null;
   }
 
-  async heartbeat(opts: { provider?: boolean; clean?: boolean } = {}): Promise<SlotHeartbeat> {
+  /**
+   * The Lobby's look at the slot. The usage since the last push or heartbeat is handed over and emptied, except with
+   * `keepUsage` (a lease holder's GET /api/_session, on every poll): then it stays here for the slot's own push at its
+   * thresholds or the sweep's heartbeat, so a session poll costs the Lobby no counter writes.
+   */
+  async heartbeat(opts: { provider?: boolean; clean?: boolean; keepUsage?: boolean } = {}): Promise<SlotHeartbeat> {
     // The Lobby's heartbeats (its sweep, session reads) reach a slot that no request reaches: a slot whose last ask
     // for an alarm failed while jobs wait, or whose clock started, gets its alarm here too.
     this.runHost.poke();
     this.scheduler.poke();
-    const usage = this.usage;
-    this.usage = zeroUsage();
+    const usage = opts.keepUsage ? zeroUsage() : this.usage;
+    if (!opts.keepUsage) this.usage = zeroUsage();
     const worldProvider = opts.provider ? this.worldProvider() : null;
     // Only the reset path asks whether the world is clean; a lease holder's GET /api/_session heartbeats this slot on
     // every poll and never uses the answer.

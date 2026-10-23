@@ -30,7 +30,7 @@ export interface SlotHeartbeat {
   /** No domain row was written since the last reset (the dirty-key table is empty); null unless asked for
    * (`heartbeat({ clean: true })`, the reset path), so the Lobby's session and sweep heartbeats read no dirty key. */
   clean: boolean | null;
-  /** Usage since the previous heartbeat or usage push. */
+  /** Usage since the previous heartbeat or usage push (zero for a `keepUsage` heartbeat, which leaves it in the slot). */
   usage: UsageDelta;
   /** The snapshot this world was restored from. */
   snapshot: string | null;

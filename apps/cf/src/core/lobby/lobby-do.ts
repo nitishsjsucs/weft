@@ -68,6 +68,13 @@ type ResetError = { error: HostedErrorCode; message: string };
 export const MAINTAIN = { verifyEveryMs: 7 * 86_400_000, bookmarkEveryMs: 25 * 86_400_000 } as const;
 /** How long the Platform readout is reused (as levelNow is): it reads today's counters, the leases and the slots. */
 export const READOUT_MEMO_MS = 30_000;
+/**
+ * A lease's last-seen time is written only once the slot's reported activity moved this far past the stored one
+ * (design 6.2). A lease holder's GET /api/_session asks on every poll, and writing each answer cost a row per poll;
+ * the freshest time is kept in memory for leaseEnded meanwhile, and a stored time at most this old only makes an
+ * idle expiry this much earlier after a hibernation (the slot's own heartbeat then corrects it).
+ */
+export const LAST_SEEN_WRITE_MS = 60_000;
 const COUNTER = {
   visitorRows: "rows_written", restoreRows: "restore_rows", restores: "restores", rowsRead: "rows_read",
   doRequests: "do_requests", workersRequests: "workers_requests",
@@ -104,6 +111,9 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   private readonly resetsRunning = new Set<string>();
   /** A seed index step is running in this instance (seedIndex). */
   private seedIndexRunning = false;
+  /** Per slot, the freshest last activity this instance learned for its lease (LAST_SEEN_WRITE_MS), kept with the
+   * lease's visitor and start so it never carries over to the slot's next lease. */
+  private readonly seen = new Map<string, { visitor: string; startedAt: number; at: number }>();
 
   constructor(ctx: DurableObjectState, env: CoreEnv) {
     super(ctx, env);
@@ -163,6 +173,28 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   private leases(): LeaseRow[] {
     return this.all<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases ORDER BY started_at`);
   }
+  /** The freshest last-seen time known for lease `l`: its row, or a later one this instance learned and has not written. */
+  private lastSeenOf(l: LeaseRow): number {
+    const m = this.seen.get(l.slot);
+    return m && m.visitor === l.visitor && m.startedAt === l.started_at ? Math.max(l.last_seen, m.at) : l.last_seen;
+  }
+  /** `l` with its freshest last-seen time. */
+  private fresh(l: LeaseRow): LeaseRow {
+    return { ...l, last_seen: this.lastSeenOf(l) };
+  }
+  /**
+   * Takes a slot's reported last activity for lease `l`: kept in memory, and written to the lease's row only once it
+   * moved LAST_SEEN_WRITE_MS past the stored time. Returns the freshest time.
+   */
+  private noteSeen(l: LeaseRow, activityMs: number | null): number {
+    const at = Math.max(this.lastSeenOf(l), activityMs ?? 0);
+    this.seen.set(l.slot, { visitor: l.visitor, startedAt: l.started_at, at });
+    if (at - l.last_seen >= LAST_SEEN_WRITE_MS) {
+      this.sql.exec(`UPDATE leases SET last_seen = ? WHERE slot = ? AND visitor = ? AND started_at = ?`, at, l.slot, l.visitor, l.started_at);
+    }
+    return at;
+  }
+
   private freeSlot(): SlotRow | undefined {
     return this.poolSlots().find((s) => s.state === "ready" && !this.one(`SELECT 1 FROM leases WHERE slot = ?`, s.name));
   }
@@ -241,8 +273,8 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     const day = utcDay(now);
     const existing = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
     if (existing) {
-      const ended = leaseEnded({ startedAt: existing.started_at, lastSeen: existing.last_seen }, now);
-      if (!ended) return { status: "leased", ...this.leaseInfo(existing) };
+      const ended = leaseEnded({ startedAt: existing.started_at, lastSeen: this.lastSeenOf(existing) }, now);
+      if (!ended) return { status: "leased", ...this.leaseInfo(this.fresh(existing)) };
       await this.release({ slot: existing.slot, reason: ended, now });
     }
     const { level } = await this.levelNow(now);
@@ -261,7 +293,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     // Reserve the slot before any await: a concurrent assign then sees it taken. A concurrent assign for the same
     // visitor that got here first wins, and this one returns its lease.
     const raced = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
-    if (raced) return { status: "leased", ...this.leaseInfo(raced) };
+    if (raced) return { status: "leased", ...this.leaseInfo(this.fresh(raced)) };
     // The IP-hash cap is checked again in the step that takes the lease: the awaits above (KV, the reclaim's
     // heartbeats) let concurrent starts from one IP hash all pass the first check.
     const reserved = this.ctx.storage.transactionSync(() => {
@@ -295,7 +327,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
    * place and the table stays near the cap between sweeps. Synchronous, so the count and the insert are one step.
    */
   private waitlist(visitor: string, ipHash: string, now: number): LeaseResult {
-    const leases = this.leases().map((l) => ({ startedAt: l.started_at, lastSeen: l.last_seen }));
+    const leases = this.leases().map((l) => ({ startedAt: l.started_at, lastSeen: this.lastSeenOf(l) }));
     const poolSize = this.poolSlots().length;
     const cutoff = now - WAITLIST_TTL_MS;
     if (!this.one(`SELECT 1 FROM waitlist WHERE visitor = ? AND seen > ?`, visitor, cutoff)) {
@@ -306,19 +338,20 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     return { status: "waitlist", position: this.waitlistPosition(visitor, now) ?? 1, poolSize, etaMinutes: etaMinutes(leases, now) };
   }
 
-  /** Ends leases past their total time, and leases whose slot reports no activity for the idle time. */
-  private async reclaim(now: number): Promise<number> {
+  /**
+   * Ends leases past their total time, and leases whose slot reports no activity for the idle time. With `collect`
+   * (the cron sweep) every leased slot is asked, so the usage its visitor's session polls left in it (they heartbeat
+   * with keepUsage) reaches the day's counters at least every 15 minutes, not only at its thresholds or its reset.
+   */
+  private async reclaim(now: number, opts: { collect?: boolean } = {}): Promise<number> {
     let n = 0;
     for (const l of this.leases()) {
-      let ended = leaseEnded({ startedAt: l.started_at, lastSeen: l.last_seen }, now);
-      if (ended === "idle") {
+      let ended = leaseEnded({ startedAt: l.started_at, lastSeen: this.lastSeenOf(l) }, now);
+      if (ended === "idle" || (opts.collect && !ended)) {
         try {
           const hb = await this.company(l.slot).heartbeat();
           this.absorbUsage(hb.usage);
-          if (hb.lastActivityMs !== null && hb.lastActivityMs > l.last_seen) {
-            this.sql.exec(`UPDATE leases SET last_seen = ? WHERE slot = ?`, hb.lastActivityMs, l.slot);
-            ended = leaseEnded({ startedAt: l.started_at, lastSeen: hb.lastActivityMs }, now);
-          }
+          ended = leaseEnded({ startedAt: l.started_at, lastSeen: this.noteSeen(l, hb.lastActivityMs) }, now);
         } catch (e) {
           logError("lobby.reclaim.heartbeat", e, { slot: l.slot });
         }
@@ -351,20 +384,20 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     if (input.visitor) {
       const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE visitor = ?`, input.visitor);
       if (l && namesLease(l, input)) {
+        // The heartbeat keeps the slot's usage where it is (the slot pushes it at its thresholds and the sweep
+        // collects the rest), and the last-seen time is written only once it moved LAST_SEEN_WRITE_MS: a session
+        // poll writes no Lobby row.
+        let seenAt = this.lastSeenOf(l);
         try {
-          const hb = await this.company(l.slot).heartbeat({ provider: true });
-          this.absorbUsage(hb.usage);
+          const hb = await this.company(l.slot).heartbeat({ provider: true, keepUsage: true });
           worldProvider = hb.worldProvider ?? null;
-          if (hb.lastActivityMs !== null && hb.lastActivityMs > l.last_seen) {
-            this.sql.exec(`UPDATE leases SET last_seen = ? WHERE slot = ?`, hb.lastActivityMs, l.slot);
-            l.last_seen = hb.lastActivityMs;
-          }
+          seenAt = this.noteSeen(l, hb.lastActivityMs);
         } catch (e) {
           logError("lobby.status.heartbeat", e, { slot: l.slot });
         }
-        const ended = leaseEnded({ startedAt: l.started_at, lastSeen: l.last_seen }, now);
+        const ended = leaseEnded({ startedAt: l.started_at, lastSeen: seenAt }, now);
         if (ended) await this.release({ slot: l.slot, reason: ended, now });
-        else lease = this.leaseInfo(l);
+        else lease = this.leaseInfo({ ...l, last_seen: seenAt });
       }
     }
     return {
@@ -422,7 +455,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   async reset(input: { visitor: string; slot: string; gen: number; now?: number }): Promise<HostedResetResult | ResetError> {
     const now = input.now ?? Date.now();
     const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE slot = ? AND visitor = ?`, input.slot, input.visitor);
-    if (!l || l.gen !== input.gen || leaseEnded({ startedAt: l.started_at, lastSeen: l.last_seen }, now)) return { error: "LEASE_ENDED", message: "This demo company's lease has ended; start a new one" };
+    if (!l || l.gen !== input.gen || leaseEnded({ startedAt: l.started_at, lastSeen: this.lastSeenOf(l) }, now)) return { error: "LEASE_ENDED", message: "This demo company's lease has ended; start a new one" };
     if (l.resets >= HOSTED_SETTINGS.resetsPerLease) return { error: "RESET_LIMIT", message: `A lease allows ${HOSTED_SETTINGS.resetsPerLease} resets` };
     const claimed = this.ctx.storage.transactionSync(() => {
       const s = this.claim(l.slot, now);
@@ -712,7 +745,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
   async sweep(input: { now?: number } = {}): Promise<{ released: number; orphans: number; restores: ProvisionStep[]; level: DegradationLevel }> {
     const now = input.now ?? Date.now();
     this.ensureSlots(now);
-    const released = await this.reclaim(now);
+    const released = await this.reclaim(now, { collect: true });
     let orphans = 0;
     try {
       orphans = await this.env.SPEND.get(this.env.SPEND.idFromName(DO_NAMES.spend)).settleOrphans(new Date(now).toISOString());
@@ -889,7 +922,7 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     return {
       readout,
       slots: this.all<SlotRow>(`SELECT name, mode, gen, state, snapshot, bookmark, workflow, restored_at, error FROM slots ORDER BY name`).map(({ bookmark: _b, ...s }) => s),
-      leases: this.leases().map((l) => ({ slot: l.slot, gen: l.gen, startedAt: new Date(l.started_at).toISOString(), lastSeen: new Date(l.last_seen).toISOString(), resets: l.resets })),
+      leases: this.leases().map((l) => ({ slot: l.slot, gen: l.gen, startedAt: new Date(l.started_at).toISOString(), lastSeen: new Date(this.lastSeenOf(l)).toISOString(), resets: l.resets })),
       usage: this.usage(),
       shares: SHARES,
     };

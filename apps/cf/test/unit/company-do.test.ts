@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_SETTINGS, type HostedJob, type TxGuard } from "../../src/shared/contracts";
 import { setEngineLoader, type EngineModule, type WorldBootInput, type WorldEngine } from "../../src/core/company/engine";
 import type { WorldStamp } from "../../src/core/company/rpc";
-import { readStamp, writeStamp } from "../../src/core/company/world-state";
+import { addLeaseKey, readStamp, writeStamp } from "../../src/core/company/world-state";
 import { signCtx } from "../../src/shared/tokens";
 import { memorySql } from "./sqlite";
 
@@ -108,13 +108,16 @@ setEngineLoader(async () => fakeModule);
 
 type LobbyStatusFn = (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown;
 
-function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean } = {}) {
+/** The MCP key the lease minted (the fake engine's mintMcpKey makes the same one); company() stores it unless told not to. */
+const MINTED_KEY = `wk_mcp_slot-1_3_${"k".repeat(24)}`;
+
+function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean; mintedKeys?: string[] } = {}) {
   const m = memorySql();
   currentSql = m;
   m.sql.exec(`CREATE TABLE kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
   m.sql.exec(`CREATE TABLE outbox (id TEXT PRIMARY KEY, kind TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL)`);
   const stamp: WorldStamp | null = o.stamp === null ? null : { slot: "slot-1", gen: 3, mode: "slot", visitor: VISITOR, ipHash: "i".repeat(32), leaseStartedAt: T0, ...o.stamp };
-  if (stamp) m.transactionSync(() => writeStamp(m.sql, stamp));
+  if (stamp) m.transactionSync(() => { writeStamp(m.sql, stamp); for (const k of o.mintedKeys ?? [MINTED_KEY]) addLeaseKey(m.sql, k); });
   const kv = new Map<string, unknown>();
   const failing = { n: o.failSetAlarms ?? 0 };
   const waits: Promise<unknown>[] = [];
@@ -169,7 +172,7 @@ async function req(path: string, o: { method?: string; visitor?: string | null; 
   const ctx = await signCtx(CTX, { slot: o.slot ?? "slot-1", gen: o.gen ?? 3, visitor: o.visitor === undefined ? VISITOR : o.visitor, ipHash: "i".repeat(32), human: true, smoke: false, iat: Math.floor(Date.now() / 1000) });
   return new Request(`https://weft.test${path}`, { method: o.method ?? "GET", headers: { "x-weft-ctx": ctx, ...o.headers }, ...(o.body !== undefined ? { body: o.body } : {}) });
 }
-const mcp = (o: { gen?: number } = {}) => req("/mcp", { method: "POST", visitor: null, gen: o.gen, body: "{}", headers: { authorization: `Bearer wk_mcp_slot-1_3_${"k".repeat(24)}` } });
+const mcp = (o: { gen?: number; key?: string } = {}) => req("/mcp", { method: "POST", visitor: null, gen: o.gen, body: "{}", headers: { authorization: `Bearer ${o.key ?? MINTED_KEY}` } });
 const at = (ms: number) => vi.setSystemTime(ms);
 
 beforeEach(() => {
@@ -224,6 +227,31 @@ describe("the MCP key's lease", () => {
     await gone.ready();
     at(T0 + 5 * MIN);
     expect((await gone.co.fetch(await mcp())).status).toBe(409);
+  });
+
+  it("refuses a key this generation never minted from the slot's stored keys, without asking the Lobby, even on an instance that has seen no activity", async () => {
+    const lease = () => ({ slot: "slot-1", gen: 3, expiresAt: new Date(T0 + 180 * MIN).toISOString(), idleExpiresAt: new Date(T0 + 40 * MIN).toISOString(), resetsLeft: 3 });
+    const c = company({ lobbyStatus: () => ({ level: 0, pool: { size: 2, free: 0, waitlist: 0 }, lease: lease(), waitlistPosition: null, worldProvider: null }) });
+    await c.ready();
+    at(T0 + 15 * MIN);
+    // Well-formed keys for this slot and generation, as anyone can write them (the front routes by the prefix only).
+    for (let i = 0; i < 20; i++) {
+      const forged = `wk_mcp_slot-1_3_${String(i).padStart(24, "f")}`;
+      const r = await c.co.fetch(await mcp({ key: forged }));
+      expect(r.status).toBe(401);
+      expect(await r.json()).toMatchObject({ code: "MCP_KEY_INVALID" });
+    }
+    const viaApiKey = await c.co.fetch(await req("/mcp", { method: "POST", visitor: null, body: "{}", headers: { "x-api-key": `wk_mcp_slot-1_3_${"x".repeat(24)}` } }));
+    expect(viaApiKey.status).toBe(401);
+    expect(c.lobbyCalls).toEqual([]);
+    // The minted key still asks the Lobby once, as before.
+    expect((await c.co.fetch(await mcp())).status).toBe(200);
+    expect(c.lobbyCalls.map((x) => x.method)).toEqual(["status"]);
+    // A world with no minted key refuses every key.
+    const none = company({ mintedKeys: [] });
+    await none.ready();
+    expect((await none.co.fetch(await mcp())).status).toBe(401);
+    expect(none.lobbyCalls).toEqual([]);
   });
 
   it("keeps the lease's start with the stamp, and drops it when the lease ends", async () => {
@@ -305,6 +333,15 @@ describe("the Lobby's heartbeat", () => {
     } finally {
       store.isClean = was;
     }
+  });
+
+  it("leaves the usage in the slot for a lease holder's session read (keepUsage), and hands it over to the sweep's", async () => {
+    const c = company();
+    await c.ready();
+    for (let i = 0; i < 3; i++) await c.co.fetch(await req("/v1/workers"));
+    for (let i = 0; i < 5; i++) expect((await c.co.heartbeat({ provider: true, keepUsage: true })).usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
+    expect((await c.co.heartbeat()).usage).toMatchObject({ requests: 3 });
+    expect((await c.co.heartbeat()).usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
   });
 });
 

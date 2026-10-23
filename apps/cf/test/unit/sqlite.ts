@@ -79,3 +79,25 @@ export function readMeter(s: MemorySql) {
   }) as typeof s.sql.exec;
   return meter;
 }
+
+/**
+ * Rows written, counted as SQLite's changes() after each INSERT, UPDATE or DELETE (an upsert with RETURNING too, which
+ * memorySql's own cursor reports as a read). workerd also bills index entries, so this is a lower bound; enough to
+ * show a path writes nothing, or writes a row only when it should. `tables` collects the tables written.
+ */
+export function writeMeter(s: MemorySql) {
+  const meter = { rows: 0, statements: 0, tables: new Set<string>() };
+  const exec = s.sql.exec.bind(s.sql);
+  s.sql.exec = ((query: string, ...b: unknown[]) => {
+    const cur = exec(query, ...b);
+    const m = /^\s*(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from)\s+(\w+)/i.exec(query);
+    if (m) {
+      const n = Number((s.db.prepare("SELECT changes() AS n").get() as { n: number }).n);
+      meter.statements += 1;
+      meter.rows += n;
+      if (n) meter.tables.add(m[1]!);
+    }
+    return cur;
+  }) as typeof s.sql.exec;
+  return meter;
+}
