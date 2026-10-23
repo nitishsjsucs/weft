@@ -69,8 +69,9 @@ function liveFeed(): LiveFeed {
 }
 function onLease(m: Extract<LiveMessage, { type: "lease" }>): void {
   if (m.state === "ended") { markEnded("server"); return; }
-  // Reset (from this visitor's other tab, or the Lobby): the cookie already carries the new generation.
-  void refreshSession().then(() => { invalidate(); liveFeed().restart(); });
+  // Reset (from this visitor's other tab, or the Lobby): the cookie already carries the new generation, so a read
+  // already out may still carry the old one. Read afresh.
+  void readSessionNow().then(() => { invalidate(); liveFeed().restart(); });
 }
 
 /** Points the scheduler and the feed at the world the status names. */
@@ -90,25 +91,45 @@ function applyStatus(s: SessionStatus): void {
 // ---- session -------------------------------------------------------------------------------------------------
 
 let inflight: Promise<SessionStatus | null> | null = null;
+/** The newest read and its number: only the newest read's answer is applied. */
+let latest: Promise<SessionStatus | null> = Promise.resolve(null);
+let readSeq = 0;
 let sessionPoll: { unregister(): void; ran(): void } | null = null;
 
 /** GET /api/_session (coalesced). A tab that held a lease and now reads the showcase shows the lease-ended screen. */
 export function refreshSession(): Promise<SessionStatus | null> {
-  inflight ??= (async () => {
-    sessionPoll?.ran();
+  return inflight ?? readSessionNow();
+}
+
+/**
+ * A session read that starts now and never joins one already out. After the cookie changed (a reset reissued it with
+ * the new generation), a read sent before carries the old cookie and may answer after this one: it would read no
+ * lease and log the visitor out. So only the newest read's answer is applied; an older one that answers later
+ * resolves to the newest read's result instead.
+ */
+function readSessionNow(): Promise<SessionStatus | null> {
+  const seq = ++readSeq;
+  const stale = () => seq !== readSeq;
+  let p: Promise<SessionStatus | null> | null = null;
+  p = (async (): Promise<SessionStatus | null> => {
     try {
-      const prev = hostedStore.get().status;
+      sessionPoll?.ran();
       const s = await call<SessionStatus>("GET", HOSTED_PATHS.session);
+      if (stale()) return latest;
+      const prev = hostedStore.get().status;
       const lost = !!prev?.lease && !s.lease;
       hostedStore.set({ status: s, loaded: true, error: null, errorStatus: null, errorCode: null, ...(lost ? { ended: hostedStore.get().ended ?? "expired" } : {}) });
       applyStatus(s);
       return s;
     } catch (e) {
+      if (stale()) return latest;
       hostedStore.set({ loaded: true, error: e instanceof Error ? e.message : String(e), errorStatus: e instanceof HostedRequestError ? e.status : null, errorCode: e instanceof HostedRequestError ? e.code : null });
       return null;
-    } finally { inflight = null; }
+    } finally { if (inflight === p) inflight = null; }
   })();
-  return inflight;
+  inflight = p;
+  latest = p;
+  return p;
 }
 
 let booted = false;
@@ -133,6 +154,7 @@ export function bootSession(): void {
 export function resetHostedSession(): void {
   booted = false;
   inflight = null;
+  latest = Promise.resolve(null);
   sessionPoll?.unregister();
   sessionPoll = null;
   feed?.stop();
@@ -189,9 +211,10 @@ export async function startLease(token: string): Promise<LeaseResult> {
   finally { leasing = false; }
   if (r.status === "leased") {
     hostedStore.set({ ended: null, blocked: null, startReason: null });
-    const s = await refreshSession();
+    // The front just set the cookies: a read already out carries none, so read afresh.
+    const s = await readSessionNow();
     if (!s?.lease) {
-      // The front set the cookies; the session read raced it. Apply what the lease answer says.
+      // The session read still raced the cookies. Apply what the lease answer says.
       writeLeaseHint({ slot: r.slot, gen: r.gen, expiresAt: r.expiresAt });
     }
     invalidate();
@@ -244,9 +267,12 @@ export function grantFailed(message: string): void {
   w.forEach((x) => x.fail(new Error(message)));
 }
 
-/** Restarts the feed after this tab reset its world (the front reissued the cookie with the new generation). */
+/**
+ * Restarts the feed after this tab reset its world (the front reissued the cookie with the new generation). The
+ * session read starts after the reset's answer, never joining one sent before it with the old cookie.
+ */
 export async function afterHostedReset(): Promise<void> {
-  await refreshSession();
+  await readSessionNow();
   liveFeed().restart();
   scheduler().refreshAll();
 }

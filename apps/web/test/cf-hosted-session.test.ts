@@ -6,7 +6,7 @@ import type { LeaseResult, SessionStatus } from "../../../packages/contracts/src
 import { PollScheduler, setScheduler, type Timers } from "../src/lib/api/poll";
 import { readLeaseHint } from "../src/lib/hosted/hint";
 import {
-  bootSession, dismissEnded, ensureHumanGrant, fmtLeft, grantFailed, hostedStore, leaseDeadline, markEnded, refreshSession, requestStart, resetHostedSession, startLease, verifyGrant,
+  afterHostedReset, bootSession, dismissEnded, ensureHumanGrant, fmtLeft, grantFailed, hostedStore, leaseDeadline, markEnded, refreshSession, requestStart, resetHostedSession, startLease, verifyGrant,
 } from "../src/lib/hosted/session";
 import { HUMAN_CHECK_WAIT_MS } from "../src/lib/hosted/flags";
 
@@ -88,6 +88,36 @@ describe("refreshSession", () => {
     await Promise.resolve();
     expect(calls.filter((c) => c.path === "/api/_session")).toHaveLength(1);
     expect(sch.size).toBe(1);
+  });
+});
+
+describe("after a hosted reset", () => {
+  it("reads the session afresh: a read sent before the reset with the old cookie cannot log the visitor out", async () => {
+    answers["GET /api/_session"] = () => ({ status: 200, body: status({ world: "slot", lease }) });
+    await refreshSession();
+    const g = globalThis as { fetch: typeof fetch };
+    const base = g.fetch;
+    // The first read is already out when the reset is sent: it carries the old cookie, reads no lease, and answers
+    // only after the reset. The read after the reset carries the reissued cookie (the new generation).
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const reads: number[] = [];
+    g.fetch = (async (path: string, init?: RequestInit) => {
+      if (path !== "/api/_session") return base(path, init);
+      reads.push(reads.length + 1);
+      if (reads.length === 1) { await gate; return new Response(JSON.stringify(status()), { status: 200 }); }
+      return new Response(JSON.stringify(status({ world: "slot", lease: { ...lease, gen: 4 } })), { status: 200 });
+    }) as typeof fetch;
+    const before = refreshSession();
+    const reset = afterHostedReset();
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await reset;
+    // The earlier read resolves to the newest answer instead of applying its own.
+    expect(await before).toMatchObject({ lease: { gen: 4 } });
+    expect(reads).toEqual([1, 2]);
+    expect(hostedStore.get()).toMatchObject({ ended: null, status: { world: "slot", lease: { gen: 4 } } });
+    expect(readLeaseHint()).toMatchObject({ slot: "slot-1", gen: 4 });
   });
 });
 
