@@ -25,8 +25,8 @@ export const IDLE_CAP_MS = 60_000;
 export const HUMAN_CHECK_WAIT_MS = 60_000;
 /** The run trace fallback poll while SSE is unavailable: 1 s on Node, 5 s hosted (design 3.4). */
 export const HOSTED_TRACE_POLL_MS = 5_000;
-/** Client keepalive on /api/_live: the slot answers with the hibernation auto-response, so it never wakes the object. */
-export const LIVE_PING = "ping";
-export const LIVE_PONG = "pong";
+/** Client keepalive on /api/_live: the slot answers with the hibernation auto-response, so it never wakes the object.
+ * The frames are the contract's, so the client and CompanyDO cannot drift apart. */
+export { LIVE_PING, LIVE_PONG } from "../../../../../packages/contracts/src/ext/cf-hosted";
 export const LIVE_PING_EVERY_MS = 45_000;
 export const LIVE_PONG_TIMEOUT_MS = 10_000;
