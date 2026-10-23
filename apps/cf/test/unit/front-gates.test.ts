@@ -5,8 +5,9 @@ import { describe, expect, it } from "vitest";
 import front, { showcaseMemo } from "../../src/front/index";
 import { ADMIN_MAX_BODY_BYTES } from "../../src/shared/http";
 import type { FrontEnv } from "../../src/shared/env";
-import { signAdmin } from "../../src/shared/tokens";
-import { formatHostedMcpKey, HOSTED_RATE_LIMITS } from "../../src/shared/contracts";
+import { grantToken, ipHash, sessionToken, signAdmin, signSmoke } from "../../src/shared/tokens";
+import { utcDay } from "../../src/shared/http";
+import { formatHostedMcpKey, HOSTED_RATE_LIMITS, HUMAN_GRANT_COOKIE, SESSION_COOKIE } from "../../src/shared/contracts";
 
 export interface FakeFront {
   env: FrontEnv;
@@ -25,7 +26,7 @@ export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown;
   };
   const taken = new Map<string, number>();
   out.env = {
-    WEFT_SESSION_SECRET: "s".repeat(64), WEFT_CTX_SECRET: "c".repeat(64), WEFT_PROXY_SECRET: "p".repeat(64), WEFT_ADMIN_TOKEN: "a".repeat(64),
+    WEFT_SESSION_SECRET: "s".repeat(64), WEFT_CTX_SECRET: "c".repeat(64), WEFT_PROXY_SECRET: "p".repeat(64), WEFT_ADMIN_TOKEN: "a".repeat(64), WEFT_SMOKE_TOKEN: "m".repeat(64),
     WEFT_PUBLIC_ORIGIN: "https://weft.test", WEFT_POOL_SIZE: String(o.pool ?? 2), WEFT_CONFIG_MEMO_MS: "0",
     RL_API: rl("RL_API", 600), RL_MUTATE: rl("RL_MUTATE", 30), RL_MCP: rl("RL_MCP", 60),
     CONFIG: { get: async (keys: string[] | string) => (Array.isArray(keys) ? new Map(keys.map((k) => [k, null])) : null) },
@@ -157,5 +158,39 @@ describe("the showcase memo", () => {
     await get("/api/v1/workers", "usr_sam");
     expect(f.worlds.at(-1)).toMatchObject({ slot: "showcase", principal: "usr_sam" });
     expect(f.worlds).toHaveLength(3);
+  });
+});
+
+describe("RL_MUTATE", () => {
+  it("keys a valid smoke visit apart from its address, and a forged smoke header by the address", async () => {
+    const f = fakeFront();
+    const ip = "203.0.113.70";
+    const hash = await ipHash(f.env.WEFT_SESSION_SECRET!, ip, utcDay());
+    const post = (headers: Record<string, string>) => call(f, "/api/v1/notes", { method: "POST", body: "{}", ip, headers: { "content-type": "application/json", origin: "https://weft.test", ...headers } });
+    const signed = await post({ "x-weft-smoke": await signSmoke(f.env.WEFT_SMOKE_TOKEN!, { method: "POST", path: "/api/v1/notes" }) });
+    expect(signed.status).toBe(200);
+    expect(f.worlds.at(-1)!.slot).toBe("slot-smoke");
+    // A leased visitor from the same address whose request carries a forged smoke header is that visitor.
+    const visitor = "vis_" + "b".repeat(32);
+    const nowS = Math.floor(Date.now() / 1000);
+    const cookie = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
+    const forged = await post({ cookie, "x-weft-smoke": `${nowS}.${"0".repeat(64)}` });
+    expect(forged.status).toBe(200);
+    expect(f.worlds.at(-1)!.slot).toBe("slot-1");
+    expect(f.limits.filter((l) => l.binding === "RL_MUTATE").map((l) => l.key)).toEqual(["mut:smoke", `mut:${hash}`]);
+  });
+
+  it("lets the smoke's mutations leave the operator's own address its whole allowance", async () => {
+    const f = fakeFront();
+    const ip = "203.0.113.71";
+    for (let i = 0; i < HOSTED_RATE_LIMITS.RL_MUTATE.limit; i++) {
+      const r = await call(f, "/api/v1/notes", { method: "POST", body: "{}", ip, headers: { "x-weft-smoke": await signSmoke(f.env.WEFT_SMOKE_TOKEN!, { method: "POST", path: "/api/v1/notes" }) } });
+      expect(r.status).toBe(200);
+    }
+    const visitor = "vis_" + "c".repeat(32);
+    const nowS = Math.floor(Date.now() / 1000);
+    const cookie = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-2", gen: 1, exp: nowS + 600 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
+    const mine = await call(f, "/api/v1/notes", { method: "POST", body: "{}", ip, headers: { cookie, origin: "https://weft.test" } });
+    expect(mine.status).toBe(200);
   });
 });

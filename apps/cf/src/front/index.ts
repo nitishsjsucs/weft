@@ -75,13 +75,18 @@ export default {
   },
 } satisfies ExportedHandler<FrontEnv>;
 
+/** RL_MUTATE's key for valid smoke visits (slot-smoke only, never a visitor's world). */
+const SMOKE_MUTATE_KEY = "mut:smoke";
+
 /** The gates every mutation passes (design 6.3): same origin, a lease, a fresh human grant, RL_MUTATE. */
 async function mutationGate(req: Request, env: FrontEnv, v: Visit): Promise<Response | null> {
   // A GET gated like a mutation (a PDF) sends no Origin; the SameSite=Strict cookies already keep it same-site.
   if (!v.smoke && isMutation(req.method) && !originAllowed(req, env)) return hostedError("ORIGIN_REFUSED", "Cross-origin requests are refused");
   if (!v.smoke && !v.session) return hostedError("LEASE_REQUIRED", "The shared demo company is read-only; start your own demo company to make changes");
   if (!v.smoke && !v.grant) return hostedError("TURNSTILE_REQUIRED", "Confirm you are human to keep making changes");
-  if (await rateLimited(env.RL_MUTATE, `mut:${v.ipHash}`)) return hostedError("RATE_LIMITED", "Too many changes in a minute; slow down a little", { retryAfterS: 60 });
+  // A valid smoke visit (the deploy's own checks, signed with WEFT_SMOKE_TOKEN) has its own key, so automated checks
+  // from the operator's address never spend that address's visitor budget; a forged or unsigned one is a visitor.
+  if (await rateLimited(env.RL_MUTATE, v.smoke ? SMOKE_MUTATE_KEY : `mut:${v.ipHash}`)) return hostedError("RATE_LIMITED", "Too many changes in a minute; slow down a little", { retryAfterS: 60 });
   return null;
 }
 

@@ -212,6 +212,20 @@ describe("rate limits", () => {
   });
 });
 
+describe("RL_MUTATE and the smoke", () => {
+  it("keys valid smoke mutations apart, so they leave the address's visitor allowance alone", async () => {
+    const ip = "203.0.113.210";
+    const limit = HOSTED_RATE_LIMITS.RL_MUTATE.limit;
+    const statuses = await Promise.all(Array.from({ length: limit }, async () =>
+      (await h.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "smoke" }), headers: await h.smokeHeaders("/api/v1/notes", "POST") }, { ip, origin: null })).status));
+    expect(statuses.filter((s) => s === 429)).toEqual([]);
+    // A visitor leasing from the same address still has its whole allowance.
+    const v = h.visitor(ip);
+    expect((await v.lease()).status).toBe("leased");
+    expect((await v.fetch("/api/v1/notes", { method: "POST", body: JSON.stringify({ text: "mine" }) })).status).toBe(201);
+  });
+});
+
 describe("world upkeep in the cron sweep", () => {
   it("verifies clean idle worlds weekly and restores idle worlds of another snapshot", async () => {
     const env = await h.coreEnv();
