@@ -5,7 +5,7 @@
 // in the composer. The text is never sent on its own. Dictation counts as a mutation at the edge, so it goes through
 // the hosted fetch.
 import { Mic, Square } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "@weft/ui";
 import { HOSTED_PATHS } from "../../../../../packages/contracts/src/ext/cf-hosted";
 import { DICTATION_MAX_SECONDS, type DictationResult } from "../../../../../packages/contracts/src/ext/cf-extras";
@@ -48,13 +48,18 @@ export function appendDictation(current: string, text: string): string {
   return current.trim() ? `${current.replace(/\s+$/, "")} ${text}` : text;
 }
 
+const noSubscribe = () => () => {};
+const recordingSupported = () => typeof window !== "undefined" && typeof window.MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+
 export function DictateButton({ onText }: { onText: (text: string) => void }) {
   const [state, setState] = useState<"idle" | "recording" | "sending">("idle");
   const [error, setError] = useState<string | null>(null);
   const rec = useRef<MediaRecorder | null>(null);
   const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (stopTimer.current) clearTimeout(stopTimer.current); rec.current?.stream.getTracks().forEach((t) => t.stop()); }, []);
-  const supported = typeof window !== "undefined" && typeof window.MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+  // Read after hydration: the export prerenders without a browser, so a composer that is on the page at load (the
+  // Agent page's) would otherwise hydrate a button its HTML does not have.
+  const supported = useSyncExternalStore(noSubscribe, recordingSupported, () => false);
 
   const start = async () => {
     setError(null);
