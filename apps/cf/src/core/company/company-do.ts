@@ -244,9 +244,11 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   }
 
   private async stopEngine(): Promise<void> {
-    // A boot in progress finishes first, so the world it brings up is the one closed here.
-    if (this.starting) await this.starting;
-    this.starting = null;
+    // A boot in progress finishes first, so the world it brings up is the one closed here. A boot that started while
+    // this one waited is for a newer stamp (startEngine shares a boot only for the same world): it is left alone.
+    const waited = this.starting;
+    if (waited) await waited;
+    if (this.starting === waited) { this.starting = null; this.startingFor = null; }
     const engine = this.engine;
     this.engine = null;
     this.engineFor = null;

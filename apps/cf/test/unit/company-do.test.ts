@@ -399,6 +399,31 @@ describe("a reset while the old world closes", () => {
   });
 });
 
+describe("a world replaced while its own steps await", () => {
+  it("keeps a newer boot that started while a stop waited for the previous one", async () => {
+    const c = company();
+    await c.ready();
+    const co = c.co as unknown as { stamp: WorldStamp; startEngine(): Promise<void>; stopEngine(): Promise<void> };
+    world.bootDelayMs = 40;
+    // Generation 4's boot is in flight, and a stop waits for it.
+    const stamped = c.co.applyStamp({ ...c.stamp!, gen: 4 });
+    await sleep(10);
+    const stop = co.stopEngine();
+    await sleep(10);
+    // Meanwhile the world moves to generation 5 and its boot starts (as restoreFinish starts one when no engine is up).
+    co.stamp = { ...co.stamp, gen: 5 };
+    const newer = co.startEngine();
+    await stamped;
+    await stop;
+    // A caller that finds no engine yet shares the generation 5 boot instead of starting a second one.
+    const served = c.co.extrasWorld().catch(() => null);
+    await newer;
+    await served;
+    expect(world.bootGens).toEqual([3, 4, 5]);
+    expect(world.closedGens).toEqual([3, 4]);
+  });
+});
+
 describe("the outbox flush", () => {
   const job = (n: number) => JSON.stringify({ v: 1, kind: "ocr.receipt", jobId: `obx_${String(n).padStart(16, "0")}`, slot: "slot-1", gen: 3, uploadId: "upl_1", expenseId: "exp_1", sha256: "0".repeat(64), storagePath: "blob:x", contentType: "image/png" });
   const append = (c: ReturnType<typeof company>, id: string, body: string) => c.m.sql.exec(`INSERT INTO outbox (id, kind, body, created_at) VALUES (?, 'ocr.receipt', ?, ?)`, id, body, new Date().toISOString());
