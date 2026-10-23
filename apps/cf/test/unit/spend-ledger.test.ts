@@ -266,4 +266,71 @@ describe("SpendDO ledger reads", () => {
     expect(large).toEqual(small);
     expect(small.status).toBe(0);
   });
+
+  it("answer GET /v1/agent/costs?day=<yesterday> from memory: after the day's one build, spent({ day }) reads no row", () => {
+    // 2,000 entries on yesterday (2026-10-25), the costs route's two calls per request, many requests.
+    const { l, meter } = seeded({ history: 2_000, today: 5 });
+    const yesterday = "2026-10-25";
+    const total = l.spent({ day: yesterday });
+    expect(total).toBe(2_000 / 2 * 1000);
+    const warm = meter.rows;
+    for (let i = 0; i < 100; i++) {
+      expect(l.spent({ day: yesterday })).toBe(total);
+      l.spent({ live: true });
+    }
+    expect(meter.rows - warm).toBe(0);
+    // A day outside the retained three (older, or not yet begun) answers nothing and reads nothing, every time.
+    for (const day of ["2026-10-23", "2026-10-01", "2026-10-27", "2099-01-01"]) expect(l.committed({ day })).toEqual({ settledMicros: 0, openMicros: 0, neurons: 0 });
+    expect(meter.rows - warm).toBe(0);
+  });
+
+  it("keep another day's totals in step with the writes that land on it, and with pruning, as a fresh read folds them", () => {
+    const { l, s, caps, at } = ledger({ neuronsDay: 5000 }, "2026-10-25T23:00:00.000Z");
+    const a = reserve(l, 0.02, { visitor: "vis_a", ipHash: "ip_a" });
+    const b = l.reserve({ runId: "run_0002", usdMicros: 1000, model: "@cf/openai/gpt-oss-120b", live: true, neurons: 300, product: "agent", world: "slot-1:gen-1", visitor: "vis_b", ipHash: "ip_a" });
+    const c = reserve(l, 0.01, { runId: "run_0003", visitor: "vis_b", ipHash: "ip_b", live: false });
+    at("2026-10-26T01:00:00.000Z");
+    const meter = readMeter(s);
+    const days = ["2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"];
+    const scopes = [{}, { visitor: "vis_a" }, { visitor: "vis_b", ipHash: "ip_a" }, { live: false }, { live: true, visitor: "vis_b" }];
+    const fresh = (now: string) => createSqlSpendLedger(s, { caps: () => caps, wallNow: () => new Date(now) });
+    /** The day's rows read now and folded, as the file ledger folds them. */
+    const read = (day: string) => {
+      const t = { settledMicros: 0, openMicros: 0, neurons: 0 };
+      for (const f of fold(l.entries(day)).values()) { if (f.open) t.openMicros += f.micros; else t.settledMicros += f.micros; t.neurons += f.neurons; }
+      return t;
+    };
+    const same = (now: string) => {
+      const f = fresh(now);
+      const retained = new Set([0, 1, 2].map((i) => new Date(Date.parse(now) - i * 86_400_000).toISOString().slice(0, 10)));
+      for (const day of days) {
+        for (const scope of scopes) expect(l.committed({ ...scope, day }), `${day} ${JSON.stringify(scope)}`).toEqual(f.committed({ ...scope, day }));
+        if (retained.has(day)) expect(l.committed({ day }), day).toEqual(read(day));
+      }
+      for (const scope of scopes) expect(l.committed(scope)).toEqual(f.committed(scope));
+      expect(l.status({ visitor: "vis_b", ipHash: "ip_a" })).toEqual(f.status({ visitor: "vis_b", ipHash: "ip_a" }));
+    };
+    l.spent({ day: "2026-10-25" });
+    // Closed after midnight: the settle and release rows land on the reservations' day, and memory follows them.
+    if (a.ok) l.settle(a.reservationId, 5_000);
+    if (b.ok) l.release(b.reservationId);
+    const rows = meter.rows;
+    expect(l.committed({ day: "2026-10-25" })).toEqual({ settledMicros: 5_000, openMicros: 10_000, neurons: 0 });
+    expect(meter.rows - rows).toBe(0);
+    same("2026-10-26T01:00:00.000Z");
+    // The orphan settles at its reserved worst case, on its own day.
+    at("2026-10-26T01:00:00.000Z");
+    expect(c.ok).toBe(true);
+    expect(l.settleOrphans()).toBe(1);
+    expect(l.committed({ day: "2026-10-25", live: false })).toEqual({ settledMicros: 10_000, openMicros: 0, neurons: 0 });
+    same("2026-10-26T01:00:00.000Z");
+    // Three days on, 2026-10-25 has left the retained days and the sweep pruned it.
+    at("2026-10-28T01:00:00.000Z");
+    l.settleOrphans();
+    expect(l.entries("2026-10-25")).toEqual([]);
+    const before = meter.rows;
+    expect(l.spent({ day: "2026-10-25" })).toBe(0);
+    expect(meter.rows - before).toBe(0);
+    same("2026-10-28T01:00:00.000Z");
+  });
 });
