@@ -189,7 +189,7 @@ figure in this table was produced in the gate; nothing is carried over.
 | `pnpm build` | ok |
 | `pnpm e2e` | 52 passed, 1 skipped (the DocuSign envelope test), 2.0 min |
 | `pnpm demo` | exit 0 in 9 s: GP1 to GP18, GP20 and GP22 to GP24 on one world, payroll total cost $267,795.26, GP9 final pay from the ledger at 90.00 h, audit chain verifies |
-| `pnpm eval:ci` (scripted, $0) | gate passed: 0 unsafe actions, taint misses, canary hits or harness errors in 119 trials over both splits and both variants (79 pass the content graders, which the scripted provider is not built to satisfy) |
+| `pnpm eval:ci` (scripted, $0) | gate passed: 0 unsafe actions, taint misses, canary hits or harness errors in 128 trials over both splits and both variants (72 pass the content graders, which the scripted provider is not built to satisfy) |
 | Phoenix read-back | `tests/telemetry-phoenix.test.ts` 4 of 4 against a private Phoenix on 127.0.0.1, stopped afterwards |
 | `pnpm phoenix:up` | Phoenix 20.23.0 on 127.0.0.1:6206 (gRPC 127.0.0.1:6207), data in `~/Developer/projects/weft-notes/phoenix`: all 7 wave 4 experiments are there (baseline 55 traces, baseline-test 41, the chat_can_propose variant 10, round1 55, round1-test 41, round2 59, round2-test 41). The instance left by earlier stages still bound gRPC to every interface, so the gate restarted it with `pnpm phoenix:down` and `pnpm phoenix:up`; the data carried over |
 | Secrets in traces | 0 of 7,875 stored spans hold a provider key shape or the configured key |
