@@ -189,6 +189,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     const runHost = this.newRunHost();
     const scheduler = this.newScheduler();
     let engine: WorldEngine | null = null;
+    let installed = false;
     try {
       this.module = await loadEngine();
       this.config = await envConfig(this.env);
@@ -237,6 +238,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
         return;
       }
       this.engine = engine;
+      installed = true;
       this.engineFor = stamp;
       this.runHost = runHost;
       this.scheduler = scheduler;
@@ -251,9 +253,20 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       await this.flushOutbox();
     } catch (e) {
       logError("world.boot", e, { slot: stamp.slot, gen: stamp.gen });
+      // An engine this boot brought up is closed, so its fence shuts and its scheduler stops: nothing serves it now.
+      // One that stopEngine took over meanwhile (this.engine is no longer it) is closed there instead.
+      const own = engine !== null && (!installed || this.engine === engine);
+      if (engine && this.engine === engine) {
+        this.engine = null;
+        this.engineFor = null;
+        this.unsubscribe?.();
+        this.unsubscribe = null;
+        this.alarms.cancel("runs");
+        this.alarms.cancel("tick");
+      }
+      if (own) await engine!.close().catch((err: unknown) => logError("world.close", err, { slot: stamp.slot, gen: stamp.gen }));
       // A failed boot of a world that is no longer the object's leaves the current one alone.
       if (!sameWorld(this.stamp, stamp)) return;
-      if (engine && this.engine === engine) { this.engine = null; this.engineFor = null; }
       this.bootError = e instanceof Error ? e.message : String(e);
     }
   }

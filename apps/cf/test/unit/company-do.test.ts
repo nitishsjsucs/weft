@@ -42,9 +42,11 @@ interface FakeWorld {
   scopedGens: number[];
   /** How long each KV config read takes (envConfig, which the alarm and the boot await). */
   configDelayMs: number;
+  /** Boots whose engine fails right after CompanyDO installs it (its change-feed subscription throws). */
+  failAfterInstall: number;
 }
 let world: FakeWorld;
-const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0 });
+const fresh = (): FakeWorld => ({ boots: 0, bootDelayMs: 0, failBoots: 0, inTx: false, scoped: null, lockTail: Promise.resolve(), input: null, engine: null, closeDelayMs: 0, bootGens: [], closedGens: [], writeBacks: [], scopedGens: [], configDelayMs: 0, failAfterInstall: 0 });
 
 function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]): { toArray(): Record<string, unknown>[] } }): WorldEngine {
   const guard: TxGuard = {
@@ -60,7 +62,8 @@ function engineFor(input: WorldBootInput, sql: { exec(q: string, ...b: unknown[]
     meter: {
       measure: async (fn) => ({ value: await fn(), usage: { statements: 0, rowsRead: 0, rowsWritten: 0, tablesRead: [], tablesWritten: [] } }),
       totals: () => ({ statements: 0, rowsRead: 0, rowsWritten: 0, tablesRead: [], tablesWritten: [] }),
-      reset() {}, version: () => 0, versions: () => ({}), onCommit: () => () => undefined,
+      reset() {}, version: () => 0, versions: () => ({}),
+      onCommit: () => { if (world.failAfterInstall > 0) { world.failAfterInstall -= 1; throw new Error("fake subscription failure"); } return () => undefined; },
     },
     guard,
     fetch: async (req) => new Response(JSON.stringify({ path: new URL(req.url).pathname }), { headers: { "content-type": "application/json" } }),
@@ -306,6 +309,21 @@ describe("the Lobby's heartbeat", () => {
 });
 
 describe("the world's boot", () => {
+  it("closes the engine it brought up when it fails after installing it (fence shut, scheduler stopped), and the next boot starts clean", async () => {
+    world.failAfterInstall = 1;
+    const c = company();
+    await c.ready();
+    expect(world.boots).toBe(1);
+    // The engine was installed, then the boot failed: it is closed, and the object serves nothing from it.
+    expect(world.closedGens).toEqual([3]);
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(503);
+    // The next alarm boots the world again, and that engine is kept.
+    await c.co.alarm();
+    expect(world.boots).toBe(2);
+    expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
+    expect(world.closedGens).toEqual([3]);
+  });
+
   it("is shared by concurrent callers: alarms and an RPC on a world whose cold boot failed boot it once", async () => {
     world.failBoots = 1;
     const c = company();
