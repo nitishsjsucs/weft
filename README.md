@@ -23,13 +23,40 @@ Every world starts from one deterministic seed, in one of two profiles:
 
 | Profile | What it holds | Used by |
 |---|---|---|
-| `rich` | The base world plus a deterministic layer of history (`packages/seed/src/rich/`): January to August pay runs imported from the previous provider, agent and routine runs with steps, decided and waiting approvals, a hash-chained action log, time off through the ledger, offers in every state and new-hire personas part way through the portal, offboarding cases, contractor payouts, filed returns, notices and memory pages. It only adds rows, so the planted story beats (the Oct 30 draft, DE 2088, the expenses in review, Noor's offer, the open October reconciliation) stay as the base seed wrote them | `pnpm dev` (the default), the guided tour, `pnpm e2e:rich`, `pnpm e2e:tour` and `pnpm screenshots:rich` |
+| `rich` | The base world plus a deterministic layer of history (`packages/seed/src/rich/`): January to August pay runs imported from the previous provider, the showcase runs (real agent conversations and routine runs, recorded once on the live model; below), decided and waiting approvals, a hash-chained action log, time off through the ledger, offers in every state and new-hire personas part way through the portal, offboarding cases, contractor payouts, filed returns, notices and memory pages. It only adds rows, so the planted story beats (the Oct 30 draft, DE 2088, the expenses in review, Noor's offer, the open October reconciliation) stay as the base seed wrote them | `pnpm dev` (the default), the guided tour, `pnpm e2e:rich`, `pnpm e2e:tour` and `pnpm screenshots:rich` |
 | `base` | The pinned test world: Larkspur Robotics on Mon Oct 26 2026 08:30 PT with its planted story beats and nothing else. Its digest and the golden numbers (the demo payroll total of $267,795.26) never move | `pnpm test`, `pnpm e2e` (`--e2e` always seeds base), `pnpm demo`, `pnpm demo:scenario --profile base`, `pnpm screenshots` and every eval world |
 
 `pnpm dev --fresh --profile base` (or `WEFT_SEED_PROFILE=base`) seeds the base world alone. A rich world remembers its
 profile, so "Reset workspace data..." in the Viewing as menu and `POST /v1/sim/reset` rebuild it rich; the reset also takes
 `{ "profile": "base" }` or `{ "profile": "rich" }`, and `GET /v1/health` reports `seedProfile`. `pnpm e2e:rich` crawls
 every audited screen and tab on a fresh rich world and fails on an empty state.
+
+### The showcase runs
+
+Every agent run in a rich world is a real one. `pnpm seed:record-showcase` (`scripts/record-showcase.ts`) built a rich
+world without them, then asked the live agent (`gpt-5.6-luna`, default effort, background model runs on) a script of
+questions and fired the routines the world needs, on the sim clock from Friday evening, Oct 23, to the seed time, and
+wrote everything that changed into `packages/seed/src/rich/showcase.json`: the runs and their steps, threads and
+questions, answers with their grounding refs, the chart artifacts, approval cards, proposals, actions, routine runs,
+channel posts, the paycheck explanations and the memory commits. The rich seed replays that file as its last step with
+no model call, so two seeds give the same digest, and it stops with a clear message if the rich layer ever changes
+under the recording (every row it adds must be new and the action chain must continue from the recorded head).
+
+- Eight conversations as Vic, each titled by its first question: payroll cost by month with the chart and why October
+  is lower; the flagged paychecks on the Oct 30 draft and why Lena Brooks is flagged; Owen Mercer's and Jonah Pell's
+  offboarding; filing and deposit deadlines and the expense policy, both answered from memory with citations; headcount
+  by department with hires and departures by month; who is out next month and Ruth Okoro's balance (a turn that read
+  employee notes, so it is marked untrusted); and a bonus request that ends in an approval card you can approve live,
+  followed by "Approve everything in my inbox", which the agent refuses.
+- Background work: the pre-payroll review that explains every flagged paycheck and proposes the submit, the time-off
+  review of Ruth's request, required training, compliance reminders, the Monday exec briefing, cost by state, the new-hire
+  checklist nudge, the weekly people digest and the monthly exec report (and two routines whose precheck found nothing to
+  do). The Inbox starts with the six approvals and two suggestions they and the rich layer leave. The expense review is
+  not among them: a recorded one would already file the 8 decisions that demo scenario 5 has the agent file live.
+- Recorded on 2026-10-23 for $0.0214 (every take and probe that day came to $0.19, under the $0.50 live cap). A take stops early
+  and starts over when the review leaves its explanations to the template or a run touches a held-out eval string, and
+  the file is refused if it holds a key, a token, an IP address or a local path. `--verify` checks the committed file
+  applies; recording again is opt-in: `WEFT_LIVE_OPENAI=1 WEFT_LLM=openai WEFT_SECRETS_FILE=... pnpm seed:record-showcase --write`.
 
 ### The guided tour
 
@@ -63,7 +90,11 @@ motion and the phone layout. How it works and the measured timings: [docs/tour.m
   clock and a status dot. **New chat** starts one; a follow-up stays in the same conversation (a thread) and the agent
   sees its last three turns, each your question and its final answer, about 2,000 characters at most, never a tool
   result. A turn that read untrusted content gives the follow-up nothing and makes it untrusted too. Runs with no
-  thread, such as the seeded history and the side panel's runs, are one-turn conversations.
+  thread, such as the side panel's, are one-turn conversations.
+- **Conversations persist.** Each turn is an agent run in the workspace's own database, so a conversation survives a
+  reload, a new tab and an API restart, and a follow-up can continue any of them, the recorded ones included. They go
+  only with the world: "Reset workspace data..." (or `POST /v1/sim/reset`) returns the world to its seed, recorded
+  conversations and all. On the hosted app a workspace lasts 30 days unless it is reset.
 - **Background work**: routine and notice runs that started on their own, with their summaries, each linking to its
   run view.
 - **The conversation**: every turn as the side panel shows it (tool steps, charts, approval cards with Approve and Deny,
@@ -88,6 +119,9 @@ Things to try in the demo:
    revocations from the case view, then run the remaining steps; Off-cycle pay proposes a one-off run.
 8. **Benefits**: run the October carrier reconciliation (three planted errors), dispute a finding, and look at who
    has not elected in open enrollment. **Contractors**: pay the three contractors and advance the clock two days.
+9. **Agent**: open the recorded conversations (real runs on the live model), ask a follow-up in one of them, and
+   approve Kofi Mensah's bonus from its approval card; Background work holds the routine runs that wrote the paycheck
+   explanations and the Inbox cards.
 9. **Memory**: browse the agent's git-backed memory with wiki-links, backlinks and per-file history.
 10. **Expenses**: eight claims wait in Needs review. Run the expense review routine; it explains each one and proposes
     one decision per claim in the Inbox. Approve two and open the next draft: the reimbursements sit outside gross and
@@ -338,9 +372,10 @@ On the rich profile (retaken on 2026-10-23, when Agent joined the sidebar, with 
   `11-compliance`, `34-reports` (payroll cost by month, January to October), `09-routines`, `35-routine-detail` (the
   pre-payroll review with its runs), `10-audit`, `17-memory`, `24-integrations`, `03-simulators`, `36-settings`,
   `37-permissions`, `39-run-view` (a recorded agent run with its steps) and `40-portal-persona` (a new hire at 5 of 7).
-- The Agent page: `41-agent-page` (a conversation of two turns, a chart answer and then a follow-up in the same
-  thread, beside the seeded conversations), `41b-agent-background` (the Background work tab) and `41c-agent-mobile`
-  (the same conversation at 390 by 844, the list in a drawer).
+- The Agent page on the recorded showcase runs: `41-agent-page` (the payroll cost conversation, a chart answer and the
+  follow-up on October, beside the other recorded conversations), `41b-agent-background` (the Background work tab),
+  `41d-agent-approval` (the bonus request with its approval card, then the refused bulk approval) and
+  `41c-agent-mobile` (the payroll cost conversation at 390 by 844, the list in a drawer).
 
 The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`, retaken on
 2026-10-23 for the sidebar's Agent item), in

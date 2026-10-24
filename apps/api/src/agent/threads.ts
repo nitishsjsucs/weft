@@ -38,7 +38,7 @@ const PAGE_MARKERS: [string, AskedFrom][] = [["\npage: employee portal", "portal
 /**
  * The question and where it was asked for each chat run, from its context step: SQLite cuts the <request> block out
  * of the stored pack, so a list of runs reads a few hundred characters each instead of whole packs. A run with no
- * stored pack (the seeded history) gets a null question.
+ * stored pack gets a null question.
  */
 export async function questionsOf(db: Db, runs: { id: string; cacheKey: string }[]): Promise<Map<string, { question: string | null; askedFrom: AskedFrom }>> {
   const out = new Map<string, { question: string | null; askedFrom: AskedFrom }>();

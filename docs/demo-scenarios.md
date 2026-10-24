@@ -1,6 +1,6 @@
 # Weft agent demo script
 
-Live behavior checked on 2026-10-18 at main `8e626f0` on the base world, live on gpt-5.6-luna at default effort, chat_can_propose and auto autonomy off: every live scenario ran 3 times on fresh worlds and once in the browser, for $0.0688 in all. The figures below were re-read on the rich world (the `pnpm dev` default, which `pnpm demo:scenario` now resets to) with the scripted provider, last on 2026-10-19 on the integrated round 1 branch `dp/integration`. The pass counts, model steps, times and costs in the table are still the base-world measurements.
+Live behavior checked on 2026-10-18 at main `8e626f0` on the base world, live on gpt-5.6-luna at default effort, chat_can_propose and auto autonomy off: every live scenario ran 3 times on fresh worlds and once in the browser, for $0.0688 in all. The figures below were re-read on the rich world (the `pnpm dev` default, which `pnpm demo:scenario` now resets to) with the scripted provider, last on 2026-10-19 on the integrated round 1 branch `dp/integration`. The pass counts, model steps, times and costs in the table are still the base-world measurements. Since 2026-10-23 every agent run already in a rich world is a real one, recorded once on the live model (the showcase runs, README), so the Inbox counts and proposal ids below were re-read on that world.
 
 ## Before you start
 
@@ -12,7 +12,7 @@ WEFT_LLM=openai WEFT_BACKGROUND_LLM=1 WEFT_CLOCK_RATE=0 WEFT_TRACE=phoenix WEFT_
 WEFT_SECRETS_FILE=$HOME/Developer/projects/.weft.secrets.env pnpm dev --fresh
 ```
 
-3. Before each scenario (or once before a short demo): `pnpm demo:scenario <name>`. It first prints the target, `target API http://127.0.0.1:4070, data dir <checkout>/.data`, and asks `[y/N]` before it resets, because a reset wipes everything done in that world; from a script or any shell without a terminal pass `--yes`, or it refuses without calling the API. Then it resets the running world to its own seed profile (rich under `pnpm dev`, the world the tour shows; `--profile base` or `--profile rich` picks one), checks the clock is back at Mon Oct 26 8:30 AM PT and that no pending proposal is newer than the seed, warns if the clock is running, and prints the click path and the prompts. The rich seed starts with 4 pending items: 2 approvals (Elias Brandt's laptop and the Oct 30 submit) and 2 suggestions (turn on Expense review, nudge the open enrollment stragglers). It calls no model and costs nothing. `pnpm demo:scenario list` names the scenarios and prints the start command above. On other ports add `--api-port` and `--web-port`. The data dir is `WEFT_DATA_DIR` (default `.data`) in the checkout you run it from, and its proxy secret must belong to the API on the target port, so check both printed values before you answer y.
+3. Before each scenario (or once before a short demo): `pnpm demo:scenario <name>`. It first prints the target, `target API http://127.0.0.1:4070, data dir <checkout>/.data`, and asks `[y/N]` before it resets, because a reset wipes everything done in that world; from a script or any shell without a terminal pass `--yes`, or it refuses without calling the API. Then it resets the running world to its own seed profile (rich under `pnpm dev`, the world the tour shows; `--profile base` or `--profile rich` picks one), checks the clock is back at Mon Oct 26 8:30 AM PT and that no pending proposal is newer than the seed, warns if the clock is running, and prints the click path and the prompts. The rich seed starts with 8 pending items: the 6 approvals the recorded showcase runs left (the Oct 30 submit from the pre-payroll review, the two required training cards, the cost-by-state email, Kofi Mensah's off-cycle bonus from a chat and the time-off review's approval of Ruth Okoro's vacation) and 2 suggestions (turn on Expense review, nudge the open enrollment stragglers). It calls no model and costs nothing. `pnpm demo:scenario list` names the scenarios and prints the start command above. On other ports add `--api-port` and `--web-port`. The data dir is `WEFT_DATA_DIR` (default `.data`) in the checkout you run it from, and its proxy secret must belong to the API on the target port, so check both printed values before you answer y.
 4. Open http://127.0.0.1:3070/app, Viewing as Vic. A 1440 wide window with the agent panel docked works on every screen.
 
 Other resets: `curl -s -X POST http://127.0.0.1:3070/api/v1/sim/reset -H 'x-weft-principal: usr_dana' -H 'content-type: application/json' -d '{}'` (about 0.6 s), or Ctrl+C and `pnpm dev --fresh`.
@@ -38,13 +38,13 @@ Reset: `pnpm demo:scenario notice`
 
 Click path:
 1. Simulators: Deliver on "Deliver CA EDD DE 2088".
-2. The agent panel shows the run; in about 6 s it posts two Approval needed cards. The Inbox now holds 4 approvals (the 2 seeded ones plus these 2).
+2. The agent panel shows the run; in about 6 s it posts two Approval needed cards. The Inbox now holds 8 approvals (the 6 the recorded runs left plus these 2).
 3. Inbox: "Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 on account 000-4817-2 for 25 CA employees paid in 2026". Read the Before and After rows: YTD employer SUI (25 CA employees paid in 2026) $5,489.93 to $2,422.04; employer SUI on the Oct 30 run $356.01 to $157.06. The reply card's letter reads "Re: DE 2088 notice received October 26, 2026" and "effective January 1, 2026". Approve the rate change.
 4. Audit log: Undo on the tax.update_rate row. A tax.revert_rate row appears; the chain stays valid.
 
 Say: "An agency letter just arrived. The agent read it, worked out the CA unemployment rate drops from 3.4 to 1.5 percent and what that means in dollars, and filed the change and the reply as proposals. Every number on the card comes from a tool result. I approve; Undo appends a reversing row and the original stays in a hash-chained log."
 
-Expect: notices.draft_response, then tax.update_rate (sui, 0.015, from 2026-01-01) and notices.send_response as pending proposals; nothing executes before approval. Approving the rate re-previews the Oct 30 draft, so the seeded Submit card filed on the old total is withdrawn (it reads "Withdrawn as out of date") and the payroll page says "The submit card is out of date" until Run review now files one on the new numbers.
+Expect: notices.draft_response, then tax.update_rate (sui, 0.015, from 2026-01-01) and notices.send_response as pending proposals; nothing executes before approval. Approving the rate re-previews the Oct 30 draft, so the Submit card the recorded pre-payroll review filed on the old total is withdrawn (it reads "Withdrawn as out of date") and the payroll page says "The submit card is out of date" until Run review now files one on the new numbers.
 
 Fallback: the scripted provider on the same path ($0, deterministic), or `pnpm demo` then `WEFT_DATA_DIR=.data-demo pnpm dev`.
 
@@ -53,7 +53,7 @@ Fallback: the scripted provider on the same path ($0, deterministic), or `pnpm d
 Reset: `pnpm demo:scenario payroll`
 
 Click path:
-1. Payroll, Oct 16 to Oct 31 draft (4 need review, 1 blocked). Run review now.
+1. Payroll, Oct 16 to Oct 31 draft (4 need review, 1 blocked). The flags already carry the recorded review's own notes (open one first to show what a past run wrote). Run review now.
 2. In about 10 s the panel reads "Explained 4 flagged paychecks" and shows a Submit card for the Oct 30 run (47 paychecks, $267,919.36, Mira Delgado excluded as blocked). The payroll page's banner says why its own totals, which count all 48 paychecks, are higher.
 3. Click the Gross change chip on Lena Brooks (click again if the first click only scrolls): "Gross pay increased 18.0%, from $4,916.67 to $5,801.67", with evidence and a Run link.
 4. Optional: ask "Why is the NY raise flagged in the Oct 30 payroll?" (read-only; the answer cites the raise's result, shown as a Sources chip under it).
@@ -67,7 +67,7 @@ Fallback: scripted provider (GP2) or `pnpm demo`.
 Reset: `pnpm demo:scenario new-hire`
 
 Click path:
-1. People, Offers: Mark accepted on Noor Castellanos (CO). The agent panel opens on the new hire readiness run. In about 10 s Approvals go from 2 to 5: the CO withholding and unemployment registrations and Noor's laptop. The #new-hires welcome reads "Please welcome Noor Castellanos, our new Senior Firmware Engineer, joining Hardware."
+1. People, Offers: Mark accepted on Noor Castellanos (CO). The agent panel opens on the new hire readiness run. In about 10 s Approvals go from 6 to 9: the CO withholding and unemployment registrations and Noor's laptop. The #new-hires welcome reads "Please welcome Noor Castellanos, our new Senior Firmware Engineer, joining Hardware."
 2. Open onboarding: IT accounts Done by the agent; Laptop and State tax registration Pending.
 3. Inbox: approve both CO registrations and the $1,899.00 laptop.
 4. Simulators: +1 day twice. The CO accounts are active.
@@ -156,7 +156,7 @@ MCP client: `pnpm mcp:config` prints the config for your checkout with the paths
 }
 ```
 
-The server reads the mcp key from the file, so the config holds no key, and PATH lets a desktop app with a short PATH find node. Calls in order, checked on 2026-10-18 with the official MCP SDK client over stdio, started from exactly the printed config: 3 of 3 on base worlds reset after scenario 1, and once on a fresh rich world (`pnpm dev --fresh`, no reset). `pnpm demo:scenario trace-mcp` now resets to the world's own profile, which is rich under `pnpm dev`, so the table gives the rich world's ids first (re-read on 2026-10-19 after a reset and scenario 1) and the base world's (`--profile base`) in parentheses.
+The server reads the mcp key from the file, so the config holds no key, and PATH lets a desktop app with a short PATH find node. Calls in order, checked on 2026-10-18 with the official MCP SDK client over stdio, started from exactly the printed config: 3 of 3 on base worlds reset after scenario 1, and once on a fresh rich world (`pnpm dev --fresh`, no reset). `pnpm demo:scenario trace-mcp` now resets to the world's own profile, which is rich under `pnpm dev`, so the table gives the rich world's ids first (re-read on 2026-10-19 after a reset and scenario 1, and the proposal ids again on 2026-10-23 with the recorded showcase runs) and the base world's (`--profile base`) in parentheses.
 
 | # | Tool | Arguments | Result |
 |---|---|---|---|
@@ -164,8 +164,8 @@ The server reads the mcp key from the file, so the config holds no key, and PATH
 | 2 | `actions__list` | `{"limit":3,"before_seq":null,"run_id":null,"command":null,"response_format":null}` | the newest audit rows: notices.draft_response by the notice routine, then sim.deliver_notice by Vic |
 | 3 | `notices__list` | `{"status":"in_review","limit":null,"response_format":null}` | the DE 2088 notice: ntc_0005, listed after DE 428T (ntc_0004; base world ntc_0002). Use this id below |
 | 4 | `notices__get` | `{"notice_id":"ntc_0005","response_format":null}` | the extracted fields: account txa_0002, sui 0.034 to 0.015, effective 2026-01-01, and the pending proposals |
-| 5 | `tax__update_rate` | `{"tax_account_id":"txa_0002","code":"sui","rate":"0.015","effective_from":"2026-01-01","source_notice_id":"ntc_0005"}` | `pending_approval` with `existing: true` and the routine's tax.update_rate proposal id, the one `notices__get` lists under proposals (prp_0020 or prp_0021, by the order the routine filed them; base prp_0001): the same change is already waiting, so no new proposal is filed and no new card appears |
-| 6 | `contractors__schedule_payouts` | `{"worker_ids":["wrk_0049","wrk_0050","wrk_0051"],"scheduled_for":"2026-10-30"}` | `pending_approval`, prp_0022 (prp_0003): a new Inbox card, Pay 3 contractors $19,094.00, with the untrusted content banner (every MCP call is untrusted). The amounts come from the contracts, never from the arguments |
+| 5 | `tax__update_rate` | `{"tax_account_id":"txa_0002","code":"sui","rate":"0.015","effective_from":"2026-01-01","source_notice_id":"ntc_0005"}` | `pending_approval` with `existing: true` and the routine's tax.update_rate proposal id, the one `notices__get` lists under proposals (prp_0014 or prp_0015, by the order the routine filed them; base prp_0001): the same change is already waiting, so no new proposal is filed and no new card appears |
+| 6 | `contractors__schedule_payouts` | `{"worker_ids":["wrk_0049","wrk_0050","wrk_0051"],"scheduled_for":"2026-10-30"}` | `pending_approval`, prp_0016 (prp_0003): a new Inbox card, Pay 3 contractors $19,094.00, with the untrusted content banner (every MCP call is untrusted). The amounts come from the contracts, never from the arguments |
 
 Wrong arguments are refused with a reason: rate `0.016` in step 5 gives DOMAIN_NOTICE_MISMATCH with the notice's own values, and `"source_notice_id": null` gives INVALID_INPUT, "expected string, received null".
 

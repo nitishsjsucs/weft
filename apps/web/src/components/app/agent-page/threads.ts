@@ -6,7 +6,7 @@ import type { ConversationRunRow } from "../../../../../../packages/contracts/sr
 import { answerPlain } from "../agent/answer";
 import { fmtDate } from "../format";
 
-/** One conversation: a thread's runs, or a single run that has no thread (the seeded history, the side panel's runs). */
+/** One conversation: a thread's runs, or a single run that has no thread (the side panel's runs). */
 export interface Conversation {
   /** `thread:<thr_...>` or `run:<run id>`. */
   key: string;
@@ -34,8 +34,8 @@ export function clipLine(text: string, max = TITLE_MAX): string {
 }
 
 /**
- * The conversation's title: its first question. A run that never stored its question (the seeded history) is titled
- * by the first sentence of its answer, and with neither by the day it ran.
+ * The conversation's title: its first question. A run that never stored its question is titled by the first sentence
+ * of its answer, and with neither by the day it ran.
  */
 export function conversationTitle(runs: Pick<ConversationRunRow, "question" | "summary" | "createdAt">[]): string {
   const first = runs[0];

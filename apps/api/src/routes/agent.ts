@@ -96,7 +96,7 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
   const ownRuns = async (c: Context<WeftEnv>): Promise<Set<string> | null> => {
     const scope = await viewerScope(weft, c);
     if (!scope) return null;
-    // A live run records its person on the executor's run row; a seeded history run on the agent run row.
+    // A run records its person on the executor's run row; a run with no executor row, on the agent run row.
     return runsActingFor(weft.db, c.var.session?.companyId ?? "cmp_larkspur", scope.viewerId);
   };
 

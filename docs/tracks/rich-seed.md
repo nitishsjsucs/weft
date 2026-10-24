@@ -18,15 +18,16 @@ is empty, I want data everywhere", without moving a test, an e2e run, an eval wo
 
 ## Rules the layer keeps
 
-- Planted proposals take their risk class from the command, and the submit and laptop cards come from the command's
-  own preview (`Layer.preview`), so a seeded card reads like the live one for the same call. People posts (weekly
-  digest, monthly exec report) run after the turnover and quote `reports.query`.
+- Planted proposals take their risk class from the command, and cards come from the command's own preview
+  (`Layer.preview`), so a seeded card reads like the live one for the same call. Since 2026-10-23 the waiting cards
+  (the Oct 30 submit and the rest) are the recorded showcase runs' own, not planted.
 
 - It only adds rows. Planted rows are byte-identical to base: the four Weft pay runs and their paychecks, every
   current worker's YTD ledger, the base expenses, time-off requests and ledger, Noor's offer, the NY DOL notice, the
   draft filings and calendar items, action #1, workers `wrk_0001` to `wrk_0051` and the open October reconciliation.
 - Ids come from the app's id counters, instants are fixed and before the seed time (Mon Oct 26 2026 8:30 PT), and
-  nothing calls a model: agent runs are scripted-provider transcripts at $0.00.
+  nothing calls a model. Until 2026-10-23 agent runs were scripted-provider transcripts at $0.00; since then every run
+  is a real one, recorded once on the live model and replayed from `rich/showcase.json` (below).
 - Names of record carry no suffix, every domain is `*.example`, and documents, mail and notices read as the company's own (2026-10-23: the `(demo)` suffix, the DEMO DOCUMENT line and the SIMULATED notice headers were removed).
 - Domain math holds: imported runs equal each worker's YTD import code by code and satisfy the SPEC 7.4 totals
   identities; time off is drawn through ledger `use` rows with a balancing import per policy so caps hold; contractor
@@ -36,11 +37,12 @@ is empty, I want data everywhere", without moving a test, an e2e run, an eval wo
 
 | File | Adds |
 | --- | --- |
-| `rich/index.ts` | Agent runs with steps (weekly digests, pre-payroll reviews, the Feb 14 NY DOL notice, chat answers including payroll cost by month and the refused approve-all), routine runs, decided and pending proposals with a hash-chained approval audit, hand-offs, about 200 hash-chained actions with one rollback, time-off history (142 requests; 2 people out on Oct 26), onboarding checklists and DEMO documents, the July leaver and Jonah Pell's open resignation, contractor payouts, filed returns with agency mail, more notices, the 2023 registrations, memory pages with wiki links and 30-plus memory commits |
-| `rich/motion.ts` | Offers in draft, viewed, accepted, expired and voided states with outbox mail and background checks; Elias Brandt at 5 of 7; the approvals waiting this week; 18 paid expense claims; Greenhouse deliveries and sync items; the September reconciliation finding; device orders; contractor accounts, tablets and agreements |
+| `rich/index.ts` | The past payrolls Theo submitted and the Feb 14 NY rate update on the action log, decided and pending proposals with a hash-chained approval audit, hand-offs, about 200 hash-chained actions with one rollback, time-off history (142 requests; 2 people out on Oct 26), onboarding checklists and DEMO documents, the July leaver and Jonah Pell's open resignation, contractor payouts, filed returns with agency mail, more notices, the 2023 registrations, memory pages with wiki links and 30-plus memory commits |
+| `rich/motion.ts` | Offers in draft, viewed, accepted, expired and voided states with outbox mail and background checks; Elias Brandt at 5 of 7; 18 paid expense claims; Greenhouse deliveries and sync items; the September reconciliation finding; device orders; contractor accounts, tablets and agreements |
 | `rich/portal-hires.ts` | Odette Marsh, NY, starts Nov 2, 7 of 7 with a bank account, an approved home office claim from the portal and the NY harassment prevention course; Tobias Wren, CA, starts Nov 30, 2 of 7; their offers, mail, checks and devices |
 | `rich/turnover.ts` | Six 2026 joiners and leavers (three summer interns, a seasonal Austin Yard technician, a quality inspector and a sales hire), each inactive with documents, a finished checklist, a completed offboarding case and an engine-computed YTD import; the July leaver gets his import here |
 | `rich/pay-history.ts` | 16 imported Jan to Aug runs whose paychecks split each worker's YTD import (wage-base codes front-loaded); the paid claims ride the run that reimbursed them (outside gross and net, inside the totals; the one past 60 days is a taxable earning line carved out of the imported gross); monthly federal deposits |
+| `rich/showcase.ts` and `rich/showcase.json` | The showcase runs (2026-10-23): eight recorded conversations and the routine runs the world needs, with everything they wrote, replayed as the last step (README "The showcase runs"; `pnpm seed:record-showcase` records them) |
 
 Jan to Aug runs are shown as Imported (`taxDataVersion "imported"`, no approver, no bank batch): the base seed says
 Larkspur ran payroll on a previous provider until Aug 31, so Weft never ran them.
@@ -98,9 +100,10 @@ Run it on other ports with `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_
 - The device status enum has no repair or returned state, so a leaver's returned laptop is told in the offboarding
   step, not on IT. The base laptops are all one model; the rich layer adds a workstation, field tablets and a
   delivered laptop for the new hires.
-- Most routines stay disabled: enabling them in a dev world would spend on live runs. Every routine the gallery shows
-  has at least one scripted past run, and the folded `rt_compliance_notices` is left out of `GET /v1/routines`
-  (`?include=retired` returns it).
+- Most routines stay disabled: enabling them in a dev world would spend on live runs. Until 2026-10-23 every routine
+  the gallery shows had a scripted past run; since the recorded showcase runs replaced them, the routines the world
+  needs have real runs and the rest read "Last run: none yet". The folded `rt_compliance_notices` is left out of
+  `GET /v1/routines` (`?include=retired` returns it).
 - Odette's home office claim is a pre-start equipment stipend (its purpose and decision note say so). It has its
   receipt but no stored checks: the policy engine flags an expense dated before the start date as outside employment.
   The profile test fails any other claim dated before its worker's start.
@@ -118,7 +121,8 @@ Run it on other ports with `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_
   `offerLetterFor` and `confidentialityText`, as `documents.send_offer` writes them. Only accepted offers have a
   background check; the follow-up routine names Tobias Wren's pending check (estimate Oct 30).
 - Routine runs: every seeded run of a cron routine sits at a slot its own cron produces (`cronSlot` reads the PREBUILT
-  trigger) with the engine's `cron:<slot>` ref; event routines carry `event:<name>:<subject>`. The Austin office laptop
+  trigger) with the engine's `cron:<slot>` ref; event routines carry `event:<name>:<subject>`. (Since 2026-10-23 the
+  recorded runs keep the same rule for their cron runs, and the rest are a person's Run now with a `manual:` ref.) The Austin office laptop
   routine names Lucia Ferrante, its one Austin hire; the life-event routine reads a closed marriage window.
 - Owen Mercer: his last day (Oct 23) is planted in base; the rich layer offboards him (open case, everything
   done but final pay on the Oct 30 run, status offboarding, accounts suspended, enrollments ended through Oct 31), so

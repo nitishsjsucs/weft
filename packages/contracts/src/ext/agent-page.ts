@@ -23,7 +23,7 @@ export type AgentRunTriggerFilter = (typeof AGENT_RUN_TRIGGERS)[number];
 export type AskedFrom = "agent" | "portal" | "mention" | "routine_draft";
 
 /** A row of GET /v1/agent/runs filtered by `trigger=chat` or `thread_id`: the run plus the person's question (null when
- * the run never stored one, such as the seeded history) and where it was asked. Unfiltered lists keep AgentRunRow. */
+ * the run never stored one) and where it was asked. Unfiltered lists keep AgentRunRow. */
 export interface ConversationRunRow extends AgentRunRow { question: string | null; askedFrom: AskedFrom }
 
 /** Test ids on the Agent page. */

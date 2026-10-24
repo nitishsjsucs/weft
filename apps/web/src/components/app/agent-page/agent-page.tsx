@@ -235,7 +235,7 @@ export function AgentPage() {
   async function send(prompt?: string) {
     const t = (prompt ?? text).trim();
     if (!t || busy) return;
-    // A thread continues; a new chat, or an answer that has no thread (the seeded history, the side panel's runs),
+    // A thread continues; a new chat, or an answer that has no thread (the side panel's runs, a portal question),
     // starts a new conversation.
     const threadId = sel.kind === "thread" ? sel.threadId : newThreadId();
     setBusy(true);
