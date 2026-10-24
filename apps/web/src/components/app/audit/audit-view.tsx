@@ -31,8 +31,8 @@ export function auditSummary(summary: string): string {
     .replace(/^Delivered (\S+)\.txt from (\w+) as the notice$/, (_m, _f: string, ag: string) => `Delivered a notice from ${AGENCY[ag as keyof typeof AGENCY] ?? "the agency"}`)
     .replace(/\boffer offr?_\w*\d\w*\b/g, "an offer")
     .replace(/^Drafted response \d+ for/, "Drafted a response to")
-    .replace(/\b(\d{4})-Q([1-4])\b/g, "Q$2 $1")
-    .replace(/\bwith (irs|ca_edd|ny_dtf|ny_dol|tx_twc|co_dor|co_cdle) \(sim\)/g, (_m, ag: string) => `with ${AGENCY[ag as keyof typeof AGENCY]}`);
+    .replace(/\b(\d{4})-Q([1-4])\b/g, "Q$2 $1");
+  // humanLine reads the agency codes as names ("with ca_edd;" is "with CA EDD;").
   return humanLine(pre);
 }
 

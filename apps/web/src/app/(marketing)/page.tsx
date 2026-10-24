@@ -14,7 +14,7 @@ import { STATIC_EXPORT } from "@/lib/static-export";
 
 export const metadata: Metadata = {
   title: "Weft: open-source payroll and HR with an agent that asks first",
-  description: "An open-source HRIS, payroll and benefits platform with an agent that drafts the admin work and waits for approval. Synthetic data and in-repo simulators only.",
+  description: "An open-source HRIS, payroll and benefits platform with an agent that drafts the admin work and waits for approval.",
 };
 
 function Landing({ hero, stats }: { hero: ReactNode; stats: ReactNode }) {

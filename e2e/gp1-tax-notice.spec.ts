@@ -1,6 +1,6 @@
 // GP1. Tax notice to rate change, the hero flow (SPEC 12, P0-5). Owner of the spec: t6-site.
 // Simulators panel delivers the CA EDD DE 2088 revised rate notice; the agent proposes the SUI rate change and the
-// filed response; Dana approves both; the rate history, notice, next preview and audit chain reflect it; Undo on
+// filed response; Vic approves both; the rate history, notice, next preview and audit chain reflect it; Undo on
 // the rate change restores 3.4% and the filing says it cannot be reversed.
 import { approveCard, byTidPrefix, employerTaxCents, eventually, expect, openApp, SEED, test, TID, tid, viewAs, type Paycheck, type Proposal } from "./fixtures";
 
@@ -68,7 +68,7 @@ test("GP1: CA EDD DE 2088 notice becomes an approved SUI rate change, a filed re
     }
   });
 
-  await test.step("Dana approves both; the run ends done with no further model steps", async () => {
+  await test.step("Vic approves both; the run ends done with no further model steps", async () => {
     const stepsBefore = (await weft.agentRuns()).find((r) => r.id === rate.proposerRunId)!.stepsUsed;
     await approveCard(page, weft, rate.id);
     await approveCard(page, weft, filing.id);
@@ -120,7 +120,7 @@ test("GP1: CA EDD DE 2088 notice becomes an approved SUI rate change, a filed re
 
     const filingAction = (await weft.actions()).find((a) => a.proposalId === filing.id)!;
     expect(filingAction.reversible).toBe("no");
-    await expect(page.getByTestId(tid.auditRow(filingAction.seq))).toContainText("Not reversible: filed with the agency simulator");
+    await expect(page.getByTestId(tid.auditRow(filingAction.seq))).toContainText("Not reversible: filed with the agency");
     await expect(page.getByTestId(tid.auditUndo(filingAction.seq))).toHaveCount(0);
 
     await openApp(page, `/app/payroll/${SEED.draftRun}`);

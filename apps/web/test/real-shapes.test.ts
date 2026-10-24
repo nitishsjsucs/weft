@@ -69,7 +69,7 @@ describe("audit reasons", () => {
     expect(notReversibleText("Not reversible: A sent message cannot be unsent.")).toBe("Not reversible: a sent message cannot be unsent");
     expect(notReversibleText("Not reversible: IRS filings stay filed")).toBe("Not reversible: IRS filings stay filed");
     expect(notReversibleText("A funded payroll cannot be undone; run an off-cycle correction instead.")).toBe("A funded payroll cannot be undone; run an off-cycle correction instead.");
-    expect(notReversibleText("filed with the agency simulator")).toBe("Not reversible: filed with the agency simulator");
+    expect(notReversibleText("filed with the agency")).toBe("Not reversible: filed with the agency");
     expect(notReversibleText(null)).toBe("Not reversible");
   });
 });

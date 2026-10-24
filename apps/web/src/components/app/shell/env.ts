@@ -60,9 +60,9 @@ export function fmtLongClock(iso: string): string {
   return `${s.replace(" at ", ", ")} PT`;
 }
 
-/** "Simulated time: Monday, October 26, 8:30 AM Pacific" */
+/** "Clock: Monday, October 26, 8:30 AM Pacific" */
 export function clockAria(iso: string | undefined): string {
-  return iso ? `Simulated time: ${fmtLongClock(iso).replace(/ PT$/, " Pacific")}` : "Simulated time: loading";
+  return iso ? `Clock: ${fmtLongClock(iso).replace(/ PT$/, " Pacific")}` : "Clock: loading";
 }
 
 /** Clock rate for the popover: 0 is paused, 1 is real time, anything else is a multiplier. */
@@ -91,14 +91,14 @@ export function nextRoutineSlot(now: string): string | null {
   return null;
 }
 
-/** "DW" from "Dana Whitfield (demo)": first letters of the first two words, ignoring the "(demo)" marker. */
+/** "VA" from "Vic Akisole": first letters of the first two words. */
 export function initials(name: string): string {
-  const words = name.replace(/\([^)]*\)/g, " ").trim().split(/\s+/).filter(Boolean);
+  const words = name.trim().split(/\s+/).filter(Boolean);
   return words.slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
 }
 
 export function firstName(name: string): string {
-  return name.replace(/\([^)]*\)/g, " ").trim().split(/\s+/)[0] ?? name;
+  return name.trim().split(/\s+/)[0] ?? name;
 }
 
 /** Persona groups in the Viewing as menu, in order. Every admin-type role reads as an admin. */

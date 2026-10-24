@@ -56,7 +56,7 @@ export function ReconciliationTab({ names, plans }: { names: Map<string, string>
           <input data-testid={TID.reconMonth} type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="h-8 rounded-lg bg-card px-2 text-[13px] text-foreground shadow-[var(--shadow-border)]" />
         </label>
         <Button data-testid={TID.reconRun} size="sm" variant="primary" disabled={run.pending} onClick={() => void onRun()}>{run.pending ? "Reconciling..." : "Run reconciliation"}</Button>
-        <span className="text-1 text-gray-10">Juniper Mutual (sim) invoice vs enrollments and that month&apos;s paycheck deductions.</span>
+        <span className="text-1 text-gray-10">Juniper Mutual invoice vs enrollments and that month&apos;s paycheck deductions.</span>
       </div>
       {err ? <div role="alert" className="mb-3 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       {notice ? <div data-testid={TID.reconNotice} role="status" className="mb-3 rounded-lg bg-gray-3 px-3 py-2 text-1 text-gray-12">{notice}</div> : null}
@@ -108,7 +108,7 @@ export function ReconciliationTab({ names, plans }: { names: Map<string, string>
                     <TR>
                       <TD colSpan={8} className="max-w-[calc(100vw-2rem)] whitespace-normal pb-3 pt-0 text-1 text-gray-10 tablet:max-w-none">
                         {f.detail}
-                        {confirm === f.id ? <span className="mt-1 block text-gray-11">Sends a templated dispute to billing@juniper-mutual.example in the email simulator and marks this finding disputed.</span> : null}
+                        {confirm === f.id ? <span className="mt-1 block text-gray-11">Sends a templated dispute to billing@juniper-mutual.example and marks this finding disputed.</span> : null}
                       </TD>
                     </TR>
                   </Fragment>

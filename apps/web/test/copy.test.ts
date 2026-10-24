@@ -34,11 +34,11 @@ describe("date lists", () => {
 describe("humanLine", () => {
   it("the notice run's step lines name the notice, not its id", () => {
     expect(humanLine("Drafted response 1 for ntc_0005")).toBe("Drafted the reply to the notice");
-    expect(humanLine("File response 1 to DE 2088 notice ntc_0005 with CA EDD (sim)")).toBe("File the reply to the DE 2088 notice with CA EDD (sim)");
+    expect(humanLine("File response 1 to DE 2088 notice ntc_0005 with CA EDD")).toBe("File the reply to the DE 2088 notice with CA EDD");
   });
   it("the routine summary drops proposal ids and action numbers", () => {
-    expect(humanLine("Proposed Set CA SUI to 1.5% from 2027-01-01 (prp_0021); Proposed File response 1 to DE 2088 notice ntc_0005 with CA EDD (sim) (prp_0022); Drafted response 1 for ntc_0005 (#228)"))
-      .toBe("Proposed Set CA SUI to 1.5% from Jan 1; Proposed File the reply to the DE 2088 notice with CA EDD (sim); Drafted the reply to the notice");
+    expect(humanLine("Proposed Set CA SUI to 1.5% from 2027-01-01 (prp_0021); Proposed File response 1 to DE 2088 notice ntc_0005 with CA EDD (prp_0022); Drafted response 1 for ntc_0005 (#228)"))
+      .toBe("Proposed Set CA SUI to 1.5% from Jan 1; Proposed File the reply to the DE 2088 notice with CA EDD; Drafted the reply to the notice");
   });
   it("a payroll run id reads as its payday; unknown ids and plain words stay", () => {
     expect(humanLine("pay_2026_10_15")).toBe("the Oct 15 run");
@@ -70,15 +70,15 @@ describe("notice and audit labels", () => {
 describe("audit and step lines carry no ids, codes or file names", () => {
   it("names offers, mentions, rates, tax accounts, agencies, systems and delivered notices", () => {
     expect(humanLine("Recorded mention mnt_0001 in #payroll")).toBe("Recorded a mention in #payroll");
-    expect(humanLine("Accepted offer offr_0001: created Noor Castellanos (demo) (wrk_0063) (EMP-0056) as onboarding")).toBe("Accepted the offer: added Noor Castellanos (demo) (EMP-0056) to onboarding");
+    expect(humanLine("Accepted offer offr_0001: created Noor Castellanos (wrk_0063) (EMP-0056) as onboarding")).toBe("Accepted the offer: added Noor Castellanos (EMP-0056) to onboarding");
     expect(humanLine("Reverted CA SUI rate etr_0005 to 3.4%")).toBe("Reverted CA SUI rate to 3.4%");
-    expect(humanLine("Register CO withholding account with CO DOR (sim) (txa_0006)")).toBe("Register CO withholding account with CO DOR (sim)");
-    expect(humanLine("Delivered CA_EDD_DE2088_2026.txt from ca_edd as ntc_0005")).toBe("Delivered the DE 2088 notice from CA EDD (sim)");
-    expect(humanLine("Filed DE9 for 2026-Q2 with ca_edd (sim); accepted")).toBe("Filed DE9 for 2026-Q2 with CA EDD (sim); accepted");
-    expect(humanLine("Created google_ws account noor.castellanos for Noor Castellanos (demo) (wrk_0063)")).toBe("Created Google Workspace account noor.castellanos for Noor Castellanos (demo)");
-    expect(humanLine("Approved 8 h of vacation for Talia Brennan (demo) (tor_0148)")).toBe("Approved 8 h of vacation for Talia Brennan (demo)");
-    expect(humanLine("Order Larkspur standard laptop (sim) for Elias Brandt (demo) (wrk_0054) at $1,899.00")).toBe("Order Larkspur standard laptop (sim) for Elias Brandt (demo) at $1,899.00");
-    expect(humanLine("Approve expense exp_0001 for Mateo Alvarez (demo) (wrk_0005): $412.38 travel on 2026-10-12")).toBe("Approve expense for Mateo Alvarez (demo): $412.38 travel on Oct 12");
+    expect(humanLine("Register CO withholding account with CO DOR (txa_0006)")).toBe("Register CO withholding account with CO DOR");
+    expect(humanLine("Delivered CA_EDD_DE2088_2026.txt from ca_edd as ntc_0005")).toBe("Delivered the DE 2088 notice from CA EDD");
+    expect(humanLine("Filed DE9 for 2026-Q2 with ca_edd; accepted")).toBe("Filed DE9 for 2026-Q2 with CA EDD; accepted");
+    expect(humanLine("Created google_ws account noor.castellanos for Noor Castellanos (wrk_0063)")).toBe("Created Google Workspace account noor.castellanos for Noor Castellanos");
+    expect(humanLine("Approved 8 h of vacation for Talia Brennan (tor_0148)")).toBe("Approved 8 h of vacation for Talia Brennan");
+    expect(humanLine("Order Larkspur standard laptop for Elias Brandt (wrk_0054) at $1,899.00")).toBe("Order Larkspur standard laptop for Elias Brandt at $1,899.00");
+    expect(humanLine("Approve expense exp_0001 for Mateo Alvarez (wrk_0005): $412.38 travel on 2026-10-12")).toBe("Approve expense for Mateo Alvarez: $412.38 travel on Oct 12");
   });
   it("step lines read as sentences", () => {
     expect(stepLine("Found 1 workers")).toBe("Found 1 worker");
@@ -95,8 +95,8 @@ describe("audit and step lines carry no ids, codes or file names", () => {
     expect(stepLine("Drafted response 1 for ntc_0005")).toBe("Drafted the reply to the notice");
   });
   it("a routine summary reads as a short list in run order", () => {
-    expect(routineSummaryText("Proposed Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 (prp_0021); Proposed File response 1 to DE 2088 notice ntc_0005 with CA EDD (sim) (prp_0022); Drafted response 1 for ntc_0005 (#228)"))
-      .toBe("Drafted the reply to the notice. Proposed: file the reply to the DE 2088 notice with CA EDD (sim); update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026.");
+    expect(routineSummaryText("Proposed Update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026 (prp_0021); Proposed File response 1 to DE 2088 notice ntc_0005 with CA EDD (prp_0022); Drafted response 1 for ntc_0005 (#228)"))
+      .toBe("Drafted the reply to the notice. Proposed: file the reply to the DE 2088 notice with CA EDD; update CA SUI rate 3.4% to 1.5% effective Jan 1, 2026.");
     expect(routineSummaryText("Nothing")).toBe("Nothing");
   });
 });

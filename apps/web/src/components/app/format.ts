@@ -73,8 +73,9 @@ export function relative(targetIso: string, nowIso: string): string {
 export const cents = (c: number | null | undefined) => (c === null || c === undefined ? "-" : formatCents(c));
 export const hours = (x100: number | null) => (x100 === null ? "-" : (x100 / 100).toFixed(2));
 export const usd = (micros: number) => `$${(micros / 1_000_000).toFixed(micros < 10_000 ? 4 : 2)}`;
+/** "VA" from "Vic Akisole": first letters of the first two words. */
 export function initials(name: string): string {
-  return name.replace(/\(demo\)/, "").trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
+  return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
 }
 /** "Oct 16 to Oct 31" */
 export function period(start: string, end: string): string { return `${fmtDate(start)} to ${fmtDate(end)}`; }
@@ -100,7 +101,7 @@ export function nextCronSlot(now: string): string | null {
 }
 
 /** Display names for the simulated agencies; every agency in Weft is a simulator. */
-export const AGENCY: Record<TaxAccount["agency"], string> = { irs: "IRS (sim)", ca_edd: "CA EDD (sim)", ny_dtf: "NY DTF (sim)", ny_dol: "NY DOL (sim)", tx_twc: "TX TWC (sim)", co_dor: "CO DOR (sim)", co_cdle: "CO CDLE (sim)" };
+export const AGENCY: Record<TaxAccount["agency"], string> = { irs: "IRS", ca_edd: "CA EDD", ny_dtf: "NY DTF", ny_dol: "NY DOL", tx_twc: "TX TWC", co_dor: "CO DOR", co_cdle: "CO CDLE" };
 
 /**
  * "Not reversible: <reason>", without doubling the phrase when the API's reason already says so, without a command

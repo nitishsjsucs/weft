@@ -73,10 +73,10 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
             </Table>
           )}
         </Card>
-        <p className="mt-2 text-1 text-gray-10">The payment rail simulator marks a transfer sent on its next tick and delivered two business days after booking, on the sim clock.</p>
+        <p className="mt-2 text-1 text-gray-10">The payment rail marks a transfer sent on its next tick and delivered two business days after booking.</p>
       </section>
       <section>
-        <CardHeading icon={<ArrowLeftRight />}>FX table <Badge tone="outline">Simulated</Badge></CardHeading>
+        <CardHeading icon={<ArrowLeftRight />}>FX table</CardHeading>
         <Card className="overflow-hidden">
           <Table data-testid={TID.fxTable} className="text-[13px]">
             <THead><TR><TH>Currency</TH><TH numeric>USD per unit</TH><TH>As of</TH></TR></THead>
@@ -87,7 +87,7 @@ export function PayoutsSection({ contractors }: { contractors: Worker[] }) {
             </TBody>
           </Table>
         </Card>
-        <p className="mt-2 text-1 text-gray-10">{rates[0]?.source ?? "Synthetic FX table (fixed, not market data)"}. Conversions round half up to whole cents.</p>
+        <p className="mt-2 text-1 text-gray-10">{rates[0]?.source ?? "Fixed FX table, not market data"}. Conversions round half up to whole cents.</p>
       </section>
     </div>
   );

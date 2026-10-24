@@ -57,7 +57,7 @@ export function CalendarPanel() {
           </TBody>
         </Table>
       </Card>
-      <p className="text-0 text-gray-10">Rows within 14 days of their due date show as due soon. Every agency here is a simulator.</p>
+      <p className="text-0 text-gray-10">Rows within 14 days of their due date show as due soon.</p>
     </div>
   );
 }

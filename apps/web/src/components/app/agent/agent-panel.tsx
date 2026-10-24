@@ -9,7 +9,6 @@ import { client, errorText } from "@/lib/api/hooks";
 import { useAgent } from "../agent-context";
 import { PanelStart } from "./panel-start";
 import { HOSTED } from "@/lib/hosted/flags";
-import { HOSTED_COPY } from "../../hosted/copy";
 import { appendDictation, DictateButton } from "../../hosted/dictate-button";
 import { RunFeed } from "./run-feed";
 
@@ -50,8 +49,6 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
         {agent.thread.length === 0 ? (
           <div className="flex flex-col gap-2 text-2 text-gray-11">
             <p>Ask about payroll, people, taxes or anything on this page. The agent reads through the same tools you do and asks before it changes anything.</p>
-            <p className="text-1 text-gray-10">Every company, person and agency here is synthetic.</p>
-            {HOSTED ? <p className="text-1 text-gray-10" data-testid="hosted-fictional">{HOSTED_COPY.fictional}</p> : null}
             <PanelStart pathname={pathname} onAsk={(p) => void send(p)} onOpen={(runId, label) => agent.watch(runId, label)} />
           </div>
         ) : null}

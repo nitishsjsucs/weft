@@ -54,7 +54,7 @@ function matchText(m: Record<string, unknown>): string {
   return rate && cap ? `Match ${rate} up to ${cap}` : "Employer match";
 }
 const PLAN_TYPE: Record<string, string> = { medical: "Medical", dental: "Dental", vision: "Vision", hsa: "HSA", "401k": "401(k)", fsa: "FSA" };
-const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace (sim)", chat: "Chat (sim)", github: "Code host (sim)" };
+const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace", chat: "Chat", github: "Code host" };
 
 function Empty({ text }: { text: string }) { return <p className="px-4 py-4 text-[13px] text-gray-10">{text}</p>; }
 
@@ -70,7 +70,7 @@ export function BenefitsView() {
   const err = plans.error ?? enr.error;
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title={<span className="flex items-center gap-2">Benefits <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Plans and enrollments held by the carrier simulators in this repo. Deductions flow into payroll through the pretax codes." />
+      <PageHeader title="Benefits" subtitle="Plans and enrollments held by the carriers. Deductions flow into payroll through the pretax codes." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       <Tabs defaultValue="plans">
         <TabsList className="mb-2">
@@ -117,7 +117,7 @@ export function ItView() {
   const err = acc.error ?? dev.error;
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title={<span className="flex items-center gap-2">IT <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Accounts and laptops held by the identity provider and device simulators in this repo." />
+      <PageHeader title="IT" subtitle="Accounts and laptops held by the identity provider and the device vendor." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       <div className="flex flex-col gap-6 [&>section]:min-w-0">
         <section>
@@ -164,7 +164,7 @@ export function ContractorsView() {
   const rows = (q.data?.data ?? []) as Worker[];
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title={<span className="flex items-center gap-2">Contractors <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Global contractors on the monthly schedule, paid through the fixed FX table and the payment rail simulator." />
+      <PageHeader title="Contractors" subtitle="Global contractors on the monthly schedule, paid through the fixed FX table and the payment rail." />
       {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(q.error)}</div> : null}
       <CardHeading icon={<Globe />}>Contractors</CardHeading>
       <Card className={cn("overflow-hidden", STACK.box)}>

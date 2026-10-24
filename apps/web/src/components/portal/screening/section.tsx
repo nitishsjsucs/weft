@@ -41,16 +41,16 @@ function ScreeningCard({ row, api, onDone }: { row: Row; api: ReturnType<typeof 
     <Card className="p-4" data-testid="portal-screening-order" data-status={row.status}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex-1 text-2 font-medium">{row.packageName} with {row.vendorLabel}</span>
-        {row.mode === "simulated" ? <Badge tone="gray">{row.vendor === "hireright" ? "Simulated, API shape not published" : "Simulated"}</Badge> : null}
+        {row.mode === "simulated" ? <Badge tone="gray">{row.vendor === "hireright" ? "Sandbox, API shape not published" : "Sandbox"}</Badge> : null}
         <span data-testid="portal-screening-status" className="text-1 text-gray-11">{STATUS[row.status] ?? row.status}</span>
       </div>
       {row.consentNeeded ? (
         <div className="mt-4 rounded-lg border border-dashed border-[var(--app-border)] p-4" data-testid="screening-apply-page">
-          <p className="mb-3 text-1 font-medium text-gray-10 uppercase">Screening company apply page (simulated)</p>
+          <p className="mb-3 text-1 font-medium text-gray-10 uppercase">Screening company apply page (sandbox)</p>
           {step === 0 ? (
             <div className="flex flex-col gap-3 text-2">
               <p className="font-medium">Disclosure regarding background investigation</p>
-              <p className="text-gray-11">Larkspur Robotics (demo) may obtain a consumer report about you from {row.vendorLabel} for employment purposes. This page stands alone so the disclosure is not mixed with anything else. This is a simulation: no report about any real person is requested.</p>
+              <p className="text-gray-11">Larkspur Robotics may obtain a consumer report about you from {row.vendorLabel} for employment purposes. This page stands alone so the disclosure is not mixed with anything else.</p>
               <Button size="sm" variant="primary" className="self-start" data-testid="screening-apply-next" onClick={() => setStep(1)}>I have read the disclosure</Button>
             </div>
           ) : step === 1 ? (

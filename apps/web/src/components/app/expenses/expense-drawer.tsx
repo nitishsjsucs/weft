@@ -40,7 +40,7 @@ function ReceiptPreview({ id }: { id: string }) {
   if (failed) return <p className="text-1 text-gray-10">{failed}</p>;
   if (!url) return <div className="h-24 w-20 animate-pulse rounded-md bg-gray-3" />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="Receipt image (simulated)" className="h-24 w-20 rounded-md bg-white object-contain shadow-[var(--shadow-border)] [image-rendering:pixelated]" />;
+  return <img src={url} alt="Receipt image" className="h-24 w-20 rounded-md bg-white object-contain shadow-[var(--shadow-border)] [image-rendering:pixelated]" />;
 }
 
 export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
@@ -78,8 +78,8 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
                 {live.milesX10 !== null ? <Row k="Miles" v={(live.milesX10 / 10).toFixed(1)} /> : null}
               </dl>
             </div>
-            {ex ? <p className="mt-2 text-1 text-gray-10">Receipt reads {usd(ex.totalCents)} on {fmtDate(ex.date)} (simulated extraction).</p>
-              : live.hasReceipt ? <p className="mt-2 text-1 text-gray-10">No extraction for this receipt: the simulated extractor reads only seeded receipts, so compare the image by eye.</p> : null}
+            {ex ? <p className="mt-2 text-1 text-gray-10">Receipt reads {usd(ex.totalCents)} on {fmtDate(ex.date)}.</p>
+              : live.hasReceipt ? <p className="mt-2 text-1 text-gray-10">No extraction for this receipt: the extractor reads only the receipts it knows, so compare the image by eye.</p> : null}
             <dl className="mt-2 text-[13px]">
               <Row k="Purpose" v={<span className="break-words">{live.businessPurpose}</span>} />
               {live.category === "meals" ? <Row k="Attendees" v={live.attendees ?? <span className="text-gray-9">none listed</span>} /> : null}

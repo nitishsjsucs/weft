@@ -6,7 +6,7 @@ import { HOSTED } from "@/lib/hosted/flags";
 
 const MORE: { href: string; title: string; body: string }[] = [
   { href: "/app/settings/permissions", title: "Permissions", body: "Who can view, edit or approve in each domain, and what the agent may do without asking." },
-  { href: "/app/integrations", title: "Integrations", body: "Greenhouse, Workday, background checks and e-signature, each simulated until a real account is connected." },
+  { href: "/app/integrations", title: "Integrations", body: "Greenhouse, Workday, background checks and e-signature, each in a sandbox until a real account is connected." },
   { href: "/app/routines", title: "Routines", body: "Scheduled and event-driven agent work, with its autonomy level and run history." },
 ];
 
@@ -17,7 +17,7 @@ export default function SettingsPage() {
       <AgentSettingsCard />
       {HOSTED ? (
         <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--app-border)] p-4" data-testid="settings-mcp">
-          <div className="min-w-0 flex-1"><div className="text-2 font-medium">MCP</div><div className="mt-1 text-1 text-gray-10">Use Weft's tools on your demo company from an MCP client, over Streamable HTTP.</div></div>
+          <div className="min-w-0 flex-1"><div className="text-2 font-medium">MCP</div><div className="mt-1 text-1 text-gray-10">Use Weft's tools on your company from an MCP client, over Streamable HTTP.</div></div>
           <McpConnectButton />
         </div>
       ) : null}

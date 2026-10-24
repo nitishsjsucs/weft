@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import { askAgent, chatChannel, eventually, expect, openApp, test, TID, viewAs, type PayrollRun } from "./fixtures";
 import { W3_CHAT_TID, W3_SETTINGS } from "../packages/contracts/src/index";
 
-const OFF_CYCLE = "Pay Hollis Grey (demo) an off-cycle bonus of $1,500.00 with payday Oct 27";
+const OFF_CYCLE = "Pay Hollis Grey an off-cycle bonus of $1,500.00 with payday Oct 27";
 
 /**
  * Turns agent.chat_can_propose on or off. PUT /v1/settings/agent belongs to w3-parity-routines; until it answers, the
@@ -65,7 +65,7 @@ test("GP15: a chart answer, a read-only answer with proposals off, and an approv
     expect((await weft.actions()).length, "nothing executed from chat").toBe(actionsBefore);
     const card = page.getByTestId(W3_CHAT_TID.card(p.id));
     await expect(card).toBeVisible();
-    await expect(card).toContainText("Hollis Grey (demo)");
+    await expect(card).toContainText("Hollis Grey");
     await expect(card).toContainText("Bonus (supplemental wages");
     await expect(card).toContainText("$1,500.00");
     await expect(card.getByRole("link", { name: /Open/ })).toHaveAttribute("href", `/app/inbox?proposal=${p.id}`);
@@ -94,7 +94,7 @@ test("GP15: the chat simulator shows the same card live; a tainted card offers n
     const card = chatChannel(page, "#payroll").getByTestId(W3_CHAT_TID.card(p.id));
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute("data-status", "pending");
-    await expect(card).toContainText("Hollis Grey (demo)");
+    await expect(card).toContainText("Hollis Grey");
     await expect(card).toContainText("$1,500.00");
     await expect(card.getByTestId(W3_CHAT_TID.cardApprove(p.id))).toBeVisible();
     await expect(card.getByRole("link", { name: /Open/ })).toHaveAttribute("href", `/app/inbox?proposal=${p.id}`);

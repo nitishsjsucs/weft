@@ -15,7 +15,7 @@ export type PrincipalId = (typeof PRINCIPALS)[number]["id"];
 export const DEFAULT_PRINCIPAL: PrincipalId = "usr_dana";
 const PRINCIPAL_KEY = "weft.viewingAs";
 
-// "Viewing as" (a demo control): the chosen human is sent as x-weft-principal on every request; the Next proxy
+// "Viewing as" (a dev-auth control): the chosen person is sent as x-weft-principal on every request; the Next proxy
 // adds x-weft-proxy, which the API requires before it honors the header (SPEC 10).
 let principal: string = DEFAULT_PRINCIPAL;
 const principalSubs = new Set<() => void>();

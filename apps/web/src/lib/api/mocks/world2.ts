@@ -22,9 +22,9 @@ export function buildTax(): { accounts: TaxAccount[]; rates: EmployerRate[]; not
       rate("etr_0005", "TX", "sui", "0.027", 900_000, "2026-01-01", null, "seed:2026 rate notice"),
     ],
     notices: [{
-      id: "ntc_0001", agency: "ny_dol", kind: "rate_change", formCode: "IA 96.1", title: "NY DOL (sim) 2026 unemployment insurance rate", receivedAt: "2026-02-14T15:00:00.000Z", respondBy: null,
+      id: "ntc_0001", agency: "ny_dol", kind: "rate_change", formCode: "IA 96.1", title: "NY DOL 2026 unemployment insurance rate", receivedAt: "2026-02-14T15:00:00.000Z", respondBy: null,
       status: "resolved", taxAccountId: "txa_ny_ui", fileName: "NY_DOL_IA961_2026.txt",
-      bodyText: "NEW YORK STATE DEPARTMENT OF LABOR (SIMULATED)\nUnemployment Insurance Division\n\nEmployer: Larkspur Robotics, Inc. (demo)\nRegistration number: 00-48172 6\n\nYour 2026 contribution rate is 4.1% on the first $17,600 of wages paid to each employee.\n\nThis is a synthetic notice generated for the Weft demo.",
+      bodyText: "NEW YORK STATE DEPARTMENT OF LABOR\nUnemployment Insurance Division\n\nEmployer: Larkspur Robotics, Inc.\nRegistration number: 00-48172 6\n\nYour 2026 contribution rate is 4.1% on the first $17,600 of wages paid to each employee.",
       extracted: { agency: "ny_dol", formCode: "IA 96.1", kind: "rate_change", accountNumber: "00-48172 6", taxAccountId: "txa_ny_ui", taxYear: 2026, effectiveFrom: "2026-01-01", respondBy: null, rates: [{ code: "sui", oldRate: "0.041", newRate: "0.041" }], amountCents: null, period: null },
       resolution: { action: "no change needed" }, responseConfirmation: null,
     }],
@@ -38,8 +38,8 @@ export function buildActions(): Action[] {
   });
   return [
     a(1, "2026-10-01T16:00:00.000Z", "system", "svc_scheduler", "payroll.mark_processed", "Processed payroll Sep 16 to Sep 30 (45 paychecks)", "na"),
-    a(2, "2026-10-08T16:00:00.000Z", "human", "usr_sam", "people.update_title", "Updated title for Kaia Lockridge (demo)", "yes"),
-    a(3, "2026-10-09T17:00:00.000Z", "human", "usr_dana", "people.update_pay_rate", "Raised Mireille Osterhout (demo) by 18% effective Oct 16", "yes"),
+    a(2, "2026-10-08T16:00:00.000Z", "human", "usr_sam", "people.update_title", "Updated title for Kaia Lockridge", "yes"),
+    a(3, "2026-10-09T17:00:00.000Z", "human", "usr_dana", "people.update_pay_rate", "Raised Mireille Osterhout by 18% effective Oct 16", "yes"),
     a(4, "2026-10-15T13:00:00.000Z", "system", "svc_events", "payroll.mark_processed", "Processed payroll Oct 1 to Oct 15 (47 paychecks)", "na"),
     a(5, "2026-10-21T18:00:00.000Z", "agent", "agt_weft", "comms.send_message", "Posted the weekly people digest to #people-ops", "no", { onBehalfOf: "usr_dana", agentRunId: "run_0000", notReversibleReason: "message already delivered to the chat simulator" }),
   ];
@@ -55,7 +55,7 @@ export function buildRoutines(): { defs: RoutineDef[]; runs: RoutineRunDto[] } {
   ];
   const runs: RoutineRunDto[] = [
     { id: "rtr_0000", routineId: "rt_people_digest", runKey: "k0", triggerRef: "cron 2026-10-19T09:00 PT", status: "done", agentRunId: null, summary: "Posted the digest: 48 employees, 2 hires in 30 days, 0 open approvals.", leftForHuman: [], overdue: false, attended: false, startedAt: "2026-10-19T16:00:00.000Z", endedAt: "2026-10-19T16:00:01.000Z", costUsdMicros: 0 },
-    { id: "rtr_0001", routineId: "rt_agency_notice", runKey: "k1", triggerRef: "event notice.received ntc_0002", status: "waiting_approval", agentRunId: "run_0001", summary: "Two proposals are waiting in the Inbox.", leftForHuman: ["Approve the CA UI rate change", "Approve the response to CA EDD (sim)"], overdue: false, attended: true, startedAt: "2026-10-26T15:31:00.000Z", endedAt: null, costUsdMicros: 955 },
+    { id: "rtr_0001", routineId: "rt_agency_notice", runKey: "k1", triggerRef: "event notice.received ntc_0002", status: "waiting_approval", agentRunId: "run_0001", summary: "Two proposals are waiting in the Inbox.", leftForHuman: ["Approve the CA UI rate change", "Approve the response to CA EDD"], overdue: false, attended: true, startedAt: "2026-10-26T15:31:00.000Z", endedAt: null, costUsdMicros: 955 },
   ];
   return { defs, runs };
 }
@@ -72,13 +72,13 @@ export function buildSim(): { faults: ArmedFault[]; chat: ChatMessageDto[]; regi
   return {
     faults: [],
     chat: [
-      msg("msg_0001", "#general", "Imani Ferreira (demo)", "Gripper v3 prototypes are in the Oakland lab if anyone wants a look.", "2026-10-23T18:00:00.000Z"),
+      msg("msg_0001", "#general", "Imani Ferreira", "Gripper v3 prototypes are in the Oakland lab if anyone wants a look.", "2026-10-23T18:00:00.000Z"),
       msg("msg_0002", "#people-ops", "Weft agent", "Weekly people digest: 48 employees, 2 hires in the last 30 days, 1 departure scheduled, 0 open approvals.", "2026-10-19T16:00:01.000Z"),
-      msg("msg_0003", "#payroll", "Theo Marsh (demo)", "Oct 15 payroll settled with the sim bank. 47 paychecks.", "2026-10-15T13:05:00.000Z"),
-      msg("msg_0004", "#new-hires", "Weft agent", "Welcome Rowan Achterberg (demo), Controls Engineer in Oakland, starting Oct 19.", "2026-10-19T16:30:00.000Z"),
+      msg("msg_0003", "#payroll", "Theo Marsh", "Oct 15 payroll settled with the bank. 47 paychecks.", "2026-10-15T13:05:00.000Z"),
+      msg("msg_0004", "#new-hires", "Weft agent", "Welcome Rowan Achterberg, Controls Engineer in Oakland, starting Oct 19.", "2026-10-19T16:30:00.000Z"),
     ],
     registrations: [{ id: "simr_0001", agency: "ca_edd", account_type: "combined", status: "active", account_number: "000-4817-2", completed_at: "2023-03-17T17:00:00.000Z" }],
     bankBatches: [{ id: "simb_2026_10_15", payroll_run_id: "pay_2026_10_15", total_cents: 18_212_440, status: "settled", settle_at: "2026-10-15T13:00:00.000Z", entryCount: 47 }],
-    idpAccounts: [{ ref: "idp_0001", worker: "Dana Whitfield (demo)", system: "google_ws", handle: "dana.whitfield@larkspur.example", status: "active" }, { ref: "idp_0002", worker: "Dana Whitfield (demo)", system: "chat", handle: "@dana", status: "active" }, { ref: "idp_0003", worker: "Imani Ferreira (demo)", system: "github", handle: "imani-ferreira-demo", status: "active" }],
+    idpAccounts: [{ ref: "idp_0001", worker: "Vic Akisole", system: "google_ws", handle: "vic.akisole@larkspur.example", status: "active" }, { ref: "idp_0002", worker: "Vic Akisole", system: "chat", handle: "@vic", status: "active" }, { ref: "idp_0003", worker: "Imani Ferreira", system: "github", handle: "imani-ferreira", status: "active" }],
   };
 }

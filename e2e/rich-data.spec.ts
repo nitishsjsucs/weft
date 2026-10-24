@@ -158,9 +158,9 @@ test("a manager's Home shows the team, and each portal persona sees its own reco
   await expect(page.locator("body")).not.toContainText("No expenses yet.");
 });
 
-// Manager privacy (docs/review-log.md): viewing as Imani Ferreira (demo), a manager with payroll: none, no screen shows
+// Manager privacy (docs/review-log.md): viewing as Imani Ferreira, a manager with payroll: none, no screen shows
 // a pay figure, leave request, offboarding case or offer salary about anyone outside her reporting chain. The foreign
-// figures and names come from Dana's API reads, so the crawl fails on any of them appearing in Imani's screens.
+// figures and names come from Vic's API reads, so the crawl fails on any of them appearing in Imani's screens.
 test("a manager's screens show nothing private about people outside her reports", async ({ page, request }) => {
   const dana = { headers: { "x-weft-principal": "usr_dana" } };
   const imani = { headers: { "x-weft-principal": "usr_imani" } };

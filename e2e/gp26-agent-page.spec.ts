@@ -35,7 +35,7 @@ test("GP26: the Agent page lists conversations and background work, threads a fo
   expect(rich.profile).toBe("rich");
   const page1 = await weft.get<{ data: Row[] }>("/v1/agent/runs", { trigger: "chat", limit: 100 });
   const seeded = page1.data.filter((r) => r.askedFrom === "agent");
-  expect(seeded.length, "Dana has seeded chat runs on the rich world").toBeGreaterThan(0);
+  expect(seeded.length, "Vic has seeded chat runs on the rich world").toBeGreaterThan(0);
   expect(seeded.every((r) => r.threadId === null), "no seeded run has a thread").toBe(true);
   const lena = seeded.find((r) => /Lena Brooks/.test(r.summary ?? ""))!;
   const background = await weft.get<{ data: AgentRunRow[] }>("/v1/agent/runs", { trigger: "background", limit: 50 });

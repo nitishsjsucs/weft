@@ -112,7 +112,7 @@ export function ComplianceView() {
   const err = accounts.error ?? rates.error ?? notices.error;
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title="Taxes & Compliance" subtitle="State registrations, employer rates, agency notices, the compliance calendar and filings. Every agency here is a simulator in this repo." />
+      <PageHeader title="Taxes & Compliance" subtitle="State registrations, employer rates, agency notices, the compliance calendar and filings." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>

@@ -49,7 +49,7 @@ export function NoticeUpload() {
         <input id="notice-file" data-testid="notice-upload-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" className="text-1" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         <Button type="submit" size="sm" disabled={!file || busy} data-testid="notice-upload-submit">{busy ? "Uploading" : "Upload"}</Button>
       </form>
-      <p className="text-0 text-gray-10">Scans are read without OCR or a model, from the simulated scanning service. Their text is untrusted: nothing in it changes a record without a person's approval.</p>
+      <p className="text-0 text-gray-10">Scans are read without OCR or a model, from the scanning service. Their text is untrusted: nothing in it changes a record without a person's approval.</p>
       {msg ? <div role={msg.ok ? "status" : "alert"} data-testid="notice-upload-result" className={`text-1 ${msg.ok ? "text-green-11" : "text-red-11"}`}>{msg.text}</div> : null}
     </Card>
   );

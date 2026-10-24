@@ -1,6 +1,6 @@
 // GP19. A coherent top bar (docs/wave3.md 5; research/wave3/topbar-design.md). Owner: w3-topbar-shell.
 // At 1440 and 1280 with the agent docked, at 1024 and at 390 the header never overflows; every bar control is 32 px
-// tall and every pill segment 28 px; the pill holds the simulated clock and Viewing as, with no model chip; no badge
+// tall and every pill segment 28 px; the pill holds the clock and Viewing as, with no model chip; no badge
 // wash appears in the bar (the only fill color is the amber persona avatar). Tab shows the same blue ring on every
 // header control. The persona menu switches personas, the clock popover advances time, search lives in the sidebar,
 // and detail pages put the record's name in the breadcrumb instead of its id.
@@ -67,13 +67,15 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     expect(seen).toEqual(["Toggle sidebar", "People", TID.simClock, TID.viewingAs, S.agentToggle]);
   });
 
-  await test.step("the persona menu is a radio menu grouped under the demo control label", async () => {
+  await test.step("the persona menu is a radio menu grouped under the Viewing as label, with no demo wording", async () => {
     await page.getByTestId(TID.viewingAs).click();
     const menu = page.getByRole("menu");
-    await expect(menu).toContainText("Viewing as (demo control)");
-    await expect(menu.getByRole("menuitemradio")).toHaveCount(4);   // Dana, Theo and Sam, then Imani under Managers
+    await expect(menu).toContainText("Viewing as");
+    await expect(menu).toContainText("Reset workspace data");
+    await expect(menu).not.toContainText(/demo/i);
+    await expect(menu.getByRole("menuitemradio")).toHaveCount(4);   // Vic, Theo and Sam, then Imani under Managers
     await expect(menu).toContainText("Managers");
-    await expect(menu.getByRole("menuitemradio", { name: /Dana/ })).toHaveAttribute("aria-checked", "true");
+    await expect(menu.getByRole("menuitemradio", { name: /Vic/ })).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
     await viewAs(page, "theo");
@@ -81,10 +83,12 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
     await viewAs(page, "dana");
   });
 
-  await test.step("the clock popover advances simulated time", async () => {
+  await test.step("the clock popover advances the clock", async () => {
+    await expect(page.getByTestId(TID.simClock)).toHaveAttribute("aria-label", /^Clock: Monday, October 26/);
     await page.getByTestId(TID.simClock).click();
     const clock = page.getByTestId(S.clockPopover);
-    await expect(clock).toContainText("Simulated time");
+    await expect(clock).toContainText("Clock");
+    await expect(clock).not.toContainText(/simulated/i);
     await expect(clock).toContainText(/Monday, October 26, 8:30\sAM PT/);
     await expect(clock).toContainText("Paused");
     await clock.getByRole("button", { name: "+1 hour" }).click();
@@ -118,7 +122,7 @@ test("GP19: the top bar fits, lines up and reads as one strip at four widths", a
 
   await test.step("detail breadcrumbs show names, not wrk_ or pay_ ids", async () => {
     const crumb = header(page).getByRole("navigation", { name: "Breadcrumb" });
-    await expect(crumb).toContainText("Dana Whitfield (demo)");
+    await expect(crumb).toContainText("Vic Akisole");
     await expect(crumb).not.toContainText("wrk_");
     await openApp(page, "/app/payroll/pay_2026_09_15");
     await expect(crumb).toContainText("Sep 1 to Sep 15");
@@ -148,10 +152,10 @@ test("GP19: the tiers, the keyboard and both drawers behave on every layout", as
   const toggleAgent = page.getByTestId(S.agentToggle);
   const panel = page.locator(`#${DOM.agentPanel}`);
 
-  await test.step("1440 docked is Full: 'Viewing as Dana', the long clock, and no close X on the docked panel", async () => {
+  await test.step("1440 docked is Full: 'Viewing as Vic', the long clock, and no close X on the docked panel", async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openApp(page, "/app/inbox");
-    await expect(persona).toHaveText(/Viewing as\s*Dana/, shown);
+    await expect(persona).toHaveText(/Viewing as\s*Vic/, shown);
     await expect(clock).toHaveText(/Mon, Oct 26, 8:30\sAM/, shown);
     await expect(page.getByTestId(TID.providerBadge)).toHaveCount(0);
     await expect(panel).toBeVisible();
@@ -161,7 +165,7 @@ test("GP19: the tiers, the keyboard and both drawers behave on every layout", as
   await test.step("1280 docked is Compact: the first name only and the short clock", async () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await expect(persona).not.toHaveText(/Viewing as/, shown);
-    await expect(persona).toHaveText(/Dana/, shown);
+    await expect(persona).toHaveText(/Vic/, shown);
     await expect(clock).toHaveText(/^Mon 8:30\sAM$/, shown);
   });
 
@@ -177,7 +181,7 @@ test("GP19: the tiers, the keyboard and both drawers behave on every layout", as
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
     await expect(persona).toBeFocused();
-    await expect(persona).toHaveAttribute("aria-label", /Dana Whitfield/);
+    await expect(persona).toHaveAttribute("aria-label", /Vic Akisole/);
   });
 
   await test.step("keyboard: Enter opens the clock popover and Esc returns focus to the clock", async () => {

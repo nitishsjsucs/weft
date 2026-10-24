@@ -131,7 +131,7 @@ export function PayrollReview({ id }: { id: string }) {
           </div>
         }
       >
-        <p className="text-2">Submitting sends a bank batch to the simulated ACH bank, settling on payday at 06:00 PT. The action is recorded in the audit log.</p>
+        <p className="text-2">Submitting sends an ACH batch to the bank, settling on payday at 06:00 PT. The action is recorded in the audit log.</p>
         {blocked ? (
           <label className="mt-4 flex items-start gap-2 rounded-lg bg-amber-3 px-3 py-2 text-[13px] text-amber-11">
             <input type="checkbox" className="mt-0.5" checked={excludeBlocked} onChange={(e) => setExcludeBlocked(e.target.checked)} />

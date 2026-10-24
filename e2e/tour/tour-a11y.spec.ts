@@ -26,7 +26,7 @@ test("reduced motion: no ring pulse, no card animation, the prompt appears at on
 test("screen readers: the card is a named dialog with a progressbar and named buttons", async ({ page, world }) => {
   void world;
   await startTour(page, "env-pill");
-  const dialog = page.getByRole("dialog", { name: "Your demo controls" });
+  const dialog = page.getByRole("dialog", { name: "Your controls" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "2");
   for (const b of await dialog.getByRole("button").all()) expect((await b.getAttribute("aria-label")) ?? (await b.innerText()).trim()).not.toBe("");

@@ -42,7 +42,7 @@ const RULE_LABEL: Record<string, string> = {
   INSUFFICIENT_BALANCE: "Balance too low", WAITING_PERIOD: "Waiting period", USE_CAP: "Over the use cap", INCREMENT: "Below the minimum",
   COVERAGE_CONFLICT: "Coverage", OVERLAPS_PAYROLL_DEADLINE: "Payroll deadline", INCLUDES_HOLIDAY: "Includes holidays", SHORT_NOTICE: "Short notice",
 };
-const PRINCIPAL_NAMES: Record<string, string> = { ...Object.fromEntries(PRINCIPALS.map((p) => [p.id, p.name])), usr_imani: "Imani Ferreira (demo)" };
+const PRINCIPAL_NAMES: Record<string, string> = { ...Object.fromEntries(PRINCIPALS.map((p) => [p.id, p.name])), usr_imani: "Imani Ferreira" };
 /** The People admin and HR managers decide anyone's request; the routed approver decides their own (the server re-checks both). */
 const DECIDER_ROLES = new Set(["admin", "hr_manager"]);
 const SOURCE_NAMES: Record<string, string> = { workday: "Workday" };
@@ -78,7 +78,7 @@ function RequestCard({ r, viewer, onDone, today }: { r: TimeOffRequestRow; viewe
         <span className="text-[13px] tabular-nums">{range(r)}</span>
         <span className="text-1 tabular-nums text-gray-11">{hrs(r.requestedMinutes)}</span>
         <span className="ml-auto flex items-center gap-1.5">
-          {external ? <Badge tone="outline" data-testid={TID.source(r.id)} title="Read-only in Weft: change it where it lives and the next sync updates it">Managed in {external}{r.source === "workday" ? " (simulated)" : ""}</Badge> : null}
+          {external ? <Badge tone="outline" data-testid={TID.source(r.id)} title="Read-only in Weft: change it where it lives and the next sync updates it">Managed in {external}</Badge> : null}
           {/* An approved day that has passed reads "Taken" like the rest of the history; the payroll that processes
               its period records it (the stored status changes then). */}
           {r.status === "approved" && today && r.endAt < today

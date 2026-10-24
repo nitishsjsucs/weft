@@ -1,5 +1,5 @@
-// The Inbox card says who proposed a change: the agent, a routine or a named person (Dana's off-cycle bonus was
-// labeled "Agent's note" although she wrote the reason herself). Rendered to static markup, so no DOM is needed.
+// The Inbox card says who proposed a change: the agent, a routine or a named person (Vic's off-cycle bonus was
+// labeled "Agent's note" although they wrote the reason themselves). Rendered to static markup, so no DOM is needed.
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Proposal } from "@weft/contracts";
@@ -44,7 +44,7 @@ describe("proposerOf", () => {
 describe("ProposalCard proposer labels", () => {
   it("a person's off-cycle reason is that person's note, never the agent's, and the card names who proposed it", () => {
     const t = text(card({}));
-    expect(DANA).toContain("Dana");
+    expect(DANA).toContain("Vic");
     expect(t).toContain(`Note from ${DANA} bonus`);
     expect(t).not.toMatch(/agent's note|note from the agent/i);
     expect(t).toContain(`Proposed by ${DANA}`);

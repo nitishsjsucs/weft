@@ -1,7 +1,7 @@
 // GP11. Benefits reconciliation and contractor payouts (docs/wave2.md). Owner of the spec: w2-benefits-contractors.
-// Dana runs reconciliation for October on the Benefits screen and sees exactly the three planted findings with the
-// billed, expected and deducted amounts the API reports; she disputes the missing dependent finding; the Open
-// enrollment tab lists who still has to choose; on Contractors she pays the three contractors and, as the sim clock
+// Vic runs reconciliation for October on the Benefits screen and sees exactly the three planted findings with the
+// billed, expected and deducted amounts the API reports; they dispute the missing dependent finding; the Open
+// enrollment tab lists who still has to choose; on Contractors they pay the three contractors and, as the sim clock
 // moves two business days, the rail status goes from sent to delivered.
 import { W2_BENEFITS_TID as BT, type ContractorPayout, type ReconFinding } from "../packages/contracts/src/index";
 import { eventually, expect, openApp, SIM_STEP, test, tid } from "./fixtures";

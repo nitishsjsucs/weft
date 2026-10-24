@@ -49,7 +49,7 @@ function OfferForm() {
         <L label="Start date"><input required type="date" data-testid={T.offerStart} className={field} value={f.startDate} onChange={set("startDate")} /></L>
         <div className="flex items-center gap-3 tablet:col-span-2">
           <Button type="submit" variant="primary" disabled={save.pending} data-testid={T.offerSaveDraft}>Save draft</Button>
-          {save.error ? <span role="alert" className="text-1 text-red-11">{errorText(save.error)}</span> : saved ? <span className="text-1 text-gray-11">Draft saved for {saved} (demo). The manager defaults to the department lead.</span> : <span className="text-1 text-gray-10">Drafts are not sent until you press Send.</span>}
+          {save.error ? <span role="alert" className="text-1 text-red-11">{errorText(save.error)}</span> : saved ? <span className="text-1 text-gray-11">Draft saved for {saved}. The manager defaults to the department lead.</span> : <span className="text-1 text-gray-10">Drafts are not sent until you press Send.</span>}
         </div>
       </form>
     </Card>
@@ -77,7 +77,7 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
   return (
     <li data-testid={T.offerRow} data-tour="hiring-offer" data-offer={o.id} data-status={o.status} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
       <div className="min-w-[200px] flex-1">
-        <div className="font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
+        <div className="font-medium">{o.candidateFirst} {o.candidateLast}</div>
         <div className="text-gray-10">{o.title} · {o.workState}{o.baseCents === null ? "" : ` · ${formatCents(o.baseCents)}`} · starts {fmtDate(o.startDate)}{o.expiresOn ? ` · open until ${fmtDate(o.expiresOn)}` : ""}</div>
       </div>
       <Badge data-testid={T.offerStatus} data-status={o.status} tone={STATUS_TONE[o.status] ?? "gray"} size="md">{STATUS_LABEL[o.status] ?? o.status}</Badge>
@@ -116,8 +116,8 @@ export function HiringView() {
           </Card>
         </div>
         <Card className="h-fit p-4" data-testid={T.outbox} data-tour="hiring-outbox" data-count={inbox.length}>
-          <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Email simulator outbox</h2>
-          <p className="mb-3 text-1 text-gray-10">Simulated mail to *.example addresses. Nothing leaves this machine.</p>
+          <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Email outbox</h2>
+          <p className="mb-3 text-1 text-gray-10">Mail to *.example addresses. Nothing leaves this machine.</p>
           {inbox.length === 0 ? <p className="text-[13px] text-gray-10">No mail yet.</p> : (
             <ul className="flex flex-col gap-3">
               {inbox.map((m) => {

@@ -62,11 +62,6 @@ function wordsOnly(text: string): string {
 function dashes(text: string): string {
   return text.replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, "$1 to $2").replace(/\s*[\u2013\u2014]\s*/g, ", ");
 }
-/** "Ruth Okoro's (demo) vacation" keeps the name of record whole: "Ruth Okoro (demo)'s vacation". */
-function possessive(text: string): string {
-  return text.replace(/\b([A-Z][\w-]*(?: [A-Z][\w-]*){0,3})([\u2019'])s \(demo\)/g, "$1 (demo)$2s");
-}
-
 /** Leftover pointers once the ids are chips: "Source: [1]." keeps the chip; "Source: ." goes. */
 function tidy(text: string): string {
   return text
@@ -105,7 +100,7 @@ const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
 /** The answer as blocks of spans; `cites` lists the cited ids in chip order (chip n is cites[n - 1]). */
 export function parseAnswer(raw: string): ParsedAnswer {
   const { text, cites } = extractCites(raw.replace(/\r\n/g, "\n"));
-  const lines = tidy(possessive(dashes(wordsOnly(text)))).split("\n").map((l) => l.replace(/^\s{0,3}#{1,6}\s+/, "").trimEnd());
+  const lines = tidy(dashes(wordsOnly(text))).split("\n").map((l) => l.replace(/^\s{0,3}#{1,6}\s+/, "").trimEnd());
   const blocks: AnswerBlock[] = [];
   for (const l of lines) {
     if (!l.trim()) { blocks.push({ kind: "p", items: [] }); continue; }

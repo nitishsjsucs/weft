@@ -8,7 +8,7 @@ import { HOSTED } from "@/lib/hosted/flags";
 
 export const metadata: Metadata = {
   title: "Weft",
-  description: "Open-source, self-hostable, AI-native payroll and HR. Synthetic data only.",
+  description: "Open-source, self-hostable, AI-native payroll and HR.",
 };
 
 // Hosted build only: zod builds its object parsers with `new Function` when it may, and probes for that with a caught

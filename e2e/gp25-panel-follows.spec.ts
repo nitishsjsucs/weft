@@ -33,7 +33,7 @@ test("GP25: the panel follows the notice, the accepted offer and the expense rev
     await openApp(page, "/app/people");
     await page.getByRole("tab", { name: /offers/i }).click();
     await page.getByTestId(tid.offerAccept(SEED.noorOffer)).click();
-    const feed = run(page, /New hire readiness: Noor Castellanos \(demo\)/);
+    const feed = run(page, /New hire readiness: Noor Castellanos/);
     await expect(feed).toBeVisible();
     await expect(feed).not.toHaveAttribute("data-status", "starting");
   });

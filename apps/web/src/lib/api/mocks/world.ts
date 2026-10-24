@@ -1,14 +1,14 @@
 // Contract-typed fixture world for building the app before merge 1 (NEXT_PUBLIC_WEFT_MOCKS=1). Owner: t5-app.
-// Every name is fictional and ends with "(demo)"; every domain is *.example. Money is integer cents.
+// Every name is fictional and every domain is *.example. Money is integer cents.
 import { buildActions, buildPeople, buildRoutines, buildSim, buildTax } from "./world2";
 import { formatCents, money, TOTALS_FIELDS, type AgentRunRow, type Paycheck, type PayrollRun, type Proposal, type RunStepRow, type Totals, type Worker, type Flag, type TaxLine } from "@weft/contracts";
 
 export const SEED_NOW = "2026-10-26T15:30:00.000Z";
 export const PRINCIPALS = [
-  { id: "usr_dana", name: "Dana Whitfield (demo)", title: "Head of People", role: "admin" },
-  { id: "usr_theo", name: "Theo Marsh (demo)", title: "Payroll Lead", role: "payroll_admin" },
-  { id: "usr_sam", name: "Sam Okafor (demo)", title: "HR Generalist", role: "hr_manager" },
-  { id: "usr_imani", name: "Imani Ferreira (demo)", title: "Hardware Lead", role: "manager" },
+  { id: "usr_dana", name: "Vic Akisole", title: "Head of People", role: "admin" },
+  { id: "usr_theo", name: "Theo Marsh", title: "Payroll Lead", role: "payroll_admin" },
+  { id: "usr_sam", name: "Sam Okafor", title: "HR Generalist", role: "hr_manager" },
+  { id: "usr_imani", name: "Imani Ferreira", title: "Hardware Lead", role: "manager" },
 ] as const;
 
 const FIRST = ["Avery", "Bram", "Celia", "Dario", "Esme", "Farid", "Greta", "Hollis", "Ines", "Jonah", "Kaia", "Lionel", "Mira", "Nils", "Odette", "Pavel", "Quinn", "Rosa", "Silas", "Tamsin", "Ulric", "Vera", "Wes", "Xenia", "Yusuf", "Zora"];
@@ -38,7 +38,7 @@ export function buildWorkers(): MockWorker[] {
       const hourlyCents = hourly ? 2_800 + ((n * 137) % 800) : null;
       out.push({
         id: `wrk_${pad(n)}`, employeeNumber: `EMP-${pad(n)}`, type: "employee", workerType: "us_w2", status: "active",
-        firstName: first, lastName: last, displayName: `${first} ${last} (demo)`, workEmail: `${first.toLowerCase()}.${last.toLowerCase()}@larkspur.example`,
+        firstName: first, lastName: last, displayName: `${first} ${last}`, workEmail: `${first.toLowerCase()}.${last.toLowerCase()}@larkspur.example`,
         title: hourly ? "Operations Technician" : TITLES[n % TITLES.length]!, departmentId: hourly ? "dpt_operations" : DEPTS[n % DEPTS.length]!,
         managerId: null, workplaceId: wkp, workState: state, country: "US", currency: "USD", timezone: state === "NY" ? "America/New_York" : state === "TX" ? "America/Chicago" : "America/Los_Angeles",
         startDate: "2024-03-04", endDate: null, ssnMasked: `***-**-${pad((n * 4721) % 10000)}`, payScheduleId: "ps_us_semimonthly",
@@ -48,16 +48,16 @@ export function buildWorkers(): MockWorker[] {
   }
   // Named fixtures matching the seed's planted anomalies (SPEC 5.2, 5.5).
   const set = (id: string, patch: Partial<MockWorker>) => Object.assign(out.find((w) => w.id === id)!, patch);
-  set("wrk_0001", { firstName: "Dana", lastName: "Whitfield", displayName: "Dana Whitfield (demo)", title: "Head of People", departmentId: "dpt_people", workEmail: "dana.whitfield@larkspur.example" });
-  set("wrk_0002", { firstName: "Imani", lastName: "Ferreira", displayName: "Imani Ferreira (demo)", title: "Hardware Lead", departmentId: "dpt_hardware", workEmail: "imani.ferreira@larkspur.example" });
+  set("wrk_0001", { firstName: "Vic", lastName: "Akisole", displayName: "Vic Akisole", title: "Head of People", departmentId: "dpt_people", workEmail: "vic.akisole@larkspur.example" });
+  set("wrk_0002", { firstName: "Imani", lastName: "Ferreira", displayName: "Imani Ferreira", title: "Hardware Lead", departmentId: "dpt_hardware", workEmail: "imani.ferreira@larkspur.example" });
   set("wrk_0020", { startDate: "2026-10-01", annualCents: 9_600_000 });
   set("wrk_0021", { startDate: "2026-10-01", annualCents: 8_800_000 });
-  set("wrk_0022", { firstName: "Rowan", lastName: "Achterberg", displayName: "Rowan Achterberg (demo)", startDate: "2026-10-19", annualCents: 10_400_000, status: "active", title: "Controls Engineer" });
-  set("wrk_0023", { firstName: "Theo", lastName: "Marsh", displayName: "Theo Marsh (demo)", title: "Payroll Lead", departmentId: "dpt_finance", workEmail: "theo.marsh@larkspur.example" });
-  set("wrk_0024", { firstName: "Mireille", lastName: "Osterhout", displayName: "Mireille Osterhout (demo)", title: "Senior Product Designer", annualCents: 14_500_000 });
-  set("wrk_0025", { firstName: "Sam", lastName: "Okafor", displayName: "Sam Okafor (demo)", title: "HR Generalist", departmentId: "dpt_people", workEmail: "sam.okafor@larkspur.example" });
-  set("wrk_0036", { firstName: "Callum", lastName: "Vasquez-Reid", displayName: "Callum Vasquez-Reid (demo)", status: "offboarding", endDate: "2026-10-23" });
-  set("wrk_0048", { firstName: "Ottilie", lastName: "Brannagh", displayName: "Ottilie Brannagh (demo)", hoursX100: 12_000 });
+  set("wrk_0022", { firstName: "Rowan", lastName: "Achterberg", displayName: "Rowan Achterberg", startDate: "2026-10-19", annualCents: 10_400_000, status: "active", title: "Controls Engineer" });
+  set("wrk_0023", { firstName: "Theo", lastName: "Marsh", displayName: "Theo Marsh", title: "Payroll Lead", departmentId: "dpt_finance", workEmail: "theo.marsh@larkspur.example" });
+  set("wrk_0024", { firstName: "Mireille", lastName: "Osterhout", displayName: "Mireille Osterhout", title: "Senior Product Designer", annualCents: 14_500_000 });
+  set("wrk_0025", { firstName: "Sam", lastName: "Okafor", displayName: "Sam Okafor", title: "HR Generalist", departmentId: "dpt_people", workEmail: "sam.okafor@larkspur.example" });
+  set("wrk_0036", { firstName: "Callum", lastName: "Vasquez-Reid", displayName: "Callum Vasquez-Reid", status: "offboarding", endDate: "2026-10-23" });
+  set("wrk_0048", { firstName: "Ottilie", lastName: "Brannagh", displayName: "Ottilie Brannagh", hoursX100: 12_000 });
   return out;
 }
 
@@ -106,7 +106,7 @@ function flagsFor(w: MockWorker): Flag[] {
 }
 
 const EXPLANATIONS: Record<string, { text: string; source: "agent" | "template" }> = {
-  wrk_0024: { text: "The 18% raise Dana entered on Oct 9 takes effect Oct 16, so this paycheck is the first at the new rate. Gross moves from $6,041.67 to $7,129.17, which matches the new annual rate divided by 24.", source: "agent" },
+  wrk_0024: { text: "The 18% raise Vic entered on Oct 9 takes effect Oct 16, so this paycheck is the first at the new rate. Gross moves from $6,041.67 to $7,129.17, which matches the new annual rate divided by 24.", source: "agent" },
   wrk_0048: { text: "Logged 120.00 hours against an 86.67 hour average. Overtime above 86.67 hours is paid at 1.5x, which explains the gross change.", source: "agent" },
   wrk_0022: { text: "New hire starting Oct 19 with no bank account on file. Exclude from this run or collect direct deposit details before the deadline.", source: "template" },
   wrk_0036: { text: "Last day is Oct 23, so the salary is prorated by working days for the period.", source: "agent" },
@@ -191,10 +191,10 @@ export function buildProposals(): Proposal[] {
     {
       ...base, id: "prp_0002", kind: "action", command: "notices.send_response", args: { notice_id: "ntc_0002" },
       subjectRef: "ntc_0002", risk: "R4", moneyCents: null, reversible: false,
-      headline: "File a response with CA EDD (sim) for notice DE 2088 requesting the 2026 UI credit",
+      headline: "File a response with CA EDD for notice DE 2088 requesting the 2026 UI credit",
       diff: [{ label: "Notice status", before: "proposed", after: "resolved" }],
-      content: [{ label: "Response to CA EDD (sim)", text: "Account 000-4817-2\nRe: DE 2088, 2026 contribution rates\n\nWe have updated our UI rate to 1.5% effective 2026-01-01 and request a credit of $2,926.12 for contributions paid at 3.4%.\n\n<Larkspur Robotics, Inc. (demo)> & payroll team" }],
-      evidence: [{ label: "CA EDD DE 2088 notice", ref: "ntc_0002" }], agentNote: "Template reply. Filing is not reversible once the agency simulator accepts it.",
+      content: [{ label: "Response to CA EDD", text: "Account 000-4817-2\nRe: DE 2088, 2026 contribution rates\n\nWe have updated our UI rate to 1.5% effective 2026-01-01 and request a credit of $2,926.12 for contributions paid at 3.4%.\n\n<Larkspur Robotics, Inc.> & payroll team" }],
+      evidence: [{ label: "CA EDD DE 2088 notice", ref: "ntc_0002" }], agentNote: "Template reply. Filing is not reversible once the agency accepts it.",
       taintedBy: null, proposerRunId: "run_0001", routineRunId: "rtr_0001", createdAt: "2026-10-26T15:31:12.000Z", expiresAt: "2026-10-29T15:31:12.000Z", status: "pending",
     },
     {
@@ -212,7 +212,7 @@ export function buildProposals(): Proposal[] {
     },
     {
       ...base, id: "prp_0000", kind: "action", command: "people.update_pay_rate", args: null, subjectRef: "wrk_0024", risk: "R3", moneyCents: 2_610_000, reversible: true,
-      headline: "Raise Mireille Osterhout (demo) by 18% effective Oct 16", diff: [{ label: "Annual salary", before: "$145,000.00", after: "$171,100.00" }], content: [], evidence: [],
+      headline: "Raise Mireille Osterhout by 18% effective Oct 16", diff: [{ label: "Annual salary", before: "$145,000.00", after: "$171,100.00" }], content: [], evidence: [],
       agentNote: null, taintedBy: null, proposerRunId: null, routineRunId: null, createdAt: "2026-10-09T17:00:00.000Z", expiresAt: "2026-10-12T17:00:00.000Z",
       status: "executed", decidedBy: "usr_dana", decidedAt: "2026-10-09T17:05:00.000Z", decisionCode: "approved", decisionNote: "Promotion cycle", executedActionSeq: 3,
     },
@@ -232,7 +232,7 @@ export function buildRuns(): { run: AgentRunRow; steps: RunStepRow[] }[] {
     step(4, "tool_call", "dispatch", "tax.rate_change_impact", "ok", { summary: "Checked 22 CA employees" }, null, 0, 0),
     step(5, "model_call", "model", null, "ok", { summary: "Drafted 2 proposals" }, usage(3_020, 2_304, 260), 573, 1_910),
     step(6, "tool_call", "dispatch", "tax.update_rate", "pending:prp_0001", { summary: "Proposed CA UI rate 3.4% to 1.5%" }, null, 0, 0),
-    step(7, "tool_call", "dispatch", "notices.send_response", "pending:prp_0002", { summary: "Proposed a response to CA EDD (sim)" }, null, 0, 0),
+    step(7, "tool_call", "dispatch", "notices.send_response", "pending:prp_0002", { summary: "Proposed a response to CA EDD" }, null, 0, 0),
     step(8, "verify", "post", null, "ok", { summary: "Checklist 3 of 3" }, null, 0, 0),
   ];
   const tok = steps.reduce((a, s) => ({ input: a.input + (s.usage?.input ?? 0), cached: a.cached + (s.usage?.cached ?? 0), cacheWrite: 0, output: a.output + (s.usage?.output ?? 0), reasoning: 0 }), usage(0, 0, 0));

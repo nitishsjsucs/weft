@@ -1,6 +1,6 @@
 "use client";
-// "Viewing as" (a demo control) as the last segment of the environment pill: a Radix DropdownMenu with one radio item
-// per demo human, grouped by role, then the new-hire portal personas (research/wave3/topbar-design.md 5.6, D7).
+// "Viewing as" as the last segment of the environment pill: a Radix DropdownMenu with one radio item per seeded
+// person who can sign in, grouped by role, then the new-hire portal personas (research/wave3/topbar-design.md 5.6, D7).
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -20,19 +20,10 @@ function usePortalPersonas(): { id: string; name: string }[] {
   const rows = (offers.data?.data ?? []) as unknown as W2OnboardingOfferDetail[];
   return rows
     .filter((o) => o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted"))
-    .map((o) => ({ id: o.personaPrincipalId!, name: demoName(`${o.candidateFirst} ${o.candidateLast}`) }));
+    .map((o) => ({ id: o.personaPrincipalId!, name: `${o.candidateFirst} ${o.candidateLast}`.trim() }));
 }
 
-/**
- * A new hire's name as every other list shows it (the people list, hiring, the permissions matrix): the offer holds
- * the candidate's bare name, and every demo person reads "(demo)" after it.
- */
-export function demoName(name: string): string {
-  const n = name.trim();
-  return /\(demo\)$/.test(n) ? n : `${n} (demo)`;
-}
-
-/** The 20 px amber initials avatar: amber marks a demo affordance, as the mock-data banner does. */
+/** The 20 px amber initials avatar: amber marks a dev-auth control, as the mock-data banner does. */
 export function PersonaAvatar({ name, className }: { name: string; className?: string }) {
   return (
     <span aria-hidden data-avatar="" className={cn("grid size-5 shrink-0 place-items-center rounded-full bg-[var(--demo-bg)] text-[10px] leading-none font-semibold text-[var(--demo-fg)]", className)}>
@@ -63,7 +54,7 @@ export function PersonaMenu() {
         <DropdownMenuTrigger
           data-testid={TID.viewingAs}
           data-seg=""
-          aria-label={`Viewing as ${current.name}. Demo control: switches the signed-in human, dev auth only`}
+          aria-label={`Viewing as ${current.name}. Switches the signed-in person, dev auth only`}
           className={cn(segmentClass, "w-7 justify-center px-0 @min-[480px]:w-auto @min-[480px]:justify-start @min-[480px]:pr-2 @min-[480px]:pl-1")}
         >
           <PersonaAvatar name={current.name} />
@@ -72,7 +63,7 @@ export function PersonaMenu() {
           <ChevronDown aria-hidden strokeWidth={1.5} className="hidden size-3.5 text-gray-10 @min-[480px]:block" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[min(340px,calc(100vw-24px))]">
-          <DropdownMenuLabel>Viewing as (demo control)</DropdownMenuLabel>
+          <DropdownMenuLabel>Viewing as</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={current.id} onValueChange={(v) => setPrincipal(v)}>
             {groups.map((g) => (
               <DropdownMenuGroup key={g.group} aria-label={g.group}>
@@ -108,13 +99,13 @@ export function PersonaMenu() {
           ) : null}
           <DropdownMenuSeparator />
           <p className="px-2 pt-1 pb-1.5 text-1 text-gray-11">
-            Switches the signed-in human. Dev auth only, and self-approval checks treat each persona as a different person on purpose.
+            Switches the signed-in person. Dev auth only, and self-approval checks treat each persona as a different person on purpose.
           </p>
           <DropdownMenuSeparator />
-          <DropdownMenuGroup aria-label="Demo">
-            <DropdownMenuLabel>Demo</DropdownMenuLabel>
+          <DropdownMenuGroup aria-label="Workspace">
+            <DropdownMenuLabel>Workspace</DropdownMenuLabel>
             <DropdownMenuItem data-tour="tour-menu-start" onSelect={() => tour.start()}>Take the tour</DropdownMenuItem>
-            <DropdownMenuItem data-tour="tour-menu-reset" onSelect={() => tour.openReset()}>Reset demo data…</DropdownMenuItem>
+            <DropdownMenuItem data-tour="tour-menu-reset" onSelect={() => tour.openReset()}>Reset workspace data…</DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -83,12 +83,12 @@ function OfferCard({ o }: { o: Offer }) {
     setOut(r);
     if (!r || !r.ok) return;
     const runId = await newRoutineAgentRun(before);
-    if (runId) agent.watch(runId, `New hire readiness: ${o.candidateFirst} ${o.candidateLast} (demo)`);
+    if (runId) agent.watch(runId, `New hire readiness: ${o.candidateFirst} ${o.candidateLast}`);
   };
   return (
     <Card className="flex flex-col gap-3 p-4 tablet:flex-row tablet:items-center">
       <div className="min-w-0 flex-1">
-        <div className="text-3 font-medium">{o.candidateFirst} {o.candidateLast} (demo)</div>
+        <div className="text-3 font-medium">{o.candidateFirst} {o.candidateLast}</div>
         <div className="text-[13px] text-gray-11">{o.title} · {deptName(o.departmentId)} · work state {o.workState}{base ? ` · ${base} a year` : ""} · starts {fmtDate(o.startDate, { month: "short", day: "numeric", year: "numeric" })}</div>
         {out && !out.ok ? <div role="alert" title={out.refusal.code} className="mt-1 text-1 text-red-11">{out.refusal.message}</div> : null}
         {accept.error ? <div role="alert" className="mt-1 text-1 text-red-11">{errorText(accept.error)}</div> : null}
@@ -97,9 +97,9 @@ function OfferCard({ o }: { o: Offer }) {
       <Badge tone={o.status === "accepted" ? "green" : o.status === "sent" ? "blue" : "gray"} size="md" data-status={o.status}>{o.status.charAt(0).toUpperCase() + o.status.slice(1)}</Badge>
       {o.status === "sent" && can("people", "edit") ? (
         <>
-          {/* The visible label is the accessible name (WCAG 2.5.3); the demo note is its description. */}
+          {/* The visible label is the accessible name (WCAG 2.5.3); the note is its description. */}
           <Button data-testid={tid.offerAccept(o.id)} variant="primary" size="sm" disabled={accept.pending} onClick={() => void onAccept()} aria-describedby={`offer-accept-note-${o.id}`}>Mark accepted</Button>
-          <span id={`offer-accept-note-${o.id}`} className="sr-only">Demo action: records the candidate's acceptance</span>
+          <span id={`offer-accept-note-${o.id}`} className="sr-only">Records the candidate's acceptance</span>
         </>
       ) : null}
     </Card>
@@ -114,7 +114,7 @@ export function PeopleView() {
   const err = workers.error ?? offers.error;
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title="People" subtitle="Everyone at Larkspur Robotics (demo). All people are synthetic." />
+      <PageHeader title="People" subtitle="Everyone at Larkspur Robotics." />
       {err ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(err)}</div> : null}
       <Tabs defaultValue="people">
         <TabsList>
@@ -137,7 +137,7 @@ export function PeopleView() {
 }
 
 const TASK_ORDER = ["sign_offer", "sign_confidentiality", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts", "device", "state_registration"];
-const TASK_LABEL: Record<string, string> = { sign_offer: "Sign offer", sign_confidentiality: "Sign confidentiality agreement", federal_w4: "Federal W-4", state_withholding: "State withholding", direct_deposit: "Direct deposit", i9_sim: "I-9 (simulated)", benefits_selection: "Benefits selection", it_accounts: "IT accounts", device: "Laptop", state_registration: "State tax registration" };
+const TASK_LABEL: Record<string, string> = { sign_offer: "Sign offer", sign_confidentiality: "Sign confidentiality agreement", federal_w4: "Federal W-4", state_withholding: "State withholding", direct_deposit: "Direct deposit", i9_sim: "Form I-9", benefits_selection: "Benefits selection", it_accounts: "IT accounts", device: "Laptop", state_registration: "State tax registration" };
 
 /** GET /v1/workers/:id returns a WorkerDetail (route table); the scaffold client types it as Worker, so both are read. */
 interface PayRate { id: string; kind: string; amount: Money; effectiveFrom: string; effectiveTo: string | null; createdActionSeq: number | null }
@@ -235,7 +235,7 @@ function ItTab({ id }: { id: string }) {
     <Card className="overflow-hidden">
       {rows.length === 0 ? <p className="p-4 text-[13px] text-gray-10">{acc.error ? errorText(acc.error) : acc.data ? "No accounts yet." : "Loading..."}</p> : (
         <Table className="text-[13px]">
-          <THead><TR><TH>System (simulated)</TH><TH>Handle</TH><TH>Groups</TH><TH>Status</TH></TR></THead>
+          <THead><TR><TH>System</TH><TH>Handle</TH><TH>Groups</TH><TH>Status</TH></TR></THead>
           <TBody>
             {rows.map((a) => (
               <TR key={a.id} data-testid={`it-account-${a.id}`}>
@@ -252,7 +252,7 @@ function ItTab({ id }: { id: string }) {
   );
 }
 
-const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace (sim)", chat: "Chat (sim)", github: "Code host (sim)" };
+const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace", chat: "Chat", github: "Code host" };
 /** Stored plan, tier and status codes as words ("hsa_cafeteria" is "HSA and cafeteria plan"). */
 const WORDS: Record<string, string> = { hsa_cafeteria: "HSA and cafeteria plan", fsa: "FSA", hsa: "HSA", employee_only: "Employee only", employee_spouse: "Employee and spouse", employee_children: "Employee and children" };
 const human = (s: string) => WORDS[s] ?? statusLabel(s);

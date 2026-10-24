@@ -64,7 +64,8 @@ test("GP16: an escalated notice shows the specialist hand-off and its evidence p
     await openApp(page, `/app/compliance?notice=${noticeId}`);
     const box = page.getByTestId(T.noticeEscalation);
     await expect(box).toBeVisible();
-    await expect(box).toContainText(/tax specialist \(simulated\)/i);
+    await expect(box).toContainText(/with the tax specialist/i);
+    await expect(box).not.toContainText(/simulated/i);
     await expect(box).toContainText(/a filing is missing/i);
     await expect(box).toContainText(noticeId);
     await expect(box).toContainText("parser extract");

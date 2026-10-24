@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { CalendarClock, FastForward, FlaskConical, Mail, MessageSquare, Zap } from "lucide-react";
-import { Badge, Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
+import { Button, Card, CardHeading, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { cn } from "@weft/ui";
 import { ApprovalCardW3, NoticeScenario, TID, tid, type ArmedFault, type ChatMessageDto, type ToolOutcome } from "@weft/contracts";
 import { client, errorText, invalidate, useGet, useMutation, useSimClock } from "@/lib/api/hooks";
@@ -236,15 +236,15 @@ export function SimulatorsView() {
 
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title={<span className="flex items-center gap-2">Simulators <Badge tone="outline" size="md">Simulated</Badge></span>} subtitle="Demo controls. Agencies, the ACH bank, the identity provider, devices and chat are simulators in this repo; nothing here reaches a real system." />
+      <PageHeader title="Simulators" subtitle="Deliver agency notices, move the clock, post to chat and inject faults." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
       {/* Two columns only when each half still holds a five-column table (about 1,100 px of content); else one. */}
       <div className="@container"><div className="grid grid-cols-1 gap-6 @min-[68rem]:grid-cols-2 [&>section]:min-w-0">
         <section>
-          <CardHeading icon={<CalendarClock />}>Sim clock</CardHeading>
+          <CardHeading icon={<CalendarClock />}>Clock</CardHeading>
           <Card className="p-4">
             <div className="text-6 font-semibold tabular" data-testid="sim-clock-now">{now ? fmtDateTime(now) : "..."}</div>
-            <div className="mt-1 text-1 text-gray-10">{clock.data ? (clock.data.rate === 0 ? "Paused" : `Rate ${clock.data.rate}x`) : "Rate -"} · cron, expiry and simulator delays all read this clock</div>
+            <div className="mt-1 text-1 text-gray-10">{clock.data ? (clock.data.rate === 0 ? "Paused" : `Rate ${clock.data.rate}x`) : "Rate -"} · cron, expiry and vendor delays all read this clock</div>
             <div className="mt-4 flex min-w-0 flex-wrap gap-2">
               <Button data-testid={tid.simAdvance("30m")} size="sm" disabled={advance.pending} onClick={() => void step({ by: "PT30M" })}><FastForward /> +30 min</Button>
               <Button data-testid={tid.simAdvance("1d")} size="sm" disabled={advance.pending} onClick={() => void step({ by: "P1D" })}><FastForward /> +1 day</Button>
@@ -301,7 +301,7 @@ export function SimulatorsView() {
           <CardHeading icon={<FlaskConical />}>Identity provider accounts</CardHeading>
           <Card className="overflow-hidden">
             {idpRows ? <SimTable kind="idpAccounts" testid="sim-idp-accounts" rows={idpRows} empty="No accounts." /> : (
-              <div data-testid="sim-idp-accounts" className="px-4 py-4"><div className="text-6 font-semibold tabular">{idpCount ?? "-"}</div><div className="text-1 text-gray-10">accounts in the simulated identity provider</div></div>
+              <div data-testid="sim-idp-accounts" className="px-4 py-4"><div className="text-6 font-semibold tabular">{idpCount ?? "-"}</div><div className="text-1 text-gray-10">accounts in the identity provider</div></div>
             )}
           </Card>
         </section>
@@ -315,7 +315,7 @@ export function SimulatorsView() {
         </section>
         <SimInboundControls />
         <section className="min-w-0 @min-[68rem]:col-span-2">
-          <CardHeading icon={<MessageSquare />}>Chat (simulated)</CardHeading>
+          <CardHeading icon={<MessageSquare />}>Chat</CardHeading>
           <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">{CHANNELS.map((c) => <ChatFeed key={c} channel={c} />)}</div>
         </section>
       </div></div>

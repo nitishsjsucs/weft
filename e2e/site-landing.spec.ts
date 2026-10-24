@@ -11,7 +11,10 @@ test.describe("landing page", () => {
     await expect(stats).toContainText("real agencies contacted");
     await expect(stats).toContainText("0");
     await expect(page.locator("footer")).toContainText("Weft contributors, Apache-2.0");
-    await expect(page.getByLabel("Simulators")).toContainText("CA EDD (sim)");
+    await expect(page.getByLabel("Simulators")).toContainText("CA EDD");
+    // One plain statement that the company is fictional and the outside world simulated, and no "(demo)" markers.
+    await expect(page.getByTestId("marketing-fictional")).toHaveText("Larkspur Robotics and everyone shown are fictional; every agency, bank and vendor is simulated.");
+    await expect(page.locator("body")).not.toContainText(/\((demo|sim)\)|fictional company|demo database/i);
     await expect(page.locator('img[src^="http"], [style*="url(http"]')).toHaveCount(0);   // no hotlinked art
   });
 
@@ -24,7 +27,7 @@ test.describe("landing page", () => {
     await expect(stats).toHaveAttribute("data-source", live ? "live" : "fallback");
     const expected = live ? [body!.employees, body!.simulatedAgencies] : [48, 7];
     for (const v of expected) await expect(stats).toContainText(String(v));
-    await expect(page.locator("#numbers")).toContainText(live ? "Counted from the demo database as it runs." : "the seed's numbers");
+    await expect(page.locator("#numbers")).toContainText(live ? "Counted from the database as it runs." : "the seed's numbers");
   });
 
   test("has no horizontal scroll at 390 px", async ({ page }) => {
@@ -32,6 +35,6 @@ test.describe("landing page", () => {
     await page.goto("/");
     const { scrollWidth, clientWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
     expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
-    await expect(page.getByRole("link", { name: /open the demo/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /open the app/i }).first()).toBeVisible();
   });
 });

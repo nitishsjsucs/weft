@@ -1,7 +1,6 @@
 "use client";
 // App sidebar (SPEC 11.3; research/wave3/topbar-design.md D1 and 7.2 to 7.4): a two-line workspace row, search with a
-// New agent thread button beside it, then the nav. One pill style only (the Inbox count); "Simulated" is quiet
-// trailing text.
+// New agent thread button beside it, then the nav. One pill style only (the Inbox count).
 import Link from "next/link";
 import { useAppPathname } from "@/lib/pathname";
 import { useEffect, useState } from "react";
@@ -15,8 +14,6 @@ import { useCan } from "@/lib/api/access";
 import { useAgent } from "../agent-context";
 import { WeftMark } from "../weft-mark";
 import { AGENT_PAGE_NEW_CHAT_EVENT, AGENT_PAGE_PATH } from "../../../../../../packages/contracts/src/ext/agent-page";
-
-const TRAILING: Record<"simulated", string> = { simulated: "Simulated" };
 
 function Item({ item, active, pending, onNavigate }: { item: NavItem; active: boolean; pending: number | null; onNavigate?: () => void }) {
   const Icon = item.icon;
@@ -36,7 +33,6 @@ function Item({ item, active, pending, onNavigate }: { item: NavItem; active: bo
       {item.badge === "inbox" && pending ? (
         <span aria-label={`${pending} pending`} className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-accent-9 px-1.5 text-[11px] leading-none font-semibold tabular text-white">{pending}</span>
       ) : null}
-      {item.badge === "simulated" ? <span className="shrink-0 text-1 font-normal text-gray-9">{TRAILING[item.badge]}</span> : null}
     </Link>
   );
 }
@@ -100,7 +96,7 @@ export function Sidebar({ id, onNavigate, onOpenSearch }: { id?: string; onNavig
         <span className="grid size-6 shrink-0 place-items-center rounded-md bg-gray-12 text-white"><WeftMark className="size-4" /></span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-2 leading-5 font-medium">Larkspur Robotics</span>
-          <span className="truncate text-1 text-gray-11">Demo workspace, Admin</span>
+          <span className="truncate text-1 text-gray-11">Admin</span>
         </span>
       </div>
       <div className="mt-1 mb-2"><SearchRow onOpenSearch={onOpenSearch} onNavigate={onNavigate} /></div>

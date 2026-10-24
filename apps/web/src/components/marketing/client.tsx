@@ -8,7 +8,7 @@ const FMT = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
 });
 
-/** The demo company's simulated clock, ticking at the API's clock rate (0 means frozen, as in E2E). */
+/** The company's simulated clock, ticking at the API's clock rate (0 means frozen, as in E2E). */
 export function SimClockTicker({ now, rate }: { now: string; rate: number }) {
   const [t, setT] = useState(() => Date.parse(now));
   useEffect(() => {

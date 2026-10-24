@@ -1,6 +1,6 @@
 "use client";
 // Breadcrumb titles for detail pages (research/wave3/topbar-design.md 7.1). A detail view renders <CrumbLabel> with
-// the same text as its H1, and the bar shows "People > Dana Whitfield (demo)" instead of the raw "wrk_0001". While
+// the same text as its H1, and the bar shows "People > Vic Akisole" instead of the raw "wrk_0001". While
 // the record loads the bar shows the id in a small mono face.
 import { createContext, useContext, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useAppPathname } from "@/lib/pathname";

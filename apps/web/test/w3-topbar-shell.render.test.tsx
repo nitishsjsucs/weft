@@ -1,7 +1,7 @@
 // The top bar, sidebar head and agent panel header as they render (research/wave3/topbar-design.md 5.3 to 5.8 and 7;
 // owner w3-topbar-shell). A static render with the data hooks stubbed: the scripted provider, the seeded clock
-// (Monday 8:30 AM PT, paused) and Dana as the signed-in human. The e2e spec (GP19) measures the same bar in a browser.
-// The pill holds the simulated clock and Viewing as; the model segment (TID.providerBadge) is no longer in the bar.
+// (Monday 8:30 AM PT, paused) and Vic as the signed-in human. The e2e spec (GP19) measures the same bar in a browser.
+// The pill holds the clock and Viewing as; the model segment (TID.providerBadge) is no longer in the bar.
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -45,7 +45,7 @@ describe("the top bar", () => {
     const html = bar();
     const segs = tagsWith(html, "data-seg");
     expect(segs.map((t) => attrOf(t, "data-testid"))).toEqual([TID.simClock, TID.viewingAs]);
-    expect(html).toContain(`role="group" aria-label="Demo environment" data-testid="${W3_SHELL_TID.envPill}"`);
+    expect(html).toContain(`role="group" aria-label="Environment" data-testid="${W3_SHELL_TID.envPill}"`);
     // Exactly one divider, hidden from screen readers.
     expect(tagsWith(html, "data-divider").every((t) => attrOf(t, "aria-hidden") === "true")).toBe(true);
     expect(tagsWith(html, "data-divider")).toHaveLength(1);
@@ -97,8 +97,8 @@ describe("the top bar", () => {
   it("carries the full meaning in accessible names and has no title tooltips", () => {
     const html = bar();
     const label = (testid: string) => attrOf(tagsWith(html, "data-testid").find((t) => attrOf(t, "data-testid") === testid)!, "aria-label");
-    expect(label(TID.simClock)?.replace(/[  ]/g, " ")).toBe("Simulated time: Monday, October 26, 8:30 AM Pacific");
-    expect(label(TID.viewingAs)).toBe("Viewing as Dana Whitfield (demo). Demo control: switches the signed-in human, dev auth only");
+    expect(label(TID.simClock)?.replace(/[  ]/g, " ")).toBe("Clock: Monday, October 26, 8:30 AM Pacific");
+    expect(label(TID.viewingAs)).toBe("Viewing as Vic Akisole. Switches the signed-in person, dev auth only");
     expect(html).not.toMatch(/\stitle="/);
     // One polite live region, for persona switches.
     expect(html.match(/aria-live="polite"/g)).toHaveLength(1);
@@ -133,7 +133,8 @@ describe("the sidebar head", () => {
   it("has the sidebar id, a two-line workspace row and search with a New agent thread button", () => {
     expect(html).toContain(`id="${W3_TOPBAR_SHELL_DOM.sidebar}"`);
     expect(html).toContain(">Larkspur Robotics<");
-    expect(html).toContain(">Demo workspace, Admin<");
+    expect(html).toContain(">Admin<");
+    expect(html).not.toContain("Demo workspace");
     expect(html).toContain(`data-testid="${W3_SHELL_TID.sidebarSearch}"`);
     expect(html).toContain(`data-testid="${W3_SHELL_TID.newThread}"`);
     expect(html).toContain('aria-label="New agent thread"');
@@ -141,10 +142,10 @@ describe("the sidebar head", () => {
     expect(html.match(/<kbd/g)).toHaveLength(1);
   });
 
-  it("keeps one pill style (the Inbox count) and drops the inert group chevrons", () => {
+  it("keeps one pill style (the Inbox count), no trailing nav labels and no inert group chevrons", () => {
     expect(html).toContain('aria-label="3 pending"');
     expect(html.match(/rounded-full bg-accent-9/g)).toHaveLength(1);
-    expect(html).toMatch(/text-gray-9">Simulated</);
+    expect(html).not.toMatch(/simulated/i);
     expect(html).not.toContain("lucide-chevron-down");
   });
 });

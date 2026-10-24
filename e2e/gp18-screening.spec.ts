@@ -1,6 +1,6 @@
 // GP18. Background check after acceptance (docs/wave3.md 5). Owner: w3-integrations-screening-esign. An offer is
-// accepted through the portal; Dana orders the check from Hiring (Simulated badge, price from the catalog); the new
-// hire authorizes it on the labeled simulated apply page in the portal; one business day later on the sim clock the
+// accepted through the portal; Vic orders the check from Hiring (Sandbox badge, price from the catalog); the new
+// hire authorizes it on the labeled sandbox apply page in the portal; one business day later on the sim clock the
 // signed webhook completes it and Hiring reads Clear. Runs on WEFT_E2E_WEB_PORT 4670 and WEFT_E2E_API_PORT 4671.
 //
 // The second test runs only when the e2e servers start with WEFT_ESIGN=docusign (the offer goes out as one envelope on
@@ -29,14 +29,14 @@ test("GP18: a background check is ordered after acceptance, authorized in the po
     await eventually(() => weft.get<OfferDetail>(`/v1/offers/${offer.id}`), (o) => o.status === "accepted", "the offer is accepted");
   });
 
-  await test.step("Dana orders the background check in Hiring", async () => {
+  await test.step("Vic orders the background check in Hiring", async () => {
     await openApp(page, "/app/hiring");
     await viewAs(page, "dana");
     const row = page.locator(`[data-testid="offer-row"][data-offer="${offer.id}"]`);
     await row.getByTestId("offer-screening-order").click();
     await expect(row.getByTestId("offer-screening-status")).toHaveText("Invited");
     await expect(row.getByTestId("offer-screening-vendor")).toHaveText("with Checkr");
-    await expect(row.getByTestId("offer-screening-mode")).toHaveText("Simulated");
+    await expect(row.getByTestId("offer-screening-mode")).toHaveText("Sandbox");
     const orders = await weft.get<{ data: Order[] }>("/v1/screening/orders", { offerId: offer.id });
     expect(orders.data).toEqual([expect.objectContaining({ status: "invited", priceCents: 3_500, mode: "simulated" })]);
   });
@@ -44,7 +44,7 @@ test("GP18: a background check is ordered after acceptance, authorized in the po
   await test.step("the new hire authorizes it on the simulated apply page", async () => {
     await page.goto(`/portal?as=${offer.personaPrincipalId}`);
     const apply = page.getByTestId("screening-apply-page");
-    await expect(apply).toContainText("Screening company apply page (simulated)");
+    await expect(apply).toContainText("Screening company apply page (sandbox)");
     await apply.getByTestId("screening-apply-next").click();
     await apply.getByTestId("screening-apply-next").click();
     await apply.getByTestId("screening-apply-name").fill("Rowan Ellery");
@@ -75,7 +75,7 @@ test("GP18: with WEFT_ESIGN=docusign the offer is signed on the simulated signin
     await page.getByTestId(T.signButton).click();
     await expect(page).toHaveURL(new RegExp(`/portal\\?esign=${env.envelopeId}`));
     const signing = page.getByTestId("esign-signing-page");
-    await expect(signing).toContainText("E-signature provider signing page (simulated)");
+    await expect(signing).toContainText("E-signature provider signing page (sandbox)");
     await expect(signing).toContainText("Confidentiality and invention assignment agreement");
   });
 

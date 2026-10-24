@@ -19,7 +19,7 @@ export const SEED = {
   now: "2026-10-26T15:30:00.000Z",           // Monday 08:30 PT
   draftRun: "pay_2026_10_30",
   noorOffer: "offr_0001",
-  noorName: "Noor Castellanos (demo)",
+  noorName: "Noor Castellanos",
   digestRoutine: "rt_people_digest",
   caAccount: "000-4817-2",
   caWorkers: 22,
@@ -30,13 +30,13 @@ export const SEED = {
 } as const;
 
 /**
- * The three demo humans. Principal ids follow the seed convention `usr_<first name>`; override with
+ * The three seeded people who sign in. Principal ids follow the seed convention `usr_<first name>`; override with
  * WEFT_E2E_PRINCIPAL_<NAME> if the governance seed names them differently.
  */
 export const PEOPLE = {
-  dana: { id: process.env.WEFT_E2E_PRINCIPAL_DANA ?? "usr_dana", name: "Dana Whitfield (demo)", first: "Dana" },
-  theo: { id: process.env.WEFT_E2E_PRINCIPAL_THEO ?? "usr_theo", name: "Theo Marsh (demo)", first: "Theo" },
-  sam: { id: process.env.WEFT_E2E_PRINCIPAL_SAM ?? "usr_sam", name: "Sam Okafor (demo)", first: "Sam" },
+  dana: { id: process.env.WEFT_E2E_PRINCIPAL_DANA ?? "usr_dana", name: "Vic Akisole", first: "Vic" },
+  theo: { id: process.env.WEFT_E2E_PRINCIPAL_THEO ?? "usr_theo", name: "Theo Marsh", first: "Theo" },
+  sam: { id: process.env.WEFT_E2E_PRINCIPAL_SAM ?? "usr_sam", name: "Sam Okafor", first: "Sam" },
 } as const;
 export type Person = keyof typeof PEOPLE;
 
@@ -87,7 +87,7 @@ export class WeftApi {
     return out;
   }
 
-  // Demo controls -------------------------------------------------------------------------------------------
+  // Simulator controls --------------------------------------------------------------------------------------
   async reset(): Promise<void> {
     const r = await this.post<{ ok: boolean }>("/v1/sim/reset", {}, 20_000);
     expect(r.ok, "POST /v1/sim/reset returns { ok: true }").toBe(true);
@@ -134,7 +134,7 @@ export async function openApp(page: Page, path: string): Promise<void> {
   await expect(page.getByTestId(TID.simClock)).toBeVisible();
 }
 
-/** Switches the "Viewing as" demo control to one of the three demo humans and checks it took. */
+/** Switches the "Viewing as" control to one of the three seeded people and checks it took. */
 export async function viewAs(page: Page, person: Person): Promise<void> {
   const who = PEOPLE[person];
   const control = page.getByTestId(TID.viewingAs);

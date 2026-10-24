@@ -85,7 +85,7 @@ test("a missing target shows the unanchored card and Next still works", async ({
   await startTour(page, "routines");
   const c = readyCard(page, "routines");
   await expect(c).toHaveAttribute("data-target-found", "false", { timeout: 10_000 });
-  await expect(c.locator("[data-tour-note]")).toHaveText("This part of the demo data is missing on this world.");
+  await expect(c.locator("[data-tour-note]")).toHaveText("This part of the workspace data is missing.");
   await c.locator("[data-tour-primary]").click();
   await expect(readyCard(page, "permissions")).toBeVisible();
 });

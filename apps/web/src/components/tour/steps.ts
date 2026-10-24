@@ -8,7 +8,7 @@ export const TOUR_BUDGET_MS = 180_000;
 export const TOUR_CHART_PROMPT = "Show payroll cost by month";
 /** The DE 2088 scenario the tour delivers (3.4% to 1.5%, from the simulator). */
 export const TOUR_NOTICE_SCENARIO = "ca_de2088_rate_change";
-/** The person page the tour opens: Lena Brooks (demo), whose raise flags GROSS_CHANGE on the Oct 30 draft. */
+/** The person page the tour opens: Lena Brooks, whose raise flags GROSS_CHANGE on the Oct 30 draft. */
 export const TOUR_PERSON = "wrk_0026";
 /** The persona the tour views as (approve and undo need an admin); restored on exit. */
 export const TOUR_PRINCIPAL = "usr_dana";
@@ -96,13 +96,13 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "welcome", n: 1, route: { kind: "path", path: "/app" }, target: null,
     title: "Welcome to Weft",
-    body: "Larkspur Robotics (demo) is a made-up company on simulators. Watch the agent handle a tax notice, then take a fast lap.",
+    body: "This is Larkspur Robotics. Watch the agent handle a tax notice, then take a fast lap.",
     action: "next", seconds: 6,
   },
   {
     id: "env-pill", n: 2, route: { kind: "path", path: "/app" }, target: '[data-tour~="env-pill"]',
-    title: "Your demo controls",
-    body: "The simulated clock every date reads, and who you are viewing as. The tour leaves the clock alone.",
+    title: "Your controls",
+    body: "The clock every date reads, and who you are viewing as. The tour leaves the clock alone.",
     action: "next", seconds: 6,
   },
   {
@@ -115,7 +115,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     id: "deliver-notice", n: 4, route: { kind: "path", path: "/app/simulators" },
     target: `[data-tour~="sim-deliver"][data-scenario="${TOUR_NOTICE_SCENARIO}"]`, agent: "after", once: true,
     title: "A letter from the state",
-    body: "California just revised Larkspur's unemployment insurance rate. Deliver the simulated notice and watch what happens next.",
+    body: "California just revised Larkspur's unemployment insurance rate. Deliver the notice and watch what happens next.",
     action: "click", proxyLabel: "Deliver notice", seconds: 6, hardMs: 8_000,
   },
   {
@@ -248,10 +248,10 @@ export const TOUR_STEPS: readonly TourStep[] = [
 
 /** Copy the card swaps in when a step degrades. Every line is plain and at most two sentences. */
 export const TOUR_COPY = {
-  missing: "This part of the demo data is missing on this world.",
+  missing: "This part of the workspace data is missing.",
   stillWorking: "Still working",
   noticeSlow: "The agent is taking longer than usual. Nothing changes without an approval, so carry on; its proposals will be in the Inbox.",
-  noticeStopped: "The agent stopped before proposing anything, so nothing changed. The next step shows a proposal from the demo data.",
+  noticeStopped: "The agent stopped before proposing anything, so nothing changed. The next step shows a proposal that was already waiting.",
   chartSlow: "No chart this time. Reports has the same figures as a chart and a table.",
   rateNotApproved: "This is where the new rate lands once a person approves it.",
   alreadyDelivered: "Already delivered",
@@ -261,19 +261,19 @@ export const TOUR_COPY = {
   agentWorking: "Agent working...",
   agentWaiting: "Waiting for you in the Inbox",
   agentDone: "Done",
-  noPersona: "No new hire with an open checklist on this world, so this stop is skipped.",
+  noPersona: "No new hire has an open checklist in this workspace, so this stop is skipped.",
   approveYourself: "Autoplay only approves the rate change this tour's own notice produced. Approve this one yourself, or go on.",
 } as const;
 
 export const TOUR_RESET_COPY = {
-  title: "Reset the demo world?",
-  body: "Weft rebuilds Larkspur Robotics (demo) from the demo data and sets the clock back to Mon, Oct 26, 8:30 AM PT. Approvals, agent runs, audit rows and memory added since then are cleared.",
+  title: "Reset the workspace?",
+  body: "Weft rebuilds Larkspur Robotics from its seed data and sets the clock back to Mon, Oct 26, 8:30 AM PT. Approvals, agent runs, audit rows and memory added since then are cleared.",
   start: "Reset and start",
   skip: "Continue without resetting",
   cancel: "Cancel",
   running: "Resetting...",
-  live: "Rebuilding the world",
-  disabled: "Reset is turned off on this server. You can still take the tour on this world.",
+  live: "Rebuilding the workspace",
+  disabled: "Reset is turned off on this server. You can still take the tour in this workspace.",
 } as const;
 
 export const stepIndex = (id: string): number => TOUR_STEPS.findIndex((s) => s.id === id);
@@ -339,7 +339,7 @@ export function targetCandidates(step: TourStep, memo: TourMemo): string[] {
 
 /** Body copy for the step, with {hireName} filled. */
 export function stepBody(step: TourStep, memo: TourMemo): string {
-  return step.body.replace("{hireName}", memo.hireName?.replace(/ \(demo\)$/, "") ?? "The new hire");
+  return step.body.replace("{hireName}", memo.hireName?.trim() || "The new hire");
 }
 
 /** Every data-tour token a step selector names (for the unit test that checks each one exists in the source). */

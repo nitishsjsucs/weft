@@ -5,7 +5,7 @@
 // becomes use rows and the calendar marks the days approved. The TX vacation day is a pto line on the open draft with
 // gross unchanged. ("Viewing as" Imani joins the persona menu with w3-topbar-shell; until then her call goes through
 // the API here.) Both tests view as Sam: the UI rate limit is per principal per minute, the app shell polls several
-// endpoints a second, and the rest of the suite runs as Dana, so these specs stay out of Dana's budget.
+// endpoints a second, and the rest of the suite runs as Vic, so these specs stay out of Vic's budget.
 import { W3_TIMEOFF_TID as T } from "../packages/contracts/src/index";
 import { eventually, expect, openApp, SEED, test, viewAs, WeftApi } from "./fixtures";
 
@@ -23,7 +23,7 @@ test("GP14: coverage conflict routed to the manager, approved on the Requests ta
     await expect(ruth.getByTestId(T.check("COVERAGE_CONFLICT"))).toBeVisible();
     await expect(ruth.getByTestId(T.check("INCLUDES_HOLIDAY"))).toBeVisible();
     await expect(ruth).toContainText("3 of 9 out (33.3%)");
-    await expect(ruth).toContainText("Routed to Imani Ferreira (demo)");
+    await expect(ruth).toContainText("Routed to Imani Ferreira");
     await expect(ruth).toContainText("Larkspur Vacation balance after this request: 89.00 h (113.00 h before it, counting other open requests)");
     await expect(page.getByTestId(T.requestRow("tor_0005")).getByTestId(T.check("WAITING_PERIOD"))).toBeVisible();
     const api = await weft.get<Req>("/v1/time-off/requests/tor_0003");
@@ -47,7 +47,7 @@ test("GP14: coverage conflict routed to the manager, approved on the Requests ta
     await page.getByTestId(T.tab("requests")).click();
     const ruth = page.getByTestId(T.requestRow("tor_0003"));
     await ruth.getByTestId(T.decide("approve")).click();
-    await expect(page.getByRole("status")).toContainText("Approved Ruth Okoro (demo)'s vacation");
+    await expect(page.getByRole("status")).toContainText("Approved Ruth Okoro's vacation");
     const ruthAfter = await eventually(() => weft.get<Req>("/v1/time-off/requests/tor_0003"), (r) => r.status === "approved" && r, "Ruth's request is approved");
     expect(ruthAfter.decidedBy).toBe("usr_sam");
     const ledger = await weft.get<{ kind: string; minutes: number; source_ref: string | null }[]>("/v1/time-off/ledger", { workerId: "wrk_0010", policyId: "top_vac_us" });
@@ -82,9 +82,9 @@ test("GP14b: an HR manager decides on the Requests tab; balances, policies, holi
   await test.step("Sam approves Kenji's request, routed to the People admin, on the Requests tab", async () => {
     await openApp(page, "/app/time-off");
     const kenji = page.getByTestId(T.requestRow("tor_0004"));
-    await expect(kenji).toContainText("Routed to Dana Whitfield (demo)");
+    await expect(kenji).toContainText("Routed to Vic Akisole");
     await kenji.getByTestId(T.decide("approve")).click();
-    await expect(page.getByRole("status")).toContainText("Approved Kenji Watanabe (demo)'s sick leave");
+    await expect(page.getByRole("status")).toContainText("Approved Kenji Watanabe's sick leave");
     const r = await eventually(() => sam.get<Req>("/v1/time-off/requests/tor_0004"), (x) => x.status === "approved" && x, "Kenji's request is approved");
     expect(r.decidedBy).toBe("usr_sam");
   });

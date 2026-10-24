@@ -2,7 +2,7 @@ import { Banknote, BookOpen, BotMessageSquare, Cable, ChartColumn, FlaskConical,
 import { HOSTED } from "@/lib/hosted/flags";
 
 /** `domain`: the grant a section reads; a person whose grants close it (a manager: payroll, benefits, IT) does not see the item. */
-export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox" | "simulated"; domain?: "payroll" | "benefits" | "it" }
+export interface NavItem { slug: string; label: string; href: string; icon: LucideIcon; badge?: "inbox"; domain?: "payroll" | "benefits" | "it" }
 export interface NavGroup { label: string | null; items: NavItem[] }
 
 // Sidebar per SPEC 11.3. Slugs feed the `nav-<slug>` test ids.
@@ -17,9 +17,9 @@ const BASE_NAV: NavGroup[] = [
     { slug: "offboarding", label: "Offboarding", href: "/app/offboarding", icon: UserMinus },   // wave 2 (w2-offboarding)
   ] },
   { label: "Products", items: [
-    { slug: "benefits", label: "Benefits", href: "/app/benefits", icon: HeartPulse, badge: "simulated", domain: "benefits" },
-    { slug: "it", label: "IT", href: "/app/it", icon: Laptop, badge: "simulated", domain: "it" },
-    { slug: "contractors", label: "Contractors", href: "/app/contractors", icon: Globe, badge: "simulated", domain: "payroll" },   // contractor pay
+    { slug: "benefits", label: "Benefits", href: "/app/benefits", icon: HeartPulse, domain: "benefits" },
+    { slug: "it", label: "IT", href: "/app/it", icon: Laptop, domain: "it" },
+    { slug: "contractors", label: "Contractors", href: "/app/contractors", icon: Globe, domain: "payroll" },   // contractor pay
     { slug: "expenses", label: "Expenses", href: "/app/expenses", icon: Receipt },
     { slug: "time-off", label: "Time Off", href: "/app/time-off", icon: Plane },
   ] },
@@ -29,8 +29,8 @@ const BASE_NAV: NavGroup[] = [
     { slug: "routines", label: "Routines", href: "/app/routines", icon: Repeat },
     { slug: "audit", label: "Audit log", href: "/app/audit", icon: ScrollText },
     { slug: "memory", label: "Memory", href: "/app/memory", icon: BookOpen },
-    { slug: "integrations", label: "Integrations", href: "/app/integrations", icon: Cable, badge: "simulated" },   // wave 3 (w3-integrations-hr)
-    { slug: "simulators", label: "Simulators", href: "/app/simulators", icon: FlaskConical, badge: "simulated" },
+    { slug: "integrations", label: "Integrations", href: "/app/integrations", icon: Cable },   // wave 3 (w3-integrations-hr)
+    { slug: "simulators", label: "Simulators", href: "/app/simulators", icon: FlaskConical },
   ] },
 ];
 /** Hosted only (Weft on Cloudflare, docs/cloudflare/design.md 10): the Platform readout and the model comparison. */

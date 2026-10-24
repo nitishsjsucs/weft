@@ -55,7 +55,6 @@ export function ExpensesView() {
       <PageHeader
         title="Expenses"
         subtitle="Every claim is checked against the company policy as it arrives. Approvers decide one item at a time; approved items ride the next payroll, outside gross pay."
-        meta={<Badge tone="outline" size="md">Synthetic data</Badge>}
         actions={<>
           <Button size="sm" variant="secondary" disabled={review.pending || !(page?.bands.needs_review)} onClick={() => void onReview()}>Review with agent</Button>
           <Button size="sm" variant="primary" onClick={() => setAdding(true)}>Add expense</Button>
@@ -126,7 +125,7 @@ export function ExpensesView() {
           </TBody>
         </Table>
       </Card>
-      <p className="mt-2 text-1 text-gray-10">A dot marks policy checks: red blocks approval, amber needs a person&apos;s judgment. Receipts are simulated images with a simulated extraction.</p>
+      <p className="mt-2 text-1 text-gray-10">A dot marks policy checks: red blocks approval, amber needs a person&apos;s judgment.</p>
       <ExpenseDrawer id={openId} onClose={() => setOpenId(null)} />
       <AddExpense open={adding} onClose={() => setAdding(false)} today={clock.data ? ptDate(clock.data.now) : "2026-10-26"} />
     </div>

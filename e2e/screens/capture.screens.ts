@@ -97,7 +97,7 @@ test("screens offboarding", async ({ page, weft }) => {
   await page.getByTestId(OT.personTerminate).click();
   await page.getByTestId(OT.terminateKind).selectOption("voluntary");
   await page.getByTestId(OT.terminateLastDay).fill("2026-10-30");
-  await page.getByTestId(OT.terminateNote).fill("Moving abroad (demo)");
+  await page.getByTestId(OT.terminateNote).fill("Moving abroad");
   await page.getByTestId(OT.terminateSubmit).click();
   await page.waitForURL(/\/app\/offboarding\/ofb_/);
   await expect(page.getByTestId(OT.caseSteps)).toBeVisible();
@@ -156,7 +156,7 @@ test("screens wave 3 top bar", async ({ page }) => {
   await top(page, "21b-topbar-persona-menu", 420, true);
   await page.keyboard.press("Escape");
   await page.getByTestId(TID.simClock).click();
-  await expect(page.getByTestId(S.clockPopover)).toContainText("Simulated time");
+  await expect(page.getByTestId(S.clockPopover)).toContainText("Clock");
   await top(page, "21c-topbar-clock", 420, true);
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -191,7 +191,7 @@ test("screens wave 3 time off", async ({ page }) => {
 test("screens wave 3 integrations and chart", async ({ page }) => {
   await openApp(page, "/app/integrations");
   await viewAs(page, "dana");
-  for (const v of ["greenhouse", "workday", "checkr", "hireright", "docusign"]) await expect(page.getByTestId(IT.mode(v))).toHaveText("Simulated");
+  for (const v of ["greenhouse", "workday", "checkr", "hireright", "docusign"]) await expect(page.getByTestId(IT.mode(v))).toHaveText("Sandbox");
   await shot(page, "24-integrations");
   await openApp(page, "/app");
   const answer = await askAgent(page, "Show payroll cost by month");

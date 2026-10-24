@@ -1,6 +1,6 @@
 // Rich-profile screenshots for docs/screenshots/ (README Screenshots). `pnpm screenshots:rich` runs it through
 // playwright.screens-rich.config.ts: a fresh rich world (scripted provider, frozen clock) on its own ports and data
-// dir, every main route at 1440 by 900 as Dana with the agent panel docked. Plain route views keep their existing
+// dir, every main route at 1440 by 900 as Vic with the agent panel docked. Plain route views keep their existing
 // names (02-app-home, 08-people and so on); routes the base capture never showed get new ones (26 onward). The flow
 // shots (04-agent-run, 05-inbox, 13-hiring and the rest) stay with `pnpm screenshots` on the base world.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";

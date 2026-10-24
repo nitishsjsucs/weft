@@ -133,7 +133,7 @@ function EmailReport({ metric, from, to, groupBy }: { metric: CatalogRow; from: 
   return (
     <Card className="flex w-full flex-col gap-2 p-3">
       <label className="flex flex-col gap-1 text-[13px] text-gray-11">
-        Recipients (simulated *.example mailboxes, comma separated)
+        Recipients (*.example mailboxes, comma separated)
         <input data-testid={T.emailRecipients} className={`${field} w-full`} value={recipients} onChange={(e) => setRecipients(e.target.value)} />
       </label>
       <div className="flex flex-wrap items-center gap-2">

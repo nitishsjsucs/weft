@@ -21,7 +21,7 @@ export function stepSummary(s: RunStepRow): string {
     const tpl = ex.filter((x) => x.source === "template").length; const agent = ex.filter((x) => x.source === "agent").length;
     if (tpl || agent) return [agent ? `Saved ${agent} ${agent === 1 ? "explanation" : "explanations"} by the agent` : "", tpl ? `${agent ? "and" : "Saved"} ${tpl} policy ${tpl === 1 ? "summary" : "summaries"} from the template` : ""].filter(Boolean).join(" ");
   }
-  // A memory read names the page it read, by its heading ("Read Lena Brooks (demo)'s memory page"), not its path.
+  // A memory read names the page it read, by its heading ("Read Lena Brooks's memory page"), not its path.
   if (toolLabel(s.toolName) === "memory.read" && typeof o?.data?.path === "string") {
     const line = memoryReadLine(o.data.path, typeof o.data.body === "string" ? o.data.body : null);
     if (line) return line;

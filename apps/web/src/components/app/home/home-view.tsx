@@ -59,16 +59,15 @@ export function HomeView() {
   const soon = today && in30Days ? tor.filter((r) => r.status === "approved" && r.startAt > today && r.startAt <= in30Days).sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) : [];
   // A manager's team: the viewer's direct reports (matched by name to the viewer's own worker record), who is out
   // today or soon, and the hires joining the team. Shown only to a viewer with reports, so Home differs per persona.
-  const bare = (n: string) => n.replace(/ \(demo\)$/, "");
-  const viewerName = bare(PRINCIPALS.find((p) => p.id === who)?.name ?? "");
-  const me = viewerName ? ws.find((w) => bare(w.displayName) === viewerName || `${w.firstName} ${w.lastName}` === viewerName) : undefined;
+  const viewerName = PRINCIPALS.find((p) => p.id === who)?.name.trim() ?? "";
+  const me = viewerName ? ws.find((w) => w.displayName === viewerName || `${w.firstName} ${w.lastName}` === viewerName) : undefined;
   const reports = me ? ws.filter((w) => w.managerId === me.id && (w.status === "active" || w.status === "onboarding")) : [];
-  const reportNames = new Set(reports.filter((w) => w.status === "active").map((w) => bare(w.displayName)));
-  const teamOut = outToday.filter((r) => reportNames.has(bare(r.workerName)));
-  const teamSoon = soon.filter((r) => reportNames.has(bare(r.workerName)));
+  const reportNames = new Set(reports.filter((w) => w.status === "active").map((w) => w.displayName));
+  const teamOut = outToday.filter((r) => reportNames.has(r.workerName));
+  const teamSoon = soon.filter((r) => reportNames.has(r.workerName));
   // The team card counts only the viewer's own reports' requests; a request routed to the viewer because another
   // manager has no login stays in the Approvals card's "+ n time-off decisions for you".
-  const teamDecide = myTor.filter((r) => reportNames.has(bare(r.workerName)));
+  const teamDecide = myTor.filter((r) => reportNames.has(r.workerName));
   const joining = reports.filter((w) => w.status === "onboarding").sort((a, b) => (a.startDate < b.startDate ? -1 : 1));
   return (
     <div className="mx-auto w-full max-w-[1040px] px-4 py-8 tablet:px-8 laptop:pt-16">
@@ -83,7 +82,7 @@ export function HomeView() {
         </span>
       </div>
       <div className="grid items-start gap-6 tablet:grid-cols-2">
-        {payroll ? <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Paid by simulated ACH debit</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
+        {payroll ? <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Paid by ACH debit</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
           {upcoming.length === 0 ? <div className="p-4 text-2 text-gray-10">{runs.error ? "Payroll is not available yet." : "No upcoming payrolls."}</div> : null}
           {upcoming.map((r) => (
             <Link key={r.id} href={`/app/payroll/${r.id}`} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-3 last:border-0 hover:bg-gray-2">

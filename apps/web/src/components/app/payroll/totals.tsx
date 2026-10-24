@@ -6,7 +6,7 @@ import { TID, TOTALS_FIELDS, type Totals } from "@weft/contracts";
 export const TOTAL_LABEL: Record<(typeof TOTALS_FIELDS)[number], string> = {
   cashRequirement: "Cash requirement", grossPay: "Gross pay", netPay: "Net pay", reimbursements: "Reimbursements", workerTaxes: "Employee taxes",
   employerTaxes: "Company taxes", preTaxDeductions: "Pre-tax deductions", postTaxDeductions: "Post-tax deductions", workerBenefitContributions: "Employee benefit contributions",
-  employerBenefitContributions: "Company benefit contributions", transactionFees: "Transaction fees (sim ACH)", totalCost: "Total cost",
+  employerBenefitContributions: "Company benefit contributions", transactionFees: "Transaction fees (ACH)", totalCost: "Total cost",
 };
 const STRIP: (typeof TOTALS_FIELDS)[number][] = ["cashRequirement", "grossPay", "employerTaxes", "netPay"];
 
@@ -45,7 +45,7 @@ export function TotalsStrip({ totals, count, blockedNames = [] }: { totals: Tota
             </div>
           ))}
         </dl>
-        <p className="mt-4 text-1 text-gray-10">Net pay = gross pay - employee taxes - pre-tax and post-tax deductions. Total cost = gross pay + reimbursements + company taxes + company benefits + fees. Cash requirement equals total cost because Weft remits every deduction in the simulator.</p>
+        <p className="mt-4 text-1 text-gray-10">Net pay = gross pay - employee taxes - pre-tax and post-tax deductions. Total cost = gross pay + reimbursements + company taxes + company benefits + fees. Cash requirement equals total cost because Weft remits every deduction itself.</p>
       </Drawer>
     </div>
     </div>

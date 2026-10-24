@@ -15,7 +15,6 @@ import type { AgentRunRow } from "@weft/contracts";
 import { AGENT_PAGE_NEW_CHAT_EVENT, AGENT_PAGE_TID as T, type ConversationRunRow } from "../../../../../../packages/contracts/src/ext/agent-page";
 import { client, errorText, invalidate, useGet, useSimClock } from "@/lib/api/hooks";
 import { HOSTED } from "@/lib/hosted/flags";
-import { HOSTED_COPY } from "../../hosted/copy";
 import { appendDictation, DictateButton } from "../../hosted/dictate-button";
 import { RunFeed } from "../agent/run-feed";
 import { PanelStart } from "../agent/panel-start";
@@ -314,7 +313,7 @@ export function AgentPage() {
             {missing ? (
               <div className="text-2 text-gray-10">
                 <p className="text-foreground">No conversation {sel.kind === "run" ? sel.runId : ""}.</p>
-                <p className="mt-1">The link may be from before the demo world was reset. Start a new chat, or pick a conversation from the list.</p>
+                <p className="mt-1">The link may be from before the workspace was reset. Start a new chat, or pick a conversation from the list.</p>
               </div>
             ) : loadingSel ? (
               <p className="pt-6 text-2 text-gray-10">Loading the conversation...</p>
@@ -323,8 +322,6 @@ export function AgentPage() {
                 <span className="grid size-9 place-items-center rounded-lg bg-gray-3 text-gray-11"><BotMessageSquare strokeWidth={1.5} className="size-5" /></span>
                 <h2 className="mt-2 text-5 font-semibold tracking-tight">Ask the Weft agent</h2>
                 <p className="max-w-[560px] text-2 text-gray-11">It reads payroll, people, taxes and the rest through the same tools you do, and asks before it changes anything. A follow-up stays in the conversation and sees its last three turns.</p>
-                <p className="text-1 text-gray-10">Every company, person and agency here is synthetic.</p>
-                {HOSTED ? <p className="text-1 text-gray-10" data-testid="agent-page-fictional">{HOSTED_COPY.fictional}</p> : null}
                 <PanelStart pathname={PAGE_PATH} recent={false} testId="agent-page-prompts" onAsk={(p) => void send(p)} onOpen={(runId) => go({ kind: "run", runId })} />
               </div>
             ) : (

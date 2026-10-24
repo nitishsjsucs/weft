@@ -54,8 +54,8 @@ function ClockSegment() {
         <span className="hidden @min-[760px]:inline">{now ? fmtClock(now) : "..."}</span>
         <span className="@min-[760px]:hidden">{now ? fmtShortClock(now) : "..."}</span>
       </PopoverTrigger>
-      <PopoverContent align="center" aria-label="Simulated time" data-testid={W3_SHELL_TID.clockPopover} className="motion-reduce:data-[state=open]:animate-none">
-        <div className="font-semibold text-gray-12">Simulated time</div>
+      <PopoverContent align="center" aria-label="Clock" data-testid={W3_SHELL_TID.clockPopover} className="motion-reduce:data-[state=open]:animate-none">
+        <div className="font-semibold text-gray-12">Clock</div>
         <div className="pt-1 pb-1.5 text-2 font-medium tabular text-gray-12">{now ? fmtLongClock(now) : "..."}</div>
         <Row k="Rate">{rateLabel(rate)}</Row>
         <Row k="Next routine">{next ? fmtShortClock(next) : "None scheduled"}</Row>
@@ -75,10 +75,10 @@ function ClockSegment() {
   );
 }
 
-/** Simulated clock, then Viewing as (time, then identity). */
+/** The clock, then Viewing as (time, then identity). */
 export function EnvPill() {
   return (
-    <div role="group" aria-label="Demo environment" data-testid={W3_SHELL_TID.envPill} data-tour="env-pill" className={pillClass}>
+    <div role="group" aria-label="Environment" data-testid={W3_SHELL_TID.envPill} data-tour="env-pill" className={pillClass}>
       <ClockSegment />
       <span aria-hidden data-divider="" className={dividerClass} />
       <PersonaMenu />

@@ -174,9 +174,9 @@ export interface PreflightFacts {
 /** Reasons the world does not suit the tour; empty means start straight away. */
 export function preflightReasons(f: PreflightFacts): string[] {
   const out: string[] = [];
-  if (f.seedProfile !== "rich") out.push("The demo data is the base world, not the rich tour world.");
+  if (f.seedProfile !== "rich") out.push("This workspace has the smaller base data set, not the fuller one the tour uses.");
   if (f.noticeForms.some((x) => /DE ?2088/i.test(x))) out.push("The DE 2088 notice was already delivered.");
-  if (f.clockNow && Date.parse(f.clockNow) !== Date.parse(SEED_NOW)) out.push("The simulated clock has moved since the seed.");
+  if (f.clockNow && Date.parse(f.clockNow) !== Date.parse(SEED_NOW)) out.push("The clock has moved since the data was seeded.");
   if (f.pendingCommands.includes("tax.update_rate")) out.push("A rate change is already waiting in the Inbox.");
   return out;
 }

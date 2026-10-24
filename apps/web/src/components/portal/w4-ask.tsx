@@ -66,7 +66,6 @@ export function PortalAskBox({ principal }: { principal: string }) {
           <p data-testid={W4_ASK_TID.answer} data-run={result.runId ?? ""} data-status={result.status} className="mt-3 whitespace-pre-line rounded-lg bg-gray-a3 p-3 text-2 text-gray-12">{result.answer}</p>
         )
       ) : null}
-      <p className="mt-2 text-1 text-gray-10">Answers use simulated data for a fictional company.</p>
     </Card>
   );
 }

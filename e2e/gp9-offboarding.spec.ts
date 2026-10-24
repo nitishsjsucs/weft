@@ -1,5 +1,5 @@
 // GP9. Termination with access revocation (docs/wave2.md). Owner of the spec: w2-offboarding.
-// From Imani's person header Dana terminates her (voluntary, last day Oct 30). The case opens with the eight
+// From Imani's person header Vic terminates her (voluntary, last day Oct 30). The case opens with the eight
 // ordered steps; final pay, directory suspend, SSO deactivation and device lock wait as proposals with previews.
 // Approving them in the case view runs the bank, IdP and device simulators; "Run remaining steps" removes groups
 // and apps, sends the COBRA notice and ends benefits. Every step has an action row and the case reads Complete.
@@ -20,7 +20,7 @@ test("GP9: terminating Imani opens an offboarding case that revokes access and c
     await page.getByTestId(OT.personTerminate).click();
     await page.getByTestId(OT.terminateKind).selectOption("voluntary");
     await page.getByTestId(OT.terminateLastDay).fill("2026-10-30");
-    await page.getByTestId(OT.terminateNote).fill("Moving abroad (demo)");
+    await page.getByTestId(OT.terminateNote).fill("Moving abroad");
     await page.getByTestId(OT.terminateSubmit).click();
     await page.waitForURL(/\/app\/offboarding\/ofb_/);
     caseId = page.url().split("/").pop()!;

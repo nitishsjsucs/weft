@@ -23,7 +23,7 @@ export function PayrollList() {
     <div className="mx-auto w-full max-w-[880px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
         title="Payroll"
-        subtitle="Semi-monthly US payroll for Larkspur Robotics (demo). Every bank batch goes to the simulated ACH bank."
+        subtitle="Semi-monthly US payroll for Larkspur Robotics. Every bank batch goes out by ACH."
         actions={<Button data-testid={TID.payrollNewDraft} size="sm" disabled={!latest || draft.pending} onClick={() => void newDraft()}><FilePlus2 /> New draft{latest ? ` (${period(fmtNext(latest.periodEnd), nextPeriodEnd(latest.periodEnd))})` : ""}</Button>}
       />
       {runs.error || draft.error ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(runs.error ?? draft.error)}</div> : null}

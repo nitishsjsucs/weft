@@ -37,12 +37,20 @@ describe("tour steps", () => {
     expect(TOUR_STEPS.some((s) => s.route.kind === "path" && s.route.path.startsWith("/app/integrations"))).toBe(false);
   });
 
-  it("introduces the demo controls as the clock and Viewing as, with no model in the pill", () => {
+  it("introduces the controls as the clock and Viewing as, with no model in the pill", () => {
     const pill = TOUR_STEPS.find((s) => s.id === "env-pill")!;
     expect(pill.n).toBe(2);
-    expect(pill.body).toMatch(/simulated clock/);
+    expect(pill.title).toBe("Your controls");
+    expect(pill.body).toMatch(/^The clock every date reads/);
     expect(pill.body).toMatch(/viewing as/i);
     expect(pill.body).not.toMatch(/model/i);
+  });
+
+  it("reads like a workspace: no demo, simulated or made-up wording and no name markers in any card or dialog", () => {
+    const copy = [...TOUR_STEPS.flatMap((s) => [s.title, s.body, s.proxyLabel ?? ""]), ...Object.values(TOUR_COPY), ...Object.values(TOUR_RESET_COPY)];
+    for (const t of copy) expect(t).not.toMatch(/\bdemo\b|simulat|made-up|fictional|synthetic|\((demo|sim)\)|\bworld\b/i);
+    expect(TOUR_RESET_COPY.title).toBe("Reset the workspace?");
+    expect(TOUR_RESET_COPY.body).toMatch(/^Weft rebuilds Larkspur Robotics from its seed data/);
   });
 
   it("plans 155 s (at most 165 s), and at most 180 s with every hard timeout spent in full", () => {
@@ -64,7 +72,7 @@ describe("tour steps", () => {
 
   it("paces every card at about 4 words a second or less (title and body against its seconds)", () => {
     for (const s of TOUR_STEPS) {
-      const words = `${s.title} ${stepBody(s, { hireName: "Noor Castellanos (demo)" })}`.split(/\s+/).filter(Boolean).length;
+      const words = `${s.title} ${stepBody(s, { hireName: "Noor Castellanos" })}`.split(/\s+/).filter(Boolean).length;
       expect(words / s.seconds, s.id).toBeLessThanOrEqual(4.2);
     }
   });
@@ -108,7 +116,8 @@ describe("tour steps", () => {
     expect(targetCandidates(step, {})).toEqual(step.fallbacks);
     expect(targetCandidates(step, { rateProposalId: "prp_0003" })[0]).toBe('[data-tour~="inbox-card"][data-proposal-id="prp_0003"]');
     expect(fill("{a}", {})).toBeNull();
-    expect(stepBody(TOUR_STEPS.find((s) => s.id === "portal")!, { hireName: "Noor Castellanos (demo)" })).toMatch(/^Noor Castellanos signs/);
+    expect(stepBody(TOUR_STEPS.find((s) => s.id === "portal")!, { hireName: "Noor Castellanos" })).toMatch(/^Noor Castellanos signs/);
+    expect(stepBody(TOUR_STEPS.find((s) => s.id === "portal")!, {})).toMatch(/^The new hire signs/);
   });
 });
 

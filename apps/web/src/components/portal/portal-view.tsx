@@ -83,8 +83,8 @@ export function PortalView() {
     <Shell>
       <div data-testid={T.portalPage} className="flex flex-col gap-6">
         <div>
-          <p className="text-1 font-medium uppercase tracking-wide text-gray-10">New-hire portal (simulated)</p>
-          <h1 className="mt-1 text-7 font-semibold tracking-tight text-balance">Welcome aboard, {view.worker.displayName.replace(/ \(demo\)$/, "")}</h1>
+          <p className="text-1 font-medium uppercase tracking-wide text-gray-10">New-hire portal</p>
+          <h1 className="mt-1 text-7 font-semibold tracking-tight text-balance">Welcome aboard, {view.worker.displayName}</h1>
           <p className="mt-2 text-3 text-gray-11">{view.worker.title} · starts {fmtDate(view.worker.startDate, { month: "short", day: "numeric", year: "numeric" })}{view.worker.workState ? ` · ${view.worker.workState}` : ""}. A few things to finish before your first day.</p>
         </div>
         {closed ? <Card className="p-4"><p role="alert" className="text-2 text-amber-11">This offer is {view.offer!.status === "voided" ? "no longer active" : "past its expiry date"}. Reach out to the hiring team with any questions.</p></Card> : null}
@@ -113,7 +113,6 @@ export function PortalView() {
         </div>
         <PortalW3Sections workerId={view.worker.id} principal={as} />
         <PortalAskBox principal={as} />
-        <p className="text-1 text-gray-10">Everything here is simulated: a fictional company, fictional people and no real tax, bank or identity data.</p>
       </div>
     </Shell>
   );
@@ -122,7 +121,7 @@ export function PortalView() {
 function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh bg-gray-2">
-      <header className="border-b border-[var(--app-border)] bg-card"><div className="mx-auto flex h-14 max-w-[760px] items-center gap-2 px-4"><WeftMark className="size-5" /><span className="text-3 font-semibold">Weft</span><span className="text-2 text-gray-10">· Larkspur Robotics (demo)</span></div></header>
+      <header className="border-b border-[var(--app-border)] bg-card"><div className="mx-auto flex h-14 max-w-[760px] items-center gap-2 px-4"><WeftMark className="size-5" /><span className="text-3 font-semibold">Weft</span><span className="text-2 text-gray-10">· Larkspur Robotics</span></div></header>
       <main className="mx-auto w-full max-w-[760px] px-4 py-8 tablet:py-12">{children}</main>
     </div>
   );
@@ -221,7 +220,7 @@ function StateForm({ view, busy, nameField, errorLine, onSubmit }: FormProps<Rec
 }
 
 function DdForm({ busy, nameField, errorLine, onSubmit }: FormProps<Record<string, unknown>>) {
-  const [f, setF] = useState({ bankName: "Sim Federal Credit Union", routing: "", account: "", accountType: "checking" });
+  const [f, setF] = useState({ bankName: "Tidepool Federal Credit Union", routing: "", account: "", accountType: "checking" });
   const submit = (e: FormEvent) => { e.preventDefault(); void onSubmit({ bankName: f.bankName, routing: f.routing.trim(), account: f.account.trim(), accountType: f.accountType }); };
   return (
     <form className="grid gap-4 tablet:grid-cols-2" onSubmit={submit}>
@@ -249,7 +248,7 @@ function I9Form({ busy, nameField, errorLine, onSubmit }: FormProps<FormData>) {
   };
   return (
     <form className="grid gap-4 tablet:grid-cols-2" onSubmit={submit}>
-      <p className="text-2 text-gray-11 tablet:col-span-2">I-9 section 1 (simulation). Upload a picture of a sample ID; it is stored on this machine and only ever shown masked.</p>
+      <p className="text-2 text-gray-11 tablet:col-span-2">I-9 section 1. Upload a picture of a sample ID; it is stored on this machine and only ever shown masked.</p>
       <Field label="Citizenship"><select data-testid={T.i9Citizenship} className={field} value={f.citizenship} onChange={(e) => setF({ ...f, citizenship: e.target.value })}><option value="citizen">US citizen</option><option value="noncitizen_national">Noncitizen national</option><option value="permanent_resident">Permanent resident</option><option value="authorized_alien">Authorized to work</option></select></Field>
       <Field label="Document"><select data-testid={T.i9DocKind} className={field} value={f.documentKind} onChange={(e) => setF({ ...f, documentKind: e.target.value })}><option value="us_passport">US passport</option><option value="permanent_resident_card">Permanent resident card</option><option value="drivers_license_and_ssn_card">Driver's license and SSN card</option></select></Field>
       <Field label="Last 4 of the document number"><input required data-testid={T.i9Last4} maxLength={4} className={field} value={f.last4} onChange={(e) => setF({ ...f, last4: e.target.value })} /></Field>

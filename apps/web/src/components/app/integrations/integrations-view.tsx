@@ -1,9 +1,9 @@
 "use client";
 // Integrations (docs/wave3.md 3.1, research/wave3/integrations-hr.md 3.7). Owner: w3-integrations-hr.
-// Five cards from GET /v1/integrations: the mode (Simulated or Connected), health, the secret names the real adapter
-// needs with present or missing (never a value), the free path, a connection test and, for Greenhouse, the simulator
-// and Workday simulator demo controls. Below: the sync items people decide (keep the Weft value or take the vendor
-// value), the hires imported as draft offers, the time off imported from Workday and the open roles. Vendor names say what Weft connects to; no logos.
+// Five cards from GET /v1/integrations: the mode (Sandbox or Connected), health, the secret names the real adapter
+// needs with present or missing (never a value), the free path, a connection test and, for Greenhouse and Workday,
+// the sandbox controls (each vendor's simulator in packages/sim). Below: the sync items people decide (keep the Weft
+// value or take the vendor value), the hires imported as draft offers, the time off imported from Workday and the open roles. Vendor names say what Weft connects to; no logos.
 import { Fragment, useState } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { W3_INTEGRATIONS_HR_TID as H, W3_INTEGRATIONS_TID as T, type ConnectorStatus, type IntegrationCard, type SyncItem } from "@weft/contracts";
@@ -15,7 +15,7 @@ const CATEGORY_LABEL: Record<string, string> = { ats: "Applicant tracking", hris
 const HEALTH_LABEL: Record<string, string> = { ok: "Healthy", auth_failed: "Sign-in failed", rate_limited: "Rate limited", permission_gap: "Permission gap", unreachable: "Unreachable", not_available: "Not available" };
 const KIND_LABEL: Record<string, string> = { sync_conflict: "Conflict", unmapped_value: "Unmapped value", orphaned: "Orphaned", permission_gap: "Permission gap" };
 const SIMULATE: Record<string, { kind: string; label: string }[]> = {
-  greenhouse: [{ kind: "hire", label: "Simulate a hire" }, { kind: "start_date_change", label: "Change the start date" }, { kind: "redeliver", label: "Resend the last delivery" }],
+  greenhouse: [{ kind: "hire", label: "Send a test hire" }, { kind: "start_date_change", label: "Change the start date" }, { kind: "redeliver", label: "Resend the last delivery" }],
   workday: [{ kind: "worker_change", label: "Promote someone in Workday" }, { kind: "time_off", label: "Approve two days off" }],
 };
 const VENDOR_LABEL: Record<string, string> = { greenhouse: "Greenhouse", workday: "Workday", checkr: "Checkr", hireright: "HireRight", docusign: "DocuSign" };
@@ -23,17 +23,17 @@ const FIELD_LABEL: Record<string, string> = { start_date: "Start date", base_cen
 const OWNER_LABEL: Record<string, string> = { people: "People", compensation: "Compensation", time_off: "Time off" };
 /** Where credentials alone do not make a card real, the card says so next to its free path. */
 const VENDOR_COPY_NOTE: Record<string, string> = {
-  workday: "Real adapter not built yet: the simulator runs even when every Workday secret is present.",
-  hireright: "Simulated, API shape not published: the simulator uses Weft's own screening shape.",
+  workday: "Real adapter not built yet: the sandbox runs even when every Workday secret is present.",
+  hireright: "Sandbox, API shape not published: the sandbox uses Weft's own screening shape.",
 };
 
 interface Imported { applicationRef: string; offerVersion: number | null; offerId: string; status: string | null; candidate: string | null; title: string | null; startDate: string | null; workState: string | null }
 interface WorkdayTimeOff { requestId: string; workerId: string; worker: string; date: string; minutes: number; status: string; entryRef: string }
 interface Job { id: string; name: string; departmentName: string | null; officeName: string | null; location: string | null; url: string | null }
 
-/** What the mode badge says: Connected, Real but switched off by the live flags, or Simulated. */
-function modeLabel(card: IntegrationCard): { text: string; tone: "green" | "amber" | "gray" } {
-  if (card.status.mode !== "real") return { text: "Simulated", tone: "gray" };
+/** What the mode badge says: Connected, Real but switched off by the live flags, or Sandbox (the in-repo simulator). */
+export function modeLabel(card: Pick<IntegrationCard, "status">): { text: string; tone: "green" | "amber" | "gray" } {
+  if (card.status.mode !== "real") return { text: "Sandbox", tone: "gray" };
   return card.status.health === "permission_gap" ? { text: "Real, disabled", tone: "amber" } : { text: "Connected", tone: "green" };
 }
 
@@ -97,7 +97,7 @@ function VendorCard({ card }: { card: IntegrationCard }) {
         </div>
         {simulate.length ? (
           <div className="border-t border-[var(--app-border)] pt-3">
-            <div className="mb-2 text-1 font-medium text-gray-10">Simulator</div>
+            <div className="mb-2 text-1 font-medium text-gray-10">Sandbox</div>
             <div className="flex flex-wrap items-center gap-2">
               {simulate.map((s) => (
                 <Button key={s.kind} size="sm" variant="secondary" data-testid={T.simulate(v, s.kind)} disabled={sim.pending}
@@ -129,7 +129,7 @@ export function syncSubject(subjectRef: string, offers: Record<string, string>):
   return /^offr_/.test(subjectRef) ? "An offer" : subjectRef;
 }
 
-function SyncItemRow({ s, simulated, offers }: { s: SyncItem; simulated: boolean; offers: Record<string, string> }) {
+function SyncItemRow({ s, offers }: { s: SyncItem; offers: Record<string, string> }) {
   const resolve = useMutation(async (take: "weft" | "vendor") => client.post("/v1/sync-items/:id/resolve", { params: { id: s.id }, body: { take } }));
   const d = s.detail;
   const vendor = VENDOR_LABEL[s.vendor] ?? s.vendor;
@@ -145,7 +145,7 @@ function SyncItemRow({ s, simulated, offers }: { s: SyncItem; simulated: boolean
       <Badge tone={s.kind === "sync_conflict" ? "amber" : "gray"} size="md">{KIND_LABEL[s.kind] ?? s.kind}</Badge>
       <div className="min-w-[220px] flex-1">
         <div>{text}</div>
-        <div className="text-1 text-gray-10" title={s.subjectRef}>{vendor}{simulated ? " (sim)" : ""} · {syncSubject(s.subjectRef, offers)} · opened {fmtDateTime(s.createdAt)}</div>
+        <div className="text-1 text-gray-10" title={s.subjectRef}>{vendor} · {syncSubject(s.subjectRef, offers)} · opened {fmtDateTime(s.createdAt)}</div>
       </div>
       <Button size="sm" variant="secondary" data-testid={H.syncResolve(s.id, "weft")} disabled={resolve.pending} onClick={() => void resolve.run("weft")}>Keep Weft value</Button>
       {s.kind === "sync_conflict" && !payChange ? <Button size="sm" variant="primary" data-testid={H.syncResolve(s.id, "vendor")} disabled={resolve.pending} onClick={() => void resolve.run("vendor")}>Take {vendor} value</Button> : null}
@@ -170,9 +170,9 @@ export function IntegrationsView() {
   const modeOf = (vendor: string) => list.find((c) => c.status.vendor === vendor)?.status.mode ?? "simulated";
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
-      <PageHeader title="Integrations" subtitle="The HR systems Weft connects to. Each one runs as a simulator until it is connected. Greenhouse, Checkr and DocuSign can be connected with credentials; the real Workday adapter is not built yet and HireRight has no public API." />
+      <PageHeader title="Integrations" subtitle="The HR systems Weft connects to. Each one runs in a sandbox until it is connected. Greenhouse, Checkr and DocuSign can be connected with credentials; the real Workday adapter is not built yet and HireRight has no public API." />
       <div data-testid={H.notice} className="mb-4 flex flex-col gap-1 rounded-lg bg-gray-2 px-3 py-2 text-1 text-gray-11">
-        <p>Weft never creates vendor accounts or accepts vendor terms for you. Simulated cards use fictional Larkspur data only.</p>
+        <p>Weft never creates vendor accounts or accepts vendor terms for you. Sandbox cards never reach the vendor.</p>
         <p>Weft reads the secret names below from the file named in WEFT_SECRETS_FILE, and real mode also needs WEFT_INTEGRATIONS_REAL=1. DocuSign also needs WEFT_ESIGN=docusign and WEFT_LIVE_DOCUSIGN=1; Checkr production also needs WEFT_LIVE_CHECKR=1. Values never reach the database or this page.</p>
       </div>
       {cards.error ? <p role="alert" className="mb-4 text-[13px] text-red-11">{errorText(cards.error)}</p> : null}
@@ -184,11 +184,11 @@ export function IntegrationsView() {
           <Card className="p-4" data-testid={T.syncItems}>
             <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Sync items <Badge size="xs">{open.length}</Badge></h2>
             <p className="mb-2 text-1 text-gray-10">Weft never overwrites a value silently. A changed value or a value it cannot map waits here for a person to decide.</p>
-            {open.length === 0 ? <p className="text-[13px] text-gray-10">Nothing to decide.</p> : <ul className="flex flex-col divide-y divide-[var(--app-border)]">{open.map((s) => <SyncItemRow key={s.id} s={s} simulated={modeOf(s.vendor) !== "real"} offers={offerNames} />)}</ul>}
+            {open.length === 0 ? <p className="text-[13px] text-gray-10">Nothing to decide.</p> : <ul className="flex flex-col divide-y divide-[var(--app-border)]">{open.map((s) => <SyncItemRow key={s.id} s={s} offers={offerNames} />)}</ul>}
           </Card>
           <Card className="p-4" data-testid={H.importedOffers}>
             <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Hires imported as draft offers</h2>
-            {imported.length === 0 ? <p className="text-[13px] text-gray-10">No hires imported yet. Simulate one on the Greenhouse card.</p> : (
+            {imported.length === 0 ? <p className="text-[13px] text-gray-10">No hires imported yet. Send a test hire from the Greenhouse card.</p> : (
               <ul className="flex flex-col divide-y divide-[var(--app-border)]">
                 {imported.map((o) => (
                   <li key={o.offerId} data-offer={o.offerId} data-status={o.status ?? ""} className="flex flex-wrap items-center gap-x-3 py-2 text-[13px]">
@@ -223,8 +223,8 @@ export function IntegrationsView() {
           </Card>
         </div>
         <Card className="h-fit p-4" data-testid={H.jobs}>
-          <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Open roles (Greenhouse board{modeOf("greenhouse") === "real" ? "" : ", sim"})</h2>
-          <p className="mb-2 text-1 text-gray-10">{modeOf("greenhouse") === "real" ? "Read from the Greenhouse board named by the board token in the secrets file." : "From the simulator. Reading a real board today needs the Harvest credentials and WEFT_INTEGRATIONS_REAL=1, plus a board token."}</p>
+          <h2 className="mb-1 text-1 font-medium text-gray-10 uppercase">Open roles (Greenhouse board{modeOf("greenhouse") === "real" ? "" : ", sandbox"})</h2>
+          <p className="mb-2 text-1 text-gray-10">{modeOf("greenhouse") === "real" ? "Read from the Greenhouse board named by the board token in the secrets file." : "From the sandbox. Reading a real board today needs the Harvest credentials and WEFT_INTEGRATIONS_REAL=1, plus a board token."}</p>
           <ul className="flex flex-col gap-2">
             {roles.map((j) => (
               <li key={j.id} className="rounded-lg border border-[var(--app-border)] p-2 text-[13px]">

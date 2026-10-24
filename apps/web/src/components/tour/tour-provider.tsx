@@ -411,7 +411,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
         setUi({
           extra: [
             { label: "Replay", onClick: () => { dispatch({ type: "replay", at: Date.now() }); void runPreflight(); } },
-            { label: "Reset demo data", onClick: openReset },
+            { label: "Reset workspace data", onClick: openReset },
           ],
         });
         primaryRef.current = finish;

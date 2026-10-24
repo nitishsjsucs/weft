@@ -47,11 +47,11 @@ export function EsignSigningPage({ api, envelopeId, returnUrl }: { api: Api; env
   return (
     <Card className="p-6" data-testid="esign-signing-page" data-envelope={envelopeId}>
       <div className="flex flex-wrap items-center gap-2">
-        <p className="flex-1 text-1 font-medium uppercase tracking-wide text-gray-10">E-signature provider signing page (simulated)</p>
-        <Badge tone="gray">Simulated</Badge>
+        <p className="flex-1 text-1 font-medium uppercase tracking-wide text-gray-10">E-signature provider signing page (sandbox)</p>
+        <Badge tone="gray">Sandbox</Badge>
       </div>
       <h1 className="mt-2 text-5 font-semibold">Review and sign your offer</h1>
-      <p className="mt-2 text-2 text-gray-11">This envelope holds two documents: the offer letter and the confidentiality and invention assignment agreement. Signing accepts the offer; declining ends it. Nothing here reaches a real provider.</p>
+      <p className="mt-2 text-2 text-gray-11">This envelope holds two documents: the offer letter and the confidentiality and invention assignment agreement. Signing accepts the offer; declining ends it.</p>
       <ol className="mt-4 flex flex-col gap-2 text-2">
         <li className="rounded-lg bg-gray-2 px-3 py-2">1. Offer letter</li>
         <li className="rounded-lg bg-gray-2 px-3 py-2">2. Confidentiality and invention assignment agreement</li>

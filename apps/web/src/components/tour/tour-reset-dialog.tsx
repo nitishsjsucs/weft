@@ -1,5 +1,5 @@
 "use client";
-// "Reset the demo world?" (owner: tour): a Radix AlertDialog offered when preflight finds the world unsuitable, from
+// "Reset the workspace?" (owner: tour): a Radix AlertDialog offered when preflight finds the world unsuitable, from
 // the Viewing as menu and from the close step. POST /v1/sim/reset { profile: "rich" } rebuilds the world.
 import { AlertDialog } from "radix-ui";
 import { Button } from "@weft/ui/components";

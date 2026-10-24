@@ -10,8 +10,8 @@ function flat(p: ParsedAnswer): string {
 
 describe("chat answers as copy", () => {
   it("renders bold, drops the worker id and turns the cited result into a chip", () => {
-    const p = parseAnswer("Recently, Lena Brooks (wrk_0026) had a salary change to **$139,240.00 annually**, effective **Oct 16**. Dana set it on **Oct 9**, action 1, result `res_0001`.");
-    expect(flat(p)).toBe("Recently, Lena Brooks had a salary change to <b>$139,240.00 annually</b>, effective <b>Oct 16</b>. Dana set it on <b>Oct 9</b>, action 1 [1].");
+    const p = parseAnswer("Recently, Lena Brooks (wrk_0026) had a salary change to **$139,240.00 annually**, effective **Oct 16**. Vic set it on **Oct 9**, action 1, result `res_0001`.");
+    expect(flat(p)).toBe("Recently, Lena Brooks had a salary change to <b>$139,240.00 annually</b>, effective <b>Oct 16</b>. Vic set it on <b>Oct 9</b>, action 1 [1].");
     expect(p.cites).toEqual(["res_0001"]);
   });
   it("a trailing Source line keeps only its chip", () => {
@@ -41,23 +41,23 @@ describe("chat answers as copy", () => {
     expect(answerPlain("The increase comes from pay rate prt_0052, set to $139,240.00 effective October 16, recorded in action 1."))
       .toBe("The increase comes from the new pay rate, set to $139,240.00 effective October 16, recorded in audit #1.");
   });
-  it("a day range reads with 'to', and a possessive keeps the name of record whole (live takes, demo check)", () => {
-    expect(flat(parseAnswer("The conflict is November 23\u201325 for Ruth Okoro\u2019s (demo) vacation \u2014 Grace is out. [res_0238]")))
-      .toBe("The conflict is November 23 to 25 for Ruth Okoro (demo)\u2019s vacation, Grace is out. [1]");
+  it("a day range reads with 'to', a dash reads as a comma, and a possessive name passes through as written", () => {
+    expect(flat(parseAnswer("The conflict is November 23\u201325 for Ruth Okoro\u2019s vacation \u2014 Grace is out. [res_0238]")))
+      .toBe("The conflict is November 23 to 25 for Ruth Okoro\u2019s vacation, Grace is out. [1]");
   });
   it("payday in backticks and a parenthesized result read as a date and a chip", () => {
     const t = flat(parseAnswer("The payday `2026-10-30` is not approved (`res_0230`)."));
     expect(t).toBe("The payday Oct 30 is not approved [1].");
   });
   it("a time-off request id and its result never show", () => {
-    const t = flat(parseAnswer("Ruth Okoro (demo) has 89 hours left after the request. Source: tor_0003, result res_0230"));
+    const t = flat(parseAnswer("Ruth Okoro has 89 hours left after the request. Source: tor_0003, result res_0230"));
     expect(t).not.toMatch(/tor_|res_|Source: ,/);
     expect(t).toContain("[1]");
   });
   it("bullet lines become a list and the same id keeps its number", () => {
-    const p = parseAnswer("Two people are out:\n- **Grace Adeyemi (demo)** on Nov 23 [res_0005]\n- Oscar Lindqvist (demo) on Nov 24 [res_0005]");
+    const p = parseAnswer("Two people are out:\n- **Grace Adeyemi** on Nov 23 [res_0005]\n- Oscar Lindqvist on Nov 24 [res_0005]");
     expect(p.blocks.map((b) => b.kind)).toEqual(["p", "ul"]);
-    expect(flat(p)).toBe("Two people are out:\n\n- <b>Grace Adeyemi (demo)</b> on Nov 23 [1]\n- Oscar Lindqvist (demo) on Nov 24 [1]");
+    expect(flat(p)).toBe("Two people are out:\n\n- <b>Grace Adeyemi</b> on Nov 23 [1]\n- Oscar Lindqvist on Nov 24 [1]");
     expect(p.cites).toEqual(["res_0005"]);
   });
   it("never passes HTML or links through as markup", () => {
@@ -74,7 +74,7 @@ describe("untrusted content as copy", async () => {
   const { instructionLines, taintText } = await import("../src/components/app/agent/untrusted");
   it("names where a run's untrusted content came from, never the row id", () => {
     expect(taintText("chat:simc_0037")).toBe("a chat message someone posted");
-    expect(taintText("chat:simc_0037", { author: "Theo Marsh (demo)", channel: "#payroll" })).toBe("a chat message from Theo Marsh (demo) in #payroll");
+    expect(taintText("chat:simc_0037", { author: "Theo Marsh", channel: "#payroll" })).toBe("a chat message from Theo Marsh in #payroll");
     expect(taintText("notice:ntc_0007")).toBe("the text of an agency notice");
     expect(taintText("mcp")).toBe("a request from an outside MCP client");
     expect(taintText(null)).toBe("content from outside Weft");

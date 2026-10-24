@@ -57,7 +57,7 @@ describe("model labels (env.ts; not shown in the top bar)", () => {
 describe("clock segment", () => {
   it("names the simulated time in full for the popover and the accessible name", () => {
     expect(plain(fmtLongClock(SEED_NOW))).toBe("Monday, October 26, 8:30 AM PT");
-    expect(plain(clockAria(SEED_NOW))).toBe("Simulated time: Monday, October 26, 8:30 AM Pacific");
+    expect(plain(clockAria(SEED_NOW))).toBe("Clock: Monday, October 26, 8:30 AM Pacific");
   });
 
   it("reads the rate as paused, real time or a multiplier", () => {
@@ -75,15 +75,16 @@ describe("clock segment", () => {
 });
 
 describe("persona menu", () => {
-  it("shows initials and first names without the demo marker", () => {
-    expect(initials("Dana Whitfield (demo)")).toBe("DW");
+  it("shows initials and first names from a plain name", () => {
+    expect(initials("Vic Akisole")).toBe("VA");
+    expect(firstName("Vic Akisole")).toBe("Vic");
     expect(initials("Rowan Ellery")).toBe("RE");
-    expect(firstName("Theo Marsh (demo)")).toBe("Theo");
+    expect(firstName("Theo Marsh")).toBe("Theo");
   });
 
   it("groups admins, managers and employees in that order and drops empty groups", () => {
     expect(groupPersonas(PRINCIPALS).map((g) => [g.group, g.people.map((p) => p.id)])).toEqual([["Admins", ["usr_dana", "usr_theo", "usr_sam"]], ["Managers", ["usr_imani"]]]);
-    const withManager = [...PRINCIPALS, { id: "usr_e", name: "E (demo)", title: "Engineer", role: "employee" }];
+    const withManager = [...PRINCIPALS, { id: "usr_e", name: "E", title: "Engineer", role: "employee" }];
     expect(groupPersonas(withManager).map((g) => g.group)).toEqual(["Admins", "Managers", "Employees"]);
     expect(roleLabel("payroll_admin")).toBe("payroll admin");
     expect(roleLabel("hr_manager")).toBe("HR manager");
@@ -105,7 +106,7 @@ describe("tiers and breadcrumbs", () => {
   });
 
   it("shows a detail page's title instead of its raw id, and marks the id while the title loads", () => {
-    expect(crumbs("/app/people/wrk_0001", "Dana Whitfield (demo)")).toEqual([{ label: "People", href: "/app/people" }, { label: "Dana Whitfield (demo)" }]);
+    expect(crumbs("/app/people/wrk_0001", "Vic Akisole")).toEqual([{ label: "People", href: "/app/people" }, { label: "Vic Akisole" }]);
     expect(crumbs("/app/people/wrk_0001")).toEqual([{ label: "People", href: "/app/people" }, { label: "wrk_0001", id: true }]);
     expect(crumbs("/app/payroll/pay_2026_09_15", "Sep 1 to Sep 15")[1]).toEqual({ label: "Sep 1 to Sep 15" });
     expect(crumbs("/app/inbox")).toEqual([{ label: "Inbox", href: "/app/inbox" }]);

@@ -1,6 +1,7 @@
 // Landing page sections (SPEC 11.2; structure after research/design.md 13.1, copy original). Owner: t6-site.
-// Every name on this page is either Weft's own or a fictional "(demo)" record from the seed; every agency, bank and
-// vendor named here is a simulator in this repo.
+// Every name on this page is either Weft's own or a fictional record from the seed; every agency, bank and vendor
+// named here is a simulator in this repo. The page says so once, plainly, as the lead of the simulators marquee
+// (FICTIONAL_NOTE), so the fictional company never reads as a customer.
 import type { ReactNode } from "react";
 import Link from "next/link";
 import {
@@ -26,7 +27,7 @@ export function Announcement() {
         <span className="text-[var(--accent-8)]">New</span>
         <span className="h-4 w-px bg-white/20" aria-hidden />
         <a href="#how-it-works" className="flex min-w-0 items-center gap-1 text-white/85 hover:text-white">
-          <span className="truncate">Weft runs a whole fictional company on your laptop</span>
+          <span className="truncate">Weft runs a whole company on your laptop</span>
           <ChevronRight className="size-4 shrink-0" strokeWidth={1.5} />
         </a>
       </Container>
@@ -55,7 +56,7 @@ export function Nav() {
         <div className="ml-auto flex items-center gap-2 laptop:ml-0">
           <a href="#how-it-works" className="weft-press hidden h-8 items-center rounded-[7px] px-3 text-2 font-medium text-gray-12 hover:bg-foreground/[0.06] mobile:inline-flex">Run locally</a>
           <Link href="/app" className="weft-press inline-flex h-8 items-center gap-1 rounded-[7px] bg-gray-12 pr-2.5 pl-3 text-2 font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,.2)] hover:bg-gray-12/90">
-            Open the demo <ChevronRight className="size-4" strokeWidth={1.5} />
+            Open the app <ChevronRight className="size-4" strokeWidth={1.5} />
           </Link>
         </div>
       </Container>
@@ -72,7 +73,7 @@ export function Hero({ clock, clockSlot }: { clock: { now: string; rate: number 
       <LoomCanvas className={`pointer-events-none absolute top-0 right-0 hidden h-[620px] w-[62%] laptop:block ${css.loomFade}`} />
       <Container className="relative flex flex-col gap-8 pt-14 pb-12 tablet:gap-11 tablet:pt-20">
         <p className="flex flex-wrap items-center gap-x-2 text-[13px] leading-5 font-medium text-gray-10">
-          <span>Simulated clock at Larkspur Robotics (demo):</span>
+          <span>Clock at Larkspur Robotics:</span>
           <span className="text-gray-12">{clockSlot ?? <SimClockTicker now={clock.now} rate={clock.rate} />}</span>
         </p>
         <div className="flex max-w-[900px] flex-col gap-5">
@@ -83,13 +84,12 @@ export function Hero({ clock, clockSlot }: { clock: { now: string; rate: number 
           <p className="max-w-[600px] text-4 leading-[27px] text-gray-a11">
             Weft is an open-source HRIS, payroll and benefits platform. Its agent reads tax notices, checks every payroll
             for anomalies and onboards new hires, then waits for a person before anything moves money or reaches an agency.
-            It runs on one fictional company, and every agency, bank and vendor is a simulator in the repo.
           </p>
         </div>
         <div className="flex flex-col gap-3 mobile:flex-row mobile:items-center">
           <div className="w-full mobile:w-[300px]"><CopyCommand command="pnpm install && pnpm dev" /></div>
           <Link href="/app" className="weft-press inline-flex h-11 items-center justify-center gap-2 rounded-[9px] bg-accent-9 px-5 text-3 font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,.25)] hover:bg-accent-10">
-            Open the demo <ArrowRight className="size-4" strokeWidth={1.5} />
+            Open the app <ArrowRight className="size-4" strokeWidth={1.5} />
           </Link>
           <a href="#run" className="inline-flex items-center justify-center gap-2 text-2 text-gray-11 hover:text-gray-12 mobile:ml-2">
             <span className="inline-flex size-7 items-center justify-center rounded-full bg-gray-3"><Workflow className="size-3.5" strokeWidth={1.5} /></span>
@@ -115,10 +115,9 @@ function ProductFrame() {
     <div id="run" className="scroll-mt-20 overflow-hidden rounded-xl border border-border bg-card shadow-product">
       <div className="flex h-10 items-center gap-2 border-b border-border bg-gray-1 px-3 text-1 text-gray-10">
         <WeaveMark size={16} />
-        <span className="font-medium text-gray-12">Larkspur Robotics (demo)</span>
+        <span className="font-medium text-gray-12">Larkspur Robotics</span>
         <ChevronRight className="size-3" strokeWidth={1.5} />
         <span>Inbox</span>
-        <span className="ml-auto rounded-full bg-amber-3 px-2 py-0.5 text-0 font-medium text-amber-11">Simulated</span>
       </div>
       <div className="grid laptop:grid-cols-[200px_1fr_320px]">
         <aside className="hidden flex-col gap-0.5 border-r border-border bg-[#fafafa] p-2 text-2 laptop:flex" aria-hidden>
@@ -177,27 +176,30 @@ function ProductFrame() {
 // ---- simulators marquee ------------------------------------------------------------------------------------------
 
 const SIMULATORS: { label: string; icon: typeof Landmark }[] = [
-  { label: "IRS (sim)", icon: Landmark },
-  { label: "CA EDD (sim)", icon: Building2 },
-  { label: "NY DTF (sim)", icon: Building2 },
-  { label: "NY DOL (sim)", icon: Building2 },
-  { label: "TX TWC (sim)", icon: Building2 },
-  { label: "CO DOR (sim)", icon: Building2 },
-  { label: "CO CDLE (sim)", icon: Building2 },
-  { label: "Sim Federal Credit Union ACH", icon: Banknote },
-  { label: "Identity provider (sim)", icon: KeyRound },
-  { label: "Laptop vendor (sim)", icon: Laptop },
-  { label: "Team chat (sim)", icon: MessageSquare },
-  { label: "Juniper Mutual (sim)", icon: HeartPulse },
-  { label: "Tidewater Retirement (sim)", icon: PiggyBank },
+  { label: "IRS", icon: Landmark },
+  { label: "CA EDD", icon: Building2 },
+  { label: "NY DTF", icon: Building2 },
+  { label: "NY DOL", icon: Building2 },
+  { label: "TX TWC", icon: Building2 },
+  { label: "CO DOR", icon: Building2 },
+  { label: "CO CDLE", icon: Building2 },
+  { label: "Tidepool Federal Credit Union ACH", icon: Banknote },
+  { label: "Identity provider", icon: KeyRound },
+  { label: "Laptop vendor", icon: Laptop },
+  { label: "Team chat", icon: MessageSquare },
+  { label: "Juniper Mutual", icon: HeartPulse },
+  { label: "Tidewater Retirement", icon: PiggyBank },
 ];
+
+/** The one place the landing says the company is fictional and the outside world simulated. */
+export const FICTIONAL_NOTE = "Larkspur Robotics and everyone shown are fictional; every agency, bank and vendor is simulated.";
 
 export function SimulatorsMarquee() {
   const items = [...SIMULATORS, ...SIMULATORS];
   return (
     <section id="simulators" className="scroll-mt-16 border-y border-border bg-background">
       <Container className="flex flex-col gap-3 py-5 laptop:flex-row laptop:items-center laptop:gap-10">
-        <p className="max-w-sm shrink-0 text-2 font-book text-gray-10">Runs against simulators in this repo, never real agencies or banks</p>
+        <p data-testid="marketing-fictional" className="max-w-sm shrink-0 text-2 font-book text-gray-10">{FICTIONAL_NOTE}</p>
         <div className={`min-w-0 flex-1 overflow-hidden ${css.marquee}`}>
           <ul className={`${css.track} gap-10`} aria-label="Simulators">
             {items.map((s, i) => (
@@ -228,7 +230,7 @@ export function ProductsSection() {
   return (
     <section className="pt-12 tablet:pt-16 laptop:pt-24">
       <Container className="flex flex-col gap-12 laptop:gap-16">
-        <SectionHeading id="product" lead="Payroll, compliance, benefits and IT in one place." rest="Built in the open, run on your own machine, honest about what is simulated." />
+        <SectionHeading id="product" lead="Payroll, compliance, benefits and IT in one place." rest="Built in the open and run on your own machine." />
         <ProductGrid />
       </Container>
     </section>
@@ -240,11 +242,11 @@ export function ProductsSection() {
 const STEPS = [
   {
     n: "01", title: "Seed a company",
-    body: "One command builds Larkspur Robotics (demo): 48 employees across California, New York and Texas, a Colorado hire on the way, three contractors, benefits, tax accounts and an open payroll draft. The same seed gives the same bytes every time.",
+    body: "One command builds Larkspur Robotics: 48 employees across California, New York and Texas, a Colorado hire on the way, three contractors, benefits, tax accounts and an open payroll draft. The same seed gives the same bytes every time.",
   },
   {
     n: "02", title: "Let the agent work",
-    body: "Routines start on an event or a schedule. A tax notice lands, a payroll deadline nears, an offer is accepted, and the agent reads, checks and drafts the work on a simulated clock.",
+    body: "Routines start on an event or a schedule. A tax notice lands, a payroll deadline nears, an offer is accepted, and the agent reads, checks and drafts the work.",
   },
   {
     n: "03", title: "Approve what matters",
@@ -256,7 +258,7 @@ export function HowItWorks() {
   return (
     <section className="py-12 tablet:py-16 laptop:py-24">
       <Container className="flex flex-col gap-12 laptop:gap-16">
-        <SectionHeading id="how-it-works" lead="One fictional company, wired end to end." rest="Seed it, let the agent work, and sign off on what matters." />
+        <SectionHeading id="how-it-works" lead="One company, wired end to end." rest="Seed it, let the agent work, and sign off on what matters." />
         <ol className="grid gap-10 tablet:grid-cols-3 tablet:gap-12">
           {STEPS.map((s) => (
             <li key={s.n} className="weft-rule flex flex-col gap-3 pl-6">
@@ -312,23 +314,23 @@ export function AgentIsland() {
 
 /** The line under the stats heading for each source. */
 export function statsNote(source: LandingStats["source"]): string {
-  if (source === "live") return "Counted from the demo database as it runs.";
-  if (source === "snapshot") return "Counted from the demo company's seeded database.";
+  if (source === "live") return "Counted from the database as it runs.";
+  if (source === "snapshot") return "Counted from the company's seeded database.";
   return "The API is not reachable, so these are the seed's numbers.";
 }
 
 export function StatsTiles({ stats }: { stats: LandingStats }) {
   const fmt = new Intl.NumberFormat("en-US");
   const tiles = [
-    { value: stats.employees, label: "synthetic employees" },
-    { value: stats.simulatedAgencies, label: "simulated agencies" },
+    { value: stats.employees, label: "employees" },
+    { value: stats.simulatedAgencies, label: "agencies" },
     { value: stats.runsLogged, label: "agent runs logged" },
     { value: stats.realAgenciesContacted, label: "real agencies contacted" },
   ];
   return (
     <section className="pb-12 tablet:pb-16 laptop:pb-24">
       <Container className="flex flex-col gap-12">
-        <SectionHeading id="numbers" lead="Numbers from this running demo." rest={statsNote(stats.source)} />
+        <SectionHeading id="numbers" lead="Numbers from this running copy of Weft." rest={statsNote(stats.source)} />
         <dl data-testid="marketing-stats" data-source={stats.source} className="grid grid-cols-2 border-t border-l border-border laptop:grid-cols-4">
           {tiles.map((t) => (
             <div key={t.label} className="flex min-h-[132px] flex-col justify-between gap-6 border-r border-b border-border p-4 tablet:min-h-[176px] tablet:p-6">
@@ -354,11 +356,11 @@ export function CtaBand() {
               Run a whole company<br /><span className="weft-hatch text-gray-9">on your own laptop.</span>
             </h2>
             <p className="max-w-[460px] text-4 text-white/80">
-              Clone it, seed it and watch the agent work against simulators. The scripted provider needs no key; add one
+              Clone it, seed it and watch the agent work. The scripted provider needs no key; add one
               when you want a real model in the loop.
             </p>
             <div className="flex flex-wrap items-center gap-4">
-              <Link href="/app" className="weft-press inline-flex h-10 items-center rounded-lg bg-white px-4 text-2 font-medium text-[#202020] hover:bg-white/90">Open the demo</Link>
+              <Link href="/app" className="weft-press inline-flex h-10 items-center rounded-lg bg-white px-4 text-2 font-medium text-[#202020] hover:bg-white/90">Open the app</Link>
               <code className="font-mono text-2 text-white/70">pnpm dev</code>
             </div>
           </div>
@@ -371,9 +373,8 @@ export function CtaBand() {
 }
 
 const FOOTER = [
-  { head: "Product", links: [{ href: "#how-it-works", label: "How it works" }, { href: "#agent", label: "Agent" }, { href: "#simulators", label: "Simulators" }, { href: "/app", label: "Open the demo" }] },
+  { head: "Product", links: [{ href: "#how-it-works", label: "How it works" }, { href: "#agent", label: "Agent" }, { href: "#simulators", label: "Simulators" }, { href: "/app", label: "Open the app" }] },
   { head: "Developers", links: [{ href: "#run", label: "One run, step by step" }, { href: "#numbers", label: "Live numbers" }, { href: "/app/routines", label: "Routines" }, { href: "/app/audit", label: "Audit log" }] },
-  { head: "Notice", links: [{ href: "#simulators", label: "Every agency is simulated" }, { href: "#numbers", label: "Demo data is fictional" }] },
 ];
 
 export function Footer() {
@@ -382,9 +383,9 @@ export function Footer() {
       <Container className="grid gap-10 pt-12 pb-8 laptop:grid-cols-[350px_1fr]">
         <div className="flex flex-col gap-3">
           <Wordmark />
-          <p className="max-w-[280px] text-2 text-gray-10">Open-source payroll and HR with an agent that asks first. Synthetic data only.</p>
+          <p className="max-w-[280px] text-2 text-gray-10">Open-source payroll and HR with an agent that asks first.</p>
         </div>
-        <div className="grid grid-cols-2 gap-8 tablet:grid-cols-3">
+        <div className="grid grid-cols-2 gap-8">
           {FOOTER.map((c) => (
             <div key={c.head} className="flex flex-col gap-3">
               <span className="text-2 font-book text-gray-12">{c.head}</span>
@@ -392,7 +393,7 @@ export function Footer() {
             </div>
           ))}
         </div>
-        <p className="text-1 text-gray-10 laptop:col-span-2">Weft contributors, Apache-2.0. Every person and company shown is fictional and marked (demo).</p>
+        <p className="text-1 text-gray-10 laptop:col-span-2">Weft contributors, Apache-2.0.</p>
       </Container>
       <div aria-hidden className={`${css.footerWord} mx-auto max-w-[1280px] px-4 select-none laptop:px-8`}>weft</div>
     </footer>

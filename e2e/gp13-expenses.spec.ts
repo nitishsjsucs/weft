@@ -1,6 +1,6 @@
 // GP13. Expense review to reimbursement (docs/wave3.md 5). Owner of the spec: w3-expenses.
 // Expenses shows the four bands with the seeded counts; rt_expense_review proposes one decision per needs-review
-// item; Dana approves the two for Mateo in the Inbox and declines the duplicate from the drawer; the open draft carries
+// item; Vic approves the two for Mateo in the Inbox and declines the duplicate from the drawer; the open draft carries
 // the reimbursements on Mateo's paycheck outside gross; processing the run moves them to Paid out. The second test is
 // the employee side: a new hire files a claim with a receipt in the portal, reads the return note and resubmits it.
 // Run on the track ports (docs/wave3.md 7 table, or the pair assigned for the round), for example:
@@ -26,7 +26,7 @@ test("GP13: one decision per expense, reimbursed on the draft outside gross, pai
     expect(subjects).toEqual(["exp_0001", "exp_0002", "exp_0003", "exp_0004", "exp_0005", "exp_0006", "exp_0007", "exp_0008"].map((id) => `expense:${id}`));
   });
 
-  await test.step("Dana approves Mateo's two proposals in the Inbox", async () => {
+  await test.step("Vic approves Mateo's two proposals in the Inbox", async () => {
     await openApp(page, "/app/inbox");
     for (const id of ["exp_0001", "exp_0006"]) await approveCard(page, weft, proposals.find((p) => p.subjectRef === `expense:${id}`)!.id);
     const pcs = await weft.get<PageResult<Paycheck>>(`/v1/payrolls/${SEED.draftRun}/paychecks`, { workerId: "wrk_0005" });
@@ -73,7 +73,7 @@ test("GP13 portal: the employee files a claim with a receipt, reads the return n
     await section.getByTestId(XT.portalNew).click();
     await section.getByTestId(XT.portalField("category")).selectOption("meals");
     await section.getByTestId(XT.portalField("date")).fill("2026-10-20");
-    await section.getByTestId(XT.portalField("merchant")).fill("Harbor Noodle (demo)");
+    await section.getByTestId(XT.portalField("merchant")).fill("Harbor Noodle");
     await section.getByTestId(XT.portalField("amount")).fill("42.50");
     await section.getByTestId(XT.portalField("purpose")).fill("Lunch with the hiring team");
     await section.getByTestId(XT.portalField("receipt")).setInputFiles({ name: "lunch.png", mimeType: "image/png", buffer: PNG });
@@ -87,18 +87,18 @@ test("GP13 portal: the employee files a claim with a receipt, reads the return n
     await expect(section.getByTestId(`portal-expense-${id}`)).toHaveAttribute("data-status", "needs_review");
   });
 
-  await test.step("Dana returns it with a note; the employee reads it and resubmits with the attendees", async () => {
+  await test.step("Vic returns it with a note; the employee reads it and resubmits with the attendees", async () => {
     await weft.post(`/v1/expenses/${id}/decide`, { decision: "return", note: "Please list who joined the lunch." });
     await page.reload();
     await expect(section.getByTestId(`portal-expense-${id}`)).toHaveAttribute("data-status", "returned");
     await expect(section.getByTestId(XT.portalNote(id))).toHaveText("Please list who joined the lunch.");
     await section.getByTestId(XT.portalResubmit(id)).click();
-    await expect(section.getByTestId(XT.portalField("merchant"))).toHaveValue("Harbor Noodle (demo)");
-    await section.getByTestId(XT.portalField("attendees")).fill("Juno Hale, Dana Whitfield");
+    await expect(section.getByTestId(XT.portalField("merchant"))).toHaveValue("Harbor Noodle");
+    await section.getByTestId(XT.portalField("attendees")).fill("Juno Hale, Vic Akisole");
     await section.getByTestId(XT.portalSubmit).click();
     await expect(section.getByTestId(`portal-expense-${id}`)).toHaveAttribute("data-status", "needs_review");
     const d = await weft.get<{ attendees: string; hasReceipt: boolean; checks: { rule: string }[]; trail: { command: string }[] }>(`/v1/expenses/${id}`);
-    expect(d).toMatchObject({ attendees: "Juno Hale, Dana Whitfield", hasReceipt: true });
+    expect(d).toMatchObject({ attendees: "Juno Hale, Vic Akisole", hasReceipt: true });
     expect(d.checks.map((c) => c.rule)).toEqual(["OUTSIDE_EMPLOYMENT"]);
     expect(d.trail.map((t) => t.command)).toEqual(["expenses.submit", "expenses.decide", "expenses.resubmit"]);
   });

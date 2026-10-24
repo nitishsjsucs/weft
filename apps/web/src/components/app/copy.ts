@@ -89,7 +89,7 @@ const SINGULAR: Record<string, string> = { workers: "worker", actions: "action",
 function deliveredLine(file: string, agency: string): string {
   const stem = file.replace(/\.txt$/i, "").replace(new RegExp(`^${agency}_`, "i"), "").replace(/_\d{4}$/, "");
   const form = stem.replace(/_/g, " ").replace(/([A-Za-z])(\d)/g, "$1 $2").trim();
-  const who = AGENCY_WORDS[agency] ? `${AGENCY_WORDS[agency]} (sim)` : agency;
+  const who = AGENCY_WORDS[agency] ?? agency;
   return form ? `Delivered the ${noticeName(form)} from ${who}` : `Delivered a notice from ${who}`;
 }
 
@@ -164,7 +164,7 @@ const COMMAND_NOUN: Record<string, [string, string]> = {
   "expenses.decide": ["expense decision", "expense decisions"], "people.update": ["profile change", "profile changes"],
 };
 
-/** A memory page read named by its page: "Read Lena Brooks (demo)'s memory page" for a person's page. */
+/** A memory page read named by its page: "Read Lena Brooks's memory page" for a person's page. */
 export function memoryReadLine(path: string, body: string | null | undefined): string | null {
   const title = /^#\s+(.+)$/m.exec(body ?? "")?.[1]?.trim();
   if (!title) return null;

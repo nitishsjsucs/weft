@@ -1,4 +1,4 @@
-// GP6. Offer to signed (docs/wave2.md). Owner: w2-onboarding. Dana builds an offer for a fictional CO candidate in
+// GP6. Offer to signed (docs/wave2.md). Owner: w2-onboarding. Vic builds an offer for a fictional CO candidate in
 // Hiring, saves the draft and sends it; the email simulator holds the invite; the portal link signs in as the new
 // hire persona (the offer reads Viewed); the new hire signs the offer and the confidentiality agreement by typing
 // their name; signature rows carry signer, sim time and the document sha256; both show under Signed in the library.
@@ -10,7 +10,7 @@ interface OfferDetail { id: string; status: string; personaPrincipalId: string |
 
 test("GP6: an offer goes from draft to signed through the new-hire portal", async ({ page, weft, request }) => {
   let offer: OfferDetail;
-  await test.step("Dana drafts the offer in Hiring and sends it", async () => {
+  await test.step("Vic drafts the offer in Hiring and sends it", async () => {
     await openApp(page, "/app/hiring");
     await viewAs(page, "dana");
     await page.getByTestId(T.offerFirst).fill(C.first);
@@ -51,7 +51,8 @@ test("GP6: an offer goes from draft to signed through the new-hire portal", asyn
     await expect(page).toHaveURL(new RegExp(`/portal\\?as=${offer.personaPrincipalId}`));
     await expect(page.getByTestId(T.portalCounter)).toHaveText("0 of 7 done");
     await eventually(() => weft.get<OfferDetail>(`/v1/offers/${offer.id}`), (o) => o.status === "viewed", "the offer reads viewed");
-    await expect(page.getByTestId(T.docBody)).toContainText("DEMO DOCUMENT");
+    await expect(page.getByTestId(T.docBody)).toContainText(/Offer letter|Confidentiality and invention assignment agreement/);
+    await expect(page.getByTestId(T.docBody)).not.toContainText(/DEMO DOCUMENT|\(demo\)/);
   });
 
   await test.step("the new hire signs the offer and the confidentiality agreement", async () => {
