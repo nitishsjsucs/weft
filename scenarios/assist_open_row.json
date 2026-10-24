@@ -1,0 +1,29 @@
+{
+  "match": "^open this (row|one)\\b",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__show",
+            "arguments": {
+              "intent": null,
+              "params": null,
+              "target": "@{{derived.under.n}}",
+              "action": "open",
+              "label": "This one"
+            }
+          },
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "Opened the row under your pointer."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

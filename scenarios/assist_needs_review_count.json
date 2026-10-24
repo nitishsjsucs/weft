@@ -1,0 +1,33 @@
+{
+  "match": "how many .*need review",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "payroll__get_run",
+            "arguments": {
+              "run_id": "pay_2026_10_30",
+              "flagged_only": true,
+              "worker_id": null,
+              "state": null,
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "{{last.payroll__get_run.data.counts.needs_review}} paychecks need review on this draft [{{last.payroll__get_run.resultId}}]."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

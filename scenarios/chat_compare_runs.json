@@ -1,0 +1,28 @@
+{
+  "match": "compare the last three (pay )?runs",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "payroll__list_runs",
+            "arguments": {
+              "status": null,
+              "limit": 3,
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Of the last pay runs, the open draft stands out: it is the only one with paychecks that still need review [{{last.payroll__list_runs.resultId}}]."
+          }
+        ]
+      }
+    ]
+  }
+}

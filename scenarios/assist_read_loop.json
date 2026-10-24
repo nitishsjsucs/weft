@@ -1,0 +1,65 @@
+{
+  "match": "^read every run",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "payroll__list_runs",
+            "arguments": {
+              "status": null,
+              "limit": 3,
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "payroll__get_run",
+            "arguments": {
+              "run_id": "pay_2026_10_30",
+              "flagged_only": true,
+              "worker_id": null,
+              "state": null,
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "payroll__get_run",
+            "arguments": {
+              "run_id": "pay_2026_10_15",
+              "flagged_only": true,
+              "worker_id": null,
+              "state": null,
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "payroll__get_run",
+            "arguments": {
+              "run_id": "pay_2026_09_30",
+              "flagged_only": true,
+              "worker_id": null,
+              "state": null,
+              "response_format": "concise"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "match": "account executive",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "people__search",
+            "arguments": {
+              "query": "Account Executive",
+              "state": null,
+              "status": null,
+              "department_id": null,
+              "start_from": null,
+              "start_to": null,
+              "limit": null,
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "Two people are account executives. Which one do you mean?"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
