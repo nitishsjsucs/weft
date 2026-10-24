@@ -256,7 +256,7 @@ no Co-Authored-By trailer, ports and process groups, money in integer cents, `da
    `preview` for anything that proposes, `access: "human_only"` for a person's own submissions. Consequential writes are
    proposals. Update the registry snapshot test in the same commit.
 5. **Seed** additions go in your own `packages/seed/src/w4-*.ts` step. Never change earlier seed counts, never edit
-   processed runs, keep every name `(demo)` and every domain `*.example`. Any seed change also refreshes the eval world
+   processed runs, keep every domain `*.example` (names of record carry no suffix since 2026-10-23). Any seed change also refreshes the eval world
    digests through the w4-eval-suite track (a reviewed commit), never silently.
 6. **Routines** go in your `packages/routines/src/wave4/<area>.ts`, ship disabled unless their golden path needs them,
    use at most 8 tools, and come with scripted scenarios in `scenarios/<routine id>*.json`.
@@ -557,8 +557,8 @@ trace tag enum in `telemetry.ts` name the same three splits.
 | Split | Status | Tasks | Phoenix dataset | Manifest | Runs while held out |
 |---|---|---|---|---|---|
 | `dev` | dev | 65 | `weft-eval-dev-<hash>` (changes as fixers edit it) | none | |
-| `test` | held out, round 2, written 2026-10-18 | 41 | `weft-eval-test-bd4217b292` | `evals/suite/test-manifest.json` | 0 |
-| `retired-r1` | retired 2026-10-18, round 1, written 2026-10-16 | 41 | `weft-eval-test-dbc843f9b5` | `evals/suite/retired-r1-manifest.json` | 11 |
+| `test` | held out, round 2, written 2026-10-18 | 41 | `weft-eval-test-2c830c192c` (was `weft-eval-test-bd4217b292` until the 2026-10-23 world digest re-pin) | `evals/suite/test-manifest.json` | 0 |
+| `retired-r1` | retired 2026-10-18, round 1, written 2026-10-16 | 41 | `weft-eval-test-456f4edc21` (was `weft-eval-test-dbc843f9b5` until the 2026-10-23 world digest re-pin) | `evals/suite/retired-r1-manifest.json` | 11 |
 
 **The retired split.** The round 1 tasks, reference notes, world mutators and oracles moved unchanged (except the
 `split` and `reference` fields) to `evals/suite/tasks/retired-r1/` and `evals/suite/reference/retired-r1/`. Its 41 world

@@ -30,7 +30,7 @@ pnpm --filter @weft/tests exec vitest run scenarios/gp6-offer-portal.test.ts sce
 WEFT_E2E_WEB_PORT=4301 WEFT_E2E_API_PORT=4302 npx playwright test e2e/gp6-offer-portal.spec.ts e2e/gp7-new-hire-checklist.spec.ts
 ```
 
-Demo by hand: `pnpm dev`, open `/app/hiring` as Dana, save a draft, press Send, follow "Open the new-hire portal" in the outbox. Test routing numbers: `021000021` and `011000015` pass the checksum; `021000022` fails it; an account ending `0000` is refused by the bank simulator.
+Demo by hand: `pnpm dev`, open `/app/hiring` as Vic, save a draft, press Send, follow "Open the new-hire portal" in the outbox. Test routing numbers: `021000021` and `011000015` pass the checksum; `021000022` fails it; an account ending `0000` is refused by the bank simulator.
 
 ## Decisions
 

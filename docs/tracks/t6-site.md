@@ -58,7 +58,7 @@ Integration findings for other tracks (from the rehearsal):
 | Tabs | Radix tabs with role `tab`: People "Offers"; Compliance "Registrations", "Rates", "Notices" | T5 |
 | Compliance | both CO accounts render as `registration-row-CO`; rate rows use the contract code, `rate-row-CA-sui` | T5 |
 | Inbox | `inbox-approve` and `inbox-tainted-banner` inside each `inbox-card-<id>`; banner text starts "This run read untrusted content" | T5 (matches today) |
-| Audit | the filing row reads "Not reversible: filed with the agency simulator" and has no `audit-undo-<seq>` | T2 text, T5 view (both match in the rehearsal code) |
+| Audit | the filing row reads "Not reversible: filed with the agency" and has no `audit-undo-<seq>` | T2 text, T5 view (both match in the rehearsal code) |
 | Payroll | group headers read "Needs Review (4)" and "Ready for Approval (44)", rows are `payroll-row-<workerId>` inside the group | T5 (matches today) |
 | Agent panel | a button whose name contains "agent" opens it when collapsed; `agent-status` says "Working..." while running | T5 (matches today) |
 | Command args | `payroll.submit_run` args include `exclude_blocked: true`; the tax.update_rate args contain `0.015`, `2026-01-01`, `sui` | T1, T2 (both match in the rehearsal code) |

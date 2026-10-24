@@ -52,7 +52,7 @@ Decisions the architect made where the research left a choice:
   wrk_0004) approves time off for direct reports only; the direct-report check lives inside `time_off.decide` (and,
   since the fixer round, `time_off.reopen`), so the grant model is unchanged. Expense manager routing is still open
   (section 10 and the README's "Wave 3: left"). Routing skips a manager whose worker is not active (GP9 terminates Imani
-  in its own world and the demo walks GP9 before GP14), falling back to the department lead, then Dana.
+  in its own world and the demo walks GP9 before GP14), falling back to the department lead, then Vic.
 - **Birthdays are opt-in and synthetic**: `workers.birth_month_day` (`MM-DD`, never a year), seeded for about half
   the people. Anniversaries come from the start date.
 - **No new grant domains.** Expense commands use the `payroll` domain and time-off commands the `people` domain, so
@@ -109,7 +109,7 @@ Nov 23 to 25, 33.3% over the 30% limit) and one approved TX request inside the o
   local Weft has no public URL, polling on the scheduler tick is the baseline (`apps/api/src/integrations/poll.ts`).
 - Data: `integration_connections`, `ext_links` (one Weft record per vendor record), `ext_snapshots` (conflict
   detection), `sync_items` (human-only Inbox items for conflicts and unmapped values).
-- Screen: `/app/integrations` (nav entry landed, labeled Simulated) renders `GET /v1/integrations` cards with the
+- Screen: `/app/integrations` (nav entry landed) renders `GET /v1/integrations` cards with the
   mode badge, secret names with present or missing, the free path, a test button and the simulate controls. The copy is
   in `packages/integrations/src/cards.ts`, in Weft's own words; vendor names are used only to say what Weft connects
   to, with no logos.
@@ -159,7 +159,7 @@ Each has a scenario test under `tests/scenarios/` on the scripted provider and, 
 **GP13. Expense review to reimbursement (w3-expenses, e2e `gp13-expenses.spec.ts`).** Expenses shows the four bands
 with the seeded counts. `rt_expense_review` explains each needs-review item and proposes one decision per item (approve
 clean, decline the duplicate, return the missing receipt, a human note for over-limit in CA). Asked to approve
-everything, the agent refuses bulk approval and offers to go item by item. Dana approves two proposals in the Inbox; the
+everything, the agent refuses bulk approval and offers to go item by item. Vic approves two proposals in the Inbox; the
 open draft shows their reimbursements on the right paychecks (outside gross, inside net and the bank entry); processing
 the run marks them Paid out.
 
@@ -236,12 +236,12 @@ process groups, models and spend, money in integer cents, `date` often). In addi
    for anything that proposes, `access: "human_only"` for signing, adverse action, sync conflict resolution and the
    employee's own submissions. Consequential writes are proposals. Update the registry snapshot test in the same commit.
 5. **Seed** additions go in your own `packages/seed/src/w3-*.ts` step. Never change wave 1 or wave 2 seed counts,
-   never edit processed runs, keep every name `(demo)` and every domain `*.example`.
+   never edit processed runs, keep every domain `*.example` (names of record carry no suffix since 2026-10-23).
 6. **Routines** go in your `packages/routines/src/wave3/<area>.ts`, ship disabled unless their golden path needs them,
    use at most 8 tools, and come with scripted scenarios in `scenarios/<routine id>*.json`.
 7. **Integrations**: never create accounts, sign up, accept terms or enter credentials on any website. Real adapters
    read credentials only through `@weft/integrations` `readSecret` (`WEFT_SECRETS_FILE`); never print, log, commit or
-   copy them. With no credentials every integration runs its simulator and the UI says Simulated. Read-only calls to
+   copy them. With no credentials every integration runs its simulator and the UI says Sandbox. Read-only calls to
    public unauthenticated endpoints (the public job board) are allowed sparingly, only behind `WEFT_LIVE_PUBLIC=1` in
    tests. Never vendor a vendor's spec file; hand-write zod schemas for the fields Weft uses. Never copy logos or
    marketing copy.
@@ -455,7 +455,7 @@ and two L7 reruns; no single run came near the per-run cap.
 |---|---|
 | `bonus_cents` was a `z.record`; its strict schema renders `propertyNames` and an object with no properties, so live chat dropped `payroll.propose_off_cycle` | The command takes `bonuses: [{worker_id, cents}]` (one per worker, only for workers in `worker_ids`); the planner hash input is unchanged and the person route converts its `bonusCents` body. `strictSchemaProblems` now flags `propertyNames` and `patternProperties`, so the registry tests catch a record input |
 | The chat role prompt said chat is read-only, so the first live L5 refused with the proposal tool on its list | The role says code decides through the tool list: with a proposal tool, file one proposal per item and say it waits for approval; without one, explain which screen does it. A generic propose example joins the role |
-| `people.search` matched one field whole, so "Hollis Grey" found nobody | Every word must match a first or last name, title, employee number or worker id; the "(demo)" suffix is ignored |
+| `people.search` matched one field whole, so "Hollis Grey" found nobody | Every word must match a first or last name, title, employee number or worker id; a name with its short id in parentheses also matches |
 | Asked for payroll cost by month, the model summed the months and grounding sent the total back | `reports.query` returns `range_totals` (every `*_cents` column summed with display strings); the style block asks the model to quote totals from results and to use no em dashes |
 
 ### Other round 2 changes

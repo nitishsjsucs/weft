@@ -60,7 +60,7 @@ Wave 3 goal 3 (docs/wave3.md section 3). Research: `research/wave3/integrations-
   - the `greenhouse.offersHidden` permission gap
 - GP17: a simulated hire becomes exactly one draft offer, linked in `ext_links`, and emits `offer.imported`.
   - The unmapped Boulder office opens an `unmapped_value` item.
-  - `rt_ats_hire` proposes `documents.send_offer`, and GP6 runs unchanged after Dana approves.
+  - `rt_ats_hire` proposes `documents.send_offer`, and GP6 runs unchanged after Vic approves.
   - A duplicate delivery is a no-op.
   - Offer version 2 with a new start date opens a human-only `sync_conflict`.
 

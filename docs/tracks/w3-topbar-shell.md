@@ -12,13 +12,13 @@ two small bugs (below).
 | The bar | `apps/web/src/components/app/shell/header.tsx` | 48 px strip inside an `@container` wrapper (the old header declared `@container` on itself, so its own container classes never applied). Sidebar toggle (`aria-expanded`, `aria-controls`), breadcrumb (14 px; parents gray-11, current ink), a ghost search icon only while the sidebar is hidden, the environment pill, and the agent toggle (one PanelRight icon, `aria-pressed`, gray-a3 fill when pressed). Every control is `Button ghost size=icon`, 32 x 32 at radius 8. |
 | Environment pill | `shell/env-pill.tsx`, `shell/segment.ts` | One white container with the ring edge, 32 px with a 2 px pad. Segments are 28 px at radius 6, 13 px labels, gray-a3 hover, gray-a4 while open, an inset 2 px blue-9 focus ring. 1 x 16 dividers hide next to a hovered or open segment. `role="group"`, `aria-label="Demo environment"`. |
 | Model segment | `env-pill.tsx` (`ModelSegment`), `env.ts` | 8 px status dot: green-9 hosted live, blue-9 local, hollow gray-8 ring scripted, red-9 when health fails, pulsing gray-6 while loading. Full tier shows the provider label, Compact the model id ("Scripted" for the scripted provider), Mini only the dot. Popover: mode, model id, spent today and live total from `GET /v1/agent/costs` (fetched only while open), and a note that the model is fixed per API process. Keeps `TID.providerBadge`. |
-| Clock segment | `env-pill.tsx` (`ClockSegment`) | "Mon, Oct 26, 8:30 AM" in Full, "Mon 8:30 AM" below (no icon in Mini). Popover titled Simulated time: the long date with PT, Rate (Paused, Real time or Nx), Next routine (the same 09:00 PT weekday rule the API uses for `toNext: "cron"`), and +1 hour, +1 day, Next routine buttons calling `POST /v1/sim/clock/advance`, plus a link to Simulators. Keeps `TID.simClock` and `data-now`. |
-| Viewing as | `shell/persona-menu.tsx` | Radix `DropdownMenu` (new `packages/ui` component) replacing the opacity-0 native select. Label "Viewing as (demo control)", radio items (`menuitemradio`) grouped by role (Admins, Managers, Employees; empty groups hidden, group labels only when there is more than one), each with a 20 px amber initials avatar, name, then "title, role". New-hire portal personas follow as plain items (`data-persona="portal:<id>"`) that open `/portal?as=...`. Footer explains it is dev auth only. Trigger keeps `TID.viewingAs`; Full shows "Viewing as Dana", Compact "Dana", Mini the avatar alone (28 px square). |
+| Clock segment | `env-pill.tsx` (`ClockSegment`) | "Mon, Oct 26, 8:30 AM" in Full, "Mon 8:30 AM" below (no icon in Mini). Popover titled Clock: the long date with PT, Rate (Paused, Real time or Nx), Next routine (the same 09:00 PT weekday rule the API uses for `toNext: "cron"`), and +1 hour, +1 day, Next routine buttons calling `POST /v1/sim/clock/advance`, plus a link to Simulators. Keeps `TID.simClock` and `data-now`. |
+| Viewing as | `shell/persona-menu.tsx` | Radix `DropdownMenu` (new `packages/ui` component) replacing the opacity-0 native select. Label "Viewing as", radio items (`menuitemradio`) grouped by role (Admins, Managers, Employees; empty groups hidden, group labels only when there is more than one), each with a 20 px amber initials avatar, name, then "title, role". New-hire portal personas follow as plain items (`data-persona="portal:<id>"`) that open `/portal?as=...`. Footer explains it is dev auth only. Trigger keeps `TID.viewingAs`; Full shows "Viewing as Vic", Compact "Vic", Mini the avatar alone (28 px square). |
 | Tiers | `env.ts` (`tierFor`), Tailwind `@min-[480px]` and `@min-[760px]` | Full from 760, Compact from 480, Mini below, by the header's own width. Measured on the e2e world: 1440 docked header 855 px (Full), 1280 docked 695 (Compact), 1024 779 (Full), 390 (Mini); no overflow at any of them. |
 | Screen reader | `env-pill.tsx`, `persona-menu.tsx` | `aria-live="polite"` announcements for a model state change and a persona switch; every segment's `aria-label` carries the full meaning the narrow tiers drop. `title` tooltips are gone. |
-| Sidebar head | `shell/sidebar.tsx` | Two-line workspace row ("Larkspur Robotics" over "Demo workspace, Admin"), then a 32 px search field with one platform kbd chip ("⌘K" or "Ctrl K") and a square New agent thread button (clears the thread, opens the panel, focuses the composer). Cmd or Ctrl+K still opens the command menu on every page. |
-| Sidebar badges | `shell/sidebar.tsx` | One pill style only: the Inbox count (18 px, radius 9, 11/600 tabular, accent). "Simulated" and "Coming soon" are quiet trailing 12 px gray-9 text. Group labels lost their inert chevrons. |
-| Breadcrumb titles | `shell/crumbs.tsx`, `nav.ts` (`crumbs`), `people/[id]/page.tsx`, `payroll/[id]/page.tsx`, `page.tsx` (`PageHeader crumb`) | `BreadcrumbProvider` in the shell; `<CrumbLabel label>` (or `PageHeader crumb="..."`) registers the record title for the current path. Person pages read "People > Dana Whitfield (demo)", payroll runs "Payroll > Sep 1 to Sep 15". While a record loads the id shows in 12 px mono gray-11. |
+| Sidebar head | `shell/sidebar.tsx` | Two-line workspace row ("Larkspur Robotics" over the viewer's role, "Admin"), then a 32 px search field with one platform kbd chip ("⌘K" or "Ctrl K") and a square New agent thread button (clears the thread, opens the panel, focuses the composer). Cmd or Ctrl+K still opens the command menu on every page. |
+| Sidebar badges | `shell/sidebar.tsx` | One pill style only: the Inbox count (18 px, radius 9, 11/600 tabular, accent). "Coming soon" is quiet trailing 12 px gray-9 text (the "Simulated" trailing text was removed on 2026-10-23). Group labels lost their inert chevrons. |
+| Breadcrumb titles | `shell/crumbs.tsx`, `nav.ts` (`crumbs`), `people/[id]/page.tsx`, `payroll/[id]/page.tsx`, `page.tsx` (`PageHeader crumb`) | `BreadcrumbProvider` in the shell; `<CrumbLabel label>` (or `PageHeader crumb="..."`) registers the record title for the current path. Person pages read "People > Vic Akisole", payroll runs "Payroll > Sep 1 to Sep 15". While a record loads the id shows in 12 px mono gray-11. |
 | Agent panel header | `agent/agent-panel.tsx` | Buttons are 32 px (`size=icon`); the X shows only when the panel overlays the page (`overlay` prop, below 1280). The panel has `id="weft-agent-panel"` for the toggle's `aria-controls`. |
 | Page widths | `page.tsx` (`PageBody`) | `width="default" | "wide" | "narrow"` on the `--page-w-*` tokens with one padding (`px-4 py-6`, `tablet:px-8 tablet:py-8`). `Placeholder` uses it. |
 | Status map | `apps/web/src/components/app/status-badge.tsx` | `StatusBadge` and `StatusText` over one status-to-tone map in sentence case (green done, blue moving, amber waiting on a person, red failed, gray inert), with per-kind overrides where a word means something else (an offboarding step's pending, a reconciliation's open). Covers every status enum in the contracts, wave 3 included. |
@@ -45,11 +45,11 @@ Everything in the bar is real UI over real API routes; nothing in this track sim
   fixed per API process (`WEFT_LLM`). In e2e and the demo the provider is the scripted one, shown as a hollow gray
   dot and "Scripted".
 - **Clock segment** reads `GET /v1/sim/clock`; its buttons call `POST /v1/sim/clock/advance`. The clock is Weft's
-  simulated business clock, so the popover title and the accessible name both say "Simulated time".
-- **Viewing as** is a demo control: it switches the dev-auth principal (`x-weft-principal`) between the demo humans
-  in `PRINCIPALS`, and new-hire items open `/portal?as=...`. The menu label and footer say so. It is not real auth.
-- **Sidebar** "Simulated" trailing text marks the products whose vendors are simulated (Benefits, IT, Contractors,
-  Integrations, Simulators). "Coming soon" stays on Expenses and Time Off until w3-expenses and w3-timeoff merge.
+  simulated business clock; the popover title and the accessible name say "Clock" (2026-10-23: "Simulated time" before).
+- **Viewing as** is a development control: it switches the dev-auth principal (`x-weft-principal`) between the seeded
+  humans in `PRINCIPALS`, and new-hire items open `/portal?as=...`. It is not real auth.
+- **Sidebar**: the "Simulated" trailing text on Benefits, IT, Contractors, Integrations and Simulators was removed on
+  2026-10-23. "Coming soon" stays on Expenses and Time Off until w3-expenses and w3-timeoff merge.
 
 ## Tests
 
@@ -68,7 +68,7 @@ Everything in the bar is real UI over real API routes; nothing in this track sim
   shows the blue ring; the persona menu is a radio menu and the `viewAs` fixture switches personas; the clock popover
   advances time and the model popover shows spend; sidebar search, Cmd or Ctrl+K and the bar search icon all open the
   command menu; person and payroll crumbs show names.
-- E2E GP19, test 2: Full text at 1440 docked ("Viewing as Dana", the long clock) and Compact at 1280 docked (first
+- E2E GP19, test 2: Full text at 1440 docked ("Viewing as Vic", the long clock) and Compact at 1280 docked (first
   name, short clock); Enter opens the persona menu on a radio item, ArrowDown moves, Esc closes and returns focus to
   the trigger; the same for the clock popover; New agent thread opens a closed panel with the composer focused; the
   docked panel has no X and the 1024 overlay does; at 390 the model is the dot alone, Tab walks toggle, search icon,
@@ -102,7 +102,7 @@ Written to `.scratch/contract-requests/w3-topbar-shell.md` as well.
 
 1. **The manager persona.** The persona menu groups `PRINCIPALS` (in `apps/web/src/lib/api/mocks/world.ts`, owned by
    t5-app) by role, so Imani shows under Managers as soon as she is in that list with `role: "manager"`. w3-timeoff
-   seeds `usr_imani`; whoever merges it should add `{ id: "usr_imani", name: "Imani ... (demo)", title: ..., role:
+   seeds `usr_imani`; whoever merges it should add `{ id: "usr_imani", name: "Imani ...", title: ..., role:
    "manager" }` to `PRINCIPALS`, and `hooks.ts` already restores any id in that list from local storage. No change in
    this track's files is needed. The unit test already covers a manager in the list.
 2. **Typed costs.** `GET /v1/agent/costs` is `unknown` in `apps/web/src/lib/api/client.ts`; the model popover casts it

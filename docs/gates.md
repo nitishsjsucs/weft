@@ -109,13 +109,13 @@ Screenshots were retaken with the new `pnpm screenshots` (`e2e/screens/capture.s
 1440 by 900 with the agent panel docked unless noted. They are in [screenshots/](screenshots):
 
 - `01-landing`, `01b-landing-full` (full page) and `12-landing-mobile` (390 by 844).
-- `02-app-home` (Home as Dana: 48 active employees, 0 onboarding) and `03-simulators`.
+- `02-app-home` (Home as Vic: 48 active employees, 0 onboarding) and `03-simulators`.
 - `04-agent-run`: the agency notice run after the DE 2088 notice, waiting for approval.
 - `05-inbox`: the SUI rate change and the filed response, waiting.
 - `06-payroll` and `07-payroll-draft`: the Oct 16 to 31 draft after the pre-payroll review (4 need review, 1 blocked),
   its submit waiting in the Inbox.
 - `08-people`, `09-routines`, `10-audit` and `11-compliance` (Taxes and Compliance).
-- `13-hiring` (an offer for Rowan Ellery (demo) sent, the invite in the email simulator outbox) and `14-portal` (the
+- `13-hiring` (an offer for Rowan Ellery sent, the invite in the email simulator outbox) and `14-portal` (the
   new-hire portal at 0 of 7).
 - `15-offboarding-case`: Imani's eight steps with four proposals (an SSO account is created first, as in the GP9 spec).
 - `16-benefits-reconciliation` (the three October findings) and `17-memory` (the company one-pager after a digest).

@@ -28,7 +28,7 @@ receipts, and reimbursement through payroll.
 
 `expenses.submit` and `expenses.resubmit` are `human_only` and declare `people: view` as their floor, then check inside
 the command: a person files for the worker record their principal names (the new hire persona from the portal, or any
-employee such as Sam for `wrk_0025`), and filing for someone else needs `payroll: edit` (Dana or Theo keying one in).
+employee such as Sam for `wrk_0025`), and filing for someone else needs `payroll: edit` (Vic or Theo keying one in).
 Otherwise the refusal is `DOMAIN_NOT_OWN_EXPENSE`. The portal routes never take a `workerId` from the body: they use
 the caller's own record, and a resubmit of someone else's item answers 404. The persona still reaches only
 `/v1/portal/*`, so `/v1/expenses` answers 403 `PORTAL_ONLY` for it.
@@ -48,7 +48,7 @@ sidecars), and the drawer says so.
 - Unit and API tests: `pnpm vitest run packages/core/test/expenses apps/api/test/expenses.test.ts tests/scenarios/gp13-expenses.test.ts tests/scenarios/gp13-expenses-chat.test.ts`.
 - E2E on this track's ports: `WEFT_E2E_WEB_PORT=4680 WEFT_E2E_API_PORT=4681 WEFT_E2E_RUNNER_PORT=4682 pnpm e2e gp13`
   (two tests: the admin review to reimbursement path, and the portal claim, return and resubmit path).
-- In `pnpm dev`: open `/app/expenses` as Dana. For the portal, send an offer, sign the letter as the new hire, open
+- In `pnpm dev`: open `/app/expenses` as Vic. For the portal, send an offer, sign the letter as the new hire, open
   `/portal?as=<persona id>` and use My expenses.
 
 ## Real versus simulated

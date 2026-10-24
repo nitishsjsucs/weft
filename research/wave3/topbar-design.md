@@ -22,7 +22,7 @@ Source: `apps/web/src/components/app/shell/header.tsx` [C]. All figures are at a
 | 4 | Model badge (`Badge tone=green size=md`, a `span`) | 134 x 24 | 6 | **green-3 `#e6f6eb` wash**, no edge | 12/500 green-11 `#218358` | none |
 | 4' | Same badge, scripted (`tone=outline`) | 125 x 24 | 6 | white + ring `#00000014` | 12/500 gray-11 | none |
 | 5 | Sim clock (`a` to /app/simulators) | 114 x 28 | 8 | **gray-3 `#efefef` fill**, no edge | 12/500 ink, tabular | Clock **14** |
-| 6 | Persona picker (`label` over a native `select` at opacity 0) | 136 x 24 | 8 | transparent + ring `#00000014` | "Dana" 12/500 | ChevronDown **12** |
+| 6 | Persona picker (`label` over a native `select` at opacity 0) | 136 x 24 | 8 | transparent + ring `#00000014` | "Vic" 12/500 | ChevronDown **12** |
 | 6a | "Demo control" badge nested in 6 | 73 x 16 | 6 | amber-3 `#fff8e7` | **10/500** amber-11 `#ac6500` | |
 | 7 | Agent toggle | 28 x 28 | 6 | open: `secondary` (white + ring + shadow); closed: ghost | | open: PanelRight; closed: **Sparkles** |
 
@@ -225,8 +225,8 @@ Transitions: background 100 ms `--ease-standard` (`.weft-press`). Popovers use t
 
 | Tier | Header width | Example layouts | Model | Clock | Persona | Pill width (13 px Inter) |
 |---|---|---|---|---|---|---|
-| Full | at least 760 | 1440 docked (856), 1024 with the agent overlaid (780), 1440 undocked (1196) | dot + "OpenAI gpt-5.6-luna" | icon + "Mon, Oct 26, 8:30 AM" | avatar + "Viewing as Dana" + chevron | about 505 |
-| Compact | 480 to 759 | 1280 docked (696), sidebar hidden at 1280 | dot + "gpt-5.6-luna" (or "Scripted") | icon + "Mon 8:30 AM" | avatar + "Dana" + chevron | about 310 |
+| Full | at least 760 | 1440 docked (856), 1024 with the agent overlaid (780), 1440 undocked (1196) | dot + "OpenAI gpt-5.6-luna" | icon + "Mon, Oct 26, 8:30 AM" | avatar + "Viewing as Vic" + chevron | about 505 |
+| Compact | 480 to 759 | 1280 docked (696), sidebar hidden at 1280 | dot + "gpt-5.6-luna" (or "Scripted") | icon + "Mon 8:30 AM" | avatar + "Vic" + chevron | about 310 |
 | Mini | under 480 | 390 phone | dot only (28 square) | "Mon 8:30 AM", no icon | avatar only (28 square) | about 170 |
 
 Width check:
@@ -245,7 +245,7 @@ Below 1024 the sidebar is a drawer (`app-shell.tsx`). The drawer gets the same s
 - `aria-label`s (visible text is shortened in narrow tiers, so the labels carry the full meaning):
   - model: `Model: OpenAI gpt-5.6-luna, live and metered`;
   - clock: `Simulated time: Monday, October 26, 8:30 AM Pacific`;
-  - persona: `Viewing as Dana Whitfield (demo). Demo control: switches the signed-in human, dev auth only`.
+  - persona: `Viewing as Vic Akisole (demo). Demo control: switches the signed-in human, dev auth only`.
 - Remove the `title` tooltips. They never show on keyboard focus, and the popovers replace them.
 - Toggles:
   - sidebar toggle: `aria-controls` the sidebar `id`, plus `aria-expanded`;
@@ -277,14 +277,14 @@ Open `research/wave3/topbar-mockup.html`; `topbar-shots/proposed-topbar-mockup.p
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ [▯|]  People › Dana Whitfield (demo)     ╭───────────────────────────────────────────────────╮ [|▯] │
-│                                          │ ● OpenAI gpt-5.6-luna │ ◷ Mon, Oct 26, 8:30 AM │ (DW) Viewing as Dana ⌄ │      │
+│ [▯|]  People › Vic Akisole (demo)        ╭───────────────────────────────────────────────────╮ [|▯] │
+│                                          │ ● OpenAI gpt-5.6-luna │ ◷ Mon, Oct 26, 8:30 AM │ (VA) Viewing as Vic ⌄  │      │
 │                                          ╰───────────────────────────────────────────────────╯      │
 └───────────────────────────────────────────────────────────────────────────────────────────────────┘
  48 px bar; every control 32 px at radius 8; segments 28 px at radius 6; dividers 1 x 16; one white pill with a ring.
 
 Compact (header 696):  [▯|] Payroll › Sep 1 to Sep 15      ( ○ Scripted │ ◷ Mon 8:30 AM │ (TM) Theo ⌄ )  [|▯]
-Mini (390):            [▯|] Taxes & … [⌕]  ( ● │ Mon 8:30 AM │ (DW) )  [|▯]
+Mini (390):            [▯|] Taxes & … [⌕]  ( ● │ Mon 8:30 AM │ (VA) )  [|▯]
 Sidebar head:          [■ Larkspur Robotics / Demo workspace, Admin ⌄]
                        [⌕ Search            ⌘K ] [+]
 ```
@@ -292,7 +292,7 @@ Sidebar head:          [■ Larkspur Robotics / Demo workspace, Admin ⌄]
 ## 7. Other shell inconsistencies, with fixes
 
 1. **Detail breadcrumbs show raw ids** [V]: `/app/people/wrk_0001` shows "People › wrk_0001", and `/app/payroll/pay_2026_09_15` shows "Payroll › pay_2026_09_15". The cause is `crumbs()` in `components/app/nav.ts`, which decodes the URL segment.
-   - Fix: a `BreadcrumbProvider` in `app-shell.tsx` plus a `useCrumbLabel(label)` hook that each detail view calls with the H1 text ("Dana Whitfield (demo)", "Sep 1 to Sep 15").
+   - Fix: a `BreadcrumbProvider` in `app-shell.tsx` plus a `useCrumbLabel(label)` hook that each detail view calls with the H1 text ("Vic Akisole (demo)", "Sep 1 to Sep 15").
    - Fallback while loading: the id in 12 px mono, gray-11.
 2. **Sidebar badges use four styles** [V, `sidebar.tsx`]: blue "Admin", accent Inbox count, outline "Simulated" (4 rows), gray "Coming soon". All are 16 px tall with 10 px text.
    - Fix: the Inbox count becomes the only pill: 18 px tall, radius 9, minimum width 18, 11/600 tabular, accent.

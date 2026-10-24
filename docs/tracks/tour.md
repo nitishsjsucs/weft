@@ -48,7 +48,7 @@ Rounds 1 and 2, 2026-10-18. Branch `feat/tour` (worktree `weft-worktrees/tour`).
   proposals and runs that existed before the tour (the rich world has a year of decided history).
 - The draft payroll lookup reads up to 100 runs (the rich world has 20).
 - New controls test: the persona portal settles (fewer than 20 API calls in 3 s) and the tour leaves it for
-  `/app/memory` in one hop, without the resume prompt, back as Dana.
+  `/app/memory` in one hop, without the resume prompt, back as Vic.
 
 ## Decisions beyond the design
 
@@ -192,7 +192,7 @@ cited ids; the expense drawer is still a full-height modal over the docked agent
   word (one unbroken line overflowed the table at 1440 px, which `e2e/rich-data.spec.ts` checks). `noticeName` does not double "notice" ("UI rate notice"); one
   `auditLabel` ("audit #N") on the rates table, the person page, the approval card and the document library. The
   memory chip reads "updated Oct 26". Flag evidence dates in the period's year read without one, as the headline does.
-  New-hire personas in the Viewing as menu read "(demo)". The rate step avoids the other rate rows, so the card goes
+  New-hire personas in the Viewing as menu read as their names. The rate step avoids the other rate rows, so the card goes
   below the table.
 - Rich layer: a new pay rate note gives its unit ("$139,240.00 a year") from the rate's kind, and the hours spike note
   says what was computed and leaves overtime to the workweek instead of stating a per-period rule. Both stay grounded.

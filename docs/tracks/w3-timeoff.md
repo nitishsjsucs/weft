@@ -47,7 +47,7 @@ conflict), docs/wave3.md 2 and 5; design and hand-computed cases in research/wav
   `coverage_max_out_pct` or leaving fewer than `coverage_min_present`. Headcount counts employees employed that day plus
   incoming hires from open offers starting by then (Noor's sent offer makes Hardware 9 on Nov 23).
 - Routing (`routeRequest`): the manager's principal when that manager is an active worker with a Weft login, else the
-  department lead's, else Dana, with each step and its reason in `routing_json`.
+  department lead's, else Vic, with each step and its reason in `routing_json`.
 - `time_off.decide {request_id, decision, note}` is R2 with approval always, lease `time_off:<request>`: an agent's
   call is always a proposal. Inside run(), the decider is the direct caller or the approver of the proposal: admins and
   HR managers decide anyone's request; a manager only a direct report's (`DOMAIN_NOT_DIRECT_REPORT`) and only while
@@ -114,7 +114,7 @@ conflict), docs/wave3.md 2 and 5; design and hand-computed cases in research/wav
   per employee and policy, opening balances dated 2026-10-15, then requests through the real commands (runDirect, no
   action rows or events): R-A Grace and Oscar approved Nov 23 to 25 (by Imani), R-B Ruth pending Nov 23 to 27
   (COVERAGE_CONFLICT 3 of 9, 33.3%, and INCLUDES_HOLIDAY, routed to Imani), R-C Kenji NY sick 4 h (routed past a
-  manager with no login to Dana), R-D Ben CA sick inside the 90-day wait (WAITING_PERIOD), and Lucy's approved TX day.
+  manager with no login to Vic), R-D Ben CA sick inside the 90-day wait (WAITING_PERIOD), and Lucy's approved TX day.
 - Routes: all ten `/v1/time-off/*` rows run the time_off commands as the session's person.
 
 ## Contract changes (separate `contract:` commits)
@@ -143,15 +143,15 @@ belong to the two integrations tracks, so round 2 used 4676/4677. Any free pair 
 
 The e2e suite sits at the UI rate limit (apps/api/src/http/auth.ts: 1,200 requests per principal in a fixed 60 s
 window). The app shell polls the clock, proposals, offers, health and the chat about every second, and almost every
-spec runs as Dana, so a fast machine packs about 1,200 of her requests into one window. Measured in round 2: the
-golden-path specs alone made 1,196 Dana requests in 29 s. Main at 35b385f also failed one site-layout spec with 429
-on the same machine. Both GP14 specs therefore view as Sam (HR manager) and read the API as Sam, which leaves 6 Dana
+spec runs as Vic, so a fast machine packs about 1,200 of her requests into one window. Measured in round 2: the
+golden-path specs alone made 1,196 Vic requests in 29 s. Main at 35b385f also failed one site-layout spec with 429
+on the same machine. Both GP14 specs therefore view as Sam (HR manager) and read the API as Sam, which leaves 6 Vic
 requests from this track. The full suite passed 33 of 33 on the final run; when it fails, the failures are 429s in
 GP9 or the site-layout specs. The fix belongs to the e2e harness or the auth limits (outside this track): a higher
 limit in test mode, or the reset fixture on its own principal.
 
 In the app: Time Off in the sidebar (`/app/time-off`), a person's Time off tab (`/app/people/<id>`), and the Time off
-tile on Home. "Viewing as" Sam (HR manager) or Dana (People admin) shows Approve and Deny on every pending request.
+tile on Home. "Viewing as" Sam (HR manager) or Vic (People admin) shows Approve and Deny on every pending request.
 
 ## Real versus simulated
 

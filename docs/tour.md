@@ -7,7 +7,7 @@ build on the app's own Radix primitives, with no new dependency.
 ## Starting it
 
 - Home: "Take the tour" next to the greeting (an accent dot shows until `weft.tour.seen` is set).
-- The Viewing as menu: a Demo group with "Take the tour" and "Reset demo data...".
+- The Viewing as menu: a Workspace group with "Take the tour" and "Reset workspace data...".
 - The command menu (Cmd or Ctrl K): "Take the tour".
 - `/app?tour=1` starts it, `/app?tour=<stepId>` jumps to a step, `&autoplay=1` turns autoplay on.
 
@@ -27,7 +27,7 @@ There is no auto-start and no first-visit popup, so `pnpm e2e` and `pnpm screens
 
 Targets are `data-tour` tokens matched with `~=`, kept apart from `data-testid`. Dynamic ids (the notice run, the
 rate proposal, its action seq, the draft payroll, the new-hire persona) come from the API at step entry. A missing
-target shows the card unanchored with "This part of the demo data is missing on this world." and Next, so the tour
+target shows the card unanchored with "This part of the workspace data is missing." and Next, so the tour
 never gets stuck.
 
 Wait timeouts are budget-aware: hard timeout = min(step hard, 180 s - elapsed - planned seconds of the steps left),

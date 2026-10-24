@@ -2,7 +2,7 @@
 
 Weft is an open-source, self-hostable, AI-native payroll and HR platform: HRIS and onboarding, US payroll with multi-state tax, benefits, IT provisioning, global contractors, and the Weft agent, which does the admin work and asks a person before it acts. It also ships routines, an MCP server and a public API.
 
-It runs on one fictional company and in-repo simulators, and it is meant to work end to end on a laptop.
+It ships with one seeded company, Larkspur Robotics, and in-repo simulators for every outside system, and it is meant to work end to end on a laptop.
 
 ## Quickstart
 
@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` checks that ports 4070 and 3070 are free, seeds `.data/` the first time (Larkspur Robotics (demo)), and starts the API on http://127.0.0.1:4070 and the web app on http://127.0.0.1:3070, each in its own process group. Open http://127.0.0.1:3070 for the landing page and http://127.0.0.1:3070/app for the demo. Ctrl+C stops both.
+`pnpm dev` checks that ports 4070 and 3070 are free, seeds `.data/` the first time (Larkspur Robotics), and starts the API on http://127.0.0.1:4070 and the web app on http://127.0.0.1:3070, each in its own process group. Open http://127.0.0.1:3070 for the landing page and http://127.0.0.1:3070/app for the app. Ctrl+C stops both.
 
 Useful flags: `pnpm dev --fresh` (reseed first), `pnpm dev --api-port 4075 --web-port 3075`, `pnpm dev --api-only`.
 
@@ -24,10 +24,10 @@ Every world starts from one deterministic seed, in one of two profiles:
 | Profile | What it holds | Used by |
 |---|---|---|
 | `rich` | The base world plus a deterministic layer of history (`packages/seed/src/rich/`): January to August pay runs imported from the previous provider, agent and routine runs with steps, decided and waiting approvals, a hash-chained action log, time off through the ledger, offers in every state and new-hire personas part way through the portal, offboarding cases, contractor payouts, filed returns, notices and memory pages. It only adds rows, so the planted story beats (the Oct 30 draft, DE 2088, the expenses in review, Noor's offer, the open October reconciliation) stay as the base seed wrote them | `pnpm dev` (the default), the guided tour, `pnpm e2e:rich`, `pnpm e2e:tour` and `pnpm screenshots:rich` |
-| `base` | The pinned test world: Larkspur Robotics (demo) on Mon Oct 26 2026 08:30 PT with its planted story beats and nothing else. Its digest and the golden numbers (the demo payroll total of $267,795.26) never move | `pnpm test`, `pnpm e2e` (`--e2e` always seeds base), `pnpm demo`, `pnpm demo:scenario --profile base`, `pnpm screenshots` and every eval world |
+| `base` | The pinned test world: Larkspur Robotics on Mon Oct 26 2026 08:30 PT with its planted story beats and nothing else. Its digest and the golden numbers (the demo payroll total of $267,795.26) never move | `pnpm test`, `pnpm e2e` (`--e2e` always seeds base), `pnpm demo`, `pnpm demo:scenario --profile base`, `pnpm screenshots` and every eval world |
 
 `pnpm dev --fresh --profile base` (or `WEFT_SEED_PROFILE=base`) seeds the base world alone. A rich world remembers its
-profile, so "Reset demo data..." in the Viewing as menu and `POST /v1/sim/reset` rebuild it rich; the reset also takes
+profile, so "Reset workspace data..." in the Viewing as menu and `POST /v1/sim/reset` rebuild it rich; the reset also takes
 `{ "profile": "base" }` or `{ "profile": "rich" }`, and `GET /v1/health` reports `seedProfile`. `pnpm e2e:rich` crawls
 every audited screen and tab on a fresh rich world and fails on an empty state.
 
@@ -43,12 +43,12 @@ the new-hire portal, Memory, Routines and Permissions.
 Start it from any of these:
 
 - Home: "Take the tour" next to the greeting.
-- The Viewing as menu in the top bar: Demo, then "Take the tour" (or "Reset demo data..." to rebuild the rich world).
+- The Viewing as menu in the top bar: Workspace, then "Take the tour" (or "Reset workspace data..." to rebuild the rich world).
 - The command menu (Cmd or Ctrl K): "Take the tour".
 - A link: http://127.0.0.1:3070/app?tour=1 starts it, `/app?tour=<stepId>` jumps to a step (for example
   `?tour=ask-chart`), and `&autoplay=1` lets it play by itself (it pauses when you focus the card with the keyboard).
 
-It runs best on a clean rich world: on any other world it first offers to reset the demo data, and skipping that runs
+It runs best on a clean rich world: on any other world it first offers to reset the workspace data, and skipping that runs
 it on its fallbacks (a step whose data is missing says so and moves on). It approves exactly one proposal, the rate
 change, and leaves the agency filing waiting. It works on the scripted provider and on a live model; with
 `WEFT_LLM=openai` the agent steps wait for the real run, and a slow run says so and lets you carry on, so a card never
@@ -78,13 +78,13 @@ Things to try in the demo:
 
 1. **Simulators**: deliver the "CA EDD DE 2088" notice. The agent drafts a SUI rate change and a reply to the agency; both wait in the **Inbox** for you.
 2. **Payroll**: open the Oct 16 to 31 draft and click "Run review now". Four paychecks need review; the agent explains each one and proposes the submit.
-3. **People**: mark Noor Castellanos (demo)'s offer accepted. New hire readiness creates accounts, posts a welcome, and proposes the Colorado registrations and a laptop.
+3. **People**: mark Noor Castellanos's offer accepted. New hire readiness creates accounts, posts a welcome, and proposes the Colorado registrations and a laptop.
 4. **Routines**: advance the simulated clock 30 minutes and watch the weekly people digest run on schedule.
 5. **Audit log**: every action is in a hash-chained log; reversible ones have Undo.
-6. **Hiring**: build an offer for a fictional candidate and send it. The email simulator outbox holds the invite;
+6. **Hiring**: build an offer for a new candidate and send it. The email simulator outbox holds the invite;
    its link opens the new-hire portal, where the hire signs the offer and the confidentiality agreement by typing
    their name and works through the checklist (W-4, state form, direct deposit, I-9 upload, benefits).
-7. **People**: on Imani Ferreira (demo), Terminate opens an offboarding case. Approve final pay and the access
+7. **People**: on Imani Ferreira, Terminate opens an offboarding case. Approve final pay and the access
    revocations from the case view, then run the remaining steps; Off-cycle pay proposes a one-off run.
 8. **Benefits**: run the October carrier reconciliation (three planted errors), dispute a finding, and look at who
    has not elected in open enrollment. **Contractors**: pay the three contractors and advance the clock two days.
@@ -94,20 +94,20 @@ Things to try in the demo:
     inside net. New hires file and fix their own claims, with a receipt, from the portal.
 11. **Time Off**: Ruth's vacation shows a coverage conflict (3 of 9 in Hardware out on Nov 23 to 25) and the
     Thanksgiving holiday. Approve it on the Requests tab, then check the balance, the calendar and the PTO line on the
-    open draft. Switch Viewing as to Imani Ferreira (demo) to decide as her manager.
+    open draft. Switch Viewing as to Imani Ferreira to decide as her manager.
 12. **Agent panel**: ask "Show payroll cost by month" for a chart with a table fallback. With Settings > Agent > Chat
     can propose turned on, asking for an off-cycle payment files a proposal whose card has Approve, Deny and Open.
     The **Agent** page holds the same answers as conversations: ask there, then ask "Why is the NY raise flagged in
     the Oct 30 payroll?" as a follow-up in the same thread.
-13. **Integrations**: every card says Simulated until you connect it. Simulate a Greenhouse hire (a signed delivery
+13. **Integrations**: every card says Sandbox until you connect it. Simulate a Greenhouse hire (a signed delivery
     becomes a linked draft offer), sync Workday (people, pay and approved time off), and on Hiring order a background
     check after an offer is accepted; the hire authorizes it in the portal and it completes on the simulated clock.
 
-The "Viewing as" segment of the header's environment pill is a demo control for acting as Dana, Theo, Sam or Imani
+The "Viewing as" segment of the header's environment pill is a development control (dev auth only) for acting as Vic, Theo, Sam or Imani
 (a manager who decides time off for her direct reports only and reads private records, leave, offboarding and offer
 pay only for her reporting chain; Payroll, Benefits, IT and contractor pay are closed to her role, and the compliance
 calendar and hand-offs show only rows about her chain or the company); new hires whose offer
-was sent from Hiring are listed there too and open the portal (the seeded offer for Noor Castellanos (demo) is
+was sent from Hiring are listed there too and open the portal (the seeded offer for Noor Castellanos is
 accepted from People > Offers instead).
 
 To see the golden paths run without a browser, `pnpm demo` seeds one world in `.data-demo/` and walks GP1 to GP18 in
@@ -145,13 +145,36 @@ web app (`apps/web`, Next 16) reaches it through an `/api` rewrite that adds the
   with versioned 2026 rate data.
 - **World** (`packages/sim`, `packages/seed`): agencies, bank ACH, identity provider, devices, chat, email, benefits
   carrier, bank account verification and contractor payment rail simulators, and the deterministic seed for Larkspur
-  Robotics (demo).
+  Robotics.
 - **Storage**: SQLite through libsql in `.data/weft.db`. Every write, autocommit or transaction, serializes through
   one in-process write mutex (`withWriteLock` in `packages/db`).
 
 More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
+
+### Clean workspace (2026-10-23, branch `cf/clean-ui`)
+
+Names of record lost their `(demo)` suffix, simulated systems lost `(sim)`, the admin persona Dana Whitfield is now
+Vic Akisole (they/them; the id stays `usr_dana`), documents, notices and mail no longer carry demo or simulated
+headers, and the hosted app shows no session countdown or limits (docs/cloudflare/design.md section 0). The seed
+changed, so every digest was re-pinned on purpose: the base world digest moved from `950933e7ed6a...10d9` to
+`dca6930b3d5e...c6c4`, and the eval suite's two held-out datasets were re-registered.
+
+| Command | Outcome |
+|---|---|
+| `pnpm typecheck` | 18 of 18 tasks; `tsc -p e2e` and `tsc -p e2e/cf` clean |
+| `pnpm test` | 2,284 passed, 8 skipped (310 files, 1 skipped) |
+| `pnpm eval:ci` | gate passed; 72 of 128 trials, the same as before the change and identical trial by trial (each task, variant, verdict, step count, call count and failure message) |
+| `pnpm eval:suite digests --split all` | 110 of 110 worlds reproduce their re-pinned digest |
+| `pnpm e2e` | 54 passed, 1 skipped, 2.3 min |
+| `pnpm e2e:tour` | 31 of 31 in 8.9 min; the tour at its planned pace 132 s, autoplay 150 s (budget 180 s) |
+| `pnpm e2e:rich` | 6 of 6, 1.8 min |
+| `pnpm cf:snapshot`, `pnpm cf:test` | snapshot `ee800421aa234def` (106 chunks, 8,270 rows); 162 passed, 1 skipped |
+| Hosted export (`WEFT_STATIC_EXPORT=1 NEXT_PUBLIC_WEFT_HOSTED=1 pnpm --filter @weft/web build`), `pnpm --filter @weft/web e2e:hosted` | 33 routes, the export check passed; 20 passed |
+| `pnpm e2e:cf --project local` | 18 passed, 3.8 min; the hosted tour 150.5 s, 23,975 rows read and 417 written |
+| `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` | ok |
+| `pnpm screenshots`, `pnpm screenshots:rich`, `TOUR_SHOTS=1 pnpm e2e:tour tour-complete` | every shot in `docs/screenshots/` retaken |
 
 ### Final guided tour gate
 
@@ -305,12 +328,12 @@ All in [docs/screenshots/](docs/screenshots), at 1440 by 900 with the agent pane
 the capture moves focus and the pointer off the control it last clicked, so the images show the resting state.
 
 On the rich profile (retaken on 2026-10-23, when Agent joined the sidebar, with `pnpm screenshots:rich`,
-`e2e/screens/rich.screens.ts`: a fresh rich world, as Dana), every main route. `pnpm screenshots` still writes base versions of the shared names, so run
+`e2e/screens/rich.screens.ts`: a fresh rich world, as Vic), every main route. `pnpm screenshots` still writes base versions of the shared names, so run
 `pnpm screenshots:rich` after it:
 
 - `01-landing`, `01b-landing-full` (full page) and `12-landing-mobile` (390 by 844).
 - `02-app-home` (approvals waiting, time off, your team, headcount), `26-inbox`, `06-payroll` (January to October,
-  imported and Weft runs), `38-payroll-imported-run`, `08-people`, `27-person` (Dana's record), `28-hiring-offers`
+  imported and Weft runs), `38-payroll-imported-run`, `08-people`, `27-person` (Vic's record), `28-hiring-offers`
   (offers in every state), `29-offboarding`, `30-benefits`, `31-it`, `32-contractors`, `22-expenses`, `33-time-off`,
   `11-compliance`, `34-reports` (payroll cost by month, January to October), `09-routines`, `35-routine-detail` (the
   pre-payroll review with its runs), `10-audit`, `17-memory`, `24-integrations`, `03-simulators`, `36-settings`,
@@ -410,7 +433,7 @@ time; the action chain verifies at the end of every scenario.
 
 ## What is stubbed or left
 
-- Benefits, IT and Contractors stay labeled Simulated; the landing page's routine showcase is P1. Wave 3's open items
+- Benefits, IT and Contractors run on their simulators only; the landing page's routine showcase is P1. Wave 3's open items
   are listed under "Wave 3: left" below and in `docs/wave3.md`.
 - `code.run` ships in QuickJS but is opt-in (`WEFT_SANDBOX=quickjs`) and on no prebuilt allowlist. Return values
   over 64 KiB are an error rather than an artifact, inner calls are listed in the result rather than as nested steps,
@@ -450,7 +473,7 @@ time; the action chain verifies at the end of every scenario.
 
 ## Integrations
 
-`/app/integrations` has one card per vendor. With no credentials every card runs its simulator and says Simulated.
+`/app/integrations` has one card per vendor. With no credentials every card runs its simulator and says Sandbox.
 Each simulator follows the vendor's published API shapes where one exists (paging, references, signed webhooks, state
 machines; HireRight publishes none, so its simulator uses Weft's own shape) and writes only to its own simulator tables. Real adapters live only in `@weft/integrations`, run only when
 `WEFT_INTEGRATIONS_REAL=1` and every required secret is present in the file named by `WEFT_SECRETS_FILE`, and can
@@ -461,9 +484,9 @@ present or missing, never its value.
 |---|---|---|---|---|
 | Greenhouse | Simulated hire: a signed `hire_candidate` delivery is verified, deduped, re-read and becomes one linked draft offer; an unmapped office becomes a sync item; a changed start date becomes a conflict for a person | Simulated by default. A read-only real adapter (OAuth client credentials, Link cursor paging, Retry-After, webhook verify) exists and is tested on a fake transport only | No free sandbox for individuals. A public job board needs no key, but Weft reads one only through the real adapter (Harvest credentials and `WEFT_INTEGRATIONS_REAL=1`); until then open roles come from the simulator | Through an employer's Greenhouse account or a Pro sandbox, a Site Admin creates Harvest v3 OAuth credentials with read-only scopes. Put `WEFT_GREENHOUSE_CLIENT_ID` and `WEFT_GREENHOUSE_CLIENT_SECRET` in the secrets file (optional: `WEFT_GREENHOUSE_WEBHOOK_SECRET`, `WEFT_GREENHOUSE_BOARD_TOKEN`), then start with `WEFT_INTEGRATIONS_REAL=1` |
 | Workday | Sync now and a 15 minute poll: workers linked by work email, a changed title applied, a pay change held as a conflict for a person, approved time off imported read-only into Time Off; Workday then owns People, Compensation and Time off | Simulated. The real adapter is still a stub, so the simulator stays in place even with secrets | Developer program personal tenant (beta, expires after 7 days without use) | Sign up at the Workday developer site yourself and read its terms, request a development tenant, register an API client and an integration system user, then put the six `WEFT_WORKDAY_*` values (host, tenant, client id, client secret, refresh token, token URL) in the secrets file |
-| Checkr | `screening.order` is an R4 proposal, allowed only after the offer is accepted and priced from the package row; the hire authorizes on a labeled simulated apply page; signed webhooks complete the check; review and every adverse step are human only, with the dispute extension | Simulated. A real adapter written to the published API (staging by default) is tested on a fake fetch only; production also needs `WEFT_LIVE_CHECKR=1` | None for individuals; staging needs a credentialed business | Credential a real business with Checkr (or apply as a partner) and get its written view on automated access, then `CHECKR_API_KEY` in the secrets file |
-| HireRight | The same screening flow on a simulator in Weft's own screening shape, labeled "Simulated, API shape not published"; choose it with `WEFT_SCREENING=hireright` | Simulated only; the real adapter always refuses with `INTEGRATION_NOT_AVAILABLE` | None | A HireRight customer contract and an assigned technical consultant; nothing is possible for free |
-| DocuSign | With `WEFT_ESIGN=docusign` an offer goes out as one envelope with both documents; the portal's sign button redirects to a simulated signing page and the signed Connect message accepts the offer (a declined envelope sets declined). Built-in click to sign stays the default | Simulated. The real adapter (JWT grant, embedded signing, Connect HMAC, polling at most every 20 minutes) is tested on a fake fetch only and also needs `WEFT_LIVE_DOCUSIGN=1` | Free developer account with the full eSignature API in the demo environment | Create the developer account, an app with an integration key and an RSA key pair (keep the PEM outside every repo), grant consent once, then put `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`, `DOCUSIGN_ACCOUNT_ID` and `DOCUSIGN_PRIVATE_KEY_FILE` (a path) in the secrets file; optional `DOCUSIGN_CONNECT_HMAC_KEY` |
+| Checkr | `screening.order` is an R4 proposal, allowed only after the offer is accepted and priced from the package row; the hire authorizes on the sandbox apply page; signed webhooks complete the check; review and every adverse step are human only, with the dispute extension | Simulated. A real adapter written to the published API (staging by default) is tested on a fake fetch only; production also needs `WEFT_LIVE_CHECKR=1` | None for individuals; staging needs a credentialed business | Credential a real business with Checkr (or apply as a partner) and get its written view on automated access, then `CHECKR_API_KEY` in the secrets file |
+| HireRight | The same screening flow on a simulator in Weft's own screening shape, labeled "Sandbox, API shape not published"; choose it with `WEFT_SCREENING=hireright` | Simulated only; the real adapter always refuses with `INTEGRATION_NOT_AVAILABLE` | None | A HireRight customer contract and an assigned technical consultant; nothing is possible for free |
+| DocuSign | With `WEFT_ESIGN=docusign` an offer goes out as one envelope with both documents; the portal's sign button redirects to the sandbox signing page and the signed Connect message accepts the offer (a declined envelope sets declined). Built-in click to sign stays the default | Simulated. The real adapter (JWT grant, embedded signing, Connect HMAC, polling at most every 20 minutes) is tested on a fake fetch only and also needs `WEFT_LIVE_DOCUSIGN=1` | Free developer account with the full eSignature API in the demo environment | Create the developer account, an app with an integration key and an RSA key pair (keep the PEM outside every repo), grant consent once, then put `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`, `DOCUSIGN_ACCOUNT_ID` and `DOCUSIGN_PRIVATE_KEY_FILE` (a path) in the secrets file; optional `DOCUSIGN_CONNECT_HMAC_KEY` |
 
 A local Weft has no public URL, so polling on the scheduler tick is the baseline; the one public webhook route is
 `POST /v1/integrations/:vendor/webhook` (HMAC over the raw bytes, constant time, ids only stored). More in
@@ -501,7 +524,7 @@ A local Weft has no public URL, so polling on the scheduler tick is the baseline
 
 ## Sandboxes and a free hosted option
 
-Weft serves one fictional company, so it does not need a sandbox fleet. Locally the plan is QuickJS (MIT, through
+Weft serves one company, so it does not need a sandbox fleet. Locally the plan is QuickJS (MIT, through
 `quickjs-emscripten`) inside the executor for `code.run`, with Anthropic's `sandbox-runtime` and `microsandbox` (both
 Apache-2.0) as opt-in wrappers. Hosted, the design targets Cloudflare Workers Free: one SQLite-backed Durable Object
 per company, Durable Object alarms for routines and the sandbox off. Cloudflare's Sandbox SDK, Containers and Dynamic
@@ -542,7 +565,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm screenshots` | Retakes `docs/screenshots/` (or `SHOTS_DIR`) through the e2e dev runner at 1440 by 900; same ports and world reset as `pnpm e2e`, never part of it |
 | `pnpm e2e:rich` | Seeds the rich profile fresh into `.data-rich/` (ports 3270 and 4270; `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_RICH_DATA_DIR` move them) and crawls every audited screen and tab for empty states |
 | `pnpm e2e:tour` | The guided tour specs (`e2e/tour/`: the whole tour read at its pace, autoplay, the controls, accessibility and the phone sheet) on ports 5640 and 5641 (`WEFT_TOUR_WEB_PORT`, `WEFT_TOUR_API_PORT`) and `.data-e2e-tour/`, scripted, each test on a freshly reset rich world. `WEFT_TOUR_LIVE=1 pnpm e2e:tour tour-autoplay` plays it on live `gpt-5.6-luna` with a $0.05 cap; `TOUR_SHOTS=1 pnpm e2e:tour tour-complete` also saves every step to `docs/screenshots/tour/` |
-| `pnpm screenshots:rich` | Retakes the plain route shots in `docs/screenshots/` on a fresh rich world (the `pnpm e2e:rich` runner and ports), as Dana at 1440 by 900 |
+| `pnpm screenshots:rich` | Retakes the plain route shots in `docs/screenshots/` on a fresh rich world (the `pnpm e2e:rich` runner and ports), as Vic at 1440 by 900 |
 | `pnpm lint:prose` | No em or en dashes in tracked text (`pnpm lint:prose --commits main..HEAD` also checks commit messages) |
 | `pnpm lint:brand` | No reference-site names, domains, denylisted phrases or copied reference files outside `research/`, `SPEC.md` and `NOTICE`; the phrase and hash checks need the local, gitignored reference folder |
 | `pnpm brand:overlap` | Fails on any run of 8 or more consecutive words shared between the visible text of the saved reference pages and the text in `apps/`, `packages/`, `docs/`, `research/`, `README.md` or `SPEC.md`, outside the (empty) allowlist `scripts/brand-overlap.allow.txt`; skips with a message when the gitignored reference folder is absent, as in CI |
@@ -554,9 +577,9 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm wave:ledger` | The shared wave 4 spend ledger (`~/Developer/projects/weft-notes/wave4-spend.json`, $3.00 cap) |
 | `pnpm memory:bundle`, `pnpm memory:restore` | Write a verified git bundle of the memory repo under `companies/<id>/bundles/`, or restore one (the old repo is kept) |
 
-## Synthetic data only
+## Fictional data only
 
-Weft runs on one fictional company, Larkspur Robotics (demo), with 48 synthetic employees and 3 contractors. Every government agency, bank, benefits carrier and SaaS integration is a simulator inside this repo ([docs/simulators.md](docs/simulators.md)); no real agency, bank or carrier is ever contacted and no real money moves. Names of record end with `(demo)` and every domain is `*.example`.
+Larkspur Robotics, its 48 employees and 3 contractors, and every other person, company and agency in Weft are fictional, and every government agency, bank, benefits carrier and SaaS integration is a simulator inside this repo ([docs/simulators.md](docs/simulators.md)): no real agency, bank or carrier is ever contacted, no real money moves, and every domain is `*.example`.
 
 ## Docs
 

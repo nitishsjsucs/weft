@@ -12,8 +12,9 @@ is empty, I want data everywhere", without moving a test, an e2e run, an eval wo
   `pnpm dev`; `--profile base` opts out). The seed CLI defaults to base.
 - A rich world carries a `seed.profile` settings row (base worlds carry none, so the base digest is unchanged).
   `POST /v1/sim/reset` rebuilds the world with the profile it was seeded with, or the one in `{ profile }`.
-- Base digest: unchanged (`950933e7ed6a...10d9`, checked by `packages/seed/test/profile.test.ts` and the eval suite's
-  pinned digests). The rich digest is the same on every seed; it is not pinned, so the layer can grow.
+- Base digest: unchanged by the rich layer (`950933e7ed6a...10d9` when this track landed; re-pinned on 2026-10-23 to
+  `dca6930b3d5e...c6c4` by the clean-workspace copy change), checked by `packages/seed/test/digest-hosted.test.ts` and the
+  eval suite's pinned digests. The rich digest is the same on every seed; it is not pinned, so the layer can grow.
 
 ## Rules the layer keeps
 
@@ -26,7 +27,7 @@ is empty, I want data everywhere", without moving a test, an e2e run, an eval wo
   draft filings and calendar items, action #1, workers `wrk_0001` to `wrk_0051` and the open October reconciliation.
 - Ids come from the app's id counters, instants are fixed and before the seed time (Mon Oct 26 2026 8:30 PT), and
   nothing calls a model: agent runs are scripted-provider transcripts at $0.00.
-- Every name of record ends in `(demo)`, documents start with the DEMO DOCUMENT line, mail and notices say SIMULATED.
+- Names of record carry no suffix, every domain is `*.example`, and documents, mail and notices read as the company's own (2026-10-23: the `(demo)` suffix, the DEMO DOCUMENT line and the SIMULATED notice headers were removed).
 - Domain math holds: imported runs equal each worker's YTD import code by code and satisfy the SPEC 7.4 totals
   identities; time off is drawn through ledger `use` rows with a balancing import per policy so caps hold; contractor
   payouts convert at the fixed FX table and land two business days after booking.
@@ -36,8 +37,8 @@ is empty, I want data everywhere", without moving a test, an e2e run, an eval wo
 | File | Adds |
 | --- | --- |
 | `rich/index.ts` | Agent runs with steps (weekly digests, pre-payroll reviews, the Feb 14 NY DOL notice, chat answers including payroll cost by month and the refused approve-all), routine runs, decided and pending proposals with a hash-chained approval audit, hand-offs, about 200 hash-chained actions with one rollback, time-off history (142 requests; 2 people out on Oct 26), onboarding checklists and DEMO documents, the July leaver and Jonah Pell's open resignation, contractor payouts, filed returns with agency mail, more notices, the 2023 registrations, memory pages with wiki links and 30-plus memory commits |
-| `rich/motion.ts` | Offers in draft, viewed, accepted, expired and voided states with outbox mail and background checks; Elias Brandt (demo) at 5 of 7; the approvals waiting this week; 18 paid expense claims; Greenhouse deliveries and sync items; the September reconciliation finding; device orders; contractor accounts, tablets and agreements |
-| `rich/portal-hires.ts` | Odette Marsh (demo), NY, starts Nov 2, 7 of 7 with a bank account, an approved home office claim from the portal and the NY harassment prevention course; Tobias Wren (demo), CA, starts Nov 30, 2 of 7; their offers, mail, checks and devices |
+| `rich/motion.ts` | Offers in draft, viewed, accepted, expired and voided states with outbox mail and background checks; Elias Brandt at 5 of 7; the approvals waiting this week; 18 paid expense claims; Greenhouse deliveries and sync items; the September reconciliation finding; device orders; contractor accounts, tablets and agreements |
+| `rich/portal-hires.ts` | Odette Marsh, NY, starts Nov 2, 7 of 7 with a bank account, an approved home office claim from the portal and the NY harassment prevention course; Tobias Wren, CA, starts Nov 30, 2 of 7; their offers, mail, checks and devices |
 | `rich/turnover.ts` | Six 2026 joiners and leavers (three summer interns, a seasonal Austin Yard technician, a quality inspector and a sales hire), each inactive with documents, a finished checklist, a completed offboarding case and an engine-computed YTD import; the July leaver gets his import here |
 | `rich/pay-history.ts` | 16 imported Jan to Aug runs whose paychecks split each worker's YTD import (wage-base codes front-loaded); the paid claims ride the run that reimbursed them (outside gross and net, inside the totals; the one past 60 days is a taxable earning line carved out of the imported gross); monthly federal deposits |
 
@@ -63,7 +64,7 @@ refuses only a pending proposal newer than the seed.
 - Settings drops the "come next" line and links Permissions, Integrations and Routines.
 - The audit table no longer needs a sideways scroll at 1440 px (the Summary column takes the free width, the
   command wraps, the run id truncates).
-- Portal: training calls the API as the portal persona, so a new hire no longer sees or completes Dana's course.
+- Portal: training calls the API as the portal persona, so a new hire no longer sees or completes Vic's course.
   The portal's time off is the Request time off section in `components/portal/w4-people.tsx` (balances, the form
   and the person's own requests from `GET /v1/portal/time-off`); the wave 3 slot `components/portal/time-off/section.tsx`
   stays empty on purpose so there is one section, not two.
@@ -112,14 +113,14 @@ Run it on other ports with `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_
 
 - Greenhouse: the seeded sync items use the engine's detail shapes (`label`, `weft_value`, `vendor_value`,
   `offer_version`, `application_ref`), so step 19 reads "Start date changed in Greenhouse (offer version 2): Weft has
-  Nov 16, 2026, Greenhouse has Nov 23, 2026" on Marisol Quint (demo)'s offer, and Take Greenhouse value applies a date.
+  Nov 16, 2026, Greenhouse has Nov 23, 2026" on Marisol Quint's offer, and Take Greenhouse value applies a date.
 - Offers: every sent, viewed, accepted, expired or voided offer's letter and agreement come from core's
   `offerLetterFor` and `confidentialityText`, as `documents.send_offer` writes them. Only accepted offers have a
-  background check; the follow-up routine names Tobias Wren (demo)'s pending check (estimate Oct 30).
+  background check; the follow-up routine names Tobias Wren's pending check (estimate Oct 30).
 - Routine runs: every seeded run of a cron routine sits at a slot its own cron produces (`cronSlot` reads the PREBUILT
   trigger) with the engine's `cron:<slot>` ref; event routines carry `event:<name>:<subject>`. The Austin office laptop
-  routine names Lucia Ferrante (demo), its one Austin hire; the life-event routine reads a closed marriage window.
-- Owen Mercer (demo): his last day (Oct 23) is planted in base; the rich layer offboards him (open case, everything
+  routine names Lucia Ferrante, its one Austin hire; the life-event routine reads a closed marriage window.
+- Owen Mercer: his last day (Oct 23) is planted in base; the rich layer offboards him (open case, everything
   done but final pay on the Oct 30 run, status offboarding, accounts suspended, enrollments ended through Oct 31), so
   Home, People, Offboarding and Reports agree on 47 employees.
 - Benefits in the imported history: the salaried leavers (Rafael Ostrander, Wen Talbot, Dorian Pike) carry their
@@ -127,7 +128,7 @@ Run it on other ports with `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_
   of the last day. Employer benefits per month now move with them. Employer health contributions stay $0 because the
   engine prices only the 401(k) match (a base engine behavior, unchanged here).
 - The July leaver's final pay is on the Jul 31 regular run; offboarding step details read days and the IT system
-  names (Workspace (sim), Chat (sim)); the quality inspector leaver is Wen Talbot (demo), not a second Calloway.
+  names (Workspace, Chat); the quality inspector leaver is Wen Talbot, not a second Calloway.
 - Audit log: the base world's #1 (Lena's raise, Oct 9) precedes ten months of imported history by sequence. The seq
   stays as recorded (the memory timeline, the pay rate and the Oct 30 flag evidence all cite #1); the page lists by
   time (`GET /v1/actions?order=time`), shows each row's #, has Show older, and an `#audit-N` link pages back until

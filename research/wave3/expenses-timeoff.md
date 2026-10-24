@@ -232,7 +232,7 @@ Balance (the reference's shape [api-tob], in Weft names) for (worker, policy, as
   - `COVERAGE_CONFLICT` (review): on some working day, the department's share of people out (approved plus pending) exceeds `coverage_max_out_pct`, or the people present fall below `coverage_min_present`; evidence lists the dates and the other requests by id.
   - `OVERLAPS_PAYROLL_DEADLINE` (review): the requester approves payroll (Theo) and is out on an approval-deadline day.
   - `INCLUDES_HOLIDAY` (info), `SHORT_NOTICE` (info, under 7 days ahead; never blocks sick leave).
-- Routing: the approver is the worker's manager when that manager has a human principal, else the department lead's principal, else the People admin (Dana). `routing_json` records the chain and the reason, for example that the manager has no Weft login. Wave 3 seeds **one manager principal**, Imani Ferreira (demo), Hardware lead, role `manager`, whose approve right covers only her direct reports. The check lives in the decide command (the subject worker's `manager_id` must be the principal's worker), so the grant model stays unchanged. [W]
+- Routing: the approver is the worker's manager when that manager has a human principal, else the department lead's principal, else the People admin (Vic). `routing_json` records the chain and the reason, for example that the manager has no Weft login. Wave 3 seeds **one manager principal**, Imani Ferreira (demo), Hardware lead, role `manager`, whose approve right covers only her direct reports. The check lives in the decide command (the subject worker's `manager_id` must be the principal's worker), so the grant model stays unchanged. [W]
 - Decision: `time_off.decide {request_id, decision: approve | deny, note}`. A human approver calls it directly and it runs; for the agent it is always a proposal. Approve converts the hold into `use` rows dated per day; deny releases the hold. Sick leave requests that pass the checks are approved by the routine's precheck path only after a human decision, the same as vacation (no autonomous approvals in wave 3).
 - After a request is approved, `refreshOpenDrafts` (already used by offboarding) recomputes any draft payroll whose period contains its days.
 
@@ -371,7 +371,7 @@ Fictional merchants only, each marked "(demo)". Workers are chosen by selector a
   - R-B pending: Ruth, vacation Mon Nov 23 to Fri Nov 27. It triggers `COVERAGE_CONFLICT` on Nov 23 to 25 (3 of 9 out, 33.3% > 30%) and `INCLUDES_HOLIDAY` for Nov 26 and 27; it routes to Imani.
   - R-C pending: a NY engineer, sick Thu Oct 29, 4 hours, clean.
   - R-D pending: Ben Ashdown (demo), who started Oct 1, sick, 8 hours on Oct 28. Day 28 of employment, so `WAITING_PERIOD` blocks.
-  - GP9 terminates Imani in its own reset world; when her worker leaves, her manager principal must be disabled in the same offboarding transaction and routing falls back to Dana.
+  - GP9 terminates Imani in its own reset world; when her worker leaves, her manager principal must be disabled in the same offboarding transaction and routing falls back to Vic.
   - One approved TX request inside Oct 16 to 31, so the open draft shows a `pto` line.
 
 ### 8.2 Expenses
