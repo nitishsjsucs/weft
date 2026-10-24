@@ -4,14 +4,20 @@
 import { askAgent, eventually, expect, openApp, test, TID, tid, viewAs, type Proposal } from "../fixtures";
 import { W2_ONBOARDING_TID as T } from "../../packages/contracts/src/w2/testids-onboarding";
 import { W2_OFFBOARDING_TID as OT, W2_BENEFITS_TID as BT, W3_CHAT_TID, W3_EXPENSES_TID as XT, W3_INTEGRATIONS_TID as IT, W3_SHELL_TID as S, W3_TIMEOFF_TID as TT } from "../../packages/contracts/src/index";
+import { ASSIST_TID as A } from "../../packages/contracts/src/ext/assist";
 import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 const OUT = process.env.SHOTS_DIR ?? fileURLToPath(new URL("../../docs/screenshots", import.meta.url));
-/** Moves focus and the pointer off the control a step last clicked, so a shot shows the resting state. */
+/**
+ * Moves focus and the pointer off the control a step last clicked, so a shot shows the resting state. The pointer
+ * then leaves the window, so the cursor assistant's floating icon (which follows it) is not in the shot either.
+ */
 const rest = async (page: Page) => {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(1, page.viewportSize()!.height - 1);
+  await page.evaluate(() => document.documentElement.dispatchEvent(new PointerEvent("pointerleave")));
+  await page.waitForTimeout(250); // the icon's fade
 };
 const shot = async (page: Page, name: string, fullPage = false) => {
   await page.waitForTimeout(600);
@@ -23,6 +29,8 @@ const shot = async (page: Page, name: string, fullPage = false) => {
 const top = async (page: Page, name: string, height: number, keepFocus = false) => {
   await page.waitForTimeout(600);
   if (!keepFocus) await rest(page);
+  // An open menu keeps focus and the pointer; the pointer still leaves the window, so the floating icon is not in it.
+  else { await page.evaluate(() => document.documentElement.dispatchEvent(new PointerEvent("pointerleave"))); await page.waitForTimeout(250); }
   const width = page.viewportSize()!.width;
   await page.screenshot({ path: `${OUT}/${name}.png`, clip: { x: 0, y: 0, width, height } });
 };
@@ -198,4 +206,48 @@ test("screens wave 3 integrations and chart", async ({ page }) => {
   await expect(answer).toContainText("Sep 2026");
   await expect(page.getByTestId(W3_CHAT_TID.chart).last().locator(".recharts-bar-rectangle").first()).toBeVisible();
   await shot(page, "25-chat-chart");
+});
+
+// The cursor assistant (README "The cursor assistant"): point, go there and answer, each with its card next to the
+// pointer. The assistant's own card stays open in the shot; rest() only moves focus and the pointer away.
+test("screens cursor assistant", async ({ page, weft }) => {
+  await weft.post("/v1/routines/rt_time_off_requests/trigger", {});
+  const prp = await eventually(() => weft.proposals("pending"), (ps) => ps.find((p: Proposal) => p.command === "time_off.decide"), "Ruth's time-off decision in the Inbox");
+  const ask = async (question: string, at: { x: number; y: number }) => {
+    await page.mouse.move(at.x, at.y);
+    await page.keyboard.press("ControlOrMeta+KeyJ");
+    await page.getByTestId(A.input).fill(question);
+    await page.getByTestId(A.input).press("Enter");
+    await expect(page.getByTestId(A.popover)).toBeVisible();
+  };
+  await openApp(page, "/app/inbox");
+  await viewAs(page, "dana");
+  await expect(page.getByTestId(tid.inboxCard(prp.id))).toBeVisible();
+  await ask("Where do I approve Ruth's time off?", { x: 980, y: 140 });
+  await expect(page.getByTestId(A.bubble)).toHaveText("Approve it here");
+  await shot(page, "42-assist-point");
+  await page.keyboard.press("Escape");
+  await ask("Show me the Oct 30 payroll flags", { x: 980, y: 140 });
+  await expect(page).toHaveURL(/\/app\/payroll\/pay_2026_10_30/);
+  await expect(page.getByTestId(A.bubble)).toHaveText("Needs review");
+  await shot(page, "43-assist-navigate");
+  await page.keyboard.press("Escape");
+  await ask("How many paychecks need review on this draft?", { x: 760, y: 120 });
+  await expect(page.getByTestId(A.answer)).toContainText("paychecks need review on this draft");
+  await expect(page.getByTestId(A.continue)).toBeVisible();
+  await shot(page, "44-assist-answer");
+  await page.keyboard.press("Escape");
+  // The handoff to the full agent: the progress card with the chat run's steps, the cited answer and its Show me chips.
+  await openApp(page, "/app");
+  await ask("Compare the last three pay runs and show me the outliers", { x: 980, y: 140 });
+  await expect(page.getByTestId(A.progress)).toHaveAttribute("data-status", "done");
+  await expect(page.getByTestId(A.answer)).toContainText("the open draft stands out");
+  await expect(page.getByTestId(A.chip).first()).toBeVisible();
+  await shot(page, "45-assist-handoff");
+  await page.keyboard.press("Escape");
+  // A walkthrough from the help corpus, on the tour's ring.
+  await ask("How do I run payroll end to end?", { x: 980, y: 140 });
+  await expect(page.getByTestId(A.walk)).toContainText("Step 1 of 5");
+  await expect(page).toHaveURL(/\/app\/payroll$/);
+  await shot(page, "46-assist-walkthrough");
 });

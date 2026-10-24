@@ -105,6 +105,77 @@ motion and the phone layout. How it works and the measured timings: [docs/tour.m
   reloaded. Below 768 px the list becomes a drawer. The side panel starts closed on this page so the agent is not on
   screen twice; its toggle still opens it.
 
+### The cursor assistant
+
+A small assistant lives at the pointer everywhere inside the app (not on the marketing pages or the new-hire portal).
+Ask it where something is, to show you something, or a question about the page, and it answers in one of three ways:
+
+- **Point.** A pointer glides to the control and rings it with the guided tour's ring and a short label. "Where do I
+  approve Ruth's time off?" rings Approve on Ruth's request card in the Inbox.
+- **Go there.** It opens the right page, tab, drawer or filter, waits for the target to render and rings it. "Show me
+  the Oct 30 payroll flags" opens the draft with Needs review ringed; "Show me Lena's paycheck on the Oct 30 run",
+  asked from Home, lands on `/app/payroll/pay_2026_10_30?paycheck=wrk_0026` with the drawer open and ringed, and the
+  same link pasted into the address bar opens the same view.
+- **Answer.** A short grounded answer in a card next to the pointer (a bottom sheet on a phone): numbers cite the
+  tool result they come from, as in chat, and **Continue in Agent** opens the exchange as a conversation on the Agent
+  page.
+
+How to open it:
+
+- Click the small icon that floats a few pixels from the pointer. It holds still when you move towards it, hides
+  while you scroll or type in a field, never covers what is under the pointer, and docks in the corner on a touch
+  screen. **Hide the assistant icon** in the Viewing as menu turns it off; the hotkey and the right-click menu still
+  work.
+- **Ctrl or Cmd J** opens the composer (press it again to interrupt). **Escape** closes everything and returns focus.
+- A single **right-click** inside the app opens a small Weft menu (Copy selected text, Ask about this) in place of the
+  browser's; fields keep the browser's own menu. Ask about this sends the record under the pointer with the question
+  (the composer shows it as "About: ..."). Two right-clicks within 400 ms wake it and start listening.
+
+What it does on its own: it points, navigates and shows things through typed intents that only move the view (open a
+record or a paycheck, switch a tab or a filter, scroll, expand a section). Nothing it can call approves, submits,
+saves, deletes, sends or runs anything: there is no such intent in the manifest, the executor refuses any control
+whose label, test id or anchor reads as a change, and the browser checks the live element again before it acts.
+Asked to "approve this", it says "Shown, not pressed: only you can make that change." and shows the proposal's own
+approval card for you to press.
+
+Complicated requests go to the full agent by themselves. A change ("Pay Hollis Grey an off-cycle bonus..."), an
+analysis ("Compare the last three pay runs") or several asks at once become an ordinary agent run in the same
+conversation (a change is filed as a proposal only with Settings > Agent > Chat can propose on, as in the side
+panel). The card becomes a progress card with the run's steps in plain words, Stop and Open in Agent. When the
+run ends, code adds the closing show with no extra model call: a proposal it filed opens in the Inbox with its card
+ringed and its approval card in the popover, and the records the answer cites become up to four "Show me" chips. A
+name that matches two people asks which one, with a button for each, and the choice continues the request. "How do I
+run payroll end to end?" plays a five-step walkthrough on the tour's ring with Next and Back (it only points).
+Where and how questions take an instant path that answers from the help corpus, the page's own labels and the nav
+registry with no model call and no cost.
+
+Voice:
+
+- **In.** The browser's live speech recognition with a live transcript where it exists (Chrome, Edge, Safari).
+  Elsewhere, on the hosted app, a clip of at most 15 s recorded as 16 kHz mono WAV goes to Weft's own dictation route
+  (Workers AI whisper); on the local app without speech recognition the composer says to type. A refused microphone
+  is said plainly.
+- **Out.** Off by default; the speaker toggle in the card turns it on. The first choice is Chatterbox Nano in the
+  browser on WebGPU (the MIT community ONNX build `owensong/chatterbox-nano-ONNX` at a pinned revision, about 395 MB
+  fetched once and cached, with a progress line; ONNX Runtime Web's JSPI WebAssembly, about 17 MB, is served from
+  Weft itself). This build does not ship its fixed voice file yet (see "What is stubbed or left"), so today spoken
+  answers use Deepgram Aura-2 on the hosted app (`POST /api/_hosted/speak`, Workers AI, inside a 500-neuron share
+  and RL_RUN) and the browser's own speech synthesis on the local app, with a voice the device provides, so no text
+  leaves the machine. Escape stops speech.
+- Dependencies, pinned exactly: `onnxruntime-web` 1.30.0 (MIT) and `@huggingface/tokenizers` 0.2.0 (Apache-2.0), both
+  loaded only when spoken answers are turned on.
+
+How it works: every question is an `assist` run (`POST /v1/agent/runs` with `recipe: "assist"`) with a numbered map
+of the visible controls built from Weft's own anchors, the record under the pointer and the last few it rested on,
+the records the page already holds, and the last ten things that happened in the app. Text people typed is sent only
+as untrusted, which taints the run. The run has 16 tools (10 chat reads and 6 presentation tools), at most 4 model
+steps and the usual $0.10 cap, and every presentation call is checked on the server against this request's map, the
+nav registry and the intent manifest ([SPEC 9.12](SPEC.md)). Tests: the contracts, executor, agent and grounding
+units, `apps/api/test/assist.test.ts`, the client cores in `apps/web/test/assist-*.test.ts`, the browser golden path
+`e2e/gp27-cursor-assistant.spec.ts` (1440 by 900 and 390 by 844, speech recognition faked with a fixed transcript)
+and the hosted check `e2e/cf/cf-assist.spec.ts`. Screenshots: `42-assist-point`, `43-assist-navigate`,
+`44-assist-answer`, `45-assist-handoff` and `46-assist-walkthrough`.
+
 Things to try in the demo:
 
 1. **Simulators**: deliver the "CA EDD DE 2088" notice. The agent drafts a SUI rate change and a reply to the agency; both wait in the **Inbox** for you.
@@ -186,6 +257,29 @@ web app (`apps/web`, Next 16) reaches it through an `/api` rewrite that adds the
 More in [docs/architecture.md](docs/architecture.md).
 
 ## Results
+
+### Cursor assistant (2026-10-24, branch `cf/assist`)
+
+The cursor assistant (README "The cursor assistant", SPEC 9.12), on the scripted provider. The chat prompt and every
+eval digest are unchanged; the hosted neuron day cap is unchanged at 5,000, with speech's 500 taken from the agent's
+4,000, now 3,500 (docs/cloudflare/design.md 5.2). Two product bugs the browser suites found were fixed on the way: closing a drawer while a navigation was in
+flight (the guided tour leaving Expenses) cancelled that navigation, because the URL view state's write made Next's
+router restore the old page; and a closing chip for a person read only from a flag's evidence was labelled "this
+person" instead of the name the read carries.
+
+| Command | Outcome |
+|---|---|
+| `pnpm typecheck` | 18 of 18 tasks; `tsc -p e2e` and `tsc -p e2e/cf` clean |
+| `pnpm test` | 2,515 passed, 8 skipped (327 files, 1 skipped) |
+| `pnpm eval:ci` | 72 of 128 trials, gate passed; 69 of 69 worlds reproduce their digest |
+| `pnpm e2e` | 64 passed, 1 skipped, 2.9 min (GP27: 10 tests at 1440 by 900 and 390 by 844) |
+| `pnpm e2e:tour` | 31 of 31 in 9.2 min (20 steps) |
+| `pnpm e2e:rich` | 6 of 6, 1.8 min |
+| `pnpm cf:snapshot`, `pnpm cf:test` | snapshot `66138d918b6b5b8d` (118 chunks, 8,190 rows); 165 passed, 1 skipped |
+| Hosted export, `pnpm --filter @weft/web e2e:hosted` | 33 routes, the export check passed; 20 passed |
+| `pnpm e2e:cf --project local` | 19 passed, 4.8 min (with `cf-assist.spec.ts`) |
+| `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` | ok |
+| `pnpm screenshots` (the top bar and cursor assistant groups) | `21` to `21d` retaken, `42` to `44` retaken on 2026-10-24, `45` and `46` new |
 
 ### Clean workspace (2026-10-23, branch `cf/clean-ui`)
 
@@ -401,6 +495,14 @@ Flows on the base world, retaken on 2026-10-23 for the sidebar's Agent item with
   - `23-time-off-requests` (Ruth's coverage conflict and holidays routed to Imani, Ben's waiting period blocking
     Approve, viewed as Sam) and `23b-time-off-calendar` (Hardware in November, 33% out on Nov 23 to 25).
   - `25-chat-chart` (payroll cost by month as a stacked bar chart with a Table toggle, "Ran 1 tool").
+- The cursor assistant, added on 2026-10-24 (`screens cursor assistant` in the same file; the four top bar shots were
+  retaken with it, since the Viewing as menu gained "Hide the assistant icon" below the crop): `42-assist-point` (Approve on Ruth's
+  time-off card in the Inbox ringed, from the instant path), `43-assist-navigate` (the Oct 30 draft opened with Needs
+  review ringed), `44-assist-answer` (the grounded count with its citation, the Show me chips and Continue in Agent),
+  `45-assist-handoff` (an analysis handed to the full agent: the progress card with its step, the cited answer and
+  its Show me chips) and `46-assist-walkthrough` (step 1 of 5 of running payroll, on the tour's ring). 42 to 44 were
+  retaken and 45 and 46 added on 2026-10-24 from the shipped UI. Resting shots move the pointer out of the window
+  first, so the floating icon is not in them.
 
 ## What works
 
@@ -414,6 +516,17 @@ Wave 4 golden paths (scripted provider; merged on 2026-10-16, see "Wave 4 integr
 | GP22 agent surfaces: portal questions from the asker's own record only (human-only topics handed to a person in code), `@weft` mentions answered read only and tainted in the thread, emailed receipts filed as expenses, wait and resume in a routine | `apps/api/test/agent-surfaces.test.ts` | passes (2 tests) | yes (portal) |
 | GP23 Reports: 11 metrics with a chart and a table, date range and grouping, "Email this report" as a proposal, the weekly cost by state routine (disabled) | `apps/api/test/w4-admin-*.test.ts` | passes | yes (the catalog) |
 | GP24 permissions and the routine gallery: the View, Edit and Approve matrix, `deny` and `propose_only` overrides enforced in the executor and set only by an approved proposal, last and next run with decision counts | `apps/api/test/w4-admin-*.test.ts` | passes (2 tests) | yes (the gallery) |
+
+The cursor assistant's agent side ([SPEC 9.12](SPEC.md)): `POST /v1/agent/runs` with `recipe: "assist"` answers a
+question asked at the pointer by pointing at an element, opening a page, showing something through a typed intent
+that only moves the view, playing a short walkthrough, or a grounded answer for the popover. Where and how questions
+take an instant path with no model call. A change, an analysis or several asks at once go to the full agent in the
+same conversation, and code (not the model) adds the closing approval card and "Show me" chips. No presentation tool
+can approve, submit, save, delete, send or run anything; a change is a proposal a person approves. On the hosted app,
+spoken answers fall back to Deepgram Aura-2 through `/api/_hosted/speak` inside a 500-neuron share
+([docs/cloudflare/design.md](docs/cloudflare/design.md) 5.4). Tests: `packages/contracts`, `packages/executor` and
+`packages/agent` `test/assist.test.ts`, `apps/api/test/assist.test.ts`, and the speech, ledger and gate tests in
+`packages/cf-extras` and `apps/cf`.
 
 Every agent run can be traced into a local Arize Phoenix (`WEFT_TRACE=phoenix`, `pnpm phoenix:up`; secrets are
 redacted at the source and a canary test proves it, see [docs/telemetry.md](docs/telemetry.md)), and the eval suite
@@ -468,6 +581,12 @@ time; the action chain verifies at the end of every scenario.
 
 ## What is stubbed or left
 
+- The cursor assistant's in-browser voice (Chatterbox Nano) is built but stays off: it needs a fixed voice file
+  (`/assist/voice/weft-voice.bin`) made once from the speech encoder and a reference clip Weft has the rights to, and
+  neither is in the repository yet, so spoken answers use Aura-2 on the hosted app and the device's own voice locally.
+  The ONNX input and output names in `apps/web/src/components/assist/chatterbox.ts` are written from the model card
+  and are not yet checked against a real download. The assistant's eval tasks (research/cursor-assistant.md 4.6,
+  phase 3) are not written.
 - Benefits, IT and Contractors run on their simulators only; the landing page's routine showcase is P1. Wave 3's open items
   are listed under "Wave 3: left" below and in `docs/wave3.md`.
 - `code.run` ships in QuickJS but is opt-in (`WEFT_SANDBOX=quickjs`) and on no prebuilt allowlist. Return values
@@ -596,7 +715,7 @@ Spend is capped per run, per day and in total. See [docs/models.md](docs/models.
 | `pnpm demo:scenario <name>` | Resets the running dev world to its own seed profile (rich under `pnpm dev`; `--profile base` or `--profile rich` picks one) for one live demo scenario (`list` names them), checks it is clean (the seed clock, no pending proposal newer than the seed) and prints the click path and what to type; it calls no model. `--api-port` and `--web-port` follow `pnpm dev`, and the world should run with `WEFT_CLOCK_RATE=0` |
 | `pnpm test` | All vitest projects (scripted provider only) |
 | `pnpm typecheck` | `tsc --noEmit` in every package, then in `e2e/` (`pnpm typecheck:e2e`) |
-| `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP24 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
+| `pnpm e2e` | Playwright golden paths GP1 to GP7, GP9 to GP27 and the site specs (the DocuSign envelope test runs only with `WEFT_ESIGN=docusign`) against a fresh seed on ports 3170 and 4170 (`WEFT_E2E_WEB_PORT`, `WEFT_E2E_API_PORT` and `WEFT_E2E_RUNNER_PORT` move them), one worker, reset before each test ([docs/testing.md](docs/testing.md)) |
 | `pnpm screenshots` | Retakes `docs/screenshots/` (or `SHOTS_DIR`) through the e2e dev runner at 1440 by 900; same ports and world reset as `pnpm e2e`, never part of it |
 | `pnpm e2e:rich` | Seeds the rich profile fresh into `.data-rich/` (ports 3270 and 4270; `WEFT_RICH_WEB_PORT`, `WEFT_RICH_API_PORT` and `WEFT_RICH_DATA_DIR` move them) and crawls every audited screen and tab for empty states |
 | `pnpm e2e:tour` | The guided tour specs (`e2e/tour/`: the whole tour read at its pace, autoplay, the controls, accessibility and the phone sheet) on ports 5640 and 5641 (`WEFT_TOUR_WEB_PORT`, `WEFT_TOUR_API_PORT`) and `.data-e2e-tour/`, scripted, each test on a freshly reset rich world. `WEFT_TOUR_LIVE=1 pnpm e2e:tour tour-autoplay` plays it on live `gpt-5.6-luna` with a $0.05 cap; `TOUR_SHOTS=1 pnpm e2e:tour tour-complete` also saves every step to `docs/screenshots/tour/` |

@@ -50,7 +50,7 @@ Left for the Deploy stage, listed by `pnpm cf:resources` as manual steps:
 | Durable Object namespace (SQLite) | class `SpendDO`, object `spend` | `SPEND` (weft-core and weft) | the spend ledger, every cap, the orphan sweep, the neuron budget | the DO limits above |
 | Durable Object migration | tag `v1` (`new_sqlite_classes` CompanyDO, LobbyDO, SpendDO) | | the three classes; later migrations are additive only | |
 | Workflow | `weft-reseed`, class `ReseedWorkflow` | `RESEED` | a full restore and arm in chunked steps that only RPC into a CompanyDO, with durable retries | 3,000 steps a day; 10 ms CPU per step documented; 1,024 steps per instance |
-| Workers AI | | `AI` | the model switch (`@cf/openai/gpt-oss-120b`), embeddings, receipt and notice OCR, dictation | 10,000 neurons a day account-wide (Weft's share 5,000; `WEFT_NEURON_DAY_CAP` 5000) |
+| Workers AI | | `AI` | the model switch (`@cf/openai/gpt-oss-120b`), embeddings, receipt and notice OCR, dictation, spoken answers | 10,000 neurons a day account-wide (Weft's share 5,000; `WEFT_NEURON_DAY_CAP` 5000) |
 | Browser Run | | `BROWSER` | offer letter, signed agreement and pay stub PDFs from Weft templates, JavaScript off and every request aborted | 10 browser-minutes a day; 3 concurrent; 1 new browser per 20 s |
 | Images | | `IMAGES` | normalizes and downscales receipt photos before OCR | 5,000 unique transformations a month, no charge past it on Free |
 | Rate Limiting namespace | `4103` | `RL_RUN` (6 per 60 s) | live run admission per visitor | per location, eventually consistent |
