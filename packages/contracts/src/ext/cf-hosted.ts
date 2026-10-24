@@ -271,7 +271,7 @@ export const HOSTED_ERRORS = {
   AGENT_PAUSED: { status: 503, tag: "Refused" },
   /** A hosted clock advance past HOSTED_CLOCK_LIMITS. */
   CLOCK_LIMIT: { status: 400, tag: "ValidationError" },
-  /** This workspace used its rows budget for this generation (design 6.3): reset it to start fresh. */
+  /** This workspace used its rows budget for this generation and UTC day (design 6.3): it refills at 00:00 UTC, or a reset starts fresh. */
   DEMO_LIMIT: { status: 429, tag: "RateLimitExceeded" },
   /** The shared showcase read its rows for the UTC day (design 6.3); leased workspaces and the static pages work. */
   SHOWCASE_LIMIT: { status: 503, tag: "Refused" },

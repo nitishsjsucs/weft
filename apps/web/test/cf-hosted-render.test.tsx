@@ -91,7 +91,7 @@ describe("the hosted banner", () => {
     state.limited = { kind: "demo", gen: lease.gen };
     const own = renderToStaticMarkup(<HostedBanner />);
     expect(own).toContain('data-testid="hosted-banner" data-world="slot"');
-    expect(own).toContain("This workspace has used its activity limit. Reset it from Viewing as to start fresh.");
+    expect(own).toContain("This workspace has used today&#x27;s activity limit. It refills at 00:00 UTC, or reset it from Viewing as to start fresh.");
     expect(own).not.toContain("hosted-provider-note");
     state.status = status();
     state.limited = { kind: "showcase", gen: null };

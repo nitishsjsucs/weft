@@ -776,7 +776,7 @@ describe("the rows budget (defense in depth)", () => {
     expect(statuses.filter((x) => x === 200)).toHaveLength(Math.ceil(limits.written / 400));
     const refused = await c.co.fetch(await req("/v1/time-off/requests", { method: "POST", body: "{}" }));
     expect(refused.status).toBe(429);
-    expect(await refused.json()).toMatchObject({ code: "DEMO_LIMIT", message: expect.stringContaining("activity limit") });
+    expect(await refused.json()).toMatchObject({ code: "DEMO_LIMIT", message: expect.stringContaining("refills at 00:00 UTC") });
     expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
     // The health readout names the generation's rows and the limits.
     const h = await (await c.co.fetch(await req("/v1/health"))).json() as { budget: { rowsWritten: number; limits: { rowsWritten: number } } };
@@ -808,6 +808,17 @@ describe("the rows budget (defense in depth)", () => {
     expect((await again.co.fetch(await req("/v1/workers", { gen: 4 }))).status).toBe(200);
   });
 
+  it("refills a leased slot's budget at 00:00 UTC on the same generation, so a 30-day lease never runs dry for good", async () => {
+    const c = company();
+    await c.ready();
+    world.rows = (m) => (m === "POST" ? { rowsRead: 10, rowsWritten: 1_000 } : { rowsRead: 10, rowsWritten: 0 });
+    for (let i = 0; i < 5; i++) expect((await c.co.fetch(await req("/v1/time-off/requests", { method: "POST", body: "{}" }))).status).toBe(200);
+    expect((await c.co.fetch(await req("/v1/time-off/requests", { method: "POST", body: "{}" }))).status).toBe(429);
+    // Same generation, next UTC day: the tally starts again and mutations are served.
+    at(T0 + 24 * 60 * MIN);
+    expect((await c.co.fetch(await req("/v1/time-off/requests", { method: "POST", body: "{}" }))).status).toBe(200);
+  });
+
   it("writes its tally one row at a time, at most every 20 requests and at each step or limit, never per request", async () => {
     const c = company();
     await c.ready();
@@ -816,7 +827,7 @@ describe("the rows budget (defense in depth)", () => {
     // 200 requests, 10,000 rows read and 200 written: 10 writes by count, a step of 250 written never crossed.
     expect(kvWrites(c)).toBeLessThanOrEqual(10 + Math.ceil(10_000 / WORLD_BUDGET.readStep));
     expect(kvWrites(c)).toBeGreaterThan(0);
-    expect(c.kv.get("weft.budget")).toMatchObject({ key: "g3", rowsRead: expect.any(Number), events: expect.any(Number) });
+    expect(c.kv.get("weft.budget")).toMatchObject({ key: expect.stringMatching(/^g3:d\d{4}-\d{2}-\d{2}$/), rowsRead: expect.any(Number), events: expect.any(Number) });
   });
 
   it("answers the showcase 503 SHOWCASE_LIMIT past its rows read for the UTC day, and serves again the next day", async () => {

@@ -861,9 +861,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   // Rows budget (budget.ts) ------------------------------------------------------------------------------------
 
-  /** What the world's rows are tallied under: the generation of a leased slot, the UTC day of the showcase. */
+  /** What the world's rows are tallied under: a leased slot's generation and UTC day (a lease can last 30 days, so the
+   * budget refills at 00:00 UTC rather than only at a reset), and the showcase's UTC day. */
   private tallyKey(stamp: WorldStamp | null): string | null {
-    if (stamp?.mode === "slot") return `g${stamp.gen}`;
+    if (stamp?.mode === "slot") return `g${stamp.gen}:d${utcDay()}`;
     if (stamp?.mode === "showcase") return `d${utcDay()}`;
     return null;
   }
@@ -914,7 +915,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       return hostedError("SHOWCASE_LIMIT", "The shared workspace has hit its daily limit; open your own workspace, or come back after 00:00 UTC",
         { retryAfterS: Math.max(60, Math.ceil((Date.parse(nextUtcMidnight(Date.now())) - Date.now()) / 1000)) });
     }
-    return hostedError("DEMO_LIMIT", "This workspace has used its activity limit; reset it to start fresh");
+    return hostedError("DEMO_LIMIT", "This workspace has used today's activity limit; it refills at 00:00 UTC, or reset it to start fresh");
   }
 
   // Usage ------------------------------------------------------------------------------------------------------

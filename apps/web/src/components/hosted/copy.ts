@@ -27,7 +27,7 @@ export const HOSTED_COPY = {
   requestCap: "Weft has used today's shared request allowance. Pages still load; data comes back after 00:00 UTC.",
   apiDown: "Weft's API is not answering right now. Pages still load; try again in a minute.",
   rateLimited: "Too many requests from this network for a moment. Pages still load; try again in a minute.",
-  demoLimit: "This workspace has used its activity limit. Reset it from Viewing as to start fresh.",
+  demoLimit: "This workspace has used today's activity limit. It refills at 00:00 UTC, or reset it from Viewing as to start fresh.",
   showcaseLimit: "The shared workspace has hit its daily limit. Open your own workspace, or come back after 00:00 UTC.",
 } as const;
 
