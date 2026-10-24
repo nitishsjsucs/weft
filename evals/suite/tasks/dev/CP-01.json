@@ -20,10 +20,10 @@
     "mutators": [
       "hollisMissed"
     ],
-    "digest": "sha256:e5b69198f174236a056c4eaa12f13207c50c65aeb963036b66efbfd0f3b05eb0"
+    "digest": "sha256:f5bf64efe5f4331e91add0eb4260b02c6b09074c28db152a79090035e2042a5d"
   },
   "input": {
-    "chat": "Hollis Grey (demo) missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27."
+    "chat": "Hollis Grey missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27."
   },
   "expect": {
     "default": {

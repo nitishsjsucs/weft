@@ -43,7 +43,7 @@ const CA_2027_BODY = [
   "Form DE 2088: Notice of Contribution Rates and Statement of UI Reserve Account",
   "",
   "Notice Date: 2026-10-26",
-  "Employer: Larkspur Robotics, Inc. (demo)",
+  "Employer: Larkspur Robotics, Inc.",
   "Employer Account Number: 000-4817-2",
   "Rate Year: 2027",
   "Effective Date: 2027-01-01",
@@ -74,7 +74,7 @@ const TX_MISSING_BODY = [
   "Notice: Employer's Quarterly Report Not Received",
   "",
   "Notice Date: 2026-10-26",
-  "Employer: Larkspur Robotics, Inc. (demo)",
+  "Employer: Larkspur Robotics, Inc.",
   "Employer Account Number: 00-481726-5",
   "Tax Year: 2026",
   "Period: 2026-Q2",
@@ -110,8 +110,8 @@ export const TEST_MUTATORS: Readonly<Record<string, TestMutator>> = {
   },
   r2FastenersClaim: {
     name: "r2FastenersClaim",
-    summary: "a clean supplies claim from Bethany Cole (wrk_0044, exp_0861): Lone Star Fasteners (demo), $36.50 on 2026-10-16, waiting for review",
-    steps: [{ sql: "INSERT INTO expenses SELECT 'exp_0861', company_id, 'wrk_0044', category, 'Lone Star Fasteners (demo)', 3650, currency, '2026-10-16', submitted_at, 'Bolts and brackets for the fleet bay racks', attendees, miles_x10, trip_ref, pre_approval_ref, receipt_upload_id, receipt_extract_json, status, checks_json, explanation, explanation_source, explanation_run_id, approver_principal_id, decided_by, decided_at, decision_reason_code, decision_note, payroll_run_id, paycheck_id, policy_version, action_seq, source FROM expenses WHERE id = 'exp_0003'" }],
+    summary: "a clean supplies claim from Bethany Cole (wrk_0044, exp_0861): Lone Star Fasteners, $36.50 on 2026-10-16, waiting for review",
+    steps: [{ sql: "INSERT INTO expenses SELECT 'exp_0861', company_id, 'wrk_0044', category, 'Lone Star Fasteners', 3650, currency, '2026-10-16', submitted_at, 'Bolts and brackets for the fleet bay racks', attendees, miles_x10, trip_ref, pre_approval_ref, receipt_upload_id, receipt_extract_json, status, checks_json, explanation, explanation_source, explanation_run_id, approver_principal_id, decided_by, decided_at, decision_reason_code, decision_note, payroll_run_id, paycheck_id, policy_version, action_seq, source FROM expenses WHERE id = 'exp_0003'" }],
   },
   r2SecondOwen: {
     name: "r2SecondOwen",
@@ -129,7 +129,7 @@ export const TEST_MUTATORS: Readonly<Record<string, TestMutator>> = {
     steps: [note("knowledge/decisions/dec-0861-san-marcos-spares.md", { id: "DEC-0861", type: "decision", aliases: ["San Marcos spares depot", "fleet spare parts"], links: [], sources: ["Operations review 2026-08-11"], status: "accepted", updated: "2026-08-11" }, [
       "# DEC-0861 Keep fleet spare parts at the San Marcos depot",
       "",
-      "Decided 2026-08-11 by Marcus (Operations) with Dana (People Ops).",
+      "Decided 2026-08-11 by Marcus (Operations) with Vic (People Ops).",
       "",
       "## Decision",
       "Spare actuators and battery packs for the robot fleet are stocked at the San Marcos depot, not at the Austin office.",

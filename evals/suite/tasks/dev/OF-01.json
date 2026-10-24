@@ -19,7 +19,7 @@
     "mutators": [
       "imaniOffboarding"
     ],
-    "digest": "sha256:821ec9c58a3eb65d4cabe9ddb0c7c073d8b8845014c191ececd33bcd726a7445"
+    "digest": "sha256:2c3fa156699b485c0988642eff944063c1231b6179c9ef2ca2880789280babc7"
   },
   "input": {
     "chat": "What's left on Imani's offboarding?"

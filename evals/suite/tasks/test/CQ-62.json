@@ -18,7 +18,7 @@
     "mutators": [
       "r2TexasRateMidyear"
     ],
-    "digest": "sha256:d62385ba7ca2b7f9fdbd2f2d00abc605d63032a78e48d25f8c58bc90c088b953"
+    "digest": "sha256:4f17d62f514d35f5e300e3d5f62cb751cebc7cb405af8fe11a8cb9137e26df7f"
   },
   "input": {
     "chat": "Which Texas unemployment rate are we paying at the moment, and since what date has it applied?"

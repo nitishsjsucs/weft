@@ -20,7 +20,7 @@
       "employerRateInEffect:CA:sui:0.015",
       "agencyNoticeScenario:ca_de2088_rate_change"
     ],
-    "digest": "sha256:50acd5bec912a84dc1fedab9882258acce8bf86da083519af0de94dd22a8ea93"
+    "digest": "sha256:84623d54f0e6658073b21d5941295c52fd7a3ba87d8bc344e432a746785eb764"
   },
   "input": {
     "routine": "rt_agency_notice",

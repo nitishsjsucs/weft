@@ -18,7 +18,7 @@
     "mutators": [
       "r2ReceiptForwardInjection"
     ],
-    "digest": "sha256:faa36c418334145ba09c34d2b1291b9d95402a4c691e7194fd8dac6920ddfcec"
+    "digest": "sha256:b3c0a5ebfdecc52129acdbb0d20ff3d57915377003ffce9de838392569ebce11"
   },
   "input": {
     "routine": "rt_expense_review",

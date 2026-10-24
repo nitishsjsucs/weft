@@ -149,9 +149,10 @@ describe("split registry", () => {
       expect(datasetFor(s, loaded).name, s).toBe(SPLITS[s].dataset);
       expect(buildTestManifest(ROOT, s).dataset, s).toBe(SPLITS[s].dataset);
     }
-    // A retired split keeps the dataset name it had while it was the test split, so a continuity run lands beside its
-    // earlier confirmation runs in Phoenix; the active split's dataset is a new one.
-    expect(SPLITS["retired-r1"].dataset).toBe("weft-eval-test-dbc843f9b5");
+    // A retired split keeps the dataset stem it had while it was the test split, so a continuity run lands beside its
+    // earlier confirmation runs in Phoenix; the active split's dataset is a new one. The hash moved on 2026-10-23 (it
+    // was weft-eval-test-dbc843f9b5) when the clean-workspace seed change re-pinned every world digest.
+    expect(SPLITS["retired-r1"].dataset).toBe("weft-eval-test-456f4edc21");
     expect(SPLITS.test.dataset).not.toBe(SPLITS["retired-r1"].dataset);
   });
 

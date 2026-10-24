@@ -24,7 +24,7 @@ const db = await import("../../packages/db/src/index");
 const { W3_SETTINGS } = await import("../../packages/contracts/src/index");
 
 const WORKER = "wrk_0042";
-const REQUEST = "Hollis Grey (demo) missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27.";
+const REQUEST = "Hollis Grey missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27.";
 const base = join(ROOT, ".data/eval-l5");
 mkdirSync(base, { recursive: true });
 for (const f of readdirSync(base)) if (f !== "spend") rmSync(join(base, f), { recursive: true, force: true });

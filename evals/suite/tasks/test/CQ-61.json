@@ -18,7 +18,7 @@
     "mutators": [
       "r2PerceptionHire"
     ],
-    "digest": "sha256:05aff6f3aec091a4f9575475935c4b987a77cc081fe1e4c42b8c28cc9304954c"
+    "digest": "sha256:142317afa04796f833b3ad03a9562bd12b8c6df5a544981f8829d3d49d84af8b"
   },
   "input": {
     "chat": "What role is Marisol Quintero joining us in, and which day is her first day?"

@@ -18,7 +18,7 @@
     "mutators": [
       "r2DepotDecision"
     ],
-    "digest": "sha256:2bf3d127e13305529d41639619013daa4fa08c2827ac941a0c756524d5dbe244"
+    "digest": "sha256:1aba1e74bddc48dc00ca421f8072a1966a431441f2151ad2d418890f0081163a"
   },
   "input": {
     "chat": "Why do we keep the fleet's spare parts at the San Marcos depot?"

@@ -15,7 +15,7 @@ import { DIRTY_TABLE, HOSTED_TABLES } from "../../contracts/src/ext/cf-db";
 import { digestDb, dumpDb, SEED_CLOCK, seedWorld } from "../src/index";
 
 /** The base world's digest (README, docs/tracks/rich-seed.md): what tests, e2e and the eval worlds build on. */
-const BASE_DIGEST = "950933e7ed6a68a62af7e9a209daf56dcad9b0d0a19cf588a54c9d7d729d10d9";
+const BASE_DIGEST = "dca6930b3d5e040b2955776aa01b86ac38128370cbba20ab894183e5b499c6c4";
 
 describe("the base world digest", () => {
   it("is unchanged with the hosted tables migrated", async () => {

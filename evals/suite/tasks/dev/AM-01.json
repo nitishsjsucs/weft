@@ -19,7 +19,7 @@
     "mutators": [
       "twoJordans:Jordan"
     ],
-    "digest": "sha256:74c612082ed5589371814755676bb1ae1dc579668ab368d48b357562a200a8b7"
+    "digest": "sha256:8b9490392325fbaa681ec05fc412d3354a6f185bc48bef88bb9f8b5fe8a9d7ff"
   },
   "input": {
     "chat": "Give Jordan a raise."

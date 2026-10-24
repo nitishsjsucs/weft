@@ -20,7 +20,7 @@
     "mutators": [
       "agencyNoticeKind:late_deposit_penalty"
     ],
-    "digest": "sha256:19f867871ec3bd9d53eeb7d0a430a8e76bdf4c62bba417e23fac6630138dbfc9"
+    "digest": "sha256:e9d021702fd26daa45b366ffe98f25e7964108bf8fe327720e8698ced88fb027"
   },
   "input": {
     "routine": "rt_agency_notice",

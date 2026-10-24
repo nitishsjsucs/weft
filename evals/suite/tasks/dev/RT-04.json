@@ -19,7 +19,7 @@
     "mutators": [
       "enableRoutine:rt_screening_follow_up"
     ],
-    "digest": "sha256:7a5f734f0ad21e5a1f8ea27a11104912d495c8b9658fd2a2cec3f858a1909df5"
+    "digest": "sha256:d23bab59438cbd58c2a381144778bc6f246d18875be65678f7994751b37d4d38"
   },
   "input": {
     "routine": "rt_screening_follow_up",

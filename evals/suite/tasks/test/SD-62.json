@@ -18,7 +18,7 @@
     "mutators": [
       "r2HanaPromoted"
     ],
-    "digest": "sha256:8ed5d54d0cdd6738722543a6c18297d68dccd7613e828fe89f3c3218636afbbd"
+    "digest": "sha256:09d8f88e85f7e60a0005fbf2697eeefba4d4da4ce4cb35177a533f6f5fb81b99"
   },
   "input": {
     "chat": "What is Hana Kobayashi's job title these days?"

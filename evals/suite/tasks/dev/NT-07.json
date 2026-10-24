@@ -20,7 +20,7 @@
     "mutators": [
       "agencyNoticeKind:registration_confirmed"
     ],
-    "digest": "sha256:f4becb26a1634f9445e0e6352617c5d873e14b88bb64c3904557cb9f2c5df89c"
+    "digest": "sha256:56a0632fc0862c99f4183f0c95f93d66d85170092cb38cea5e416037b377a24b"
   },
   "input": {
     "routine": "rt_agency_notice",

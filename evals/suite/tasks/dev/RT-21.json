@@ -18,7 +18,7 @@
     "mutators": [
       "departedEmployee:wrk_0004"
     ],
-    "digest": "sha256:015ddf85701443e2500bf3e104bffefa59b906cc85a416ed307a472abac88bf3"
+    "digest": "sha256:7a8e45defe698ee7b9295b57b9eab6d2027edb9799e46bd422642fb8e75d7787"
   },
   "input": {
     "routine": "rt_people_digest",

@@ -30,11 +30,11 @@ export const SPLITS: Readonly<Record<EvalSplit, SplitInfo>> = {
   dev: { status: "dev", round: null, authored: "2026-10-16", retired: null, confirmations: null, datasetStem: "dev", dataset: null, manifest: null },
   test: {
     status: "held_out", round: 2, authored: "2026-10-18", retired: null, confirmations: 0,
-    datasetStem: "test", dataset: "weft-eval-test-bd4217b292", manifest: "evals/suite/test-manifest.json",
+    datasetStem: "test", dataset: "weft-eval-test-2c830c192c", manifest: "evals/suite/test-manifest.json",
   },
   "retired-r1": {
     status: "retired", round: 1, authored: "2026-10-16", retired: "2026-10-18", confirmations: 11,
-    datasetStem: "test", dataset: "weft-eval-test-dbc843f9b5", manifest: "evals/suite/retired-r1-manifest.json",
+    datasetStem: "test", dataset: "weft-eval-test-456f4edc21", manifest: "evals/suite/retired-r1-manifest.json",
   },
 };
 

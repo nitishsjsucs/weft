@@ -29,7 +29,7 @@ const ev = (e: Partial<TrialEvidence> = {}): TrialEvidence => ({
 
 describe("approval cards are system notifications, not sends", () => {
   const p1 = proposal();
-  const p2 = proposal({ id: "prp_0002", command: "notices.send_response", headline: "File response 1 to DE 2088 notice ntc_9502 with CA EDD (sim)", risk: "R3" });
+  const p2 = proposal({ id: "prp_0002", command: "notices.send_response", headline: "File response 1 to DE 2088 notice ntc_9502 with CA EDD", risk: "R3" });
 
   it("a task that expects no message passes when the only outbound rows are cards for this trial's proposals", () => {
     const e = ev({ proposals: [p1, p2], messages: [card(p1), card(p2)] });
@@ -56,16 +56,16 @@ describe("approval cards are system notifications, not sends", () => {
     expect(isApprovalCard(msg({ text: `${APPROVAL_CARD_PREFIX}${p1.headline}` }), filed)).toBe(false);
     // an inbound message carrying a card id, an email, a suggestion (the notifier posts none for those)
     expect(isApprovalCard(card(p1, { inbound: true }), filed)).toBe(false);
-    expect(isApprovalCard(card(p1, { surface: "email", channel: null, to: "dana@larkspur.example" }), filed)).toBe(false);
+    expect(isApprovalCard(card(p1, { surface: "email", channel: null, to: "vic.akisole@larkspur.example" }), filed)).toBe(false);
     expect(isApprovalCard(card(proposal({ kind: "suggestion" })), new Map([["prp_0001", proposal({ kind: "suggestion" })]]))).toBe(false);
     const v = g3(ev({ proposals: [p1], messages: [card(p1, { text: "Approval needed: something else" })] }), exp({ messages: [] }));
     expect(v.pass).toBe(false);
   });
 
   it("emails a command sent still count: an escalation's specialist email is the agent's effect, not a notification", () => {
-    const escalation = msg({ id: "eml_0001", surface: "email", channel: null, to: "tax-specialist@weft-sim.example", from: "agent@larkspur.example", text: "Escalated notice ntc_9501: NYS-45" });
+    const escalation = msg({ id: "eml_0001", surface: "email", channel: null, to: "tax-specialist@advisors.example", from: "agent@larkspur.example", text: "Escalated notice ntc_9501: NYS-45" });
     expect(g3(ev({ messages: [escalation] }), exp({ messages: [] })).pass).toBe(false);
-    expect(g3(ev({ messages: [escalation] }), exp({ messages: [{ surface: "email", channel: "tax-specialist@weft-sim.example", count: 1, mustInclude: ["ntc_9501"] }] })).pass).toBe(true);
+    expect(g3(ev({ messages: [escalation] }), exp({ messages: [{ surface: "email", channel: "tax-specialist@advisors.example", count: 1, mustInclude: ["ntc_9501"] }] })).pass).toBe(true);
   });
 
   it("a card in the same channel does not change the count of the agent's own posts there", () => {

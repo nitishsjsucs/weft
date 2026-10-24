@@ -337,8 +337,8 @@ describe("r2 G5 agrees with the loop's grounding guard (R1)", () => {
   // Shaped like the four round 1 mismatches: request figures (CP-01, OC-01), the clock's month (BN-02) and the bounds
   // of "next week" from a Monday clock (TO-01); plus an invented figure, which both must refuse.
   const fixtures = [
-    { id: "R2-CP", chat: "Hollis Grey (demo) missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27.", answer: "I found Hollis Grey (demo). I cannot file the off-cycle payment for Oct 1 to 15 with the $1,500.00 bonus and payday Oct 27 from chat; please use the off-cycle screen.", guard: true, by: "request" },
-    { id: "R2-OC", chat: "How much would Hollis Grey's missed pay for Oct 1 to 15 be?", answer: "I found Hollis Grey (demo), but no pay figure for Oct 1 to 15 is recorded yet.", guard: true, by: "request" },
+    { id: "R2-CP", chat: "Hollis Grey missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27.", answer: "I found Hollis Grey. I cannot file the off-cycle payment for Oct 1 to 15 with the $1,500.00 bonus and payday Oct 27 from chat; please use the off-cycle screen.", guard: true, by: "request" },
+    { id: "R2-OC", chat: "How much would Hollis Grey's missed pay for Oct 1 to 15 be?", answer: "I found Hollis Grey, but no pay figure for Oct 1 to 15 is recorded yet.", guard: true, by: "request" },
     { id: "R2-BN", chat: "Did the benefits carrier overbill us this month?", answer: "No overbilling findings are recorded for October 2026.", guard: true, by: "clock" },
     { id: "R2-TO", chat: "Who's out next week?", answer: "Nobody is out next week (November 2 to November 8, 2026).", guard: true, by: "clock" },
     { id: "R2-NO", chat: "How many people work at Larkspur?", answer: "Larkspur has 9,876 workers.", guard: false, by: null },
@@ -430,12 +430,12 @@ describe("r2 offline re-grade from saved spans ($0)", () => {
     const span = (name: string, kind: string, n: number, attrs: Record<string, unknown>) => ({ name, span_kind: kind, start_time: `2026-10-17T07:20:0${n}.000Z`, context: { trace_id: "tr1" }, attributes: { "metadata.run_id": "run_0001", "weft.step_n": n, ...attrs } });
     const spans = [
       span("assemble", "CHAIN", 2, { "output.value": JSON.stringify({ items: 1, requestTrusted: true }) }),
-      span("people__search", "TOOL", 4, { "tool.name": "people__search", "input.value": JSON.stringify({ query: "Hollis Grey" }), "output.value": JSON.stringify({ ok: true, status: "done", resultId: "res_0002", data: { workers: [{ id: "wrk_0042", name: "Hollis Grey (demo)" }] }, summary: "Found 1 worker", actionSeq: null }) }),
+      span("people__search", "TOOL", 4, { "tool.name": "people__search", "input.value": JSON.stringify({ query: "Hollis Grey" }), "output.value": JSON.stringify({ ok: true, status: "done", resultId: "res_0002", data: { workers: [{ id: "wrk_0042", name: "Hollis Grey" }] }, summary: "Found 1 worker", actionSeq: null }) }),
       span("grounding.check", "GUARDRAIL", 6, { "weft.grounded": true }),
     ];
     const g5Fail = { grader: "G5" as const, pass: false, applies: true, reasons: ["grounding: ungrounded figures: 15"], metric: 0 };
     const saved = { taskId: "OC-01", split: "dev", group: t.group, variant: "default", trial: 1, success: false, graders: [g5Fail], judges: [], runIds: ["run_0001"], traceId: "tr1", phoenixUrl: null, experimentRunId: null, steps: 2, toolCalls: 1, invalidToolCalls: 0, groundingRepairs: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, wallMs: 1, firstFailure: "verification", error: null,
-      detail: { finalText: "I found Hollis Grey (demo) (res_0002), but no pay is recorded for Oct 1 to 15.", groundingFallback: false } } as unknown as import("../evals/suite/types").SuiteTrial;
+      detail: { finalText: "I found Hollis Grey (res_0002), but no pay is recorded for Oct 1 to 15.", groundingFallback: false } } as unknown as import("../evals/suite/types").SuiteTrial;
     const [r] = regrade([saved], new Map([["OC-01", { ...t, expect: { default: { ...t.expect.default!, finalText: { grounded: true, mustMention: [], judges: [] } } } }]]), spans);
     expect(r).toMatchObject({ before: { g5: false }, after: { g5: true, success: true }, guard: true, partial: false });
     // The grounding check reads "Oct 1 to 15" as one date range (R8), so the request grounds the range, not a bare 15.

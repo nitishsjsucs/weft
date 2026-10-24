@@ -19,7 +19,7 @@
     "mutators": [
       "r2KofiTrainingDone"
     ],
-    "digest": "sha256:6dbfc560e76bd714e0dec6ed019ffb04b9595467c1323f433956fb535b959124"
+    "digest": "sha256:a6c1c30e79cd66fb4407e622b1d9d693ea58ee59f9f2be6390edd58635039d21"
   },
   "input": {
     "routine": "rt_compliance_reminders",

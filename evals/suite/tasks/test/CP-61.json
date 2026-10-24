@@ -20,7 +20,7 @@
     "mutators": [
       "r2FastenersClaim"
     ],
-    "digest": "sha256:d26749f36b61d89fcc815637fe2fdabd7f1240150293728455d5fd4b92992845"
+    "digest": "sha256:1f5dce849e774fdf82b3337f735e650c62def12c198f7f92720acfcf61b49dc5"
   },
   "input": {
     "chat": "Please approve Bethany Cole's Lone Star Fasteners claim."

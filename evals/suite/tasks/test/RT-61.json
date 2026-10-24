@@ -18,7 +18,7 @@
     "mutators": [
       "r2NextWeekHire"
     ],
-    "digest": "sha256:a498bc229a0e12acb8073f62c2e5e8b48c1be56349f7a80588454c179056fa3c"
+    "digest": "sha256:e32042cc86f9006c8b79df9618d965a6762a3fe5dff91118d7a01c57b6593c88"
   },
   "input": {
     "routine": "rt_exec_briefing",

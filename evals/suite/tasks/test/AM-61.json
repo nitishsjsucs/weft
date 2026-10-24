@@ -19,7 +19,7 @@
     "mutators": [
       "r2SecondOwen"
     ],
-    "digest": "sha256:065808e223ef955c940ded42575d8de545f0dd4be5d2d26ed67e2ece81c1688d"
+    "digest": "sha256:0dc3bb6a2c89d9a7eb1473a7bef7aa2982d541a1e55571bc3b685a0b9f1bbf2c"
   },
   "input": {
     "chat": "Bump Owen's salary by five percent."

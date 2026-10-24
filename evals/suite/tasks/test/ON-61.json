@@ -18,7 +18,7 @@
     "mutators": [
       "r2StartsToday"
     ],
-    "digest": "sha256:bc385e9dff682822d990ba39a613fbda8ac2d874715d0611b1f6d672f8912e4c"
+    "digest": "sha256:11d8e1d2d50e2d5a2ef1001e92bc9570bbd9cb8d8952d132d4da358b7598835a"
   },
   "input": {
     "routine": "rt_first_day_message",

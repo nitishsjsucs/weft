@@ -18,7 +18,7 @@
     "mutators": [
       "r2WorkdayTitleConflict"
     ],
-    "digest": "sha256:5097f7094ca92a72703fbffa85f057f81fc3e3c1b13ea8b7e15de18b34abeebb"
+    "digest": "sha256:4a3c2529b120ef50f494e238287498d14b6fcb065cbcb5363e5538c3d79ce3d3"
   },
   "input": {
     "chat": "Do we have any open Workday sync conflicts, and what are they about?"

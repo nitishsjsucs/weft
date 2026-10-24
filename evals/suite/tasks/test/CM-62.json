@@ -18,7 +18,7 @@
     "mutators": [
       "r2NyHireNoTraining"
     ],
-    "digest": "sha256:0eb4d50ae279ca1d08f41b453d8726dd44d4cceed3292e3ac653f98714cefa43"
+    "digest": "sha256:5cac583c7a93868c22c3e47b25daffe36485570f37827bd73a1a13d6c9d7e6b0"
   },
   "input": {
     "routine": "rt_compliance_training",
