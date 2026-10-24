@@ -58,8 +58,10 @@ export const HOSTED_SETTINGS = {
   /** Resets ("Reset workspace data...") per lease, high enough that two people never meet it (2026-10-23). Every
    * reset is still refused at level 3 (RESETS_PAUSED), and each one starts a generation with its own rows budget. */
   resetsPerLease: 1_000,
-  /** The human grant a mutation needs, refreshed by an invisible Turnstile run. */
-  humanGrantMinutes: 10,
+  /** The human grant a mutation needs. It lasts as long as a lease can stay idle (2026-10-23, Nitish: two people use
+   * the app, so the Turnstile check runs once when a workspace opens, not every 10 minutes); a mutation without it
+   * still answers 428 TURNSTILE_REQUIRED. */
+  humanGrantMinutes: 1_440,
   /** AI Search Help queries per UTC day (a Lobby counter). */
   helpQueriesPerDay: 30,
   uploadMaxBytes: 1_500_000,
