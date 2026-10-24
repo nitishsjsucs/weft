@@ -298,7 +298,7 @@ describe("pnpm cf:budget", () => {
       { dimensions: { scriptName: "weft-core", status: "success" }, sum: { requests: 10, errors: 0, subrequests: 0 }, quantiles: { cpuTimeP50: 300, cpuTimeP99: 900 } },
     ],
     objects: [{ dimensions: { namespaceId: "n1" }, sum: { cpuTime: 12_000_000, rowsRead: 50_000, rowsWritten: 3_000, exceededCpuErrors: 0, exceededMemoryErrors: 0 } }],
-    gateway: [{ dimensions: { gateway: "weft-x", provider: "openai" }, sum: { cost: 0.012, requests: 10, cachedRequests: 1 } }],
+    gateway: [{ dimensions: { gateway: "weft-x", provider: "openai" }, count: 10, sum: { cost: 0.012, cachedRequests: 1 } }],
   };
   it("is quiet within the targets and the ledger", () => {
     const s = summarize("2026-10-26", data, 0.0121, "weft-x");

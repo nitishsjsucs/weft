@@ -38,7 +38,8 @@ export const QUERY = `query WeftBudget($account: string!, $start: Time!, $end: T
       }
       gateway: aiGatewayRequestsAdaptiveGroups(limit: 100, filter: { datetime_geq: $start, datetime_lt: $end }) {
         dimensions { gateway provider }
-        sum { cost requests cachedRequests }
+        count
+        sum { cost cachedRequests }
       }
     }
   }
@@ -47,7 +48,7 @@ export const QUERY = `query WeftBudget($account: string!, $start: Time!, $end: T
 export interface BudgetData {
   workers: { dimensions: { scriptName: string; status: string }; sum: { requests: number; errors: number; subrequests: number }; quantiles: { cpuTimeP50: number; cpuTimeP99: number } }[];
   objects: { dimensions: { namespaceId: string }; sum: { cpuTime: number; rowsRead: number; rowsWritten: number; exceededCpuErrors: number; exceededMemoryErrors?: number } }[];
-  gateway: { dimensions: { gateway: string; provider: string }; sum: { cost: number; requests: number; cachedRequests: number } }[];
+  gateway: { dimensions: { gateway: string; provider: string }; count: number; sum: { cost: number; cachedRequests: number } }[];
 }
 
 export interface BudgetSummary {
