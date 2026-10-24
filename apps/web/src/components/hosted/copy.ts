@@ -27,16 +27,17 @@ export const HOSTED_COPY = {
   requestCap: "Weft has used today's shared request allowance. Pages still load; data comes back after 00:00 UTC.",
   apiDown: "Weft's API is not answering right now. Pages still load; try again in a minute.",
   rateLimited: "Too many requests from this network for a moment. Pages still load; try again in a minute.",
-  demoLimit: "This workspace has hit its daily limit. Reset it from Viewing as, or come back later.",
+  demoLimit: "This workspace has used its activity limit. Reset it from Viewing as to start fresh.",
   showcaseLimit: "The shared workspace has hit its daily limit. Open your own workspace, or come back after 00:00 UTC.",
 } as const;
 
-/** " One frees in about 7 min." A lease ends after a day without activity, so a long wait reads in hours. */
+/** " One frees in about 7 min." A lease can last 30 days, so a long wait reads in hours, then in days. */
 function etaLine(etaMinutes: number | null): string {
   if (etaMinutes === null) return "";
   const min = Math.max(1, Math.round(etaMinutes));
   if (min < 90) return ` One frees in about ${min} min.`;
-  return ` One frees in about ${Math.round(min / 60)} hours.`;
+  if (min < 48 * 60) return ` One frees in about ${Math.round(min / 60)} hours.`;
+  return ` One frees in about ${Math.round(min / 1_440)} days.`;
 }
 
 /** The line for a lease attempt that did not lease. */

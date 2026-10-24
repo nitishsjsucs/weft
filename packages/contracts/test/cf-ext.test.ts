@@ -27,9 +27,10 @@ describe("cf round 0 contracts", () => {
     expect(HOSTED_CAP_DEFAULTS).toEqual({ runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 });
     expect(HOSTED_CAP_DEFAULTS.visitorDayUsd).toBe(HOSTED_CAP_DEFAULTS.dayUsd);
     expect(HOSTED_CAP_DEFAULTS.ipDayUsd).toBe(HOSTED_CAP_DEFAULTS.dayUsd);
-    expect(HOSTED_SETTINGS).toMatchObject({ poolSize: 2, leaseIdleMinutes: 1440, leaseTotalMinutes: 43_200, leasesPerIpHashPerDay: 500, resetsPerLease: 1_000, helpQueriesPerDay: 30 });
+    // 2026-10-23: a workspace lasts 30 days unless reset (idle and total), and the human grant lasts 24 hours.
+    expect(HOSTED_SETTINGS).toMatchObject({ poolSize: 2, leaseIdleMinutes: 43_200, leaseTotalMinutes: 43_200, leasesPerIpHashPerDay: 500, resetsPerLease: 1_000, helpQueriesPerDay: 30, humanGrantMinutes: 1_440 });
     // The guards on the shared account quotas did not move with the 2026-10-23 session settings.
-    expect(HOSTED_SETTINGS).toMatchObject({ humanGrantMinutes: 10, uploadMaxBytes: 1_500_000, uploadsPerVisitorPerDay: 5 });
+    expect(HOSTED_SETTINGS).toMatchObject({ uploadMaxBytes: 1_500_000, uploadsPerVisitorPerDay: 5 });
     expect(HOSTED_RATE_LIMITS).toEqual({ RL_API: { limit: 600, period: 60 }, RL_MUTATE: { limit: 30, period: 60 }, RL_MCP: { limit: 60, period: 60 }, RL_RUN: { limit: 6, period: 60 } });
     expect(HOSTED_CLOCK_LIMITS).toEqual({ maxStepDays: 7, maxDaysFromStart: 60 });
     expect(Object.values(NEURON_SHARES).reduce((a, b) => a + b, 0)).toBe(HOSTED_CAP_DEFAULTS.neuronsDay);

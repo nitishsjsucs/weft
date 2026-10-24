@@ -2,7 +2,7 @@
 // Additive only. What the front Worker, the Durable Objects and the hosted web agree on: world names, the settings
 // Nitish chose on 2026-10-20, the KV `weft-config` keys, the session and human-grant cookies, the trust headers and
 // the HMAC'd `x-weft-ctx`, the WebSocket change feed, the hosted HTTP paths and bodies, and the hosted error codes.
-// The session settings were changed on 2026-10-23 (HOSTED_SETTINGS).
+// The session settings were changed on 2026-10-23 (HOSTED_SETTINGS), twice: the lease idle time is now 30 days.
 // Implemented by cf4-worker (front, LobbyDO, CompanyDO) and used by cf5-web. Types, constants and pure helpers only:
 // the front Worker imports this file and must stay near its 10 ms CPU budget, so nothing here builds a schema.
 import type { ErrorTag } from "../errors";
@@ -38,7 +38,8 @@ export const HOSTED_CLOCK_LIMITS = { maxStepDays: 7, maxDaysFromStart: 60 } as c
 /**
  * The hosted settings from design section 0. Nitish chose them on 2026-10-20; on 2026-10-23 he chose the lease
  * times, the resets per lease and the leases per IP hash below, because only two people use the hosted app (Nitish
- * and his interviewer), so a session shows no limits. They override every other value in the design and tracks (the
+ * and his interviewer), so a session shows no limits. Later that day he raised the idle time to the total cap, so a
+ * workspace and everything in it (its agent conversations included) lasts 30 days unless it is reset. They override every other value in the design and tracks (the
  * 9.4 config sketch's WEFT_POOL_SIZE 4 and WEFT_LIVE_USD_CAP 0.50, 6.2's 15 and 60 minute leases and 3 leases per IP,
  * and the 2026-10-20 values: 30 minutes idle, 3 hours in all, 20 leases per IP hash a day, 3 resets per lease). The
  * guards on the shared account quotas stay as they were: Turnstile and the human grant, HOSTED_RATE_LIMITS, the spend
@@ -48,8 +49,9 @@ export const HOSTED_CLOCK_LIMITS = { maxStepDays: 7, maxDaysFromStart: 60 } as c
 export const HOSTED_SETTINGS = {
   /** Pool slots besides the showcase and slot-smoke, so the whole pool seeds on the first UTC day. */
   poolSize: 2,
-  /** A lease ends after 24 hours without activity (2026-10-23). */
-  leaseIdleMinutes: 1440,
+  /** A lease ends after 30 days without activity, the same as its total cap (2026-10-23, Nitish: chats persist in the
+   * workspace, so it lasts 30 days unless reset). It was 24 hours earlier that day and 30 minutes before. */
+  leaseIdleMinutes: 43_200,
   /** No total cap in practice: 30 days (2026-10-23). It stays a number, so the cookie's `exp` and `leaseExpiresMs`
    * still name the lease. */
   leaseTotalMinutes: 43_200,
@@ -58,9 +60,9 @@ export const HOSTED_SETTINGS = {
   /** Resets ("Reset workspace data...") per lease, high enough that two people never meet it (2026-10-23). Every
    * reset is still refused at level 3 (RESETS_PAUSED), and each one starts a generation with its own rows budget. */
   resetsPerLease: 1_000,
-  /** The human grant a mutation needs. It lasts as long as a lease can stay idle (2026-10-23, Nitish: two people use
-   * the app, so the Turnstile check runs once when a workspace opens, not every 10 minutes); a mutation without it
-   * still answers 428 TURNSTILE_REQUIRED. */
+  /** The human grant a mutation needs: 24 hours (2026-10-23, Nitish: two people use the app, so the Turnstile check
+   * runs once a day, not every 10 minutes). It stays at 24 hours though a lease now lasts 30 days; the web runs the
+   * check again when a mutation answers 428 TURNSTILE_REQUIRED. */
   humanGrantMinutes: 1_440,
   /** AI Search Help queries per UTC day (a Lobby counter). */
   helpQueriesPerDay: 30,
@@ -269,7 +271,7 @@ export const HOSTED_ERRORS = {
   AGENT_PAUSED: { status: 503, tag: "Refused" },
   /** A hosted clock advance past HOSTED_CLOCK_LIMITS. */
   CLOCK_LIMIT: { status: 400, tag: "ValidationError" },
-  /** This workspace used its rows budget for this generation (design 6.3): reset it, or come back later. */
+  /** This workspace used its rows budget for this generation (design 6.3): reset it to start fresh. */
   DEMO_LIMIT: { status: 429, tag: "RateLimitExceeded" },
   /** The shared showcase read its rows for the UTC day (design 6.3); leased workspaces and the static pages work. */
   SHOWCASE_LIMIT: { status: 503, tag: "Refused" },

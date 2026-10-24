@@ -776,7 +776,7 @@ describe("the rows budget (defense in depth)", () => {
     expect(statuses.filter((x) => x === 200)).toHaveLength(Math.ceil(limits.written / 400));
     const refused = await c.co.fetch(await req("/v1/time-off/requests", { method: "POST", body: "{}" }));
     expect(refused.status).toBe(429);
-    expect(await refused.json()).toMatchObject({ code: "DEMO_LIMIT", message: expect.stringContaining("daily limit") });
+    expect(await refused.json()).toMatchObject({ code: "DEMO_LIMIT", message: expect.stringContaining("activity limit") });
     expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
     // The health readout names the generation's rows and the limits.
     const h = await (await c.co.fetch(await req("/v1/health"))).json() as { budget: { rowsWritten: number; limits: { rowsWritten: number } } };

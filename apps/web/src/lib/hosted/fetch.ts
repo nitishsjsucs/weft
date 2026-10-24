@@ -5,8 +5,8 @@
 // - 409 LEASE_REQUIRED (a mutation on the shared showcase): offer "Open my workspace";
 // - 409 LEASE_ENDED (the cookie's generation is older than the world's): show the lease-ended screen;
 // - 401 SESSION_INVALID: re-read the session;
-// - 429 DEMO_LIMIT and 503 SHOWCASE_LIMIT (the world's rows budget, design 6.3): the banner says the workspace (or
-//   the shared one) has hit its daily limit.
+// - 429 DEMO_LIMIT and 503 SHOWCASE_LIMIT (the world's rows budget, design 6.3): the banner says the workspace has
+//   used its activity limit (or the shared one its daily limit).
 // The response the caller sees is the retried one, or the original when the check was cancelled. The lease and
 // session answers are acted on whichever response carries them, the first or the retried one.
 import { TABLES_HEADER, type HostedErrorCode } from "../../../../../packages/contracts/src/ext/cf-hosted";

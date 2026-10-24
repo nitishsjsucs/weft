@@ -86,12 +86,12 @@ describe("the hosted banner", () => {
     expect(html).toContain("budget is used up, so new agent runs use the scripted provider");
     expect(html).toContain('data-testid="hosted-provider-note"');
   });
-  it("says when the visitor's workspace, or the shared one, has hit its daily limit", () => {
+  it("says when the visitor's workspace has used its activity limit, or the shared one its daily limit", () => {
     state.status = status({ world: "slot", lease });
     state.limited = { kind: "demo", gen: lease.gen };
     const own = renderToStaticMarkup(<HostedBanner />);
     expect(own).toContain('data-testid="hosted-banner" data-world="slot"');
-    expect(own).toContain("This workspace has hit its daily limit. Reset it from Viewing as, or come back later.");
+    expect(own).toContain("This workspace has used its activity limit. Reset it from Viewing as to start fresh.");
     expect(own).not.toContain("hosted-provider-note");
     state.status = status();
     state.limited = { kind: "showcase", gen: null };

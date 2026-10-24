@@ -914,7 +914,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       return hostedError("SHOWCASE_LIMIT", "The shared workspace has hit its daily limit; open your own workspace, or come back after 00:00 UTC",
         { retryAfterS: Math.max(60, Math.ceil((Date.parse(nextUtcMidnight(Date.now())) - Date.now()) / 1000)) });
     }
-    return hostedError("DEMO_LIMIT", "This workspace has hit its daily limit; reset it, or come back later");
+    return hostedError("DEMO_LIMIT", "This workspace has used its activity limit; reset it to start fresh");
   }
 
   // Usage ------------------------------------------------------------------------------------------------------

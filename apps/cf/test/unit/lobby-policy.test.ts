@@ -27,13 +27,15 @@ describe("lease times (section 0)", () => {
   const IDLE = HOSTED_SETTINGS.leaseIdleMinutes * MIN;
   const TOTAL = HOSTED_SETTINGS.leaseTotalMinutes * MIN;
 
-  it("uses 24 hours idle and 30 days in all (Nitish, 2026-10-23)", () => {
-    expect(HOSTED_SETTINGS.leaseIdleMinutes).toBe(24 * 60);
+  it("uses 30 days idle and 30 days in all, and a 24-hour human grant (Nitish, 2026-10-23)", () => {
+    expect(HOSTED_SETTINGS.leaseIdleMinutes).toBe(30 * 24 * 60);
     expect(HOSTED_SETTINGS.leaseTotalMinutes).toBe(30 * 24 * 60);
+    expect(HOSTED_SETTINGS.humanGrantMinutes).toBe(24 * 60);
     const l = { startedAt: 0, lastSeen: 0 };
-    // An idle lease still ends after the idle time.
+    // A lease left idle from the start lasts the whole 30 days: the idle and total times coincide, so it ends at its
+    // total time, and activity never extends it past that.
     expect(leaseEnded(l, IDLE - MIN)).toBeNull();
-    expect(leaseEnded(l, IDLE)).toBe("idle");
+    expect(leaseEnded(l, IDLE)).toBe("total");
     // A lease kept active still ends at its total time.
     expect(leaseEnded({ startedAt: 0, lastSeen: TOTAL - 10 * MIN }, TOTAL - MIN)).toBeNull();
     expect(leaseEnded({ startedAt: 0, lastSeen: TOTAL - MIN }, TOTAL)).toBe("total");
@@ -44,7 +46,8 @@ describe("lease times (section 0)", () => {
 
   it("estimates the waitlist from the soonest lease end", () => {
     expect(etaMinutes([], 0)).toBeNull();
-    expect(etaMinutes([{ startedAt: 0, lastSeen: 10 * MIN }, { startedAt: 0, lastSeen: 20 * MIN }], 15 * MIN)).toBe((10 * MIN + IDLE - 15 * MIN) / MIN);
+    // With the idle time equal to the total, the soonest end is the earliest start plus 30 days.
+    expect(etaMinutes([{ startedAt: 0, lastSeen: 10 * MIN }, { startedAt: 5 * MIN, lastSeen: 20 * MIN }], 15 * MIN)).toBe((TOTAL - 15 * MIN) / MIN);
     expect(etaMinutes([{ startedAt: 0, lastSeen: 0 }], IDLE + MIN)).toBe(1);
   });
 

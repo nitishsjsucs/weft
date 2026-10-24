@@ -318,13 +318,15 @@ describe("a lease holder's GET /api/_session", () => {
     expect(w.rows).toBeLessThanOrEqual(Math.ceil((90 * 2_000) / LAST_SEEN_WRITE_MS));
     expect([...w.tables]).toEqual(["leases"]);
     expect(f.heartbeats.every((h) => h.keepUsage === true)).toBe(true);
-    // The lease answer still reads the freshest activity (kept in memory), not the stored one.
-    expect(Date.parse(last!.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + HOSTED_SETTINGS.leaseIdleMinutes * 60_000);
+    // The lease answer still reads the freshest activity (kept in memory), not the stored one; the idle expiry never
+    // passes the lease's total expiry (since 2026-10-23 both are 30 days, so it is the total one).
+    const total = Date.parse((lease as { expiresAt: string }).expiresAt);
+    expect(Date.parse(last!.lease!.idleExpiresAt)).toBe(Math.min(total, t0 + 180_000 - 500 + HOSTED_SETTINGS.leaseIdleMinutes * 60_000));
     expect(t0 + 180_000 - storedLastSeen(m)).toBeLessThanOrEqual(LAST_SEEN_WRITE_MS + 500);
     expect(counter(m, "rows_read")).toBe(0);
     // A Lobby that just woke up still finds the lease live, from the stored time and the slot's heartbeat.
     const cold = await wake().status({ visitor: v, slot, gen: 0, now: t0 + 181_000 });
-    expect(Date.parse(cold.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + HOSTED_SETTINGS.leaseIdleMinutes * 60_000);
+    expect(Date.parse(cold.lease!.idleExpiresAt)).toBe(Math.min(total, t0 + 180_000 - 500 + HOSTED_SETTINGS.leaseIdleMinutes * 60_000));
     // The sweep collects what the polls left in the slot.
     await lobby.sweep({ now: t0 + 182_000 });
     expect(counter(m, "rows_read")).toBe(90 * 400);

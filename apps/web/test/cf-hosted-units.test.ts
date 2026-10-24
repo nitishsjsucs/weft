@@ -100,6 +100,7 @@ describe("hosted copy", () => {
     expect(blockedText({ status: "waitlist", position: 3, poolSize: 2, etaMinutes: null })).toBe("All 2 workspaces are in use. You are number 3 in line.");
     // A lease ends after a day without activity, so a long wait reads in hours.
     expect(blockedText({ status: "waitlist", position: 1, poolSize: 2, etaMinutes: 1_380 })).toBe("All 2 workspaces are in use. One frees in about 23 hours. You are number 1 in line.");
+    expect(blockedText({ status: "waitlist", position: 1, poolSize: 2, etaMinutes: 40_000 })).toBe("All 2 workspaces are in use. One frees in about 28 days. You are number 1 in line.");
     expect(blockedText({ status: "full", poolSize: 2, etaMinutes: 4.2 })).toBe("All 2 workspaces are in use and the line is full. One frees in about 4 min. Try again later.");
     expect(blockedText({ status: "full", poolSize: 2, etaMinutes: null })).toBe("All 2 workspaces are in use and the line is full. Try again later.");
     expect(blockedText({ status: "budget", reopensAt: "2026-10-27T00:00:00.000Z" })).toBe("Today's budget is used up; back after 00:00 UTC.");
