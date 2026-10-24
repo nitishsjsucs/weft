@@ -2,7 +2,8 @@
 // reference): sampling with a repetition penalty, temperature, top-k and top-p; the speech token sequence the decoder
 // takes; half floats; and the fixed voice file. The voice file holds what the speech encoder would compute from a
 // reference clip (audio_features, audio_tokens, speaker_embeddings, speaker_features), so the browser never downloads
-// or runs the encoder: scripts/assist/build-voice.ts writes it once from a clip Weft has the rights to.
+// or runs the encoder. It is made once from the speech encoder and a reference clip Weft has the rights to; neither
+// is in the repository yet (README, "What is stubbed or left"), so the in-browser voice stays off until it is.
 export const SAMPLE_RATE = 24_000;
 export const START_SPEECH = 6561;
 export const STOP_SPEECH = 6562;

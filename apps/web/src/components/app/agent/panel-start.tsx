@@ -17,7 +17,7 @@ function promptsFor(pathname: string): string[] {
 /** `recent: false` (the Agent page, whose own list holds the conversations) shows the prompts only and reads no runs. */
 export function PanelStart({ pathname, onAsk, onOpen, recent: withRecent = true, testId = "agent-panel-start" }: { pathname: string; onAsk: (text: string) => void; onOpen: (runId: string, label: string) => void; recent?: boolean; testId?: string }) {
   const runs = useGet("/v1/agent/runs", { query: { limit: 100 }, enabled: withRecent });
-  const recent = [...(((runs.data as { data?: unknown[] } | undefined)?.data ?? []) as { id: string; trigger: string; summary: string | null; createdAt: string }[])]
+  const recent = [...(((runs.data as { data?: unknown[] } | undefined)?.data ?? []) as { id: string; trigger: string; summary: string | null; createdAt: string; tainted?: boolean }[])]
     .filter((r) => r.trigger === "chat" && r.summary)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 4);
@@ -37,7 +37,8 @@ export function PanelStart({ pathname, onAsk, onOpen, recent: withRecent = true,
           <div className="flex flex-col gap-1.5">
             {recent.map((r) => (
               <button key={r.id} type="button" onClick={() => onOpen(r.id, "Earlier answer")} className="rounded-lg px-2.5 py-1.5 text-left hover:bg-gray-2" data-testid="agent-recent-run">
-                <div className="line-clamp-2 text-2" title={answerPlain(r.summary ?? "") || undefined}>{answerPlain(r.summary ?? "").replace(/\.$/, "")}</div>
+                {/* A run that read untrusted content: its answer is never the app's own words to the cursor assistant. */}
+                <div className="line-clamp-2 text-2" data-assist-untrusted={r.tainted ? "" : undefined} title={answerPlain(r.summary ?? "") || undefined}>{answerPlain(r.summary ?? "").replace(/\.$/, "")}</div>
                 <div className="text-1 text-gray-10">{fmtDateTime(r.createdAt)}</div>
               </button>
             ))}

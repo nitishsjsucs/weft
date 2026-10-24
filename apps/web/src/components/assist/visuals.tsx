@@ -16,7 +16,9 @@ import { ASSIST_COPY } from "./copy";
 /**
  * The open modal layer (a drawer or dialog) the assistant's interactive surfaces must live inside, or null. A modal
  * Radix dialog turns pointer events off on the body, hides its siblings from assistive tech and keeps focus inside
- * itself, so a card left outside it could not be clicked, read or typed into; portaled into the layer it can.
+ * itself, so a card left outside it could not be clicked, read or typed into; portaled into the layer it can. The
+ * cards are fixed in viewport pixels, so a layer is centred without a transform (a transform or translate would make
+ * it their containing block and offset them, and its overflow would clip them).
  */
 export function useLayerHost(): HTMLElement | null {
   const [host, setHost] = useState<HTMLElement | null>(null);
@@ -53,7 +55,12 @@ export function InLayer({ host, children }: { host: HTMLElement | null; children
   }, []);
   useLayoutEffect(() => {
     const to = host ?? document.body;
-    if (box && box.parentElement !== to) to.appendChild(box);
+    if (!box || box.parentElement === to) return;
+    to.appendChild(box);
+    // A modal layer hides the body's other children from assistive tech as it opens (aria-hidden), the container
+    // among them while it still sat there; inside the layer it is the layer's own, so the mark comes off with it
+    // (the layer's undo only removes the attribute, so it finds nothing amiss).
+    if (host) { box.removeAttribute("aria-hidden"); box.removeAttribute("data-aria-hidden"); }
   }, [box, host]);
   // A layer that closes takes the container out with it; it goes back to the body before the next paint.
   useEffect(() => {

@@ -12,7 +12,7 @@ import type { Rect } from "../tour/geometry";
 import { sleep } from "../tour/dom";
 import { TourRing } from "../tour/tour-ring";
 import { ASSIST_COPY } from "./copy";
-import { actionable, entityOfEl, hrefOf, kindOf, labelOf, resolveRegistered, type Registered } from "./dom";
+import { actionable, entityOfEl, hrefOf, kindOf, labelOf, MUTATING_MARK, resolveRegistered, type Registered } from "./dom";
 import { bringIntoView, goTo, TARGET_WAIT_MS, waitTarget } from "./effects";
 import { sheetReserve } from "./surface-core";
 import { FloatingCard, useTrackedRect } from "./visuals";
@@ -22,12 +22,22 @@ export function walkIndex(i: number, n: number): number {
   return Math.max(0, Math.min(i, n - 1));
 }
 
+/**
+ * The page step `k` opens as it is entered: its own route, else the page it was on before (Back from a later step's
+ * page returns there), else, before any step has moved, the page the walkthrough started on. Null for a step with no
+ * route that has not been entered yet after a move: it waits on the page the person reached.
+ */
+export function stepPage(steps: readonly Pick<WalkStepEffect, "route">[], k: number, shownOn: ReadonlyMap<number, string>, startedOn: string): string | null {
+  return steps[k]?.route ?? shownOn.get(k) ?? (steps.slice(0, k).every((s) => !s.route) ? startedOn : null);
+}
+
 export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname, onExit }: {
   steps: WalkStepEffect[]; registry: Map<number, Registered>; here: () => string; push: (href: string) => void; sheet: boolean; pathname: string;
   start: { x: number; y: number }; onExit: () => void;
 }) {
   const [i, setI] = useState(0);
-  const [target, setTarget] = useState<HTMLElement | null>(null);
+  // The target with the step it was found for: a step just entered never shows the ring (or "found") of the one before.
+  const [found, setFound] = useState<{ k: number; el: HTMLElement } | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [refused, setRefused] = useState(false);
   // A step waiting for its part of the page looks again when the person moves to another page (following the step before).
@@ -37,13 +47,27 @@ export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname
   useEffect(() => { if (waitingRef.current) setTries((t) => t + 1); }, [pathname]);
   const k = walkIndex(i, steps.length);
   const step = steps[k]!;
+  const target = found?.k === k ? found.el : null;
+  // Where each step was last looked for (found, or waiting for the person to get there), and where the walkthrough
+  // started: a step with no route of its own is looked for there when it is entered again (Back).
+  const shownOn = useRef(new Map<number, string>());
+  const startedOn = useRef<string | null>(null);
+  startedOn.current ??= here();
+  const lookedAgain = useRef(tries);
   useEffect(() => {
     const ctrl = new AbortController();
-    setTarget(null);
+    setFound(null);
     setWaiting(false);
     setRefused(false);
+    // Looking again because the person moved (tries) never takes them back: only entering the step does. (Read from
+    // tries, not from k, so React's second mount run in development still counts as entering.)
+    const arriving = lookedAgain.current === tries;
+    lookedAgain.current = tries;
     void (async () => {
-      if (step.route && !(await goTo(step.route, { here, push, signal: ctrl.signal }))) { if (!ctrl.signal.aborted) setWaiting(true); return; }
+      const page = arriving ? stepPage(steps, k, shownOn.current, startedOn.current!) : null;
+      // A step's own route always opens (with its view state); the page it was on only when the person is elsewhere.
+      const open = step.route ?? (page && page.split("?")[0] !== here().split("?")[0] ? page : null);
+      if (open && !(await goTo(open, { here, push, signal: ctrl.signal }))) { if (!ctrl.signal.aborted) setWaiting(true); return; }
       let el: HTMLElement | null = null;
       // On a phone the walk card is a bottom sheet: each target is brought into view above it, never under it.
       const room = sheet ? sheetReserve(window.innerHeight) : 0;
@@ -51,7 +75,7 @@ export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname
       if (step.target.kind === "item") {
         el = resolveRegistered(registry.get(step.target.n));
         // The element found now is checked again like the server checked the map's: never a control a person presses.
-        if (el && stepRefusal({ kind: kindOf(el), label: labelOf(el).label, testid: el.dataset.testid ?? null, anchor: registry.get(step.target.n)?.item.anchor ?? null, entity: entityOfEl(el, here())?.entity ?? null, href: hrefOf(el) }, { hosted: HOSTED })) {
+        if (el && stepRefusal({ kind: kindOf(el), label: labelOf(el).label, testid: el.dataset.testid ?? null, anchor: registry.get(step.target.n)?.item.anchor ?? null, entity: entityOfEl(el, here())?.entity ?? null, href: hrefOf(el), mutating: !!el.closest(MUTATING_MARK) }, { hosted: HOSTED })) {
           if (!ctrl.signal.aborted) setRefused(true);
           return;
         }
@@ -60,9 +84,14 @@ export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname
           // Checked again after the scroll, as a point is: a sticky header or an open layer may cover it there.
           if (!actionable(el)) { await sleep(150, ctrl.signal); if (!actionable(el)) el = null; }
         }
-      } else el = (await waitTarget(step.selectors, null, ctrl.signal, TARGET_WAIT_MS, room)).el;
+      } else {
+        el = (await waitTarget(step.selectors, null, ctrl.signal, TARGET_WAIT_MS, room)).el;
+        // An anchor's element the page marks as a control that changes data is never ringed either.
+        if (el?.closest(MUTATING_MARK)) { if (!ctrl.signal.aborted) setRefused(true); return; }
+      }
       if (ctrl.signal.aborted) return;
-      if (el) setTarget(el); else setWaiting(true);
+      shownOn.current.set(k, here());
+      if (el) setFound({ k, el }); else setWaiting(true);
     })();
     return () => ctrl.abort();
   }, [k, tries]); // eslint-disable-line react-hooks/exhaustive-deps

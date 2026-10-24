@@ -24,7 +24,7 @@ export const VOICE_MODEL = {
 } as const;
 /** About 395 MB in all (the speech encoder's 177 MB are never fetched). */
 export const VOICE_MODEL_BYTES = Object.values(VOICE_MODEL.files).reduce((a, f) => a + f.bytes, 0);
-/** The fixed voice, served by Weft itself (scripts/assist/build-voice.ts writes it). */
+/** The fixed voice, served by Weft itself once it is made (chatterbox-core.ts; not in the repository yet). */
 export const VOICE_FILE_URL = "/assist/voice/weft-voice.bin";
 const CACHE = "weft-voice-v1";
 const fileUrl = (path: string) => `https://huggingface.co/${VOICE_MODEL.repo}/resolve/${VOICE_MODEL.revision}/${path}`;

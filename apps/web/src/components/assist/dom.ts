@@ -16,6 +16,8 @@ import { buildScreenMap, type Candidate } from "./screen-map-core";
 /** The assistant's own surfaces and the tour's: never part of the map, never "covering" a target. */
 export const OWN = "[data-assist-ui],[data-tour-card],[data-tour-ring],[data-tour-mark]";
 export const UNTRUSTED = "[data-assist-untrusted]";
+/** What the page marks as a control that changes data (a link that signs in as someone): never shown, never a step. */
+export const MUTATING_MARK = "[data-assist-mutating]";
 const CANDIDATES = [
   "[data-tour]", "[data-testid]", "[data-entity]", "[role=tab]", "[role=dialog]", "[role=alertdialog]", "[role=menuitem]", "[role=menuitemradio]",
   "main h1", "main h2", "main h3", "nav a[href]", "a[href^='/app']", "button", "summary", "[aria-expanded]", "main", "nav[aria-label]", "aside[aria-label]",
@@ -198,6 +200,7 @@ export function readScreen(route: string, opts: { intents: string[]; viewport?: 
       key: els.length - 1, kind, label: kind === "landmark" ? (el.getAttribute("aria-label") ?? "Main content") : label, untrusted: untrusted && kind !== "landmark",
       entity: ent?.entity ?? null, entityKind: ent?.kind ?? null, anchor, testid: el.dataset.testid ?? null,
       box: [Math.round(v.left), Math.round(v.top), Math.round(v.right - v.left), Math.round(v.bottom - v.top)], state: stateOf(el), href: hrefOf(el),
+      mutating: !!el.closest(MUTATING_MARK),
     });
   }
   const title = document.querySelector("main h1")?.textContent?.trim() || document.title || "Weft";

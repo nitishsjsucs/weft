@@ -12,7 +12,7 @@ import type { Locator, Page } from "@playwright/test";
 import { eventually, expect, openApp, SEED, test, tid, type WeftApi } from "./fixtures";
 import { ASSIST_TID as A } from "../packages/contracts/src/ext/assist";
 import { AGENT_PAGE_TID } from "../packages/contracts/src/ext/agent-page";
-import { W2_BENEFITS_TID, W2_ONBOARDING_TID, W3_SETTINGS, W3_TIMEOFF_TID } from "../packages/contracts/src/index";
+import { W2_BENEFITS_TID, W2_OFFBOARDING_TID, W2_ONBOARDING_TID, W3_SETTINGS, W3_TIMEOFF_TID } from "../packages/contracts/src/index";
 
 /** A stand-in for the browser's speech recognition: it hears `window.__assistHeard` (partial words, then the whole). */
 async function fakeSpeech(page: Page, heard: string): Promise<void> {
@@ -393,6 +393,31 @@ test.describe("GP27 the cursor assistant", () => {
       await expect(walk).toHaveCount(0);
     });
 
+    await test.step("Back to a step with no route of its own returns to the page it was shown on", async () => {
+      await openApp(page, "/app");
+      await ask(page, "How do I run payroll end to end?");
+      const walk = page.getByTestId(A.walk);
+      const found = walk.locator("[data-found]");
+      await expect(walk).toContainText("Step 1 of 5");
+      await page.getByTestId(A.walkNext).click();
+      await expect(walk).toContainText("Step 2 of 5");
+      // Following the step before: the person opens the draft run themselves (the walkthrough card sits over its
+      // row at this size, so the link is followed as its own click), and the band is found there.
+      await page.getByTestId(`payroll-run-${SEED.draftRun}`).dispatchEvent("click");
+      await expect(found).toHaveAttribute("data-found", "true");
+      await page.getByTestId(A.walkNext).click();
+      await expect(walk).toContainText("Step 3 of 5");
+      await expect(found).toHaveAttribute("data-found", /true|false/);
+      await page.getByTestId(A.walkNext).click();
+      await expect(walk).toContainText("Step 4 of 5");
+      await expect(page).toHaveURL(/\/app\/inbox/);
+      await page.getByTestId(A.walkBack).click();
+      await expect(walk).toContainText("Step 3 of 5");
+      await expect(page).toHaveURL(new RegExp(`/app/payroll/${SEED.draftRun}`));
+      await page.keyboard.press("Escape");
+      await expect(walk).toHaveCount(0);
+    });
+
     await test.step("asked to walk through submitting, the submit step is refused and never ringed", async () => {
       await openApp(page, `/app/payroll/${SEED.draftRun}`);
       const before = await weft.payroll(SEED.draftRun);
@@ -629,6 +654,82 @@ test.describe("GP27 the cursor assistant", () => {
       expect((await weft.proposals()).length, "no proposal was filed").toBe(proposals);
       expect((await weft.actions()).length, "nothing changed").toBe(actions);
       await dismiss(page);
+    });
+
+    await test.step("Escape before the progress card shows ends the request: a handoff it already made is cancelled too", async () => {
+      const proposals = (await weft.proposals()).length;
+      await page.keyboard.press("ControlOrMeta+KeyJ");
+      const input = page.getByTestId(A.input);
+      await expect(input).toBeFocused();
+      await input.fill("Give Felix Wainwright a raise of 2 percent from November 16");
+      const accepted = page.waitForResponse((r) => r.request().method() === "POST" && /\/api\/v1\/agent\/runs$/.test(new URL(r.url()).pathname));
+      await input.press("Enter");
+      // The resolver hands a change off at once; the card still says Working while the client learns of it.
+      const { runId } = (await (await accepted).json()) as { runId: string };
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId(A.popover)).toHaveCount(0);
+      type Ended = { run: { status: string }; handoff?: { to: string | null } };
+      const t = await eventually(() => weft.get<Ended>(`/v1/agent/runs/${runId}/trace`), (x) => (x.run.status === "done" || x.run.status === "cancelled" ? x : undefined), "the assist run ends");
+      if (t.handoff?.to) await eventually(() => weft.get<{ status: string }>(`/v1/agent/runs/${t.handoff!.to}`), (r) => (r.status === "cancelled" ? r : undefined), "the chat run it handed to is cancelled");
+      else expect(t.run.status).toBe("cancelled");
+      expect((await weft.proposals()).length, "no proposal was filed").toBe(proposals);
+    });
+  });
+
+  test("inside a drawer or the command menu it is placed, reachable and leaves what the drawer holds alone", async ({ page }) => {
+    const isAsk = (r: { method(): string; url(): string }) => r.method() === "POST" && /\/api\/v1\/agent\/runs$/.test(new URL(r.url()).pathname);
+    const intents = (r: { postDataJSON(): unknown }) => (r.postDataJSON() as { assist: { screen: { intents: string[] } } }).assist.screen.intents;
+    await openApp(page, "/app/people/wrk_0026");
+
+    await test.step("with no layer open, the record's tabs are a page intent", async () => {
+      await expect(page.getByRole("tab", { name: "Pay and tax" })).toBeVisible();
+      const sent = page.waitForRequest(isAsk);
+      const card = await ask(page, "Where is Viewing as?");
+      expect(intents(await sent)).toContain("tab.select");
+      // The voice toggle keeps its name; aria-pressed says whether it is on.
+      await expect(card.getByTestId(A.voiceOut)).toHaveAttribute("aria-label", "Speak answers");
+      await expect(card.getByTestId(A.voiceOut)).toHaveAttribute("aria-pressed", "false");
+      await dismiss(page);
+    });
+
+    await test.step("in the Off-cycle pay drawer the composer is read by assistive tech, and nothing behind the drawer is pressed", async () => {
+      await page.getByTestId(W2_OFFBOARDING_TID.personOffCycle).click();
+      const bonus = page.getByTestId(W2_OFFBOARDING_TID.offCycleBonus);
+      await bonus.fill("250.00");
+      await page.keyboard.press("ControlOrMeta+KeyJ");
+      // By role: a composer under an aria-hidden container (the drawer hid the body's other children) is not found.
+      const input = page.getByRole("textbox", { name: "Ask about this page..." });
+      await expect(input).toBeFocused();
+      // A held hotkey repeats: only the press itself toggles the composer.
+      await page.evaluate(() => { for (let i = 0; i < 5; i++) document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "j", code: "KeyJ", ctrlKey: true, metaKey: true, repeat: true, bubbles: true, cancelable: true })); });
+      await expect(input).toBeFocused();
+      const sent = page.waitForRequest(isAsk);
+      await input.fill("Where is Viewing as?");
+      await input.press("Enter");
+      // The tabs sit behind the drawer: not offered, so the assistant never presses one (that would close the drawer).
+      expect(intents(await sent)).not.toContain("tab.select");
+      await expect(page.getByTestId(A.popover)).toBeVisible();
+      await dismiss(page);
+      await expect(bonus).toHaveValue("250.00");
+      await page.keyboard.press("Escape");
+      await expect(bonus).toHaveCount(0);
+    });
+
+    await test.step("over the command menu the composer opens where it can be seen and typed into", async () => {
+      await page.keyboard.press("ControlOrMeta+KeyK");
+      await expect(page.getByRole("dialog", { name: "Search and navigate" })).toBeVisible();
+      await page.keyboard.press("ControlOrMeta+KeyJ");
+      const input = page.getByTestId(A.input);
+      await expect(input).toBeFocused();
+      // Not offset by the menu's box or clipped by it: what is at the field's middle is the field.
+      const reachable = await input.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight && (hit === el || el.contains(hit));
+      });
+      expect(reachable).toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId(A.composer)).toHaveCount(0);
     });
   });
 

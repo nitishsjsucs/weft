@@ -20,6 +20,8 @@ export interface Candidate {
   untrusted?: boolean;
   /** Where the link the element is or sits in goes (dom.ts hrefOf). */
   href?: string | null;
+  /** The element is or sits in [data-assist-mutating]. */
+  mutating?: boolean;
 }
 
 /** How much a candidate says about the page: Weft's anchors and records first, then controls, then structure. */
@@ -65,7 +67,7 @@ export function buildScreenMap(cands: readonly Candidate[], page: { route: strin
       n: i + 1, kind: c.kind, label: c.label, box: c.box.map((v) => Math.round(v)) as ScreenItem["box"],
       ...(c.entity ? { entity: c.entity } : {}), ...(c.entityKind ? { entityKind: c.entityKind.slice(0, 24) } : {}), ...(c.anchor ? { anchor: c.anchor } : {}),
       ...(c.testid ? { testid: c.testid.slice(0, 64) } : {}), ...(c.state ? { state: c.state.slice(0, 24) } : {}), ...(c.untrusted ? { untrusted: true } : {}),
-      ...(c.href ? { href: c.href.slice(0, limits.route) } : {}),
+      ...(c.href ? { href: c.href.slice(0, limits.route) } : {}), ...(c.mutating ? { mutating: true } : {}),
     }));
   let items = number(chosen);
   let truncated = kept.length > chosen.length;

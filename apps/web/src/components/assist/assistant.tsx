@@ -188,9 +188,12 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
     speakCtrl.current?.abort();
     stopSpeaking();
     seq.current++;
-    // An assist run still working is interrupted; a handoff's chat run keeps going (the Agent page shows it).
+    // An assist run still working is interrupted. One that handed off before its progress card showed (its end not
+    // seen yet, or seen as HANDED_OFF) is cancelled too: the server stops the chat run it opened, since the person
+    // never saw that handoff. Once the progress card is up (chatId), its chat run keeps going (the Agent page shows it).
     const e = exRef.current;
-    if (e?.assistId && !e.chatId && !ended(e.assist?.run?.status)) void client.post("/v1/agent/runs/:id/cancel", { params: { id: e.assistId } }).catch(() => undefined);
+    const seen = e?.assist?.run;
+    if (e?.assistId && !e.chatId && (!ended(seen?.status) || seen?.terminalReason === "HANDED_OFF")) void client.post("/v1/agent/runs/:id/cancel", { params: { id: e.assistId } }).catch(() => undefined);
     setExchange(null);
     const menuBack = menuRef.current?.returnTo ?? null;
     setPhase("idle"); setMenu(null); setPointer(null); setWalk(null); setNotes([]); setVoice("idle"); setVoiceNote(null); setSpeech(null); setText("");
@@ -417,6 +420,9 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.code === "KeyJ" || e.key.toLowerCase() === "j")) {
         if (l.tourActive) return;
         e.preventDefault();
+        // A held key repeats about 30 times a second: only the press itself toggles, or the assistant would flicker
+        // open and closed and land either way.
+        if (e.repeat) return;
         // Pressing it again interrupts whatever is open (research/cursor-assistant.md 4.1).
         if (l.phase !== "idle" || l.walk || l.menu) { closeAll(); return; }
         // From the keyboard: at the focused control and about its record when focus moved there after the pointer
@@ -505,7 +511,7 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
           <div className="flex items-center gap-1.5 border-b border-[var(--app-border)] px-3 py-2">
             <Sparkles className="size-3.5 shrink-0 text-[var(--accent-9)]" aria-hidden />
             <span className="min-w-0 flex-1 truncate text-1 text-gray-11" title={exchange.question}>{exchange.question}</span>
-            <button type="button" data-testid={ASSIST_TID.voiceOut} aria-pressed={voiceOn} aria-label={voiceOn ? ASSIST_COPY.voiceOn : ASSIST_COPY.voiceOff} title={voiceOn ? ASSIST_COPY.voiceOn : ASSIST_COPY.voiceOff}
+            <button type="button" data-testid={ASSIST_TID.voiceOut} aria-pressed={voiceOn} aria-label={ASSIST_COPY.voiceOn} title={voiceOn ? ASSIST_COPY.voiceOn : ASSIST_COPY.voiceOff}
               onClick={() => { const on = !voiceOn; setAssistPref("voice", on); if (on) primeVoice(); if (on && finalT?.run.summary) void speakAnswer(finalT.run.summary); else { speakCtrl.current?.abort(); stopSpeaking(); setSpeech(null); } }}
               className={cn("grid size-6 place-items-center rounded-md text-gray-10 hover:bg-gray-3 hover:text-foreground", voiceOn && "text-[var(--accent-11)]")}>
               {voiceOn ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
@@ -563,7 +569,7 @@ function Composer({ at, sheet, about, onClearAbout, text, setText, voice, voiceN
             placeholder={voice === "listening" ? ASSIST_COPY.listening : ASSIST_COPY.placeholder} aria-label={ASSIST_COPY.placeholder}
             className="min-w-0 flex-1 bg-transparent px-1 py-1 text-2 outline-none placeholder:text-gray-9" />
           {micMode !== "none" ? (
-            <button type="button" data-testid={ASSIST_TID.mic} data-mode={micMode} aria-label={voice === "listening" ? ASSIST_COPY.stop : ASSIST_COPY.mic} aria-pressed={voice === "listening"} onClick={onMic}
+            <button type="button" data-testid={ASSIST_TID.mic} data-mode={micMode} aria-label={ASSIST_COPY.mic} aria-pressed={voice === "listening"} title={voice === "listening" ? ASSIST_COPY.stop : ASSIST_COPY.mic} onClick={onMic}
               className={cn("grid size-7 shrink-0 place-items-center rounded-full text-gray-11 hover:bg-gray-3", voice === "listening" && "bg-red-3 text-red-11")}>
               {voice === "listening" ? <Square className="size-3" /> : <Mic className="size-3.5" />}
             </button>
@@ -632,7 +638,7 @@ function Answer({ trace, threadId, handedOff, onChip, onChoose }: { trace: Assis
   return (
     <div className="flex flex-col gap-2.5" data-run-id={run.id} data-status={run.status}>
       {run.tainted ? <p className="flex items-start gap-1.5 rounded-lg bg-amber-3 px-2 py-1.5 text-1 text-amber-11"><ShieldAlert className="mt-px size-3.5 shrink-0" aria-hidden /><span title={run.taintedBy ?? undefined}>This answer read untrusted content: {taintText(run.taintedBy)}.</span></p> : null}
-      {text ? <AnswerView text={text} runId={run.id} testId={ASSIST_TID.answer} /> : null}
+      {text ? <AnswerView text={text} runId={run.id} testId={ASSIST_TID.answer} untrusted={!!run.tainted} /> : null}
       {closing?.choose ? (
         <div className="flex flex-col gap-1.5" role="group" aria-label={ASSIST_COPY.choose}>
           <span className="text-1 text-gray-10">{ASSIST_COPY.choose}</span>

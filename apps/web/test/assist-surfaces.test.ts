@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { patchedSearch, sameAsPage } from "../src/lib/url-state";
 import { iconHidden, mayShowNow, sheetReserve, viewPatch, type IconState } from "../src/components/assist/surface-core";
-import { walkIndex } from "../src/components/assist/walk";
+import { stepPage, walkIndex } from "../src/components/assist/walk";
 import { setAssistPref } from "../src/components/assist/prefs";
 import { keyboardOrigin } from "../src/components/assist/context-core";
 import { personTabOffered } from "../src/components/app/people/people-view";
@@ -124,5 +124,19 @@ describe("what the second review of the cursor assistant found", () => {
     expect(walkIndex(0, 6)).toBe(0);
     expect(walkIndex(3, 6)).toBe(3);
     expect(walkIndex(-1, 3)).toBe(0);
+  });
+
+  it("Back to a step with no route of its own opens the page it was shown on, not the later step's page", () => {
+    // The help corpus's run-payroll walkthrough: the draft run, its Needs review band and a flag, then the Inbox.
+    const steps = [{ route: "/app/payroll/pay_2026_10_30" }, { route: null }, { route: null }, { route: "/app/inbox" }];
+    const shown = new Map([[0, "/app/payroll/pay_2026_10_30"], [1, "/app/payroll/pay_2026_10_30"], [2, "/app/payroll/pay_2026_10_30?section=needs-review"], [3, "/app/inbox"]]);
+    expect(stepPage(steps, 2, shown, "/app")).toBe("/app/payroll/pay_2026_10_30?section=needs-review");
+    expect(stepPage(steps, 3, shown, "/app")).toBe("/app/inbox");
+    // Not shown yet after a move: it waits where the person is.
+    expect(stepPage(steps, 2, new Map(), "/app")).toBeNull();
+    // A model's walkthrough that starts on the current page and then moves: Back returns to where it started.
+    const mixed = [{ route: null }, { route: "/app/inbox" }];
+    expect(stepPage(mixed, 0, new Map(), "/app/payroll?x=1")).toBe("/app/payroll?x=1");
+    expect(stepPage(mixed, 0, new Map([[0, "/app/payroll"]]), "/app/payroll?x=1")).toBe("/app/payroll");
   });
 });

@@ -119,6 +119,12 @@ async function changedSince(before: { route: string; layer: ReturnType<typeof op
   return env.signal.aborted || moved();
 }
 
+/** The app's own words on an element, for the pointer's bubble or a note: never text people typed (labelOf untrusted). */
+function ownLabel(el: Element): string {
+  const l = labelOf(el);
+  return l.untrusted ? "" : l.label.slice(0, 40);
+}
+
 function miss(env: EffectEnv, why: "missing" | "covered", label: string, opened?: string, hint?: string | null): void {
   if (why === "covered") { env.note(ASSIST_COPY.covered(label)); return; }
   // A name nothing on the page holds: said as that, not as the control (which other cards may well have).
@@ -188,7 +194,7 @@ export async function applyEffect(e: AssistEffect, env: EffectEnv): Promise<void
         // layer says it did. When nothing changes, the popover says so instead of the answer claiming it opened.
         const before = { route: env.here(), layer: openLayer() };
         activate(el);
-        if (!(await changedSince(before, env))) { if (live()) env.note(ASSIST_COPY.notOpened(e.label ?? (labelOf(el).label.slice(0, 40) || "That"))); }
+        if (!(await changedSince(before, env))) { if (live()) env.note(ASSIST_COPY.notOpened(e.label ?? (ownLabel(el) || "That"))); }
         return;
       }
       if (e.action === "tab") activate(el);
@@ -197,7 +203,7 @@ export async function applyEffect(e: AssistEffect, env: EffectEnv): Promise<void
         if (el instanceof HTMLDetailsElement) el.open = open;
         else if ((el.getAttribute("aria-expanded") === "true") !== open) activate(el);
       }
-      await env.point(el, e.label ?? labelOf(el).label.slice(0, 40));
+      await env.point(el, e.label ?? ownLabel(el));
       return;
     }
     case "steps":

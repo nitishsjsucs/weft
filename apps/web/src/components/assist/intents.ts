@@ -31,7 +31,12 @@ export function useAssistIntent(id: string, h: IntentHandler, enabled = true): v
 }
 
 const reduce = (): ScrollBehavior => (reducedMotion() ? "auto" : "smooth");
-const inMain = (sel: string) => [...document.querySelectorAll<HTMLElement>(`main ${sel}`)].filter((e) => e.getBoundingClientRect().height > 0);
+/**
+ * The page's own markup in main, as the person can reach it now: rendered, and not behind an open modal layer (a
+ * drawer or dialog hides the rest of the page as it opens, aria-hidden). A tab or a section trigger behind one is never
+ * pressed: a press outside a modal layer closes it, and the form in it (the Off-cycle pay drawer's dates) is lost.
+ */
+const inMain = (sel: string) => [...document.querySelectorAll<HTMLElement>(`main ${sel}`)].filter((e) => e.getBoundingClientRect().height > 0 && !e.closest("[aria-hidden='true'],[inert]"));
 const slug = (s: string) => s.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 /** A tab's slug: its data-tab, the value Radix puts at the end of its id, or its label. */
 const tabSlug = (t: HTMLElement) => t.dataset.tab ?? /-trigger-(.+)$/.exec(t.id)?.[1] ?? slug(labelOf(t).label);
@@ -86,7 +91,7 @@ async function toggleSection(id: string, open: boolean): Promise<boolean> {
   }
   // Checked like any show before it is pressed: a disclosure or a section, nothing that changes data.
   const why = liveShowRefusal({ tag: trigger.tagName, kind: kindOf(trigger), label: labelOf(trigger).label, testid: trigger.dataset.testid ?? null, anchor: null, type: trigger.getAttribute("type"), inForm: !!trigger.closest("form"), marked: !!trigger.closest("[data-assist-mutating]") }, open ? "expand" : "collapse");
-  if (why) return false;
+  if (why || trigger.closest("[aria-hidden='true'],[inert]")) return false;
   if ((trigger.getAttribute("aria-expanded") === "true") !== open) activate(trigger);
   return true;
 }

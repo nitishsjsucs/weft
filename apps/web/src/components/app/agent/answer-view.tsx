@@ -17,10 +17,14 @@ function Span({ s, runId, cites }: { s: AnswerSpan; runId: string; cites: string
   return <>{s.s}</>;
 }
 
-export function AnswerView({ text, runId, testId }: { text: string; runId: string; testId?: string }) {
+/**
+ * `untrusted`: the answer of a run that read untrusted content (run.tainted). Its words were written after that read,
+ * so the cursor assistant's screen map reads them as text people typed ([data-assist-untrusted]), never as the app's.
+ */
+export function AnswerView({ text, runId, testId, untrusted = false }: { text: string; runId: string; testId?: string; untrusted?: boolean }) {
   const { blocks, cites } = parseAnswer(text);
   return (
-    <div data-testid={testId} className="flex flex-col gap-2 text-2 leading-[22px] break-words text-gray-12">
+    <div data-testid={testId} data-assist-untrusted={untrusted ? "" : undefined} className="flex flex-col gap-2 text-2 leading-[22px] break-words text-gray-12">
       {blocks.map((b, i) => b.kind === "ul" ? (
         <ul key={i} className="flex list-disc flex-col gap-0.5 pl-5">
           {b.items.map((spans, j) => <li key={j}>{spans.map((s, k) => <Span key={k} s={s} runId={runId} cites={cites} />)}</li>)}
