@@ -64,7 +64,7 @@ Fatal issues fixed:
 | Subrequests per invocation | 50 external (the 51st throws), 1,000 to Cloudflare services | measured and documented (probe: Subrequests) |
 | Worker size | 10.35 MiB of incompressible data deployed; documented 64 MiB uncompressed, no compressed limit | measured (probe: bundle size) |
 | Full rich restore | 20,556 rows written (99 tables, 160 indexes, 8 triggers, 7,957 data rows; index entries count either way) | verified locally (risk design, workerd) |
-| Delta reset after a 10-flow engaged session | 557 rows written, 6,789 rows read, 0 mismatches over 2 cycles, with memory in git (hosted worlds keep it in SQL: 717 rows, section 4.6) | verified locally (risk design) |
+| Delta reset after a 10-flow engaged session | 697 rows written (696 on the emulator), 7,779 rows read, 0 mismatches over 2 cycles, with memory in git, on the rich world with the recorded showcase runs; first measured at 557 before them (hosted worlds keep memory in SQL: 717 rows, section 4.6) | verified locally (2026-10-24, workerd through Miniflare) |
 | 10-flow engaged session with dirty tracking | 894 rows written (824 without tracking), 29,044 rows read | verified locally (risk design) |
 | Idle Home tab | `/v1/time-off/requests` reads 1,092 rows in 145 statements every 10 s, about 0.39M rows read per tab-hour | verified locally (risk design; poll at `apps/web/src/components/app/home/home-view.tsx:43`) |
 | GET routes that write | nine GET routes write a `res_` id row on every call (`newId(sp, "res_")` at `packages/executor/src/pipeline.ts:281`) | verified locally (risk design) |

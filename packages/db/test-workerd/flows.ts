@@ -27,11 +27,12 @@ export type SessionMemory = "git" | "sqlite";
 export const SESSION_MEMORIES: readonly SessionMemory[] = ["git", "sqlite"];
 
 /**
- * The design's measured delta reset after a 10-flow session (verified locally by the risk design), and the 25% band.
- * The risk design measured it before the SQL memory repo existed (memory lived in git, outside the database), so it
- * bounds the session on git memory.
+ * The measured delta reset after a 10-flow session on git memory, and the 25% band. First measured at 557 rows (the
+ * risk design), then 630 in the cloud session; the rich world's recorded showcase runs (2026-10-23) added rows a reset
+ * must put back, and it was re-measured at 697 rows written in workerd through Miniflare and 696 on the emulator,
+ * verified locally on the Mac on 2026-10-24.
  */
-export const DELTA_RESET_BASELINE_ROWS = 557;
+export const DELTA_RESET_BASELINE_ROWS = 697;
 export const DELTA_RESET_MAX_ROWS = Math.floor(DELTA_RESET_BASELINE_ROWS * 1.25);
 /**
  * The same session on the SQL memory repo, as hosted worlds run it: the reset also deletes the git objects and log
