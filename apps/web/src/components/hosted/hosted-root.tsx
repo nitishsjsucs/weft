@@ -1,6 +1,6 @@
 "use client";
 // The hosted shell's overlays (docs/cloudflare/design.md 6.2), mounted once in the root layout on the hosted build:
-// the Start my demo company dialog, the human check a 428 asks for, and the lease-ended screen. None of them does
+// the Open my workspace dialog, the human check a 428 asks for, and the lease-ended screen. None of them does
 // anything until the session state asks for it, so the landing page still makes no request.
 import { Dialog } from "radix-ui";
 import { useRouter } from "next/navigation";
@@ -23,7 +23,7 @@ function errorLine(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function StartDemoDialog() {
+export function StartWorkspaceDialog() {
   const s = useHostedState();
   const router = useRouter();
   const open = s.startReason !== null;
@@ -50,7 +50,6 @@ export function StartDemoDialog() {
           <Dialog.Title className="text-[14px] font-semibold text-gray-12">{C.startTitle}</Dialog.Title>
           {s.startReason === "mutation" ? <p className="font-medium text-gray-12">{C.startForMutation}</p> : null}
           <Dialog.Description className="leading-5 text-gray-11">{C.startBody}</Dialog.Description>
-          <p className="leading-5 text-gray-11">{C.fictional}</p>
           {s.blocked ? <p role="status" data-testid="hosted-start-blocked" data-status={s.blocked.status} className="rounded-lg bg-amber-3 px-3 py-2 leading-5 text-amber-11">{blockedText(s.blocked)}</p> : null}
           {error ? <p role="alert" className="leading-5 text-red-11">{error}</p> : null}
           {phase === "check" ? <><p className="text-1 text-gray-10">{C.startCheck}</p><TurnstileWidget action="lease" nonce={nonce} onToken={(t) => void onToken(t)} onError={(m) => { setError(m); setPhase("done"); }} /></> : null}
@@ -109,5 +108,5 @@ export function LeaseEndedDialog() {
 }
 
 export function HostedRoot() {
-  return <><StartDemoDialog /><TurnstileHost /><LeaseEndedDialog /></>;
+  return <><StartWorkspaceDialog /><TurnstileHost /><LeaseEndedDialog /></>;
 }

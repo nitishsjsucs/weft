@@ -108,7 +108,7 @@ export async function startLease(req: Request, env: FrontEnv, v: Visit): Promise
 }
 
 export async function verifyHuman(req: Request, env: FrontEnv, v: Visit): Promise<Response> {
-  if (!v.session) return hostedError("LEASE_REQUIRED", "Start your own demo company first");
+  if (!v.session) return hostedError("LEASE_REQUIRED", "Open your own workspace first");
   const body = await readJson<TurnstileTokenBody>(req);
   if (!body || typeof body.token !== "string") return hostedError("TURNSTILE_FAILED", "A Turnstile token is required");
   const check = await siteverify(env, body.token, v.ip);

@@ -4,9 +4,9 @@
 //
 // - A leased slot tallies the rows its requests and alarm drains read and write, per generation (a reset starts the
 //   next one). Past `leaseRowsWritten` its mutations answer 429 DEMO_LIMIT, and past `leaseRowsRead` every request
-//   does ("this demo company has hit its daily limit; reset it or come back later").
+//   does ("this workspace has hit its daily limit; reset it, or come back later").
 // - The showcase tallies the rows it reads per UTC day; past `showcaseRowsReadPerDay` every request answers 503
-//   SHOWCASE_LIMIT, while leased demo companies and the static pages keep working.
+//   SHOWCASE_LIMIT, while leased workspaces and the static pages keep working.
 //
 // The tally lives in the object's memory and is written to its storage cheaply: one row (kv `weft.budget`), at most
 // every `persistEvery` requests and alarms (200 on the showcase), and whenever it crosses a step or a limit, so a

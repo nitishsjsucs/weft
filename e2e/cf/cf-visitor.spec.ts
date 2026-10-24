@@ -13,7 +13,7 @@ test.skip(({ baseURL }) => !(baseURL ?? "").startsWith(LOCAL.origin), "local onl
 
 const stubCalls = async (): Promise<StubCall[]> => ((await (await fetch(`http://localhost:${LOCAL.stubPort}/calls`)).json()) as { calls: StubCall[] }).calls;
 
-/** Start my demo company: the widget runs, the token goes to /api/_session/lease; returns that answer. */
+/** Open my workspace: the widget runs, the token goes to /api/_session/lease; returns that answer. */
 async function start(page: import("@playwright/test").Page): Promise<{ status: string; slot?: string; position?: number; poolSize?: number }> {
   await page.goto("/app/");
   expect(await bannerWorld(page)).toBe("showcase");
@@ -25,7 +25,7 @@ async function start(page: import("@playwright/test").Page): Promise<{ status: s
   return (await res.json()) as { status: string; slot?: string; position?: number; poolSize?: number };
 }
 
-test("Turnstile starts a visitor's own demo company, a mutation refreshes the human grant, and a full pool answers with the waitlist", async ({ browser, operator }) => {
+test("Turnstile starts a visitor's own workspace, a mutation refreshes the human grant, and a full pool answers with the waitlist", async ({ browser, operator }) => {
   test.setTimeout(240_000);
   void operator;   // the run's operator lease holds one of the two pool slots
   const before = (await stubCalls()).length;
@@ -40,7 +40,7 @@ test("Turnstile starts a visitor's own demo company, a mutation refreshes the hu
   expect(ra.slot).toMatch(/^slot-\d$/);
   expect(ra.slot).not.toBe(operator.lease.slot);
   expect(await bannerWorld(pa)).toBe("slot");
-  await expect(pa.getByTestId("hosted-banner")).toHaveAttribute("data-slot", ra.slot!);
+  await expect(pa.getByTestId("hosted-world")).toHaveAttribute("data-slot", ra.slot!);
   await expect(pa.getByTestId("hosted-start")).toHaveCount(0);
   const calls = (await stubCalls()).slice(before);
   expect(calls.at(-1), "siteverify saw the test secret, the dummy token, the visitor's address and one idempotency key").toMatchObject({ secretKind: "pass", dummyToken: true, remoteip: true, idempotencyKey: true, success: true });
@@ -64,7 +64,7 @@ test("Turnstile starts a visitor's own demo company, a mutation refreshes the hu
   const rb = await start(pb);
   expect(rb).toMatchObject({ status: "waitlist", poolSize: 2, position: 1 });
   await expect(pb.getByTestId("hosted-start-blocked")).toHaveAttribute("data-status", "waitlist");
-  await expect(pb.getByTestId("hosted-start-blocked")).toContainText("All 2 demo companies are in use.");
+  await expect(pb.getByTestId("hosted-start-blocked")).toContainText("All 2 workspaces are in use.");
   expect(await bannerWorld(pb)).toBe("showcase");
   await a.close();
   await b.close();

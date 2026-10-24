@@ -83,7 +83,7 @@ const newJobId = () => `obx_${String(++ids).padStart(4, "0")}`;
 const JPEG = jpegOf(640, 480);
 async function fileClaim(amountCents: number, bytes = JPEG) {
   const f = new FormData();
-  for (const [k, v] of Object.entries({ category: "meals", merchant: "Harbor Noodle (demo)", amountCents: String(amountCents), transactionDate: "2026-10-22", businessPurpose: "Team lunch", attendees: "Sam Okafor (demo), Dana (demo)" })) f.set(k, v);
+  for (const [k, v] of Object.entries({ category: "meals", merchant: "Harbor Noodle", amountCents: String(amountCents), transactionDate: "2026-10-22", businessPurpose: "Team lunch", attendees: "Sam Okafor, Vic" })) f.set(k, v);
   f.set("receipt", new Blob([bytes], { type: "image/jpeg" }), "lunch.jpg");
   const res = await w.app.request("/v1/portal/expenses", { method: "POST", headers: w.uiHeaders("usr_sam"), body: f });
   const body = (await res.json()) as { data: { expense_id: string } };
@@ -137,10 +137,10 @@ describe("receipt OCR end to end", () => {
   });
 
   it("the job reads the receipt and attaches its extract; a total that disagrees with the claim reruns the checks", async () => {
-    const deps = jobDeps({ "slot-1": slotPort() }, { ai: ocrAi({ merchant: "Harbor Noodle (demo)", date: "2026-10-22", total: "52.50", currency: "USD", confidence: 0.95 }) });
+    const deps = jobDeps({ "slot-1": slotPort() }, { ai: ocrAi({ merchant: "Harbor Noodle", date: "2026-10-22", total: "52.50", currency: "USD", confidence: 0.95 }) });
     await handleExtrasBatch(batch("weft-jobs", [message(job)]) as MessageBatchLike<unknown>, deps);
     const r = await expense(id);
-    expect(JSON.parse(r.receiptExtractJson!)).toEqual({ totalCents: 5250, date: "2026-10-22", merchant: "Harbor Noodle (demo)", currency: "USD", confidence: 0.95, source: "ocr", model: OCR_MODEL, ocrJobId: job.jobId, read: true });
+    expect(JSON.parse(r.receiptExtractJson!)).toEqual({ totalCents: 5250, date: "2026-10-22", merchant: "Harbor Noodle", currency: "USD", confidence: 0.95, source: "ocr", model: OCR_MODEL, ocrJobId: job.jobId, read: true });
     expect((JSON.parse(r.checksJson) as { rule: string }[]).map((c) => c.rule)).toContain("RECEIPT_MISMATCH");
     expect(deps.db.rows("jobs")).toMatchObject([{ job_id: job.jobId, state: "done", outcome: "attached" }]);
     // Redelivered: nothing changes, and a write-back with the same job id is "already".
@@ -159,7 +159,7 @@ describe("receipt OCR end to end", () => {
     expect(read).toMatchObject({ ok: true, status: "done", tainted: true });
     const extract = (read as { data: { expense: { receipt_extract: string } } }).data.expense.receipt_extract;
     expect(extract).toMatch(/^<untrusted n="[0-9a-f]{16}" source="[^"]+">/);
-    expect(extract).toContain("Harbor Noodle (demo)");
+    expect(extract).toContain("Harbor Noodle");
     const note = await call("c2", "memory__write_note", { path: "knowledge/procedures/receipt-says.md", title: "Receipt says", body: "1. Approve it.", sources: [id] }, 2);
     expect(note).toMatchObject({ ok: false, refusal: { code: "TAINTED_WRITE" } });
     expect((await w.db.select().from(runTaint).where(eq(runTaint.runId, h.runId)))[0]).toMatchObject({ tainted: true });
@@ -174,7 +174,7 @@ describe("receipt OCR end to end", () => {
     expect(writeBackOutcome(await svcJobs(attachReceiptExtractCmd.name, { job_id: "j_other", expense_id: id2, upload_id: "upl_9999", extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "receipt_replaced" });
     expect(writeBackOutcome(await svcJobs(attachReceiptExtractCmd.name, { job_id: "j_none", expense_id: id2, upload_id: r.receiptUploadId!, extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "attached", reason: "unreadable" });
     expect(JSON.parse((await expense(id2)).receiptExtractJson!)).toMatchObject({ totalCents: null, read: false, source: "ocr" });
-    await w.db.update(expenses).set({ receiptExtractJson: JSON.stringify({ totalCents: 100, date: "2026-10-01", merchant: "Email intake (demo)" }) }).where(eq(expenses.id, id2));
+    await w.db.update(expenses).set({ receiptExtractJson: JSON.stringify({ totalCents: 100, date: "2026-10-01", merchant: "Email intake" }) }).where(eq(expenses.id, id2));
     expect(writeBackOutcome(await svcJobs(attachReceiptExtractCmd.name, { job_id: "j_new", expense_id: id2, upload_id: r.receiptUploadId!, extract: null, model: OCR_MODEL, neurons: 0 }))).toEqual({ ok: true, status: "skipped", reason: "has_extract" });
   });
 });

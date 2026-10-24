@@ -22,7 +22,7 @@ const FIXTURE = [
   event("e3", { $workers: { scriptName: "weft-core", event: { request: { headers: { "x-weft-ctx": CTX, "x-weft-principal": "usr_dana" } } } } }),
   event("e4", { source: { msg: `minted ${MCP_KEY} and ${MCP_KEY}` } }),
   // Mentions and redacted values that are not credentials.
-  event("e5", { $metadata: { id: "e5", service: "weft", message: "Use the MCP key from your demo company (Bearer wk_mcp_...)" } }),
+  event("e5", { $metadata: { id: "e5", service: "weft", message: "Use the MCP key from your workspace (Bearer wk_mcp_...)" } }),
   event("e6", { $workers: { event: { request: { headers: { "x-weft-proxy": "[redacted]", "x-weft-tables": "employees,payroll_runs" } } } } }),
   event("e7", { source: `x-weft-proxy: ${"c".repeat(40)} ${WEFT_KEY}` }),
 ];

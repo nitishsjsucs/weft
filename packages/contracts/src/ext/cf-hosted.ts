@@ -2,6 +2,7 @@
 // Additive only. What the front Worker, the Durable Objects and the hosted web agree on: world names, the settings
 // Nitish chose on 2026-10-20, the KV `weft-config` keys, the session and human-grant cookies, the trust headers and
 // the HMAC'd `x-weft-ctx`, the WebSocket change feed, the hosted HTTP paths and bodies, and the hosted error codes.
+// The session settings were changed on 2026-10-23 (HOSTED_SETTINGS).
 // Implemented by cf4-worker (front, LobbyDO, CompanyDO) and used by cf5-web. Types, constants and pure helpers only:
 // the front Worker imports this file and must stay near its 10 ms CPU budget, so nothing here builds a schema.
 import type { ErrorTag } from "../errors";
@@ -28,25 +29,35 @@ export const HOSTED_CLOCK = { at: "2026-10-26T15:30:00.000Z", rate: 0 } as const
  * How far a hosted world's clock moves (design 6.3). One advance moves it at most `maxStepDays` (so "+1 hour",
  * "+1 day" and "next routine" work and one request cannot jump years, which writes and reads the rows of every cron
  * slot and queues a run for each), and never past `maxDaysFromStart` after HOSTED_CLOCK.at; past it the visitor
- * resets the demo company. A refusal is 400 CLOCK_LIMIT. Node worlds have no such bound.
+ * resets the workspace. A refusal is 400 CLOCK_LIMIT. Node worlds have no such bound.
  */
 export const HOSTED_CLOCK_LIMITS = { maxStepDays: 7, maxDaysFromStart: 60 } as const;
 
 // Settings ------------------------------------------------------------------------------------------------------
 
 /**
- * The hosted settings from design section 0 (Nitish, 2026-10-20). They override every other value in the design
- * and tracks (the 9.4 config sketch's WEFT_POOL_SIZE 4 and WEFT_LIVE_USD_CAP 0.50, and 6.2's 15 and 60 minute leases
- * and 3 leases per IP). Spend caps are HOSTED_CAP_DEFAULTS in cf-agent.ts.
+ * The hosted settings from design section 0. Nitish chose them on 2026-10-20; on 2026-10-23 he chose the lease
+ * times, the resets per lease and the leases per IP hash below, because only two people use the hosted app (Nitish
+ * and his interviewer), so a session shows no limits. They override every other value in the design and tracks (the
+ * 9.4 config sketch's WEFT_POOL_SIZE 4 and WEFT_LIVE_USD_CAP 0.50, 6.2's 15 and 60 minute leases and 3 leases per IP,
+ * and the 2026-10-20 values: 30 minutes idle, 3 hours in all, 20 leases per IP hash a day, 3 resets per lease). The
+ * guards on the shared account quotas stay as they were: Turnstile and the human grant, HOSTED_RATE_LIMITS, the spend
+ * caps (HOSTED_CAP_DEFAULTS in cf-agent.ts), each generation's rows budget, the level 3 brake (RESETS_PAUSED and no
+ * new leases), the showcase read cap and HOSTED_CLOCK_LIMITS.
  */
 export const HOSTED_SETTINGS = {
   /** Pool slots besides the showcase and slot-smoke, so the whole pool seeds on the first UTC day. */
   poolSize: 2,
-  leaseIdleMinutes: 30,
-  leaseTotalMinutes: 180,
-  leasesPerIpHashPerDay: 20,
-  /** Visitor resets ("Reset demo data...") per lease. */
-  resetsPerLease: 3,
+  /** A lease ends after 24 hours without activity (2026-10-23). */
+  leaseIdleMinutes: 1440,
+  /** No total cap in practice: 30 days (2026-10-23). It stays a number, so the cookie's `exp` and `leaseExpiresMs`
+   * still name the lease. */
+  leaseTotalMinutes: 43_200,
+  /** High enough that two people never meet it (2026-10-23); it still refuses past its value. */
+  leasesPerIpHashPerDay: 500,
+  /** Resets ("Reset workspace data...") per lease, high enough that two people never meet it (2026-10-23). Every
+   * reset is still refused at level 3 (RESETS_PAUSED), and each one starts a generation with its own rows budget. */
+  resetsPerLease: 1_000,
   /** The human grant a mutation needs, refreshed by an invisible Turnstile run. */
   humanGrantMinutes: 10,
   /** AI Search Help queries per UTC day (a Lobby counter). */
@@ -193,11 +204,11 @@ export interface TurnstileTokenBody { token: string }
 export interface LeaseInfo { slot: string; gen: number; expiresAt: string; idleExpiresAt: string; resetsLeft: number }
 export type LeaseResult =
   | ({ status: "leased" } & LeaseInfo)
-  /** "All N demo companies are in use; one frees in about M min". */
+  /** "All N workspaces are in use. One frees in about M min." */
   | { status: "waitlist"; position: number; poolSize: number; etaMinutes: number | null }
-  /** Every demo company is in use and the waitlist is full (the Lobby's cap on live entries): no place in line. */
+  /** Every workspace is in use and the waitlist is full (the Lobby's cap on live entries): no place in line. */
   | { status: "full"; poolSize: number; etaMinutes: number | null }
-  /** "Today's demo budget is used up; back after 00:00 UTC". */
+  /** "Today's budget is used up; back after 00:00 UTC." */
   | { status: "budget"; reopensAt: string }
   | { status: "ip_limit"; reopensAt: string }
   /** Degradation level 3 or more: no new leases. */
@@ -256,9 +267,9 @@ export const HOSTED_ERRORS = {
   AGENT_PAUSED: { status: 503, tag: "Refused" },
   /** A hosted clock advance past HOSTED_CLOCK_LIMITS. */
   CLOCK_LIMIT: { status: 400, tag: "ValidationError" },
-  /** This demo company used its rows budget for this generation (design 6.3): reset it, or come back later. */
+  /** This workspace used its rows budget for this generation (design 6.3): reset it, or come back later. */
   DEMO_LIMIT: { status: 429, tag: "RateLimitExceeded" },
-  /** The shared showcase read its rows for the UTC day (design 6.3); leased demo companies and the static pages work. */
+  /** The shared showcase read its rows for the UTC day (design 6.3); leased workspaces and the static pages work. */
   SHOWCASE_LIMIT: { status: 503, tag: "Refused" },
   /** Past level 3 of the day's share no reset starts (a reset would refill a generation's rows budget); the lease goes on. */
   RESETS_PAUSED: { status: 503, tag: "Refused" },

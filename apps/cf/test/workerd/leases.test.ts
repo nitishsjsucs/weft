@@ -52,7 +52,7 @@ describe("leases", () => {
     expect(await notes(h.visitor())).not.toContain("only in a");
   });
 
-  it("resets a visitor's world through the Lobby: new generation cookie, old one 409, at most 3", async () => {
+  it("resets a visitor's world through the Lobby: new generation cookie, old one 409, at most resetsPerLease", async () => {
     await releaseAll();
     const v = h.visitor("198.51.100.103");
     const l = await v.lease();
@@ -61,7 +61,7 @@ describe("leases", () => {
     const r = await v.fetch("/api/v1/sim/reset", { method: "POST", body: JSON.stringify({ profile: "rich" }) });
     expect(r.status).toBe(200);
     const body = await r.json() as { ok: boolean; gen: number; resetsLeft: number; profile: string };
-    expect(body).toMatchObject({ ok: true, gen: l.gen! + 1, resetsLeft: 2, profile: "rich" });
+    expect(body).toMatchObject({ ok: true, gen: l.gen! + 1, resetsLeft: HOSTED_SETTINGS.resetsPerLease - 1, profile: "rich" });
     expect(v.jar.cookies.get(SESSION_COOKIE)).not.toBe(oldCookie);
     expect(await notes(v)).not.toContain("before reset");
 
@@ -92,7 +92,12 @@ describe("leases", () => {
     const base = await v.fetch("/api/v1/sim/reset", { method: "POST", body: JSON.stringify({ profile: "base" }) });
     expect(base.status).toBe(400);
     expect(await base.json()).toMatchObject({ code: "HOSTED_RESET_PROFILE" });
-    for (let i = 0; i < 2; i++) expect((await v.fetch("/api/v1/sim/reset", { method: "POST", body: "{}" })).status).toBe(200);
+    // The cap is high (Nitish, 2026-10-23), so the lease's count moves to one short of it instead of that many resets.
+    const lobbySql = await h.core.getDurableObjectStorage("LobbyDO", { name: DO_NAMES.lobby });
+    await lobbySql.exec(`UPDATE leases SET resets = ? WHERE slot = ?`, HOSTED_SETTINGS.resetsPerLease - 1, l.slot!);
+    const last = await v.fetch("/api/v1/sim/reset", { method: "POST", body: "{}" });
+    expect(last.status).toBe(200);
+    expect(await last.json()).toMatchObject({ ok: true, resetsLeft: 0 });
     const limit = await v.fetch("/api/v1/sim/reset", { method: "POST", body: "{}" });
     expect(limit.status).toBe(429);
     expect(await limit.json()).toMatchObject({ code: "RESET_LIMIT" });
@@ -146,14 +151,18 @@ describe("leases", () => {
     expect(await notes(next)).not.toContain("left behind");
   });
 
-  it("ends leases at their 3 hour total even when active, and keeps active leases within it", async () => {
+  it("ends leases at their total time even when active, and keeps active leases within it", async () => {
     await releaseAll();
     const v = h.visitor("198.51.100.106");
     await v.lease();
     const l = await lobby();
     expect((await l.sweep({ now: Date.now() + 20 * 60_000 })).released).toBe(0);
     await v.fetch("/api/v1/notes");
-    expect((await l.sweep({ now: Date.now() + (HOSTED_SETTINGS.leaseTotalMinutes + 1) * 60_000 })).released).toBe(1);
+    // The total is 30 days (Nitish, 2026-10-23): the lease's start moves to 10 minutes short of it, so the sweep 20
+    // minutes on finds it far inside its idle time and past its total.
+    const sql = await h.core.getDurableObjectStorage("LobbyDO", { name: DO_NAMES.lobby });
+    await sql.exec(`UPDATE leases SET started_at = started_at - ?`, (HOSTED_SETTINGS.leaseTotalMinutes - 10) * 60_000);
+    expect((await l.sweep({ now: Date.now() + 20 * 60_000 })).released).toBe(1);
   });
 
   it("gives a clean slot a new generation without a reset", async () => {
@@ -167,11 +176,13 @@ describe("leases", () => {
     expect((await v.fetch("/api/v1/notes")).status).toBe(409);
   });
 
-  it("caps leases at 20 per IP hash per UTC day", async () => {
+  it("caps leases at leasesPerIpHashPerDay per IP hash per UTC day", async () => {
     await releaseAll();
     const ip = "192.0.2.77";
     const l = await lobby();
-    for (let i = 0; i < HOSTED_SETTINGS.leasesPerIpHashPerDay; i++) {
+    // The cap is high (Nitish, 2026-10-23): the address's count starts two short of it, and two real leases reach it.
+    await l.extrasCounterAdd(`ip:${await ipHash(h.secrets.session, ip, utcDay())}`, HOSTED_SETTINGS.leasesPerIpHashPerDay - 2);
+    for (let i = 0; i < 2; i++) {
       const r = await h.visitor(ip).lease();
       expect(r.status).toBe("leased");
       await l.release({ slot: r.slot!, reason: "test" });

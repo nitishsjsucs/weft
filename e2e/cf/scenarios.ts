@@ -149,12 +149,12 @@ const s7: Scenario = {
     has(trace, "$5,302,554.78", "chart total in the run's tool result");
     has(trace, "stacked_bar", "chart kind");
     const lena = await w.get<{ name?: string; displayName?: string; payRates?: { amount: { amount: number; display: string }; effectiveFrom: string }[] }>("/api/v1/workers/wrk_0026");
-    has(JSON.stringify(lena), "Lena Brooks (demo)", "wrk_0026");
+    has(JSON.stringify(lena), "Lena Brooks", "wrk_0026");
     const rate = (lena.payRates ?? []).find((r) => r.effectiveFrom === "2026-10-16");
     check(rate && rate.amount.amount === 13_924_000, `Lena Brooks's pay rate from 2026-10-16 is $139,240.00 (got ${JSON.stringify(rate?.amount ?? null)})`);
     const first = await w.get<{ seq: number; command: string; ts: string }>("/api/v1/actions/1");
     check(/2026-10-09/.test(first.ts), `audit #1 is recorded Oct 9 (got ${first.ts} ${first.command})`);
-    return `Sep 2026 $537,996.96, Oct 2026 to date $287,078.55, total $5,302,554.78; Lena Brooks (demo) ${rate.amount.display} effective Oct 16, audit #1 ${first.command} on ${first.ts.slice(0, 10)}`;
+    return `Sep 2026 $537,996.96, Oct 2026 to date $287,078.55, total $5,302,554.78; Lena Brooks ${rate.amount.display} effective Oct 16, audit #1 ${first.command} on ${first.ts.slice(0, 10)}`;
   },
 };
 
@@ -162,8 +162,8 @@ const s6: Scenario = {
   id: "6", title: "Time off with a coverage conflict",
   async run({ world: w }) {
     const reqs = list(await w.get<Page<{ id: string; workerName: string; approverPrincipalId: string; checks: { rule: string; message: string; evidence: { label: string; ref: string }[] }[]; balance_now?: { hours: number }; holidays_note?: string }>>("/api/v1/time-off/requests?status=pending"));
-    const ruth = reqs.find((r) => r.workerName === "Ruth Okoro (demo)");
-    check(ruth, `Ruth Okoro (demo) has a pending request (got ${reqs.map((r) => r.workerName).join(", ")})`);
+    const ruth = reqs.find((r) => r.workerName === "Ruth Okoro");
+    check(ruth, `Ruth Okoro has a pending request (got ${reqs.map((r) => r.workerName).join(", ")})`);
     eq(ruth.approverPrincipalId, "usr_imani", "Ruth's request routes to");
     const coverage = ruth.checks.find((c) => c.rule === "COVERAGE_CONFLICT");
     check(coverage, "Ruth's request has a coverage check");
@@ -171,12 +171,12 @@ const s6: Scenario = {
     has(ruth.checks.find((c) => c.rule === "INCLUDES_HOLIDAY")?.message, "2026-11-26, 2026-11-27, charged 0 h", "holiday check");
     const outIds = coverage.evidence.filter((e) => e.label === "also out").map((e) => e.ref);
     const out = await Promise.all(outIds.map(async (id) => (await w.get<{ workerName: string }>(`/api/v1/time-off/requests/${id}`)).workerName));
-    eq(out.sort().join(", "), "Grace Adeyemi (demo), Oscar Lindqvist (demo)", "also out those days");
+    eq(out.sort().join(", "), "Grace Adeyemi, Oscar Lindqvist", "also out those days");
     eq(ruth.balance_now?.hours, 89, "Ruth's vacation hours left");
     const run = await ask(w, "How many vacation days will Ruth have left?");
     eq(run.status, "done", "time-off run status");
     has(run.summary, "89 hours", "time-off answer");
-    return `Ruth Okoro (demo): ${coverage.message}; also out ${out.join(" and ")}; 89 hours left; Nov 26 and 27 holidays at 0 h`;
+    return `Ruth Okoro: ${coverage.message}; also out ${out.join(" and ")}; 89 hours left; Nov 26 and 27 holidays at 0 h`;
   },
 };
 
@@ -190,7 +190,7 @@ const s2: Scenario = {
     const submit = (await pending(w)).find((p) => p.command === "payroll.submit_run");
     check(submit, "a Submit card waits in the Inbox");
     has(submit.headline, "47 paychecks, total cost $267,919.36", "Submit card");
-    eq(submit.diff.find((d) => d.label === "Excluded (blocked)")?.after, "Mira Delgado (demo)", "excluded as blocked");
+    eq(submit.diff.find((d) => d.label === "Excluded (blocked)")?.after, "Mira Delgado", "excluded as blocked");
     const checks = list(await w.get<Page<{ id: string; workerId: string; flags?: { rule: string; message: string }[] }>>("/api/v1/payrolls/pay_2026_10_30/paychecks?limit=100"));
     const lenaId = checks.find((p) => p.workerId === "wrk_0026")?.id;
     check(lenaId, "Lena Brooks has an Oct 30 paycheck");
@@ -198,11 +198,11 @@ const s2: Scenario = {
     const flag = lena.flags.find((f) => f.rule === "GROSS_CHANGE");
     has(flag?.message, "18.0%", "Lena Brooks's gross change flag");
     has(flag?.message, "($4,916.67 to $5,801.67)", "Lena Brooks's gross change flag");
-    return `Explained 4 flagged paychecks; Submit card 47 paychecks $267,919.36, Mira Delgado (demo) excluded; Lena Brooks gross up 18.0% ($4,916.67 to $5,801.67)`;
+    return `Explained 4 flagged paychecks; Submit card 47 paychecks $267,919.36, Mira Delgado excluded; Lena Brooks gross up 18.0% ($4,916.67 to $5,801.67)`;
   },
 };
 
-const NOOR_WELCOME = "Please welcome Noor Castellanos (demo), our new Senior Firmware Engineer, joining Hardware.";
+const NOOR_WELCOME = "Please welcome Noor Castellanos, our new Senior Firmware Engineer, joining Hardware.";
 
 const s3: Scenario = {
   id: "3", title: "New hire in a new state: Mark accepted, approvals 2 to 5",
@@ -210,7 +210,7 @@ const s3: Scenario = {
     const before = await approvals(w);
     eq(before.length, 2, "approvals in the Inbox before Mark accepted");
     const accepted = await w.post<{ summary: string; data: { worker_id: string } }>("/api/v1/offers/offr_0001/accept", {});
-    has(accepted.summary, "Noor Castellanos (demo)", "accepted offer");
+    has(accepted.summary, "Noor Castellanos", "accepted offer");
     const workerId = accepted.data.worker_id;
     const rr = await until("the new hire readiness run", async () => list(await w.get<Page<RoutineRun>>("/api/v1/routines/rt_new_hire/runs?limit=5")).find((r) => r.precheck?.subjectRefs?.includes(workerId)) ?? null,
       (r) => r !== null && TERMINAL_ROUTINE(r.status), 120_000, 750);
@@ -220,7 +220,7 @@ const s3: Scenario = {
     eq(after.length, 5, "approvals after Mark accepted");
     eq(fresh.filter((p) => p.command === "tax.register_state_account").length, 2, "CO registrations waiting");
     const laptop = fresh.find((p) => p.command === "it.order_device");
-    check(laptop && laptop.moneyCents === 189_900 && laptop.headline.includes("Noor Castellanos (demo)"), `Noor's $1,899.00 laptop waits (got ${laptop?.headline ?? "none"})`);
+    check(laptop && laptop.moneyCents === 189_900 && laptop.headline.includes("Noor Castellanos"), `Noor's $1,899.00 laptop waits (got ${laptop?.headline ?? "none"})`);
     check(fresh.every((p) => p.taintedBy === null), "the new hire proposals are untainted");
     const acts = await actionsOf(w, rr!.agentRunId!);
     eq(acts.filter((a) => a.command === "it.create_account").length, 3, "IT accounts created by the agent");
@@ -357,13 +357,13 @@ const s5: Scenario = {
     const decisions = (await pending(w)).filter((p) => p.command === "expenses.decide" && p.proposerRunId === rr.agentRunId);
     eq(decisions.length, 8, "expense proposals, one per claim");
     const find = (who: string, amount: string) => decisions.find((p) => p.headline.includes(who) && p.headline.includes(amount));
-    const victor = find("Victor Huang (demo)", "$96.00");
+    const victor = find("Victor Huang", "$96.00");
     check(victor && victor.args.decision === "decline" && victor.args.reason_code === "duplicate", "Victor Huang's $96.00 software claim is declined as a duplicate");
-    check(find("Wren Calloway (demo)", "$54.20")?.args.decision === "approve_taxable", "Wren Calloway's late $54.20 meals are approved as taxable");
-    check(find("Lena Brooks (demo)", "$86.40")?.args.decision === "return", "Lena Brooks's $86.40 meals are returned for attendees");
-    const kofi = find("Kofi Mensah (demo)", "$1,249.00");
+    check(find("Wren Calloway", "$54.20")?.args.decision === "approve_taxable", "Wren Calloway's late $54.20 meals are approved as taxable");
+    check(find("Lena Brooks", "$86.40")?.args.decision === "return", "Lena Brooks's $86.40 meals are returned for attendees");
+    const kofi = find("Kofi Mensah", "$1,249.00");
     check(kofi?.args.decision === "approve" && /California/.test(String(kofi.args.note ?? "")), "Kofi Mensah's $1,249.00 equipment claim is proposed Approve with the California note");
-    const mateo = find("Mateo Alvarez (demo)", "$412.38");
+    const mateo = find("Mateo Alvarez", "$412.38");
     check(mateo && mateo.args.decision === "approve", "Mateo Alvarez's $412.38 travel is proposed Approve");
     const expenseId = String(mateo.args.expense_id);
     const checks = list(await w.get<Page<{ id: string; workerId: string; gross: { amount: number } }>>("/api/v1/payrolls/pay_2026_10_30/paychecks?limit=100"));

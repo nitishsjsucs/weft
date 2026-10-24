@@ -68,7 +68,7 @@ export async function operatorGrant(request: APIRequestContext, origin: string, 
   if (res.status() !== 200) throw new HttpError(res.status(), null, "POST", "/api/_admin/grant", await res.text());
 }
 
-/** The provider for new runs in the lease's world: scripted unless WEFT_CF_LIVE=1 (then the demo default). */
+/** The provider for new runs in the lease's world: scripted unless WEFT_CF_LIVE=1 (then the default). */
 export async function pinProvider(world: WorldApi): Promise<void> {
   await world.put("/api/_hosted/model", { provider: LIVE ? null : "scripted" });
   const s = await world.get<{ provider: { id: string; reason: string } }>("/api/_session");
@@ -108,9 +108,10 @@ export const test = base.extend<{ target: Target; operator: OperatorFixture; con
   },
 });
 
-/** The banner's world once the hosted shell has read the session. */
+/** The world the tab reads once the hosted shell has read the session, from the banner's hidden marker (a leased
+ * world shows no banner unless there is something to say). */
 export async function bannerWorld(page: Page): Promise<string | null> {
-  const banner = page.getByTestId("hosted-banner");
-  await expect(banner).toBeVisible({ timeout: 30_000 });
-  return banner.getAttribute("data-world");
+  const marker = page.getByTestId("hosted-world");
+  await expect(marker).toBeAttached({ timeout: 30_000 });
+  return marker.getAttribute("data-world");
 }

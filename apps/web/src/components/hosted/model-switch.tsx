@@ -1,6 +1,6 @@
 "use client";
 // The model switch on the Simulators page (docs/cloudflare/design.md 5.2): which provider new agent runs in this
-// visitor's demo company use. It writes the per-world setting through PUT /api/_hosted/model; a run keeps the
+// visitor's workspace use. It writes the per-world setting through PUT /api/_hosted/model; a run keeps the
 // provider it was created with. Hosted build only.
 import { Cpu } from "lucide-react";
 import { useState } from "react";
@@ -14,9 +14,9 @@ import { providerLabel, providerNote } from "./copy";
 import { useHostedState } from "./use-hosted";
 
 export const MODEL_CHOICES: { id: HostedProviderId | null; note: string }[] = [
-  { id: null, note: "OpenAI gpt-5.6-luna through AI Gateway, unless the demo's settings say otherwise." },
-  { id: "openai", note: "Through Cloudflare AI Gateway, with logs and caching. Metered against the demo's caps." },
-  { id: "workers_ai", note: "Runs on Cloudflare Workers AI. Metered in neurons against the demo's daily allowance." },
+  { id: null, note: "OpenAI gpt-5.6-luna through AI Gateway, unless Weft's settings say otherwise." },
+  { id: "openai", note: "Through Cloudflare AI Gateway, with logs and caching. Metered against the spend caps." },
+  { id: "workers_ai", note: "Runs on Cloudflare Workers AI. Metered in neurons against the daily allowance." },
   { id: "scripted", note: "Canned answers from the scripted provider. No model calls and no spend." },
 ];
 
@@ -64,7 +64,7 @@ export function ModelSwitchSection() {
         })}
       </Card>
       <p className="mt-2 text-1 text-gray-11" data-testid="hosted-model-current">
-        {status ? `New runs use ${providerLabel(status.provider.id)}.` : "Reading the demo's settings..."} {leased ? "A run keeps the model it started with." : "Start your demo company to choose the model."}
+        {status ? `New runs use ${providerLabel(status.provider.id)}.` : "Reading the settings..."} {leased ? "A run keeps the model it started with." : "Open your workspace to choose the model."}
       </p>
       {note ? <p className="mt-1 text-1 text-amber-11">{note}</p> : null}
       {error ? <p role="alert" className="mt-1 text-1 text-red-11">{error}</p> : null}

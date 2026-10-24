@@ -9,13 +9,6 @@ export function useHostedState(): HostedState {
   return useSyncExternalStore(hostedStore.subscribe, hostedStore.get, hostedStore.get);
 }
 
-/** Date.now(), refreshed every `ms` (a local timer; it makes no request). */
-export function useNow(ms = 15_000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [ms]);
-  return now;
-}
-
 export interface HostedQuery<T> { data: T | null; error: string | null; loading: boolean; reload: () => void }
 
 /** GET a hosted route (outside the typed /v1 client): once, then every `refreshMs` under the poll scheduler. */

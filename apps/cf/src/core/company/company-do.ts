@@ -82,7 +82,7 @@ const sameWorld = (a: WorldStamp | null, b: WorldStamp | null): boolean =>
 /** An outbox row whose body is a job (a row that is not is dropped as poison). */
 type SendableRow = OutboxRow & { job: NonNullable<OutboxRow["job"]> };
 
-const leaseEndedError = () => hostedError("LEASE_ENDED", "This demo company's lease has ended", { headers: { [LEASE_HEADER]: "ended" } });
+const leaseEndedError = () => hostedError("LEASE_ENDED", "This workspace has ended", { headers: { [LEASE_HEADER]: "ended" } });
 
 /** The MCP key a request carries (Bearer, or x-api-key), or "" (the front reads it the same way). */
 const mcpKeyOf = (request: Request): string =>
@@ -332,7 +332,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     // generation never minted is refused first, from the slot's own stored keys: a forged wk_mcp_<slot>_<gen>_... key
     // on an idle leased slot never reaches the Lobby (each such call would be a Lobby request and its rows).
     if (url.pathname === DO_PATHS.mcp && stamp.mode === "slot") {
-      if (!this.mcpKeyMinted(request)) return plainError(401, "Unauthorized", "MCP_KEY_INVALID", "This MCP key is not one this demo company minted");
+      if (!this.mcpKeyMinted(request)) return plainError(401, "Unauthorized", "MCP_KEY_INVALID", "This MCP key is not one this workspace minted");
       if (!(await this.mcpLeaseOpen(stamp))) return leaseEndedError();
       stamp = this.stamp;
       if (!stamp || !this.engine || !sameWorld(this.engineFor, stamp)) return this.notReady();
@@ -342,7 +342,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     // A mutation is counted from here (no await since the gate) until it is answered, so a clean check or a reset
     // sees every row it writes; while one of those runs, new mutations wait outside.
     const counted = isMutation(request.method);
-    if (counted && this.quiescing) return plainError(503, "NotImplemented", "WORLD_REBUILDING", "This demo company is being reset; try again in a moment");
+    if (counted && this.quiescing) return plainError(503, "NotImplemented", "WORLD_REBUILDING", "This workspace is being reset; try again in a moment");
     if (counted) this.inflight += 1;
     if (c.visitor && c.visitor === stamp.visitor) this.lastActivity = Date.now();
 
@@ -373,7 +373,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
   private notReady(): Response {
     const restoring = !!this.ctx.storage.kv.get(RESTORE_KEY);
     return plainError(503, "NotImplemented", restoring ? "WORLD_REBUILDING" : "WORLD_NOT_READY",
-      restoring ? "This demo company is being rebuilt; try again in a minute" : this.bootError ? "This demo company failed to start" : "This demo company is not provisioned yet");
+      restoring ? "This workspace is being rebuilt; try again in a minute" : this.bootError ? "This workspace failed to start" : "This workspace is not provisioned yet");
   }
 
   private lobby() {
@@ -450,8 +450,8 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     if (c.slot !== stamp.slot) return ended();
     switch (stamp.mode) {
       case "showcase":
-        if (isMutation(method) && path !== DO_PATHS.mcp) return hostedError("WORLD_READ_ONLY", "The shared demo company is read-only; start your own demo company to make changes");
-        if (path === DO_PATHS.mcp || path === DO_PATHS.live) return hostedError("LEASE_REQUIRED", "Start your own demo company first");
+        if (isMutation(method) && path !== DO_PATHS.mcp) return hostedError("WORLD_READ_ONLY", "The shared workspace is read-only; open your own workspace to make changes");
+        if (path === DO_PATHS.mcp || path === DO_PATHS.live) return hostedError("LEASE_REQUIRED", "Open your own workspace first");
         return null;
       case "slot":
         if (c.gen !== stamp.gen) return ended();
@@ -529,7 +529,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   private async switchModel(request: Request, stamp: WorldStamp): Promise<Response> {
     if (request.method !== "PUT") return plainError(405, "ValidationError", "METHOD", "PUT a ModelSwitchBody");
-    if (stamp.mode === "showcase") return hostedError("WORLD_READ_ONLY", "The shared demo company is read-only");
+    if (stamp.mode === "showcase") return hostedError("WORLD_READ_ONLY", "The shared workspace is read-only");
     const body = await readJson<ModelSwitchBody>(request);
     const allowed: (HostedProviderId | null)[] = ["openai", "workers_ai", "scripted", null];
     if (!body || !allowed.includes(body.provider ?? null)) return plainError(400, "ValidationError", "PROVIDER", "provider is openai, workers_ai, scripted or null");
@@ -539,7 +539,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
 
   private async mintKey(request: Request, stamp: WorldStamp): Promise<Response> {
     if (request.method !== "POST") return plainError(405, "ValidationError", "METHOD", "POST to mint the lease's MCP key");
-    if (stamp.mode !== "slot") return hostedError("LEASE_REQUIRED", "MCP keys belong to a leased demo company");
+    if (stamp.mode !== "slot") return hostedError("LEASE_REQUIRED", "MCP keys belong to your own workspace");
     const origin = (this.env.WEFT_PUBLIC_ORIGIN ?? "").replace(/\/$/, "");
     // The key lives as long as its lease: the lease's own total expiry, not the minute it was minted plus a lease.
     const startedAt = stamp.leaseStartedAt ?? Date.now();
@@ -579,7 +579,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
    * bring up the world being replaced and answer for it.
    */
   private async slotExtras(): Promise<{ port: SlotExtrasPort; engine: WorldEngine }> {
-    const rebuilding = () => new Error("WORLD_NOT_READY: this demo company is being reset");
+    const rebuilding = () => new Error("WORLD_NOT_READY: this workspace is being reset");
     if (this.quiescing || this.rebuilding) throw rebuilding();
     if (!this.engine && this.mayBoot()) {
       await this.startEngine();
@@ -588,7 +588,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
     }
     const engine = sameWorld(this.engineFor, this.stamp) ? this.engine : null;
     const port = engine?.extras;
-    if (!engine || !port) throw new Error(this.bootError ? "WORLD_NOT_READY: this demo company failed to start" : "WORLD_NOT_READY: this demo company is not running");
+    if (!engine || !port) throw new Error(this.bootError ? "WORLD_NOT_READY: this workspace failed to start" : "WORLD_NOT_READY: this workspace is not running");
     return { port, engine };
   }
   /** A job's generation must be the world's: a late job of the previous visitor's generation writes nothing here. */
@@ -911,10 +911,10 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       logEvent("budget.limit", { slot: stamp.slot, gen: stamp.gen, outcome: over, rowsRead: t.rowsRead, rowsWritten: t.rowsWritten });
     }
     if (stamp.mode === "showcase") {
-      return hostedError("SHOWCASE_LIMIT", "The shared demo company has hit its daily limit; start your own demo company, or come back after 00:00 UTC",
+      return hostedError("SHOWCASE_LIMIT", "The shared workspace has hit its daily limit; open your own workspace, or come back after 00:00 UTC",
         { retryAfterS: Math.max(60, Math.ceil((Date.parse(nextUtcMidnight(Date.now())) - Date.now()) / 1000)) });
     }
-    return hostedError("DEMO_LIMIT", "This demo company has hit its daily limit; reset it, or come back later");
+    return hostedError("DEMO_LIMIT", "This workspace has hit its daily limit; reset it, or come back later");
   }
 
   // Usage ------------------------------------------------------------------------------------------------------

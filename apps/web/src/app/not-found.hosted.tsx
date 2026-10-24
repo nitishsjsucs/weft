@@ -9,8 +9,8 @@ export default function NotFound() {
       <NotFoundRedirect />
       <div className="flex max-w-[420px] flex-col items-center gap-3 text-center">
         <h1 className="text-6 font-semibold text-gray-12">Page not found</h1>
-        <p className="text-2 text-gray-11">This page is not part of the Weft demo.</p>
-        <Link href="/app" className="rounded-sm text-2 text-gray-12 underline underline-offset-2">Open the demo company</Link>
+        <p className="text-2 text-gray-11">This page is not part of Weft.</p>
+        <Link href="/app" className="rounded-sm text-2 text-gray-12 underline underline-offset-2">Open the workspace</Link>
       </div>
     </main>
   );

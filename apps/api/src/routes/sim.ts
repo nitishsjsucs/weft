@@ -60,9 +60,9 @@ const fmtDays = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
  */
 export function hostedClockRefusal(from: string, to: string): string | null {
   const step = Date.parse(to) - Date.parse(from);
-  if (step > HOSTED_CLOCK_LIMITS.maxStepDays * DAY_MS) return `The hosted demo moves the clock at most ${fmtDays(HOSTED_CLOCK_LIMITS.maxStepDays)} at a time; move it in smaller steps`;
+  if (step > HOSTED_CLOCK_LIMITS.maxStepDays * DAY_MS) return `A hosted workspace moves its clock at most ${fmtDays(HOSTED_CLOCK_LIMITS.maxStepDays)} at a time; move it in smaller steps`;
   if (Date.parse(to) - Date.parse(HOSTED_CLOCK.at) > HOSTED_CLOCK_LIMITS.maxDaysFromStart * DAY_MS) {
-    return `The hosted demo's clock stays within ${fmtDays(HOSTED_CLOCK_LIMITS.maxDaysFromStart)} of its start; reset the demo company to start the clock again`;
+    return `A hosted workspace's clock stays within ${fmtDays(HOSTED_CLOCK_LIMITS.maxDaysFromStart)} of its start; reset the workspace to start the clock again`;
   }
   return null;
 }
@@ -240,7 +240,7 @@ export function simRoutes(weft: Weft): Hono<WeftEnv> {
     const { profile } = SimResetBody.parse(await c.req.json().catch(() => ({})));
     if (weft.platform?.kind === "durable" && profile && profile !== HOSTED_RESET_PROFILE) {
       const e = HOSTED_ERRORS.HOSTED_RESET_PROFILE;
-      return c.json({ _tag: e.tag, code: "HOSTED_RESET_PROFILE", message: `The hosted demo resets to the ${HOSTED_RESET_PROFILE} profile only; ${profile} is not available here` }, e.status);
+      return c.json({ _tag: e.tag, code: "HOSTED_RESET_PROFILE", message: `A hosted workspace resets to the ${HOSTED_RESET_PROFILE} profile only; ${profile} is not available here` }, e.status);
     }
     const { ms, profile: seeded, gen } = await resetWorld(weft, { profile });
     return c.json({ ok: true, ms, profile: seeded, ...(gen !== undefined ? { gen } : {}) });

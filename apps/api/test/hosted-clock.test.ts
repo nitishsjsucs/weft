@@ -51,7 +51,7 @@ describe("a hosted world's clock", () => {
     const before = w.storage.stats();
     const r = await advance({ by: "P3D" });
     expect(r.status).toBe(400);
-    expect(r.body).toMatchObject({ code: "CLOCK_LIMIT", message: expect.stringContaining("reset the demo company") });
+    expect(r.body).toMatchObject({ code: "CLOCK_LIMIT", message: expect.stringContaining("reset the workspace") });
     expect(w.storage.stats().rowsWritten - before.rowsWritten).toBe(0);
     expect(await advance({ to: iso(edge) })).toMatchObject({ status: 200, body: { now: iso(edge) } });
     expect((await advance({ by: "PT1M" })).body.code).toBe("CLOCK_LIMIT");

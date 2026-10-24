@@ -1,5 +1,5 @@
 // The hosted visitor session (docs/cloudflare/design.md 6.2): which world this tab reads (the shared showcase or the
-// visitor's own leased slot), the lease and its countdown, the human grant mutations need, and the screens that follow
+// visitor's own leased slot), the lease and when it ends, the human grant mutations need, and the screens that follow
 // a lease ending, a full pool or a spent day budget. The cookies are HttpOnly and set by the front Worker; this module
 // only reads GET /api/_session and posts Turnstile tokens. Nothing here runs on Node.
 import {
@@ -14,7 +14,7 @@ import { createStore } from "./store";
 
 export type BlockedResult = Exclude<LeaseResult, { status: "leased" }>;
 export type EndedReason = "expired" | "server" | "reset_elsewhere";
-/** A world answered past its rows budget (design 6.3): the visitor's own demo company (DEMO_LIMIT, until a reset gives
+/** A world answered past its rows budget (design 6.3): the visitor's own workspace (DEMO_LIMIT, until a reset gives
  * it a new generation), or the shared showcase (SHOWCASE_LIMIT, until 00:00 UTC). */
 export type LimitKind = "demo" | "showcase";
 
@@ -173,18 +173,9 @@ export function resetHostedSession(): void {
   leasing = false;
 }
 
-/** The lease ends at the earlier of its total and idle deadlines. */
+/** The lease ends at the earlier of its total and idle deadlines (the banner asks for the session once it passes). */
 export function leaseDeadline(lease: Pick<LeaseInfo, "expiresAt" | "idleExpiresAt">): number {
   return Math.min(Date.parse(lease.expiresAt), Date.parse(lease.idleExpiresAt));
-}
-
-/** "42 min left", "1 h 5 min left", "under a minute left". */
-export function fmtLeft(ms: number): string {
-  if (ms < 60_000) return "under a minute left";
-  const min = Math.floor(ms / 60_000);
-  if (min < 60) return `${min} min left`;
-  const h = Math.floor(min / 60), m = min % 60;
-  return m ? `${h} h ${m} min left` : `${h} h left`;
 }
 
 /** A request was refused past its world's rows budget (DEMO_LIMIT or SHOWCASE_LIMIT): the banner says so. */
@@ -202,7 +193,7 @@ export function markEnded(reason: EndedReason): void {
   scheduler().setEnv({ feed: "showcase" });
 }
 
-/** The visitor chose to keep browsing the shared demo after a lease ended or a lease was refused. */
+/** The visitor chose to keep browsing the shared workspace after a lease ended or a lease was refused. */
 export function dismissEnded(): void {
   hostedStore.set({ ended: null, blocked: null });
   void refreshSession().then(() => invalidate());

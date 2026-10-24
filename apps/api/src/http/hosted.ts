@@ -123,7 +123,7 @@ export function hostedApp(inner: Hono<WeftEnv>, weft: Weft, meter: SqlMeter | nu
     const url = new URL(req.url);
     const method = req.method.toUpperCase();
     if (MUTATING.has(method) && url.pathname.startsWith("/v1/") && worldReadOnly(weft)) {
-      return hostedError("WORLD_READ_ONLY", "This is the shared read-only demo company; start your own demo company to make changes");
+      return hostedError("WORLD_READ_ONLY", "This is the shared read-only workspace; open your own workspace to make changes");
     }
     if (method !== "GET" || !meter) return inner.fetch(req, c.env);
 

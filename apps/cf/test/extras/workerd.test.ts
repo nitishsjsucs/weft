@@ -106,13 +106,13 @@ describe("extras in workerd", () => {
     await new Promise((r) => setTimeout(r, 2500));
     const wbs = await (await (await mf.getWorker(CORE)).fetch("http://core.local/writebacks?slot=slot-1")).json() as { command: string; args: { extract: { totalCents: number } } }[];
     expect(wbs).toHaveLength(1);
-    expect(wbs[0]).toMatchObject({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_w1", extract: { totalCents: 4138, merchant: "Corner Deli (demo)" } } });
+    expect(wbs[0]).toMatchObject({ command: "expenses.attach_receipt_extract", args: { job_id: "obx_w1", extract: { totalCents: 4138, merchant: "Corner Deli" } } });
     const calls = await (await front("/calls")).json() as { ai: number };
     expect(calls.ai).toBe(1);
   }, 60_000);
 
   it("a render job stores its PDF in R2 through a browser that loads nothing", async () => {
-    const html = renderPdfHtml({ kind: "offer_letter", companyName: "Larkspur Labs (demo)", documentId: "doc_0007", title: "Offer letter", bodyText: "Dear Noor (demo)", sha256: "a".repeat(64), status: "sent", sentAt: null, signature: null });
+    const html = renderPdfHtml({ kind: "offer_letter", companyName: "Larkspur Labs", documentId: "doc_0007", title: "Offer letter", bodyText: "Dear Noor", sha256: "a".repeat(64), status: "sent", sentAt: null, signature: null });
     const sha256 = await sha256Hex(html);
     await core("/send", { queue: "render", body: { v: 1, kind: "render.pdf", jobId: "obx_w2", slot: "slot-1", gen: 1, pdf: "offer_letter", subjectId: "doc_0007", sha256, html } });
     const db = await mf.getD1Database("OPS", CORE);

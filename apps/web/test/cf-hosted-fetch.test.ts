@@ -70,7 +70,7 @@ describe("hosted fetch", () => {
     expect(h.events).toEqual([]);
   });
 
-  it("offers Start my demo company on LEASE_REQUIRED and the ended screen on LEASE_ENDED", async () => {
+  it("offers Open my workspace on LEASE_REQUIRED and the ended screen on LEASE_ENDED", async () => {
     const a = harness([json(409, { _tag: "Conflict", code: "LEASE_REQUIRED", message: "read only" })]);
     expect((await a.f("/api/v1/proposals/p/approve", { method: "POST" })).status).toBe(409);
     expect(a.events).toEqual(["start:mutation"]);
@@ -93,7 +93,7 @@ describe("hosted fetch", () => {
     expect(tablesFor("/api/v1/sim/clock")).toBeNull();
   });
 
-  it("says when a world answers past its rows budget: the visitor's demo company (429) or the shared showcase (503)", async () => {
+  it("says when a world answers past its rows budget: the visitor's workspace (429) or the shared showcase (503)", async () => {
     const demo = harness([json(429, { _tag: "RateLimitExceeded", code: "DEMO_LIMIT", message: "daily limit" })]);
     const res = await demo.f("/api/v1/workers");
     expect(res.status).toBe(429);

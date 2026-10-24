@@ -9,7 +9,7 @@ import { idFromPath, resolveRouteId, ROUTE_SECTIONS, SHELL_ID } from "../src/lib
 import { hydrationPathname, normalizePath, shellPathname } from "../src/lib/pathname";
 import { shellRedirect } from "../src/components/hosted/not-found-redirect";
 import { readLeaseHint, writeLeaseHint } from "../src/lib/hosted/hint";
-import { blockedText, hostedResetError, levelText, providerLabel, providerNote, resetNote, usd, usdMicros } from "../src/components/hosted/copy";
+import { blockedText, HOSTED_COPY, hostedResetError, levelText, providerLabel, providerNote, resetNote, usd, usdMicros } from "../src/components/hosted/copy";
 import { helpPath, helpSummary, searchHelp } from "../src/components/hosted/help-search";
 import { mcpClientConfig, mintMcpKey } from "../src/components/hosted/mcp-connect";
 import { downloadPdf, PDF_WAIT_MAX_MS, pdfPath, pdfRetryMs } from "../src/components/hosted/pdf-button";
@@ -96,13 +96,31 @@ describe("the lease hint", () => {
 
 describe("hosted copy", () => {
   it("says why a lease was not given", () => {
-    expect(blockedText({ status: "waitlist", position: 1, poolSize: 2, etaMinutes: 7.4 })).toBe("All 2 demo companies are in use. One frees in about 7 min. You are number 1 in line.");
-    expect(blockedText({ status: "waitlist", position: 3, poolSize: 2, etaMinutes: null })).toBe("All 2 demo companies are in use. You are number 3 in line.");
-    expect(blockedText({ status: "full", poolSize: 2, etaMinutes: 4.2 })).toBe("All 2 demo companies are in use and the line is full. One frees in about 4 min. Try again in a few minutes.");
-    expect(blockedText({ status: "full", poolSize: 2, etaMinutes: null })).toBe("All 2 demo companies are in use and the line is full. Try again in a few minutes.");
-    expect(blockedText({ status: "budget", reopensAt: "2026-10-27T00:00:00.000Z" })).toBe("Today's demo budget is used up; back after 00:00 UTC.");
-    expect(blockedText({ status: "ip_limit", reopensAt: "bad" })).toBe("This network has started its 20 demo companies for today; back after 00:00 UTC.");
+    expect(blockedText({ status: "waitlist", position: 1, poolSize: 2, etaMinutes: 7.4 })).toBe("All 2 workspaces are in use. One frees in about 7 min. You are number 1 in line.");
+    expect(blockedText({ status: "waitlist", position: 3, poolSize: 2, etaMinutes: null })).toBe("All 2 workspaces are in use. You are number 3 in line.");
+    // A lease ends after a day without activity, so a long wait reads in hours.
+    expect(blockedText({ status: "waitlist", position: 1, poolSize: 2, etaMinutes: 1_380 })).toBe("All 2 workspaces are in use. One frees in about 23 hours. You are number 1 in line.");
+    expect(blockedText({ status: "full", poolSize: 2, etaMinutes: 4.2 })).toBe("All 2 workspaces are in use and the line is full. One frees in about 4 min. Try again later.");
+    expect(blockedText({ status: "full", poolSize: 2, etaMinutes: null })).toBe("All 2 workspaces are in use and the line is full. Try again later.");
+    expect(blockedText({ status: "budget", reopensAt: "2026-10-27T00:00:00.000Z" })).toBe("Today's budget is used up; back after 00:00 UTC.");
+    expect(blockedText({ status: "ip_limit", reopensAt: "bad" })).toBe("This network has opened as many workspaces as it can today; back after 00:00 UTC.");
     expect(blockedText({ status: "closed", level: 3 })).toContain("paused for today");
+  });
+  it("reads as a workspace: no demo or fictional wording and no session times (Nitish, 2026-10-23)", () => {
+    const lines = [
+      ...Object.values(HOSTED_COPY),
+      ...(["waitlist", "full", "budget", "ip_limit", "closed"] as const).map((status) => blockedText({ status, position: 1, poolSize: 2, etaMinutes: 5, reopensAt: "x", level: 3 } as never)),
+      ...(["paused", "budget", "neurons"] as const).map((reason) => providerNote({ id: "scripted", reason }, true)!),
+      ...([0, 1, 2, 3, 4] as const).map(levelText),
+      resetNote(), resetNote(2),
+      ...[["RESETS_PAUSED", 503], ["RESET_LIMIT", 429], ["HOSTED_RESET_PROFILE", 400], ["LEASE_REQUIRED", 409]].map(([c, s]) => hostedResetError(s as number, c as string)!),
+      providerLabel(null),
+    ];
+    for (const line of lines) {
+      expect(line, line).not.toMatch(/demo|fictional|visitor/i);
+      expect(line, line).not.toMatch(/\b\d+ (minutes|hours)\b|resets? (are|is) left/);
+    }
+    expect(Object.keys(HOSTED_COPY)).not.toContain("fictional");
   });
   it("names the provider and why runs fell back to the scripted one", () => {
     expect(providerNote({ id: "openai", reason: "default" }, true)).toBeNull();
@@ -111,20 +129,20 @@ describe("hosted copy", () => {
     expect(providerNote({ id: "scripted", reason: "neurons" }, true)).toContain("Workers AI allowance");
     expect(providerNote({ id: "scripted", reason: "paused" }, true)).toContain("paused");
     expect(providerNote({ id: "openai", reason: "default" }, false)).toContain("paused");
-    expect([null, "openai", "workers_ai", "scripted", "anthropic"].map((p) => providerLabel(p as never))).toEqual(["Demo default", "OpenAI gpt-5.6-luna", "Workers AI gpt-oss-120b", "Scripted, no model calls", "anthropic"]);
+    expect([null, "openai", "workers_ai", "scripted", "anthropic"].map((p) => providerLabel(p as never))).toEqual(["Default", "OpenAI gpt-5.6-luna", "Workers AI gpt-oss-120b", "Scripted, no model calls", "anthropic"]);
     expect(MODEL_CHOICES.map((c) => c.id)).toEqual([null, "openai", "workers_ai", "scripted"]);
   });
   it("explains every degradation level", () => {
     expect(([0, 1, 2, 3, 4] as const).map(levelText).every((t) => t.length > 5)).toBe(true);
   });
   it("hosted reset lines", () => {
-    expect(resetNote(2)).toContain("3 times; 2 resets are left");
-    expect(resetNote(1)).toContain("1 reset is left");
-    expect(resetNote(undefined)).toContain("3 resets are left");
-    expect(hostedResetError(429, "RESET_LIMIT")).toBe("You have used the 3 resets for this demo company.");
+    // What a reset does here, with no count of resets left (a lease allows 1,000 since 2026-10-23).
+    expect(resetNote(2)).toBe("Here a reset rebuilds your own workspace, with the rich data only.");
+    expect(resetNote(undefined)).toBe(resetNote(2));
+    expect(hostedResetError(429, "RESET_LIMIT")).toBe("This workspace has used all of its resets.");
     expect(hostedResetError(503, "RESETS_PAUSED")).toContain("paused until 00:00 UTC");
-    expect(hostedResetError(400, "HOSTED_RESET_PROFILE")).toContain("rich demo data");
-    expect(hostedResetError(409, "LEASE_REQUIRED")).toContain("Start your own demo company");
+    expect(hostedResetError(400, "HOSTED_RESET_PROFILE")).toContain("rich data only");
+    expect(hostedResetError(409, "LEASE_REQUIRED")).toContain("Open your own workspace");
     expect(hostedResetError(500, null)).toBeNull();
   });
   it("money", () => {
@@ -160,7 +178,7 @@ describe("hosted requests", () => {
     expect(await mintMcpKey(f.f)).toEqual(mint);
     expect(f.calls[0]).toMatchObject({ url: "/api/_hosted/mcp-key", init: { method: "POST" } });
     expect(JSON.parse(mcpClientConfig(mint))).toEqual({ mcpServers: { weft: { type: "http", url: mint.url, headers: { Authorization: `Bearer ${mint.key}` } } } });
-    await expect(mintMcpKey(fakeFetch(() => json(409, { message: "Start your demo company first" })).f)).rejects.toThrow("Start your demo company first");
+    await expect(mintMcpKey(fakeFetch(() => json(409, { message: "Open your own workspace first" })).f)).rejects.toThrow("Open your own workspace first");
   });
 
   const pdfBody = () => new Response(new Uint8Array([37, 80, 68, 70]), { status: 200, headers: { "content-type": "application/pdf" } });
@@ -309,8 +327,8 @@ describe("the hosted landing", () => {
 
   it("labels each stats source", () => {
     expect(toLandingStats({ employees: 48, simulatedAgencies: 7, runsLogged: 3 } as never, "snapshot")).toEqual({ source: "snapshot", employees: 48, simulatedAgencies: 7, runsLogged: 3, realAgenciesContacted: 0 });
-    expect(statsNote("snapshot")).toBe("Counted from the demo company's seeded database.");
-    expect(statsNote("live")).toBe("Counted from the demo database as it runs.");
+    expect(statsNote("snapshot")).toBe("Counted from the company's seeded database.");
+    expect(statsNote("live")).toBe("Counted from the database as it runs.");
     expect(statsNote("fallback")).toBe("The API is not reachable, so these are the seed's numbers.");
   });
 

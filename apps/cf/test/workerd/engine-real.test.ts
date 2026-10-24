@@ -355,7 +355,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     const count = async (q: string, ...b: unknown[]) => Number(((await sql.exec(q, ...b)) as { n: number }[])[0]!.n);
     const actionsBefore = await count("SELECT count(*) AS n FROM actions");
     const form = new FormData();
-    for (const [k, v] of Object.entries({ workerId: "wrk_0025", category: "meals", merchant: "Fake Cafe (demo)", amountCents: "1062", transactionDate: "2026-10-20", businessPurpose: "Team lunch" })) form.set(k, v);
+    for (const [k, v] of Object.entries({ workerId: "wrk_0025", category: "meals", merchant: "Fake Cafe", amountCents: "1062", transactionDate: "2026-10-20", businessPurpose: "Team lunch" })) form.set(k, v);
     form.set("receipt", new Blob([PNG], { type: "image/png" }), "lunch.png");
     // The multipart body as bytes with its boundary and length, as a browser sends it (the front needs a Content-Length).
     const encoded = new Response(form);
@@ -366,7 +366,7 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     const id = body.data.expense_id;
     const row = await until(async () => ((await sql.exec("SELECT receipt_extract_json AS j, receipt_upload_id AS upl FROM expenses WHERE id = ?", id)) as { j: string | null; upl: string }[])[0]!, (r) => !!r.j, 60_000);
     const extract = JSON.parse(row.j!) as { source: string; merchant: string | null; read: boolean; ocrJobId: string };
-    expect(extract).toMatchObject({ source: "ocr", merchant: "Fake Cafe (demo)", read: true });
+    expect(extract).toMatchObject({ source: "ocr", merchant: "Fake Cafe", read: true });
     expect(extract.ocrJobId).toMatch(/^obx_[0-9a-f]{16}$/);
     const writeBacks = () => count("SELECT count(*) AS n FROM actions WHERE command = 'expenses.attach_receipt_extract'");
     expect(await writeBacks()).toBe(1);

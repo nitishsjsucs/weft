@@ -15,7 +15,7 @@ export class FakeAi extends WorkerEntrypoint {
       return { shape: [list.length, 768], data: list.map((t) => Array.from({ length: 768 }, (_, i) => ((t.length + i) % 7) / 7)) };
     }
     if (model.includes("whisper")) return { text: "fake dictation" };
-    if (model.includes("mistral")) return { response: JSON.stringify({ merchant: "Fake Cafe (demo)", date: "2026-10-20", totalCents: 1062, currency: "USD", confidence: 0.9 }) };
+    if (model.includes("mistral")) return { response: JSON.stringify({ merchant: "Fake Cafe", date: "2026-10-20", totalCents: 1062, currency: "USD", confidence: 0.9 }) };
     return { output: [{ type: "message", content: [{ type: "output_text", text: "fake" }] }], usage: { input_tokens: 10, output_tokens: 2 } };
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 // The hosted landing's live islands (docs/cloudflare/design.md 3.5). The page is a static asset: it renders the
 // snapshot builder's stats.json and the frozen hosted clock, so an unleased visit costs no Worker or Durable Object
-// request. A visitor who holds a lease (the per-browser hint) then refreshes both from their own demo company.
+// request. A visitor who holds a lease (the per-browser hint) then refreshes both from their own workspace.
 import type { Health, Stats } from "@weft/contracts";
 import { useEffect, useState } from "react";
 import { readLeaseHint } from "@/lib/hosted/hint";

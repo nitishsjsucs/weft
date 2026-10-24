@@ -119,7 +119,7 @@ export async function handleHostedPdf(path: string, deps: PdfRouteDeps): Promise
       "x-content-type-options": "nosniff", "x-weft-pdf": "cached",
     } });
   }
-  if (deps.world.mode === "showcase") return hostedError("LEASE_REQUIRED", "Start your own demo company to render documents");
+  if (deps.world.mode === "showcase") return hostedError("LEASE_REQUIRED", "Open your own workspace to render documents");
   if (!deps.ctx.human && !deps.ctx.smoke) return hostedError("TURNSTILE_REQUIRED", "Confirm you are human to render this document");
   if (!(await deps.flags()).pdf || !deps.render) return refused(503, "PDF_DISABLED", "PDF rendering is switched off");
   // The consumer refuses a document over MAX_PDF_HTML_BYTES, so it is refused here, before it is queued.

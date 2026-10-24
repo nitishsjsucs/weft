@@ -1,66 +1,66 @@
 // Every line the hosted shell shows (docs/cloudflare/design.md 6.2 and 6.5), pure so the unit tests read them. Owner:
-// cf5-web. No React here.
+// cf5-web. No React here. Since 2026-10-23 only two people use the hosted app, so it reads as a workspace and names
+// no session times or counts.
 import type { DegradationLevel, LeaseResult, SessionStatus } from "../../../../../packages/contracts/src/ext/cf-hosted";
-import { HOSTED_SETTINGS } from "../../../../../packages/contracts/src/ext/cf-hosted";
 import { WORKERS_AI_LABEL, type HostedProviderId } from "../../../../../packages/contracts/src/ext/cf-agent";
 
 export const HOSTED_COPY = {
-  showcase: "You are looking at a shared demo company. It is read only, and every visitor sees the same one.",
-  showcaseCta: "Start my demo company",
-  showcaseMore: "Your own copy has the live agent and resets for the next visitor when you are done.",
-  fictional: "Everything here is fictional. Please do not type real personal data.",
-  startTitle: "Start my demo company",
-  startBody: `Weft gives you your own copy of Larkspur Robotics (demo) with the live agent. It lasts up to ${HOSTED_SETTINGS.leaseTotalMinutes / 60} hours, or ${HOSTED_SETTINGS.leaseIdleMinutes} minutes without activity, then resets for the next visitor.`,
-  startForMutation: "The shared demo company is read only. Start your own to make changes.",
+  showcase: "You are looking at a shared, read-only workspace.",
+  showcaseCta: "Open my workspace",
+  showcaseMore: "Your own workspace has the live agent.",
+  startTitle: "Open my workspace",
+  startBody: "Weft gives you your own copy of Larkspur Robotics with the live agent.",
+  startForMutation: "The shared workspace is read only. Open your own to make changes.",
   startCheck: "A quick check that you are a person comes first.",
-  starting: "Starting your demo company...",
+  starting: "Starting your workspace...",
   checkFailed: "The check did not pass. Try again.",
   tryAgain: "Try again",
-  keepBrowsing: "Keep browsing the shared demo",
+  keepBrowsing: "Keep browsing the shared workspace",
   grantTitle: "One quick check",
   grantBody: "Changes need a fresh check that you are a person. It usually passes on its own.",
   grantCancel: "Cancel",
-  endedTitle: "Your demo company has ended",
-  endedExpired: `Demo companies end after ${HOSTED_SETTINGS.leaseIdleMinutes} minutes without activity or ${HOSTED_SETTINGS.leaseTotalMinutes / 60} hours in all, and Weft resets them for the next visitor.`,
-  endedServer: "This demo company was reset for the next visitor.",
-  endedAgain: "Start a new demo company",
-  endedBrowse: "Browse the shared demo",
-  leased: "Your demo company",
-  requestCap: "The demo has used today's shared request allowance. Pages still load; demo data comes back after 00:00 UTC.",
-  apiDown: "The demo's API is not answering right now. Pages still load; try again in a minute.",
+  endedTitle: "Your workspace has ended",
+  endedExpired: "Weft closed it after a long time without activity. A new workspace starts from fresh data.",
+  endedServer: "Weft closed this workspace and reset its data.",
+  endedAgain: "Open a new workspace",
+  endedBrowse: "Browse the shared workspace",
+  requestCap: "Weft has used today's shared request allowance. Pages still load; data comes back after 00:00 UTC.",
+  apiDown: "Weft's API is not answering right now. Pages still load; try again in a minute.",
   rateLimited: "Too many requests from this network for a moment. Pages still load; try again in a minute.",
-  demoLimit: "This demo company has hit its daily limit. Reset it from Viewing as, or come back later.",
-  showcaseLimit: "The shared demo company has hit its daily limit. Start your own demo company, or come back after 00:00 UTC.",
+  demoLimit: "This workspace has hit its daily limit. Reset it from Viewing as, or come back later.",
+  showcaseLimit: "The shared workspace has hit its daily limit. Open your own workspace, or come back after 00:00 UTC.",
 } as const;
+
+/** " One frees in about 7 min." A lease ends after a day without activity, so a long wait reads in hours. */
+function etaLine(etaMinutes: number | null): string {
+  if (etaMinutes === null) return "";
+  const min = Math.max(1, Math.round(etaMinutes));
+  if (min < 90) return ` One frees in about ${min} min.`;
+  return ` One frees in about ${Math.round(min / 60)} hours.`;
+}
 
 /** The line for a lease attempt that did not lease. */
 export function blockedText(r: Exclude<LeaseResult, { status: "leased" }>): string {
   switch (r.status) {
-    case "waitlist": {
-      const eta = r.etaMinutes === null ? "" : ` One frees in about ${Math.max(1, Math.round(r.etaMinutes))} min.`;
-      return `All ${r.poolSize} demo companies are in use.${eta} You are number ${r.position} in line.`;
-    }
-    case "full": {
-      const eta = r.etaMinutes === null ? "" : ` One frees in about ${Math.max(1, Math.round(r.etaMinutes))} min.`;
-      return `All ${r.poolSize} demo companies are in use and the line is full.${eta} Try again in a few minutes.`;
-    }
-    case "budget": return "Today's demo budget is used up; back after 00:00 UTC.";
-    case "ip_limit": return `This network has started its ${HOSTED_SETTINGS.leasesPerIpHashPerDay} demo companies for today; back after 00:00 UTC.`;
-    case "closed": return "New demo companies are paused for today to stay inside the shared daily limits. The shared demo stays open.";
+    case "waitlist": return `All ${r.poolSize} workspaces are in use.${etaLine(r.etaMinutes)} You are number ${r.position} in line.`;
+    case "full": return `All ${r.poolSize} workspaces are in use and the line is full.${etaLine(r.etaMinutes)} Try again later.`;
+    case "budget": return "Today's budget is used up; back after 00:00 UTC.";
+    case "ip_limit": return "This network has opened as many workspaces as it can today; back after 00:00 UTC.";
+    case "closed": return "New workspaces are paused for today to stay inside the shared daily limits. The shared workspace stays open.";
   }
 }
 
 /** Why new runs use the scripted provider, or null when they do not. */
 export function providerNote(p: SessionStatus["provider"], agentEnabled: boolean): string | null {
-  if (!agentEnabled || p.reason === "paused") return "The agent is paused on this demo for now. New runs use the scripted provider.";
-  if (p.reason === "budget") return "Today's demo budget is used up, so new agent runs use the scripted provider until 00:00 UTC.";
+  if (!agentEnabled || p.reason === "paused") return "The agent is paused for now. New runs use the scripted provider.";
+  if (p.reason === "budget") return "Today's budget is used up, so new agent runs use the scripted provider until 00:00 UTC.";
   if (p.reason === "neurons") return "Today's Workers AI allowance is used up, so new agent runs use the scripted provider until 00:00 UTC.";
   return null;
 }
 
 /** The badge for a provider id. */
 export function providerLabel(id: HostedProviderId | null): string {
-  if (id === null) return "Demo default";
+  if (id === null) return "Default";
   if (id === "workers_ai") return WORKERS_AI_LABEL;
   if (id === "openai") return "OpenAI gpt-5.6-luna";
   if (id === "scripted") return "Scripted, no model calls";
@@ -73,23 +73,26 @@ export function levelText(level: DegradationLevel): string {
     case 0: return "Normal.";
     case 1: return "Over 70% of a daily share: pages refresh less often and mostly from the live feed.";
     case 2: return "The day's dollar or neuron cap, or the kill switch: new runs use the scripted provider.";
-    case 3: return "Over 90% of the Durable Object rows or requests share: no new demo companies today; the shared demo stays open.";
+    case 3: return "Over 90% of the Durable Object rows or requests share: no new workspaces today; the shared workspace stays open.";
     case 4: return "The account's Workers request cap: only static pages load until 00:00 UTC.";
   }
 }
 
-/** Hosted reset dialog lines. */
-export function resetNote(resetsLeft: number | null | undefined): string {
-  const left = resetsLeft ?? HOSTED_SETTINGS.resetsPerLease;
-  return `On this hosted demo a reset rebuilds your own demo company (the rich demo data only). You can reset it ${HOSTED_SETTINGS.resetsPerLease} times; ${left} ${left === 1 ? "reset is" : "resets are"} left.`;
+/**
+ * The hosted line in the "Reset workspace data..." dialog: what a reset does here. It names no count: a lease allows
+ * HOSTED_SETTINGS.resetsPerLease resets (1,000 since 2026-10-23), which two people never reach, so the lease's
+ * `resetsLeft` the tour passes is not shown.
+ */
+export function resetNote(_resetsLeft?: number | null): string {
+  return "Here a reset rebuilds your own workspace, with the rich data only.";
 }
 
 /** The reset error line for the hosted gate codes; null leaves the tour's own wording. */
 export function hostedResetError(status: number | null, code: string | null): string | null {
-  if (code === "RESETS_PAUSED") return "Weft has used most of today's free Cloudflare quota, so resets are paused until 00:00 UTC. Your demo company keeps working.";
-  if (code === "RESET_LIMIT" || status === 429) return `You have used the ${HOSTED_SETTINGS.resetsPerLease} resets for this demo company.`;
-  if (code === "HOSTED_RESET_PROFILE") return "The hosted demo resets to the rich demo data only.";
-  if (code === "LEASE_REQUIRED") return "Start your own demo company first; the shared one cannot be reset.";
+  if (code === "RESETS_PAUSED") return "Weft has used most of today's free Cloudflare quota, so resets are paused until 00:00 UTC. Your workspace keeps working.";
+  if (code === "RESET_LIMIT" || status === 429) return "This workspace has used all of its resets.";
+  if (code === "HOSTED_RESET_PROFILE") return "Here a reset uses the rich data only.";
+  if (code === "LEASE_REQUIRED") return "Open your own workspace first; the shared one cannot be reset.";
   return null;
 }
 

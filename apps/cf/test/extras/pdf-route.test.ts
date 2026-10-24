@@ -76,7 +76,7 @@ describe("hosted PDF route", () => {
     expect(parseJob(job).ok).toBe(true);
     expect(job).toMatchObject({ kind: "render.pdf", slot: "slot-1", gen: 3, pdf: "offer_letter", subjectId: letterId });
     const html = (job as { html: string }).html;
-    expect(html).toContain("Pia Strand (demo)");
+    expect(html).toContain("Pia Strand");
     expect(html).toContain("Offer letter");
     expect((job as { sha256: string }).sha256).toBe(await sha256Hex(html));
 
@@ -191,7 +191,7 @@ describe("hosted PDF route", () => {
 
   it("refuses a document too large to render before it is queued", async () => {
     const big = { id: "doc_0900", kind: "offer_letter", title: "Offer letter", status: "sent", sha256: "a".repeat(64), sentAt: null, bodyText: "Long clause. ".repeat(9_000), signature: null };
-    const s = setup({ app: async (p) => Response.json(p === "/v1/company" ? { company: { legalName: "Larkspur Labs (demo)" } } : big) });
+    const s = setup({ app: async (p) => Response.json(p === "/v1/company" ? { company: { legalName: "Larkspur Labs" } } : big) });
     const r = await handleHostedPdf("/api/_hosted/pdf/offer_letter/doc_0900", s.deps);
     expect(r.status).toBe(413);
     expect(await r.json()).toMatchObject({ code: "PDF_TOO_LARGE" });

@@ -1,12 +1,13 @@
 // Weft on Cloudflare round 0 contracts (packages/contracts/src/ext/cf-*.ts, track cf0-contracts): the settings Nitish
-// chose on 2026-10-20, the pure helpers, and the rule that these files load no runtime code a Worker would pay for.
+// chose on 2026-10-20 and 2026-10-23, the pure helpers, and the rule that these files load no runtime code a Worker
+// would pay for.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ERROR_STATUS, type SpendLedger } from "../src/index";
 import { HOSTED_TABLES, DO_SQL_LIMITS, RESERVED_TABLE_PREFIX } from "../src/ext/cf-db";
 import { aiGatewayOpenAiBaseUrl, FROZEN_CAP, HOSTED_CAP_DEFAULTS, MAX_FETCHES_PER_ALARM, NEURON_SHARES, type HostedCap, type HostedSpendLedger } from "../src/ext/cf-agent";
-import { DO_NAMES, formatHostedMcpKey, HOSTED_ERRORS, HOSTED_SETTINGS, hostedEtag, hostedWorldId, parseHostedMcpKey, slotName } from "../src/ext/cf-hosted";
+import { DO_NAMES, formatHostedMcpKey, HOSTED_CLOCK_LIMITS, HOSTED_ERRORS, HOSTED_RATE_LIMITS, HOSTED_SETTINGS, hostedEtag, hostedWorldId, parseHostedMcpKey, slotName } from "../src/ext/cf-hosted";
 import { pdfObjectKey, queueFor, QUEUES, seedNamespace } from "../src/ext/cf-extras";
 import { EPHEMERAL_READ_ID_PREFIX } from "../src/ext/cf-platform";
 
@@ -26,7 +27,11 @@ describe("cf round 0 contracts", () => {
     expect(HOSTED_CAP_DEFAULTS).toEqual({ runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 });
     expect(HOSTED_CAP_DEFAULTS.visitorDayUsd).toBe(HOSTED_CAP_DEFAULTS.dayUsd);
     expect(HOSTED_CAP_DEFAULTS.ipDayUsd).toBe(HOSTED_CAP_DEFAULTS.dayUsd);
-    expect(HOSTED_SETTINGS).toMatchObject({ poolSize: 2, leaseIdleMinutes: 30, leaseTotalMinutes: 180, leasesPerIpHashPerDay: 20, helpQueriesPerDay: 30 });
+    expect(HOSTED_SETTINGS).toMatchObject({ poolSize: 2, leaseIdleMinutes: 1440, leaseTotalMinutes: 43_200, leasesPerIpHashPerDay: 500, resetsPerLease: 1_000, helpQueriesPerDay: 30 });
+    // The guards on the shared account quotas did not move with the 2026-10-23 session settings.
+    expect(HOSTED_SETTINGS).toMatchObject({ humanGrantMinutes: 10, uploadMaxBytes: 1_500_000, uploadsPerVisitorPerDay: 5 });
+    expect(HOSTED_RATE_LIMITS).toEqual({ RL_API: { limit: 600, period: 60 }, RL_MUTATE: { limit: 30, period: 60 }, RL_MCP: { limit: 60, period: 60 }, RL_RUN: { limit: 6, period: 60 } });
+    expect(HOSTED_CLOCK_LIMITS).toEqual({ maxStepDays: 7, maxDaysFromStart: 60 });
     expect(Object.values(NEURON_SHARES).reduce((a, b) => a + b, 0)).toBe(HOSTED_CAP_DEFAULTS.neuronsDay);
     expect(MAX_FETCHES_PER_ALARM).toBeLessThan(50);
   });

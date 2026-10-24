@@ -170,6 +170,19 @@ export class OperatorWorld extends BaseWorld implements WorldApi {
     return r.body;
   }
 
+  /**
+   * POST /api/_admin/release { name }: ends this operator lease now, so a finished check frees its pool slot instead
+   * of holding it until the 24 hour idle time (design section 0, 2026-10-23). Answers whether a lease was released.
+   */
+  async release(): Promise<boolean> {
+    const res = await adminFetch(this.origin, this.sign, "POST", "/api/_admin/release", { name: this.name }, this.jar.cookies.size ? { cookie: this.jar.header() } : {});
+    this.jar.absorb(res.headers.getSetCookie());
+    const r = await parse<{ released?: boolean }>(res);
+    if (r.status !== 200) throw new HttpError(r.status, codeOf(r.body), "POST", "/api/_admin/release", r.text);
+    this.lease = null;
+    return r.body.released === true;
+  }
+
   /** POST /api/_admin/grant { name } with the lease's session cookie: a fresh human grant only. */
   async refreshGrant(): Promise<void> {
     const res = await adminFetch(this.origin, this.sign, "POST", "/api/_admin/grant", { name: this.name }, { cookie: this.jar.header() });

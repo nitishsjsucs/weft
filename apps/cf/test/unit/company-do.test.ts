@@ -1,7 +1,7 @@
 // CompanyDO's own plumbing on Node over a fake ctx and env, with a small fake engine behind the EngineModule seam
 // (design 3.3, 4.6, 6.3): the MCP key's lease check, the minted key's expiry, the alarm's retry, the boot that two
 // callers share, the outbox flush under the world's write lock, and the I/O guards. The clock here is Date only (fake
-// timers for Date), so a lease's 3 hours pass at once. The Miniflare suite runs the same class in workerd.
+// timers for Date), so a lease's 30 days pass at once. The Miniflare suite runs the same class in workerd.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_SETTINGS, type HostedJob, type TxGuard } from "../../src/shared/contracts";
 import { setEngineLoader, type EngineModule, type WorldBootInput, type WorldEngine } from "../../src/core/company/engine";
@@ -195,8 +195,10 @@ describe("the MCP key's lease", () => {
     at(T0 + 2 * MIN);
     expect((await c.co.fetch(await req("/v1/workers"))).status).toBe(200);
     expect((await c.co.fetch(await mcp())).status).toBe(200);
-    // Busy all along, so never idle; the 3 hours still end it.
-    for (const t of [60, 120, 170, 179]) { at(T0 + t * MIN); await c.co.fetch(await req("/v1/workers")); }
+    // Busy all along (a request just inside each idle time), so never idle; the total time still ends it.
+    const idle = HOSTED_SETTINGS.leaseIdleMinutes, total = HOSTED_SETTINGS.leaseTotalMinutes;
+    for (let t = idle - 1; t < total; t += idle - 1) { at(T0 + t * MIN); await c.co.fetch(await req("/v1/workers")); }
+    at(T0 + (total - 1) * MIN);
     expect((await c.co.fetch(await mcp())).status).toBe(200);
     at(T0 + HOSTED_SETTINGS.leaseTotalMinutes * MIN + 1);
     const r = await c.co.fetch(await mcp());
@@ -218,15 +220,15 @@ describe("the MCP key's lease", () => {
   });
 
   it("asks the Lobby once when this instance has seen no activity (a restart), and fails closed on no lease", async () => {
-    const lease = () => ({ slot: "slot-1", gen: 3, expiresAt: new Date(T0 + 180 * MIN).toISOString(), idleExpiresAt: new Date(T0 + 40 * MIN).toISOString(), resetsLeft: 3 });
+    const lease = () => ({ slot: "slot-1", gen: 3, expiresAt: new Date(T0 + HOSTED_SETTINGS.leaseTotalMinutes * MIN).toISOString(), idleExpiresAt: new Date(T0 + (10 + HOSTED_SETTINGS.leaseIdleMinutes) * MIN).toISOString(), resetsLeft: HOSTED_SETTINGS.resetsPerLease });
     const c = company({ lobbyStatus: () => ({ level: 0, pool: { size: 2, free: 0, waitlist: 0 }, lease: lease(), waitlistPosition: null, worldProvider: null }) });
     await c.ready();
     at(T0 + 15 * MIN);
     expect((await c.co.fetch(await mcp())).status).toBe(200);
     expect((await c.co.fetch(await mcp())).status).toBe(200);
     expect(c.lobbyCalls.filter((x) => x.method === "status")).toEqual([{ method: "status", input: { visitor: VISITOR, slot: "slot-1", gen: 3, now: T0 + 15 * MIN } }]);
-    // The Lobby's last-seen time (10 minutes in) is now this instance's: idle 30 minutes after it.
-    at(T0 + 41 * MIN);
+    // The Lobby's last-seen time (10 minutes in) is now this instance's: idle the idle time after it.
+    at(T0 + (11 + HOSTED_SETTINGS.leaseIdleMinutes) * MIN);
     expect((await c.co.fetch(await mcp())).status).toBe(409);
 
     const gone = company();
@@ -236,7 +238,7 @@ describe("the MCP key's lease", () => {
   });
 
   it("refuses a key this generation never minted from the slot's stored keys, without asking the Lobby, even on an instance that has seen no activity", async () => {
-    const lease = () => ({ slot: "slot-1", gen: 3, expiresAt: new Date(T0 + 180 * MIN).toISOString(), idleExpiresAt: new Date(T0 + 40 * MIN).toISOString(), resetsLeft: 3 });
+    const lease = () => ({ slot: "slot-1", gen: 3, expiresAt: new Date(T0 + HOSTED_SETTINGS.leaseTotalMinutes * MIN).toISOString(), idleExpiresAt: new Date(T0 + (10 + HOSTED_SETTINGS.leaseIdleMinutes) * MIN).toISOString(), resetsLeft: HOSTED_SETTINGS.resetsPerLease });
     const c = company({ lobbyStatus: () => ({ level: 0, pool: { size: 2, free: 0, waitlist: 0 }, lease: lease(), waitlistPosition: null, worldProvider: null }) });
     await c.ready();
     at(T0 + 15 * MIN);

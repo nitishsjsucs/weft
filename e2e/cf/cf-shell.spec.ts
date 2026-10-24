@@ -1,8 +1,8 @@
 // The hosted shell on the real stack (design 3.5, 6.1, 6.2 and 6.5), track cf7-integrate: what an unleased visitor
-// sees (the shared read-only showcase, Start my demo company, a deep link rendered from its section's shell, the
-// security headers), what a leased tab sees (its own slot, the lease countdown, the session status), the model switch
-// on the Simulators page, and the Platform page's readout. Leased checks use the operator lease, never Turnstile. The
-// last case is the app's own Reset demo data, which keeps the visitor's lease and cookies.
+// sees (the shared read-only showcase, Open my workspace, a deep link rendered from its section's shell, the
+// security headers), what a leased tab sees (its own slot with no banner and no countdown, the session status), the
+// model switch on the Simulators page, and the Platform page's readout. Leased checks use the operator lease, never
+// Turnstile. The last case is the app's own Reset workspace data, which keeps the visitor's lease and cookies.
 import { bannerWorld, expect, LIVE, pinProvider, test } from "./fixtures";
 import { budgetLine, mutationHeadroom, type BudgetReadout } from "./world";
 import { HOSTED_COPY, providerLabel } from "../../apps/web/src/components/hosted/copy";
@@ -32,10 +32,10 @@ test("an unleased visitor browses the shared read-only showcase; a deep link ren
 
   const deep = await page.goto("/app/people/wrk_0026/");
   expect(deep?.status(), "the people shell serves a record deep link").toBe(200);
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Lena Brooks (demo)");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Lena Brooks");
   expect(await page.evaluate(() => location.pathname)).toBe("/app/people/wrk_0026/");
 
-  // A showcase mutation is refused at the edge with LEASE_REQUIRED, which opens Start my demo company.
+  // A showcase mutation is refused at the edge with LEASE_REQUIRED, which opens Open my workspace.
   const refused = await page.request.post("/api/v1/sim/clock/advance", { data: { by: "P1D" }, headers: { origin: new URL(page.url()).origin, "x-weft-principal": "usr_dana" } });
   expect(refused.status()).toBe(409);
   expect(((await refused.json()) as { code: string }).code).toBe("LEASE_REQUIRED");
@@ -69,14 +69,14 @@ test("the Agent page renders from the export: conversations, background work, a 
   expect(consoleErrors, "no console errors").toEqual([]);
 });
 
-test("a leased tab reads its own slot: the banner, the lease countdown and the session status", async ({ page, operator }) => {
+test("a leased tab reads its own slot: no banner and no countdown, and the session status", async ({ page, operator }) => {
   await page.goto("/app/");
   expect(await bannerWorld(page)).toBe("slot");
-  const banner = page.getByTestId("hosted-banner");
-  await expect(banner).toHaveAttribute("data-slot", operator.lease.slot);
-  await expect(banner).toContainText(HOSTED_COPY.leased);
-  await expect(page.getByTestId("hosted-lease-left")).toContainText(/min left|h left|h \d+ min left/);
+  await expect(page.getByTestId("hosted-world")).toHaveAttribute("data-slot", operator.lease.slot);
+  await expect(page.getByTestId("hosted-lease-left"), "no lease countdown (Nitish, 2026-10-23)").toHaveCount(0);
   const s = await operator.world.get<Session>("/api/_session");
+  // A leased world shows a banner only when there is something to say: a rows-budget limit or a provider note.
+  if (s.agentEnabled && !["budget", "neurons", "paused"].includes(s.provider.reason)) await expect(page.getByTestId("hosted-banner")).toHaveCount(0);
   expect(s.world).toBe("slot");
   expect(s.lease).toMatchObject({ slot: operator.lease.slot, gen: operator.lease.gen });
   expect(Date.parse(s.grantExpiresAt ?? ""), "the operator lease carries a fresh human grant").toBeGreaterThan(Date.now());
@@ -96,7 +96,7 @@ test("the Simulators page shows the model switch, and switching it changes what 
   const want = async () => `New runs use ${providerLabel((await operator.world.get<Session>("/api/_session")).provider.id)}.`;
   await expect(current).toContainText(await want());
   try {
-    // To the demo default and back. No run starts in between, so nothing is spent on a deployed world.
+    // To the default and back. No run starts in between, so nothing is spent on a deployed world.
     await section.locator('input[data-provider="null"]').check();
     await expect(section.locator('input[data-provider="null"]')).toBeChecked();
     const s = await operator.world.get<Session>("/api/_session");
@@ -123,20 +123,20 @@ test("the Platform page reads today's caps, shares and Lobby state", async ({ pa
   await expect(page.getByTestId("platform-level")).toContainText(/Level \d/);
 });
 
-// Known failure, recorded as contract request cf7 item 1 (.scratch/contract-requests/cf7.md): the app's own "Reset demo
-// data" ends the visitor's session in the browser. The reset answer reissues __Host-weft with the new generation, but a
+// Known failure, recorded as contract request cf7 item 1 (.scratch/contract-requests/cf7.md): the app's own "Reset
+// workspace data" ends the visitor's session in the browser. The reset answer reissues __Host-weft with the new generation, but a
 // GET /api/_session already in flight carries the old one; the front then finds no lease for that generation and
 // answers with both cookies cleared (Max-Age=0), which deletes the new cookie too. The Lobby still holds the lease. Seen
 // every time in Chrome on the local stack (with the operator lease's cookies and with a browser-set lease alike).
-test("the app's Reset demo data keeps the visitor's own demo company", async ({ page, operator }) => {
+test("the app's Reset workspace data keeps the visitor's own workspace", async ({ page, operator }) => {
   // The rows the operator lease's generation read and wrote so far (the shell checks above), against its budget.
   console.log(`shell rows budget: ${budgetLine((await operator.world.get<{ budget?: BudgetReadout }>("/api/v1/health")).budget ?? null)}`);
   await mutationHeadroom(4);
   await page.goto("/app/");
   expect(await bannerWorld(page)).toBe("slot");
   await page.getByTestId("viewing-as").click();
-  await page.getByRole("menuitem", { name: /Reset demo data/ }).click();
-  await expect(page.locator("[data-tour-reset-note]")).toContainText("left");
+  await page.getByRole("menuitem", { name: /Reset workspace data/ }).click();
+  await expect(page.locator("[data-tour-reset-note]")).toContainText("rebuilds your own workspace");
   const reset = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/sim/reset" && r.request().method() === "POST", { timeout: 120_000 });
   await page.locator("[data-tour-reset-go]").click();
   expect((await reset).status()).toBe(200);

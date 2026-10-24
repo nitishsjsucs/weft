@@ -20,7 +20,7 @@
 //
 // The guided tour runs in a browser: the smoke runs Playwright's `deployed` project (playwright.cf.config.ts) on
 // e2e/cf/cf-tour.spec.ts against the same origin and reads the measured time back. `--live` (Nitish's opt-in) runs that
-// one tour on the demo's default provider (Luna through AI Gateway, $0.003 to $0.005 inside the caps); everything else
+// one tour on the default provider (Luna through AI Gateway, $0.003 to $0.005 inside the caps); everything else
 // stays scripted.
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -115,8 +115,8 @@ const PLATFORM: Check[] = [
       const shell = await r.text();
       ensure(shell.includes("<html"), "the deep link is not the people shell's HTML");
       const lena = await e.anon.get<{ name?: string; firstName?: string; lastName?: string }>("/api/v1/workers/wrk_0026");
-      ensure(JSON.stringify(lena).includes("Lena Brooks (demo)"), "the showcase API does not name wrk_0026 Lena Brooks (demo)");
-      return "/app/people/wrk_0026/ serves the people shell and its API read names Lena Brooks (demo) (rendered in the browser by cf-shell.spec.ts)";
+      ensure(JSON.stringify(lena).includes("Lena Brooks"), "the showcase API does not name wrk_0026 Lena Brooks");
+      return "/app/people/wrk_0026/ serves the people shell and its API read names Lena Brooks (rendered in the browser by cf-shell.spec.ts)";
     },
   },
   {
@@ -229,7 +229,7 @@ const EXTRAS: Check[] = [
     id: "extras.receipt-ocr",
     async run(e) {
       const form = new FormData();
-      for (const [k, v] of Object.entries({ workerId: "wrk_0025", category: "meals", merchant: "Smoke Cafe (demo)", amountCents: "1062", transactionDate: "2026-10-20", businessPurpose: "Team lunch" })) form.set(k, v);
+      for (const [k, v] of Object.entries({ workerId: "wrk_0025", category: "meals", merchant: "Smoke Cafe", amountCents: "1062", transactionDate: "2026-10-20", businessPurpose: "Team lunch" })) form.set(k, v);
       form.set("receipt", new Blob([Buffer.from(PNG_1PX, "base64")], { type: "image/png" }), "lunch.png");
       const encoded = new Response(form);
       const bytes = new Uint8Array(await encoded.arrayBuffer());
@@ -307,7 +307,7 @@ function runTour(e: Env): Promise<string> {
   rmSync(out, { force: true });
   const env: NodeJS.ProcessEnv = {
     ...process.env, WEFT_CF_URL: e.o.url, WEFT_CF_TOKENS_FILE: e.sign.file, WEFT_CF_OPERATOR: e.o.operator, WEFT_CF_TOUR_OUT: out,
-    WEFT_CF_RESETS_NEEDED: "1", WEFT_CF_LIVE: e.o.live ? "1" : "0",
+    WEFT_CF_RESETS_NEEDED: "1", WEFT_CF_LIVE: e.o.live ? "1" : "0", WEFT_CF_KEEP_LEASE: "1",
   };
   return new Promise((resolve, reject) => {
     const child = spawn(join(REPO_ROOT, "node_modules/.bin/playwright"), ["test", "-c", join(REPO_ROOT, "playwright.cf.config.ts"), "--project=deployed", "e2e/cf/cf-tour.spec.ts"], { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -318,7 +318,7 @@ function runTour(e: Env): Promise<string> {
       let m: { total: number; steps: number } | null = null;
       try { m = JSON.parse(readFileSync(out, "utf8")) as { total: number; steps: number }; } catch { m = null; }
       const time = m ? `${(m.total / 1000).toFixed(1)} s over ${m.steps} steps` : "no timing";
-      if (code === 0) resolve(`autoplay on the operator lease ${e.o.operator} ${e.o.live ? "on the demo default provider (live)" : "with the scripted provider"}: ${time}, every step on its own target, hosted reset through the Lobby`);
+      if (code === 0) resolve(`autoplay on the operator lease ${e.o.operator} ${e.o.live ? "on the default provider (live)" : "with the scripted provider"}: ${time}, every step on its own target, hosted reset through the Lobby`);
       else reject(new Error(`the tour spec failed (${time}): ${log.split("\n").filter((l) => /Error|expect|✘|failed/i.test(l)).slice(0, 6).join(" | ").slice(0, 600)}`));
     });
   });
@@ -414,14 +414,20 @@ async function main(argv: string[]): Promise<void> {
   const kind = targetKind(o.url);
   const sign = signers(o.tokens ?? tokensFile(kind));
   const e: Env = { o, kind, sign, smoke: new SmokeWorld(o.url, sign), anon: new AnonWorld(o.url), op: new OperatorWorld(o.url, sign, o.operator) };
-  console.log(`cf:smoke ${o.url} (${kind}${kind === "local" ? `, the local stack: ${LOCAL.dir}` : ""}); smoke calls on slot-smoke, scripted; operator lease "${o.operator}"${o.live ? "; --live: the tour runs on the demo default provider" : ""}`);
+  console.log(`cf:smoke ${o.url} (${kind}${kind === "local" ? `, the local stack: ${LOCAL.dir}` : ""}); smoke calls on slot-smoke, scripted; operator lease "${o.operator}"${o.live ? "; --live: the tour runs on the default provider" : ""}`);
   const results: Result[] = [];
   const t0 = Date.now();
-  for (const c of CHECKS) {
-    if (o.only && !selected(c.id, o.only)) continue;
-    const r = await runOne(c, e);
-    results.push(r);
-    console.log(formatResult(r));
+  try {
+    for (const c of CHECKS) {
+      if (o.only && !selected(c.id, o.only)) continue;
+      const r = await runOne(c, e);
+      results.push(r);
+      console.log(formatResult(r));
+    }
+  } finally {
+    // Leases now last until 24 hours idle (design section 0, 2026-10-23), so the smoke frees its operator lease's pool
+    // slot when it is done instead of holding one of the two slots for a day.
+    try { console.log(`operator lease "${o.operator}" ${(await e.op.release()) ? "released" : "held no slot"}`); } catch (err) { console.log(`operator lease "${o.operator}" not released: ${err instanceof Error ? err.message : String(err)}`); }
   }
   const s = summarize(results);
   console.log(`${s.line} in ${((Date.now() - t0) / 1000).toFixed(0)} s`);

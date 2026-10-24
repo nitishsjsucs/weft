@@ -53,13 +53,18 @@ export default async function globalSetup(config: FullConfig): Promise<() => Pro
     const lease = await w.start();
     if (lease.status !== "leased") throw new Error(`${t.name}: the operator lease "${OPERATOR}" was not granted: ${JSON.stringify(lease)}`);
     await w.put("/api/_hosted/model", { provider: LIVE ? null : "scripted" });
-    console.log(`cf e2e ${t.name} ${t.origin}: ${o.lobby.slots.length} worlds ready; operator lease ${OPERATOR} on ${lease.slot} gen ${lease.gen}, ${lease.resetsLeft} resets left; provider ${LIVE ? "the demo default (WEFT_CF_LIVE=1)" : "scripted"}; ${line(o)}`);
+    console.log(`cf e2e ${t.name} ${t.origin}: ${o.lobby.slots.length} worlds ready; operator lease ${OPERATOR} on ${lease.slot} gen ${lease.gen}, ${lease.resetsLeft} resets left; provider ${LIVE ? "the default (WEFT_CF_LIVE=1)" : "scripted"}; ${line(o)}`);
     // A whole run resets the operator's world twice (the scenarios and the tour); the smoke's tour alone needs one.
     const needed = Number(process.env.WEFT_CF_RESETS_NEEDED ?? 2);
     if ((lease.resetsLeft ?? 0) < needed) throw new Error(`${t.name}: the operator lease "${OPERATOR}" has ${lease.resetsLeft} resets left and this run needs ${needed}; set WEFT_CF_OPERATOR to another name or wait for the lease to end`);
   }
   return async () => {
     for (const t of targets) {
+      // Leases last until 24 hours idle (design section 0, 2026-10-23): free the operator's pool slot after the run,
+      // unless a caller that keeps using the lease (pnpm cf:smoke's tour) asks to keep it.
+      if (process.env.WEFT_CF_KEEP_LEASE !== "1") {
+        try { console.log(`cf e2e ${t.name}: operator lease ${OPERATOR} ${(await new OperatorWorld(t.origin, signers(tokensFile(targetKind(t.origin))), OPERATOR).release()) ? "released" : "held no slot"}`); } catch (e) { console.log(`cf e2e ${t.name}: operator lease ${OPERATOR} not released (${(e as Error).message})`); }
+      }
       try { console.log(`cf e2e ${t.name} after the run: ${line(await ops(t.origin, signers(tokensFile(targetKind(t.origin)))))}`); } catch (e) { console.log(`cf e2e ${t.name}: no readout after the run (${(e as Error).message})`); }
     }
   };

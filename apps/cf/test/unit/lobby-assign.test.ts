@@ -95,7 +95,25 @@ describe("LobbyDO.reset at the day's last degradation level", () => {
     const r = await lobby.reset({ visitor: me, slot: l.slot, gen: l.gen, now: start + 31_000 });
     expect(r).toMatchObject({ error: "RESETS_PAUSED" });
     const st = await lobby.status({ visitor: me, slot: l.slot, gen: l.gen, leaseExpiresMs: Date.parse(l.expiresAt), now: start + 32_000 });
-    expect(st.lease).toMatchObject({ slot: l.slot, gen: l.gen, resetsLeft: 3 });
+    expect(st.lease).toMatchObject({ slot: l.slot, gen: l.gen, resetsLeft: HOSTED_SETTINGS.resetsPerLease });
+  });
+});
+
+describe("LobbyDO.reset per lease", () => {
+  it("still refuses a reset past HOSTED_SETTINGS.resetsPerLease, and the lease goes on", async () => {
+    const { lobby, m } = lobbyOver(2);
+    const me = visitor(51);
+    const start = Date.now();
+    const l = await lobby.assign({ visitor: me, ipHash: "f".repeat(32), now: start });
+    if (l.status !== "leased") throw new Error(`not leased: ${l.status}`);
+    // The cap is high (Nitish, 2026-10-23), so the lease's count starts one short of it instead of after that many resets.
+    m.sql.exec(`UPDATE leases SET resets = ? WHERE visitor = ?`, HOSTED_SETTINGS.resetsPerLease - 1, me);
+    const last = await lobby.reset({ visitor: me, slot: l.slot, gen: l.gen, now: start + 1_000 });
+    expect(last).toMatchObject({ ok: true, resetsLeft: 0 });
+    const gen = (last as { gen: number }).gen;
+    expect(await lobby.reset({ visitor: me, slot: l.slot, gen, now: start + 2_000 })).toMatchObject({ error: "RESET_LIMIT" });
+    const st = await lobby.status({ visitor: me, slot: l.slot, gen, leaseExpiresMs: Date.parse(l.expiresAt), now: start + 3_000 });
+    expect(st.lease).toMatchObject({ slot: l.slot, gen, resetsLeft: 0 });
   });
 });
 
@@ -301,12 +319,12 @@ describe("a lease holder's GET /api/_session", () => {
     expect([...w.tables]).toEqual(["leases"]);
     expect(f.heartbeats.every((h) => h.keepUsage === true)).toBe(true);
     // The lease answer still reads the freshest activity (kept in memory), not the stored one.
-    expect(Date.parse(last!.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + 30 * 60_000);
+    expect(Date.parse(last!.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + HOSTED_SETTINGS.leaseIdleMinutes * 60_000);
     expect(t0 + 180_000 - storedLastSeen(m)).toBeLessThanOrEqual(LAST_SEEN_WRITE_MS + 500);
     expect(counter(m, "rows_read")).toBe(0);
     // A Lobby that just woke up still finds the lease live, from the stored time and the slot's heartbeat.
     const cold = await wake().status({ visitor: v, slot, gen: 0, now: t0 + 181_000 });
-    expect(Date.parse(cold.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + 30 * 60_000);
+    expect(Date.parse(cold.lease!.idleExpiresAt)).toBe(t0 + 180_000 - 500 + HOSTED_SETTINGS.leaseIdleMinutes * 60_000);
     // The sweep collects what the polls left in the slot.
     await lobby.sweep({ now: t0 + 182_000 });
     expect(counter(m, "rows_read")).toBe(90 * 400);

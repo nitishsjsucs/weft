@@ -29,7 +29,7 @@ import { bundledSnapshotFiles } from "./snapshot-assets";
 
 type Session = { principalId: string; companyId: string; via: "ui"; keyScope: null };
 
-/** The admin session the hosted settings run as: the persona the visitor is viewing as, Dana (demo) by default. */
+/** The admin session the hosted settings run as: the persona the visitor is viewing as, Vic by default. */
 async function adminSession(db: Db, principalId: string | null): Promise<Session> {
   const id = principalId ?? "usr_dana";
   const [p] = await db.select().from(principals).where(eq(principals.id, id)).limit(1);
@@ -88,7 +88,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     const req = new Request(`${origin}${u.pathname}${u.search}`, init);
     // agent_ask is a model-calling admission: the kill switch (KV agent.enabled=false) answers it as the front does.
     if (req.method === "POST" && isModelAdmission(req.method, u.pathname) && (input.env.WEFT_AGENT_ENABLED ?? "").toLowerCase() === "false") {
-      return hostedError("AGENT_PAUSED", "The agent is paused on this demo right now", { retryAfterS: 300 });
+      return hostedError("AGENT_PAUSED", "The agent is paused right now", { retryAfterS: 300 });
     }
     return appFetch(req);
   };
@@ -162,7 +162,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
       const session = await adminSession(weft.db, m.principalId);
       const plaintext = formatHostedMcpKey(m.slot, m.gen, randomAlnum(40));
       internals.addSecret(plaintext);
-      await inScope(() => d.adminChange(internals.engine, session, "settings.create_api_key", { label: "hosted mcp", scope: "mcp" }, "Created this demo company's MCP key", async (tx: DbTx) => {
+      await inScope(() => d.adminChange(internals.engine, session, "settings.create_api_key", { label: "hosted mcp", scope: "mcp" }, "Created this workspace's MCP key", async (tx: DbTx) => {
         const id = await newId(tx, "key_");
         await tx.insert(apiKeys).values({
           id, companyId: session.companyId, principalId: session.principalId, prefix: plaintext.slice(0, 16),
@@ -175,7 +175,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     async setWorldProvider({ provider, principalId }) {
       if (!internals) throw new Error("executor internals unavailable");
       const session = await adminSession(weft.db, principalId);
-      const summary = provider ? `New runs in this demo company use ${provider}` : "New runs in this demo company use the default model";
+      const summary = provider ? `New runs in this workspace use ${provider}` : "New runs in this workspace use the default model";
       await inScope(() => d.adminChange(internals.engine, session, "settings.hosted_model_provider", { provider }, summary, async (tx: DbTx) => {
         if (provider === null) await tx.delete(settings).where(eq(settings.key, WORLD_MODEL_SETTING));
         else await tx.insert(settings).values({ key: WORLD_MODEL_SETTING, valueJson: JSON.stringify(provider) })

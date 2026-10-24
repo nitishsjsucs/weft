@@ -11,7 +11,7 @@ export class FakeAi extends WorkerEntrypoint {
     if (model === "@cf/mistralai/mistral-small-3.1-24b-instruct") {
       const content = (inputs.messages as { content: { type: string; image_url?: { url: string } }[] }[])[0]!.content;
       if (!content.some((c) => c.type === "image_url" && c.image_url?.url.startsWith("data:image/"))) throw new Error("expected an image");
-      return { response: JSON.stringify({ merchant: "Corner Deli (demo)", date: "2026-10-22", total: "41.38", currency: "USD", confidence: 0.9 }), gateway: options?.gateway?.id ?? null };
+      return { response: JSON.stringify({ merchant: "Corner Deli", date: "2026-10-22", total: "41.38", currency: "USD", confidence: 0.9 }), gateway: options?.gateway?.id ?? null };
     }
     if (model === "@cf/openai/whisper-large-v3-turbo") return { text: "Show payroll cost by month", transcription_info: { duration: 2 } };
     throw new Error(`no fake for ${model}`);

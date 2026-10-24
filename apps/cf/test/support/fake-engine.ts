@@ -5,7 +5,7 @@
 import { WORLD_MODEL_SETTING, type DurableStorageLike, type SqlCommit, type SqlMeter, type SqlUsage, type TxGuard } from "../../src/shared/contracts";
 import type { EngineModule, SnapshotArtifacts, WorldBootInput, WorldEngine, WorldStore } from "../../src/core/company/engine";
 
-const SEED = ["Larkspur Robotics (demo) handbook", "Payroll runs on Fridays", "Benefits renew in January"];
+const SEED = ["Larkspur Robotics handbook", "Payroll runs on Fridays", "Benefits renew in January"];
 /** What a run's counted fetches ask for: the discard port on loopback, refused at once with no DNS lookup and no
  * proxy (loopback is in every NO_PROXY), so 40 of them take milliseconds on any machine. A name that does not
  * resolve would go through an HTTPS proxy where one is set and take about 0.3 s each. */

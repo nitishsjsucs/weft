@@ -10,7 +10,7 @@ import { BUDGET_RETRIES, exportObjectKey, handleExtrasBatch, retryDelaySeconds, 
 import { batch, embeddingHandler, fakeAi, fakeBrowser, fakeImages, fakeSlot, fakeVectorize, FLAGS_ON, jobDeps, memoryR2, message, TINY_JPEG } from "./helpers";
 
 // 290 prompt and 41 completion tokens: ceil(290 x 0.031876 + 41 x 0.050488) = 12 neurons.
-const ocrReply = () => ({ response: JSON.stringify({ merchant: "Corner Deli (demo)", date: "2026-10-22", total: "41.38", currency: "USD", confidence: 0.91 }), usage: { prompt_tokens: 290, completion_tokens: 41 } });
+const ocrReply = () => ({ response: JSON.stringify({ merchant: "Corner Deli", date: "2026-10-22", total: "41.38", currency: "USD", confidence: 0.91 }), usage: { prompt_tokens: 290, completion_tokens: 41 } });
 async function receiptJob(o: Partial<Extract<HostedJob, { kind: "ocr.receipt" }>> = {}) {
   const sha = await sha256Hex(TINY_JPEG);
   return { v: 1 as const, kind: "ocr.receipt" as const, jobId: "obx_0001", slot: "slot-1", gen: 3, uploadId: "upl_0042", expenseId: "exp_0201", sha256: sha, storagePath: `blob:${sha}`, contentType: "image/jpeg", ...o };
@@ -28,7 +28,7 @@ describe("OCR jobs", () => {
     const first = message(job);
     await run(deps, "weft-jobs", first);
     expect(first.acked).toBe(1);
-    expect(slot.writeBacks).toEqual([{ command: "expenses.attach_receipt_extract", args: { job_id: "obx_0001", expense_id: "exp_0201", upload_id: "upl_0042", extract: { merchant: "Corner Deli (demo)", date: "2026-10-22", totalCents: 4138, currency: "USD", confidence: 0.91 }, model: OCR_MODEL, neurons: 12 } }]);
+    expect(slot.writeBacks).toEqual([{ command: "expenses.attach_receipt_extract", args: { job_id: "obx_0001", expense_id: "exp_0201", upload_id: "upl_0042", extract: { merchant: "Corner Deli", date: "2026-10-22", totalCents: 4138, currency: "USD", confidence: 0.91 }, model: OCR_MODEL, neurons: 12 } }]);
     const again = message(job, 1);
     await run(deps, "weft-jobs", again);
     expect(again.acked).toBe(1);
@@ -286,7 +286,7 @@ describe("embedding, export and render jobs", () => {
     const slot = fakeSlot();
     const files = memoryR2();
     const browser = fakeBrowser({ extraRequests: ["http://169.254.169.254/"] });
-    const html = renderPdfHtml({ kind: "offer_letter", companyName: "Larkspur Labs (demo)", documentId: "doc_0007", title: "Offer letter", bodyText: "Dear Noor (demo)", sha256: "a".repeat(64), status: "sent", sentAt: null, signature: null });
+    const html = renderPdfHtml({ kind: "offer_letter", companyName: "Larkspur Labs", documentId: "doc_0007", title: "Offer letter", bodyText: "Dear Noor", sha256: "a".repeat(64), status: "sent", sentAt: null, signature: null });
     const job = { v: 1, kind: "render.pdf", jobId: "obx_p1", slot: "slot-1", gen: 3, pdf: "offer_letter", subjectId: "doc_0007", sha256: await sha256Hex(html), html };
     const deps = jobDeps({ "slot-1": slot }, { files, launch: browser.launch });
     await run(deps, "weft-render", message(job));

@@ -25,7 +25,7 @@ export function ModelsView() {
   const rows = q.data ?? [];
   return (
     <PageBody width="wide">
-      <PageHeader title="Model comparison" subtitle="Agent runs on this hosted demo, grouped by the model that ran them. Switch the model for your own demo company on the Simulators page." />
+      <PageHeader title="Model comparison" subtitle="Agent runs on hosted Weft, grouped by the model that ran them. Switch the model for your own workspace on the Simulators page." />
       {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{q.error}</div> : null}
       <section>
         <CardHeading icon={<Scale />}>Runs by model, last 7 days</CardHeading>

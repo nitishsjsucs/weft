@@ -2,7 +2,7 @@
 // slot, timed from the first card to the end, under 180 s, with every step's card on its own target. Before the tour the
 // world is reset with the hosted reset, which the front Worker sends through the Lobby (a new generation in the cookie,
 // one reset fewer on the lease); then the scripted provider is pinned again, since the reset rebuilt the world's
-// settings (WEFT_CF_LIVE=1 keeps the demo default: one live tour).
+// settings (WEFT_CF_LIVE=1 keeps the default provider: one live tour).
 // The measured time is printed, attached, and written to WEFT_CF_TOUR_OUT when set (scripts/cf/smoke.ts reads it).
 import { writeFileSync } from "node:fs";
 import { TOUR_STEPS } from "../../apps/web/src/components/tour/steps";
@@ -79,7 +79,7 @@ test("the guided tour autoplays on a leased hosted world within 180 s, every ste
   expect(offTarget, "every step on its own target").toEqual([]);
   expect(notes, "no step fell back to a note").toEqual({});
 
-  await expect(page.getByTestId("hosted-banner"), "the tab still reads its own slot after the tour").toHaveAttribute("data-world", "slot");
+  await expect(page.getByTestId("hosted-world"), "the tab still reads its own slot after the tour").toHaveAttribute("data-world", "slot");
   const executed = (await allPages<{ id: string; command: string }>(w, "/api/v1/proposals?status=executed")).filter((p) => !executedBefore.has(p.id));
   expect(executed.map((p) => p.command), "the tour executes exactly one proposal, the rate change").toEqual(["tax.update_rate"]);
   expect((await w.get<{ ok: boolean }>("/api/v1/actions/verify")).ok, "the audit chain verifies").toBe(true);

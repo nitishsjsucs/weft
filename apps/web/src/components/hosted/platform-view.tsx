@@ -47,7 +47,7 @@ export function PlatformView() {
   const r = q.data;
   return (
     <PageBody>
-      <PageHeader title="Platform" subtitle="How this hosted demo runs on Cloudflare's free plan today: spend against the caps, the daily shares Weft keeps for itself, and the shared limits behind them." meta={r ? <Badge tone={r.level === 0 ? "green" : r.level >= 3 ? "red" : "amber"} size="md" data-testid="platform-level">Level {r.level}</Badge> : null} />
+      <PageHeader title="Platform" subtitle="How hosted Weft runs on Cloudflare's free plan today: spend against the caps, the daily shares Weft keeps for itself, and the shared limits behind them." meta={r ? <Badge tone={r.level === 0 ? "green" : r.level >= 3 ? "red" : "amber"} size="md" data-testid="platform-level">Level {r.level}</Badge> : null} />
       {q.error ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{q.error}</div> : null}
       {!r ? (q.error ? null : <p className="text-2 text-gray-10">Loading...</p>) : (
         <div className="flex flex-col gap-6" data-testid="platform-readout" data-day={r.day}>
@@ -56,7 +56,7 @@ export function PlatformView() {
             <Tile testid="platform-dollars" icon={<CircleDollarSign />} label="Model spend today" value={`${usd(r.dollars.spentUsd)} of ${usd(r.dollars.dayCapUsd)}`} note={`Each run is capped at ${usd(r.dollars.runCapUsd)}.`} />
             <Tile testid="platform-neurons" icon={<Cpu />} label="Workers AI neurons today" value={shareLine(r.neurons.used, r.neurons.cap)} />
             <Tile testid="platform-restores" icon={<RotateCcw />} label="Full restores left today" value={String(r.restoresLeft)} />
-            <Tile testid="platform-leases" icon={<Users />} label="Demo companies in use" value={`${r.leases.active} of ${r.leases.pool}`} note={r.leases.waitlist ? `${r.leases.waitlist} waiting` : "No one waiting"} />
+            <Tile testid="platform-leases" icon={<Users />} label="Workspaces in use" value={`${r.leases.active} of ${r.leases.pool}`} note={r.leases.waitlist ? `${r.leases.waitlist} waiting` : "No one waiting"} />
             <Tile testid="platform-dead-letters" icon={<Layers />} label="Dead-letter jobs" value={String(r.deadLetters)} />
             <Tile testid="platform-sweep" icon={<Activity />} label="Last Lobby sweep" value={r.lastSweepAt ? new Date(r.lastSweepAt).toISOString().slice(11, 16) + " UTC" : "Not yet"} />
           </div>

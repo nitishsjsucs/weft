@@ -93,7 +93,7 @@ const USAGE_KEYS = Object.values(COUNTER);
  * be for the lease's slot and carry the lease's total expiry (`leaseExpiresMs`, to the millisecond), which names the
  * lease: a reset keeps the lease's start, and the visitor's next lease has another one. The lease's own generation
  * qualifies. An older generation qualifies only with that same expiry: it is a cookie from before the visitor's own
- * "Reset demo data..." of this lease, answered with the lease as it is now so the front reissues the cookie. A cookie
+ * "Reset workspace data..." of this lease, answered with the lease as it is now so the front reissues the cookie. A cookie
  * of an earlier, ended lease of the same visitor (operator visitor ids are stable per name) never names a later lease,
  * so a cookie that leaked is revoked when its lease ends; a generation newer than the lease's names none. A caller
  * without a lease expiry (a slot asking about its own stamp) is answered for the lease's own generation only.
@@ -457,12 +457,12 @@ export class LobbyDO extends DurableObject<CoreEnv> {
     return { released: true, slot: l.slot };
   }
 
-  /** "Reset demo data..." for the leased visitor: at most HOSTED_SETTINGS.resetsPerLease per lease. */
+  /** "Reset workspace data..." for the leased visitor: at most HOSTED_SETTINGS.resetsPerLease per lease. */
   async reset(input: { visitor: string; slot: string; gen: number; now?: number }): Promise<HostedResetResult | ResetError> {
     const now = input.now ?? Date.now();
     const l = this.one<LeaseRow>(`SELECT slot, visitor, ip_hash, gen, started_at, last_seen, resets FROM leases WHERE slot = ? AND visitor = ?`, input.slot, input.visitor);
-    if (!l || l.gen !== input.gen || leaseEnded({ startedAt: l.started_at, lastSeen: this.lastSeenOf(l) }, now)) return { error: "LEASE_ENDED", message: "This demo company's lease has ended; start a new one" };
-    if (l.resets >= HOSTED_SETTINGS.resetsPerLease) return { error: "RESET_LIMIT", message: `A lease allows ${HOSTED_SETTINGS.resetsPerLease} resets` };
+    if (!l || l.gen !== input.gen || leaseEnded({ startedAt: l.started_at, lastSeen: this.lastSeenOf(l) }, now)) return { error: "LEASE_ENDED", message: "This workspace has ended; open a new one" };
+    if (l.resets >= HOSTED_SETTINGS.resetsPerLease) return { error: "RESET_LIMIT", message: "This workspace has used all of its resets" };
     // Past 90% of the day's share (level 3) no new lease starts, and a reset would start a generation with a fresh rows
     // budget, so the leases already held could keep spending past the account's caps. Resets wait for 00:00 UTC too;
     // the lease itself goes on (design 6.5).
@@ -473,15 +473,15 @@ export class LobbyDO extends DurableObject<CoreEnv> {
       return s;
     });
     if (!claimed) {
-      if (this.slot(l.slot)?.state === "resetting") return { error: "RATE_LIMITED", message: "This demo company is already being reset; try again in a moment" };
+      if (this.slot(l.slot)?.state === "resetting") return { error: "RATE_LIMITED", message: "This workspace is already being reset; try again in a moment" };
       // The world failed or is being restored: the lease cannot go on (the slot is not ready, so nobody else gets it).
       this.sql.exec(`DELETE FROM leases WHERE slot = ? AND visitor = ?`, l.slot, l.visitor);
-      return { error: "LEASE_ENDED", message: "This demo company is being rebuilt; start a new one in a few minutes" };
+      return { error: "LEASE_ENDED", message: "This workspace is being rebuilt; open a new one in a few minutes" };
     }
     const out = await this.resetClaimed(claimed, { visitor: l.visitor, ipHash: l.ip_hash, startedAt: l.started_at }, now);
     // A reset that could not finish in place ended the lease and started a full restore; so did a lease that ended
     // while the reset ran. Either way the visitor never learns the new generation.
-    if (!out.ok || !out.leaseKept) return { error: "LEASE_ENDED", message: "This demo company is being rebuilt; start a new one in a few minutes" };
+    if (!out.ok || !out.leaseKept) return { error: "LEASE_ENDED", message: "This workspace is being rebuilt; open a new one in a few minutes" };
     logEvent("lease.reset", { slot: l.slot, gen: out.gen, outcome: out.method, rowsWritten: out.rowsWritten, ms: out.ms });
     return { ok: true, gen: out.gen, resetsLeft: Math.max(0, HOSTED_SETTINGS.resetsPerLease - l.resets - 1) };
   }

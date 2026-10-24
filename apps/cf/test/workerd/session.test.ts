@@ -4,7 +4,7 @@
 // answers model-calling admissions 503, the session reports the world's model switch, and the operator lease
 // (POST /api/_admin/lease and /api/_admin/grant) is the admin signature's alone.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DO_NAMES, HOSTED_CONFIG_KEYS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, type SessionStatus } from "../../src/shared/contracts";
+import { DO_NAMES, HOSTED_CONFIG_KEYS, HOSTED_SETTINGS, HUMAN_GRANT_COOKIE, SESSION_COOKIE, type SessionStatus } from "../../src/shared/contracts";
 import { signAdmin } from "../../src/shared/tokens";
 import { Harness, TURNSTILE } from "../support/harness";
 
@@ -29,10 +29,10 @@ describe("session and Turnstile", () => {
     const r = await v.fetch("/api/_session/lease", { method: "POST", body: JSON.stringify({ token: TURNSTILE.dummyToken }) });
     expect(r.status).toBe(200);
     const body = await r.json() as { status: string; slot: string; gen: number; expiresAt: string; idleExpiresAt: string; resetsLeft: number };
-    expect(body).toMatchObject({ status: "leased", resetsLeft: 3 });
+    expect(body).toMatchObject({ status: "leased", resetsLeft: HOSTED_SETTINGS.resetsPerLease });
     expect(body.slot).toMatch(/^slot-\d+$/);
-    expect(Date.parse(body.expiresAt) - Date.now()).toBeGreaterThan(179 * 60_000);
-    expect(Date.parse(body.idleExpiresAt) - Date.now()).toBeLessThanOrEqual(30 * 60_000);
+    expect(Date.parse(body.expiresAt) - Date.now()).toBeGreaterThan((HOSTED_SETTINGS.leaseTotalMinutes - 1) * 60_000);
+    expect(Date.parse(body.idleExpiresAt) - Date.now()).toBeLessThanOrEqual(HOSTED_SETTINGS.leaseIdleMinutes * 60_000);
     const cookies = r.headers.getSetCookie();
     for (const name of [SESSION_COOKIE, HUMAN_GRANT_COOKIE]) {
       const c = cookies.find((x) => x.startsWith(`${name}=`))!;

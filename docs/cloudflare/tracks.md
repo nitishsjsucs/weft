@@ -201,7 +201,7 @@ These must show:
 - The conditional export config in `next.config.ts` (`output: "export"`, `trailingSlash`, no rewrites, `pageExtensions: ["tsx"]` under `WEFT_STATIC_EXPORT=1`); `generateStaticParams` with `_` for the five `[id]` pages; `useRouteId`; the client-rendered landing with `stats.json`.
 - `apps/web/scripts/cf-export.ts`: writes `_redirects`, `_headers` with per-route CSP script hashes, and checks the output.
 - `hooks.ts`: pause when hidden, idle backoff, the hosted interval multiplier, the WebSocket invalidation feed keyed by `x-weft-tables`, a 5 s SSE trace fallback on hosted.
-- The hosted shell under `NEXT_PUBLIC_WEFT_HOSTED=1`: showcase banner, Start my demo company with the Turnstile widget, the 428 retry, the lease countdown and lease-ended, waitlist and budget screens, the hosted reset UX, the model switch, the Platform page, the model comparison page, the MCP connect dialog, PDF buttons, Help in Cmd+K, the Dictate button and the fictional-data notice.
+- The hosted shell under `NEXT_PUBLIC_WEFT_HOSTED=1`: showcase banner, Open my workspace with the Turnstile widget, the 428 retry, the lease-ended, waitlist and budget screens, the hosted reset UX, the model switch, the Platform page, the model comparison page, the MCP connect dialog, PDF buttons, Help in Cmd+K and the Dictate button. (On 2026-10-23 Nitish chose two users and no visible session limits, design section 0: the lease countdown and the fictional-data notice are gone, and the copy says "workspace", not "demo company".)
 
 **Acceptance.**
 

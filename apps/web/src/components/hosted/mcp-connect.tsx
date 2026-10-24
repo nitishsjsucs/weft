@@ -1,6 +1,6 @@
 "use client";
 // The MCP connect dialog (docs/cloudflare/design.md 3.3 and 6.3): mints this lease's MCP key once and shows how to
-// point an MCP client at /mcp over Streamable HTTP. The key routes by its prefix to the visitor's own demo company
+// point an MCP client at /mcp over Streamable HTTP. The key routes by its prefix to the visitor's own workspace
 // and dies with the lease generation; its tools read and propose only (approvals stay in the app). Hosted only.
 import { Dialog } from "radix-ui";
 import { Check, Copy, Plug } from "lucide-react";
@@ -53,9 +53,9 @@ export function McpConnectButton({ size = "sm" }: { size?: "xs" | "sm" | "md" })
         <Dialog.Content data-testid="hosted-mcp" className="fixed top-1/2 left-1/2 z-[81] flex max-h-[85vh] w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-y-auto rounded-xl bg-card p-5 text-[13px] shadow-[var(--shadow-modal)] outline-none">
           <Dialog.Title className="text-[14px] font-semibold text-gray-12">Connect an MCP client</Dialog.Title>
           <Dialog.Description className="leading-5 text-gray-11">
-            Any MCP client that speaks Streamable HTTP can use Weft's tools on your demo company. The key works until your demo company ends; its tools read and propose, and every change still waits for approval here.
+            Any MCP client that speaks Streamable HTTP can use Weft's tools on your workspace. The key works until your workspace ends; its tools read and propose, and every change still waits for approval here.
           </Dialog.Description>
-          {!leased ? <p className="rounded-lg bg-blue-3 px-3 py-2 text-blue-11">Start your demo company first: the shared demo has no MCP key.</p> : null}
+          {!leased ? <p className="rounded-lg bg-blue-3 px-3 py-2 text-blue-11">Open your workspace first: the shared workspace has no MCP key.</p> : null}
           {error ? <p role="alert" className="text-red-11">{error}</p> : null}
           {mint ? (
             <div className="flex flex-col gap-2" data-testid="hosted-mcp-key">

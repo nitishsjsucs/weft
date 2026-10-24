@@ -2,16 +2,16 @@
 // started for a lease, the lease-ended screen, lease attempts that do not lease, and the human grant waiters. The
 // fetch, the WebSocket and the window are fakes.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LeaseResult, SessionStatus } from "../../../packages/contracts/src/ext/cf-hosted";
+import { HOSTED_SETTINGS, type LeaseResult, type SessionStatus } from "../../../packages/contracts/src/ext/cf-hosted";
 import { PollScheduler, setScheduler, type Timers } from "../src/lib/api/poll";
 import { readLeaseHint } from "../src/lib/hosted/hint";
 import {
-  afterHostedReset, bootSession, dismissEnded, ensureHumanGrant, fmtLeft, grantFailed, hostedStore, leaseDeadline, markEnded, markLimited, refreshSession, requestStart, resetHostedSession, startLease, verifyGrant,
+  afterHostedReset, bootSession, dismissEnded, ensureHumanGrant, grantFailed, hostedStore, leaseDeadline, markEnded, markLimited, refreshSession, requestStart, resetHostedSession, startLease, verifyGrant,
 } from "../src/lib/hosted/session";
 import { HUMAN_CHECK_WAIT_MS } from "../src/lib/hosted/flags";
 
 const timers: Timers = { now: () => Date.now(), set: () => 0, clear: () => {} };
-const lease = { slot: "slot-1", gen: 3, expiresAt: new Date(Date.now() + 3 * 3600_000).toISOString(), idleExpiresAt: new Date(Date.now() + 1800_000).toISOString(), resetsLeft: 3 };
+const lease = { slot: "slot-1", gen: 3, expiresAt: new Date(Date.now() + HOSTED_SETTINGS.leaseTotalMinutes * 60_000).toISOString(), idleExpiresAt: new Date(Date.now() + HOSTED_SETTINGS.leaseIdleMinutes * 60_000).toISOString(), resetsLeft: HOSTED_SETTINGS.resetsPerLease };
 const status = (p: Partial<SessionStatus> = {}): SessionStatus => ({
   world: "showcase", lease: null, grantExpiresAt: null, level: 0, pool: { size: 2, free: 1, waitlist: 0 }, provider: { id: "openai", reason: "default" }, agentEnabled: true, ...p,
 });
@@ -262,14 +262,9 @@ describe("the human grant", () => {
   });
 });
 
-describe("countdown helpers", () => {
+describe("the lease deadline (no countdown is shown since 2026-10-23; the banner reads the session once it passes)", () => {
   it("the lease ends at the earlier deadline", () => {
     expect(leaseDeadline({ expiresAt: "2026-10-26T18:00:00.000Z", idleExpiresAt: "2026-10-26T16:00:00.000Z" })).toBe(Date.parse("2026-10-26T16:00:00.000Z"));
-  });
-  it("reads minutes and hours", () => {
-    expect(fmtLeft(30_000)).toBe("under a minute left");
-    expect(fmtLeft(42 * 60_000 + 5_000)).toBe("42 min left");
-    expect(fmtLeft(65 * 60_000)).toBe("1 h 5 min left");
-    expect(fmtLeft(180 * 60_000)).toBe("3 h left");
+    expect(leaseDeadline({ expiresAt: "2026-10-26T18:00:00.000Z", idleExpiresAt: "2026-10-26T18:00:00.000Z" })).toBe(Date.parse("2026-10-26T18:00:00.000Z"));
   });
 });

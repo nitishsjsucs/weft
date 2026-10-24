@@ -6,7 +6,7 @@
 // routes refuse. /api and the socket are answered by the test (e2e/hosted-fixtures.ts).
 import { expect, test } from "@playwright/test";
 import { pcmWavInfo } from "../../../packages/cf-extras/src/wav";
-import { cspViolations, hide, installHosted, settle, status } from "./hosted-fixtures";
+import { cspViolations, hide, installHosted, LEASE, settle, status } from "./hosted-fixtures";
 
 test.describe("static export on Workers assets", () => {
   test("a record deep link renders from its section's shell, with the CSP in force and no violations", async ({ page }) => {
@@ -20,7 +20,7 @@ test.describe("static export on Workers assets", () => {
     expect(csp.match(/default-src 'self'/g)).toHaveLength(2);
     expect(csp).toContain("frame-ancestors 'none'");
     expect(res?.headers()["x-content-type-options"]).toBe("nosniff");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Dana Whitfield (demo)");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Vic Akisole");
     expect(h.api.some((r) => r.path === "/api/v1/workers/wrk_0001")).toBe(true);
     expect(h.api.some((r) => r.path.startsWith("/api/v1/workers/_"))).toBe(false);
     expect(await cspViolations(page)).toEqual([]);
@@ -33,7 +33,7 @@ test.describe("static export on Workers assets", () => {
     const link = page.locator('a[href^="/app/people/wrk_0002"]').first();
     await link.click();
     await expect(page).toHaveURL(/\/app\/people\/wrk_0002\/$/);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Imani Ferreira (demo)");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Imani Ferreira");
     await page.goBack();
     await expect(page).toHaveURL(/\/app\/people\/$/);
     expect(h.errors).toEqual([]);
@@ -48,7 +48,7 @@ test.describe("static export on Workers assets", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Page not found");
     await page.goto("/app/people/wrk_0001");
     await expect(page).toHaveURL(/\/app\/people\/wrk_0001\/$/);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Dana Whitfield (demo)");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Vic Akisole");
   });
 
   test("every other record section serves its shell", async ({ page }) => {
@@ -97,7 +97,8 @@ test.describe("polling discipline", () => {
     const hh = await installHosted(hp, { acceptSockets: false });
     const vh = await installHosted(vp);
     await Promise.all([hp.goto("/app/"), vp.goto("/app/")]);
-    await Promise.all([expect(hp.getByTestId("hosted-banner")).toBeVisible(), expect(vp.getByTestId("hosted-banner")).toBeVisible()]);
+    // A leased tab shows no banner unless there is something to say; the hidden marker says the session was read.
+    await Promise.all([expect(hp.getByTestId("hosted-world")).toHaveAttribute("data-world", "slot"), expect(vp.getByTestId("hosted-world")).toHaveAttribute("data-world", "slot")]);
     await expect.poll(() => vh.sockets.length).toBe(1);
     await Promise.all([settle(hp, hh), settle(vp, vh)]);
     // The hidden tab polls while visible (its feed is down), which is what makes the pause visible below.
@@ -133,15 +134,17 @@ test.describe("polling discipline", () => {
 });
 
 test.describe("hosted shell", () => {
-  test("the shared showcase offers Start my demo company; Turnstile and the lease switch the tab to the visitor's world", async ({ page }) => {
+  test("the shared showcase offers Open my workspace; Turnstile and the lease switch the tab to the visitor's world, with no banner", async ({ page }) => {
     const h = await installHosted(page, { session: status({ world: "showcase", lease: null }) });
     await page.goto("/app/");
     const banner = page.getByTestId("hosted-banner");
     await expect(banner).toHaveAttribute("data-world", "showcase");
     await page.getByTestId("hosted-start-cta").click();
     await expect(page.getByTestId("hosted-start")).toBeVisible();
-    await expect(banner).toHaveAttribute("data-world", "slot");
-    await expect(page.getByTestId("hosted-lease-left")).toContainText(/min left/);
+    await expect(page.getByTestId("hosted-world")).toHaveAttribute("data-world", "slot");
+    // The visitor's own workspace shows no banner and no countdown while there is nothing to say.
+    await expect(banner).toHaveCount(0);
+    await expect(page.getByTestId("hosted-lease-left")).toHaveCount(0);
     await expect(page.getByTestId("hosted-start")).toHaveCount(0);
     const lease = h.api.find((r) => r.path === "/api/_session/lease");
     expect(lease?.method).toBe("POST");
@@ -159,15 +162,15 @@ test.describe("hosted shell", () => {
     await expect(page.getByTestId("sim-clock-now")).toContainText("Oct 27");
   });
 
-  test("a showcase mutation answered LEASE_REQUIRED opens Start my demo company", async ({ page }) => {
+  test("a showcase mutation answered LEASE_REQUIRED opens Open my workspace", async ({ page }) => {
     const h = await installHosted(page, { session: status({ world: "showcase", lease: null }) });
-    h.queue("POST /api/v1/sim/clock/advance", { status: 409, body: { _tag: "Conflict", code: "LEASE_REQUIRED", message: "The shared demo is read only" } });
+    h.queue("POST /api/v1/sim/clock/advance", { status: 409, body: { _tag: "Conflict", code: "LEASE_REQUIRED", message: "The shared workspace is read-only" } });
     h.queue("POST /api/_session/lease", { status: 200, body: { status: "waitlist", position: 1, poolSize: 2, etaMinutes: 6 } });
     await page.goto("/app/simulators/");
     await page.getByTestId("sim-advance-1d").click();
     const dialog = page.getByTestId("hosted-start");
-    await expect(dialog).toContainText("The shared demo company is read only");
-    await expect(page.getByTestId("hosted-start-blocked")).toContainText("All 2 demo companies are in use. One frees in about 6 min.");
+    await expect(dialog).toContainText("The shared workspace is read only");
+    await expect(page.getByTestId("hosted-start-blocked")).toContainText("All 2 workspaces are in use. One frees in about 6 min.");
     await expect(page.getByTestId("hosted-start-retry")).toBeVisible();
   });
 
@@ -178,8 +181,21 @@ test.describe("hosted shell", () => {
     h.session = status({ world: "showcase", lease: null });
     h.frame({ type: "lease", state: "ended", gen: 4 });
     await expect(page.getByTestId("hosted-ended")).toBeVisible();
-    await page.getByRole("button", { name: "Browse the shared demo" }).click();
+    await page.getByRole("button", { name: "Browse the shared workspace" }).click();
     await expect(page.getByTestId("hosted-banner")).toHaveAttribute("data-world", "showcase");
+  });
+
+  test("a lease whose deadline passes reads the session, and the lease-ended screen follows", async ({ page }) => {
+    // No countdown is shown, but the banner still asks for the session once the lease's earlier deadline passes.
+    const deadline = Date.now() + 15_000;
+    const h = await installHosted(page, { session: status({ lease: { ...LEASE, idleExpiresAt: new Date(deadline).toISOString() } }) });
+    await page.goto("/app/");
+    await expect(page.getByTestId("hosted-world")).toHaveAttribute("data-world", "slot");
+    await settle(page, h);
+    h.session = status({ world: "showcase", lease: null });
+    await expect(page.getByTestId("hosted-ended")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("hosted-ended")).toHaveAttribute("data-reason", "expired");
+    expect(h.api.filter((r) => r.path === "/api/_session" && r.at >= deadline - 1_000).length, "a session read at the deadline").toBeGreaterThan(0);
   });
 
   test("the Platform and model comparison pages read the hosted routes", async ({ page }) => {
@@ -193,14 +209,16 @@ test.describe("hosted shell", () => {
     expect(await cspViolations(page)).toEqual([]);
   });
 
-  test("the hosted reset goes through the front Worker, says how many resets are left and reopens the feed", async ({ page }) => {
+  test("the hosted reset goes through the front Worker, says what a reset does here and reopens the feed", async ({ page }) => {
     const h = await installHosted(page);
     h.queue("POST /api/v1/sim/reset", { status: 200, body: { ok: true, gen: 5, resetsLeft: 2 } });
     await page.goto("/app/");
     await expect.poll(() => h.sockets.length).toBe(1);
     await page.getByTestId("viewing-as").click();
-    await page.getByRole("menuitem", { name: /Reset demo data/ }).click();
-    await expect(page.locator("[data-tour-reset-note]")).toContainText("3 resets are left");
+    await page.getByRole("menuitem", { name: /Reset workspace data/ }).click();
+    const note = page.locator("[data-tour-reset-note]");
+    await expect(note).toContainText("Here a reset rebuilds your own workspace, with the rich data only.");
+    await expect(note).not.toContainText(/resets? (are|is) left/);
     const t0 = Date.now();
     await page.locator("[data-tour-reset-go]").click();
     await expect.poll(() => h.since(t0).some((r) => r.path === "/api/v1/sim/reset" && r.method === "POST")).toBe(true);
@@ -221,7 +239,7 @@ test.describe("hosted shell", () => {
 
   test("Help in Cmd+K searches only when asked, and shows the hits", async ({ page }) => {
     const h = await installHosted(page);
-    h.queue("GET /api/_hosted/help", { status: 200, body: { ok: true, hits: [{ title: "The guided tour", path: "docs/tour.md", snippet: "A three minute walk through the demo company.", score: 0.71 }], leftToday: 29 } });
+    h.queue("GET /api/_hosted/help", { status: 200, body: { ok: true, hits: [{ title: "The guided tour", path: "docs/tour.md", snippet: "A three minute walk through the workspace.", score: 0.71 }], leftToday: 29 } });
     await page.goto("/app/");
     await page.keyboard.press("ControlOrMeta+k");
     await page.getByTestId("cmdk-input").fill("guided tour");

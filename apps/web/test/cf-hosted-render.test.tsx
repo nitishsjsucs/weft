@@ -1,6 +1,7 @@
 // The hosted shell as it renders (track cf5-web; docs/cloudflare/design.md 6.2 and 10), with NEXT_PUBLIC_WEFT_HOSTED
-// on: the showcase and leased banners, the Platform and model comparison pages, the model switch, the hosted sidebar
-// and the agent panel's fictional-data notice. Static renders with the session state and the hosted reads stubbed.
+// on: the showcase banner and the leased world's (none unless there is something to say), the Platform and model
+// comparison pages, the model switch, the hosted sidebar and the agent panel with no fictional-data notice. Static
+// renders with the session state and the hosted reads stubbed.
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -17,7 +18,6 @@ vi.mock("next/navigation", () => ({
 const state = vi.hoisted(() => ({ status: null as SessionStatus | null, blocked: null as unknown, data: null as unknown, error: null as string | null, errorStatus: null as number | null, errorCode: null as string | null, limited: null as unknown }));
 vi.mock("../src/components/hosted/use-hosted", () => ({
   useHostedState: () => ({ status: state.status, loaded: true, error: state.error, errorStatus: state.errorStatus, errorCode: state.errorCode, ended: null, blocked: state.blocked, startAsk: 0, startReason: null, grantAsk: null, limited: state.limited }),
-  useNow: () => Date.parse("2026-10-26T16:00:00.000Z"),
   useHostedGet: () => ({ data: state.data, error: null, loading: false, reload: () => {} }),
 }));
 vi.mock("@/lib/api/hooks", async (importOriginal) => {
@@ -55,13 +55,14 @@ describe("the hosted banner", () => {
     expect(renderToStaticMarkup(<HostedBanner />)).toContain("not answering right now");
     state.error = null; state.errorStatus = null;
   });
-  it("offers Start my demo company on the shared showcase", () => {
+  it("offers Open my workspace on the shared showcase", () => {
     state.status = status(); state.blocked = null;
     const html = renderToStaticMarkup(<HostedBanner />);
-    expect(html).toContain('data-world="showcase"');
-    expect(html).toContain("read only");
+    expect(html).toContain('data-testid="hosted-banner" data-world="showcase"');
+    expect(html).toContain('data-testid="hosted-world" data-world="showcase"');
+    expect(html).toContain("You are looking at a shared, read-only workspace.");
     expect(html).toContain('data-testid="hosted-start-cta"');
-    expect(html).toContain("Start my demo company");
+    expect(html).toContain("Open my workspace");
   });
   it("shows a refused lease instead, and no Start button at level 3", () => {
     state.status = status({ level: 3 }); state.blocked = { status: "closed", level: 3 };
@@ -70,26 +71,32 @@ describe("the hosted banner", () => {
     expect(html).not.toContain("hosted-start-cta");
     state.blocked = null;
   });
-  it("counts down the visitor's own lease (the earlier deadline) with the fictional-data notice", () => {
+  it("shows no banner in the visitor's own workspace when there is nothing to say: no countdown and no notice", () => {
     state.status = status({ world: "slot", lease });
     const html = renderToStaticMarkup(<HostedBanner />);
-    expect(html).toContain('data-world="slot"');
-    expect(html).toContain('data-slot="slot-1"');
-    expect(html).toContain(">42 min left<");
-    expect(html).toContain("Please do not type real personal data.");
+    // Only the hidden marker of the world the tab reads.
+    expect(html).toBe('<span hidden="" data-testid="hosted-world" data-world="slot" data-slot="slot-1"></span>');
+    expect(html).not.toContain("hosted-banner");
+    expect(html).not.toMatch(/min left|h left|fictional|personal data/);
   });
   it("says when new runs fall back to the scripted provider", () => {
     state.status = status({ world: "slot", lease, provider: { id: "scripted", reason: "budget" } });
-    expect(renderToStaticMarkup(<HostedBanner />)).toContain("budget is used up, so new agent runs use the scripted provider");
+    const html = renderToStaticMarkup(<HostedBanner />);
+    expect(html).toContain('data-testid="hosted-banner" data-world="slot" data-slot="slot-1"');
+    expect(html).toContain("budget is used up, so new agent runs use the scripted provider");
+    expect(html).toContain('data-testid="hosted-provider-note"');
   });
-  it("says when the visitor's demo company, or the shared one, has hit its daily limit", () => {
+  it("says when the visitor's workspace, or the shared one, has hit its daily limit", () => {
     state.status = status({ world: "slot", lease });
     state.limited = { kind: "demo", gen: lease.gen };
-    expect(renderToStaticMarkup(<HostedBanner />)).toContain("This demo company has hit its daily limit. Reset it from Viewing as, or come back later.");
+    const own = renderToStaticMarkup(<HostedBanner />);
+    expect(own).toContain('data-testid="hosted-banner" data-world="slot"');
+    expect(own).toContain("This workspace has hit its daily limit. Reset it from Viewing as, or come back later.");
+    expect(own).not.toContain("hosted-provider-note");
     state.status = status();
     state.limited = { kind: "showcase", gen: null };
     const html = renderToStaticMarkup(<HostedBanner />);
-    expect(html).toContain("The shared demo company has hit its daily limit.");
+    expect(html).toContain("The shared workspace has hit its daily limit.");
     expect(html).toContain('data-testid="hosted-start-cta"');
     state.limited = null;
     expect(renderToStaticMarkup(<HostedBanner />)).not.toContain("hosted-limit");
@@ -153,7 +160,7 @@ describe("the model switch", () => {
   it("is read only on the showcase", () => {
     state.status = status();
     const html = renderToStaticMarkup(<ModelSwitchSection />);
-    expect(html).toContain("Start your demo company to choose the model.");
+    expect(html).toContain("Open your workspace to choose the model.");
     expect((html.match(/disabled=""/g) ?? []).length).toBe(4);
     expect(html).toMatch(/data-provider="null"[^>]*checked=""/);
   });
@@ -165,7 +172,10 @@ describe("the hosted shell around the app", () => {
     expect(html).toContain('href="/app/platform"');
     expect(html).toContain('href="/app/models"');
   });
-  it("puts the fictional-data notice in the agent panel", () => {
-    expect(shell(<AgentPanel />)).toContain('data-testid="hosted-fictional"');
+  it("puts no fictional-data notice in the agent panel (Nitish, 2026-10-23)", () => {
+    const html = shell(<AgentPanel />);
+    expect(html).toContain('aria-label="Agent"');
+    expect(html).not.toContain("hosted-fictional");
+    expect(html).not.toContain("Please do not type real personal data.");
   });
 });

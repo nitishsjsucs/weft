@@ -1,5 +1,5 @@
 // Help results in Cmd+K (docs/cloudflare/design.md 7.1): AI Search over Weft's own docs, capped at 30 queries a day
-// for the whole demo, so the menu searches only when the visitor picks "Search Weft help" (never on each keystroke).
+// for all of hosted Weft, so the menu searches only when the visitor picks "Search Weft help" (never on each keystroke).
 import { HOSTED_PATHS, HOSTED_SETTINGS } from "../../../../../packages/contracts/src/ext/cf-hosted";
 import type { HelpSearchResult } from "../../../../../packages/contracts/src/ext/cf-extras";
 import { apiFetch } from "@/lib/api/client";

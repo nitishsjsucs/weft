@@ -1,4 +1,4 @@
-// The Lobby's rules (design 6.2, 6.5, 8.2, 9.2) with the section 0 settings: 30 minute idle and 3 hour leases, the
+// The Lobby's rules (design 6.2, 6.5, 8.2, 9.2) with the section 0 settings: 24 hour idle and 30 day leases, the
 // shares, the provisioning-day ceiling that seeds the whole pool on day 1, and the degradation ladder.
 import { describe, expect, it } from "vitest";
 import { HOSTED_DELTA_RESET_BASELINE_ROWS, HOSTED_SETTINGS } from "../../src/shared/contracts";
@@ -24,27 +24,33 @@ describe("the engaged session's rows", () => {
 });
 
 describe("lease times (section 0)", () => {
-  it("uses 30 minutes idle and 3 hours in all", () => {
-    expect(HOSTED_SETTINGS.leaseIdleMinutes).toBe(30);
-    expect(HOSTED_SETTINGS.leaseTotalMinutes).toBe(180);
+  const IDLE = HOSTED_SETTINGS.leaseIdleMinutes * MIN;
+  const TOTAL = HOSTED_SETTINGS.leaseTotalMinutes * MIN;
+
+  it("uses 24 hours idle and 30 days in all (Nitish, 2026-10-23)", () => {
+    expect(HOSTED_SETTINGS.leaseIdleMinutes).toBe(24 * 60);
+    expect(HOSTED_SETTINGS.leaseTotalMinutes).toBe(30 * 24 * 60);
     const l = { startedAt: 0, lastSeen: 0 };
-    expect(leaseEnded(l, 29 * MIN)).toBeNull();
-    expect(leaseEnded(l, 30 * MIN)).toBe("idle");
-    expect(leaseEnded({ startedAt: 0, lastSeen: 170 * MIN }, 179 * MIN)).toBeNull();
-    expect(leaseEnded({ startedAt: 0, lastSeen: 179 * MIN }, 180 * MIN)).toBe("total");
-    expect(leaseExpiresAt(l)).toBe(180 * MIN);
-    expect(leaseIdleExpiresAt({ startedAt: 0, lastSeen: 170 * MIN })).toBe(180 * MIN);
+    // An idle lease still ends after the idle time.
+    expect(leaseEnded(l, IDLE - MIN)).toBeNull();
+    expect(leaseEnded(l, IDLE)).toBe("idle");
+    // A lease kept active still ends at its total time.
+    expect(leaseEnded({ startedAt: 0, lastSeen: TOTAL - 10 * MIN }, TOTAL - MIN)).toBeNull();
+    expect(leaseEnded({ startedAt: 0, lastSeen: TOTAL - MIN }, TOTAL)).toBe("total");
+    expect(leaseExpiresAt(l)).toBe(TOTAL);
+    expect(leaseIdleExpiresAt(l)).toBe(IDLE);
+    expect(leaseIdleExpiresAt({ startedAt: 0, lastSeen: TOTAL - 10 * MIN })).toBe(TOTAL);
   });
 
   it("estimates the waitlist from the soonest lease end", () => {
     expect(etaMinutes([], 0)).toBeNull();
-    expect(etaMinutes([{ startedAt: 0, lastSeen: 10 * MIN }, { startedAt: 0, lastSeen: 20 * MIN }], 15 * MIN)).toBe(25);
-    expect(etaMinutes([{ startedAt: 0, lastSeen: 0 }], 31 * MIN)).toBe(1);
+    expect(etaMinutes([{ startedAt: 0, lastSeen: 10 * MIN }, { startedAt: 0, lastSeen: 20 * MIN }], 15 * MIN)).toBe((10 * MIN + IDLE - 15 * MIN) / MIN);
+    expect(etaMinutes([{ startedAt: 0, lastSeen: 0 }], IDLE + MIN)).toBe(1);
   });
 
-  it("allows 20 leases per IP hash a day and 3 resets per lease", () => {
-    expect(HOSTED_SETTINGS.leasesPerIpHashPerDay).toBe(20);
-    expect(HOSTED_SETTINGS.resetsPerLease).toBe(3);
+  it("allows 500 leases per IP hash a day and 1,000 resets per lease", () => {
+    expect(HOSTED_SETTINGS.leasesPerIpHashPerDay).toBe(500);
+    expect(HOSTED_SETTINGS.resetsPerLease).toBe(1_000);
     expect(HOSTED_SETTINGS.poolSize).toBe(2);
   });
 });

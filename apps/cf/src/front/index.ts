@@ -82,7 +82,7 @@ const SMOKE_MUTATE_KEY = "mut:smoke";
 async function mutationGate(req: Request, env: FrontEnv, v: Visit): Promise<Response | null> {
   // A GET gated like a mutation (a PDF) sends no Origin; the SameSite=Strict cookies already keep it same-site.
   if (!v.smoke && isMutation(req.method) && !originAllowed(req, env)) return hostedError("ORIGIN_REFUSED", "Cross-origin requests are refused");
-  if (!v.smoke && !v.session) return hostedError("LEASE_REQUIRED", "The shared demo company is read-only; start your own demo company to make changes");
+  if (!v.smoke && !v.session) return hostedError("LEASE_REQUIRED", "The shared workspace is read-only; open your own workspace to make changes");
   if (!v.smoke && !v.grant) return hostedError("TURNSTILE_REQUIRED", "Confirm you are human to keep making changes");
   // A valid smoke visit (the deploy's own checks, signed with WEFT_SMOKE_TOKEN) has its own key, so automated checks
   // from the operator's address never spend that address's visitor budget; a forged or unsigned one is a visitor.
@@ -106,16 +106,16 @@ async function api(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<Res
     const refused = await mutationGate(req, env, v);
     if (refused) return refused;
     if (isModelAdmission(req.method, apiPath) && !agentEnabled(await envConfig(env))) {
-      return hostedError("AGENT_PAUSED", "The agent is paused on this demo right now", { retryAfterS: 300 });
+      return hostedError("AGENT_PAUSED", "The agent is paused right now", { retryAfterS: 300 });
     }
     if (apiPath === SIM_RESET_PATH && req.method === "POST") return resetIntercept(req, env, v);
     if (isUpload(req.method, req.headers.get("content-type"))) {
       const len = Number(req.headers.get("content-length") ?? "NaN");
       if (!Number.isFinite(len)) return plainError(411, "ValidationError", "LENGTH_REQUIRED", "Uploads need a Content-Length");
-      if (len > HOSTED_SETTINGS.uploadMaxBytes + UPLOAD_OVERHEAD) return hostedError("UPLOAD_LIMIT", "Uploads are limited to 1.5 MB on the hosted demo");
+      if (len > HOSTED_SETTINGS.uploadMaxBytes + UPLOAD_OVERHEAD) return hostedError("UPLOAD_LIMIT", "Uploads are limited to 1.5 MB on hosted Weft");
       if (!v.smoke) {
         const r = await lobby(env).take({ key: `upload:${v.session!.visitor}`, limit: HOSTED_SETTINGS.uploadsPerVisitorPerDay });
-        if (!r.ok) return hostedError("UPLOAD_LIMIT", `The hosted demo allows ${HOSTED_SETTINGS.uploadsPerVisitorPerDay} uploads a day`);
+        if (!r.ok) return hostedError("UPLOAD_LIMIT", `Hosted Weft allows ${HOSTED_SETTINGS.uploadsPerVisitorPerDay} uploads a day`);
       }
     }
     return forwardToWorld(req, env, { ...worldOf(v, t), path: apiPath, search: url.search });
@@ -143,7 +143,7 @@ async function showcaseRead(req: Request, env: FrontEnv, url: URL, v: Visit, t: 
   const hit = showcaseMemo.get(read.key, maxAge);
   if (hit) return forMethod(req, hit);
   if (!showcaseMemo.admitMiss(apiPath, read)) {
-    return hostedError("RATE_LIMITED", "The shared demo company is answering many different requests right now; try again in a minute, or start your own demo company", { retryAfterS: 60 });
+    return hostedError("RATE_LIMITED", "The shared workspace is answering many different requests right now; try again in a minute, or open your own workspace", { retryAfterS: 60 });
   }
   const ask = (r: NormalizedRead) => {
     const headers = new Headers(req.headers);
@@ -167,11 +167,11 @@ async function showcaseRead(req: Request, env: FrontEnv, url: URL, v: Visit, t: 
   return forMethod(req, await showcaseMemo.put(ResponseMemo.normalize({ ...base, reads: learned }).key, res));
 }
 
-/** "Reset demo data..." (design 6.2 step 5): through the Lobby, rich profile only, a new cookie generation. */
+/** "Reset workspace data..." (design 6.2 step 5): through the Lobby, rich profile only, a new cookie generation. */
 async function resetIntercept(req: Request, env: FrontEnv, v: Visit): Promise<Response> {
   const body = await readJson<{ profile?: unknown }>(req);
   if (body === null) return plainError(400, "ValidationError", "BAD_BODY", "The reset body is JSON: { profile? }");
-  if (body.profile !== undefined && body.profile !== "rich") return hostedError("HOSTED_RESET_PROFILE", "The hosted demo resets to the rich world only");
+  if (body.profile !== undefined && body.profile !== "rich") return hostedError("HOSTED_RESET_PROFILE", "Hosted workspaces reset to the rich data only");
   if (v.smoke) {
     const r = await lobby(env).resetWorld({ slot: DO_NAMES.smoke });
     return "error" in r ? hostedError(r.error, r.message) : json({ ...r, profile: "rich" });
@@ -189,7 +189,7 @@ async function resetIntercept(req: Request, env: FrontEnv, v: Visit): Promise<Re
 async function live(req: Request, env: FrontEnv, v: Visit): Promise<Response> {
   if ((req.headers.get("upgrade") ?? "").toLowerCase() !== "websocket") return plainError(426, "ValidationError", "UPGRADE_REQUIRED", "Expected a WebSocket upgrade");
   const t = targetOf(v);
-  if (!t.leased) return hostedError("LEASE_REQUIRED", "The live feed belongs to your own demo company");
+  if (!t.leased) return hostedError("LEASE_REQUIRED", "The live feed belongs to your own workspace");
   return forwardToWorld(req, env, { ...worldOf(v, t), path: DO_PATHS.live, search: "" });
 }
 
@@ -214,7 +214,7 @@ async function hosted(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<
     return forwardToWorld(req, env, { ...worldOf(v, t), path: `${DO_PATHS.pdf}${path.slice(HOSTED_PATHS.pdf.length)}`, search: "" });
   }
   // Exports belong to a leased world (the job id names its slot's file).
-  if (path.startsWith(HOSTED_EXPORT_PREFIX) && !t.leased && !v.smoke) return hostedError("LEASE_REQUIRED", "Exports belong to your own demo company");
+  if (path.startsWith(HOSTED_EXPORT_PREFIX) && !t.leased && !v.smoke) return hostedError("LEASE_REQUIRED", "Exports belong to your own workspace");
   if (![HOSTED_PATHS.platform, HOSTED_PATHS.models, HOSTED_PATHS.help, HOSTED_PATHS.dictate].includes(path as never) && !path.startsWith(HOSTED_EXPORT_PREFIX)) {
     return plainError(404, "NotFound", "NOT_FOUND", "No such hosted route");
   }
@@ -243,7 +243,7 @@ async function mcp(req: Request, env: FrontEnv, url: URL): Promise<Response> {
   const auth = req.headers.get("authorization") ?? "";
   const key = /^Bearer\s+(\S+)$/i.exec(auth)?.[1] ?? req.headers.get("x-api-key") ?? "";
   const parsed = key ? parseHostedMcpKey(key) : null;
-  if (!parsed || !isPoolSlot(env, parsed.slot)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "Use the MCP key from your demo company (Bearer wk_mcp_...)");
+  if (!parsed || !isPoolSlot(env, parsed.slot)) return plainError(401, "Unauthorized", "MCP_KEY_REQUIRED", "Use the MCP key from your workspace (Bearer wk_mcp_...)");
   const v = await resolveVisit(req, env);
   if (await rateLimited(env.RL_MCP, `mcp-ip:${v.ipHash}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
   if (await rateLimited(env.RL_MCP, `mcp:${await mcpKeyId(key)}`)) return hostedError("RATE_LIMITED", "Too many MCP requests in a minute", { retryAfterS: 60 });
