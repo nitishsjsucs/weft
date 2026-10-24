@@ -1,9 +1,10 @@
 // GP26. The Agent page (README "The Agent page"; packages/contracts/src/ext/agent-page.ts). Agent in the sidebar opens
-// the full-page agent with the side panel closed; the seeded history shows as single-turn conversations and the
-// routine and notice runs as background work; a seeded conversation opens; a new question starts a thread, a follow-up
-// stays in it and its context pack holds the first turn; the deep link reloads; and the page holds at 1440 by 900 and
-// 390 by 844. The seeded runs live in the rich profile, so this spec resets the e2e world to rich and back to base
-// afterwards (every other spec runs on base). Scripted provider.
+// the full-page agent with the side panel closed; the recorded showcase conversations (real runs on the live model,
+// packages/seed/src/rich/showcase.ts) show as threads titled by their first question and the routine runs as
+// background work; a recorded conversation opens with every turn; a new question starts a thread, a follow-up stays in
+// it and its context pack holds the first turn; the deep link reloads; and the page holds at 1440 by 900 and 390 by
+// 844. The recorded runs live in the rich profile, so this spec resets the e2e world to rich and back to base
+// afterwards (every other spec runs on base). New questions run on the scripted provider.
 import type { Page } from "@playwright/test";
 import { expect, openApp, test, TID, type AgentRunRow } from "./fixtures";
 import { AGENT_PAGE_TID as T } from "../packages/contracts/src/ext/agent-page";
@@ -35,9 +36,12 @@ test("GP26: the Agent page lists conversations and background work, threads a fo
   expect(rich.profile).toBe("rich");
   const page1 = await weft.get<{ data: Row[] }>("/v1/agent/runs", { trigger: "chat", limit: 100 });
   const seeded = page1.data.filter((r) => r.askedFrom === "agent");
-  expect(seeded.length, "Vic has seeded chat runs on the rich world").toBeGreaterThan(0);
-  expect(seeded.every((r) => r.threadId === null), "no seeded run has a thread").toBe(true);
-  const lena = seeded.find((r) => /Lena Brooks/.test(r.summary ?? ""))!;
+  expect(seeded.length, "Vic has recorded chat runs on the rich world").toBeGreaterThan(0);
+  expect(seeded.every((r) => r.threadId !== null && r.question), "every recorded run is a turn of a thread, with its question").toBe(true);
+  expect(seeded.every((r) => r.provider === "openai"), "the recorded runs ran on the live model").toBe(true);
+  const flagged = seeded.find((r) => r.question === "Which paychecks are flagged in the Oct 30 payroll draft?")!;
+  expect(flagged, "the flagged-paychecks conversation").toBeTruthy();
+  const flaggedTurns = seeded.filter((r) => r.threadId === flagged.threadId).length;
   const background = await weft.get<{ data: AgentRunRow[] }>("/v1/agent/runs", { trigger: "background", limit: 50 });
   expect(background.data.length).toBeGreaterThan(0);
 
@@ -54,11 +58,11 @@ test("GP26: the Agent page lists conversations and background work, threads a fo
     await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("New chat");
   });
 
-  await test.step("the seeded history shows as single-turn conversations, and the routine runs as background work", async () => {
+  await test.step("the recorded conversations show as threads, and the routine runs as background work", async () => {
     const items = page.getByTestId(T.thread);
-    await expect(items).toHaveCount(new Set(seeded.map((r) => r.threadId ?? r.id)).size);
-    await expect(items.filter({ hasText: "Payroll cost by month for 2026" })).toHaveCount(1);
-    await expect(items.first()).not.toContainText("turns");
+    await expect(items).toHaveCount(new Set(seeded.map((r) => r.threadId)).size);
+    await expect(items.filter({ hasText: "Show payroll cost by month for 2026" })).toHaveCount(1);
+    await expect(items.filter({ hasText: "Show payroll cost by month for 2026" })).toContainText("2 turns");
     await page.getByTestId(T.backgroundTab).click();
     const bg = page.getByTestId(T.background);
     await expect(bg.first()).toBeVisible();
@@ -69,16 +73,17 @@ test("GP26: the Agent page lists conversations and background work, threads a fo
     await page.getByTestId(T.threadsTab).click();
   });
 
-  await test.step("a seeded conversation opens with its answer, model and cost", async () => {
-    await page.getByTestId(T.thread).filter({ hasText: "Lena Brooks" }).click();
-    await expect(page).toHaveURL(new RegExp(`\\?run=${lena.id}$`));
-    await expect(page.getByTestId(T.turn)).toHaveCount(1);
-    const main = page.getByTestId(T.page);
-    await expect(main.getByTestId(TID.agentAnswer)).toContainText("gross change");
-    await expect(page.getByTestId(T.model)).toHaveText("Scripted, no model");
+  await test.step("a recorded conversation opens with every turn, the live model and its cost", async () => {
+    await page.getByTestId(T.thread).filter({ hasText: "Which paychecks are flagged" }).click();
+    await expect(page).toHaveURL(new RegExp(`\\?thread=${flagged.threadId}$`));
+    await expect(page.getByTestId(T.turn)).toHaveCount(flaggedTurns);
+    const lena = page.getByTestId(T.turn).filter({ has: page.getByTestId(T.question).filter({ hasText: "Why is Lena Brooks flagged?" }) });
+    await expect(lena.getByTestId(TID.agentAnswer)).toContainText("18.0%");
+    await expect(page.getByTestId(T.model)).toHaveText("openai gpt-5.6-luna (live)");
     await expect(page.getByTestId(T.cost)).toHaveText(/^\$\d/);
-    await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Lena Brooks");
-    await expect(page.getByTestId(T.composerNote)).toContainText("starts a new conversation");
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Which paychecks are flagged");
+    await expect(page.getByTestId(T.composerNote)).toContainText("A follow-up sees the last three turns");
+    await expect(page.getByTestId(T.composer)).toHaveAttribute("placeholder", "Ask a follow-up...");
   });
 
   let threadId = "";
@@ -159,10 +164,10 @@ test("GP26: the Agent page lists conversations and background work, threads a fo
     const drawer = page.getByTestId(T.list).last();
     await expect(drawer).toBeVisible();
     await fitsWidth(page, T.list);
-    await drawer.getByTestId(T.thread).filter({ hasText: "Payroll cost by month for 2026" }).click();
+    await drawer.getByTestId(T.thread).filter({ hasText: "Show payroll cost by month for 2026" }).click();
     await expect(drawer).toBeHidden();
-    await expect(page).toHaveURL(/\?run=run_\d+$/);
-    await expect(page.getByTestId(T.turn)).toHaveCount(1);
-    await expect(page.getByTestId(T.title)).toHaveText("Payroll cost by month for 2026");
+    await expect(page).toHaveURL(/\?thread=thr_[0-9a-f]{20}$/);
+    await expect(page.getByTestId(T.turn)).toHaveCount(2);
+    await expect(page.getByTestId(T.title)).toHaveText("Show payroll cost by month for 2026");
   });
 });

@@ -72,13 +72,14 @@ test("completes the whole tour on the scripted provider in 180 s or less", async
       expect(Number(await page.locator('[data-tour~="memory-backlinks"]').getAttribute("data-count")), "memory backlinks").toBeGreaterThan(0);
     }
     if (step.id === "payroll-flags" && world.rich) {
-      // The open flag's popover reads as copy: its own line, human dates, no row ids or engine codes.
+      // The open flag's popover reads as copy (human dates, no row ids or engine codes) and carries the recorded
+      // pre-payroll review's own note on the paycheck: written by the agent, and it speaks to the blocking flag.
       const pop = page.locator("[data-radix-popper-content-wrapper]").filter({ has: page.locator("[data-explanation-source]") });
       await expect(pop).toBeVisible();
       const text = await pop.innerText();
       expect(text, "flag popover copy").not.toMatch(/\b(?:wrk|pyc|prt|tor|res|pay|prp)_\d{4}|\d{4}-\d{2}-\d{2}|\b[A-Z]+_[A-Z_]+\b/);
-      expect(text, "the blocking flag's own line").toContain("No active bank account, so this paycheck is blocked");
-      expect(text, "no other flag's line").not.toContain("First paycheck");
+      expect(text, "the note covers the blocking flag").toMatch(/no active bank account/i);
+      await expect(pop.locator("[data-explanation-source]"), "the agent wrote it").toHaveAttribute("data-explanation-source", "agent");
     }
     if (TOUR_STEPS.findIndex((x) => x.id === "approve") < i) {
       // After the approval, the notice run's step line for the rate change shows the decision, not the filing.

@@ -33,7 +33,9 @@ function LastRun({ r, short = false }: { r: GalleryRow; short?: boolean }) {
   if (!r.lastRunAt) return <span className="text-gray-10">Never</span>;
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
-      {r.lastRunStatus ? <Badge tone={STATUS_TONE[r.lastRunStatus] ?? "gray"} size="xs">{r.lastRunStatus === "waiting_approval" ? "Waiting for approval" : statusLabel(r.lastRunStatus)}</Badge> : null}
+      {/* The table's short form says "Waiting" (the title has the rest), so a run waiting on a person keeps the five
+          columns inside the docked panel's 630 px content column. */}
+      {r.lastRunStatus ? <Badge tone={STATUS_TONE[r.lastRunStatus] ?? "gray"} size="xs" title={r.lastRunStatus === "waiting_approval" ? "Waiting for approval" : undefined}>{r.lastRunStatus === "waiting_approval" ? (short ? "Waiting" : "Waiting for approval") : statusLabel(r.lastRunStatus)}</Badge> : null}
       <span title={short ? fmtDateTime(r.lastRunAt) : undefined}>{short ? shortWhen(r.lastRunAt) : fmtDateTime(r.lastRunAt)}</span>
     </span>
   );

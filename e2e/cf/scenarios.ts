@@ -4,7 +4,8 @@
 //
 // They run in one pass on a freshly reset rich world, in an order where none changes another's figures: the read-only
 // questions first (7, 6), the pre-payroll review (2) before anything moves the Oct 30 draft, the accepted offer (3)
-// while the Inbox holds only two approvals (the seeded laptop and the review's Submit card), the MCP client (8) while the
+// while the Inbox holds only the six approvals the recorded showcase runs left (the review's Submit card, the two training
+// cards, the cost-by-state email, the off-cycle bonus and Ruth's vacation), the MCP client (8) while the
 // delivered notice's rate change still waits, then the notice's approval and Undo (1), the injection (4), the expense
 // review (5), and last the two clock advances that activate the CO accounts (3, continued), since a moved clock changes
 // the notice letter's date and the time-off figures. The scripted provider answers the agent runs (hosted worlds use
@@ -204,11 +205,14 @@ const s2: Scenario = {
 
 const NOOR_WELCOME = "Please welcome Noor Castellanos, our new Senior Firmware Engineer, joining Hardware.";
 
+/** Approvals waiting on a fresh rich world: the ones the recorded showcase runs left (packages/seed/src/rich/showcase.ts). */
+export const SEEDED_APPROVALS = 6;
+
 const s3: Scenario = {
-  id: "3", title: "New hire in a new state: Mark accepted, approvals 2 to 5",
+  id: "3", title: `New hire in a new state: Mark accepted, approvals ${SEEDED_APPROVALS} to ${SEEDED_APPROVALS + 3}`,
   async run({ world: w }) {
     const before = await approvals(w);
-    eq(before.length, 2, "approvals in the Inbox before Mark accepted");
+    eq(before.length, SEEDED_APPROVALS, "approvals in the Inbox before Mark accepted");
     const accepted = await w.post<{ summary: string; data: { worker_id: string } }>("/api/v1/offers/offr_0001/accept", {});
     has(accepted.summary, "Noor Castellanos", "accepted offer");
     const workerId = accepted.data.worker_id;
@@ -217,7 +221,7 @@ const s3: Scenario = {
     check(rr!.status === "waiting_approval" || rr!.status === "done", `the new hire readiness run ended ${rr!.status}: ${rr!.summary ?? ""}`);
     const after = await approvals(w);
     const fresh = after.filter((p) => !before.some((b) => b.id === p.id));
-    eq(after.length, 5, "approvals after Mark accepted");
+    eq(after.length, SEEDED_APPROVALS + 3, "approvals after Mark accepted");
     eq(fresh.filter((p) => p.command === "tax.register_state_account").length, 2, "CO registrations waiting");
     const laptop = fresh.find((p) => p.command === "it.order_device");
     check(laptop && laptop.moneyCents === 189_900 && laptop.headline.includes("Noor Castellanos"), `Noor's $1,899.00 laptop waits (got ${laptop?.headline ?? "none"})`);
@@ -227,8 +231,8 @@ const s3: Scenario = {
     const welcome = (await chatMessages(w, "#new-hires")).find((m) => m.text === NOOR_WELCOME);
     check(welcome, `#new-hires has "${NOOR_WELCOME}"`);
     for (const p of fresh) await approve(w, p.id);
-    eq((await approvals(w)).length, 2, "approvals after approving the three");
-    return `approvals 2 to 5 (2 CO registrations and the $1,899.00 laptop), 3 IT accounts and the #new-hires welcome executed, all three approved`;
+    eq((await approvals(w)).length, SEEDED_APPROVALS, "approvals after approving the three");
+    return `approvals ${SEEDED_APPROVALS} to ${SEEDED_APPROVALS + 3} (2 CO registrations and the $1,899.00 laptop), 3 IT accounts and the #new-hires welcome executed, all three approved`;
   },
 };
 

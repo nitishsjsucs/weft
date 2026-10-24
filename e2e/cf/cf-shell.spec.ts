@@ -43,7 +43,7 @@ test("an unleased visitor browses the shared read-only showcase; a deep link ren
 });
 
 // The Agent page in the export (README "The Agent page"): one prerendered page that reads its selection from the query,
-// so a deep link needs no shell. The showcase is the rich world, so its seeded conversations and routine runs are there;
+// so a deep link needs no shell. The showcase is the rich world, so its recorded conversations and routine runs are there;
 // nothing here writes, so it costs no lease.
 test("the Agent page renders from the export: conversations, background work, a deep link and the hosted composer", async ({ page, consoleErrors }) => {
   const res = await page.goto("/app/agent/");

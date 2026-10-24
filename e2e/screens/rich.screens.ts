@@ -95,22 +95,25 @@ test("rich profile screens", async ({ page, request }) => {
   await page.goto(`/portal?as=${encodeURIComponent(persona!)}`);
   await shot(page, "40-portal-persona");
 
-  // The Agent page: a conversation of two turns (a chart answer, then a follow-up in the same thread) beside the
-  // seeded conversations, the Background work tab, and the same thread at phone width with the list as a drawer.
-  await openApp(page, "/app/agent");
+  // The Agent page on the recorded showcase conversations (real runs on the live model, packages/seed/src/rich/
+  // showcase.ts): the payroll cost chart and its follow-up on October, the Background work tab, the request that ended
+  // in an approval card, and the first conversation at phone width with the list as a drawer.
+  const chats = await getJson<{ data: { threadId: string | null; question: string | null }[] }>(request, "/v1/agent/runs?trigger=chat&limit=100");
+  const threadOf = (q: string) => { const t = chats.data.find((r) => r.question?.startsWith(q))?.threadId; expect(t, q).toBeTruthy(); return t!; };
+  const costThread = `/app/agent?thread=${threadOf("Show payroll cost by month for 2026")}`;
+  await openApp(page, costThread);
   await viewAs(page, "dana");
-  for (const q of ["Show payroll cost by month", "Why is the NY raise flagged in the Oct 30 payroll?"]) {
-    await page.getByTestId("agent-page-composer").fill(q);
-    await page.getByTestId("agent-page-send").click();
-    await expect(page.getByTestId("agent-page-turn").last().getByTestId("agent-status")).toHaveAttribute("data-status", "done");
-  }
+  await expect(page.getByTestId("agent-page-turn")).toHaveCount(2);
+  await expect(page.getByTestId("agent-chart").first()).toBeVisible();
   await shot(page, "41-agent-page");
-  const thread = page.url();
   await page.getByTestId("agent-page-tab-background").click();
   await expect(page.getByTestId("agent-page-background").first()).toBeVisible();
   await shot(page, "41b-agent-background");
+  await openApp(page, `/app/agent?thread=${threadOf("Please propose a $1,500 bonus")}`);
+  await expect(page.getByTestId("agent-page-turn")).toHaveCount(2);
+  await shot(page, "41d-agent-approval");
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(thread);
+  await page.goto(costThread);
   await expect(page.getByTestId("agent-page-turn")).toHaveCount(2);
   await shot(page, "41c-agent-mobile");
 

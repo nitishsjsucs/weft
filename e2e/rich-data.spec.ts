@@ -85,7 +85,8 @@ test("the rich profile fills every audited screen", async ({ page, request }) =>
   const runs = await (await request.get("/api/v1/agent/runs?limit=1", { headers: { "x-weft-principal": "usr_dana" } })).json() as { data?: { id: string }[] };
   const runId = runs.data?.[0]?.id;
   expect(runId, "a recorded agent run").toBeTruthy();
-  const routes: Check[] = [...ROUTES, { path: `/app/runs/${runId}`, need: ["Steps", "Scripted, no model"] }];
+  // The newest run is a recorded showcase run (packages/seed/src/rich/showcase.ts): a real one, on the live model.
+  const routes: Check[] = [...ROUTES, { path: `/app/runs/${runId}`, need: ["Steps", "openai gpt-5.6-luna (live)"] }];
 
   const failures: string[] = [];
   const gapsSeen = new Set<string>();
