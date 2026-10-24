@@ -441,6 +441,94 @@ test.describe("GP27 the cursor assistant", () => {
     });
   });
 
+  test("the review's client fixes: the word a right-click selects, a waiting step, Back's focus, and the label read out", async ({ page }) => {
+    await test.step("a right-click's own word selection (as macOS makes one) is never the person's: no Copy, no selection sent", async () => {
+      await openApp(page, "/app");
+      // WebKit on macOS selects the word under the pointer before contextmenu fires; this does the same, first.
+      await page.evaluate(() => window.addEventListener("contextmenu", (e) => {
+        const t = e.target instanceof Element ? e.target : null;
+        if (!t) return;
+        const r = document.createRange();
+        r.selectNodeContents(t);
+        window.getSelection()!.removeAllRanges();
+        window.getSelection()!.addRange(r);
+      }, { capture: true }));
+      const h1 = page.locator("main h1").first();
+      const box = (await h1.boundingBox())!;
+      await page.mouse.click(box.x + 10, box.y + box.height / 2, { button: "right" });
+      await expect(page.getByTestId(A.menu)).toBeVisible();
+      await expect(page.getByTestId(A.menuCopy)).toBeDisabled();
+      expect(await page.evaluate(() => window.getSelection()?.toString() ?? ""), "the page's selection is as it was").toBe("");
+      await page.getByTestId(A.menuAsk).click();
+      const input = page.getByTestId(A.input);
+      await expect(input).toBeFocused();
+      await input.fill("Where is the clock?");
+      const sent = page.waitForRequest((r) => r.method() === "POST" && /\/api\/v1\/agent\/runs$/.test(new URL(r.url()).pathname));
+      await input.press("Enter");
+      const body = (await sent).postDataJSON() as { assist: { cursor: { selection: unknown } } };
+      expect(body.assist.cursor.selection).toBeNull();
+      await dismiss(page);
+      // A selection the person made before the press is theirs: Copy offers it.
+      await page.evaluate(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector("main h1")!); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(r); });
+      const words = (await h1.textContent())!.trim();
+      const again = (await h1.boundingBox())!;
+      // Past the double right-click window: this press is a first one, not the second of a pair.
+      await page.waitForTimeout(450);
+      await page.mouse.click(again.x + 10, again.y + again.height / 2, { button: "right" });
+      await expect(page.getByTestId(A.menuCopy)).toBeEnabled();
+      expect((await page.evaluate(() => window.getSelection()?.toString() ?? "")).trim()).toBe(words);
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId(A.menu)).toHaveCount(0);
+    });
+
+    await test.step("a pointer's label is read out through the card's live region, which was open before it", async () => {
+      await openApp(page, "/app/inbox");
+      const card = await ask(page, "Where is the clock?");
+      await expect(card).toHaveAttribute("aria-live", "polite");
+      await expect(page.getByTestId(A.bubble)).toHaveText("Clock and persona");
+      await expect(page.getByTestId(A.bubble)).toHaveAttribute("aria-hidden", "true");
+      await expect(card.getByTestId(A.pointed)).toHaveText("Clock and persona");
+      await dismiss(page);
+    });
+
+    await test.step("Back to the first step keeps focus in the walkthrough, on Next", async () => {
+      await openApp(page, "/app");
+      await ask(page, "How do I run payroll end to end?");
+      const walk = page.getByTestId(A.walk);
+      await expect(walk).toContainText("Step 1 of 5");
+      await page.getByTestId(A.walkNext).click();
+      await expect(walk).toContainText("Step 2 of 5");
+      await page.getByTestId(A.walkBack).focus();
+      await page.keyboard.press("Enter");
+      await expect(walk).toContainText("Step 1 of 5");
+      await expect(page.getByTestId(A.walkNext)).toBeFocused();
+      await page.waitForTimeout(300);
+      await expect(page.getByTestId(A.walkNext)).toBeFocused();
+    });
+
+    await test.step("a waiting step finds its part of the page when it appears there, with no move", async () => {
+      const walk = page.getByTestId(A.walk);
+      const found = walk.locator("[data-found]");
+      await page.getByTestId(A.walkNext).click();
+      await expect(walk).toContainText("Step 2 of 5");
+      // Needs review is on a pay run's page, not the list: the step waits.
+      await expect(found).toHaveAttribute("data-found", "false", { timeout: 10_000 });
+      await expect(page).toHaveURL(/\/app\/payroll$/);
+      // A section that renders late on this same page (as a drawer or a tab opened in place would).
+      await page.evaluate(() => {
+        const s = document.createElement("section");
+        s.setAttribute("data-tour", "payroll-needs-review");
+        s.textContent = "Needs review";
+        // Clear of the walkthrough card, which sits where the question was asked.
+        s.style.cssText = "position: fixed; left: 300px; bottom: 32px; width: 220px; height: 64px; border: 1px solid; background: white";
+        document.querySelector("main")!.append(s);
+      });
+      await expect(found).toHaveAttribute("data-found", "true");
+      await page.keyboard.press("Escape");
+      await expect(walk).toHaveCount(0);
+    });
+  });
+
   test("untrusted titles stay untrusted, records open through their link, and the card keeps out of the person's way", async ({ page, weft }) => {
     /** Asks, and returns the request the page sent and the run it started. */
     const askSent = async (question: string) => {
@@ -641,11 +729,22 @@ test.describe("GP27 the cursor assistant", () => {
       // The chat run's first model step is held (scenarios/chat_held_raise.json), so the run is still working here.
       const stop = progress.getByTestId(A.stop);
       await expect(stop).toBeVisible();
+      // A cancel the server refuses is not a stop: the card says so, and Stop stays to press again.
+      const isCancel = (u: URL) => /\/api\/v1\/agent\/runs\/run_[^/]+\/cancel$/.test(u.pathname);
+      await page.route(isCancel, (r) => r.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ _tag: "Unavailable", message: "Try again" }) }));
+      await stop.click();
+      await expect(progress.getByTestId(A.stopFailed)).toBeVisible();
+      await expect(stop).toBeVisible();
+      await expect(progress).not.toContainText("Stopped.");
+      await page.unroute(isCancel);
       const cancel = page.waitForRequest((r) => r.method() === "POST" && /\/api\/v1\/agent\/runs\/run_[^/]+\/cancel$/.test(new URL(r.url()).pathname));
       await stop.click();
       const runId = /\/runs\/(run_[^/]+)\/cancel$/.exec(new URL((await cancel).url()).pathname)![1]!;
       await expect(stop).toHaveCount(0);
       await expect(progress.getByRole("status")).toBeVisible();
+      // The heading says it stopped, never that the agent is still working.
+      await expect(progress).toContainText("The agent stopped");
+      await expect(progress).not.toContainText("The agent is working on it");
       const run = await eventually(() => weft.get<{ id: string; status: string; trigger: string; recipe?: string | null }>(`/v1/agent/runs/${runId}`), (r) => (r.status === "cancelled" ? r : undefined), "the chat run ends cancelled");
       expect(run.trigger).toBe("chat");
       await expect(progress).toHaveAttribute("data-status", "cancelled");

@@ -90,7 +90,7 @@ export function RunView({ id }: { id: string }) {
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
         title={<span data-testid="run-title">{runTitle(run, run.routineRunId ? routineNames[run.routineRunId] : undefined)}</span>}
-        subtitle={run.summary ? (run.routineRunId ? routineSummaryText(run.summary) : answerPlain(run.summary)) : undefined}
+        subtitle={run.summary ? <span data-assist-untrusted={run.tainted ? "" : undefined}>{run.routineRunId ? routineSummaryText(run.summary) : answerPlain(run.summary)}</span> : undefined}
         meta={
           <>
             <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{statusLabel(run.status)}</ShimmerText> : run.status === "waiting" ? "Waiting for approval" : statusLabel(run.status)}</Badge>

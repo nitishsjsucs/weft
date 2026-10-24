@@ -5,9 +5,9 @@
 // focused record, and a person's tab the viewer is not offered falls back to Profile.
 import { describe, expect, it } from "vitest";
 import { patchedSearch, sameAsPage } from "../src/lib/url-state";
-import { iconHidden, mayShowNow, sheetReserve, viewPatch, type IconState } from "../src/components/assist/surface-core";
+import { composing, iconHidden, isAssistHotkey, mayShowNow, sheetReserve, viewPatch, type IconState, type KeyPress } from "../src/components/assist/surface-core";
 import { stepPage, walkIndex } from "../src/components/assist/walk";
-import { setAssistPref } from "../src/components/assist/prefs";
+import { readAssistPref, setAssistPref } from "../src/components/assist/prefs";
 import { keyboardOrigin } from "../src/components/assist/context-core";
 import { personTabOffered } from "../src/components/app/people/people-view";
 
@@ -69,6 +69,10 @@ describe("the docked icon", () => {
       expect(store.get("weft.assist.icon")).toBe("on");
       g.window = { localStorage: { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } } };
       expect(() => setAssistPref("icon", false)).not.toThrow();
+      // Storage blocked: the choice still holds for this page, so Hide hides and the voice toggle stays on.
+      expect(readAssistPref("icon")).toBe("off");
+      setAssistPref("voice", true);
+      expect(readAssistPref("voice")).toBe("on");
     } finally {
       if (had) g.window = prev; else delete g.window;
     }
@@ -138,5 +142,28 @@ describe("what the second review of the cursor assistant found", () => {
     const mixed = [{ route: null }, { route: "/app/inbox" }];
     expect(stepPage(mixed, 0, new Map(), "/app/payroll?x=1")).toBe("/app/payroll?x=1");
     expect(stepPage(mixed, 0, new Map([[0, "/app/payroll"]]), "/app/payroll?x=1")).toBe("/app/payroll");
+  });
+});
+
+describe("the assistant's keys", () => {
+  const press = (x: Partial<KeyPress>): KeyPress => ({ key: "j", code: "KeyJ", metaKey: false, ctrlKey: true, altKey: false, shiftKey: false, ...x });
+  it("Ctrl or Cmd J on any layout, and never the browser's Ctrl H or Ctrl N where Dvorak or Colemak puts H or N on the J key", () => {
+    expect(isAssistHotkey(press({}))).toBe(true);
+    expect(isAssistHotkey(press({ ctrlKey: false, metaKey: true }))).toBe(true);
+    // Russian: the J key types о.
+    expect(isAssistHotkey(press({ key: "о" }))).toBe(true);
+    // Dvorak: J types h and the layout's J sits on KeyC; Colemak: J types n.
+    expect(isAssistHotkey(press({ key: "h" }))).toBe(false);
+    expect(isAssistHotkey(press({ key: "n" }))).toBe(false);
+    expect(isAssistHotkey(press({ key: "j", code: "KeyC" }))).toBe(true);
+    expect(isAssistHotkey(press({ shiftKey: true }))).toBe(false);
+    expect(isAssistHotkey(press({ ctrlKey: false }))).toBe(false);
+  });
+
+  it("a key in an input method's composition is never the assistant's: its Escape cancels the candidate", () => {
+    expect(composing(press({ key: "Escape", code: "Escape", ctrlKey: false, isComposing: true }))).toBe(true);
+    expect(composing(press({ key: "Escape", code: "Escape", ctrlKey: false, keyCode: 229 }))).toBe(true);
+    expect(composing(press({ key: "Escape", code: "Escape", ctrlKey: false }))).toBe(false);
+    expect(isAssistHotkey(press({ isComposing: true }))).toBe(false);
   });
 });

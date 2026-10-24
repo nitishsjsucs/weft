@@ -269,7 +269,10 @@ export function CursorIcon({ onOpen, hidden, docked }: { onOpen: (at: { x: numbe
   );
 }
 
-/** The pointer that glides from `from` to the target along a short curve, then the ring and the label bubble. */
+/**
+ * The pointer that glides from `from` to the target along a short curve, then the ring and the label bubble. All of it
+ * is visual: the label is read out through the answer card's live region, which is open before it is written.
+ */
 export function AssistPointer({ target, label, from, onArrived }: { target: HTMLElement; label: string; from: { x: number; y: number }; onArrived?: () => void }) {
   const dot = useRef<HTMLDivElement | null>(null);
   const [arrived, setArrived] = useState(false);
@@ -314,7 +317,7 @@ export function AssistPointer({ target, label, from, onArrived }: { target: HTML
       </div>
       {arrived ? <TourRing target={target} found secondary={[]} /> : null}
       {arrived && bubble ? (
-        <div data-assist-ui="" data-testid={ASSIST_TID.bubble} role="status" className="weft-assist-bubble pointer-events-none fixed z-[73] max-w-[220px] truncate rounded-full bg-gray-12 px-2.5 py-1 text-1 font-medium text-white shadow-[var(--shadow-modal)]" style={{ left: bubble.left, top: bubble.top }}>
+        <div data-assist-ui="" data-testid={ASSIST_TID.bubble} aria-hidden className="weft-assist-bubble pointer-events-none fixed z-[73] max-w-[220px] truncate rounded-full bg-gray-12 px-2.5 py-1 text-1 font-medium text-white shadow-[var(--shadow-modal)]" style={{ left: bubble.left, top: bubble.top }}>
           {label}
         </div>
       ) : null}

@@ -52,14 +52,15 @@ export function startCursorTracking(route: () => string): () => void {
 /** What the page held when a question started: the record under the point, the selection and the focused control. */
 export interface CursorStart { under: EntityRef | null; selection: { text: string; node: Node | null } | null; focus: Element | null }
 
-export function captureStart(at: { x: number; y: number } | null, route: string, around?: Element | null): CursorStart {
+/** `selection`: what the page held selected before the browser changed it (a right-click on macOS); else read now. */
+export function captureStart(at: { x: number; y: number } | null, route: string, around?: Element | null, selection?: CursorStart["selection"]): CursorStart {
   const a = typeof document !== "undefined" ? document.activeElement : null;
   const under = around ? entityAround(around, route) : at ? entityAt(at.x, at.y, route) : null;
   // The record's own name from the page's data, when it has one, rather than every word of its row.
   const name = under ? recordName(mountedQueries(), under.entity) : null;
   return {
     under: under && name ? { ...under, label: name } : under,
-    selection: selectedText(),
+    selection: selection === undefined ? selectedText() : selection,
     focus: a && a !== document.body && !a.closest(OWN) ? a : null,
   };
 }

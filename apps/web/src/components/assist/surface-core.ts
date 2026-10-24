@@ -1,6 +1,6 @@
 // Where the cursor assistant's surfaces may sit, the pure parts (effects.ts, walk.tsx and assistant.tsx read the page and
 // call these): the view state a validated link to the page the person is on writes, the room the phone's bottom sheet
-// is given above a target, and when the floating icon stays out of the way.
+// is given above a target, when the floating icon stays out of the way, and which key presses are the assistant's.
 import { ASSIST_QUERY_KEYS, routePattern, splitRoute } from "../../../../../packages/contracts/src/ext/assist";
 
 /**
@@ -72,4 +72,22 @@ export interface IdleState {
  */
 export function mayShowNow(s: IdleState): boolean {
   return s.here === s.askedFrom && !s.typing && (!s.layerNow || s.layerThen);
+}
+
+/** The parts of a keydown the assistant reads. */
+export interface KeyPress { key: string; code: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number }
+
+/**
+ * A key press still in an input method's composition (Japanese, Chinese, Korean): its Escape cancels the candidate and
+ * its keys build the word, so none is the assistant's (Safari reports keyCode 229 instead of isComposing).
+ */
+export const composing = (e: KeyPress): boolean => !!e.isComposing || e.keyCode === 229;
+
+/**
+ * Ctrl or Cmd J. The physical J key (e.code) counts only when the layout puts no Latin letter there (a Russian, Greek or
+ * Hebrew layout): on Dvorak or Colemak that key types H or N, and Ctrl H or Ctrl N stays the browser's.
+ */
+export function isAssistHotkey(e: KeyPress): boolean {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || composing(e)) return false;
+  return e.key.toLowerCase() === "j" || (e.code === "KeyJ" && !/^[a-z]$/i.test(e.key));
 }

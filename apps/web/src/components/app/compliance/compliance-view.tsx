@@ -25,15 +25,16 @@ function currentRate(rates: EmployerRate[], j: string, code: string): EmployerRa
   return rates.filter((r) => r.jurisdiction === j && r.code === code && r.supersededActionSeq === null).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
 }
 
-interface EscalationCase { outcome: "escalated"; reason: string; specialist: string; escalated_at: string; escalated_by: string; evidence: { label: string; ref: string }[] }
+export interface EscalationCase { outcome: "escalated"; reason: string; specialist: string; escalated_at: string; escalated_by: string; evidence: { label: string; ref: string }[] }
 const escalationOf = (n: Notice): EscalationCase | null => (n.status === "escalated" && n.resolution?.outcome === "escalated" ? (n.resolution as unknown as EscalationCase) : null);
 
-/** The specialist hand-off (notices.escalate): who has it, why, and the evidence pack it carried. */
-function Escalation({ e }: { e: EscalationCase }) {
+/** The specialist hand-off (notices.escalate): who has it, why, and the evidence pack it carried. The reason is the
+ *  escalating run's words (often a run that read the notice), so it is marked untrusted for the cursor assistant. */
+export function Escalation({ e }: { e: EscalationCase }) {
   return (
     <section data-testid={W3_ROUTINES_TID.noticeEscalation} className="rounded-lg border border-red-6 bg-red-2 p-3">
       <h3 className="mb-1 text-1 font-medium text-red-11 uppercase">With the {e.specialist.toLowerCase()}</h3>
-      <p className="text-[13px]">Escalated {fmtDateTime(e.escalated_at)} by <code className="font-mono text-0">{e.escalated_by}</code>: {e.reason}.</p>
+      <p className="text-[13px]">Escalated {fmtDateTime(e.escalated_at)} by <code className="font-mono text-0">{e.escalated_by}</code>: <span data-assist-untrusted="">{e.reason}</span>.</p>
       <ul className="mt-2 flex flex-col gap-1 text-[13px]">
         {e.evidence.map((x) => (
           <li key={`${x.label}${x.ref}`} className="flex flex-wrap items-center gap-2"><span className="text-gray-10">{x.label}</span>{refHref(x.ref) ? <Link href={refHref(x.ref)!} className="font-mono text-0 text-blue-11 hover:underline">{x.ref}</Link> : <code className="font-mono text-0">{x.ref}</code>}</li>

@@ -10,6 +10,8 @@ export const ASSIST_COPY = {
   handedOffDone: "The agent answered",
   stop: "Stop",
   stopped: "Stopped. Nothing else changes.",
+  stoppedHeading: "The agent stopped",
+  stopFailed: "It did not stop. Press Stop to try again.",
   openInAgent: "Open in Agent",
   continueInAgent: "Continue in Agent",
   showMe: (label: string) => `Show me ${label}`,

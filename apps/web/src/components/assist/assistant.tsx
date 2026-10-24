@@ -34,14 +34,14 @@ import { newThreadId, selectionHref } from "../app/agent-page/threads";
 import { ASSIST_COPY } from "./copy";
 import { buildCursor, captureStart, keyboardStart, lastPointer, startCursorTracking, type CursorStart } from "./context";
 import { PREFIX_KIND } from "./context-core";
-import { openLayer, readScreen, type Registered } from "./dom";
+import { openLayer, readScreen, selectedText, type Registered } from "./dom";
 import { applyEffect, type EffectEnv } from "./effects";
 import { offeredIntents } from "./intents";
 import { setAssistPref, useAssistIcon, useAssistVoice } from "./prefs";
 import { summarizeRecords } from "./records-core";
 import { createRightClickDetector } from "./right-click";
 import { cardTaint, chipLabel, clipAnswer, effectTrailLabel, fitAssistRequest, playableEffects, progressSteps, refusedChange, type AssistTrace } from "./run-core";
-import { iconHidden, mayShowNow, sheetReserve, viewPatch } from "./surface-core";
+import { composing, iconHidden, isAssistHotkey, mayShowNow, sheetReserve, viewPatch } from "./surface-core";
 import { pushTrail, startTrail, syncTrail, trailEvents } from "./trail";
 import { AssistPointer, CursorIcon, FloatingCard, InLayer, useLayerHost, useTrackedRect, WeftMenu } from "./visuals";
 import { browserVoiceInMode, listen, VOICE_COPY, type Listening } from "./voice-in";
@@ -74,8 +74,10 @@ interface Exchange {
   chatId: string | null;
   chat: RunWatch | null;
   error: string | null;
-  stopped: boolean;
+  /** Stop on the progress card: sent, then stopped once the cancel is accepted, or failed (Stop stays to try again). */
+  stop: StopState;
 }
+type StopState = "idle" | "sending" | "stopped" | "failed";
 interface Pointing { key: number; target: HTMLElement; label: string; from: { x: number; y: number }; done: () => void }
 /** `returnTo`: what had focus before the right-click, where focus goes back when the menu or what it opened closes. */
 interface MenuState { at: { x: number; y: number }; copy: string; start: CursorStart; returnTo: HTMLElement | null }
@@ -128,6 +130,8 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
   const [exchange, setExchange] = useState<Exchange | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [pointer, setPointer] = useState<Pointing | null>(null);
+  // What the pointer showed, for screen readers: written into the card (a live region already open) once it arrives.
+  const [said, setSaid] = useState("");
   const [walk, setWalk] = useState<WalkStepEffect[] | null>(null);
   // Each walkthrough is its own player (its key): a second one in the same run starts at its step 1 with a fresh
   // target lookup, never at the first one's step under the old ring.
@@ -196,7 +200,7 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
     if (e?.assistId && !e.chatId && (!ended(seen?.status) || seen?.terminalReason === "HANDED_OFF")) void client.post("/v1/agent/runs/:id/cancel", { params: { id: e.assistId } }).catch(() => undefined);
     setExchange(null);
     const menuBack = menuRef.current?.returnTo ?? null;
-    setPhase("idle"); setMenu(null); setPointer(null); setWalk(null); setNotes([]); setVoice("idle"); setVoiceNote(null); setSpeech(null); setText("");
+    setPhase("idle"); setMenu(null); setPointer(null); setSaid(""); setWalk(null); setNotes([]); setVoice("idle"); setVoiceNote(null); setSpeech(null); setText("");
     const back = returnFocus.current ?? menuBack;
     returnFocus.current = null;
     // Only from the assistant's own surfaces (or nowhere): a field the person moved to while the card was open keeps it.
@@ -241,13 +245,15 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
     registry: reg,
     point: (el, label) => (signal.aborted ? Promise.resolve() : new Promise<void>((resolve) => {
       const done = () => resolve();
+      setSaid("");
       setPointer({ key: ++pointKey.current, target: el, label, from: pointerFrom(), done });
       // The glide is 420 ms; a pointer that never reports arriving (a hidden tab) does not hold the queue.
       setTimeout(done, 1_500);
       signal.addEventListener("abort", done, { once: true });
     })),
     note: (t) => { if (!signal.aborted) addNote(t); },
-    walk: (steps) => { if (!signal.aborted) { setWalkKey((k) => k + 1); setWalk(steps); } },
+    // A walkthrough rings its own steps: a point played before it in the same run leaves with its ring and label.
+    walk: (steps) => { if (!signal.aborted) { setPointer(null); setWalkKey((k) => k + 1); setWalk(steps); } },
     signal,
     sheetRoom,
   });
@@ -367,7 +373,7 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
     setPointer(null); setWalk(null); setNotes([]); setVoice("idle"); setText(""); setSpeech(null);
     const exId = ++seq.current;
     const threadId = opts.threadId ?? newThreadId();
-    setExchange({ id: exId, question: q, threadId, assistId: null, assist: null, chatId: null, chat: null, error: null, stopped: false });
+    setExchange({ id: exId, question: q, threadId, assistId: null, assist: null, chatId: null, chat: null, error: null, stop: "idle" });
     leftAt.current = { route: routeNow(), layer: !!openLayer() };
     setPhase("card");
     try {
@@ -416,8 +422,9 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const l = live.current;
-      // The J key wherever the layout puts its letter (e.code): a Russian, Greek or Hebrew layout reports another one.
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.code === "KeyJ" || e.key.toLowerCase() === "j")) {
+      // An input method's composition keeps its keys: its Escape cancels a candidate, not the composer.
+      if (composing(e)) return;
+      if (isAssistHotkey(e)) {
         if (l.tourActive) return;
         e.preventDefault();
         // A held key repeats about 30 times a second: only the press itself toggles, or the assistant would flicker
@@ -447,25 +454,47 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
   }, [closeAll, closeMenu, openComposer]);
 
   useEffect(() => {
+    // On macOS a right-click (or a Control-click) selects the word under the pointer before contextmenu fires, and
+    // preventDefault does not undo it. The selection as it was at the press is the person's: the menu copies and asks
+    // about that one, and the page's selection is put back as it was.
+    let pressed: { at: number; text: string; selection: CursorStart["selection"]; range: Range | null } | null = null;
+    const onPress = (e: MouseEvent) => {
+      if (e.button !== 2 && !(e.button === 0 && e.ctrlKey)) return;
+      const s = window.getSelection?.();
+      pressed = { at: performance.now(), text: s?.toString() ?? "", selection: selectedText(), range: s && s.rangeCount ? s.getRangeAt(0).cloneRange() : null };
+    };
+    const atPress = (): { text: string; selection: CursorStart["selection"] } | null => {
+      const p = pressed;
+      pressed = null;
+      // A menu from the keyboard (the context menu key, Shift F10) had no press: the selection now is the person's.
+      if (!p || performance.now() - p.at > 5_000) return null;
+      const s = window.getSelection?.();
+      if (s && s.toString() !== p.text) {
+        s.removeAllRanges();
+        if (p.range) s.addRange(p.range);
+      }
+      return { text: p.text, selection: p.selection };
+    };
     const onContext = (e: MouseEvent) => {
-      if (live.current.tourActive) return;
+      if (live.current.tourActive) { pressed = null; return; }
       const t = e.target instanceof Element ? e.target : null;
       // Fields keep the browser's menu (paste, spelling); so do the assistant's own surfaces, except its menu, where
       // the second press of a double right-click lands.
-      if (!t || t.closest("input,textarea,select,[contenteditable]:not([contenteditable='false'])")) return;
-      if (t.closest("[data-assist-ui]") && !t.closest(`[data-testid="${ASSIST_TID.menu}"]`)) return;
+      if (!t || t.closest("input,textarea,select,[contenteditable]:not([contenteditable='false'])")) { pressed = null; return; }
+      if (t.closest("[data-assist-ui]") && !t.closest(`[data-testid="${ASSIST_TID.menu}"]`)) { pressed = null; return; }
       e.preventDefault();
+      const before = atPress();
       // A menu opened from the keyboard may carry no pointer position: it opens at the element instead.
       const r = t.getBoundingClientRect();
       const point = Number.isFinite(e.clientX) && Number.isFinite(e.clientY) ? { x: e.clientX, y: e.clientY } : { x: r.left + 8, y: r.top + 8 };
       if (detector.current.press({ t: performance.now(), ...point }) === "double") {
         // The second press lands on the menu, which holds focus by then: focus goes back to what had it before the first.
         const m = live.current.menu;
-        openComposer(point, m?.start ?? captureStart(point, routeNow()), { listen: true, returnTo: m ? m.returnTo : focusedNow() });
+        openComposer(point, m?.start ?? captureStart(point, routeNow(), undefined, before?.selection), { listen: true, returnTo: m ? m.returnTo : focusedNow() });
         return;
       }
-      const copy = window.getSelection?.()?.toString() ?? "";
-      const start = captureStart(point, routeNow());
+      const copy = before ? before.text : window.getSelection?.()?.toString() ?? "";
+      const start = captureStart(point, routeNow(), undefined, before?.selection);
       // Focus to return to: what had it before (the answer card too, which stays open), unless that is the menu this
       // one replaces (then what that menu was to return to).
       const a = document.activeElement;
@@ -475,8 +504,12 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
       closeAppMenu();
       setMenu({ at: point, copy, start, returnTo });
     };
+    window.addEventListener("mousedown", onPress, { capture: true });
     document.addEventListener("contextmenu", onContext);
-    return () => document.removeEventListener("contextmenu", onContext);
+    return () => {
+      window.removeEventListener("mousedown", onPress, { capture: true });
+      document.removeEventListener("contextmenu", onContext);
+    };
   }, [closeAll, openComposer]);
 
   // ---- render ----------------------------------------------------------------------------------------------------
@@ -521,18 +554,27 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
           <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-3 py-2.5">
             {exchange.error ? <p role="alert" className="text-1 text-red-11">{exchange.error || ASSIST_COPY.error}</p> : null}
             {handedOff ? (
-              <Progress watch={exchange.chat} stopped={exchange.stopped} threadId={exchange.threadId}
-                onStop={() => { const id = exchange.chatId!; setExchange((e) => (e ? { ...e, stopped: true } : e)); void client.post("/v1/agent/runs/:id/cancel", { params: { id } }).catch(() => undefined); }} />
+              <Progress watch={exchange.chat} stop={exchange.stop} threadId={exchange.threadId}
+                onStop={() => {
+                  // Stopped only once the cancel is accepted: a refused or failed one leaves Stop to press again.
+                  const id = exchange.chatId!, exId = exchange.id;
+                  const set = (stop: StopState) => setExchange((e) => (e && e.id === exId ? { ...e, stop } : e));
+                  set("sending");
+                  void client.post("/v1/agent/runs/:id/cancel", { params: { id } }).then(() => set("stopped"), () => set("failed"));
+                }} />
             ) : null}
             {finalT ? <Answer trace={finalT} threadId={exchange.threadId} handedOff={handedOff} onChip={playChip}
               onChoose={(o) => void ask(choiceText(o), { threadId: exchange.threadId, under: { entity: o.id, kind: PREFIX_KIND[o.id.slice(0, 4)] ?? "record", label: o.label.slice(0, 120) } })} />
               : !handedOff && !exchange.error ? <div data-testid={ASSIST_TID.status} className="text-[13px]"><ShimmerText>{ASSIST_COPY.working}</ShimmerText></div> : null}
+            {/* What the pointer rang, read out through the card's own live region (the bubble is visual only). Not a
+                region of its own beside the page: a modal app menu's aria-hidden would then reach into the layer. */}
+            <p data-testid={ASSIST_TID.pointed} className="sr-only">{said}</p>
             {notes.length ? <ul role="status" className="flex flex-col gap-1">{notes.map((n) => <li key={n} data-testid="assist-note" className="text-1 text-amber-11">{n}</li>)}</ul> : null}
             {speech ? <p data-testid={ASSIST_TID.voiceProgress} role="status" className="text-1 text-gray-10">{speech}</p> : null}
           </div>
         </FloatingCard>
       ) : null}
-      {pointer ? <AssistPointer key={pointer.key} target={pointer.target} label={pointer.label} from={pointer.from} onArrived={pointer.done} /> : null}
+      {pointer ? <AssistPointer key={pointer.key} target={pointer.target} label={pointer.label} from={pointer.from} onArrived={() => { setSaid(pointer.label); pointer.done(); }} /> : null}
       {walk ? <WalkPlayer key={walkKey} steps={walk} registry={registry.current} here={routeNow} push={(h) => router.push(h)} sheet={sheet} start={at} pathname={pathname} onExit={() => closeAll()} /> : null}
     </InLayer>
   );
@@ -565,7 +607,7 @@ function Composer({ at, sheet, about, onClearAbout, text, setText, voice, voiceN
         ) : null}
         <div className="flex items-center gap-1.5">
           <input ref={input} data-testid={ASSIST_TID.input} value={text} onChange={(e) => setText(e.target.value)} maxLength={4000}
-            onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
+            onKeyDown={(e) => { if (e.key === "Escape" && !composing(e.nativeEvent)) { e.preventDefault(); onClose(); } }}
             placeholder={voice === "listening" ? ASSIST_COPY.listening : ASSIST_COPY.placeholder} aria-label={ASSIST_COPY.placeholder}
             className="min-w-0 flex-1 bg-transparent px-1 py-1 text-2 outline-none placeholder:text-gray-9" />
           {micMode !== "none" ? (
@@ -591,11 +633,13 @@ const TONE_ICON: Record<string, ReactNode> = {
 const toneOf = (o: RunStepRow["outcome"]) => (!o || o === "ok" ? "ok" : o.startsWith("pending:") ? "pending" : "bad");
 
 /** The handoff's progress card: the chat run's steps in plain words while it works, Stop, and Open in Agent. */
-function Progress({ watch, stopped, threadId, onStop }: { watch: RunWatch | null; stopped: boolean; threadId: string; onStop: () => void }) {
+function Progress({ watch, stop, threadId, onStop }: { watch: RunWatch | null; stop: StopState; threadId: string; onStop: () => void }) {
   const status = watch?.run?.status;
   const working = !ended(status);
+  const stopped = stop === "stopped";
   const lines = progressSteps(watch?.steps ?? [], stepSummary);
-  // Stop goes away once pressed (or once the run ends): focus that was on it moves to Open in Agent, not the page's top.
+  // Stop goes away once the stop is accepted (or once the run ends): focus that was on it moves to Open in Agent, not
+  // the page's top. While the cancel is on its way it stays (and ignores presses), so focus stays on it.
   const stopFocused = useRef(false);
   const open = useRef<HTMLAnchorElement | null>(null);
   const showStop = working && !stopped;
@@ -608,7 +652,7 @@ function Progress({ watch, stopped, threadId, onStop }: { watch: RunWatch | null
   return (
     <section data-testid={ASSIST_TID.progress} data-status={status ?? "starting"} className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2 text-[13px] font-medium text-gray-12">
-        {working && !stopped ? <ShimmerText>{ASSIST_COPY.handedOff}</ShimmerText> : <span>{stopped ? ASSIST_COPY.handedOff : ASSIST_COPY.handedOffDone}</span>}
+        {stopped ? <span>{ASSIST_COPY.stoppedHeading}</span> : working ? <ShimmerText>{ASSIST_COPY.handedOff}</ShimmerText> : <span>{ASSIST_COPY.handedOffDone}</span>}
       </div>
       {lines.length ? (
         <ul className="flex flex-col gap-1">
@@ -616,9 +660,10 @@ function Progress({ watch, stopped, threadId, onStop }: { watch: RunWatch | null
         </ul>
       ) : null}
       {stopped ? <p role="status" className="text-1 text-gray-11">{ASSIST_COPY.stopped}</p> : null}
+      {stop === "failed" && working ? <p role="alert" data-testid={ASSIST_TID.stopFailed} className="text-1 text-red-11">{ASSIST_COPY.stopFailed}</p> : null}
       <div className="flex items-center gap-1.5">
         {showStop ? (
-          <button type="button" data-testid={ASSIST_TID.stop} onClick={onStop} onFocus={() => { stopFocused.current = true; }} onBlur={() => { stopFocused.current = false; }} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-1 text-gray-11 shadow-[var(--shadow-border)] hover:bg-gray-2"><Square className="size-3" aria-hidden /> {ASSIST_COPY.stop}</button>
+          <button type="button" data-testid={ASSIST_TID.stop} aria-disabled={stop === "sending" ? true : undefined} onClick={() => { if (stop !== "sending") onStop(); }} onFocus={() => { stopFocused.current = true; }} onBlur={() => { stopFocused.current = false; }} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-1 text-gray-11 shadow-[var(--shadow-border)] hover:bg-gray-2"><Square className="size-3" aria-hidden /> {ASSIST_COPY.stop}</button>
         ) : null}
         <Link ref={open} href={agentHref(threadId)} onClick={(e) => followInPlace(e, agentHref(threadId), viewPatch(agentHref(threadId)))} data-testid={ASSIST_TID.openInAgent} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-1 text-gray-11 hover:bg-gray-2 hover:text-foreground">{ASSIST_COPY.openInAgent} <ExternalLink className="size-3" aria-hidden /></Link>
       </div>

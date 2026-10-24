@@ -115,6 +115,22 @@ function triggerRefWords(ref: string): string {
 /** A routine run's "left for a person" item ("Approve payroll.submit_run (prp_0023)") as words. */
 const leftWords = (s: string) => humanLine(s.replace(/\b([a-z_]+)\.([a-z_]+)\b/g, (_m, _ns: string, verb: string) => verb.replaceAll("_", " ")));
 
+/** One row of a routine's run log. The summary is the model's own words (the run's final answer), so it is marked
+ *  untrusted for the cursor assistant: the run's taint is not on this row, and a run that read a notice may repeat it. */
+export function RunLogRow({ x }: { x: RoutineRunDto }) {
+  return (
+    <TR data-testid={TID.routineRunRow} data-status={x.status}>
+      <TD className="h-11 max-w-[220px]"><span title={x.triggerRef} className="text-1 break-words">{triggerRefWords(x.triggerRef)}</span>{x.attended || x.overdue ? <span className="mt-0.5 flex flex-wrap gap-1">{x.attended ? <Badge tone="blue" size="xs">Attended</Badge> : null}{x.overdue ? <Badge tone="red" size="xs">Overdue</Badge> : null}</span> : null}</TD>
+      <TD className="h-11"><Badge tone={RUN_TONE[x.status]}>{RUN_STATUS_WORDS[x.status] ?? statusLabel(x.status)}</Badge></TD>
+      <TD className="h-11 whitespace-nowrap">{x.startedAt ? fmtDateTime(x.startedAt) : "-"}</TD>
+      <TD numeric className="h-11">{duration(x)}</TD>
+      <TD numeric className="h-11">{usd(x.costUsdMicros)}</TD>
+      <TD className="h-11 min-w-[280px] py-2">{x.leftForHuman.length ? x.leftForHuman.map(leftWords).join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div data-assist-untrusted="" className="text-1 text-gray-10">{routineSummaryText(x.summary)}</div> : null}</TD>
+      <TD className="h-11">{x.agentRunId ? <Link href={`/app/runs/${x.agentRunId}`} title={x.agentRunId} className="text-1 text-blue-11 hover:underline">Open run</Link> : <span className="text-1 text-gray-10">Precheck only</span>}</TD>
+    </TR>
+  );
+}
+
 export function RoutineDetail({ id }: { id: string }) {
   const agent = useAgent();
   const r = useGet("/v1/routines/:id", { params: { id } });
@@ -163,15 +179,7 @@ export function RoutineDetail({ id }: { id: string }) {
           <THead><TR><TH>Trigger</TH><TH>Status</TH><TH>Started</TH><TH numeric>Duration</TH><TH numeric>Cost</TH><TH>Left for a person</TH><TH>Run</TH></TR></THead>
           <TBody>
             {(runs.data?.data ?? []).map((x) => (
-              <TR key={x.id} data-testid={TID.routineRunRow} data-status={x.status}>
-                <TD className="h-11 max-w-[220px]"><span title={x.triggerRef} className="text-1 break-words">{triggerRefWords(x.triggerRef)}</span>{x.attended || x.overdue ? <span className="mt-0.5 flex flex-wrap gap-1">{x.attended ? <Badge tone="blue" size="xs">Attended</Badge> : null}{x.overdue ? <Badge tone="red" size="xs">Overdue</Badge> : null}</span> : null}</TD>
-                <TD className="h-11"><Badge tone={RUN_TONE[x.status]}>{RUN_STATUS_WORDS[x.status] ?? statusLabel(x.status)}</Badge></TD>
-                <TD className="h-11 whitespace-nowrap">{x.startedAt ? fmtDateTime(x.startedAt) : "-"}</TD>
-                <TD numeric className="h-11">{duration(x)}</TD>
-                <TD numeric className="h-11">{usd(x.costUsdMicros)}</TD>
-                <TD className="h-11 min-w-[280px] py-2">{x.leftForHuman.length ? x.leftForHuman.map(leftWords).join("; ") : <span className="text-gray-10">Nothing</span>}{x.summary ? <div className="text-1 text-gray-10">{routineSummaryText(x.summary)}</div> : null}</TD>
-                <TD className="h-11">{x.agentRunId ? <Link href={`/app/runs/${x.agentRunId}`} title={x.agentRunId} className="text-1 text-blue-11 hover:underline">Open run</Link> : <span className="text-1 text-gray-10">Precheck only</span>}</TD>
-              </TR>
+              <RunLogRow key={x.id} x={x} />
             ))}
             {runs.data && runs.data.data.length === 0 ? <TR><TD colSpan={7} className="text-gray-10">No runs yet.</TD></TR> : null}
           </TBody>

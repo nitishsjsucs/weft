@@ -105,21 +105,25 @@ function ConversationList({ conversations, background, routineNames, selectedKey
             <ul className="flex flex-col gap-0.5" aria-label="Background work">
               {background.map((r) => {
                 const routine = routineIdOf(r);
-                return (
-                  <li key={r.id}>
-                    <Link href={`/app/runs/${r.id}`} data-testid={T.background} data-run-id={r.id} className="flex flex-col gap-0.5 rounded-lg px-2.5 py-2 outline-none hover:bg-gray-a3 focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]">
-                      <span className="flex min-w-0 items-center gap-1.5 text-[13px] leading-5 font-medium text-gray-12"><Dot status={r.status} /><span className="truncate">{(routine && routineNames.get(routine)) ?? "Routine run"}</span></span>
-                      {r.summary ? <span className="line-clamp-2 text-1 break-words text-gray-11">{routineSummaryText(r.summary)}</span> : null}
-                      <span className="text-0 text-gray-10">{ago(r.createdAt, now)}</span>
-                    </Link>
-                  </li>
-                );
+                return <li key={r.id}><BackgroundItem r={r} name={(routine && routineNames.get(routine)) ?? "Routine run"} now={now} /></li>;
               })}
             </ul>
           )}
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/** One background run in the list. Its summary is the model's own words: untrusted when the run read untrusted
+ *  content, as RunFeed marks it, so the cursor assistant never reads a notice's words as the list's. */
+export function BackgroundItem({ r, name, now }: { r: AgentRunRow; name: string; now: string }) {
+  return (
+    <Link href={`/app/runs/${r.id}`} data-testid={T.background} data-run-id={r.id} className="flex flex-col gap-0.5 rounded-lg px-2.5 py-2 outline-none hover:bg-gray-a3 focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]">
+      <span className="flex min-w-0 items-center gap-1.5 text-[13px] leading-5 font-medium text-gray-12"><Dot status={r.status} /><span className="truncate">{name}</span></span>
+      {r.summary ? <span data-assist-untrusted={r.tainted ? "" : undefined} className="line-clamp-2 text-1 break-words text-gray-11">{routineSummaryText(r.summary)}</span> : null}
+      <span className="text-0 text-gray-10">{ago(r.createdAt, now)}</span>
+    </Link>
   );
 }
 

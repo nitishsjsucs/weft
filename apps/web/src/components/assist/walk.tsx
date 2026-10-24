@@ -3,13 +3,14 @@
 // waits for its target the way the tour does (the anchor's selectors, about 3 s, then visible and not covered), rings
 // it with the tour's ring and shows the step's words in a small card with Back and Next. It only points: no step
 // presses, types or opens anything, and the executor already refused any step on a control that changes data. A
-// target that never appears says so and waits; another element is never guessed.
+// target that never appears says so and waits (looking again when the page changes); another element is never guessed.
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import { ASSIST_TID, stepRefusal, type WalkStepEffect } from "../../../../../packages/contracts/src/ext/assist";
 import { HOSTED } from "@/lib/hosted/flags";
+import { URL_STATE_EVENT } from "@/lib/url-state";
 import type { Rect } from "../tour/geometry";
-import { sleep } from "../tour/dom";
+import { findFirst, sleep } from "../tour/dom";
 import { TourRing } from "../tour/tour-ring";
 import { ASSIST_COPY } from "./copy";
 import { actionable, entityOfEl, hrefOf, kindOf, labelOf, MUTATING_MARK, resolveRegistered, type Registered } from "./dom";
@@ -47,6 +48,33 @@ export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname
   useEffect(() => { if (waitingRef.current) setTries((t) => t + 1); }, [pathname]);
   const k = walkIndex(i, steps.length);
   const step = steps[k]!;
+  // It also looks again when the page changes under it without a move: the link's view state (a drawer, a tab, a
+  // filter opened on the same page) or its anchor appearing (a section expanded, a list that renders late).
+  useEffect(() => {
+    if (!waiting) return;
+    const again = () => setTries((t) => t + 1);
+    const selectors = step.target.kind === "anchor" ? [...step.selectors] : [];
+    let seen = selectors.length ? findFirst(selectors)?.el ?? null : null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const obs = selectors.length ? new MutationObserver(() => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        const el = findFirst(selectors)?.el ?? null;
+        if (el && el !== seen) again();
+        seen = el;
+      }, 150);
+    }) : null;
+    obs?.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener(URL_STATE_EVENT, again);
+    window.addEventListener("popstate", again);
+    return () => {
+      obs?.disconnect();
+      if (timer) clearTimeout(timer);
+      window.removeEventListener(URL_STATE_EVENT, again);
+      window.removeEventListener("popstate", again);
+    };
+  }, [waiting, k]); // eslint-disable-line react-hooks/exhaustive-deps
   const target = found?.k === k ? found.el : null;
   // Where each step was last looked for (found, or waiting for the person to get there), and where the walkthrough
   // started: a step with no route of its own is looked for there when it is entered again (Back).
@@ -54,6 +82,7 @@ export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname
   const startedOn = useRef<string | null>(null);
   startedOn.current ??= here();
   const lookedAgain = useRef(tries);
+  const next = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     const ctrl = new AbortController();
     setFound(null);
@@ -65,8 +94,9 @@ export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname
     lookedAgain.current = tries;
     void (async () => {
       const page = arriving ? stepPage(steps, k, shownOn.current, startedOn.current!) : null;
-      // A step's own route always opens (with its view state); the page it was on only when the person is elsewhere.
-      const open = step.route ?? (page && page.split("?")[0] !== here().split("?")[0] ? page : null);
+      // Entering a step opens its own route (with its view state), or the page it was on when the person is elsewhere.
+      // Looking again opens nothing: the drawer or tab the person just opened on that page stays open.
+      const open = arriving ? step.route ?? (page && page.split("?")[0] !== here().split("?")[0] ? page : null) : null;
       if (open && !(await goTo(open, { here, push, signal: ctrl.signal }))) { if (!ctrl.signal.aborted) setWaiting(true); return; }
       let el: HTMLElement | null = null;
       // On a phone the walk card is a bottom sheet: each target is brought into view above it, never under it.
@@ -116,10 +146,14 @@ export function WalkPlayer({ steps, registry, here, push, sheet, start, pathname
           {waiting ? <p role="status" className="text-1 text-amber-11">{ASSIST_COPY.walkWaiting}</p> : null}
           {refused ? <p role="status" className="text-1 text-amber-11">{ASSIST_COPY.walkRefused}</p> : null}
           <div className="flex items-center gap-1.5 pt-1">
-            <button type="button" data-testid={ASSIST_TID.walkBack} disabled={k === 0} onClick={() => setI(Math.max(0, k - 1))}
+            <button type="button" data-testid={ASSIST_TID.walkBack} disabled={k === 0} onClick={() => {
+              // Back to the first step disables Back: focus moves to Next first, so it never falls to the page.
+              if (k === 1) next.current?.focus({ preventScroll: true });
+              setI(Math.max(0, k - 1));
+            }}
               className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-1 text-gray-11 shadow-[var(--shadow-border)] hover:bg-gray-2 disabled:opacity-50"><ArrowLeft className="size-3.5" aria-hidden /> {ASSIST_COPY.walkBack}</button>
             <span className="flex-1" />
-            <button type="button" data-testid={ASSIST_TID.walkNext} onClick={() => (last ? onExit() : setI(k + 1))}
+            <button ref={next} type="button" data-testid={ASSIST_TID.walkNext} onClick={() => (last ? onExit() : setI(k + 1))}
               className="inline-flex h-7 items-center gap-1 rounded-md bg-gray-12 px-2.5 text-1 font-medium text-white hover:bg-gray-11">{last ? ASSIST_COPY.walkDone : <>{ASSIST_COPY.walkNext} <ArrowRight className="size-3.5" aria-hidden /></>}</button>
           </div>
         </div>

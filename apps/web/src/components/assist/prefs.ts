@@ -7,10 +7,19 @@ import { useSyncExternalStore } from "react";
 const KEYS = { icon: "weft.assist.icon", voice: "weft.assist.voice" } as const;
 type Key = keyof typeof KEYS;
 const subs = new Set<() => void>();
-const read = (k: Key): string | null => { try { return window.localStorage.getItem(KEYS[k]); } catch { return null; } };
+/** This page's own choices: with storage blocked (site data turned off) a choice still holds until the page reloads. */
+const chosen = new Map<Key, string>();
+/** "on", "off" or null (never chosen): this page's choice first, then the browser's stored one. */
+export function readAssistPref(k: Key): string | null {
+  const mine = chosen.get(k);
+  if (mine !== undefined) return mine;
+  try { return window.localStorage.getItem(KEYS[k]); } catch { return null; }
+}
+const read = readAssistPref;
 
 export function setAssistPref(k: Key, on: boolean): void {
-  try { window.localStorage.setItem(KEYS[k], on ? "on" : "off"); } catch { /* storage blocked */ }
+  chosen.set(k, on ? "on" : "off");
+  try { window.localStorage.setItem(KEYS[k], on ? "on" : "off"); } catch { /* storage blocked: the choice lasts for this page */ }
   subs.forEach((f) => f());
 }
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
