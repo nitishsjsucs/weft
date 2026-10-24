@@ -1,5 +1,6 @@
 // Workers AI neurons for the extras (design 5.2 and 5.4). Weft's daily share is 5,000 of the account's 10,000:
-// agent 4,000, OCR 500, embeddings 200, dictation 300 (NEURON_SHARES). SpendDO holds the neuron ledger, so every
+// agent 3,500, OCR 500, embeddings 200, dictation 300 and speech 500 (NEURON_SHARES; speech, the cursor assistant's
+// spoken answers, took its 500 from the agent's 4,000 on 2026-10-24). SpendDO holds the neuron ledger, so every
 // extra reserves its worst case before the call and settles what the call reports it used after (the worst case when
 // it reports nothing); an open reservation counts as used, and an orphan settles at its reserved worst case.
 // Track cf6-extras.
@@ -38,7 +39,7 @@ export function neuronBudgetFromLedger(ledger: Pick<HostedSpendLedger, "reserve"
 
 /** In-memory budget with the per-product shares, for tests and local runs. */
 export function memoryNeuronBudget(shares: Record<NeuronProduct, number> = NEURON_SHARES): NeuronBudget & { used(product: NeuronProduct): number; open(): number } {
-  const used: Record<NeuronProduct, number> = { agent: 0, ocr: 0, embeddings: 0, dictation: 0 };
+  const used: Record<NeuronProduct, number> = { agent: 0, ocr: 0, embeddings: 0, dictation: 0, speech: 0 };
   const open = new Map<string, { product: NeuronProduct; neurons: number }>();
   let n = 0;
   const inUse = (p: NeuronProduct) => used[p] + [...open.values()].filter((o) => o.product === p).reduce((a, o) => a + o.neurons, 0);

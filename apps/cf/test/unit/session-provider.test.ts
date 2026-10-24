@@ -9,7 +9,7 @@ const status = (o: { day?: number; visitor?: number | null; ip?: number | null; 
   day: "2026-10-21",
   caps: { ...HOSTED_CAP_DEFAULTS, liveUsd: o.liveUsd === undefined ? HOSTED_CAP_DEFAULTS.liveUsd : o.liveUsd },
   spentMicros: { day: o.day ?? 0, visitor: o.visitor === undefined ? 0 : o.visitor, ip: o.ip === undefined ? 0 : o.ip, live: o.live ?? 0 },
-  neurons: { used: o.neurons ?? 0, byProduct: { agent: o.agentNeurons ?? 0, ocr: 0, embeddings: 0, dictation: 0 } },
+  neurons: { used: o.neurons ?? 0, byProduct: { agent: o.agentNeurons ?? 0, ocr: 0, embeddings: 0, dictation: 0, speech: 0 } },
   openReservations: 0,
 });
 const all = new Set<HostedProviderId>(["openai", "workers_ai", "scripted"]);

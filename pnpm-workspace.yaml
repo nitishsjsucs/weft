@@ -4,6 +4,8 @@ packages:
   - tests
 allowBuilds:
   esbuild: true
+  # protobufjs (onnxruntime-web, the assistant's in-browser voice) ships a postinstall that only prints a CLI notice.
+  protobufjs: false
   # workerd's postinstall only checks the platform binary and hard-links it over the JS launcher; the binary itself
   # comes from the optional @cloudflare/workerd-<platform> package, so Miniflare and wrangler work without the script.
   workerd: false

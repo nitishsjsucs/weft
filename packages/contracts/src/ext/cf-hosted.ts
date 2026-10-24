@@ -105,6 +105,8 @@ export const HOSTED_CONFIG_KEYS = {
   extrasPdf: "extras.pdf",
   extrasHelp: "extras.help",
   extrasDictation: "extras.dictation",
+  /** The cursor assistant's spoken answers (POST HOSTED_PATHS.speak). */
+  extrasSpeech: "extras.speech",
 } as const;
 
 /** The per-world `settings` row the Simulators panel's model switch writes; it overrides `model.provider`. */
@@ -173,6 +175,8 @@ export const HOSTED_PATHS = {
   help: "/api/_hosted/help",
   /** POST audio (at most 30 s): DictationResult (cf-extras.ts). */
   dictate: "/api/_hosted/dictate",
+  /** POST { text } (at most SPEECH_MAX_CHARS, ext/assist.ts): audio/mpeg, or a SpeechRefusal. The cursor assistant's spoken answers. */
+  speak: "/api/_hosted/speak",
   /** GET /api/_hosted/pdf/<PdfKind>/<subject id>: a PDF, served from R2 once rendered. */
   pdf: "/api/_hosted/pdf",
   /** POST: McpKeyMint, the lease's MCP key, shown once. */

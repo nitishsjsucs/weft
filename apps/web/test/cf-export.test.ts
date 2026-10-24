@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  appRoutes, buildCsp, buildHeaders, buildRedirects, checkExport, exportedFilesFor, headerPattern, htmlFile, inlineScripts, LIMITS, matchPattern, parseHeaders,
+  appRoutes, buildCsp, VOICE_FILE, VOICE_MODEL_ORIGINS, buildHeaders, buildRedirects, checkExport, exportedFilesFor, headerPattern, htmlFile, inlineScripts, LIMITS, matchPattern, parseHeaders,
   parseRedirects, resolveRedirect, rscFile, sha256Source, TURNSTILE_ORIGIN, writeExport, type Route,
 } from "../scripts/cf-export";
 
@@ -79,6 +79,19 @@ describe("CSP", () => {
     expect(/script-src[^;]*unsafe-inline/.test(csp)).toBe(false);   // hashes, not 'unsafe-inline', for scripts
     expect(buildCsp([], { publicOrigin: "https://weft.nitish-ratakonda.workers.dev" })).toContain("connect-src 'self' wss://weft.nitish-ratakonda.workers.dev");
     expect(buildCsp(["'sha256-AAA='"], { unsafeInline: true })).toContain("script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com");
+  });
+  it("lets the in-browser voice model download from Hugging Face and compile its WebAssembly only when the export ships it", () => {
+    const csp = buildCsp(["'sha256-AAA='"], { publicOrigin: "https://weft.nitish-ratakonda.workers.dev", voice: true });
+    expect(VOICE_MODEL_ORIGINS).toEqual(["https://huggingface.co", "https://*.hf.co"]);
+    expect(VOICE_FILE).toBe("assist/voice/weft-voice.bin");
+    expect(csp).toContain("connect-src 'self' wss://weft.nitish-ratakonda.workers.dev https://huggingface.co https://*.hf.co;");
+    expect(csp).toMatch(/script-src [^;]*'wasm-unsafe-eval'/);
+    expect(csp).not.toMatch(/'unsafe-eval'/);
+    expect(csp).not.toMatch(/script-src [^;]*hf\.co/);
+    // Without the voice file the in-browser voice never runs: no third-party connection and no WebAssembly compile.
+    const plain = buildCsp(["'sha256-AAA='"], { publicOrigin: "https://weft.nitish-ratakonda.workers.dev" });
+    expect(plain).toContain("connect-src 'self' wss://weft.nitish-ratakonda.workers.dev;");
+    expect(plain).not.toMatch(/hf\.co|huggingface|wasm-unsafe-eval/);
   });
   it("gives shells a one-segment placeholder rule and static routes exact rules", () => {
     expect(headerPattern({ path: "/", shellOf: null })).toBe("/");

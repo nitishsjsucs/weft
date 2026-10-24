@@ -73,7 +73,7 @@ export class FakeSpend extends DurableObject<ExtrasEnv> {
   async settle(id: string, _usd: number, actual?: { neurons?: number }) { this.ctx.storage.sql.exec("UPDATE rsv SET settled = ? WHERE id = ?", actual?.neurons ?? 0, id); }
   async status() {
     const used = Number(this.ctx.storage.sql.exec<{ n: number | null }>("SELECT sum(coalesce(settled, neurons)) AS n FROM rsv").one().n ?? 0);
-    return { day: new Date().toISOString().slice(0, 10), caps: { runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 }, spentMicros: { day: 0, visitor: null, ip: null, live: 0 }, neurons: { used, byProduct: { agent: 0, ocr: used, embeddings: 0, dictation: 0 } }, openReservations: 0 };
+    return { day: new Date().toISOString().slice(0, 10), caps: { runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 }, spentMicros: { day: 0, visitor: null, ip: null, live: 0 }, neurons: { used, byProduct: { agent: 0, ocr: used, embeddings: 0, dictation: 0, speech: 0 } }, openReservations: 0 };
   }
 }
 

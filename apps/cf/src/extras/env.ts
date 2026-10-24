@@ -98,6 +98,7 @@ export function hostedDepsFromEnv(env: ExtrasEnv, ctx: ExecutionContextLike, log
     ai: env.AI ?? null,
     neurons: neuronBudgetFromLedger(spend(env)),
     dictationEnabled: async () => (await flags()).dictation,
+    speechEnabled: async () => (await flags()).speech,
     catalog: catalogFor(env.OPS),
     platform: () => memoizedPlatform(env.OPS as object, () => buildPlatformReadout({ lobby: () => lobby(env).extrasReadout(), spend: spend(env), ops: env.OPS, counters })),
     files: env.FILES,

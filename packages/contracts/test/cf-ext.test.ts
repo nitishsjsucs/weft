@@ -24,7 +24,10 @@ describe("cf round 0 contracts", () => {
   });
 
   it("carry the hosted settings from design section 0", () => {
+    // 2026-10-24: the cursor assistant's spoken answers (speech) took 500 neurons from the agent's 4,000, so the day
+    // cap stays 5,000, half of the account's allowance (design 8.2).
     expect(HOSTED_CAP_DEFAULTS).toEqual({ runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 });
+    expect(NEURON_SHARES).toEqual({ agent: 3500, ocr: 500, embeddings: 200, dictation: 300, speech: 500 });
     expect(HOSTED_CAP_DEFAULTS.visitorDayUsd).toBe(HOSTED_CAP_DEFAULTS.dayUsd);
     expect(HOSTED_CAP_DEFAULTS.ipDayUsd).toBe(HOSTED_CAP_DEFAULTS.dayUsd);
     // 2026-10-23: a workspace lasts 30 days unless reset (idle and total), and the human grant lasts 24 hours.

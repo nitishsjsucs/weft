@@ -1,14 +1,14 @@
 // The extras flags (design 6.3 and 7.1), read from KV `weft-config` and memoized in the isolate for
 // HOSTED_SETTINGS.configMemoMs. Each extra is a kill flag: absent means on, "off" (or "false") turns it off, so an
-// operator can stop OCR, PDF rendering, Help or dictation without a redeploy. Semantic recall is the exception: it
+// operator can stop OCR, PDF rendering, Help, dictation or spoken answers without a redeploy. Semantic recall is the exception: it
 // stays off until the live L1 to L4 gate passes. KV recall.semantic decides when it is set ("on" or "off"), so the
 // deploy track turns it on without a redeploy; while it is absent, the WEFT_SEMANTIC_RECALL var decides (hosted "0").
 // Track cf6-extras.
 import { HOSTED_CONFIG_KEYS, HOSTED_SETTINGS } from "../../contracts/src/ext/cf-hosted";
 import type { KvLike } from "./bindings";
 
-export interface ExtrasFlags { ocr: boolean; pdf: boolean; help: boolean; dictation: boolean; recallSemantic: boolean }
-export const EXTRAS_FLAGS_ALL_OFF: ExtrasFlags = { ocr: false, pdf: false, help: false, dictation: false, recallSemantic: false };
+export interface ExtrasFlags { ocr: boolean; pdf: boolean; help: boolean; dictation: boolean; speech: boolean; recallSemantic: boolean }
+export const EXTRAS_FLAGS_ALL_OFF: ExtrasFlags = { ocr: false, pdf: false, help: false, dictation: false, speech: false, recallSemantic: false };
 
 const OFF = new Set(["off", "false", "0", "no"]);
 /** The values that turn an opt-in flag on (recall.semantic, WEFT_SEMANTIC_RECALL), trimmed and lowercased. The one
@@ -25,14 +25,15 @@ export function flagsFrom(values: Partial<Record<keyof typeof HOSTED_CONFIG_KEYS
     pdf: killFlag(values.extrasPdf ?? null),
     help: killFlag(values.extrasHelp ?? null),
     dictation: killFlag(values.extrasDictation ?? null),
+    speech: killFlag(values.extrasSpeech ?? null),
     recallSemantic: values.recallSemantic !== null && values.recallSemantic !== undefined ? optIn(values.recallSemantic) : optIn(env.WEFT_SEMANTIC_RECALL),
   };
 }
 
-const KEYS = ["extrasOcr", "extrasPdf", "extrasHelp", "extrasDictation", "recallSemantic"] as const;
+const KEYS = ["extrasOcr", "extrasPdf", "extrasHelp", "extrasDictation", "extrasSpeech", "recallSemantic"] as const;
 
 /**
- * A memoized reader. Each read of the five keys is one KV read per key per memo window (KV allows 100,000 reads a
+ * A memoized reader. Each read of the six keys is one KV read per key per memo window (KV allows 100,000 reads a
  * day). A KV failure keeps the last known flags, or all off when there are none, so an outage never turns an extra on.
  */
 export function createFlagReader(kv: KvLike | null | undefined, env: { WEFT_SEMANTIC_RECALL?: string | undefined } = {}, opts: { memoMs?: number; now?: () => number } = {}): () => Promise<ExtrasFlags> {

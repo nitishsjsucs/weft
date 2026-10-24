@@ -30,16 +30,18 @@ import { randomHex } from "../../shared/crypto";
 
 /**
  * "3" added `spend_who` (the persisted per-day totals of each visitor and IP hash) in place of the visitor and IP-hash
- * indexes; "2" added `spend_days` (the persisted per-day totals); "1" kept totals in memory.
+ * indexes; "2" added `spend_days` (the persisted per-day totals); "1" kept totals in memory. The speech neuron product
+ * (the cursor assistant's spoken answers, 2026-10-24) only adds a `spend_days` column with a default, which code from
+ * before it never names, so it is no new version: a rollback of weft-core still reads the ledger (addMissingDayColumns).
  */
 export const SPEND_SCHEMA_VERSION = "3";
 
-const PRODUCTS: readonly NeuronProduct[] = ["agent", "ocr", "embeddings", "dictation"];
+const PRODUCTS: readonly NeuronProduct[] = ["agent", "ocr", "embeddings", "dictation", "speech"];
 
 /** The columns of a `spend_days` row: one UTC day's fold, as the file ledger folds it, plus its direct neurons. */
 const DAY_COLS = [
   "settled_micros", "open_micros", "open_count", "neurons",
-  "agent_neurons", "ocr_neurons", "embeddings_neurons", "dictation_neurons",
+  "agent_neurons", "ocr_neurons", "embeddings_neurons", "dictation_neurons", "speech_neurons",
   "live_settled_micros", "live_open_micros", "live_neurons",
 ] as const;
 type DayCol = (typeof DAY_COLS)[number];
@@ -76,14 +78,17 @@ export interface SyncSql {
 }
 
 /**
- * Creates the ledger's tables and indexes (IF NOT EXISTS, so a start creates nothing once they exist) and upgrades an
- * older ledger once: its `spend_days` and `spend_who` rows are built from the entries (each read once) in the same
- * transaction that records schema "3" (rebuildSpendTotals), and the indexes they replace are dropped (schema 1's live
- * index, schema 2's visitor and IP-hash indexes).
+ * Creates the ledger's tables and indexes (IF NOT EXISTS, so a start creates nothing once they exist), adds any day
+ * column a `spend_days` table from before it lacks (every start; CREATE TABLE IF NOT EXISTS adds no column to a table
+ * that exists; zero for every earlier day, when nothing spoke), and upgrades an older ledger once, in one transaction
+ * with the schema row: a schema 1 or 2 ledger gets its `spend_days` and `spend_who` rows built from the entries (each
+ * read once, rebuildSpendTotals), and the indexes they replace are dropped (schema 1's live index, schema 2's visitor
+ * and IP-hash indexes).
  */
 export function migrateSpend(s: SyncSql): void {
   s.transactionSync(() => {
     for (const q of SCHEMA) s.sql.exec(q);
+    addMissingDayColumns(s.sql);
     const v = s.sql.exec<{ v: string }>(`SELECT v FROM spend_meta WHERE k = 'schema'`).toArray()[0]?.v;
     if (v === SPEND_SCHEMA_VERSION) return;
     if (v === undefined) {
@@ -95,6 +100,15 @@ export function migrateSpend(s: SyncSql): void {
     rebuildTotalsNow(s.sql);
     s.sql.exec(`UPDATE spend_meta SET v = ? WHERE k = 'schema'`, SPEND_SCHEMA_VERSION);
   });
+}
+
+/**
+ * Adds each DAY_COLS column an older `spend_days` lacks. Every start runs it: the table's columns come from PRAGMA
+ * table_info (no row of any table is read, nothing is written), and the ALTER runs only for a column that is missing.
+ */
+function addMissingDayColumns(sql: SqlStorageLike): void {
+  const have = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(spend_days)`).toArray().map((r) => r.name));
+  for (const c of DAY_COLS) if (!have.has(c)) sql.exec(`ALTER TABLE spend_days ADD COLUMN ${c} INTEGER NOT NULL DEFAULT 0`);
 }
 
 /**

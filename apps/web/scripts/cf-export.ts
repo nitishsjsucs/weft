@@ -22,6 +22,16 @@ import { fileURLToPath } from "node:url";
 export const LIMITS = { headerRules: 100, headerLine: 2_000, staticRedirects: 2_000, dynamicRedirects: 100, redirectLine: 1_000, files: 20_000, fileBytes: 25 * 1024 * 1024 } as const;
 
 export const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
+/**
+ * Where the cursor assistant's in-browser voice model downloads from, once, when a person turns spoken answers on
+ * (apps/web/src/components/assist/chatterbox.ts): huggingface.co answers each pinned file with a redirect to its
+ * storage on hf.co (a Xet bridge such as us.aws.cdn.hf.co on 2026-10-23, chosen per region, so the subdomains are
+ * allowed rather than one host). Nothing is sent there but the GET of a public file. The policy names them only when
+ * the export ships the fixed voice file (VOICE_FILE): without it the in-browser voice never runs, so nothing needs them.
+ */
+export const VOICE_MODEL_ORIGINS = ["https://huggingface.co", "https://*.hf.co"] as const;
+/** The fixed voice file under the export (chatterbox.ts VOICE_FILE_URL); its presence turns the voice's policy on. */
+export const VOICE_FILE = "assist/voice/weft-voice.bin";
 /** Strings only src/proxy.ts holds; none may reach the export. */
 export const PROXY_MARKERS = ["proxy.secret", "HOST_NOT_ALLOWED", "Host not allowed"] as const;
 export const SHELL = "_";
@@ -87,19 +97,24 @@ export function sha256Source(text: string): string {
   return `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
 }
 
-export interface CspOptions { publicOrigin?: string | null; unsafeInline?: boolean }
+/** `voice`: the export ships the in-browser voice (its fixed voice file), so its download hosts and WebAssembly are allowed. */
+export interface CspOptions { publicOrigin?: string | null; unsafeInline?: boolean; voice?: boolean }
 
-/** The CSP for one route: scripts and frames from self and Turnstile, connections to self, nothing may frame it. */
+/**
+ * The CSP for one route: scripts and frames from self and Turnstile, connections to self, nothing may frame it. With
+ * the in-browser voice shipped (`voice`), connections also to its download hosts, and 'wasm-unsafe-eval' so ONNX
+ * Runtime can compile its WebAssembly (served from self); it allows no string eval.
+ */
 export function buildCsp(hashes: string[], o: CspOptions = {}): string {
   const ws = o.publicOrigin ? o.publicOrigin.replace(/^http/, "ws").replace(/\/+$/, "") : null;
-  const script = ["'self'", ...(o.unsafeInline ? ["'unsafe-inline'"] : [...new Set(hashes)]), TURNSTILE_ORIGIN];
+  const script = ["'self'", ...(o.unsafeInline ? ["'unsafe-inline'"] : [...new Set(hashes)]), TURNSTILE_ORIGIN, ...(o.voice ? ["'wasm-unsafe-eval'"] : [])];
   return [
     "default-src 'self'",
     `script-src ${script.join(" ")}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `connect-src 'self'${ws ? ` ${ws}` : ""}`,
+    `connect-src 'self'${ws ? ` ${ws}` : ""}${o.voice ? ` ${VOICE_MODEL_ORIGINS.join(" ")}` : ""}`,
     `frame-src 'self' ${TURNSTILE_ORIGIN}`,
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
@@ -263,8 +278,9 @@ export function builtRoutes(nextDir: string, outDir: string): string[] | null {
 
 export function writeExport(o: ExportOptions): { routes: Route[]; csps: RouteCsp[] } {
   const routes = appRoutes(o.appDir, o.hosted);
-  const csps = routeCsps(o.outDir, routes, { publicOrigin: o.publicOrigin });
-  writeFileSync(join(o.outDir, "_headers"), buildHeaders(csps, o.hosted, { publicOrigin: o.publicOrigin }));
+  const csp: CspOptions = { publicOrigin: o.publicOrigin, voice: existsSync(join(o.outDir, VOICE_FILE)) };
+  const csps = routeCsps(o.outDir, routes, csp);
+  writeFileSync(join(o.outDir, "_headers"), buildHeaders(csps, o.hosted, csp));
   writeFileSync(join(o.outDir, "_redirects"), buildRedirects(routes));
   return { routes, csps };
 }

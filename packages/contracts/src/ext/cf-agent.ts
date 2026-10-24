@@ -34,7 +34,8 @@ export const AIG_ENV = { accountId: "WEFT_AIG_ACCOUNT_ID", gateway: "WEFT_AIG_GA
 export const AIG_HEADERS = { metadata: "cf-aig-metadata", authorization: "cf-aig-authorization", cacheStatus: "cf-aig-cache-status" } as const;
 /** The value of `cf-aig-cache-status` on a cache hit; the provider settles that call at $0. */
 export const AIG_CACHE_HIT = "HIT";
-export type AigCallKind = "chat" | "routine" | "draft" | "embed" | "ocr" | "dictation" | "smoke";
+/** `assist`: a cursor assistant question (attended), apart from the unattended routine runs. */
+export type AigCallKind = "chat" | "assist" | "routine" | "draft" | "embed" | "ocr" | "dictation" | "speech" | "smoke";
 /** `cf-aig-metadata`: at most 5 keys. */
 export interface AigMetadata { slot: string; gen: number; run: string | null; kind: AigCallKind; visitor: string | null }
 export interface AiGatewayConfig { accountId: string; gateway: string; token?: string | null }
@@ -67,9 +68,15 @@ export interface HostedCaps {
 }
 export const HOSTED_CAP_DEFAULTS: HostedCaps = { runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 };
 
-/** Workers AI neurons Weft may use per UTC day, by product: 5,000 of the account's 10,000 (design 5.2). */
-export type NeuronProduct = "agent" | "ocr" | "embeddings" | "dictation";
-export const NEURON_SHARES: Record<NeuronProduct, number> = { agent: 4000, ocr: 500, embeddings: 200, dictation: 300 };
+/**
+ * Workers AI neurons Weft may use per UTC day, by product: the shares partition the day cap, 5,000 of the account's
+ * 10,000 (design 5.2: half, the rest for the other apps on the account). `speech` (the cursor assistant's spoken
+ * answers on Deepgram Aura-2, the fallback when the browser cannot speak them itself) has 500 since 2026-10-24, taken
+ * from the agent's 4,000, so the day cap is unchanged; KV `caps.neurons_day` (and the Worker var WEFT_NEURON_DAY_CAP)
+ * still override it.
+ */
+export type NeuronProduct = "agent" | "ocr" | "embeddings" | "dictation" | "speech";
+export const NEURON_SHARES: Record<NeuronProduct, number> = { agent: 3500, ocr: 500, embeddings: 200, dictation: 300, speech: 500 };
 
 /** A run's reservation as the agent loop makes it, plus who it is charged to. Background runs carry the lease's visitor and IP hash. */
 export interface HostedReserveInput {

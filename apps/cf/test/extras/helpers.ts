@@ -43,7 +43,7 @@ export function fakeSlot(world: Partial<SlotWorldInfo> = {}): FakeSlot {
   return s;
 }
 
-export const FLAGS_ON: ExtrasFlags = { ocr: true, pdf: true, help: true, dictation: true, recallSemantic: true };
+export const FLAGS_ON: ExtrasFlags = { ocr: true, pdf: true, help: true, dictation: true, speech: true, recallSemantic: true };
 
 export function captureMetrics(): MetricsSink & { points: MetricPoint[] } {
   const points: MetricPoint[] = [];

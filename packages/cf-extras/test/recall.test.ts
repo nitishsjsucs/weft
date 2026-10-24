@@ -93,23 +93,23 @@ describe("RecallSource", () => {
     const notes = Array.from({ length: 120 }, (_, i) => ({ path: `knowledge/facts/n${i}.md`, commit: C1, tainted: false, kind: "knowledge", text: doc(`Note ${i}`, `Fact number ${i}. ${"word ".repeat(200)}`) }));
     // Each chunk is 512 tokens at most, so a batch of 50 reserves 156 neurons.
     expect(embeddingNeurons(new Array(50).fill("x".repeat(1100)))).toBe(156);
-    const day1 = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 200, dictation: 0 });
+    const day1 = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 200, dictation: 0, speech: 0 });
     const first = await indexNotes({ ai, vectors, neurons: day1 }, { namespace: "seed-snap1", gen: 0, notes, stopOnBudget: true });
     expect(first).toMatchObject({ chunks: 120, notes: 120, nextChunk: 50 });
     expect(vectors.vectors.size).toBe(50);
     expect(day1.used("embeddings")).toBe(156);
-    const day2 = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 400, dictation: 0 });
+    const day2 = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 400, dictation: 0, speech: 0 });
     const second = await indexNotes({ ai, vectors, neurons: day2 }, { namespace: "seed-snap1", gen: 0, notes, fromChunk: first.nextChunk!, stopOnBudget: true });
     expect(second.nextChunk).toBeNull();
     expect(vectors.vectors.size).toBe(120);
     expect(ai.calls).toHaveLength(3);
     // Without stopOnBudget a refusal throws, so a slot job never half-indexes in silence.
-    await expect(indexNotes({ ai, vectors, neurons: memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 1, dictation: 0 }) }, { namespace: "slot-1", gen: 1, notes })).rejects.toMatchObject({ code: "EMBED_BUDGET" });
+    await expect(indexNotes({ ai, vectors, neurons: memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 1, dictation: 0, speech: 0 }) }, { namespace: "slot-1", gen: 1, notes })).rejects.toMatchObject({ code: "EMBED_BUDGET" });
   });
 
   it("embeddings reserve from the embeddings share and check the model's shape", async () => {
     const ai = fakeAi({ [EMBEDDING_MODEL]: embeddingHandler });
-    const neurons = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 2, dictation: 0 });
+    const neurons = memoryNeuronBudget({ agent: 0, ocr: 0, embeddings: 2, dictation: 0, speech: 0 });
     await embedTexts({ ai, neurons }, ["a short note"]);
     expect(neurons.used("embeddings")).toBe(1);
     await embedTexts({ ai, neurons }, ["another"]);

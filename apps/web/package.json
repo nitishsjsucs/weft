@@ -25,7 +25,9 @@
     "lucide-react": "1.55.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "tailwind-merge": "3.7.0"
+    "tailwind-merge": "3.7.0",
+    "onnxruntime-web": "1.30.0",
+    "@huggingface/tokenizers": "0.2.0"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
