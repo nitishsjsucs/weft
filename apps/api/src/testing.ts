@@ -6,15 +6,16 @@ import { join } from "node:path";
 import type { ModelProvider } from "@weft/contracts";
 import { seedWorld } from "@weft/seed";
 import { createWeft, type Weft } from "./compose";
+import type { CreateWeftOptions } from "./assemble";
 
 export interface TestWeft extends Weft { uiHeaders(principalId: string): Record<string, string> }
-export interface CreateTestWeftOptions { seed?: boolean; provider?: ModelProvider }
+export interface CreateTestWeftOptions { seed?: boolean; provider?: ModelProvider; admitRun?: CreateWeftOptions["admitRun"] }
 
 let current: TestWeft | null = null;
 
 export async function createTestWeft(opts: CreateTestWeftOptions = {}): Promise<TestWeft> {
   const dataDir = mkdtempSync(join(tmpdir(), "weft-test-"));
-  const weft = await createWeft({ dataDir, testMode: true, provider: opts.provider });
+  const weft = await createWeft({ dataDir, testMode: true, provider: opts.provider, ...(opts.admitRun ? { admitRun: opts.admitRun } : {}) });
   if (opts.seed ?? true) await seedWorld(weft);
   await weft.clock.set("2026-10-26T15:30:00.000Z", 0);
   const close = weft.close.bind(weft);

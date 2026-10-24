@@ -5,11 +5,14 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type Proposal, type RunStepRow } from "@weft/contracts";
-import { execRuns, notices, payrollRuns, principals, proposals, runArtifacts, workers, type Db } from "@weft/db";
-import { createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
-import { approvalCardOf, fileRunFiles } from "@weft/executor";
+import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type ExecutorBundle, type HumanSession, type Proposal, type RunStepRow } from "@weft/contracts";
+import { execRuns, notices, payrollRuns, principals, proposals, runArtifacts, withWriteLock, workers, type Db } from "@weft/db";
+import { assistUntrustedSource, closingShow, createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
+import { proposalVisible, readScopeFor } from "@weft/core";
+import { approvalCardOf, assistScreenKey, executorInternals, fileRunFiles } from "@weft/executor";
+import { ASSIST_TOOLS, AssistInput, cleanAssistInput, SCREEN_LIMITS, type AssistHandoffLink, type AssistRunAccepted, type AssistTraceExtras } from "../../../../packages/contracts/src/ext/assist";
 import { RUN_LONG_POLL_MAX_S } from "../../../../packages/contracts/src/ext/cf-agent";
+import type { RunAdmission } from "../../../../packages/contracts/src/ext/cf-platform";
 import type { Weft, WeftEnv } from "../http/context";
 import { chooseChatTools } from "../agent/chat-allowlist";
 import { sse } from "../http/sse";
@@ -28,7 +31,18 @@ function redactSafe<T>(weft: Weft, v: T): T {
 
 // threadId (the Agent page): a conversation thread the client minted (`thr_` and 8 to 40 characters); null or omitted
 // starts a single run, as the side panel, MCP and every older caller do.
-const StartBody = z.object({ text: z.string().min(1).max(4000), pageContext: z.string().max(400).nullable().optional(), threadId: z.string().regex(THREAD_ID_RE, "threadId is thr_ and 8 to 40 letters, digits, _ or -").nullable().optional() });
+// recipe "assist" (the cursor assistant, ext/assist.ts): the body also carries the screen map, the cursor context, the
+// page's records and the trail, validated here and capped at SCREEN_LIMITS.bodyBytes; any other recipe is chat.
+const StartBody = z.object({
+  text: z.string().min(1).max(4000), pageContext: z.string().max(400).nullable().optional(), threadId: z.string().regex(THREAD_ID_RE, "threadId is thr_ and 8 to 40 letters, digits, _ or -").nullable().optional(),
+  recipe: z.enum(["chat", "assist"]).optional(), assist: AssistInput.optional(),
+});
+/** A conversation id as the Agent page mints them: thr_ and 20 hex characters. */
+function newThreadId(): string {
+  const b = new Uint8Array(10);
+  globalThis.crypto.getRandomValues(b);
+  return `thr_${[...b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+}
 const TERMINAL = new Set(["waiting", "held", "done", "failed", "refused", "escalated", "expired", "cancelled"]);
 const parse = <T>(s: string | null, d: T): T => { if (!s) return d; try { return JSON.parse(s) as T; } catch { return d; } };
 
@@ -48,7 +62,17 @@ function toProposal(r: ProposalRow): Proposal {
  * The chat pack's deterministic company summary and open-loops board from DB rows (harness 7.2). The brain never reads
  * domain tables, so apps/api builds this and the integrator passes it as createAgentRuntime({ contextSource }).
  */
-export function createChatContextSource(db: Db): ChatContextSource {
+export type { RunAdmission };
+
+export interface ChatContextDeps {
+  /** The executor bundle, for the cursor assistant's handoff (a chat run for the same person, tainted when the assist run was). */
+  executor?: Pick<ExecutorBundle, "runs" | "registry">;
+  liveProvider?: () => boolean;
+  /** The host's gates for the handoff's chat run; a refusal leaves the assist run to end with its own answer. */
+  admitRun?: RunAdmission;
+}
+
+export function createChatContextSource(db: Db, deps: ChatContextDeps = {}): ChatContextSource {
   return {
     async chat({ companyId, runId }) {
       const [run] = await db.select().from(execRuns).where(eq(execRuns.id, runId)).limit(1);
@@ -75,6 +99,25 @@ export function createChatContextSource(db: Db): ChatContextSource {
     async channels() { return ["#general", "#new-hires", "#payroll", "#people-ops"]; },
     recall: createMemoryRecall(db),   // wave 2 (w2-memory); "" until that track lands recall
     earlier: (input) => earlierTurns(db, input),   // the Agent page's conversation threads (agent/threads.ts)
+    // The cursor assistant's handoff: an ordinary chat run for the person the assist run acted for, with the chat
+    // tools code picks for the question (proposals only when Chat can propose is on), the same caps, in the same
+    // thread, tainted when the assist run was. It gains no power the person's own chat question would not have.
+    ...(deps.executor ? { handoff: async (input, start) => {
+      const [er] = await db.select({ onBehalfOf: execRuns.onBehalfOf, companyId: execRuns.companyId, surface: execRuns.surface }).from(execRuns).where(eq(execRuns.id, input.fromRunId)).limit(1);
+      if (!er?.onBehalfOf) return null;
+      // One more run: the same admission as a person's own POST /v1/agent/runs (on hosted, RL_RUN and the rows budget).
+      if (deps.admitRun && !(await deps.admitRun({ kind: "assist_handoff", fromRunId: input.fromRunId }).catch(() => ({ ok: false as const })))?.ok) return null;
+      // The chat run keeps the assist run's surface: an MCP run (the route takes assist only from the app, so this is
+      // a second guard) stays an MCP run, which never gets the act list, as the same key's own chat question would not.
+      const mcp = er.surface === "mcp";
+      const session: HumanSession = { principalId: er.onBehalfOf, companyId: er.companyId, via: mcp ? "api_key" : "ui", keyScope: mcp ? "mcp" : null };
+      const choice = await chooseChatTools({ db, registry: deps.executor!.registry, liveProvider: deps.liveProvider?.() === true }, session, input.question);
+      const allowlist = choice.allowlist ?? [...CHAT_TOOLS];
+      const handle = await deps.executor!.runs.openChatRun(session, { threadId: input.threadId, surface: mcp ? "mcp" : "human_ui", allowlist });
+      if (input.taintedBy) await executorInternals(deps.executor as ExecutorBundle)?.taintRun(handle.runId, `run:${input.fromRunId}`);
+      await start(handle, choice.allowlist ?? null);
+      return handle.runId;
+    } } satisfies Pick<ChatContextSource, "handoff"> : {}),
   };
 }
 
@@ -103,10 +146,41 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
   r.post("/v1/agent/runs", async (c) => {
     const session = c.get("session");
     if (!session) throw new Unauthorized();
-    const body = StartBody.parse(await c.req.json());
+    // No valid body is larger than an assist request, so a bigger one is refused before it is parsed.
+    const raw = await c.req.text();
+    if (new TextEncoder().encode(raw).length > SCREEN_LIMITS.bodyBytes) {
+      return c.json({ _tag: "ValidationError", ok: false, message: `The body is at most ${SCREEN_LIMITS.bodyBytes} bytes` }, 413);
+    }
+    let json: unknown;
+    try { json = JSON.parse(raw); } catch { throw new ValidationError("The body is JSON: { text, pageContext?, threadId?, recipe?, assist? }"); }
+    const body = StartBody.parse(json);
     // A thread is one person's conversation: a follow-up into a thread whose runs acted for someone else is refused as
     // if the thread did not exist (its earlier turns would otherwise reach this person's context pack).
     if (body.threadId && await threadBelongsToSomeoneElse(weft.db, session.companyId, body.threadId, session.principalId)) throw new NotFound(`No conversation ${body.threadId}`);
+    if (body.recipe === "assist") {
+      // The cursor assistant: one run with the assist recipe's frozen tools (the chat reads and the presentation
+      // tools), the request's screen map in the run workspace for the executor's checks, and taint when the request
+      // carries text people typed (a selection, an untrusted label), as for any untrusted read. It is the app's own
+      // assistant, so only a person signed in to the app starts one: an API key (MCP, CLI) asks through chat.
+      if (session.via !== "ui" || session.keyScope !== null) throw new Forbidden("The cursor assistant runs only in the app; ask through chat instead", { code: "NOT_PERMITTED" });
+      if (!body.assist) throw new ValidationError("recipe assist needs assist: { screen, cursor, records, trail }");
+      // The page's route and view state as the registry knows them (cleanAssistInput): text in a link someone sent
+      // never reaches the model, the handoff or the executor's checks as the page's own words.
+      const input = cleanAssistInput(body.assist, { hosted: !!weft.platform?.world });
+      const registry = weft.executor.registry as { get?: (n: string) => unknown } | undefined;
+      const allowlist = ASSIST_TOOLS.filter((n) => !registry?.get || registry.get(n));
+      // Every exchange is a conversation (Open in Agent shows it; a handoff and a choice continue it): one is minted
+      // when the client sends none, exactly as the Agent page mints them.
+      const threadId = body.threadId ?? newThreadId();
+      const handle = await weft.executor.runs.openChatRun(session, { threadId, surface: "human_ui", allowlist });
+      const files = weft.runFiles ?? fileRunFiles(weft.dataDir);
+      await withWriteLock(() => files.write(assistScreenKey(session.companyId, handle.runId), JSON.stringify(input.screen)));
+      const untrusted = assistUntrustedSource(input);
+      if (untrusted) await executorInternals(weft.executor)?.taintRun(handle.runId, untrusted);
+      await weft.agent.startChat(handle, { text: body.text, recipe: "assist", pageContext: body.pageContext ?? null, allowlist, threadId, assist: input });
+      const accepted: AssistRunAccepted = { runId: handle.runId, chatMode: "assist", threadId };
+      return c.json(accepted, 202);
+    }
     // Harness 5.3 wave 3 amendment: code picks the chat tools (reads, or proposals when the setting is on and the
     // request reads as an action). With no registry wired (route tests), the wave 1 list stays.
     const choice = await chooseChatTools({ db: weft.db, registry: weft.executor.registry, liveProvider: weft.provider?.live === true }, session, body.text);
@@ -172,7 +246,19 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     const id = c.req.param("id");
     const run = await getRun(id, c);
     const steps = await store.steps(id);
-    const propRows = await weft.db.select().from(proposals).where(eq(proposals.proposerRunId, id)).orderBy(desc(proposals.createdAt));
+    const filed = await weft.db.select().from(proposals).where(eq(proposals.proposerRunId, id)).orderBy(desc(proposals.createdAt));
+    // An assist run that showed an existing proposal's approval card (ui.show approval.card) gets that card too, built
+    // from the stored preview like every card, so the person can decide it from the popover.
+    const shown = [...new Set(steps.flatMap((s) => {
+      const d = (s.result as { outcome?: { ok?: boolean; data?: { intent?: string; params?: { proposalId?: string } } } } | null)?.outcome;
+      return s.kind === "tool_call" && s.toolName === "ui__show" && d?.ok && d.data?.intent === "approval.card" && d.data.params?.proposalId ? [d.data.params.proposalId] : [];
+    }))].filter((p) => !filed.some((f) => f.id === p));
+    // Only those the viewer could read in their own Inbox (the proposals routes' rule): the executor refuses the card
+    // for a proposal outside a narrowed person's scope, and a run recorded before that, or a proposal whose subject
+    // moved out of their reports since, is narrowed here as well.
+    const scope = shown.length ? await readScopeFor(weft.db, run.companyId, c.var.session?.principalId ?? null) : null;
+    const extra = shown.length ? (await weft.db.select().from(proposals).where(and(inArray(proposals.id, shown), eq(proposals.companyId, run.companyId)))).filter((p) => proposalVisible(scope, p)) : [];
+    const propRows = [...filed, ...extra];
     const props = propRows.map(toProposal);
     // Wave 3: one approval card per proposal, built from the stored preview (never model text).
     const cards: ApprovalCardW3[] = [];
@@ -181,7 +267,17 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
       const o = (s.result as { outcome?: { ok: boolean; status?: string; actionSeq?: number | null; summary?: string } } | null)?.outcome;
       return s.kind === "tool_call" && o?.ok && o.status === "done" && typeof o.actionSeq === "number" ? [{ seq: o.actionSeq, command: s.toolName ?? "", summary: o.summary ?? "" }] : [];
     });
-    return c.json(redactSafe(weft, { run, steps, proposals: props, cards, actions, children: [], summary: summarize(steps), queuePosition: runtime.queue?.position(id) ?? null }));
+    // The cursor assistant: the handoff link on both runs (an assist run's terminal step names the chat run it handed
+    // to; that chat run's context step names the assist run), and the closing show code builds from the steps.
+    const handedTo = steps.flatMap((s) => { const h = (s.result as { handoff?: { to?: string; reason?: string; forced?: boolean } } | null)?.handoff; return s.stage === "terminal" && h?.to ? [h] : []; })[0] ?? null;
+    const from = (steps.find((s) => s.kind === "context" && (s.result as { pack?: boolean } | null)?.pack)?.result as { handoffFrom?: { runId: string; reason: string } } | undefined)?.handoffFrom ?? null;
+    const handoff: AssistHandoffLink | null = handedTo || from ? { to: handedTo?.to ?? null, from: from?.runId ?? null, reason: (handedTo?.reason ?? from?.reason ?? null) as AssistHandoffLink["reason"], forced: handedTo?.forced ?? null } : null;
+    // The closing show is for the cursor assistant only: a finished assist run (not one that handed off) and the chat
+    // run a handoff started. The side panel and the Agent page get none.
+    const assistRun = (steps.find((s) => s.kind === "context" && (s.result as { pack?: boolean } | null)?.pack)?.result as { promptKind?: string } | undefined)?.promptKind === "assist";
+    const closing = run.trigger === "chat" && (assistRun || from) && TERMINAL.has(run.status) && run.terminalReason !== "HANDED_OFF" ? closingShow(steps, run.summary, { hosted: !!weft.platform?.world }) : null;
+    const extras: AssistTraceExtras = { handoff, closing };
+    return c.json(redactSafe(weft, { run, steps, proposals: props, cards, actions, children: [], summary: summarize(steps), queuePosition: runtime.queue?.position(id) ?? null, ...extras }));
   });
 
   r.get("/v1/agent/runs/:id/events", async (c) => {

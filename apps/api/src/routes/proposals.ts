@@ -5,7 +5,7 @@ import { and, asc, eq, gt, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { CHAT_TOOLS, NotFound, Unauthorized, ValidationError, type DecisionInput } from "@weft/contracts";
 import { proposals } from "@weft/db";
-import { auditRowVisible, commandDomain, readScopeFor, type ReadScope } from "@weft/core";
+import { proposalVisible, readScopeFor } from "@weft/core";
 import { executorInternals, toProposal } from "@weft/executor";
 import type { Weft, WeftEnv } from "../http/context";
 import { parsePage, toPage } from "../http/paging";
@@ -21,10 +21,6 @@ export function redactJson<T>(weft: Weft, v: T): T {
 }
 export async function kick(weft: Weft): Promise<void> {
   try { await weft.scheduler.kick(); } catch { /* a stubbed part must not fail the human's request */ }
-}
-
-function proposalVisible(scope: ReadScope | null, p: typeof proposals.$inferSelect): boolean {
-  return auditRowVisible(scope, (cmd) => p.domain ?? commandDomain(cmd), { command: p.command, argsJson: p.argsJson, subjectRef: p.subjectRef, text: `${p.headline} ${p.diffJson ?? ""}` });
 }
 
 export function proposalsRoutes(weft: Weft): Hono<WeftEnv> {

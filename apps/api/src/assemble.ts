@@ -21,7 +21,7 @@ import {
   loadSecret, nodeProviderPorts, setTraceRedactor, traceMcpCall, type ProviderPool,
 } from "@weft/agent";
 import { createRoutines, PREBUILT_HASH_KEY, type WeftRoutinesEngine } from "@weft/routines";
-import { createChatContextSource } from "./routes/agent";
+import { createChatContextSource, type RunAdmission } from "./routes/agent";
 import { createRoutinesEventSource } from "./routes/routines";
 import type { Weft, WeftPlatformInfo } from "./http/context";
 import { hostedApp } from "./http/hosted";
@@ -59,6 +59,8 @@ export interface CreateWeftOptions {
   /** Set by the seed CLI: skips agent.boot() and the proposal wiring side effects that need a seeded world. */
   seeding?: boolean;
   ports?: { api?: number; web?: number };
+  /** The host's gates for a run the API starts on its own (the cursor assistant's handoff); the hosted slot passes RL_RUN and the rows budget. */
+  admitRun?: RunAdmission;
 }
 
 const isStubError = (e: unknown) => isWeftError(e) && e._tag === "NotImplemented";
@@ -251,7 +253,7 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
       get: (id: string) => (routinesRef.current as WeftRoutinesEngine).view.get(id),
       checklist: (x: Parameters<WeftRoutinesEngine["view"]["checklist"]>[0]) => (routinesRef.current as WeftRoutinesEngine).view.checklist(x),
     },
-    contextSource: createChatContextSource(db),
+    contextSource: createChatContextSource(db, { executor, liveProvider: () => provider.live, ...(opts.admitRun ? { admitRun: opts.admitRun } : {}) }),   // the cursor assistant's handoff opens chat runs
     handleStore: runHandles,
     ...(platform.runHost ? { runHost: platform.runHost } : {}),
     ...(durable ? { env: secretEnv, scriptSource, ...(pool ? { providers: pool } : {}) } : {}),

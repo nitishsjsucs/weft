@@ -17,7 +17,10 @@ export function runNeurons(provider: string, tokens: { input?: number; output?: 
 
 export async function catalogRowFor(db: Db, runId: string, world: { slot: string; gen: number }, endedAtWall: Date = new Date()): Promise<RunCatalogRow | null> {
   const [r] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1);
-  if (!r || !TERMINAL.has(r.status)) return null;
+  // The cursor assistant's runs (the instant resolver's no-model stand-in among them) are not the model comparison's:
+  // a few presentation steps per question would read as a model and skew the chat runs' steps, cost and latency. A
+  // request it hands off is an ordinary chat run, recorded like any other.
+  if (!r || !TERMINAL.has(r.status) || r.kind === "assist") return null;
   const [t] = await db.select({ resultJson: runSteps.resultJson }).from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.stage, "terminal"))).orderBy(desc(runSteps.n)).limit(1);
   let result: { ms?: unknown; groundingFallback?: unknown } = {};
   try { result = t?.resultJson ? (JSON.parse(String(t.resultJson)) as typeof result) : {}; } catch { result = {}; }

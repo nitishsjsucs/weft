@@ -61,4 +61,14 @@ describe("run catalog source", () => {
     expect(await catalogRowFor(w.db, "run_cat5", { slot: "slot-1", gen: 3 })).toBeNull();
     expect(await catalogRowFor(w.db, "run_missing", { slot: "slot-1", gen: 3 })).toBeNull();
   });
+
+  it("leaves the cursor assistant's runs out of the model comparison: the resolver's stand-in and a live assist run", async () => {
+    await insertRun("run_cat6", { kind: "assist", provider: "scripted", model: "resolver", cacheKey: "weft:main:assist:cmp_larkspur" }, { status: "done", reason: "DONE", ms: 4 });
+    await insertRun("run_cat7", { kind: "assist", cacheKey: "weft:main:assist:cmp_larkspur" }, { status: "done", reason: "DONE", ms: 900 });
+    expect(await catalogRowFor(w.db, "run_cat6", { slot: "slot-1", gen: 3 })).toBeNull();
+    expect(await catalogRowFor(w.db, "run_cat7", { slot: "slot-1", gen: 3 })).toBeNull();
+    // The chat run a request was handed to is an ordinary chat run.
+    await insertRun("run_cat8", { cacheKey: "weft:main:chat:cmp_larkspur" });
+    expect(await catalogRowFor(w.db, "run_cat8", { slot: "slot-1", gen: 3 })).toMatchObject({ runId: "run_cat8", provider: "openai" });
+  });
 });

@@ -116,7 +116,7 @@ type LobbyStatusFn = (input: { visitor: string | null; slot?: string | null; gen
 /** The MCP key the lease minted (the fake engine's mintMcpKey makes the same one); company() stores it unless told not to. */
 const MINTED_KEY = `wk_mcp_slot-1_3_${"k".repeat(24)}`;
 
-function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean; mintedKeys?: string[] } = {}) {
+function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbyStatusFn; failSetAlarms?: number; failSend?: (body: unknown) => boolean; mintedKeys?: string[]; runLimit?: (key: string) => boolean } = {}) {
   const m = memorySql();
   currentSql = m;
   m.sql.exec(`CREATE TABLE kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
@@ -135,6 +135,7 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
   let ready: Promise<unknown> = Promise.resolve();
   const lobbyCalls: { method: string; input: unknown }[] = [];
   const sent: { queue: string; body: unknown }[] = [];
+  const runKeys: string[] = [];
   const ctx = {
     id: { name: stamp?.slot ?? "slot-1" },
     storage: {
@@ -165,13 +166,13 @@ function company(o: { stamp?: Partial<WorldStamp> | null; lobbyStatus?: LobbySta
     COMPANY: { idFromName: (n: string) => n, get: () => ({}) },
     JOBS: { send: async (body: unknown) => { if (o.failSend?.(body)) throw new Error("Queue.send refused the message"); sent.push({ queue: "jobs", body }); } },
     RENDER: { send: async (body: unknown) => { sent.push({ queue: "render", body }); } },
-    RL_RUN: { limit: async () => ({ success: true }) },
+    RL_RUN: { limit: async ({ key }: { key: string }) => { runKeys.push(key); return { success: o.runLimit?.(key) ?? true }; } },
     OPS: { prepare: (q: string) => ({ bind: (...b: unknown[]) => ({ run: async () => { recorded.push(b); ops.push({ sql: q, binds: b }); return {}; } }) }) },
   };
   const co = new CompanyDO(ctx as never, env as never);
   /** The same object started again (an eviction or a deploy): a new instance over the same storage. */
   const restart = () => { const again = new CompanyDO(ctx as never, env as never); return { co: again, ready: () => ready }; };
-  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded, ops, kv, kvPuts, restart };
+  return { co, ready: () => ready, m, alarms, failing, lobbyCalls, sent, stamp, waits, recorded, ops, kv, kvPuts, restart, runKeys };
 }
 
 async function req(path: string, o: { method?: string; visitor?: string | null; slot?: string; gen?: number; body?: string; headers?: Record<string, string> } = {}): Promise<Request> {
@@ -350,6 +351,53 @@ describe("the Lobby's heartbeat", () => {
     for (let i = 0; i < 5; i++) expect((await c.co.heartbeat({ provider: true, keepUsage: true })).usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
     expect((await c.co.heartbeat()).usage).toMatchObject({ requests: 3 });
     expect((await c.co.heartbeat()).usage).toEqual({ rowsRead: 0, rowsWritten: 0, requests: 0 });
+  });
+});
+
+describe("a run the world starts on its own (the cursor assistant's handoff)", () => {
+  it("takes RL_RUN under the lease visitor's key, as POST /v1/agent/runs does at the door, and is refused past it", async () => {
+    let allow = true;
+    const c = company({ runLimit: () => allow });
+    await c.ready();
+    const admit = world.input!.admitRun!;
+    expect(await admit({ kind: "assist_handoff", fromRunId: "run_0001" })).toEqual({ ok: true });
+    expect(c.runKeys).toEqual([`run:${VISITOR}`]);
+    allow = false;
+    expect(await admit({ kind: "assist_handoff", fromRunId: "run_0002" })).toMatchObject({ ok: false, code: "RATE_LIMITED" });
+  });
+
+  it("an assist request takes the slot's gates at the door (RL_RUN per visitor, the rows budget), and so does its handoff", async () => {
+    let allow = true;
+    const c = company({ runLimit: () => allow });
+    await c.ready();
+    const assist = JSON.stringify({ text: "Where is the audit log?", recipe: "assist", pageContext: null, assist: {} });
+    const post = async () => c.co.fetch(await req("/v1/agent/runs", { method: "POST", body: assist, headers: { "content-type": "application/json" } }));
+    expect((await post()).status).toBe(200);
+    expect(c.runKeys).toEqual([`run:${VISITOR}`]);
+    allow = false;
+    const limited = await post();
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ code: "RATE_LIMITED" });
+    allow = true;
+    // Past the generation's rows written, the request is refused, and a handoff the world would start is too.
+    world.rows = (m) => (m === "POST" ? { rowsRead: 10, rowsWritten: WORLD_BUDGET.leaseRowsWritten } : { rowsRead: 0, rowsWritten: 0 });
+    expect((await post()).status).toBe(200);
+    const spent = await post();
+    expect(spent.status).toBe(429);
+    expect(await spent.json()).toMatchObject({ code: "DEMO_LIMIT" });
+    expect(await world.input!.admitRun!({ kind: "assist_handoff", fromRunId: "run_0003" })).toMatchObject({ ok: false, code: "DEMO_LIMIT" });
+  });
+
+  it("keys a showcase's runs by its slot, and refuses inside a transaction instead of holding the input gate", async () => {
+    const c = company({ stamp: { mode: "showcase", visitor: null } });
+    await c.ready();
+    const admit = world.input!.admitRun!;
+    expect(await admit({ kind: "assist_handoff", fromRunId: "run_0001" })).toEqual({ ok: true });
+    expect(c.runKeys).toEqual(["run:slot:slot-1"]);
+    world.inTx = true;
+    try {
+      await expect(admit({ kind: "assist_handoff", fromRunId: "run_0002" })).rejects.toMatchObject({ code: "IO_IN_TX" });
+    } finally { world.inTx = false; }
   });
 });
 

@@ -48,16 +48,18 @@ export async function questionsOf(db: Db, runs: { id: string; cacheKey: string }
   const rows = await db.select({
     runId: runSteps.runId, n: runSteps.n,
     request: sql<string | null>`CASE WHEN instr(${text}, '<request>') > 0 THEN substr(${text}, instr(${text}, '<request>'), instr(${text}, '</request>') - instr(${text}, '<request>') + 10) END`,
+    // An assist run stores the request as written beside its pack (its screen map sits in the pack); it wins.
+    raw: sql<string | null>`json_extract(${runSteps.resultJson}, '$.request')`,
     portal: sql<number>`instr(${text}, ${PAGE_MARKERS[0]![0]})`,
     mention: sql<number>`instr(${text}, ${PAGE_MARKERS[1]![0]})`,
   }).from(runSteps).where(and(inArray(runSteps.runId, runs.map((r) => r.id)), eq(runSteps.kind, "context"))).orderBy(asc(runSteps.runId), asc(runSteps.n));
   const seen = new Set<string>();
   for (const r of rows) {
-    if (seen.has(r.runId) || r.request === null) continue;
+    if (seen.has(r.runId) || (r.request === null && typeof r.raw !== "string")) continue;
     seen.add(r.runId);
     const cur = out.get(r.runId)!;
     const askedFrom: AskedFrom = cur.askedFrom === "routine_draft" ? "routine_draft" : Number(r.portal) > 0 ? "portal" : Number(r.mention) > 0 ? "mention" : "agent";
-    out.set(r.runId, { question: questionOfPack(r.request), askedFrom });
+    out.set(r.runId, { question: typeof r.raw === "string" ? r.raw.trim() || null : questionOfPack(r.request), askedFrom });
   }
   return out;
 }
@@ -80,14 +82,15 @@ export async function earlierTurns(db: Db, input: { companyId: string; runId: st
   if (!person) return [];
   const rows = (await db.select({
     id: agentRuns.id, createdAt: agentRuns.createdAt, status: agentRuns.status, summary: agentRuns.summary, tainted: agentRuns.tainted,
-    onBehalfOf: agentRuns.onBehalfOf, trigger: agentRuns.trigger, cacheKey: agentRuns.cacheKey,
+    onBehalfOf: agentRuns.onBehalfOf, trigger: agentRuns.trigger, cacheKey: agentRuns.cacheKey, terminalReason: agentRuns.terminalReason,
   }).from(agentRuns).where(and(eq(agentRuns.companyId, input.companyId), eq(agentRuns.threadId, input.threadId)))).filter((r) => r.id !== input.runId).sort(byCreation);
   const before = current ? rows.filter((r) => byCreation(r, { id: current.id, createdAt: current.createdAt }) < 0) : rows;
   const people = await peopleOf(db, before);
   const taint = before.length
     ? new Set((await db.select({ runId: runTaint.runId }).from(runTaint).where(and(inArray(runTaint.runId, before.map((r) => r.id)), eq(runTaint.tainted, true)))).map((t) => t.runId))
     : new Set<string>();
-  const eligible = before.filter((r) => r.trigger === "chat" && r.status === "done" && !r.tainted && !taint.has(r.id) && people.get(r.id) === person && answerForThread(r.summary))
+  // An assist run that handed off is not a turn of its own: the chat run it started carries the request and answers it.
+  const eligible = before.filter((r) => r.trigger === "chat" && r.status === "done" && r.terminalReason !== "HANDED_OFF" && !r.tainted && !taint.has(r.id) && people.get(r.id) === person && answerForThread(r.summary))
     .slice(-THREAD_PRIOR_TURNS * 2);
   const questions = await questionsOf(db, eligible);
   return eligible.flatMap((r) => {
