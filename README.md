@@ -361,7 +361,7 @@ Found by this gate and not fixed here (each is in "Wave 3: left" below):
 All in [docs/screenshots/](docs/screenshots), at 1440 by 900 with the agent panel docked unless noted. Before each shot
 the capture moves focus and the pointer off the control it last clicked, so the images show the resting state.
 
-On the rich profile (retaken on 2026-10-23, when Agent joined the sidebar, with `pnpm screenshots:rich`,
+On the rich profile (retaken on 2026-10-23 with the recorded showcase runs, with `pnpm screenshots:rich`,
 `e2e/screens/rich.screens.ts`: a fresh rich world, as Vic), every main route. `pnpm screenshots` still writes base versions of the shared names, so run
 `pnpm screenshots:rich` after it:
 
@@ -378,7 +378,7 @@ On the rich profile (retaken on 2026-10-23, when Agent joined the sidebar, with 
   `41c-agent-mobile` (the payroll cost conversation at 390 by 844, the list in a drawer).
 
 The guided tour, one shot per step on the scripted provider (`TOUR_SHOTS=1 pnpm e2e:tour tour-complete`, retaken on
-2026-10-23 for the sidebar's Agent item), in
+2026-10-23 with the recorded showcase runs: step 10's popover shows the review's own note), in
 [docs/screenshots/tour/](docs/screenshots/tour): `01-welcome` to `20-finish`, named by step.
 
 Flows on the base world, retaken on 2026-10-23 for the sidebar's Agent item with `pnpm screenshots`
