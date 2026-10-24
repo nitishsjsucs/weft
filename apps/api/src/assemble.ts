@@ -11,11 +11,11 @@
 import { join, resolve } from "node:path";
 import { isWeftError, NotImplemented, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
 import { eq } from "drizzle-orm";
-import { closeDb, migrate, notices, openDb, settings, type Db } from "@weft/db";
+import { closeDb, migrate, notices, openDb, settings, withWriteLock, type Db } from "@weft/db";
 import { commands, complianceNoticeVariant, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createVendorOverlay } from "@weft/integrations";
-import { createExecutor, executorInternals, fileRunFiles } from "@weft/executor";
+import { assistScreenKey, createExecutor, executorInternals, fileRunFiles } from "@weft/executor";
 import {
   createAgentRuntime, createHostedProviderPool, createProvider, createSpendLedger, envSecret, fixtureScriptSource, hostedProviderSelector, hostedProviderSet,
   loadSecret, nodeProviderPorts, setTraceRedactor, traceMcpCall, type ProviderPool,
@@ -255,6 +255,10 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
     },
     contextSource: createChatContextSource(db, { executor, liveProvider: () => provider.live, ...(opts.admitRun ? { admitRun: opts.admitRun } : {}) }),   // the cursor assistant's handoff opens chat runs
     handleStore: runHandles,
+    // An assist run's screen map (routes/agent.ts) is only for its own checks: it goes when the run ends, or when the
+    // boot rule fails a run a restart cut short, so the run files hold the screens of the runs in flight and no more
+    // (on hosted they are rows of a workspace that may last 30 days).
+    onAssistRunEnded: (run: { id: string; companyId: string }) => withWriteLock(() => runFiles.removePrefix(assistScreenKey(run.companyId, run.id))),
     ...(platform.runHost ? { runHost: platform.runHost } : {}),
     ...(durable ? { env: secretEnv, scriptSource, ...(pool ? { providers: pool } : {}) } : {}),
   };

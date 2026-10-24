@@ -62,6 +62,15 @@ export function namesIn(text: string): string[] {
  */
 const NAV_COMMON = new Set(["it", "access", "accounts", "exit", "start", "history", "leave"]);
 const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * Whether a phrase names what the question asks about: a match the question only names as an owner ("the new hire's
+ * bank account", "Payroll's owner") asks about a field of that thing, which is no answer for the place it names.
+ */
+function asksAbout(re: RegExp, text: string): boolean {
+  const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+  for (const m of text.matchAll(g)) if (!text.startsWith("'s", m.index + m[0].length)) return true;
+  return false;
+}
 /** The words that name a nav page, as patterns: a label in capitals matches only as written ("IT", never "it"). */
 function navNames(n: (typeof ASSIST_NAV)[number]): { re: RegExp; cased: boolean; len: number }[] {
   const out: { re: RegExp; cased: boolean; len: number }[] = [];
@@ -146,7 +155,7 @@ export function resolveAssist(question: string, input: AssistInput, opts: { host
   const names = namesIn(question.trim());
 
   // 1. The help corpus: the first entry whose phrase matches (the corpus is ordered most specific first).
-  const help = ASSIST_HELP.find((h) => !h.steps && h.phrases.some((p) => new RegExp(p).test(t)));
+  const help = ASSIST_HELP.find((h) => !h.steps && h.phrases.some((p) => asksAbout(new RegExp(p), t)));
   if (help) return { via: "help", id: help.id, calls: answer(help.route, help.anchor, help.label, help.answer, input, names, !!opts.hosted) };
 
   // 2. A label on screen that the question names in full, when exactly one element has it.
@@ -160,7 +169,7 @@ export function resolveAssist(question: string, input: AssistInput, opts: { host
 
   // 3. A page the question names, when exactly one page matches best. A word that is also plain English ("it",
   // "access", "exit") never names a page by itself, and a label in capitals ("IT") counts only as written.
-  const scored = ASSIST_NAV.filter((n) => !n.hosted || opts.hosted).map((n) => ({ n, len: Math.max(0, ...navNames(n).filter((w) => w.re.test(w.cased ? question : t)).map((w) => w.len)) }))
+  const scored = ASSIST_NAV.filter((n) => !n.hosted || opts.hosted).map((n) => ({ n, len: Math.max(0, ...navNames(n).filter((w) => asksAbout(w.re, w.cased ? question : t)).map((w) => w.len)) }))
     .filter((x) => x.len > 0).sort((a, b) => b.len - a.len);
   if (scored.length && (scored.length === 1 || scored[0]!.len > scored[1]!.len)) {
     const n = scored[0]!.n;

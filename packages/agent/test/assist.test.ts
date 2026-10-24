@@ -196,6 +196,22 @@ describe("the instant resolver", () => {
     expect(resolveAssist("Where do I see laptops?", person)).toMatchObject({ via: "nav", calls: [{ name: "ui__navigate", args: { route: "/app/it" } }, { name: "ui__say" }] });
     expect(resolveAssist("Take me to the offboarding page", person)).toMatchObject({ via: "nav", calls: [{ name: "ui__navigate", args: { route: "/app/offboarding" } }, { name: "ui__say" }] });
   });
+
+  it("an everyday word another page's help also uses never sends a question there: a pay schedule, a new hire's account, unemployment claims", () => {
+    const person = input({ route: "/app/people/wrk_0026", title: "Lena Brooks", items: [item(1, { kind: "row", label: "Pay schedule" })] });
+    // The field on this page answers, not Routines.
+    for (const q of ["Where is Lena's pay schedule?", "How do I change Lena's pay schedule?"]) {
+      expect(resolveAssist(q, person), q).toMatchObject({ via: "screen", calls: [{ name: "ui__point", args: { target: "@1" } }, { name: "ui__say" }] });
+    }
+    // The new hire owns the account; unemployment claims are no expense claims: the model takes both.
+    expect(resolveAssist("Where do I see the new hire's bank account?", person)).toBeNull();
+    expect(resolveAssist("Where do I see unemployment claims?", person)).toBeNull();
+    // Their own questions still go to their pages.
+    expect(resolveAssist("How do I schedule a routine?", person)).toMatchObject({ via: "help", id: "routines" });
+    expect(resolveAssist("Where are my expense claims?", person)).toMatchObject({ via: "help", id: "expenses" });
+    expect(resolveAssist("How do I send an offer?", person)).toMatchObject({ via: "help", id: "offers" });
+    expect(resolveAssist("Where do I see the new hire?", person)).toMatchObject({ via: "nav", calls: [{ name: "ui__navigate", args: { route: "/app/hiring" } }, { name: "ui__say" }] });
+  });
 });
 
 // ---- runs through the runtime -------------------------------------------------------------------------------
@@ -225,9 +241,9 @@ function executor(showAny = false): FakeExecutor {
   ]);
 }
 
-function runtime(fake: FakeExecutor, scripts: Record<string, Script>, contextSource?: ChatContextSource): WeftAgentRuntime {
+function runtime(fake: FakeExecutor, scripts: Record<string, Script>, contextSource?: ChatContextSource, onAssistRunEnded?: (run: { id: string; companyId: string }) => Promise<void>): WeftAgentRuntime {
   const provider = scriptedProvider({ scriptsDir: dataDir, scripts });
-  return createAgentRuntime({ db, clock, executor: fake, provider, ledger: createSpendLedger({ dir: join(dataDir, "spend") }), routinesView: { get: async () => null }, ...(contextSource ? { contextSource } : {}) });
+  return createAgentRuntime({ db, clock, executor: fake, provider, ledger: createSpendLedger({ dir: join(dataDir, "spend") }), routinesView: { get: async () => null }, ...(contextSource ? { contextSource } : {}), ...(onAssistRunEnded ? { onAssistRunEnded } : {}) });
 }
 /** A context source whose handoff records what it was asked and answers with a chat run id (it starts nothing). */
 function handoffSource() {
@@ -265,6 +281,13 @@ const SCRIPTS: Record<string, Script> = {
   ] } },
   assist_mixed_handoff: { match: "compare and change", agents: { main: [
     { output: [fc("payroll__list_runs", { response_format: "concise" }), fc("ui__handoff", { reason: "multi_part", task: "Compare the runs, then change the rate." })] },
+  ] } },
+  // Read, an invented figure (the early repair), the identical read again (served, so refunded), then reads and a line.
+  assist_reread: { match: "^reread", agents: { main: [
+    { output: [fc("payroll__get_run", { run_id: "pay_2026_10_30" })] },
+    { output: [fc("ui__say", { text: "Payroll is $999,999.99 this month." })] },
+    { output: [fc("payroll__get_run", { run_id: "pay_2026_10_30" })] },
+    { output: [fc("payroll__list_runs", { response_format: "concise" }), fc("ui__say", { text: "4 paychecks need review [res_0300]." })] },
   ] } },
   assist_other_tool: { match: "registrations", agents: { main: [{ output: [fc("tax__list_registrations", {})] }] } },
   // The review's cases: invented figures beside a read, beside a refused call, beside a handoff, and in a label.
@@ -451,6 +474,38 @@ describe("assist runs", () => {
     expect(row.summary ?? "").not.toContain("12,345.67");
     expect(steps.some((s) => s.kind === "notice" && (s.result as { attrs?: { code?: string } }).attrs?.code === "UNGROUNDED")).toBe(true);
     await rt.idle();
+  });
+
+  it("a re-read refund never moves the answer-by step past the four-step cap: the last-step notice still comes, and its reads are not run", async () => {
+    const { source } = handoffSource();
+    const rt = runtime(executor(), SCRIPTS, source);
+    const { row, steps } = await ask(rt, "reread the run");
+    expect(steps.some((s) => s.kind === "recite" && (s.result as { served?: boolean }).served === true)).toBe(true);
+    expect(steps.some((s) => s.kind === "notice" && (s.result as { attrs?: { code?: string } }).attrs?.code === "ANSWER_NOW")).toBe(true);
+    expect(steps.filter((s) => s.kind === "tool_call").map((s) => s.toolName)).not.toContain("payroll__list_runs");
+    expect(row.stepsUsed).toBe(4);
+    await rt.idle();
+  });
+
+  it("the host hears when an assist run ends, and when the boot rule fails one a restart cut short; never for a chat run", async () => {
+    const ended: string[] = [];
+    const hook = async (r: { id: string }) => { ended.push(r.id); };
+    const rt = runtime(executor(), SCRIPTS, undefined, hook);
+    const { h } = await ask(rt, "point at the flags");
+    await expect.poll(() => ended).toEqual([h.runId]);
+    const chat = handle();
+    await rt.startChat(chat, { text: "point at the flags", recipe: "chat", pageContext: null });
+    await rt.settled(chat.runId);
+    await rt.idle();
+    // A restart while the run worked: the next process fails it, and the host removes what it kept for it.
+    await rt.store.updateRun(h.runId, { status: "running" });
+    await rt.store.updateRun(chat.runId, { status: "running" });
+    const after: string[] = [];
+    const next = runtime(executor(), SCRIPTS, undefined, async (r) => { after.push(r.id); });
+    await next.boot();
+    expect(await next.store.getRun(h.runId)).toMatchObject({ status: "failed", terminalReason: "PROCESS_RESTART" });
+    await expect.poll(() => after).toEqual([h.runId]);
+    expect(ended).toEqual([h.runId]);
   });
 
   it("a handoff ends the run even beside reads: done, HANDED_OFF, with the chat run's id and the model's reason", async () => {

@@ -2,7 +2,7 @@
 // shown, the assistant's own questions and effects), so "what did I just do" or "why did that fail" can be answered.
 // Pure: a ring buffer with times, and how a page change or a change of the URL's view state reads in it; trail.ts
 // feeds it from the page.
-import { ASSIST_NAV, ASSIST_QUERY_KEYS, ASSIST_RECORD_ROUTES, queryProblem, routePattern, SCREEN_LIMITS, type TrailEvent } from "../../../../../packages/contracts/src/ext/assist";
+import { ASSIST_QUERY_KEYS, assistPageName, queryProblem, routePattern, SCREEN_LIMITS, type TrailEvent } from "../../../../../packages/contracts/src/ext/assist";
 
 export interface TrailItem { kind: TrailEvent["kind"]; label: string; route: string | null; at: number }
 
@@ -25,13 +25,9 @@ export function createTrail(max: number = SCREEN_LIMITS.trail) {
 }
 export type Trail = ReturnType<typeof createTrail>;
 
-/** "Payroll", "Pay run pay_2026_10_30" or the path itself. */
+/** "Payroll", "Pay run pay_2026_10_30", or the sidebar page a path of no record's shape sits under ("People"). */
 export function pageName(path: string): string {
-  const p = path.split("?")[0]!.replace(/(.)\/+$/, "$1");
-  const nav = ASSIST_NAV.find((n) => n.href === p);
-  if (nav) return nav.label;
-  const rec = ASSIST_RECORD_ROUTES.find((r) => p.startsWith(`${r.pattern.slice(0, -"/:id".length)}/`));
-  return rec ? `${rec.label} ${p.split("/").pop()}` : p;
+  return assistPageName(path, { hosted: true });
 }
 
 /** The query keys that name an open record, and what the trail calls each. */

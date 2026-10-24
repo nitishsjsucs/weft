@@ -177,7 +177,7 @@ export const ASSIST_NAV: readonly AssistNavItem[] = [
   { slug: "benefits", label: "Benefits", href: "/app/benefits", words: ["benefits", "carrier", "enrollment", "reconciliation", "health plan"], domain: "benefits" },
   { slug: "it", label: "IT", href: "/app/it", words: ["it", "laptops", "devices", "accounts", "provisioning"], domain: "it" },
   { slug: "contractors", label: "Contractors", href: "/app/contractors", words: ["contractors", "contractor", "payouts"], domain: "payroll" },
-  { slug: "expenses", label: "Expenses", href: "/app/expenses", words: ["expenses", "expense", "receipts", "reimbursements", "claims"] },
+  { slug: "expenses", label: "Expenses", href: "/app/expenses", words: ["expenses", "expense", "receipts", "reimbursements", "expense claims"] },
   { slug: "time-off", label: "Time Off", href: "/app/time-off", words: ["time off", "vacation", "pto", "leave", "holidays", "balances"] },
   { slug: "compliance", label: "Taxes & Compliance", href: "/app/compliance", words: ["taxes", "tax", "compliance", "rates", "registrations", "filings", "notices", "calendar"] },
   { slug: "reports", label: "Reports", href: "/app/reports", words: ["reports", "report", "metrics", "charts", "headcount"] },
@@ -360,10 +360,9 @@ export function routeDomains(route: string, opts: { hosted?: boolean } = {}): No
   const { path, query } = splitRoute(normalizeRoute(route));
   const pattern = routePattern(path, opts);
   if (!pattern) return [];
-  const base = pattern.endsWith("/:id") ? pattern.slice(0, -"/:id".length) : pattern;
-  const nav = ASSIST_NAV.filter((n) => n.href !== "/app" && (base === n.href || base.startsWith(`${n.href}/`))).sort((a, b) => b.href.length - a.href.length)[0];
   const out = new Set<NonNullable<AssistNavItem["domain"]>>();
-  if (nav?.domain) out.add(nav.domain);
+  const section = patternDomain(pattern);
+  if (section) out.add(section);
   if (pattern === "/app/people/:id") {
     const tab = new URLSearchParams(query ?? "").get("tab");
     if (tab && Object.hasOwn(PERSON_TAB_DOMAIN, tab)) out.add(PERSON_TAB_DOMAIN[tab]!);
@@ -371,10 +370,32 @@ export function routeDomains(route: string, opts: { hosted?: boolean } = {}): No
   return [...out];
 }
 
+/** The grant a manifest pattern's sidebar section needs ("/app/payroll/:id" sits under Payroll: payroll), or null. */
+export function patternDomain(pattern: string): NonNullable<AssistNavItem["domain"]> | null {
+  const base = pattern.endsWith("/:id") ? pattern.slice(0, -"/:id".length) : pattern;
+  const nav = ASSIST_NAV.filter((n) => n.href !== "/app" && (base === n.href || base.startsWith(`${n.href}/`))).sort((a, b) => b.href.length - a.href.length)[0];
+  return nav?.domain ?? null;
+}
+
 /** The sidebar page a path sits under ("/app/people/wrk_x" reads "/app/people"), or "/app". */
 function nearPage(path: string, opts: { hosted?: boolean }): string {
   const near = ASSIST_NAV.filter((n) => n.href !== "/app" && path.startsWith(`${n.href}/`) && (!n.hosted || opts.hosted)).sort((a, b) => b.href.length - a.href.length)[0];
   return near?.href ?? "/app";
+}
+
+/**
+ * What the trail calls a page: its sidebar label, a record page by its kind and id ("Pay run pay_2026_10_30"), or else
+ * the sidebar page the path sits under. Nothing of a path outside those shapes (a sender's words) is in the name. The
+ * client names its navigations with it (trail-core.ts) and the server names them again from the cleaned route.
+ */
+export function assistPageName(route: string, opts: { hosted?: boolean } = {}): string {
+  const path = splitRoute(normalizeRoute(String(route ?? "").trim())).path;
+  const nav = ASSIST_NAV.find((n) => n.href === path && (!n.hosted || opts.hosted));
+  if (nav) return nav.label;
+  const rec = recordOf(path);
+  if (rec) return `${ASSIST_RECORD_ROUTES.find((r) => r.pattern === rec.pattern)!.label} ${rec.id}`;
+  const near = nearPage(path, opts);
+  return ASSIST_NAV.find((n) => n.href === near)?.label ?? "Home";
 }
 
 /**
@@ -416,14 +437,22 @@ export function cleanView(view: AssistCursor["view"], route: string, opts: { hos
   return { tab, filters, selected };
 }
 
-/** The request as the server keeps it: routes and view state cleaned (cleanRoute, cleanView); the rest unchanged. */
+/**
+ * The request as the server keeps it: routes and view state cleaned (cleanRoute, cleanView), and a navigation in the
+ * trail named again from its cleaned route (assistPageName), so its label never holds more than the route keeps; the
+ * rest unchanged.
+ */
 export function cleanAssistInput(a: AssistInput, opts: { hosted?: boolean } = {}): AssistInput {
   const route = cleanRoute(a.screen.route, opts);
   return {
     ...a,
     screen: { ...a.screen, route },
     cursor: { ...a.cursor, view: cleanView(a.cursor.view, route, opts) },
-    trail: a.trail.map((t) => (t.route ? { ...t, route: cleanRoute(t.route, opts) } : t)),
+    trail: a.trail.map((t) => {
+      if (!t.route) return t;
+      const r = cleanRoute(t.route, opts);
+      return t.kind === "navigate" ? { ...t, route: r, label: `Opened ${assistPageName(r, opts)}` } : { ...t, route: r };
+    }),
   };
 }
 
@@ -434,6 +463,9 @@ export function cleanAssistInput(a: AssistInput, opts: { hosted?: boolean } = {}
  */
 export const ASSIST_LOOKED_UP = ["wrk_", "pay_", "run_", "rt_", "ofb_", "thr_"] as const;
 const lookedUp = (v: string) => ASSIST_LOOKED_UP.some((p) => v.startsWith(p));
+/** The looked-up ids a trail label spells ("Opened conversation thr_...", an alert's "No worker wrk_..."). */
+const LABEL_ID_RE = new RegExp(`\\b(?:${ASSIST_LOOKED_UP.join("|")})[A-Za-z0-9_-]*`, "g");
+const labelIds = (label: string): string[] => label.match(LABEL_ID_RE) ?? [];
 
 /** The ids of a cleaned request that apps/api looks up before the pack is built (assistKnownRecords). */
 export function assistRecordIds(a: AssistInput, opts: { hosted?: boolean } = {}): string[] {
@@ -445,14 +477,17 @@ export function assistRecordIds(a: AssistInput, opts: { hosted?: boolean } = {})
     if (c.ok) c.ids.forEach(add);
   }
   for (const part of a.cursor.view.selected?.split(":") ?? []) add(part);
+  for (const t of a.trail) labelIds(t.label).forEach(add);
   return [...out];
 }
 
 /**
  * The request with every looked-up id (ASSIST_LOOKED_UP) that does not exist for this company taken out: a record page
  * reads as its sidebar page, a thread key is dropped, and so is a selected record that names one, so a sender's words
- * spelled as an id never reach the model, the handoff or the executor's checks as the page's own. `known` answers for
- * the ids assistRecordIds listed; the request is cleaned again after (cleanAssistInput).
+ * spelled as an id never reach the model, the handoff or the executor's checks as the page's own. A trail label that
+ * spells one goes too: a record opened or closed through the link is left out of the trail, and any other event (an
+ * alert that repeats the id) is marked untrusted; a navigation is named again from its route (cleanAssistInput).
+ * `known` answers for the ids assistRecordIds listed; the request is cleaned again after (cleanAssistInput).
  */
 export function assistKnownRecords(a: AssistInput, known: (id: string) => boolean, opts: { hosted?: boolean } = {}): AssistInput {
   const ok = (v: string) => !lookedUp(v) || known(v);
@@ -470,7 +505,13 @@ export function assistKnownRecords(a: AssistInput, known: (id: string) => boolea
     ...a,
     screen: { ...a.screen, route: reduce(a.screen.route) },
     cursor: { ...a.cursor, view: { ...a.cursor.view, selected: selected && selected.split(":").every(ok) ? selected : null } },
-    trail: a.trail.map((t) => (t.route ? { ...t, route: reduce(t.route) } : t)),
+    trail: a.trail.flatMap((t) => {
+      const e = t.route ? { ...t, route: reduce(t.route) } : t;
+      // A question the person asked earlier is their own words, whatever ids it spells.
+      if ((e.kind === "navigate" && e.route) || e.kind === "ask") return [e];
+      if (labelIds(e.label).every(ok)) return [e];
+      return e.kind === "open" || e.kind === "close" ? [] : [{ ...e, untrusted: true }];
+    }),
   };
   return cleanAssistInput(next, opts);
 }
@@ -894,10 +935,13 @@ export const ASSIST_TID = {
   menuAsk: "assist-menu-ask",
   pointer: "assist-pointer",
   bubble: "assist-bubble",
+  /** Where the card's live region reads out a pointer's label (the bubble itself is visual only). */
+  pointed: "assist-pointed",
   toggle: "assist-toggle",
   /** The handoff's progress card, its Stop and its Open in Agent. */
   progress: "assist-progress",
   stop: "assist-stop",
+  stopFailed: "assist-stop-failed",
   openInAgent: "assist-open-in-agent",
   /** A closing "Show me" chip and an ambiguity choice button (data-entity carries the record id). */
   chip: "assist-chip",
@@ -999,11 +1043,11 @@ export const ASSIST_HELP: readonly AssistHelpEntry[] = [
   { id: "rate-change", phrases: ["\\b(sui|tax rates?|rate change|unemployment rate)\\b"], route: "/app/compliance", anchor: "compliance-rates", label: "Tax rates", answer: "Employer tax rates are on the Rates tab of Taxes and Compliance, each with its source." },
   { id: "filing-calendar", phrases: ["\\b(deadlines?|due dates?|filing calendar|deposits? due|compliance calendar)\\b"], route: "/app/compliance", anchor: "compliance-calendar", label: "Compliance calendar", answer: "The Calendar tab of Taxes and Compliance tracks every deposit and filing due." },
   { id: "undo", phrases: ["\\b(undo|roll ?back|revert|audit log|who changed|change history)\\b"], route: "/app/audit", anchor: "audit-chain", label: "Audit log", answer: "Every change is a row in the audit log; a reversible one has Undo, which appends a reversing row." },
-  { id: "routines", phrases: ["\\b(routines?|schedules?|automations?|digest)\\b"], route: "/app/routines", anchor: "routine-gallery", label: "Routines", answer: "Routines run on a schedule or an event; the gallery shows each with its last and next run." },
+  { id: "routines", phrases: ["\\b(routines?|automations?|digest|schedul\\w* (a |the )?(routine|digest))\\b"], route: "/app/routines", anchor: "routine-gallery", label: "Routines", answer: "Routines run on a schedule or an event; the gallery shows each with its last and next run." },
   { id: "memory", phrases: ["\\b(memory|procedures?|policy notes?|wiki)\\b"], route: "/app/memory", anchor: "memory-file", label: "Memory", answer: "The agent's memory is Markdown in a git repository; every edit is a commit." },
   { id: "permissions", phrases: ["\\b(permissions?|who can|access rights?|roles?)\\b"], route: "/app/settings/permissions", anchor: "permissions-matrix", label: "Permissions", answer: "View, Edit and Approve per person are in Settings, Permissions. The agent never exceeds the person it acts for." },
-  { id: "offers", phrases: ["\\b(send an offer|make an offer|offers?|hire someone|new hire)\\b"], route: "/app/hiring", anchor: "hiring-offers", label: "Offers", answer: "Offers are on the Hiring page. Once one is signed, onboarding becomes the new hire's checklist." },
-  { id: "expenses", phrases: ["\\b(expenses?|receipts?|reimburse\\w*|claims?)\\b"], route: "/app/expenses", anchor: "expense-checks", label: "Policy checks", answer: "Claims are on the Expenses page, checked against policy as they arrive. Decisions are per claim, never in bulk." },
+  { id: "offers", phrases: ["\\b(send an offer|make an offer|offers?|hire someone)\\b"], route: "/app/hiring", anchor: "hiring-offers", label: "Offers", answer: "Offers are on the Hiring page. Once one is signed, onboarding becomes the new hire's checklist." },
+  { id: "expenses", phrases: ["\\b(expenses?|receipts?|reimburse\\w*|(expense|reimbursement) claims?)\\b"], route: "/app/expenses", anchor: "expense-checks", label: "Policy checks", answer: "Claims are on the Expenses page, checked against policy as they arrive. Decisions are per claim, never in bulk." },
   { id: "notices", phrases: ["\\b(deliver (a |the )?notice|agency notice|simulators?)\\b"], route: "/app/simulators", anchor: "sim-deliver", label: "Deliver a notice", answer: "The Simulators page delivers agency notices and moves the clock. Delivering one starts the agent's notice routine." },
   { id: "clock", phrases: ["\\b(clock|viewing as|switch (person|persona|user)|reset (the )?workspace|take the tour)\\b"], route: "/app", anchor: "env-pill", label: "Clock and persona", answer: "The pill in the top bar holds the simulated clock and Viewing as, with Take the tour and Reset workspace data in its menu." },
   { id: "benefits-reconciliation", phrases: ["\\b(benefits? )?reconciliation\\b", "\\bcarrier (invoices?|bills?)\\b"], route: "/app/benefits?tab=reconciliation", anchor: "benefits-reconciliation", label: "Reconciliation", answer: "The Reconciliation tab of Benefits checks each month's carrier records against Weft's enrollments and lists what does not match." },

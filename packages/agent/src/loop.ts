@@ -282,9 +282,10 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   });
   let earlyRepairUsed = repairAt.includes("early");
   let lastRepairUsed = repairAt.includes("last");
-  // A post-repair batch of identical re-reads served from the run moves the answer-by step back by one, once.
+  // A post-repair batch of identical re-reads served from the run moves the answer-by step back by one, once. Never
+  // past the step budget: an assist run answers by its last step, and a refund there would skip the last-step notice.
   let rereadRefunded = steps.some((s) => s.kind === "recite" && (s.result as { served?: boolean } | null)?.served === true);
-  let answerAt = answerBy + (rereadRefunded ? 1 : 0);
+  let answerAt = Math.min(answerBy + (rereadRefunded ? 1 : 0), stepBudget);
   // Grounding evidence beyond the tool results: the person's own request and the run clock. The request counts only
   // when the run was untainted before its first model step (a tagged thread or a tainted suggestion carries other
   // people's text into it). The decision is stored on every chat assemble row; runEvidence reads the first one back, so
@@ -534,7 +535,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       : null;
     if (served && served.every((o) => o !== null)) {
       rereadRefunded = true;
-      answerAt += 1;
+      answerAt = Math.min(answerAt + 1, stepBudget);
       const batch = served as ToolOutcome[];
       const items = await deps.checklist(run);
       const plan = renderPlan(items, run.stepsUsed, stepBudget, run.costUsdMicros / 1e6);

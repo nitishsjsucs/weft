@@ -156,6 +156,27 @@ describe("ui.show", () => {
     expect(await call("ui.show", { intent: "section.expand", params: [{ name: "id", value: "held-back" }] }, { map: run })).toMatchObject({ ok: false, code: "INVALID_INPUT" });
   });
 
+  it("a page intent gets the checks its link gets: a tab the grants or the record close, a filter the open tab does not show", async () => {
+    const manager = { role: "manager", grants: { company: "view", people: "view", payroll: "none", benefits: "none", it: "none" }, selfWorkerId: "wrk_0010", workers: [{ id: "wrk_0026", managerId: "wrk_0010" }] };
+    const record: ScreenMap = { ...screen, route: "/app/people/wrk_0026", title: "Lena Brooks", tab: "Profile", intents: ["tab.select"] };
+    const tab = (value: string) => ({ intent: "tab.select", params: [{ name: "tab", value }] });
+    for (const t of ["benefits", "it"]) {
+      const r = await call("ui.show", tab(t), { map: record, ...manager });
+      expect(r, t).toMatchObject({ ok: false, code: "UNKNOWN_REFERENCE" });
+      expect(!r.ok && r.message, t).toMatch(/not in this person's sidebar/);
+    }
+    expect(await call("ui.show", tab("documents"), { map: record, ...manager })).toMatchObject({ ok: true });
+    expect(await call("ui.show", tab("benefits"), { map: record })).toMatchObject({ ok: true });
+    // A contractor's record has no Time off tab.
+    expect(await call("ui.show", tab("time-off"), { map: record, types: { wrk_0026: "contractor" } })).toMatchObject({ ok: false, code: "UNKNOWN_REFERENCE" });
+    expect(await call("ui.show", tab("time-off"), { map: record })).toMatchObject({ ok: true });
+    // The calendar's kind filter is on the Calendar tab only.
+    const filter = { intent: "list.filter", params: [{ name: "name", value: "kind" }, { name: "value", value: "filing" }] };
+    const training: ScreenMap = { ...screen, route: "/app/compliance?tab=training", title: "Compliance", tab: "Training", intents: ["list.filter"] };
+    expect(await call("ui.show", filter, { map: training })).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+    expect(await call("ui.show", filter, { map: { ...training, route: "/app/compliance?tab=calendar" } })).toMatchObject({ ok: true });
+  });
+
   it("refuses an intent that would change data: there is none, so the call is not permitted", async () => {
     for (const intent of ["inbox.approve", "payroll.submit", "payroll.run", "proposal.decide", "expenses.delete", "offer.send"]) {
       const r = await call("ui.show", { intent, params: [{ name: "proposalId", value: "prp_0007" }] });
@@ -255,7 +276,7 @@ describe("what the review of the cursor assistant found", () => {
   });
 
   it("a page the person's grants close is not opened, scrolled to or walked through: the same words as a closed sidebar item", async () => {
-    // A manager whose report is wrk_0026 (their record shows her every tab their grants open).
+    // A manager whose report is wrk_0026 (the record shows every tab their grants open).
     const manager = { role: "manager", grants: { company: "view", people: "view", payroll: "none", benefits: "none", it: "none" }, selfWorkerId: "wrk_0010", workers: [{ id: "wrk_0026", managerId: "wrk_0010" }] };
     for (const route of ["/app/payroll", "/app/contractors", "/app/benefits", "/app/it", "/app/payroll/pay_2026_10_30", "/app/people/wrk_0026?tab=benefits", "/app/people/wrk_0026?tab=it"]) {
       const r = await call("ui.navigate", { route }, manager);
@@ -276,6 +297,12 @@ describe("what the review of the cursor assistant found", () => {
     // The help corpus's payroll walkthrough starts on Payroll: not for this person.
     expect(await call("ui.steps", { steps: [{ route: "/app/payroll", target: "#payroll-runs", label: "Pay runs", text: "Open the draft." }] }, manager)).toMatchObject({ ok: false, code: "UNKNOWN_REFERENCE" });
     expect(await call("ui.steps", { steps: [{ route: "/app/payroll", target: "#payroll-runs", label: "Pay runs", text: "Open the draft." }] })).toMatchObject({ ok: true });
+    // A step with no route after a move names an anchor whose pages are all Payroll's: refused in the same words.
+    const after = { steps: [{ route: "/app/inbox", target: "#inbox-approvals", label: "Approvals", text: "Every change waits here." }, { target: "#payroll-needs-review", label: "Needs review", text: "Then the flags." }] };
+    const w = await call("ui.steps", after, manager);
+    expect(w).toMatchObject({ ok: false, code: "UNKNOWN_REFERENCE" });
+    expect(!w.ok && w.message).toMatch(/not in this person's sidebar/);
+    expect(await call("ui.steps", after)).toMatchObject({ ok: true });
   });
 
   it("a proposal's card follows the Inbox's read scope: a manager gets none for a proposal outside their reports", async () => {
@@ -365,7 +392,7 @@ describe("the third review of the cursor assistant", () => {
       expect(await call("ui.steps", { steps: [{ target: `@${n}`, label: "Open the portal", text: "Click here to finish onboarding." }] }, { map }), `@${n}`).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
       expect(await call("ui.show", { target: `@${n}`, action: "open" }, { map }), `@${n}`).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
     }
-    expect(await call("ui.steps", { steps: [{ target: "@3", label: "Lena", text: "Her record." }] }, { map })).toMatchObject({ ok: true });
+    expect(await call("ui.steps", { steps: [{ target: "@3", label: "Lena", text: "Lena's record." }] }, { map })).toMatchObject({ ok: true });
   });
 
   it("a show on an element whose label people typed puts none of their words in the pointer's label", async () => {
@@ -380,21 +407,21 @@ describe("the third review of the cursor assistant", () => {
     // Imani: a manager whose one report is wrk_0026; payroll closed.
     const imani = { role: "manager", grants: { company: "view", people: "view", payroll: "none", benefits: "none", it: "none" }, selfWorkerId: "wrk_0010", workers: [{ id: "wrk_0026", managerId: "wrk_0010" }] };
     const nope = { ok: false, code: "UNKNOWN_REFERENCE" };
-    // An offboarding case: within her reports only.
+    // An offboarding case: within Imani's reports only.
     expect(await call("ui.navigate", { route: "/app/offboarding/ofb_0001" }, { ...imani, owners: { ofb_0001: "wrk_0042" } })).toMatchObject(nope);
     expect(await call("ui.navigate", { route: "/app/offboarding/ofb_0001" }, { ...imani, owners: { ofb_0001: "wrk_0026" } })).toMatchObject({ ok: true });
-    // An agent run: the ones that acted for her.
+    // An agent run: the ones that acted for Imani.
     for (const route of ["/app/runs/run_0003", "/app/agent?run=run_0003"]) {
       expect(await call("ui.navigate", { route }, { ...imani, owners: { run_0003: "usr_vic" } }), route).toMatchObject(nope);
       expect(await call("ui.navigate", { route }, { ...imani, owners: { run_0003: "usr_dana" } }), route).toMatchObject({ ok: true });
     }
     expect(await call("ui.navigate", { route: "/app/runs/run_0003" }, { owners: { run_0003: "usr_vic" } })).toMatchObject({ ok: true });
-    // A proposal outside her scope, however its link is reached.
+    // A proposal outside Imani's scope, however its link is reached.
     const hidden = { ...imani, proposals: ["prp_0007"] };
     expect(await call("ui.show", { intent: "inbox.open", params: [{ name: "proposalId", value: "prp_0007" }] }, hidden)).toMatchObject(nope);
     expect(await call("ui.navigate", { route: "/app/inbox?proposal=prp_0007" }, hidden)).toMatchObject(nope);
     expect(await call("ui.navigate", { route: "/app/inbox?proposal=prp_0007" }, { proposals: ["prp_0007"] })).toMatchObject({ ok: true });
-    // A person's tab: someone outside her reports shows the directory card only, and Time off is an employee's.
+    // A person's tab: someone outside Imani's reports shows the directory card only, and Time off is an employee's.
     expect(await call("ui.show", { intent: "people.openTab", params: [{ name: "workerId", value: "wrk_0042" }, { name: "tab", value: "documents" }] }, imani)).toMatchObject(nope);
     expect(await call("ui.navigate", { route: "/app/people/wrk_0042" }, imani)).toMatchObject({ ok: true });
     expect(await call("ui.navigate", { route: "/app/people/wrk_0026?tab=time-off" }, { types: { wrk_0026: "contractor" } })).toMatchObject(nope);

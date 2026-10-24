@@ -223,6 +223,11 @@ export interface CreateAgentRuntimeOptions {
   runHost?: RunHost;
   /** Hosted: the provider for each new run, pinned on its row. Default: `provider` for every run (Node). */
   providers?: ProviderPool;
+  /**
+   * Called once an assist run's terminal row is written, and for each assist run the boot rule fails: apps/api removes
+   * the run's screen map from the run files then. A restart never loses it the way a request's waiter would.
+   */
+  onAssistRunEnded?: (run: { id: string; companyId: string }) => Promise<void>;
 }
 
 export interface WeftAgentRuntime extends AgentRuntime {
@@ -278,6 +283,9 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
   const triggers = new Map<string, { routine: RoutineDef; trigger: Record<string, unknown> }>();
   const companyId = opts.companyId ?? DEFAULT_COMPANY_ID;
   const settledWaiters = new Map<string, ((r: AgentRunRow) => void)[]>();
+  /** Assist runs this process started and has not seen end (boot finds the ones a restart cut short by their setup). */
+  const assistRuns = new Set<string>();
+  const assistEnded = (run: { id: string; companyId: string }) => { void opts.onAssistRunEnded?.(run).catch(() => undefined); };
 
   const handleStore = opts.handleStore;
   const terminal = (status: string) => !["queued", "running", "waiting", "held"].includes(status);
@@ -418,6 +426,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
 
   const notifySettled = (row: AgentRunRow) => {
     if (terminal(row.status)) forget(row.id);
+    if (terminal(row.status) && assistRuns.delete(row.id)) assistEnded(row);
     const ws = settledWaiters.get(row.id) ?? [];
     settledWaiters.delete(row.id);
     for (const w of ws) w(row);
@@ -488,6 +497,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
         await store.updateRun(r.id, { status: "failed", terminalReason: "PROCESS_RESTART", endedAt: opts.clock.now(), summary: r.status === "queued" ? "The process restarted before this run started. Run it again." : "The process restarted while this run was active. Run it again." });
         if (r.routineRunId) await store.failRoutineRun(r.routineRunId, "The process restarted while this run was active. Run again.", opts.clock.now());
         await handleStore?.drop(r.id).catch(() => undefined);
+        if (opts.onAssistRunEnded && !r.routineRunId && (await setupOf(r.id).catch(() => undefined))?.promptKind === "assist") assistEnded(r);
       }
       // Waiting and held runs are not active, so they survive: their handle and trigger come back from the handle
       // store and the context step, and the next decision wakes them as if the process had never stopped.
@@ -499,6 +509,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     async startChat(handle, input) {
       await remember(handle);
       const kind: PromptKind = input.recipe === "routine_draft" ? "routine_draft" : input.recipe === "assist" && input.assist ? "assist" : "chat";
+      if (kind === "assist") assistRuns.add(handle.runId);
       // A conversation thread (the Agent page) is recorded on the run row; the side panel and every other caller pass none.
       // An assist exchange carries one too, so Continue in Agent opens it as a conversation.
       const threadId = (kind === "chat" || kind === "assist") && typeof input.threadId === "string" && input.threadId ? input.threadId : null;

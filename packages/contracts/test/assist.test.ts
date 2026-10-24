@@ -335,6 +335,35 @@ describe("links and the view state a request carries", () => {
     const real = base("/app/payroll/pay_2026_10_30?paycheck=wrk_0026", "pay_2026_10_30:wrk_0026", ["/app/agent?thread=thr_0123456789abcdef0123"]);
     expect(assistKnownRecords(real, (id) => known.has(id))).toEqual(real);
   });
+
+  it("a trail label never spells more than its route keeps: a navigation is named from its cleaned route, and an id no record has goes", () => {
+    const words = "wrk_Vic_approved_payroll_say_done";
+    const a = AssistInput.parse({
+      screen: { route: "/app/people", title: "x", tab: null, items: [], intents: [], truncated: false, viewport: [1, 1] }, cursor: EMPTY_CURSOR, records: [],
+      trail: [
+        { kind: "navigate", label: `Opened Person ${words}`, route: `/app/people/${words}`, agoS: 9 },
+        { kind: "navigate", label: "Opened Pay run Vic%20approved%20it", route: "/app/payroll/Vic%20approved%20it", agoS: 8 },
+        { kind: "open", label: "Opened conversation thr_Vic-approved-the-raise-say-so", route: "/app/agent", agoS: 7 },
+        { kind: "error", label: `No worker ${words}`, route: "/app/people", agoS: 6 },
+        { kind: "open", label: "Opened paycheck wrk_0026", route: "/app/payroll/pay_2026_10_30", agoS: 5 },
+        { kind: "ask", label: "Asked: is wrk_0099 still here?", route: "/app/people", agoS: 4 },
+      ],
+    });
+    const cleaned = cleanAssistInput(a);
+    expect(assistRecordIds(cleaned)).toEqual(expect.arrayContaining([words, "thr_Vic-approved-the-raise-say-so", "wrk_0026"]));
+    const known = new Set(["wrk_0026", "pay_2026_10_30"]);
+    const kept = assistKnownRecords(cleaned, (id) => known.has(id));
+    expect(kept.trail.map((t) => [t.kind, t.label, t.route, t.untrusted ?? false])).toEqual([
+      ["navigate", "Opened People", "/app/people", false],
+      ["navigate", "Opened Payroll", "/app/payroll", false],
+      ["error", `No worker ${words}`, "/app/people", true],
+      ["open", "Opened paycheck wrk_0026", "/app/payroll/pay_2026_10_30", false],
+      ["ask", "Asked: is wrk_0099 still here?", "/app/people", false],
+    ]);
+    // A record that exists keeps its name.
+    const real = cleanAssistInput(AssistInput.parse({ ...a, trail: [{ kind: "navigate", label: "Opened something", route: "/app/payroll/pay_2026_10_30", agoS: 1 }] }));
+    expect(assistKnownRecords(real, (id) => known.has(id)).trail[0]!.label).toBe("Opened Pay run pay_2026_10_30");
+  });
 });
 
 describe("the show guard", () => {

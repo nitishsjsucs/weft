@@ -11,7 +11,7 @@ import { expenses, inScope, proposalVisible, readScopeOf, viewerIdOf, type ReadS
 import { principals, proposals, type DbTx } from "@weft/db";
 import {
   anchorOn, ASSIST_ANCHORS, ASSIST_NAV, ASSIST_RECORD_ROUTES, ASSIST_SCREEN_FILE, ASSIST_SHOW_ACTIONS, checkIntent, checkRoute, fillSelectors, HandoffArgs, NavigateArgs, parseTarget, PointArgs, readsMutating,
-  hintName, routeDomains, SayArgs, ScreenMap, shortLabel, ShowArgs, showRefusal, splitRoute, stepRefusal, StepsArgs, viewParamProblem, type AssistAnchor, type AssistEffect, type AssistShowAction, type AssistTarget, type ScreenItem, type WalkStepEffect,
+  hintName, patternDomain, queryNeedProblem, routeDomains, routePattern, SayArgs, ScreenMap, shortLabel, ShowArgs, showRefusal, splitRoute, stepRefusal, StepsArgs, viewParamProblem, type AssistAnchor, type AssistEffect, type AssistShowAction, type AssistTarget, type ScreenItem, type WalkStepEffect,
 } from "../../contracts/src/ext/assist";
 import { NODE_HOSTED, type Engine } from "./engine";
 import { runRel } from "./hosted/run-files";
@@ -78,6 +78,14 @@ async function routeClosed(tx: DbTx, ctx: Ctx, route: string, hosted: boolean, w
   const grants = await grantsOf(tx, ctx);
   const closed = need.find((d) => !canView(grants, d));
   if (closed) throw new Refused("UNKNOWN_REFERENCE", `${what} is not in this person's sidebar: their access does not open ${closed === "it" ? "IT" : closed}`, { hint: "Say plainly that this person cannot open it.", example: { route: "/app" } });
+}
+
+/** Every page an anchor lives on sits in a sidebar section the person's grants close (patternDomain). */
+async function anchorPagesClosed(tx: DbTx, ctx: Ctx, a: AssistAnchor): Promise<boolean> {
+  const domains = a.routes.map(patternDomain);
+  if (domains.some((d) => d === null)) return false;
+  const grants = await grantsOf(tx, ctx);
+  return domains.every((d) => !canView(grants, d!));
 }
 
 type Scope = () => Promise<ReadScope | null>;
@@ -287,6 +295,20 @@ export function assistCommands(e: Engine): WeftCommand[] {
         // A page intent's tab, section or filter is one this page keeps (its enums in the manifest), not a free slug.
         const view = c.def.scope === "page" ? viewParamProblem(c.def.id, c.params, screen.route, { hosted: hostedOf(e) }) : null;
         if (view) throw new Refused("INVALID_INPUT", `${c.def.id}: ${view}`, { hint: "Use a value the page offers.", example: { intent: c.def.id, params: Object.entries(c.params).map(([name, value]) => ({ name, value })) } });
+        // The page's own checks, as for the link that does the same: a tab this person's grants or the record close
+        // (a person's Benefits, IT, or a contractor's Time off), and a filter its open tab does not show.
+        const here = splitRoute(screen.route);
+        if (c.def.id === "tab.select" && c.params.tab) {
+          const r = checkRoute(`${here.path}?tab=${encodeURIComponent(c.params.tab)}`, { hosted: hostedOf(e) });
+          if (r.ok) {
+            await routeClosed(deps.tx, ctx, r.route, hostedOf(e), `The ${c.params.tab} tab`);
+            await routeRecordsExist(deps.tx, ctx, r, c.def.id);
+          }
+        }
+        const pattern = c.def.id === "list.filter" ? routePattern(here.path, { hosted: hostedOf(e) }) : null;
+        const tabNow = new URLSearchParams(here.query ?? "").get("tab");
+        const need = pattern ? queryNeedProblem(pattern, `filter.${c.params.name ?? ""}`, (k) => (k === "tab" ? tabNow : null)) : null;
+        if (need) throw new Refused("INVALID_INPUT", `${c.def.id}: ${need}`, { hint: "Open that tab first: ui.show tab.select, or ui.navigate to the page with it.", example: { intent: "tab.select", params: [{ name: "tab", value: need.split("=").pop()! }] } });
         if (c.def.id === "approval.card") {
           // The card the person could read in their own Inbox: a narrowed person (a manager) gets none for a proposal
           // outside their reports and domains, exactly as GET /v1/proposals/:id answers them (proposalVisible).
@@ -390,10 +412,13 @@ export function assistCommands(e: Engine): WeftCommand[] {
           // page (never a templated one, never a hosted-only one on the Node app). An anchor is a part of the page the
           // manifest names, so only its mutating flag refuses it (the kind rule is for screen map items); the client
           // refuses one the page marks data-assist-mutating.
-          const a = pattern ? anchorOn(t.anchor, pattern, { hosted }) : anchorOn(t.anchor, "*", { hosted }) ?? anyRouteAnchor(t.anchor, hosted);
+          const shell = pattern ? null : anchorOn(t.anchor, "*", { hosted });
+          const a = pattern ? anchorOn(t.anchor, pattern, { hosted }) : shell ?? anyRouteAnchor(t.anchor, hosted);
           if (!a) throw new Refused("UNKNOWN_REFERENCE", `Step ${n}: #${t.anchor} is not a known anchor${pattern ? ` of ${pattern}` : ""}`);
           if (a.mutating) throw new Refused("NOT_PERMITTED", `Step ${n} points at "${a.label}", which changes data; a walkthrough points at what it acts on and leaves the press to the person`);
           if (await hiddenFor(deps.tx, ctx, a)) throw new Refused("UNKNOWN_REFERENCE", `Step ${n}: #${t.anchor} is not in this person's sidebar`);
+          // Found on a page of its own, not this one: one of those pages has to be open to the person, as a routed step's is.
+          if (!pattern && !shell && await anchorPagesClosed(deps.tx, ctx, a)) throw new Refused("UNKNOWN_REFERENCE", `Step ${n}: #${t.anchor} is not in this person's sidebar: their access opens none of its pages`, { hint: "Say plainly that this person cannot open it.", example: { route: "/app" } });
           selectors = a.selectors;
         }
         out.push({ route, target: t, label: shortLabel(st.label), text: st.text.trim().slice(0, 240), selectors });

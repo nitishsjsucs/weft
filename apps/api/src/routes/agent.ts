@@ -199,12 +199,16 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
       const files = weft.runFiles ?? fileRunFiles(weft.dataDir);
       const screenKey = assistScreenKey(session.companyId, handle.runId);
       await withWriteLock(() => files.write(screenKey, JSON.stringify(input.screen)));
-      const untrusted = assistUntrustedSource(input);
-      if (untrusted) await executorInternals(weft.executor)?.taintRun(handle.runId, untrusted);
-      await weft.agent.startChat(handle, { text: body.text, recipe: "assist", pageContext: body.pageContext ?? null, allowlist, threadId, assist: input });
-      // The screen map is only for this run's own checks: it goes when the run ends, so the run files hold the screens
-      // of the runs in flight and no more (on hosted they are rows of a workspace that may last 30 days).
-      void runtime.settled?.(handle.runId).then(() => withWriteLock(() => files.removePrefix(screenKey))).catch(() => undefined);
+      // The screen map is only for this run's own checks: the runtime removes it when the run ends, or when the boot
+      // rule fails a run a restart cut short (assemble.ts onAssistRunEnded). A run that never starts removes it here.
+      try {
+        const untrusted = assistUntrustedSource(input);
+        if (untrusted) await executorInternals(weft.executor)?.taintRun(handle.runId, untrusted);
+        await weft.agent.startChat(handle, { text: body.text, recipe: "assist", pageContext: body.pageContext ?? null, allowlist, threadId, assist: input });
+      } catch (err) {
+        await withWriteLock(() => files.removePrefix(screenKey)).catch(() => undefined);
+        throw err;
+      }
       const accepted: AssistRunAccepted = { runId: handle.runId, chatMode: "assist", threadId };
       return c.json(accepted, 202);
     }
