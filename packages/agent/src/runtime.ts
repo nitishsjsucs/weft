@@ -56,6 +56,12 @@ export interface ChatContextSource {
    */
   earlier?(input: { companyId: string; runId: string; threadId: string }): Promise<EarlierTurn[]>;
   /**
+   * The cursor assistant: the same person's last request in the thread before this run, whatever that turn read (a
+   * request is their own words, or code's restatement of them, never text a tool read; its answer stays out). A choice
+   * picked after a turn that read untrusted content continues the request it answers. Absent, `earlier` alone is read.
+   */
+  lastRequest?(input: { companyId: string; runId: string; threadId: string }): Promise<string | null>;
+  /**
    * The cursor assistant's handoff: opens a chat run for the person an assist run acted for (the chat tools code picks
    * for the question, the same caps; tainted when `taintedBy` is set), starts it with `start`, and returns its id.
    * apps/api provides it; absent, an assist run cannot hand off and ends with its own answer.
@@ -74,6 +80,13 @@ export function handoffPageLine(brief: RunSetup["brief"] | undefined): string | 
   if (brief.recordIds.length) parts.push(`records on the page: ${brief.recordIds.slice(0, 20).join(", ")}`);
   return parts.join("; ").slice(0, 600);
 }
+
+/** The earlier turn's answer when only the person's request in it may be read (ChatContextSource.lastRequest). */
+const LEFT_OUT_ANSWER = "(Its answer is not repeated here.)";
+
+/** The chat run an assist run handed off to, as its terminal step names it. */
+const handedToOf = (steps: RunStepRow[]): string | null =>
+  steps.flatMap((s) => { const to = (s.result as { handoff?: { to?: unknown } } | null)?.handoff?.to; return s.stage === "terminal" && typeof to === "string" ? [to] : []; })[0] ?? null;
 
 /** The acting principal for telemetry (user.id): the source's id, else the "(prn_...)" id inside actingFor. */
 export function principalOf(c: { actingFor: string; principalId?: string | null }): string | null {
@@ -259,6 +272,8 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
   };
   const handles = new Map<string, RunHandle>();
   const cancelled = new Set<string>();
+  /** An assist run's chat run, from the moment the handoff opened it until the assist run settles (then its terminal step names it). */
+  const handedTo = new Map<string, string>();
   const aborts = new Map<string, AbortController>();
   const triggers = new Map<string, { routine: RoutineDef; trigger: Record<string, unknown> }>();
   const companyId = opts.companyId ?? DEFAULT_COMPANY_ID;
@@ -300,6 +315,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     // person gave an old run of the same id (it would be cancelled before its first step).
     triggers.delete(handle.runId);
     cancelled.delete(handle.runId);
+    handedTo.delete(handle.runId);
     handles.set(handle.runId, handle);
     // A handle that cannot be persisted still works in this process; only restart survival is lost for that run.
     await handleStore?.save(handle).catch(() => undefined);
@@ -307,6 +323,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
   const forget = (runId: string) => {
     handles.delete(runId);
     triggers.delete(runId);
+    handedTo.delete(runId);
     void handleStore?.drop(runId).catch(() => undefined);
   };
 
@@ -386,7 +403,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
         ...(run.threadId ? { threadId: run.threadId } : {}), handoff: { fromRunId: run.id, reason: h.reason, task: h.task, question },
       });
     });
-    if (!stopped()) return to;
+    if (!stopped()) { if (to) handedTo.set(run.id, to); return to; }
     if (started) await runtime.cancel(started).catch(() => undefined);
     return null;
   };
@@ -487,7 +504,11 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
       const threadId = (kind === "chat" || kind === "assist") && typeof input.threadId === "string" && input.threadId ? input.threadId : null;
       // An assist exchange in a conversation reads the thread's earlier turns like a chat follow-up, so a choice or a
       // short follow-up continues the request before it (a source that throws leaves them out).
-      const earlierAssist = kind === "assist" && threadId && opts.contextSource?.earlier ? await opts.contextSource.earlier({ companyId, runId: handle.runId, threadId }).catch(() => []) : [];
+      const prior = kind === "assist" && threadId && opts.contextSource?.earlier ? await opts.contextSource.earlier({ companyId, runId: handle.runId, threadId }).catch(() => []) : [];
+      // A turn that read untrusted content gives no turn of its own, but the person's request in it still leads: a
+      // choice after "give Lena a raise" handed to a tainted chat run continues the raise, never opens Lena instead.
+      const asked = kind === "assist" && threadId && opts.contextSource?.lastRequest ? await opts.contextSource.lastRequest({ companyId, runId: handle.runId, threadId }).catch(() => null) : null;
+      const earlierAssist = asked && asked !== prior.at(-1)?.question ? [...prior, { question: asked, answer: LEFT_OUT_ANSWER }] : prior;
       // The cursor assistant's instant path: a where or how question the resolver answers is pinned to its stand-in.
       const resolved: AssistResolution | null = kind === "assist" ? resolveAssist(input.text, input.assist!, { hosted: !!opts.providers, earlier: earlierAssist.at(-1)?.question ?? null }) : null;
       const provider = resolved ? resolverProvider(resolved) : opts.providers ? await chooseProvider(kind, true) : opts.provider;
@@ -602,11 +623,18 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     async cancel(runId) {
       cancelled.add(runId);
       aborts.get(runId)?.abort();
+      // Read before the first await: the assist run may settle (and forget it) while the row is read.
+      const opened = handedTo.get(runId);
       const run = await store.getRun(runId);
       if (run && ["queued", "waiting", "held"].includes(run.status) && queue.position(runId) === null) {
         await store.updateRun(runId, { status: "cancelled", terminalReason: "CANCELLED", endedAt: opts.clock.now() });
         notifySettled((await store.getRun(runId))!);
       }
+      // An assist run that already handed off: its chat run is the same request still going, so it stops too. The
+      // cursor assistant sends this only while the person has not seen the handoff (no progress card, no Stop yet);
+      // once they have, a dismissal leaves the chat run going and its own Stop cancels it by its id.
+      const to = opened ?? (run?.terminalReason === "HANDED_OFF" ? handedToOf(await store.steps(runId)) : null);
+      if (to && to !== runId) await runtime.cancel(to);
     },
     subscribe(runId, cb) {
       const set = listeners.get(runId) ?? new Set();

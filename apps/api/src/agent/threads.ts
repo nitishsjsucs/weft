@@ -99,3 +99,23 @@ export async function earlierTurns(db: Db, input: { companyId: string; runId: st
     return [{ question: q.question, answer: answerForThread(r.summary) }];
   });
 }
+
+/**
+ * ChatContextSource.lastRequest: the same person's last question in `threadId` before `runId`, whatever that turn read.
+ * The question is the stored request (the person's words, or code's restatement of them for a handoff), never a tool
+ * result or an answer, so a tainted turn still gives it; earlierTurns keeps that turn's answer out.
+ */
+export async function lastRequest(db: Db, input: { companyId: string; runId: string; threadId: string }): Promise<string | null> {
+  const [me] = await db.select({ onBehalfOf: execRuns.onBehalfOf }).from(execRuns).where(eq(execRuns.id, input.runId)).limit(1);
+  const [current] = await db.select({ id: agentRuns.id, createdAt: agentRuns.createdAt, onBehalfOf: agentRuns.onBehalfOf }).from(agentRuns).where(eq(agentRuns.id, input.runId)).limit(1);
+  const person = me?.onBehalfOf ?? current?.onBehalfOf ?? null;
+  if (!person) return null;
+  const rows = (await db.select({ id: agentRuns.id, createdAt: agentRuns.createdAt, onBehalfOf: agentRuns.onBehalfOf, trigger: agentRuns.trigger, cacheKey: agentRuns.cacheKey })
+    .from(agentRuns).where(and(eq(agentRuns.companyId, input.companyId), eq(agentRuns.threadId, input.threadId)))).filter((r) => r.id !== input.runId).sort(byCreation);
+  const before = (current ? rows.filter((r) => byCreation(r, { id: current.id, createdAt: current.createdAt }) < 0) : rows).filter((r) => r.trigger === "chat");
+  const people = await peopleOf(db, before);
+  const last = before.filter((r) => people.get(r.id) === person).at(-1);
+  if (!last) return null;
+  const q = (await questionsOf(db, [last])).get(last.id);
+  return q?.askedFrom === "agent" ? q.question : null;
+}

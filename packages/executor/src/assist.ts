@@ -7,7 +7,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ID_SHAPE, idPrefixOf, Refused } from "@weft/contracts";
-import { proposalVisible, readScopeOf, viewerIdOf, type WeftCommand } from "@weft/core";
+import { expenses, inScope, proposalVisible, readScopeOf, viewerIdOf, type ReadScope, type WeftCommand } from "@weft/core";
 import { principals, proposals, type DbTx } from "@weft/db";
 import {
   anchorOn, ASSIST_ANCHORS, ASSIST_NAV, ASSIST_RECORD_ROUTES, ASSIST_SCREEN_FILE, ASSIST_SHOW_ACTIONS, checkIntent, checkRoute, fillSelectors, HandoffArgs, NavigateArgs, parseTarget, PointArgs, readsMutating,
@@ -48,13 +48,17 @@ function itemOf(screen: ScreenMap, n: number): ScreenItem {
   return i;
 }
 
-/** The grants of the person the call acts for (the sidebar shows them only the items those grants open). */
-async function grantsOf(tx: DbTx, ctx: Ctx): Promise<Partial<Grants>> {
+/** The person the call acts for: their grants (the sidebar shows them only the items those open), role and own worker. */
+interface Viewer { id: string | null; grants: Partial<Grants>; role: string | null; workerId: string | null }
+async function viewerOf(tx: DbTx, ctx: Ctx): Promise<Viewer> {
   const id = viewerIdOf(ctx);
-  if (!id) return {};
-  const [p] = await tx.select({ grantsJson: principals.grantsJson }).from(principals).where(and(eq(principals.id, id), eq(principals.companyId, ctx.companyId))).limit(1);
-  try { return (JSON.parse(p?.grantsJson ?? "{}") as Partial<Grants>) ?? {}; } catch { return {}; }
+  if (!id) return { id: null, grants: {}, role: null, workerId: null };
+  const [p] = await tx.select({ grantsJson: principals.grantsJson, role: principals.role, workerId: principals.workerId }).from(principals).where(and(eq(principals.id, id), eq(principals.companyId, ctx.companyId))).limit(1);
+  let grants: Partial<Grants> = {};
+  try { grants = (JSON.parse(p?.grantsJson ?? "{}") as Partial<Grants>) ?? {}; } catch { /* none */ }
+  return { id, grants, role: p?.role ?? null, workerId: p?.workerId ?? null };
 }
+const grantsOf = async (tx: DbTx, ctx: Ctx): Promise<Partial<Grants>> => (await viewerOf(tx, ctx)).grants;
 
 const canView = (grants: Partial<Grants>, domain: keyof Grants): boolean => (GRANT_RANK[grants[domain] ?? "none"] ?? 0) >= GRANT_RANK.view;
 
@@ -76,38 +80,68 @@ async function routeClosed(tx: DbTx, ctx: Ctx, route: string, hosted: boolean, w
   if (closed) throw new Refused("UNKNOWN_REFERENCE", `${what} is not in this person's sidebar: their access does not open ${closed === "it" ? "IT" : closed}`, { hint: "Say plainly that this person cannot open it.", example: { route: "/app" } });
 }
 
+type Scope = () => Promise<ReadScope | null>;
+const one = async <T>(tx: DbTx, q: ReturnType<typeof sql>): Promise<T | undefined> => (await tx.all<T>(q))[0];
+
 /**
- * The ids a route may carry whose records REF_TABLES (the pipeline's reference check) does not list: an offboarding
- * case and an expense claim by company, in the domain their own reads need, and a conversation thread only when it is
- * this person's (a thread whose runs acted for someone else does not exist for them, as POST /v1/agent/runs answers).
+ * The ids a route may carry whose records REF_TABLES (the pipeline's reference check) does not list, or lists without
+ * the reader's own narrowing, each read the way its page reads it: an offboarding case only within the person's
+ * reports (GET /v1/offboarding/:id), an expense claim only their own unless their role reads every claim (GET
+ * /v1/expenses/:id, seesExpense), an agent run only when it acted for a narrowed person (GET /v1/agent/runs/:id), and
+ * a conversation thread only when it is this person's (as POST /v1/agent/runs answers). One that is not theirs to
+ * read does not exist for them, in the same words as one that does not exist at all.
  */
-const ROUTE_REFS: Readonly<Record<string, { domain: keyof Grants; exists: (tx: DbTx, companyId: string, id: string, viewer: string | null) => Promise<boolean> }>> = {
-  ofb_: { domain: "people", exists: async (tx, c, id) => (await tx.all<{ id: string }>(sql`SELECT id FROM offboarding_cases WHERE id = ${id} AND company_id = ${c} LIMIT 1`)).length > 0 },
-  exp_: { domain: "payroll", exists: async (tx, c, id) => (await tx.all<{ id: string }>(sql`SELECT id FROM expenses WHERE id = ${id} AND company_id = ${c} LIMIT 1`)).length > 0 },
+const ROUTE_REFS: Readonly<Record<string, { domain: keyof Grants | null; exists: (tx: DbTx, companyId: string, id: string, viewer: Viewer, scope: Scope) => Promise<boolean> }>> = {
+  ofb_: {
+    domain: "people",
+    exists: async (tx, c, id, _v, scope) => {
+      const row = await one<{ workerId: string | null }>(tx, sql`SELECT worker_id AS workerId FROM offboarding_cases WHERE id = ${id} AND company_id = ${c} LIMIT 1`);
+      return !!row && inScope(await scope(), row.workerId);
+    },
+  },
+  exp_: {
+    domain: null,
+    exists: async (tx, c, id, v) => {
+      const row = await one<{ workerId: string | null }>(tx, sql`SELECT worker_id AS workerId FROM expenses WHERE id = ${id} AND company_id = ${c} LIMIT 1`);
+      return !!row && (!v.id || expenses.seesExpense(v, row.workerId));
+    },
+  },
+  run_: {
+    domain: "company",
+    exists: async (tx, c, id, v, scope) => {
+      const row = await one<{ live: string | null; seeded: string | null }>(tx, sql`SELECT e.on_behalf_of AS live, a.on_behalf_of AS seeded FROM agent_runs a LEFT JOIN exec_runs e ON e.id = a.id WHERE a.id = ${id} AND a.company_id = ${c} LIMIT 1`);
+      // The People and payroll roles read every run; a narrowed person (a manager) reads the runs that acted for them.
+      return !!row && (!(await scope()) || (!!v.id && (row.live === v.id || row.seeded === v.id)));
+    },
+  },
   thr_: {
     domain: "company",
-    exists: async (tx, c, id, viewer) => {
+    exists: async (tx, c, id, v) => {
       const runs = await tx.all<{ who: string | null }>(sql`SELECT COALESCE(e.on_behalf_of, a.on_behalf_of) AS who FROM agent_runs a LEFT JOIN exec_runs e ON e.id = a.id WHERE a.thread_id = ${id} AND a.company_id = ${c} LIMIT 200`);
-      return runs.length > 0 && (!viewer || runs.every((r) => r.who === viewer));
+      return runs.length > 0 && (!v.id || runs.every((r) => r.who === v.id));
     },
   },
 };
 
 /**
- * The record ids a route names (checkRoute ids: its page's own id, a paycheck, a proposal, a case, a claim, a thread)
- * must exist in this company in a domain the person can view, like every id argument (harness 4.6); an invented one
- * is refused, and so is an id of a kind nothing here can look up.
+ * The record ids a route names (checkRoute ids: its page's own id, a paycheck, a proposal, a case, a claim, a run, a
+ * thread) must exist in this company in a domain the person can view, like every id argument (harness 4.6), and be
+ * one their page would show them: a proposal only when they could read it in their own Inbox (proposalVisible). An
+ * invented one is refused, and so is an id of a kind nothing here can look up.
  */
 async function idsExist(tx: DbTx, ctx: Ctx, ids: readonly string[], what: string): Promise<void> {
   if (!ids.length) return;
-  const grants = await grantsOf(tx, ctx);
+  const viewer = await viewerOf(tx, ctx);
+  const grants = viewer.grants;
+  let scoped: Promise<ReadScope | null> | null = null;
+  const scope: Scope = () => (scoped ??= readScopeOf(tx, ctx));
   const refused = (id: string, closest: string[] = []) => new Refused("UNKNOWN_REFERENCE", `${what}: ${id} does not exist in this company`, { hint: closest.length ? `Closest ids: ${closest.join(", ")}` : "Use an id from a tool result or the screen map.", example: { route: "/app/payroll" } });
   const known: string[] = [];
   for (const id of ids) {
     const prefix = idPrefixOf(id);
     const ref = prefix && Object.hasOwn(ROUTE_REFS, prefix) ? ROUTE_REFS[prefix]! : null;
     if (ref) {
-      if (!canView(grants, ref.domain) || !(await ref.exists(tx, ctx.companyId, id, viewerIdOf(ctx)))) throw refused(id);
+      if ((ref.domain && !canView(grants, ref.domain)) || !(await ref.exists(tx, ctx.companyId, id, viewer, scope))) throw refused(id);
       continue;
     }
     // Only an id the reference check really looks up (a listed prefix, its shape); any other is skipped there, so here
@@ -117,18 +151,37 @@ async function idsExist(tx: DbTx, ctx: Ctx, ids: readonly string[], what: string
   }
   const unknown = known.length ? await findUnknownReference(tx, ctx.companyId, known, grants as Grants) : null;
   if (unknown) throw refused(unknown.id, unknown.closest);
+  for (const id of known.filter((x) => x.startsWith("prp_"))) {
+    const [p] = await tx.select().from(proposals).where(and(eq(proposals.id, id), eq(proposals.companyId, ctx.companyId))).limit(1);
+    if (!p || !proposalVisible(await scope(), p)) throw refused(id);
+  }
 }
 
 /**
  * A route's records exist (idsExist) and belong together: a pay run's paycheck link names a worker who has a paycheck
- * in that run (a contractor, or someone hired after it, has none), so a show never claims a drawer that cannot open.
+ * in that run (a contractor, or someone hired after it, has none), so a show never claims a drawer that cannot open;
+ * and a person's tab is one their record shows this viewer (people-view.tsx): someone outside a narrowed person's
+ * reports shows the directory card only, and Time off is an employee's.
  */
 async function routeRecordsExist(tx: DbTx, ctx: Ctx, r: { route: string; pattern: string; ids: readonly string[] }, what: string): Promise<void> {
   await idsExist(tx, ctx, r.ids, what);
-  if (r.pattern !== "/app/payroll/:id") return;
   const { path, query } = splitRoute(r.route);
-  const workerId = new URLSearchParams(query ?? "").get("paycheck");
-  const runId = path.split("/").pop()!;
+  const params = new URLSearchParams(query ?? "");
+  const id = path.split("/").pop()!;
+  if (r.pattern === "/app/people/:id") {
+    const tab = params.get("tab") ?? (params.has("filter.documents") ? "documents" : null);
+    if (!tab || tab === "profile") return;
+    const notShown = () => new Refused("UNKNOWN_REFERENCE", `${what}: ${id}'s record shows this person no ${tab} tab`, { hint: "Open the person's record without a tab.", example: { route: `/app/people/${id}` } });
+    if (!inScope(await readScopeOf(tx, ctx), id)) throw notShown();
+    if (tab === "time-off") {
+      const w = await one<{ type: string | null }>(tx, sql`SELECT type FROM workers WHERE id = ${id} AND company_id = ${ctx.companyId} LIMIT 1`);
+      if (w?.type !== "employee") throw notShown();
+    }
+    return;
+  }
+  if (r.pattern !== "/app/payroll/:id") return;
+  const workerId = params.get("paycheck");
+  const runId = id;
   if (!workerId) return;
   const rows = await tx.all<{ id: string }>(sql`SELECT x.id AS id FROM paychecks x JOIN payroll_runs p ON p.id = x.payroll_run_id WHERE x.payroll_run_id = ${runId} AND x.worker_id = ${workerId} AND p.company_id = ${ctx.companyId} LIMIT 1`);
   if (!rows.length) throw new Refused("UNKNOWN_REFERENCE", `${what}: ${workerId} has no paycheck in ${runId}`, { hint: "Open the pay run, or name a worker its paychecks list.", example: { route: `/app/payroll/${runId}` } });
@@ -265,7 +318,9 @@ export function assistCommands(e: Engine): WeftCommand[] {
         if (a.mutating) throw new Refused("NOT_PERMITTED", `"${a.label}" changes data; only a person can use it. ${NOT_A_CHANGE}`, { hint: "Point at it with ui.point instead.", example: { target: `#${anchor}`, label: a.label } });
         if (action !== "scroll") throw new Refused("NOT_PERMITTED", "An anchor can only be scrolled to; open, tab, expand and collapse take an element from the screen map");
       }
-      const label = i.label ? shortLabel(i.label) : item?.label ? shortLabel(item.label) : null;
+      // The element's own label only when the app wrote it: a label people typed (a merchant, a note) is never shown as
+      // the assistant's words, as the summary below says "item n" for it.
+      const label = i.label ? shortLabel(i.label) : item?.label && !item.untrusted ? shortLabel(item.label) : null;
       const data: AssistEffect = { effect: "show", via: "element", target, action, label, selectors };
       return { data, summary: `${showVerb[action]} ${item ? (item.untrusted ? `item ${item.n}` : item.label) : ASSIST_ANCHORS[(target as { anchor: string }).anchor]!.label}` };
     },
@@ -332,7 +387,9 @@ export function assistCommands(e: Engine): WeftCommand[] {
           if (why) throw new Refused("NOT_PERMITTED", `Step ${n} points at ${why}; a walkthrough points at what it acts on and leaves the press to the person`);
         } else {
           // A step with no route of its own, after a move, is on a page code cannot name yet: any anchor known on some
-          // page (never a templated one, never a hosted-only one on the Node app).
+          // page (never a templated one, never a hosted-only one on the Node app). An anchor is a part of the page the
+          // manifest names, so only its mutating flag refuses it (the kind rule is for screen map items); the client
+          // refuses one the page marks data-assist-mutating.
           const a = pattern ? anchorOn(t.anchor, pattern, { hosted }) : anchorOn(t.anchor, "*", { hosted }) ?? anyRouteAnchor(t.anchor, hosted);
           if (!a) throw new Refused("UNKNOWN_REFERENCE", `Step ${n}: #${t.anchor} is not a known anchor${pattern ? ` of ${pattern}` : ""}`);
           if (a.mutating) throw new Refused("NOT_PERMITTED", `Step ${n} points at "${a.label}", which changes data; a walkthrough points at what it acts on and leaves the press to the person`);

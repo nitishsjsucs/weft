@@ -117,7 +117,9 @@ export function sqlRunFileStore(db: Db): RunFileStore {
       // Inside the executor's transaction the drizzle db joins it (the facade's transaction is the closure in scope).
       const parts: string[] = [];
       for (let at = 0; at < body.length; at += RUN_FILE_PART_CHARS) parts.push(body.slice(at, at + RUN_FILE_PART_CHARS));
-      await db.delete(runFiles).where(sql`${runFiles.path} = ${path} OR substr(${runFiles.path}, 1, ${path.length + 5}) = ${`${path}#part`}`);
+      // The path and its parts as a key range ("#part" up to "#paru"), so the primary key finds them: a substr test
+      // would read every row of the table on each write, and hosted counts every row read.
+      await db.delete(runFiles).where(sql`${runFiles.path} = ${path} OR (${runFiles.path} >= ${`${path}#part`} AND ${runFiles.path} < ${`${path}#paru`})`);
       if (parts.length <= 1) { await db.insert(runFiles).values({ path, body }); return; }
       await db.insert(runFiles).values({ path, body: `${CHUNKED}${parts.length}` });
       for (const [i, p] of parts.entries()) await db.insert(runFiles).values({ path: partKey(path, i + 1), body: p });
@@ -138,7 +140,8 @@ export function sqlRunFileStore(db: Db): RunFileStore {
     },
     async removePrefix(prefix) {
       const p = safeRunFileKey(prefix.replace(/\/+$/, ""));
-      await withWriteLock(() => db.delete(runFiles).where(sql`${runFiles.path} = ${p} OR substr(${runFiles.path}, 1, ${p.length + 1}) = ${`${p}/`}`));
+      // Everything under "<prefix>/" as a key range ("/" up to "0", the next character), and any parts of the path itself.
+      await withWriteLock(() => db.delete(runFiles).where(sql`${runFiles.path} = ${p} OR (${runFiles.path} >= ${`${p}/`} AND ${runFiles.path} < ${`${p}0`}) OR (${runFiles.path} >= ${`${p}#part`} AND ${runFiles.path} < ${`${p}#paru`})`));
     },
   };
 }

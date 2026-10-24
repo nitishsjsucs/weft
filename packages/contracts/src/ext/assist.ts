@@ -84,6 +84,8 @@ export const ScreenItem = z.object({
    * Opening such an element is a navigation, so show allows it only to a route checkRoute accepts.
    */
   href: shortText(SCREEN_LIMITS.route).nullable().optional(),
+  /** The element is or sits in [data-assist-mutating]: the page marks it as a control that changes data (itemMutating). */
+  mutating: z.boolean().optional(),
 });
 export type ScreenItem = z.infer<typeof ScreenItem>;
 
@@ -369,6 +371,12 @@ export function routeDomains(route: string, opts: { hosted?: boolean } = {}): No
   return [...out];
 }
 
+/** The sidebar page a path sits under ("/app/people/wrk_x" reads "/app/people"), or "/app". */
+function nearPage(path: string, opts: { hosted?: boolean }): string {
+  const near = ASSIST_NAV.filter((n) => n.href !== "/app" && path.startsWith(`${n.href}/`) && (!n.hosted || opts.hosted)).sort((a, b) => b.href.length - a.href.length)[0];
+  return near?.href ?? "/app";
+}
+
 /**
  * A page location from the browser as the assistant may pass it on (the screen map's route, a trail event's route):
  * the path when it is a registry page and only the query keys that page keeps with values of their shape. Anything
@@ -378,10 +386,7 @@ export function routeDomains(route: string, opts: { hosted?: boolean } = {}): No
 export function cleanRoute(route: string, opts: { hosted?: boolean } = {}): string {
   const { path: raw, query } = splitRoute(normalizeRoute(String(route ?? "").trim()));
   const pattern = routePattern(raw, opts);
-  if (!pattern) {
-    const near = ASSIST_NAV.filter((n) => n.href !== "/app" && raw.startsWith(`${n.href}/`) && (!n.hosted || opts.hosted)).sort((a, b) => b.href.length - a.href.length)[0];
-    return near?.href ?? "/app";
-  }
+  if (!pattern) return nearPage(raw, opts);
   const allowed = ASSIST_QUERY_KEYS[pattern] ?? table({});
   const kept = new URLSearchParams();
   for (const [k, v] of new URLSearchParams(query ?? "")) {
@@ -420,6 +425,54 @@ export function cleanAssistInput(a: AssistInput, opts: { hosted?: boolean } = {}
     cursor: { ...a.cursor, view: cleanView(a.cursor.view, route, opts) },
     trail: a.trail.map((t) => (t.route ? { ...t, route: cleanRoute(t.route, opts) } : t)),
   };
+}
+
+/**
+ * Ids whose shape alone lets text through (a record page's path id, up to 40 letters, digits and _ after its prefix,
+ * and a conversation thread, which takes - too): a link someone sent may spell words with them. Every other id a
+ * route keeps is digits only (ASSIST_QUERY_KEYS), so it carries no words.
+ */
+export const ASSIST_LOOKED_UP = ["wrk_", "pay_", "run_", "rt_", "ofb_", "thr_"] as const;
+const lookedUp = (v: string) => ASSIST_LOOKED_UP.some((p) => v.startsWith(p));
+
+/** The ids of a cleaned request that apps/api looks up before the pack is built (assistKnownRecords). */
+export function assistRecordIds(a: AssistInput, opts: { hosted?: boolean } = {}): string[] {
+  const out = new Set<string>();
+  const add = (v: string | null | undefined) => { if (v && lookedUp(v)) out.add(v); };
+  for (const r of [a.screen.route, ...a.trail.map((t) => t.route)]) {
+    if (!r) continue;
+    const c = checkRoute(r, opts);
+    if (c.ok) c.ids.forEach(add);
+  }
+  for (const part of a.cursor.view.selected?.split(":") ?? []) add(part);
+  return [...out];
+}
+
+/**
+ * The request with every looked-up id (ASSIST_LOOKED_UP) that does not exist for this company taken out: a record page
+ * reads as its sidebar page, a thread key is dropped, and so is a selected record that names one, so a sender's words
+ * spelled as an id never reach the model, the handoff or the executor's checks as the page's own. `known` answers for
+ * the ids assistRecordIds listed; the request is cleaned again after (cleanAssistInput).
+ */
+export function assistKnownRecords(a: AssistInput, known: (id: string) => boolean, opts: { hosted?: boolean } = {}): AssistInput {
+  const ok = (v: string) => !lookedUp(v) || known(v);
+  const reduce = (route: string): string => {
+    const { path, query } = splitRoute(route);
+    const rec = recordOf(path);
+    const p = rec && !ok(rec.id) ? nearPage(path, opts) : path;
+    const params = new URLSearchParams(query ?? "");
+    for (const [k, v] of [...params]) if (!ok(v)) params.delete(k);
+    const q = params.toString();
+    return q ? `${p}?${q}` : p;
+  };
+  const selected = a.cursor.view.selected;
+  const next: AssistInput = {
+    ...a,
+    screen: { ...a.screen, route: reduce(a.screen.route) },
+    cursor: { ...a.cursor, view: { ...a.cursor.view, selected: selected && selected.split(":").every(ok) ? selected : null } },
+    trail: a.trail.map((t) => (t.route ? { ...t, route: reduce(t.route) } : t)),
+  };
+  return cleanAssistInput(next, opts);
 }
 
 // ---- anchors ------------------------------------------------------------------------------------------------
@@ -677,19 +730,20 @@ export const SHOWABLE_KINDS: Readonly<Record<AssistShowAction, readonly ScreenIt
 /** Kinds a person presses or types into: a walkthrough step never points at one (a tab and a disclosure only change the view). */
 export const PRESSED_KINDS: readonly ScreenItemKind[] = ["button", "menuitem", "field"];
 
-type ItemFacts = Pick<ScreenItem, "kind" | "label" | "testid" | "anchor"> & Partial<Pick<ScreenItem, "entity" | "href">>;
+type ItemFacts = Pick<ScreenItem, "kind" | "label" | "testid" | "anchor"> & Partial<Pick<ScreenItem, "entity" | "href" | "mutating">>;
 
 /**
  * Whether an element reads as a control that changes data: its test id or anchor, and its label unless it is a tab,
  * a disclosure, a record's own row or card (a person named Grant, an off-cycle run), or a link into the app (opening
- * it is a navigation checkRoute validates). An anchor counts by its manifest flag or its token.
+ * it is a navigation checkRoute validates). An anchor counts by its manifest flag or its token, and an element the page
+ * itself marks (data-assist-mutating, such as a link that signs in as someone) always counts.
  */
 export function itemMutating(item: ItemFacts, opts: { hosted?: boolean } = {}): boolean {
   const record = (item.kind === "row" || item.kind === "card" || item.kind === "item") && !!item.entity;
   const appLink = item.kind === "link" && !!item.href && checkRoute(item.href, opts).ok;
   const words = item.kind === "tab" || item.kind === "disclosure" || record || appLink ? false : readsMutating(item.label);
   const anchor = item.anchor ? (Object.hasOwn(ASSIST_ANCHORS, item.anchor) && ASSIST_ANCHORS[item.anchor]!.mutating) || readsMutating(item.anchor) : false;
-  return words || testidMutating(item.testid) || !!anchor;
+  return words || testidMutating(item.testid) || !!anchor || !!item.mutating;
 }
 
 /**

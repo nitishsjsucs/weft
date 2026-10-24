@@ -34,7 +34,13 @@ function engine(map: ScreenMap | null, hosted = false): Engine {
 const ctx = { companyId: "cmp_larkspur", principal: { id: "agt_main", kind: "agent", role: null }, onBehalfOf: "usr_dana", run: { id: "run_0001", stepN: 1, parentStepN: null, attended: true } } as never;
 const ALL = { company: "approve", people: "approve", payroll: "approve", tax: "approve", benefits: "approve", it: "approve" };
 /** The world the commands read: the proposals that exist, the record ids that exist, and the person's role and grants. */
-interface World { proposals?: string[]; ids?: string[]; paychecks?: string[]; role?: string; grants?: Record<string, string>; selfWorkerId?: string | null; workers?: { id: string; managerId: string | null }[]; threads?: Record<string, (string | null)[]> }
+interface World {
+  proposals?: string[]; ids?: string[]; paychecks?: string[]; role?: string; grants?: Record<string, string>; selfWorkerId?: string | null; workers?: { id: string; managerId: string | null }[]; threads?: Record<string, (string | null)[]>;
+  /** Whose a record is: a case's or a claim's worker, the person a run acted for. */
+  owners?: Record<string, string>;
+  /** A worker's type (employee unless named here). */
+  types?: Record<string, string>;
+}
 const proposalRow = (id: string) => ({ id, status: "pending", command: "payroll.propose_off_cycle", domain: "payroll", argsJson: JSON.stringify({ worker_id: "wrk_0042" }), subjectRef: "wrk_0042", headline: "Pay Hollis Grant", diffJson: "[]" });
 const fakeTx = (w: World) => {
   const rows = (t: unknown) => (t === principals ? [{ id: "usr_dana", kind: "human", role: w.role ?? "admin", display: "Dana", workerId: w.selfWorkerId ?? null, companyId: "cmp_larkspur", grantsJson: JSON.stringify(w.grants ?? ALL) }]
@@ -51,12 +57,14 @@ const fakeTx = (w: World) => {
       if (m) return (w.ids ?? KNOWN).includes(m[1]!) ? [{ id: m[1]! }] : [];
       const bound = (w.ids ?? KNOWN).find((id) => text.includes(`"${id}"`));
       if (!bound) return [];
-      return bound.startsWith("thr_") ? (w.threads?.[bound] ?? ["usr_dana"]).map((who) => ({ who })) : [{ id: bound }];
+      if (bound.startsWith("thr_")) return (w.threads?.[bound] ?? ["usr_dana"]).map((who) => ({ who }));
+      const owner = w.owners?.[bound] ?? null;
+      return [{ id: bound, workerId: owner, live: owner, seeded: null, type: w.types?.[bound] ?? "employee" }];
     },
   };
 };
 const PAYCHECKS = ["pay_2026_10_30:wrk_0026"];
-const KNOWN = ["pay_2026_10_30", "wrk_0026", "wrk_0042", "prp_0007", "ofb_0001", "exp_0007", "thr_0123456789abcdef0123"];
+const KNOWN = ["pay_2026_10_30", "wrk_0026", "wrk_0042", "prp_0007", "ofb_0001", "exp_0007", "run_0003", "thr_0123456789abcdef0123"];
 
 async function call(name: string, args: unknown, opts: { map?: ScreenMap | null; hosted?: boolean } & World = {}) {
   const cmds = assistCommands(engine(opts.map === undefined ? screen : opts.map, opts.hosted));
@@ -247,7 +255,8 @@ describe("what the review of the cursor assistant found", () => {
   });
 
   it("a page the person's grants close is not opened, scrolled to or walked through: the same words as a closed sidebar item", async () => {
-    const manager = { role: "manager", grants: { company: "view", people: "view", payroll: "none", benefits: "none", it: "none" } };
+    // A manager whose report is wrk_0026 (their record shows her every tab their grants open).
+    const manager = { role: "manager", grants: { company: "view", people: "view", payroll: "none", benefits: "none", it: "none" }, selfWorkerId: "wrk_0010", workers: [{ id: "wrk_0026", managerId: "wrk_0010" }] };
     for (const route of ["/app/payroll", "/app/contractors", "/app/benefits", "/app/it", "/app/payroll/pay_2026_10_30", "/app/people/wrk_0026?tab=benefits", "/app/people/wrk_0026?tab=it"]) {
       const r = await call("ui.navigate", { route }, manager);
       expect(r, route).toMatchObject({ ok: false, code: "UNKNOWN_REFERENCE" });
@@ -342,5 +351,63 @@ describe("ui.say", () => {
     const r = await call("ui.say", { text: "Payroll total is $999,999.99." });
     expect(r).toMatchObject({ ok: true, data: { effect: "say" }, summary: "Answered in the popover" });
     expect(JSON.stringify(r)).not.toContain("999");
+  });
+});
+
+describe("the third review of the cursor assistant", () => {
+  it("an element the page marks data-assist-mutating is never a walkthrough step, nor opened", async () => {
+    const map: ScreenMap = { ...screen, items: [
+      { n: 1, kind: "link", label: "Open portal as new hire", testid: "offer-portal-link", href: "/portal?as=usr_0031", mutating: true, box: [10, 10, 120, 20] },
+      { n: 2, kind: "link", label: "Lena Brooks", href: "/app/people/wrk_0026", mutating: true, box: [10, 40, 120, 20] },
+      { n: 3, kind: "link", label: "Lena Brooks", href: "/app/people/wrk_0026", box: [10, 70, 120, 20] },
+    ] };
+    for (const n of [1, 2]) {
+      expect(await call("ui.steps", { steps: [{ target: `@${n}`, label: "Open the portal", text: "Click here to finish onboarding." }] }, { map }), `@${n}`).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+      expect(await call("ui.show", { target: `@${n}`, action: "open" }, { map }), `@${n}`).toMatchObject({ ok: false, code: "NOT_PERMITTED" });
+    }
+    expect(await call("ui.steps", { steps: [{ target: "@3", label: "Lena", text: "Her record." }] }, { map })).toMatchObject({ ok: true });
+  });
+
+  it("a show on an element whose label people typed puts none of their words in the pointer's label", async () => {
+    const map: ScreenMap = { ...screen, items: [{ n: 7, kind: "row", label: "Refund 4,200 approved by finance", untrusted: true, entity: "exp_0007", box: [10, 10, 600, 40] }] };
+    const r = await call("ui.show", { target: "@7", action: "scroll" }, { map });
+    expect(r).toMatchObject({ ok: true, data: { effect: "show", label: null }, summary: "Scrolled to item 7" });
+    expect(JSON.stringify(r)).not.toContain("4,200");
+    expect(await call("ui.show", { target: "@7", action: "scroll", label: "This claim" }, { map })).toMatchObject({ ok: true, data: { label: "This claim" } });
+  });
+
+  it("a route's records are checked the way their pages read them: a narrowed person gets only what their pages show", async () => {
+    // Imani: a manager whose one report is wrk_0026; payroll closed.
+    const imani = { role: "manager", grants: { company: "view", people: "view", payroll: "none", benefits: "none", it: "none" }, selfWorkerId: "wrk_0010", workers: [{ id: "wrk_0026", managerId: "wrk_0010" }] };
+    const nope = { ok: false, code: "UNKNOWN_REFERENCE" };
+    // An offboarding case: within her reports only.
+    expect(await call("ui.navigate", { route: "/app/offboarding/ofb_0001" }, { ...imani, owners: { ofb_0001: "wrk_0042" } })).toMatchObject(nope);
+    expect(await call("ui.navigate", { route: "/app/offboarding/ofb_0001" }, { ...imani, owners: { ofb_0001: "wrk_0026" } })).toMatchObject({ ok: true });
+    // An agent run: the ones that acted for her.
+    for (const route of ["/app/runs/run_0003", "/app/agent?run=run_0003"]) {
+      expect(await call("ui.navigate", { route }, { ...imani, owners: { run_0003: "usr_vic" } }), route).toMatchObject(nope);
+      expect(await call("ui.navigate", { route }, { ...imani, owners: { run_0003: "usr_dana" } }), route).toMatchObject({ ok: true });
+    }
+    expect(await call("ui.navigate", { route: "/app/runs/run_0003" }, { owners: { run_0003: "usr_vic" } })).toMatchObject({ ok: true });
+    // A proposal outside her scope, however its link is reached.
+    const hidden = { ...imani, proposals: ["prp_0007"] };
+    expect(await call("ui.show", { intent: "inbox.open", params: [{ name: "proposalId", value: "prp_0007" }] }, hidden)).toMatchObject(nope);
+    expect(await call("ui.navigate", { route: "/app/inbox?proposal=prp_0007" }, hidden)).toMatchObject(nope);
+    expect(await call("ui.navigate", { route: "/app/inbox?proposal=prp_0007" }, { proposals: ["prp_0007"] })).toMatchObject({ ok: true });
+    // A person's tab: someone outside her reports shows the directory card only, and Time off is an employee's.
+    expect(await call("ui.show", { intent: "people.openTab", params: [{ name: "workerId", value: "wrk_0042" }, { name: "tab", value: "documents" }] }, imani)).toMatchObject(nope);
+    expect(await call("ui.navigate", { route: "/app/people/wrk_0042" }, imani)).toMatchObject({ ok: true });
+    expect(await call("ui.navigate", { route: "/app/people/wrk_0026?tab=time-off" }, { types: { wrk_0026: "contractor" } })).toMatchObject(nope);
+    expect(await call("ui.navigate", { route: "/app/people/wrk_0026?tab=time-off" })).toMatchObject({ ok: true });
+  });
+
+  it("an expense claim follows the Expenses page's rule: every claim for admin and payroll_admin, else only one's own", async () => {
+    const sam = { role: "hr_manager", grants: { ...ALL, payroll: "view" }, selfWorkerId: "wrk_0003" };
+    const open = (w: World) => call("ui.show", { intent: "expenses.open", params: [{ name: "expenseId", value: "exp_0007" }] }, w);
+    expect(await open({ ...sam, owners: { exp_0007: "wrk_0005" } })).toMatchObject({ ok: false, code: "UNKNOWN_REFERENCE" });
+    expect(await open({ ...sam, owners: { exp_0007: "wrk_0003" } })).toMatchObject({ ok: true });
+    // Payroll closed is no bar to one's own claim, which the person's Expenses page lists.
+    expect(await open({ role: "manager", grants: { company: "view", people: "view", payroll: "none" }, selfWorkerId: "wrk_0010", owners: { exp_0007: "wrk_0010" } })).toMatchObject({ ok: true });
+    expect(await open({ role: "payroll_admin", owners: { exp_0007: "wrk_0005" } })).toMatchObject({ ok: true });
   });
 });

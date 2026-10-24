@@ -338,6 +338,23 @@ describe("platform parts", () => {
     expect(await files.read("companies/cmp_larkspur/runs/run_9901/code/1.js")).toBeNull();
   });
 
+  it("finds a run file's rows by key range, never by reading the whole table, and leaves its neighbours", async () => {
+    const files = sqlRunFileStore(w.weft.db);
+    const big = "y".repeat(RUN_FILE_PART_CHARS + 5);
+    await files.write("companies/cmp_larkspur/runs/run_9902/assist/screen.json", big);
+    await files.write("companies/cmp_larkspur/runs/run_99020/assist/screen.json", "{}");
+    await files.write("companies/cmp_larkspur/runs/run_9902/assist/screen.json", "{}");
+    const count = (like: string) => Number(w.storage.sql.exec(`SELECT count(*) AS n FROM run_files WHERE path LIKE '${like}'`).one().n);
+    expect(count("companies/cmp_larkspur/runs/run_9902/%")).toBe(1);
+    expect(await files.read("companies/cmp_larkspur/runs/run_9902/assist/screen.json")).toBe("{}");
+    await files.removePrefix("companies/cmp_larkspur/runs/run_9902");
+    expect(count("companies/cmp_larkspur/runs/run_9902/%")).toBe(0);
+    expect(await files.read("companies/cmp_larkspur/runs/run_99020/assist/screen.json")).toBe("{}");
+    // The delete each write runs is served by the primary key.
+    const plan = w.storage.sql.exec("EXPLAIN QUERY PLAN DELETE FROM run_files WHERE path = 'a' OR (path >= 'a#part' AND path < 'a#paru')").toArray().map((r) => String((r as { detail: unknown }).detail));
+    expect(plan.join(" ")).not.toMatch(/\bSCAN run_files\b/);
+  });
+
   it("bundles every fixture the durable path reads, and lists them like the repo does", () => {
     const repo = repoFixtures();
     const bundled = mapFixtures(bundleFixtures());

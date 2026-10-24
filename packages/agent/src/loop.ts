@@ -166,6 +166,9 @@ export function renderPlan(items: ChecklistState[] | null, stepsUsed: number, st
   return s.length > 600 ? s.slice(0, 597) + "..." : s;
 }
 
+/** What a ui.say beside reads tells the model (the loop's dispatch): its line is not on the screen. */
+export const SAY_HELD = "Not shown yet: a popover line sent beside reads waits for them. Answer with ui__say once you have read their results.";
+
 /** The function output the model sees: the outcome as canonical JSON, with _weft_plan on the last one of a batch. */
 export function outputFor(outcome: ToolOutcome, plan: string | null): string {
   return canonicalJson(plan === null ? outcome : { ...outcome, _weft_plan: plan });
@@ -287,11 +290,18 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   // people's text into it). The decision is stored on every chat assemble row; runEvidence reads the first one back, so
   // a resumed segment keeps it and the eval suite's G5 sees the same decision. The pack row is also an assemble row
   // but carries no decision, so it is skipped (before round 2 it was found first, and a resumed segment lost trust).
+  // An assist run's request is the person's own composer text, stored apart from the screen text (setup.request): the
+  // taint apps/api gives it for a page's untrusted labels (screen:*) or that its thread carries (thread:*) is about
+  // what it may read, never about the words they typed, so neither makes their request stop counting.
   const storedTrust = requestTrustOf(steps);
+  const startState = async () => {
+    const t = await executor.runState(handle).catch(() => ({ tainted: true, taintedBy: null }));
+    return !t.tainted || (assist && /^(?:screen|thread):/.test(t.taintedBy ?? ""));
+  };
   const requestTrusted = !chat ? false
     : storedTrust !== null ? storedTrust
     : steps.some((s) => s.kind === "model_call") ? false
-    : !(await executor.runState(handle).catch(() => ({ tainted: true }))).tainted;
+    : await startState();
   const clockAtStart = deps.clock.now();
 
   await store.updateRun(run.id, { status: "running" });
@@ -633,7 +643,13 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       const items = await deps.checklist(run);
       if (items) await store.updateRun(run.id, { checklist: items });
       const plan = renderPlan(items, run.stepsUsed, stepBudget, run.costUsdMicros / 1e6);
-      const toolOutputs = outputs.map((o, i) => ({ callId: o.callId, name: o.name, output: outputFor(o.outcome, i === outputs.length - 1 ? plan : null) }));
+      // A popover line sent beside reads is not the answer: the run goes on to the model, and only a line it ends with
+      // (or a step of presentation calls only) reaches the popover, so the model is told it was not shown.
+      const sayHeld = assist && !presentationOnly;
+      const toolOutputs = outputs.map((o, i) => {
+        const shown = sayHeld && o.name === "ui__say" && o.outcome.ok && o.outcome.status === "done" ? { ...o.outcome, summary: SAY_HELD } : o.outcome;
+        return { callId: o.callId, name: o.name, output: outputFor(shown, i === outputs.length - 1 ? plan : null) };
+      });
       for (let i = 0; i < outputs.length; i++) {
         const row = await append({ ...outputs[i]!.row, result: { output: toolOutputs[i]!.output, outcome: outputs[i]!.outcome } });
         toolSpans[i]?.end(row);
@@ -648,6 +664,18 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
         const words = presentationText(accepted);
         const g = words ? await (async () => { const ev = await evidence(); return check(words, ev.results, ev.opts); })() : { ok: true, offending: [] as string[] };
         await append({ stage: "post", kind: "verify", parentN: modelStepRow!.n, outcome: "ok", result: { presentation: g.ok ? "grounded" : "withheld", offending: g.offending }, timings: emptyTimings() });
+        // Withheld in a step the run goes on from (beside reads, or beside a refusal), the model learns its words were
+        // not shown, as a repair would tell it; a step that ends here gets the repair itself or hands off, below. It
+        // spends no repair: its answer is still to come.
+        const endsHere = (presentationOnly && outputs.every((o) => o.outcome.ok)) || (!!handoffCall && !!outputs.find((o) => o.callId === handoffCall.callId)?.outcome.ok);
+        if (!g.ok && !endsHere) {
+          const notice = {
+            notice: "repair" as const, attrs: { n: setup.nonce, code: "WITHHELD" },
+            text: `Nothing from those presentation calls was shown: these numbers match no tool result in this run: ${g.offending.join(", ")}. Show and answer again from the results above.`,
+          };
+          await append({ stage: "post", kind: "notice", result: notice });
+          history = [...history, { kind: "notice", ...notice }];
+        }
       }
 
       if (deps.isCancelled(run.id)) return finish({ status: "cancelled", reason: "CANCELLED", summary: "Cancelled by a person." });

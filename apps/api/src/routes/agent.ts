@@ -6,11 +6,11 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type ExecutorBundle, type HumanSession, type Proposal, type RunStepRow } from "@weft/contracts";
-import { execRuns, notices, payrollRuns, principals, proposals, runArtifacts, withWriteLock, workers, type Db } from "@weft/db";
+import { agentRuns, execRuns, notices, offboardingCases, payrollRuns, principals, proposals, routines, runArtifacts, withWriteLock, workers, type Db } from "@weft/db";
 import { assistUntrustedSource, closingShow, createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
 import { proposalVisible, readScopeFor } from "@weft/core";
 import { approvalCardOf, assistScreenKey, executorInternals, fileRunFiles } from "@weft/executor";
-import { ASSIST_TOOLS, AssistInput, cleanAssistInput, SCREEN_LIMITS, type AssistHandoffLink, type AssistRunAccepted, type AssistTraceExtras } from "../../../../packages/contracts/src/ext/assist";
+import { ASSIST_TOOLS, AssistInput, assistKnownRecords, assistRecordIds, cleanAssistInput, SCREEN_LIMITS, type AssistHandoffLink, type AssistRunAccepted, type AssistTraceExtras } from "../../../../packages/contracts/src/ext/assist";
 import { RUN_LONG_POLL_MAX_S } from "../../../../packages/contracts/src/ext/cf-agent";
 import type { RunAdmission } from "../../../../packages/contracts/src/ext/cf-platform";
 import type { Weft, WeftEnv } from "../http/context";
@@ -19,7 +19,7 @@ import { sse } from "../http/sse";
 import { stubRoutes } from "../http/stub";
 import { createMemoryRecall } from "../memory/recall";
 import { viewerScope } from "../http/scope";
-import { earlierTurns, questionsOf, runsActingFor, threadBelongsToSomeoneElse } from "../agent/threads";
+import { earlierTurns, lastRequest, questionsOf, runsActingFor, threadBelongsToSomeoneElse } from "../agent/threads";
 import { AGENT_RUN_TRIGGERS, isThreadId, THREAD_ID_RE, type AgentRunTriggerFilter, type ConversationRunRow } from "../../../../packages/contracts/src/ext/agent-page";
 
 // Steps carry raw model call args, so the trace and the SSE stream go through the executor's redactor (harness 9).
@@ -99,6 +99,7 @@ export function createChatContextSource(db: Db, deps: ChatContextDeps = {}): Cha
     async channels() { return ["#general", "#new-hires", "#payroll", "#people-ops"]; },
     recall: createMemoryRecall(db),   // wave 2 (w2-memory); "" until that track lands recall
     earlier: (input) => earlierTurns(db, input),   // the Agent page's conversation threads (agent/threads.ts)
+    lastRequest: (input) => lastRequest(db, input),   // a cursor assistant choice continues the request before it
     // The cursor assistant's handoff: an ordinary chat run for the person the assist run acted for, with the chat
     // tools code picks for the question (proposals only when Chat can propose is on), the same caps, in the same
     // thread, tainted when the assist run was. It gains no power the person's own chat question would not have.
@@ -119,6 +120,24 @@ export function createChatContextSource(db: Db, deps: ChatContextDeps = {}): Cha
       return handle.runId;
     } } satisfies Pick<ChatContextSource, "handoff"> : {}),
   };
+}
+
+/**
+ * Which of the ids a cursor assistant request names (assistRecordIds: record pages, threads, the selected paycheck)
+ * exist in this company. Looked up by prefix, one query each, so a sender's words spelled as an id are found out.
+ */
+async function knownAssistRecords(db: Db, companyId: string, ids: readonly string[]): Promise<Set<string>> {
+  const of = (p: string) => ids.filter((id) => id.startsWith(p));
+  const found = new Set<string>();
+  const add = (rows: { id: string | null }[]) => { for (const r of rows) if (r.id) found.add(r.id); };
+  const look = async (p: string, q: (xs: string[]) => Promise<{ id: string | null }[]>) => { const xs = of(p); if (xs.length) add(await q(xs)); };
+  await look("wrk_", (xs) => db.select({ id: workers.id }).from(workers).where(and(eq(workers.companyId, companyId), inArray(workers.id, xs))));
+  await look("pay_", (xs) => db.select({ id: payrollRuns.id }).from(payrollRuns).where(and(eq(payrollRuns.companyId, companyId), inArray(payrollRuns.id, xs))));
+  await look("run_", (xs) => db.select({ id: agentRuns.id }).from(agentRuns).where(and(eq(agentRuns.companyId, companyId), inArray(agentRuns.id, xs))));
+  await look("rt_", (xs) => db.select({ id: routines.id }).from(routines).where(and(eq(routines.companyId, companyId), inArray(routines.id, xs))));
+  await look("ofb_", (xs) => db.select({ id: offboardingCases.id }).from(offboardingCases).where(and(eq(offboardingCases.companyId, companyId), inArray(offboardingCases.id, xs))));
+  await look("thr_", (xs) => db.select({ id: agentRuns.threadId }).from(agentRuns).where(and(eq(agentRuns.companyId, companyId), inArray(agentRuns.threadId, xs))));
+  return found;
 }
 
 export function agentRoutes(weft: Weft): Hono<WeftEnv> {
@@ -164,9 +183,13 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
       // assistant, so only a person signed in to the app starts one: an API key (MCP, CLI) asks through chat.
       if (session.via !== "ui" || session.keyScope !== null) throw new Forbidden("The cursor assistant runs only in the app; ask through chat instead", { code: "NOT_PERMITTED" });
       if (!body.assist) throw new ValidationError("recipe assist needs assist: { screen, cursor, records, trail }");
-      // The page's route and view state as the registry knows them (cleanAssistInput): text in a link someone sent
-      // never reaches the model, the handoff or the executor's checks as the page's own words.
-      const input = cleanAssistInput(body.assist, { hosted: !!weft.platform?.world });
+      // The page's route and view state as the registry knows them (cleanAssistInput), and only with records that
+      // exist (assistKnownRecords): text in a link someone sent never reaches the model, the handoff or the
+      // executor's checks as the page's own words, not even spelled as an id.
+      const hosted = { hosted: !!weft.platform?.world };
+      const cleaned = cleanAssistInput(body.assist, hosted);
+      const known = await knownAssistRecords(weft.db, session.companyId, assistRecordIds(cleaned, hosted));
+      const input = assistKnownRecords(cleaned, (id) => known.has(id), hosted);
       const registry = weft.executor.registry as { get?: (n: string) => unknown } | undefined;
       const allowlist = ASSIST_TOOLS.filter((n) => !registry?.get || registry.get(n));
       // Every exchange is a conversation (Open in Agent shows it; a handoff and a choice continue it): one is minted
@@ -174,10 +197,14 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
       const threadId = body.threadId ?? newThreadId();
       const handle = await weft.executor.runs.openChatRun(session, { threadId, surface: "human_ui", allowlist });
       const files = weft.runFiles ?? fileRunFiles(weft.dataDir);
-      await withWriteLock(() => files.write(assistScreenKey(session.companyId, handle.runId), JSON.stringify(input.screen)));
+      const screenKey = assistScreenKey(session.companyId, handle.runId);
+      await withWriteLock(() => files.write(screenKey, JSON.stringify(input.screen)));
       const untrusted = assistUntrustedSource(input);
       if (untrusted) await executorInternals(weft.executor)?.taintRun(handle.runId, untrusted);
       await weft.agent.startChat(handle, { text: body.text, recipe: "assist", pageContext: body.pageContext ?? null, allowlist, threadId, assist: input });
+      // The screen map is only for this run's own checks: it goes when the run ends, so the run files hold the screens
+      // of the runs in flight and no more (on hosted they are rows of a workspace that may last 30 days).
+      void runtime.settled?.(handle.runId).then(() => withWriteLock(() => files.removePrefix(screenKey))).catch(() => undefined);
       const accepted: AssistRunAccepted = { runId: handle.runId, chatMode: "assist", threadId };
       return c.json(accepted, 202);
     }

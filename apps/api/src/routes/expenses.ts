@@ -14,7 +14,7 @@ import { stubRoutes } from "../http/stub";
 import { parsePage } from "../http/paging";
 import { blobsOf, storeUpload, uploadLimitResponse } from "../http/uploads";
 
-const ADMIN_ROLES = new Set(["admin", "payroll_admin"]);
+const ADMIN_ROLES = exp.EXPENSE_ADMIN_ROLES;
 /** Receipts reuse the I-9 upload path and limits (routes/portal.ts): 5 MB, PNG, JPEG, WebP or PDF, stored through the
  * world's BlobStore (uploads/<sha256>.bin on Node, blob:<sha256> with WEFT_BLOBS=sqlite and on hosted). */
 const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;

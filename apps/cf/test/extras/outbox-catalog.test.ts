@@ -6,6 +6,7 @@ import { agentRuns, runSteps } from "@weft/db";
 import { parseJob } from "@weft/cf-extras";
 import { extrasOutboxJobs, OUTBOX_COMMANDS } from "../../src/extras/slot/outbox";
 import { catalogRowFor, runNeurons } from "../../src/extras/slot/catalog";
+import { EMPTY_CURSOR } from "../../../../packages/contracts/src/ext/assist";
 
 let w: TestWeft;
 beforeAll(async () => { w = await createTestWeft(); });
@@ -35,7 +36,8 @@ describe("outbox mapping", () => {
 describe("run catalog source", () => {
   const insertRun = async (id: string, o: Partial<typeof agentRuns.$inferInsert> = {}, terminal: Record<string, unknown> | null = { status: "done", reason: "DONE", ms: 4321.6 }) => {
     await w.db.insert(agentRuns).values({
-      id, companyId: "cmp_larkspur", kind: "chat", trigger: "chat", attended: true, provider: "openai", model: "gpt-5.6-luna", effort: "low", cacheKey: "k",
+      // As the runtime writes every run (runtime.ts baseRow): kind main, the prompt kind in the cache key only.
+      id, companyId: "cmp_larkspur", kind: "main", trigger: "chat", attended: true, provider: "openai", model: "gpt-5.6-luna", effort: "low", cacheKey: "weft:main:chat:cmp_larkspur",
       status: "done", terminalReason: "DONE", budgetJson: "{}", stepsUsed: 4, costUsdMicros: 3100, tokensJson: JSON.stringify({ input: 12_000, cached: 0, cacheWrite: 0, output: 300, reasoning: 0 }),
       createdAt: "2026-10-26T15:30:00.000Z", endedAt: "2026-10-26T15:30:00.000Z", summary: "secret summary text", ...o,
     });
@@ -52,7 +54,7 @@ describe("run catalog source", () => {
   it("marks a grounded-receipt fallback ungrounded, a routine ungraded, prices Workers AI in neurons, and skips running runs", async () => {
     await insertRun("run_cat2", {}, { status: "done", reason: "DONE", ms: 100, groundingFallback: true });
     expect((await catalogRowFor(w.db, "run_cat2", { slot: "slot-1", gen: 3 }))!.grounded).toBe(false);
-    await insertRun("run_cat3", { kind: "routine", trigger: "event", status: "waiting", terminalReason: "WAITING_APPROVAL" });
+    await insertRun("run_cat3", { trigger: "event", cacheKey: "weft:main:rt_time_off_requests:cmp_larkspur", status: "waiting", terminalReason: "WAITING_APPROVAL" });
     expect(await catalogRowFor(w.db, "run_cat3", { slot: "slot-1", gen: 3 })).toMatchObject({ grounded: null, status: "waiting" });
     await insertRun("run_cat4", { provider: "workers_ai", model: "@cf/openai/gpt-oss-120b" });
     expect((await catalogRowFor(w.db, "run_cat4", { slot: "slot-1", gen: 3 }))!.neurons).toBe(runNeurons("workers_ai", { input: 12_000, output: 300 }));
@@ -63,12 +65,22 @@ describe("run catalog source", () => {
   });
 
   it("leaves the cursor assistant's runs out of the model comparison: the resolver's stand-in and a live assist run", async () => {
-    await insertRun("run_cat6", { kind: "assist", provider: "scripted", model: "resolver", cacheKey: "weft:main:assist:cmp_larkspur" }, { status: "done", reason: "DONE", ms: 4 });
-    await insertRun("run_cat7", { kind: "assist", cacheKey: "weft:main:assist:cmp_larkspur" }, { status: "done", reason: "DONE", ms: 900 });
+    await insertRun("run_cat6", { provider: "scripted", model: "resolver", cacheKey: "weft:main:assist:cmp_larkspur" }, { status: "done", reason: "DONE", ms: 4 });
+    await insertRun("run_cat7", { cacheKey: "weft:main:assist:cmp_larkspur" }, { status: "done", reason: "DONE", ms: 900 });
     expect(await catalogRowFor(w.db, "run_cat6", { slot: "slot-1", gen: 3 })).toBeNull();
     expect(await catalogRowFor(w.db, "run_cat7", { slot: "slot-1", gen: 3 })).toBeNull();
     // The chat run a request was handed to is an ordinary chat run.
     await insertRun("run_cat8", { cacheKey: "weft:main:chat:cmp_larkspur" });
-    expect(await catalogRowFor(w.db, "run_cat8", { slot: "slot-1", gen: 3 })).toMatchObject({ runId: "run_cat8", provider: "openai" });
+    expect(await catalogRowFor(w.db, "run_cat8", { slot: "slot-1", gen: 3 })).toMatchObject({ runId: "run_cat8", provider: "openai", grounded: true });
+  });
+
+  it("leaves out a real assist run the runtime wrote, as it writes it", async () => {
+    const assist = { screen: { route: "/app", title: "Home", tab: null, items: [], intents: [], truncated: false, viewport: [1440, 900] }, cursor: EMPTY_CURSOR, records: [], trail: [] };
+    const res = await w.app.request("/v1/agent/runs", { method: "POST", headers: { ...w.uiHeaders("usr_dana"), "content-type": "application/json" }, body: JSON.stringify({ text: "Where do I approve Ruth's time off?", recipe: "assist", pageContext: null, assist }) });
+    expect(res.status).toBe(202);
+    const { runId } = (await res.json()) as { runId: string };
+    const row = await (w.agent as unknown as { settled(id: string): Promise<{ kind: string; model: string; status: string }> }).settled(runId);
+    expect(row).toMatchObject({ kind: "main", model: "resolver", status: "done" });
+    expect(await catalogRowFor(w.db, runId, { slot: "slot-1", gen: 3 })).toBeNull();
   });
 });
