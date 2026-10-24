@@ -5,17 +5,17 @@
 // Rules: it only adds rows, never edits a planted row (the four pay runs, Ruth's coverage conflict, the 8 expenses in
 // review, the DE 2088 flow, Noor's offer, the open October reconciliation). Ids come from the same id counters the app
 // uses, timestamps are fixed sim-clock instants before the seed time, every domain is *.example, and nothing here
-// calls a model: agent runs are scripted-provider transcripts at zero cost.
-import { createHash } from "node:crypto";
+// calls a model. The agent's runs are real: the showcase runs (./showcase.ts), recorded once on the live model by
+// `pnpm seed:record-showcase`, are replayed as the last step, on exactly the world this layer builds before them.
 import { and, asc, eq } from "drizzle-orm";
 import { PREBUILT } from "@weft/routines";
 import {
-  actions, agentRuns, benefitEnrollments, enrollmentWindows, itAccounts, lifeEvents, offers, screeningOrders, approvalAudit, contractorPayments, documents, employerTaxRates, filings, handoffCases, notices, offboardingCases, offboardingSteps,
-  onboardingTasks, paychecks, payRates, payrollRuns, proposals, routineRuns, runSteps, simAgencyMail, simChatMessages, simRailTransfers, simRegistrations,
+  actions, benefitEnrollments, enrollmentWindows, itAccounts, lifeEvents, approvalAudit, contractorPayments, documents, employerTaxRates, filings, handoffCases, notices, offboardingCases, offboardingSteps,
+  complianceItems, expensePolicies, onboardingTasks, paychecks, payRates, payrollRuns, proposals, simAgencyMail, simChatMessages, simRailTransfers, simRegistrations,
   taxAccounts, taxProfiles, timeOffAssignments, timeOffLedger, timeOffRequests, workers, withWriteLock, type DbTx,
 } from "@weft/db";
 import { canonicalJson, commands, newId, offboarding, payroll, sha256Hex } from "@weft/core";
-import type { ExecContext, Preview, SimClock, Simulators } from "@weft/contracts";
+import { EXPENSE_RATES, type ExecContext, type Preview, type SimClock, type Simulators } from "@weft/contracts";
 import { createSimulators } from "@weft/sim";
 import type { SeedContext } from "../context";
 import { seedRichMotion, type MotionApi } from "./motion";
@@ -23,6 +23,7 @@ import { seedBlobMode } from "../blobs";
 import { seedImportedPayHistory } from "./pay-history";
 import { enrollLeaver, seedTurnover, terminateLeaverEnrollments } from "./turnover";
 import { SEED_CHAT } from "../it";
+import { applyShowcaseFiles, applyShowcaseMemory, applyShowcaseRows, readShowcaseFixture } from "./showcase";
 
 const CO = "cmp_larkspur";
 const GENESIS = "0".repeat(64);
@@ -39,7 +40,6 @@ const name = (w: Pick<W, "firstName" | "lastName">) => `${w.firstName} ${w.lastN
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const weekday = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay();
 const isWeekday = (d: string) => weekday(d) !== 0 && weekday(d) !== 6;
-const runKey = (routineId: string, triggerRef: string) => createHash("sha256").update(JSON.stringify({ routine_id: routineId, trigger_ref: triggerRef })).digest("hex");
 const money = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const HOLIDAYS = new Set(["2026-01-01", "2026-01-19", "2026-02-16", "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07"]);
@@ -47,13 +47,7 @@ const HOLIDAYS = new Set(["2026-01-01", "2026-01-19", "2026-02-16", "2026-05-25"
 /** Counts written by the layer, for the CLI log and the tests. */
 export interface RichSummary { [table: string]: number }
 
-// ---- agent runs, routine runs, proposals and the action log ------------------------------------------------------
-
-interface ToolUse { name: string; args: Record<string, unknown>; data: unknown }
-interface RunSpec {
-  at: string; trigger: "chat" | "routine"; routineId?: string; triggerRef?: string; onBehalfOf: string | null;
-  tools: ToolUse[]; final: string; checklist?: { id: string; label: string; passed: boolean }[]; status?: "done" | "refused";
-}
+// ---- proposals and the action log ----------------------------------------------------------------------------------
 
 interface PendingAction {
   ts: string; actorKind: "human" | "agent" | "routine" | "system"; actorId: string; onBehalfOf?: string | null; agentRunId?: string | null;
@@ -95,54 +89,6 @@ class Layer {
     const deps = { tx: this.tx, sims: this.sims, clock: this.clock, newId: (prefix: string) => newId(this.tx, prefix as Parameters<typeof newId>[1]),
       resolveCredential: async () => { throw new Error("rich seed: reads never touch the vault"); } };
     return (await cmd.run(cmd.input.parse(args), ctx, deps as never)).data as T;
-  }
-
-  async run(spec: RunSpec): Promise<{ runId: string; routineRunId: string | null }> {
-    const { tx } = this;
-    const runId = await newId(tx, "run_");
-    let routineRunId: string | null = null;
-    if (spec.trigger === "routine") {
-      routineRunId = await newId(tx, "rtr_");
-      const ref = spec.triggerRef ?? `cron:${spec.at}`;
-      await tx.insert(routineRuns).values({
-        id: routineRunId, routineId: spec.routineId!, runKey: runKey(spec.routineId!, ref), triggerRef: ref, status: "done", agentRunId: runId,
-        summary: spec.final.slice(0, 400), leftForHumanJson: "[]", attended: false, costUsdMicros: 0, startedAt: spec.at, endedAt: spec.at,
-      });
-      this.bump("routine_runs");
-    }
-    const steps: (typeof runSteps.$inferInsert)[] = [];
-    let n = 0;
-    const step = (s: Omit<typeof runSteps.$inferInsert, "runId" | "n" | "createdAt">) => { n += 1; steps.push({ runId, n, createdAt: spec.at, ...s }); return n; };
-    const usage = (input: number, output: number) => JSON.stringify({ input, cached: Math.floor(input * 0.4), cacheWrite: 0, output, reasoning: 0 });
-    step({ stage: "assemble", kind: "context", outcome: "ok", resultJson: JSON.stringify({ promptKind: spec.trigger === "chat" ? "chat" : "routine", allowlist: spec.tools.map((t) => t.name.replace("__", ".")) }) });
-    let input = 5_200 + spec.tools.length * 700;
-    let output = 0;
-    if (spec.tools.length) {
-      const m = step({ stage: "model", kind: "model_call", outcome: "ok", usageJson: usage(input, 24 * spec.tools.length),
-        resultJson: JSON.stringify({ provider: "scripted", stop: "tool_calls", text: "", toolCalls: spec.tools.map((t) => t.name), error: null, refusal: null, servedBy: "scripted" }) });
-      output += 24 * spec.tools.length;
-      spec.tools.forEach((t, i) => {
-        step({ parentN: m, stage: "dispatch", kind: "tool_call", callId: `call_${runId}_${i + 1}`, toolName: t.name, toolArgsJson: JSON.stringify(t.args), outcome: "ok",
-          resultJson: JSON.stringify({ output: JSON.stringify({ actionSeq: null, artifactRef: null, data: t.data }) }) });
-      });
-      input += 900;
-    }
-    const finalOut = Math.max(30, Math.round(spec.final.length / 4));
-    output += finalOut;
-    step({ stage: "model", kind: "model_call", outcome: "ok", usageJson: usage(input, finalOut),
-      resultJson: JSON.stringify({ provider: "scripted", stop: "final", text: spec.final, toolCalls: [], error: null, refusal: spec.status === "refused" ? "guardrail" : null, servedBy: "scripted" }) });
-    step({ stage: "terminal", kind: "verify", outcome: "ok", resultJson: JSON.stringify({ status: spec.status ?? "done", reason: spec.status === "refused" ? "REFUSED" : "DONE", ms: 1 }) });
-    await tx.insert(runSteps).values(steps);
-    await tx.insert(agentRuns).values({
-      id: runId, companyId: CO, kind: "main", routineRunId, onBehalfOf: spec.onBehalfOf, trigger: routineRunId ? `routine:${routineRunId}` : "chat", attended: spec.trigger === "chat",
-      provider: "scripted", model: "scripted", effort: "low", cacheKey: `weft:main:${spec.routineId ?? "chat"}:${CO}`, status: spec.status ?? "done",
-      terminalReason: spec.status === "refused" ? "REFUSED" : "DONE", checklistJson: spec.checklist ? JSON.stringify(spec.checklist) : null,
-      budgetJson: JSON.stringify({ steps: spec.trigger === "chat" ? 12 : 6, usd: 0.1, minutes: 10 }), stepsUsed: Math.max(1, spec.tools.length + 1),
-      costUsdMicros: 0, tokensJson: JSON.stringify({ input: input * (spec.tools.length ? 2 : 1), cached: Math.floor(input * 0.4), cacheWrite: 0, output, reasoning: 0 }),
-      summary: spec.final.slice(0, 600), createdAt: spec.at, endedAt: spec.at,
-    });
-    this.bump("agent_runs"); this.bump("run_steps", steps.length);
-    return { runId, routineRunId };
   }
 
   async proposal(p: {
@@ -229,70 +175,33 @@ class Layer {
   }
 }
 
-/** Mondays from `from` to `to` inclusive. */
-function mondays(from: string, to: string): string[] {
-  const out: string[] = [];
-  let d = from;
-  while (weekday(d) !== 1) d = addDays(d, 1);
-  for (; d <= to; d = addDays(d, 7)) out.push(d);
-  return out;
-}
-
-async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
-  const emp = ws.filter((w) => w.type === "employee");
-  // Pre-payroll review on each approval-deadline day, with the submit proposal Theo approved.
+/**
+ * The history around the agent: the past payrolls Theo submitted and Weft paid, the New York rate notice Vic applied
+ * in February, hand-offs to a tax specialist and the people ops channels. The agent's own runs are not planted here:
+ * the showcase runs (./showcase.ts) are real recorded runs.
+ */
+async function seedHistory(L: Layer): Promise<void> {
+  // Each processed Weft payroll: submitted by Theo on its approval-deadline day, then settled by the bank.
   const runs = await L.tx.select().from(payrollRuns).where(eq(payrollRuns.status, "processed")).orderBy(asc(payrollRuns.periodEnd));
   for (const run of runs) {
-    // The run's stored totals (contracts TOTALS_FIELDS: { totalCost: { amount } }), worded by the live preview's formatter.
+    // The run's stored totals (contracts TOTALS_FIELDS: { totalCost: { amount } }).
     const t = JSON.parse(run.totalsJson ?? "{}") as Record<string, { amount?: number } | undefined>;
-    const cost = t.totalCost?.amount ?? 0;
     const bank = (t.netPay?.amount ?? 0) + (t.reimbursements?.amount ?? 0);
-    const checks = await L.tx.select({ workerId: paychecks.workerId, status: paychecks.status }).from(paychecks).where(eq(paychecks.payrollRunId, run.id));
-    const excludedNames = checks.filter((c) => c.status === "excluded").map((c) => { const w = ws.find((x) => x.id === c.workerId); return w ? name(w) : c.workerId; });
-    const included = checks.length - excludedNames.length;
-    const { title: headline, diff } = payroll.submitPreviewText({ run, included, totalCostCents: cost, bankCents: bank, excludedNames });
-    const at = new Date(Date.parse(run.approvalDeadline) - 8 * 3_600_000).toISOString();
-    const r = await L.run({ at, trigger: "routine", routineId: "rt_pre_payroll", onBehalfOf: "usr_theo", final: `Proposed: ${headline}. Explanations attached to the flagged paychecks.`,
-      tools: [{ name: "payroll__get_run", args: { run_id: run.id }, data: { id: run.id, status: "draft" } }, { name: "payroll__submit_run", args: { run_id: run.id }, data: { proposed: true } }],
-      checklist: [{ id: "explain", label: "explain flagged paychecks", passed: true }, { id: "submit", label: "propose payroll.submit_run", passed: true }] });
-    const decidedAt = run.approvedAt ?? new Date(Date.parse(at) + 2 * 3_600_000).toISOString();
-    await L.proposal({ at, command: "payroll.submit_run", args: { run_id: run.id }, subjectRef: run.id, risk: "R4", headline, diff, domain: "payroll", moneyCents: cost,
-      evidence: [{ label: "Pay run", ref: run.id }], runId: r.runId, routineRunId: r.routineRunId, status: "executed", decidedBy: "usr_theo", decidedAt, onBehalfOf: "usr_theo",
-      exec: { ts: decidedAt, actorKind: "human", actorId: "usr_theo", summary: `Submitted ${run.id}: ${included} paychecks, ${money(bank)} to the bank`, reversible: "no" } });
+    const checks = await L.tx.select({ status: paychecks.status }).from(paychecks).where(eq(paychecks.payrollRunId, run.id));
+    const included = checks.filter((c) => c.status !== "excluded").length;
+    const at = run.approvedAt ?? new Date(Date.parse(run.approvalDeadline) - 6 * 3_600_000).toISOString();
+    L.action({ ts: at, actorKind: "human", actorId: "usr_theo", command: "payroll.submit_run", args: { run_id: run.id }, summary: `Submitted ${run.id}: ${included} paychecks, ${money(bank)} to the bank`, reversible: "no" });
     L.action({ ts: run.processedAt ?? pt(run.payday, 6), actorKind: "system", actorId: "svc_events", command: "payroll.mark_processed", args: { run_id: run.id }, summary: `Processed ${run.id}: paychecks settled`, reversible: "no" });
   }
-  // The NY DOL 2026 rate notice handled on Feb 14 (the notice row is planted and already resolved).
+  // The NY DOL 2026 rate notice (the notice row is planted and already resolved): Vic applied the new rate on Feb 14,
+  // as tax.update_rate records it, reversible through tax.revert_rate.
   {
-    const at = "2026-02-14T17:30:00.000Z";
-    const r = await L.run({ at, trigger: "routine", routineId: "rt_agency_notice", triggerRef: "event:notice.received:ntc_0001", onBehalfOf: "usr_dana",
-      final: "Read the NY DOL 2026 UI rate notice (ntc_0001), checked the account and proposed the rate update with the notice as the source.",
-      tools: [{ name: "notices__get", args: { notice_id: "ntc_0001" }, data: { agency: "ny_dol", kind: "rate_change" } }, { name: "tax__update_rate", args: { code: "sui", rate: "0.041", effective_from: "2026-01-01", source_notice_id: "ntc_0001" }, data: { proposed: true } }],
-      checklist: [{ id: "rate", label: "propose tax.update_rate", passed: true }] });
-    // Shaped like tax.update_rate itself: its input fields, risk R2, reversible through tax.revert_rate.
     const [ny] = await L.tx.select().from(taxAccounts).where(eq(taxAccounts.agency, "ny_dol"));
     const [nyRate] = await L.tx.select().from(employerTaxRates).where(eq(employerTaxRates.source, "notice:ntc_0001"));
     const args = { tax_account_id: ny?.id ?? "txa_ny_dol", code: "sui", rate: nyRate?.rate ?? "0.041", effective_from: nyRate?.effectiveFrom ?? "2026-01-01", source_notice_id: "ntc_0001" };
-    await L.proposal({ at, command: "tax.update_rate", args, subjectRef: `${args.tax_account_id}:sui`, risk: "R2",
-      headline: `Update NY SUI rate 3.80% to 4.10% effective Jan 1, 2026 on account ${ny?.accountNumber ?? "00-48172 6"}`, domain: "tax",
-      diff: [{ label: "NY SUI rate", before: "3.80%", after: "4.10%" }], evidence: [{ label: "Notice", ref: "ntc_0001" }], runId: r.runId, reversible: true,
-      routineRunId: r.routineRunId, status: "executed", decidedBy: "usr_dana", decidedAt: "2026-02-14T19:05:00.000Z",
-      exec: { ts: "2026-02-14T19:05:00.000Z", actorKind: "human", actorId: "usr_dana", summary: `Updated NY SUI rate 3.80% to 4.10% effective 2026-01-01${nyRate ? ` (${nyRate.id})` : ""}`,
-        reversible: nyRate ? "yes" : "no", reverse: nyRate ? { rate_id: nyRate.id } : undefined } });
+    L.action({ ts: "2026-02-14T19:05:00.000Z", actorKind: "human", actorId: "usr_dana", command: "tax.update_rate", args, summary: `Updated NY SUI rate 3.80% to 4.10% effective 2026-01-01${nyRate ? ` (${nyRate.id})` : ""}`,
+      reversible: nyRate ? "yes" : "no", reverse: nyRate ? { rate_id: nyRate.id } : undefined });
   }
-  // Chat runs a viewer can open from the agent panel and the run view.
-  const chats: RunSpec[] = [
-    { at: pt("2026-10-23", 10, 12), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { chart: { kind: "stacked_bar" } } }],
-      final: "Payroll cost by month for 2026: January to August from the imported history of the previous provider, September and October from the runs Weft paid. The chart splits each month into gross pay, employer taxes and benefits." },
-    { at: pt("2026-10-23", 10, 20), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "payroll__get_paycheck", args: { run_id: "pay_2026_10_30", worker: "Lena Brooks" }, data: { flags: ["GROSS_CHANGE"] } }, { name: "actions__list", args: { command: "people.set_pay_rate" }, data: { seq: 1 } }],
-      final: "Lena Brooks has a gross change flag: her gross changed against the last processed run because the raise in action #1 took effect on Oct 16." },
-    { at: pt("2026-10-22", 15, 4), trigger: "chat", onBehalfOf: "usr_theo", tools: [], status: "refused",
-      final: "I can't approve anything: approvals are human-only and there is no approve tool. Open each card in the Inbox to review the diff, then approve or deny it yourself." },
-    { at: pt("2026-10-21", 11, 40), trigger: "chat", onBehalfOf: "usr_sam", tools: [{ name: "time_off__balances", args: { worker: "Vic Akisole" }, data: { policies: 2 } }],
-      final: "Vic Akisole has vacation and California sick leave balances on file; the Time off tab shows what is used, held and available." },
-    { at: pt("2026-10-20", 9, 15), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "expenses__policy", args: {}, data: { version: 1 } }],
-      final: "From the company expense policy: business meals have a per person limit, lodging always needs a receipt, and mileage is paid at the IRS rate." },
-  ];
-  for (const c of chats) await L.run(c);
   // Open hand-offs to a tax specialist, and one already resolved.
   const hand = [
     { kind: "tax_specialist", reason: "deposit_schedule_question", summary: "The IRS letter asks whether Larkspur moves to a semiweekly deposit schedule next year; a tax specialist should confirm the lookback period.", status: "open", createdAt: pt("2026-10-22", 10), subjectRef: "txa_0001" },
@@ -304,31 +213,6 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
       evidenceJson: JSON.stringify([{ label: "Subject", ref: h.subjectRef }]), status: h.status, assigneePrincipalId: h.assignee ?? null, openedBy: AGENT, runId: null,
       createdAt: h.createdAt, resolvedAt: h.resolvedAt ?? null, resolutionNote: h.note ?? null });
     L.bump("handoff_cases");
-  }
-  // Routines that ran in a September trial and are paused now, plus the October chases. The milestone posts name the
-  // people whose start date comes round in the week up to the post.
-  function anniversaries(d: string): string {
-    const year = Number(d.slice(0, 4));
-    const hits = emp.filter((w) => w.status === "active" && w.startDate.slice(0, 4) < d.slice(0, 4) && !w.endDate)
-      .filter((w) => { const on = `${d.slice(0, 4)}${w.startDate.slice(4)}`; return on > addDays(d, -7) && on <= d; })
-      .map((w) => { const n = year - Number(w.startDate.slice(0, 4)); return `${name(w)}, ${n} ${n === 1 ? "year" : "years"}`; });
-    return hits.length ? `Celebrating work anniversaries this week: ${hits.join("; ")}.` : "No work anniversaries this week, so nothing was posted.";
-  }
-  const trial: [string, string, string, string, string | null][] = [
-    ["rt_expense_review", "2026-09-14", "Checked 6 claims against the policy: 5 within limits, 1 missing a receipt. Drafted the decisions for review.", "expenses__list", null],
-    ["rt_expense_review", "2026-09-28", "Checked 4 claims against the policy: all within limits. Drafted the approvals for review.", "expenses__list", null],
-    ["rt_milestones", "2026-09-21", anniversaries("2026-09-21"), "comms__send_message", "#general"],
-    ["rt_milestones", "2026-10-05", anniversaries("2026-10-05"), "comms__send_message", "#general"],
-    ["rt_open_enrollment", "2026-10-05", "Sent the first open enrollment reminder to the employees who have not opened the 2027 window.", "comms__send_email", null],
-    ["rt_onboarding_nudge", "2026-10-21", "Reminded Mira Delgado to add a bank account; payroll is blocked until it is on file.", "comms__send_email", null],
-  ];
-  for (const [routineId, day, final, tool, channel] of trial) {
-    const { at, triggerRef } = cronRun(routineId, day);
-    const r = await L.run({ at, trigger: "routine", routineId, triggerRef, onBehalfOf: "usr_dana", final, tools: [{ name: tool, args: channel ? { channel } : {}, data: { ok: true } }] });
-    if (channel && !final.startsWith("No work anniversaries")) {
-      await L.chat(channel, "Weft agent", final, at);
-      L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel, text: final }, summary: `Posted the work anniversaries to ${channel}`, reversible: "no" });
-    }
   }
   // People ops chat spread over days.
   for (const [ch, author, text, at] of [
@@ -408,68 +292,9 @@ async function seedDecidedProposals(L: Layer, ws: W[]): Promise<void> {
   for (const x of sug) await L.proposal(x);
 }
 
-/** The routines that report on people: the weekly digest, the monthly exec report, the weekly cost by state and the
- * ready check before each 2026 hire. They run after the turnover and the portal hires are planted, from the full worker
- * list, and quote reports.query itself (headcount at the end of the reported month, hires and departures in it), so a
- * post in #leadership agrees with the Reports page. They stay disabled (a running dev clock never fires a live model
- * call), but the gallery and their detail pages show real past runs. */
-async function seedReportHistory(L: Layer): Promise<void> {
-  const all = await L.tx.select().from(workers).orderBy(asc(workers.id));
-  const emp = all.filter((w) => w.type === "employee" && w.status !== "draft");
-  const onRoll = (d: string) => emp.filter((w) => w.startDate <= d && (!w.endDate || w.endDate >= d));
-  const short = (d: string) => payroll.shortDay(d, 2026);
-  for (const day of mondays("2026-08-03", "2026-10-19")) {
-    const at = pt(day, 9);
-    const active = onRoll(day).length;
-    const joined = emp.filter((w) => w.startDate > addDays(day, -7) && w.startDate <= day);
-    const left = emp.filter((w) => w.endDate && w.endDate >= addDays(day, -7) && w.endDate < day);
-    const text = `Weekly people digest: ${active} employees. New this week: ${joined.length ? joined.map(name).join(", ") : "none"}. `
-      + `Left last week: ${left.length ? left.map(name).join(", ") : "none"}. Open onboarding items and time-off requests are listed in Weft.`;
-    const r = await L.run({ at, trigger: "routine", routineId: "rt_people_digest", onBehalfOf: "usr_dana", final: `Posted the weekly digest to #people-ops for the week of ${short(day)}: ${active} employees.`,
-      tools: [{ name: "people__search", args: { status: "active" }, data: { count: active } }, { name: "comms__send_message", args: { channel: "#people-ops" }, data: { posted: true } }],
-      checklist: [{ id: "posted", label: "post the digest in #people-ops", passed: true }] });
-    await L.chat("#people-ops", "Weft agent", text, at);
-    L.action({ ts: at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#people-ops", text }, summary: "Posted the weekly people digest to #people-ops", reversible: "no" });
-  }
-  type Move = { period: string; hires: number; departures: number; headcount_end: number };
-  const moves = (await L.read<{ rows: Move[] }>("reports.query", { metric: "hires_and_departures_by_month", from: "2026-01-01", to: "2026-09-30" })).rows;
-  for (const mv of moves) {
-    const [y, mo] = mv.period.split("-").map(Number) as [number, number];
-    // The 1st of the next month at the routine's own slot (it runs on a weekend 1st too).
-    const day = new Date(Date.UTC(y, mo, 1, 12)).toISOString().slice(0, 10);
-    const slot = cronRun("rt_monthly_exec_report", day);
-    const label = new Date(`${mv.period}-15T12:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-    const final = `Posted the ${label} exec report to #leadership: ${mv.headcount_end} employees at month end (${mv.hires} joined, ${mv.departures} left), payroll cost by month and open compliance items.`;
-    const r = await L.run({ ...slot, trigger: "routine", routineId: "rt_monthly_exec_report", onBehalfOf: "usr_dana", final,
-      tools: [{ name: "reports__query", args: { metric: "hires_and_departures_by_month" }, data: { period: mv.period, hires: mv.hires, departures: mv.departures, headcount_end: mv.headcount_end } },
-        { name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { rows: 1 } }, { name: "comms__send_message", args: { channel: "#leadership" }, data: { posted: true } }] });
-    await L.chat("#leadership", "Weft agent", `${label} exec report: ${mv.headcount_end} employees at month end, ${mv.hires} joined, ${mv.departures} left. Cost by month and compliance items are in Weft.`, slot.at);
-    L.action({ ts: slot.at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#leadership" }, summary: `Posted the ${label} exec report to #leadership`, reversible: "no" });
-  }
-  for (const day of mondays("2026-08-03", "2026-10-19")) {
-    const states = [...new Set(onRoll(day).map((w) => w.workState ?? "CA"))].sort();
-    await L.run({ ...cronRun("rt_weekly_cost_by_state", day), trigger: "routine", routineId: "rt_weekly_cost_by_state", onBehalfOf: "usr_theo",
-      final: `Payroll cost by state for the week of ${short(day)}: ${states.join(", ")}. No state moved more than the alert threshold.`,
-      tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_state" }, data: { states: states.length } }] });
-  }
-  // One ready check per slot (the routine's own weekday 9:00), naming every hire it covered.
-  const ready = new Map<string, W[]>();
-  for (const w of emp.filter((x) => x.startDate >= "2026-01-05" && x.startDate <= "2026-10-26")) {
-    let day = addDays(w.startDate, -3);
-    while (!isWeekday(day)) day = addDays(day, -1);
-    ready.set(day, [...(ready.get(day) ?? []), w]);
-  }
-  for (const [day, hires] of [...ready.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    const each = hires.map((w) => `${name(w)} for ${short(w.startDate)}`);
-    await L.run({ ...cronRun("rt_new_hire_ready", day), trigger: "routine", routineId: "rt_new_hire_ready", onBehalfOf: "usr_sam",
-      final: `Ready: ${each.join(" and ")}. Offer signed, W-4 and state form in, accounts created, laptop shipped.`,
-      tools: hires.map((w) => ({ name: "onboarding__ready_check", args: { worker_id: w.id }, data: { ready: true, open: 0 } })) });
-  }
-}
-
 /** The slot a routine's own cron fires at on `day`, or on the latest day before it the cron fires (the PREBUILT
- * trigger, read as minute, hour, day of month and weekday in PT), so a seeded run never sits at an hour or on a day its
- * schedule could not produce. An hourly cron takes `hour`. */
+ * trigger, read as minute, hour, day of month and weekday in PT), so a recorded cron run never sits at an hour or on a
+ * day its schedule could not produce (the showcase recorder fires its cron runs here). An hourly cron takes `hour`. */
 export function cronSlot(routineId: string, day: string, hour = 9): string {
   const r = PREBUILT.find((x) => x.id === routineId);
   if (!r || r.trigger.type !== "cron") throw new Error(`rich seed: ${routineId} has no cron trigger`);
@@ -482,66 +307,18 @@ export function cronSlot(routineId: string, day: string, hour = 9): string {
   for (let i = 0; i < 40 && !((dom === "*" || Number(dom) === Number(d.slice(8))) && inDow(d)); i++) d = addDays(d, -1);
   return pt(d, h === "*" ? hour : Number(h), Number(mi));
 }
-/** A run of a cron routine on `day`: its slot and the trigger ref the engine writes for that slot. */
-const cronRun = (routineId: string, day: string, hour?: number) => { const at = cronSlot(routineId, day, hour); return { at, triggerRef: `cron:${at}` }; };
 
-/** One or two past runs for each routine the gallery shows that has none yet, so no card reads "Last run never". They
- * are scripted transcripts at $0.00 and every routine keeps its enabled flag: nothing here turns on live firing. Each
- * summary names only what the rest of the layer planted (the offers, Mira's window, Odette's course, the checks). Cron
- * routines run at their own slots; event routines carry the event and its subject in the trigger ref. */
-async function seedQuietRoutines(L: Layer): Promise<void> {
+/** A marriage reported in September whose 30-day window closed with no changes (Kofi Mensah): the life-event record
+ * and its closed window, so the Benefits page and the life-event routine have history to read. */
+async function seedLifeEventHistory(L: Layer): Promise<void> {
   const all = await L.tx.select().from(workers).orderBy(asc(workers.id));
-  const who = (first: string) => { const w = all.find((x) => x.firstName === first); return w ? name(w) : first; };
-  const idOf = (first: string) => all.find((x) => x.firstName === first)?.id ?? first.toLowerCase();
-  const contractors = all.filter((w) => w.type === "contractor" && w.status === "active").length;
-  const offerOf = async (first: string) => (await L.tx.select().from(offers).where(eq(offers.candidateFirst, first)))[0];
-  const marisol = await offerOf("Marisol"), tess = await offerOf("Tess"), tobias = await offerOf("Tobias");
-  const [tobiasCheck] = tobias ? await L.tx.select().from(screeningOrders).where(eq(screeningOrders.offerId, tobias.id)) : [];
-  const [benefitCharges] = await L.tx.select().from(notices).where(eq(notices.formCode, "DE 428T"));
-  // The Austin office routine: Lucia Ferrante, the seasonal Austin Yard technician, was its one Austin hire.
-  const austin = all.find((w) => w.workplaceId === "wkp_austin" && w.startDate >= "2026-01-01" && w.type === "employee");
-  // One of the requests still waiting, routed the way the time-off engine routed it.
-  const [pending] = await L.tx.select().from(timeOffRequests).where(eq(timeOffRequests.status, "pending")).orderBy(asc(timeOffRequests.createdAt));
-  const pendingWho = pending ? all.find((w) => w.id === pending.workerId) : undefined;
-  const approver = pending?.approverPrincipalId === "usr_imani" ? "Imani Ferreira" : "Vic Akisole";
-  const short = (d: string) => payroll.shortDay(d, 2026);
-  const ev = (event: string, subject: string, at: string) => ({ at, triggerRef: `event:${event}:${subject}` });
-  // A marriage reported in September whose 30-day window closed with no changes: what the life-event routine last saw.
   const kofi = all.find((w) => w.firstName === "Kofi" && w.lastName === "Mensah");
-  let lifeWindow: { id: string; closesOn: string; who: string } | null = null;
-  if (kofi) {
-    const eventId = await newId(L.tx, "lev_");
-    const windowId = await newId(L.tx, "ewn_");
-    await L.tx.insert(enrollmentWindows).values({ id: windowId, companyId: CO, workerId: kofi.id, kind: "life_event", lifeEventId: eventId, opensOn: "2026-09-14", closesOn: "2026-10-14", status: "closed", remindersSent: 3, createdAt: pt("2026-09-14", 9) });
-    await L.tx.insert(lifeEvents).values({ id: eventId, workerId: kofi.id, kind: "marriage", eventDate: "2026-09-12", note: "", status: "closed_no_change", reportedBy: "usr_sam", reportedAt: pt("2026-09-14", 9), windowId });
-    L.bump("life_events"); L.bump("enrollment_windows");
-    lifeWindow = { id: windowId, closesOn: "2026-10-14", who: name(kofi) };
-  }
-  const runs: [string, { at: string; triggerRef: string }, string, string][] = [
-    ["rt_ats_hire", ev("offer.imported", marisol?.id ?? "marisol", pt("2026-10-19", 10, 2)), "integrations__apply_delivery", `Greenhouse marked ${who("Marisol")} hired; drafted the offer in Weft for Sam to review and send.`],
-    ["rt_ats_hire", ev("offer.imported", tess?.id ?? "tess", pt("2026-10-23", 15, 2)), "integrations__apply_delivery", `Greenhouse marked ${who("Tess")} hired; drafted the offer in Weft for Sam to review. It is still a draft.`],
-    ["rt_benefits_window_reminders", cronRun("rt_benefits_window_reminders", "2026-10-20"), "comms__send_email", `Reminded ${who("Mira")} that her new-hire benefits window is open until Nov 18.`],
-    ["rt_compliance_reminders", cronRun("rt_compliance_reminders", "2026-10-23"), "compliance__post_reminders", "Posted the filing and deposit deadlines due in the next 14 days to #payroll."],
-    ["rt_compliance_training", cronRun("rt_compliance_training", "2026-10-23"), "training__assign", `Assigned the New York harassment prevention course to ${who("Odette")}, due within 30 days of her Nov 2 start.`],
-    ["rt_compliance_uploads", ev("notice.uploaded", benefitCharges?.id ?? "de428t", pt("2026-09-21", 10)), "notices__get", "Read the EDD statement of benefit charges and left it in review for Vic; an uploaded notice never changes a record without approval."],
-    ["rt_contractor_forms", cronRun("rt_contractor_forms", "2026-10-19"), "contractors__list_forms", `Checked the contractors' tax forms: a current W-8BEN is on file for all ${contractors}.`],
-    ["rt_exec_briefing", cronRun("rt_exec_briefing", "2026-10-19"), "reports__query", "Sent Vic the Monday briefing: approvals waiting, people out this week and the Oct 30 payroll deadline."],
-    ["rt_first_day_message", cronRun("rt_first_day_message", "2026-10-01"), "comms__send_email", `Sent ${who("Ana")} and ${who("Ben")} their first-day message: manager, desk and the #new-hires channel.`],
-    ["rt_first_day_message", cronRun("rt_first_day_message", "2026-10-19"), "comms__send_email", `Sent ${who("Mira")} her first-day message: manager, desk and the #new-hires channel.`],
-    ...(austin ? [["rt_laptop_hand_delivery", ev("worker.created", austin.id, austin.createdAt), "comms__send_message",
-      `${name(austin)} was added for the Austin Yard, so I asked in #new-hires for her laptop to be hand delivered on her first day, ${short(austin.startDate)}.`] as [string, { at: string; triggerRef: string }, string, string]] : []),
-    ...(lifeWindow ? [["rt_life_event_window", ev("enrollment_window.closed", lifeWindow.id, pt(addDays(lifeWindow.closesOn, 1), 6)), "benefits__list_life_events",
-      `${lifeWindow.who}'s marriage window closed on ${short(lifeWindow.closesOn)} with no election changes, so nothing was filed with the carrier.`] as [string, { at: string; triggerRef: string }, string, string]] : []),
-    ["rt_memory_digest", cronRun("rt_memory_digest", "2026-10-19", 7), "memory__write", "Wrote the weekly memory digest for the week of Oct 12: payroll settled, a resignation and the Colorado plan."],
-    ...(tobias && tobiasCheck ? [["rt_screening_follow_up", ev("offer.accepted", idOf("Tobias"), tobias.acceptedAt ?? pt("2026-10-21", 10)), "screening__list",
-      `${who("Tobias")} accepted his offer, so I proposed the standard background check. It was ordered ${short(tobiasCheck.createdAt.slice(0, 10))} and is pending with an estimate of ${short(tobiasCheck.etaOn ?? "2026-10-30")}.`] as [string, { at: string; triggerRef: string }, string, string]] : []),
-    ["rt_thirty_day_checkin", cronRun("rt_thirty_day_checkin", "2026-04-01"), "comms__send_email", `Reminded Sam of the 30-day check-in for ${who("Lucia")}, who started on Mar 2.`],
-    ...(pending && pendingWho ? [["rt_time_off_requests", ev("time_off.request.created", pending.id, pending.createdAt), "time_off__list_requests",
-      `Checked ${name(pendingWho)}'s request for ${short(pending.startAt)}${pending.endAt !== pending.startAt ? ` to ${short(pending.endAt)}` : ""} against the balance and team coverage and left the decision with ${approver}.`] as [string, { at: string; triggerRef: string }, string, string]] : []),
-  ];
-  for (const [routineId, { at, triggerRef }, tool, final] of runs) {
-    await L.run({ at, trigger: "routine", routineId, triggerRef, onBehalfOf: "usr_dana", final, tools: [{ name: tool, args: {}, data: { ok: true } }] });
-  }
+  if (!kofi) return;
+  const eventId = await newId(L.tx, "lev_");
+  const windowId = await newId(L.tx, "ewn_");
+  await L.tx.insert(enrollmentWindows).values({ id: windowId, companyId: CO, workerId: kofi.id, kind: "life_event", lifeEventId: eventId, opensOn: "2026-09-14", closesOn: "2026-10-14", status: "closed", remindersSent: 3, createdAt: pt("2026-09-14", 9) });
+  await L.tx.insert(lifeEvents).values({ id: eventId, workerId: kofi.id, kind: "marriage", eventDate: "2026-09-12", note: "", status: "closed_no_change", reportedBy: "usr_sam", reportedAt: pt("2026-09-14", 9), windowId });
+  L.bump("life_events"); L.bump("enrollment_windows");
 }
 
 /** Employee numbers for the layer's own employees, from the counter offers.accept and the portal use (numbered workers
@@ -860,21 +637,67 @@ const MEMORY_DOCS: { path: string; day: string; id: string; type: string; links:
   // The guided tour opens the SUI rate notice procedure; this thread links it, so its Backlinks are not empty.
   { path: "workstreams/2026-agency-notices.md", day: "2026-09-25", id: "ws-2026-agency-notices", type: "workstream", links: ["knowledge/procedures/state-sui-rate-notice.md", "entities/agencies/ca_edd-combined.md"], message: "workstream: 2026 agency notices",
     body: "# 2026 agency notices\n\nIn February, New York's unemployment rate notice went through [[knowledge/procedures/state-sui-rate-notice|the state SUI rate notice procedure]]: the rate change waited for Vic's approval. The Texas rate notice confirmed an unchanged rate. The [[entities/agencies/ca_edd-combined|EDD]] statement of benefit charges is still in review.\n" },
-  { path: "workstreams/october-payroll.md", day: "2026-10-23", id: "ws-october-payroll", type: "workstream", links: ["entities/people/wrk_0002", "knowledge/preferences/agent/autonomy.md"], message: "workstream: October payroll",
-    body: "# October payroll\n\nOct 15 settled. The Oct 30 draft has four flagged paychecks; [[entities/people/wrk_0002|Theo Marsh]] approves by the Wednesday deadline. The agent proposes the submit and waits, as [[knowledge/preferences/agent/autonomy|the autonomy preference]] asks.\n" },
-  { path: "comms/2026-10-weekly-digests.md", day: "2026-10-19", id: "comms-2026-10-digests", type: "thread", links: ["workstreams/october-payroll.md"], message: "comms: October digests",
-    body: "# October digests\n\nThe weekly people digest posted every Monday in #people-ops. See [[workstreams/october-payroll]] for the payroll thread.\n" },
-  { path: "timeline/monthly/2026-08.md", day: "2026-09-01", id: "timeline-2026-08", type: "timeline_monthly", links: [], message: "digest: monthly 2026-08", body: "# August 2026\n\n- Weekly digests posted each Monday.\n- Two semi-monthly payrolls ran on the previous provider.\n" },
+  { path: "workstreams/october-payroll.md", day: "2026-10-23", id: "ws-october-payroll", type: "workstream", links: ["entities/people/wrk_0002", "knowledge/preferences/agent/autonomy.md", "knowledge/facts/payroll-tax-calendar.md"], message: "workstream: October payroll",
+    body: "# October payroll\n\nOct 15 settled. The Oct 30 draft has four flagged paychecks; [[entities/people/wrk_0002|Theo Marsh]] approves by the Wednesday deadline. The agent proposes the submit and waits, as [[knowledge/preferences/agent/autonomy|the autonomy preference]] asks. The Q3 returns and the October federal deposit follow on [[knowledge/facts/payroll-tax-calendar|the payroll tax calendar]].\n" },
+  { path: "workstreams/october-expenses.md", day: "2026-10-23", id: "ws-october-expenses", type: "workstream", links: ["knowledge/facts/expense-policy.md", "entities/people/wrk_0001"], message: "workstream: October expenses",
+    body: "# October expenses\n\nEight claims wait for a decision. Each one is checked against [[knowledge/facts/expense-policy|the expense policy]] when it is submitted; the Expense review routine, which drafts a decision per claim, stays off until [[entities/people/wrk_0001|Vic Akisole]] turns it on.\n" },
+  { path: "timeline/monthly/2026-08.md", day: "2026-09-01", id: "timeline-2026-08", type: "timeline_monthly", links: [], message: "digest: monthly 2026-08", body: "# August 2026\n\n- Two semi-monthly payrolls ran on the previous provider.\n" },
   { path: "timeline/monthly/2026-09.md", day: "2026-10-01", id: "timeline-2026-09", type: "timeline_monthly", links: ["workstreams/october-payroll.md"], message: "digest: monthly 2026-09", body: "# September 2026\n\n- First two payrolls run in Weft (Sep 15 and Sep 30), approved by Theo.\n- Q3 deposits made on schedule.\n" },
   { path: "timeline/weekly/2026-W42.md", day: "2026-10-19", id: "timeline-2026-W42", type: "timeline_weekly", links: ["workstreams/co-expansion.md"], message: "digest: weekly 2026-W42", body: "# Week of Oct 12\n\n- Oct 15 payroll settled.\n- Jonah Pell gave notice; last day Nov 13.\n- Colorado plan moved forward ([[workstreams/co-expansion]]).\n" },
-  { path: "timeline/daily/2026-10-23.md", day: "2026-10-23", id: "timeline-2026-10-23", type: "timeline_daily", links: [], message: "digest: daily 2026-10-23", body: "# Fri Oct 23\n\n- Owen Mercer's last day.\n- Agent answered two payroll questions in chat.\n" },
+  { path: "timeline/daily/2026-10-23.md", day: "2026-10-23", id: "timeline-2026-10-23", type: "timeline_daily", links: [], message: "digest: daily 2026-10-23", body: "# Fri Oct 23\n\n- Owen Mercer's last day.\n" },
 ];
+
+const cents = (c: number) => `$${(c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+const longDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/**
+ * Two knowledge notes the team keeps, written from the world's own rows so they agree with every screen: the expense
+ * policy (the stored policy version and the published rates it applies) and the payroll tax calendar (the filing and
+ * deposit rows of the compliance calendar from the seed week on). The agent reads them with memory.search and cites them.
+ */
+async function knowledgeDocs(db: SeedContext["db"]): Promise<typeof MEMORY_DOCS> {
+  const [pol] = await db.select().from(expensePolicies).where(eq(expensePolicies.companyId, CO)).orderBy(asc(expensePolicies.version));
+  const out: typeof MEMORY_DOCS = [];
+  if (pol) {
+    const r = JSON.parse(pol.rulesJson) as Record<string, number>;
+    const [m1, m2] = EXPENSE_RATES.mileageCentsPerMileX10;
+    const [l1, l2] = EXPENSE_RATES.lodgingCents;
+    const day = (d: string) => payroll.shortDay(d, 0);
+    const on = pol.effectiveFrom;
+    const src = (what: string) => `(${on}, src: ${what})`;
+    const company = `Larkspur expense policy v${pol.version}`;
+    out.push({ path: "knowledge/facts/expense-policy.md", day: on, id: "fact-expense-policy", type: "fact", links: ["entities/company/cmp_larkspur.md"], message: `fact: expense policy v${pol.version}`,
+      body: [`# Expense policy (version ${pol.version}, effective ${day(on)})`, "",
+        "What Weft checks on every claim before a person decides it. Policy limits are the company's; rates come from the IRS and GSA.", "",
+        `- Receipts: lodging always needs one, and so does any other expense of ${cents(r.receiptRequiredAtCents!)} or more ${src("IRS Publication 463, chapter 5")}`,
+        `- Client and team meals: up to ${cents(r.mealsPerPersonCents!)} per person, counting everyone at the table; list the attendees and the business purpose ${src(company)}`,
+        `- Hotel stays: up to the standard night rate, ${cents(l1!.cents)} a night through ${day(l1!.to)} and ${cents(l2!.cents)} from ${day(l2!.from)} ${src("GSA per diem bulletin FTR 27-01")}`,
+        `- Meals on a trip: ${cents(r.perDiemMealsCents!)} a day, ${cents(r.perDiemTravelDayCents!)} on the first and last day ${src("GSA per diem bulletin FTR 27-01")}`,
+        `- Mileage: the IRS standard rate on the day of the drive, ${m1!.centsPerMileX10 / 10} cents a mile through ${day(m1!.to)} and ${m2!.centsPerMileX10 / 10} cents from ${day(m2!.from)} ${src("IRS standard mileage rates for 2026")}`,
+        `- Software: up to ${cents(r.softwareMonthlyCents!)} a month per tool ${src(company)}`,
+        `- Equipment over ${cents(r.equipmentPreApprovalCents!)} needs a pre-approval reference ${src(company)}`,
+        `- Claims over ${cents(r.secondApproverOverCents!)} get a second reviewer after the approver ${src(company)}`,
+        `- Submit within ${r.accountableWindowDays} days of the expense; later claims can only be declined or paid as taxable wages ${src("IRS Publication 15, section 5, accountable plans")}`,
+        `- California employees are reimbursed for necessary business expenses even above a limit, and the approver decides whether the purchase was necessary ${src("California Labor Code 2802")}`, ""].join("\n") });
+  }
+  const rows = (await db.select().from(complianceItems).where(eq(complianceItems.companyId, CO)).orderBy(asc(complianceItems.dueOn), asc(complianceItems.id)))
+    .filter((x) => (x.kind === "filing" || x.kind === "deposit") && x.dueOn >= "2026-10-19" && x.dueOn <= "2027-02-28");
+  if (rows.length) {
+    const byDay = new Map<string, string[]>();
+    for (const x of rows) byDay.set(x.dueOn, [...(byDay.get(x.dueOn) ?? []), x.title]);
+    out.push({ path: "knowledge/facts/payroll-tax-calendar.md", day: "2026-10-19", id: "fact-payroll-tax-calendar", type: "fact", links: ["entities/agencies/irs-federal.md", "entities/agencies/ca_edd-combined.md"], message: "fact: payroll tax calendar",
+      body: ["# Payroll tax calendar", "", "The filings and federal deposits due from the week of Oct 19, 2026, copied from the compliance calendar in Weft (Taxes & Compliance). Federal deposits are on the monthly schedule for 2026, per the IRS lookback notice.", "",
+        ...[...byDay].map(([d, titles]) => `- ${longDay(d)}: ${titles.join("; ")} (2026-10-19, src: Weft compliance calendar)`), ""].join("\n") });
+  }
+  return out;
+}
 
 async function seedMemory(ctx: SeedContext, tail: { seq: number; hash: string; ts: string; command: string; summary: string }[]): Promise<number> {
   const mem = ctx.executor.memory as unknown as { root?: () => string | null; write: (w: unknown) => Promise<unknown>; appendTimeline: (b: unknown) => Promise<unknown> };
   if (typeof mem.root === "function" && !mem.root()) return 0;
   let commits = 0;
-  for (const d of MEMORY_DOCS) {
+  const docs = [...await knowledgeDocs(ctx.db), ...MEMORY_DOCS].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  for (const d of docs) {
     await ctx.clock.set(pt(d.day, 9), 0);
     try {
       await mem.write({ path: d.path, frontmatter: { id: d.id, type: d.type, aliases: [], links: d.links, sources: ["seed"], status: null, updated: d.day, taintedBy: null },
@@ -892,31 +715,45 @@ async function seedMemory(ctx: SeedContext, tail: { seq: number; hash: string; t
 
 // ---- entry point --------------------------------------------------------------------------------------------------
 
-export async function seedRichProfile(ctx: SeedContext): Promise<RichSummary> {
+export interface RichOptions {
+  /** Replay the recorded showcase runs (./showcase.ts) as the last step. On by default; the recorder turns it off to
+   * build the world the runs are recorded on. A missing fixture file leaves the world without them. */
+  showcase?: boolean;
+  /** Another fixture file than the committed one (the recorder checks a new recording with it). */
+  showcaseFixture?: string;
+}
+
+export async function seedRichProfile(ctx: SeedContext, opts: RichOptions = {}): Promise<RichSummary> {
   let L!: Layer;
   let tail: Awaited<ReturnType<Layer["flushActions"]>> = [];
+  const fixture = opts.showcase === false ? null : readShowcaseFixture(opts.showcaseFixture);
+  const blobMode = seedBlobMode(ctx.executor);
   await withWriteLock(() => ctx.db.transaction(async (tx) => {
     L = new Layer(tx, createSimulators({ db: tx, clock: ctx.clock }), ctx.clock);
     const ws = await tx.select().from(workers).orderBy(asc(workers.id));
-    await seedAgentHistory(L, ws);
+    await seedHistory(L);
     await seedTimeOffHistory(L, ws);
     await seedDecidedProposals(L, ws);
     await seedPeopleRecords(L, ws);
     await seedMoneyAndCompliance(L, ws);
     const api: MotionApi = {
-      tx, dataDir: ctx.dataDir, blobMode: seedBlobMode(ctx.executor), bump: (t, n) => L.bump(t, n), chat: (c, a, t, ts) => L.chat(c, a, t, ts),
-      proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), preview: (c, a) => L.preview(c, a), run: (r) => L.run(r as unknown as RunSpec), action: (a) => L.action(a as unknown as PendingAction),
+      tx, dataDir: ctx.dataDir, blobMode, bump: (t, n) => L.bump(t, n), chat: (c, a, t, ts) => L.chat(c, a, t, ts),
+      proposal: (p) => L.proposal(p as Parameters<Layer["proposal"]>[0]), preview: (c, a) => L.preview(c, a), action: (a) => L.action(a as unknown as PendingAction),
     };
     await seedRichMotion(api, ws);
     await seedTurnover({ tx, bump: (t, n) => L.bump(t, n), action: (a) => L.action(a as unknown as PendingAction) });
     await seedImportedPayHistory(tx, (t, n) => L.bump(t, n));
     await terminateLeaverEnrollments(tx);
-    await seedReportHistory(L);
-    await seedQuietRoutines(L);
+    await seedLifeEventHistory(L);
     await numberRichEmployees(L);
     tail = await L.flushActions();
+    if (fixture) {
+      for (const [t, n] of Object.entries(await applyShowcaseRows(tx, fixture))) L.bump(`showcase.${t}`, n);
+      L.bump("showcase.run_files", await applyShowcaseFiles({ tx, dataDir: ctx.dataDir, mode: blobMode }, fixture));
+    }
   }));
   const commits = await seedMemory(ctx, tail);
   L.bump("memory_commits", commits);
+  if (fixture) L.bump("showcase.memory_commits", await applyShowcaseMemory({ clock: ctx.clock, memory: ctx.executor.memory }, fixture));
   return L.counts;
 }

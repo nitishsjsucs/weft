@@ -29,6 +29,7 @@
     "db:seed": "tsx packages/seed/src/cli.ts seed",
     "db:reset": "tsx packages/seed/src/cli.ts reset",
     "db:digest": "tsx packages/seed/src/cli.ts digest",
+    "seed:record-showcase": "tsx scripts/record-showcase.ts",
     "eval:live": "tsx evals/live/run.ts",
     "eval:suite": "tsx evals/suite/run.ts",
     "eval:ci": "tsx evals/suite/run.ts --split all --variant both --provider scripted --gate --out evals/results/ci",

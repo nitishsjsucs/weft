@@ -1,20 +1,22 @@
 // The seed profiles: base is exactly seedWorld() (its digest is what tests, e2e and the eval worlds pin), rich is a
 // deterministic layer on top whose action chain still verifies.
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { closeDb, migrate, openDb, type Db } from "@weft/db";
-import { commands, createSimClock, expenses as policy } from "@weft/core";
+import { commands, createSimClock, expenses as policy, payroll } from "@weft/core";
 import { createExecutor } from "@weft/executor";
 import { createSimulators } from "@weft/sim";
 import { digestDb, SEED_CLOCK, seedWorld } from "../src/index";
 import { parseSeedProfile, seedWorldProfile, type SeedProfile } from "../src/profile";
 import { cronSlot } from "../src/rich/index";
+import { readShowcaseFixture } from "../src/rich/showcase";
 import { PREBUILT } from "@weft/routines";
 
-async function seeded<T>(profile: SeedProfile | "world", read: (db: Db, verify: () => Promise<{ ok: boolean; gitLag: number }>) => Promise<T>): Promise<T> {
+async function seeded<T>(profile: SeedProfile | "world", read: (db: Db, verify: () => Promise<{ ok: boolean; gitLag: number }>, dir: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "weft-profile-"));
   const db = openDb({ dataDir: dir });
   try {
@@ -25,13 +27,14 @@ async function seeded<T>(profile: SeedProfile | "world", read: (db: Db, verify: 
       const target = { db, clock, executor, sims: createSimulators({ db, clock }), dataDir: dir };
       if (profile === "world") await seedWorld(target); else await seedWorldProfile(target, profile);
       expect(clock.now()).toBe(SEED_CLOCK);
-      return await read(db, () => executor.verifyChain());
+      return await read(db, () => executor.verifyChain(), dir);
     } finally { await executor.close(); }
   } finally { await closeDb(db); rmSync(dir, { recursive: true, force: true }); }
 }
 /** The planted rows the rich layer must leave alone: the four Weft pay runs and their paychecks, YTD, the base
  * expenses, time-off requests and ledger, offers, notices, filings, compliance items and the first action. The one
- * thing the rich layer adds to a planted paycheck is the pre-payroll review's flag explanation (asserted apart). */
+ * thing the rich layer adds to a planted paycheck is the recorded pre-payroll review's flag explanation (asserted
+ * apart). */
 async function planted(db: Db): Promise<string> {
   const q = (s: string) => db.all<Record<string, unknown>>(sql.raw(s));
   const own = (rows: Record<string, unknown>[]) => rows.map(({ explanation: _e, explanation_source: _s, explanation_run_id: _r, ...rest }) => rest);
@@ -68,13 +71,13 @@ describe("seed profiles", () => {
   }, 60_000);
 
   it("rich is deterministic, fills history and keeps the action chain valid", async () => {
-    const a = await seeded("rich", async (db, verify) => {
+    const a = await seeded("rich", async (db, verify, dir) => {
       const chain = await verify();
       expect(chain.ok).toBe(true);
       expect(chain.gitLag).toBe(0);
       expect(await count(db, "agent_runs")).toBeGreaterThanOrEqual(20);
       expect(await count(db, "actions")).toBeGreaterThanOrEqual(100);
-      expect(await count(db, "routine_runs")).toBeGreaterThanOrEqual(15);
+      expect(await count(db, "routine_runs")).toBeGreaterThanOrEqual(10);
       expect(await count(db, "time_off_requests")).toBeGreaterThanOrEqual(120);
       expect(await count(db, "offboarding_cases")).toBe(9);
       // Every 2026 departure the reports count is an inactive worker with a completed offboarding case and imported pay.
@@ -123,26 +126,20 @@ describe("seed profiles", () => {
       for (const x of miles) expect(x.c, x.id).toBe(policy.mileageCents(x.m, policy.mileageRateX10(x.d)!));
       const codes = await db.all<{ rule: string }>(sql`SELECT DISTINCT json_extract(j.value, '$.rule') AS rule FROM expenses e, json_each(e.checks_json) j`);
       for (const c of codes) expect(c.rule).not.toBe("OVER_ACCOUNTABLE_WINDOW");
-      // The four flagged paychecks on the Oct 30 draft carry the review's explanation.
-      const flagged = await db.all<{ e: string | null }>(sql`SELECT explanation AS e FROM paychecks WHERE payroll_run_id = 'pay_2026_10_30' AND flags_json != '[]'`);
-      expect(flagged.length).toBeGreaterThanOrEqual(4);
-      for (const f of flagged) expect(f.e).toBeTruthy();
-      // Each explanation is the agent's, one line per flag, with no row ids or ISO dates, and it never contradicts the
-      // worker's rows: no "complete" onboarding while a task is open, no raise without a new pay rate, and the blocked
-      // paycheck is left out by the pending submit, not already excluded.
-      const notes = await db.all<{ w: string; e: string; s: string; f: string; open: number }>(sql`SELECT p.worker_id AS w, p.explanation AS e, p.explanation_source AS s, p.flags_json AS f,
-        (SELECT COUNT(*) FROM onboarding_tasks t WHERE t.worker_id = p.worker_id AND t.status != 'done') AS open FROM paychecks p WHERE p.payroll_run_id = 'pay_2026_10_30' AND p.flags_json != '[]'`);
+      // The four flagged paychecks on the Oct 30 draft carry the recorded pre-payroll review's own explanation: written by
+      // the model (never the template), saved by that run, and covering every flag on the paycheck.
+      const notes = await db.all<{ w: string; e: string | null; s: string | null; f: string; rid: string | null; provider: string | null }>(sql`SELECT p.worker_id AS w, p.explanation AS e,
+        p.explanation_source AS s, p.flags_json AS f, a.routine_run_id AS rid, a.provider AS provider
+        FROM paychecks p LEFT JOIN agent_runs a ON a.id = p.explanation_run_id WHERE p.payroll_run_id = 'pay_2026_10_30' AND p.review_group = 'needs_review'`);
+      expect(notes.length).toBe(4);
       for (const n of notes) {
-        const flags = JSON.parse(n.f) as { rule: string; evidence: Record<string, unknown> }[];
         expect(n.s, n.w).toBe("agent");
-        expect(n.e.split("\n"), n.w).toHaveLength(flags.length);
-        expect(n.e, n.w).not.toMatch(/\b[a-z]{2,4}_\d{4}\b|\d{4}-\d{2}-\d{2}|\b[A-Z]+_[A-Z_]+\b/);
-        if (n.open > 0) expect(n.e, n.w).not.toMatch(/complete/i);
-        if (!flags.some((f) => f.evidence.pay_rate_id)) expect(n.e, n.w).not.toMatch(/raise/i);
-        expect(n.e, n.w).not.toMatch(/\bis excluded\b/i);
-        expect(new Set(n.e.split(/(?<=\.)\s+/)).size, n.w).toBe(n.e.split(/(?<=\.)\s+/).length);
+        expect(n.e, n.w).toBeTruthy();
+        expect(payroll.uncoveredFlags(n.e!, JSON.parse(n.f) as never), n.w).toEqual([]);
+        expect(n.provider, n.w).toBe("openai");
+        const [rr] = await db.all<{ r: string }>(sql`SELECT routine_id AS r FROM routine_runs WHERE id = ${n.rid}`);
+        expect(rr?.r, n.w).toBe("rt_pre_payroll");
       }
-      expect(notes.find((n) => n.w === "wrk_0022")?.e).toMatch(/direct deposit, the I-9 and benefits selection are still open/);
       const submit = await db.all<{ h: string; d: string; m: number | null }>(sql`SELECT headline AS h, diff_json AS d, money_cents AS m FROM proposals WHERE command = 'payroll.submit_run' AND status = 'pending'`);
       expect(submit.map((x) => x.h)).toEqual(["Submit the Oct 16 to Oct 31 payroll (payday Oct 30): 47 paychecks, total cost $267,919.36"]);
       expect(submit[0]!.m).toBe(26_791_936);
@@ -169,21 +166,50 @@ describe("seed profiles", () => {
         if (a.request_id) expect(wid, p.id).toBeTruthy();
         if (wid) expect(p.h, p.id).toContain(names.get(wid)!);
       }
-      // The monthly exec report quotes the hires and departures report for the month it covers.
-      const execs = await db.all<{ t: string }>(sql`SELECT text AS t FROM sim_chat_messages WHERE channel = '#leadership' AND text LIKE '%exec report%' ORDER BY ts`);
-      expect(execs.length).toBe(9);
-      const moves = await db.all<{ m: string; h: number; d: number }>(sql`SELECT m, SUM(h) AS h, SUM(d) AS d FROM (
-          SELECT substr(start_date, 1, 7) AS m, 1 AS h, 0 AS d FROM workers WHERE type = 'employee' AND status != 'draft' AND start_date BETWEEN '2026-01-01' AND '2026-09-30'
-          UNION ALL SELECT substr(end_date, 1, 7) AS m, 0 AS h, 1 AS d FROM workers WHERE type = 'employee' AND status != 'draft' AND end_date BETWEEN '2026-01-01' AND '2026-09-30') GROUP BY m`);
-      const byMonth = new Map(moves.map((x) => [x.m, x]));
-      for (const [i, e] of execs.entries()) {
-        const m = `2026-${String(i + 1).padStart(2, "0")}`;
-        expect(e.t, m).toContain(`${byMonth.get(m)?.h ?? 0} joined, ${byMonth.get(m)?.d ?? 0} left`);
+      // The recorded runs: real ones, on the live model, before the seed time, each finished or waiting for a person.
+      const runs = await db.all<{ id: string; trigger: string; provider: string; model: string; status: string; created: string; thread: string | null; summary: string | null; tainted: number }>(sql`SELECT id, trigger,
+        provider, model, status, created_at AS created, thread_id AS thread, summary, tainted FROM agent_runs ORDER BY created_at, id`);
+      for (const r of runs) {
+        expect(r.provider, r.id).toBe("openai");
+        expect(r.model, r.id).not.toBe("template");
+        expect(["done", "waiting", "refused"], r.id).toContain(r.status);
+        expect(r.created <= SEED_CLOCK, r.id).toBe(true);
       }
-      expect(execs.some((e) => !/0 joined, 0 left/.test(e.t))).toBe(true);
-      // Every routine the gallery shows has a past run.
-      const quiet = await db.all<{ id: string }>(sql`SELECT r.id FROM routines r WHERE r.id != 'rt_compliance_notices' AND NOT EXISTS (SELECT 1 FROM routine_runs x WHERE x.routine_id = r.id)`);
-      expect(quiet).toEqual([]);
+      // Conversations: every chat run belongs to a thread and stored the person's question, which titles it.
+      const chats = runs.filter((r) => r.trigger === "chat");
+      expect(chats.length).toBeGreaterThanOrEqual(12);
+      expect(new Set(chats.map((r) => r.thread)).size).toBeGreaterThanOrEqual(6);
+      for (const c of chats) {
+        expect(c.thread, c.id).toMatch(/^thr_[0-9a-f]{20}$/);
+        const [ctx] = await db.all<{ t: string }>(sql`SELECT json_extract(result_json, '$.text') AS t FROM run_steps WHERE run_id = ${c.id} AND kind = 'context' ORDER BY n LIMIT 1`);
+        expect(ctx?.t, c.id).toMatch(/<request>[^<]+<\/request>/);
+      }
+      // Grounding refs resolve: every result id an answer cites is a result of that run's own tool calls, or the result
+      // of an action on the log that one of them read (the raise's res_0001).
+      for (const c of chats) {
+        for (const ref of new Set((c.summary ?? "").match(/\bres_\d{4}\b/g) ?? [])) {
+          const [own] = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM run_steps WHERE run_id = ${c.id} AND kind = 'tool_call' AND instr(result_json, ${`"resultId":"${ref}"`}) > 0`);
+          const [read] = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM actions WHERE result_id = ${ref}
+            AND EXISTS (SELECT 1 FROM run_steps WHERE run_id = ${c.id} AND kind = 'tool_call' AND instr(result_json, ${ref}) > 0)`);
+          expect(own!.n + read!.n, `${c.id} cites ${ref}`).toBeGreaterThan(0);
+        }
+      }
+      // A tainted run is tainted in the executor's own table too, so no follow-up reads its answer.
+      for (const r of runs.filter((x) => x.tainted)) {
+        expect((await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM run_taint WHERE run_id = ${r.id} AND tainted = 1`))[0]!.n, r.id).toBe(1);
+      }
+      // Offloaded artifacts (the charts) have their bodies in the run workspace.
+      for (const art of await db.all<{ id: string; path: string; sha: string }>(sql`SELECT id, path, sha256 AS sha FROM run_artifacts`)) {
+        const body = readFileSync(join(dir, art.path), "utf8");
+        expect(createHash("sha256").update(body).digest("hex"), art.id).toBe(art.sha);
+      }
+      // The approval cards waiting from the runs: the review's Submit and the chat's off-cycle bonus, each linked to its run.
+      const cards = await db.all<{ c: string; run: string | null; t: string | null }>(sql`SELECT p.command AS c, p.proposer_run_id AS run, a.trigger AS t FROM proposals p LEFT JOIN agent_runs a ON a.id = p.proposer_run_id WHERE p.status = 'pending' AND p.kind = 'action'`);
+      expect(cards.find((x) => x.c === "payroll.submit_run")?.t).toMatch(/^routine:/);
+      expect(cards.find((x) => x.c === "payroll.propose_off_cycle")?.t).toBe("chat");
+      for (const x of cards) expect(x.run, x.c).toBeTruthy();
+      // The fixture holds no key material.
+      expect(JSON.stringify(readShowcaseFixture())).not.toMatch(/\bsk-[A-Za-z0-9_-]{16,}/);
       // Paid claims above the receipt threshold, and lodging, carry their receipt.
       const noReceipt = await db.all<{ id: string }>(sql`SELECT id FROM expenses WHERE status IN ('paid', 'approved') AND category != 'mileage' AND receipt_upload_id IS NULL AND (amount_cents >= 7500 OR category = 'lodging')`);
       expect(noReceipt).toEqual([]);
@@ -194,8 +220,8 @@ describe("seed profiles", () => {
       const gaps = await db.all<{ id: string }>(sql`SELECT r.id FROM time_off_requests r WHERE r.status IN ('approved', 'taken') AND r.id > 'tor_0006'
         AND (SELECT COUNT(*) FROM time_off_ledger l WHERE l.source_ref = r.id AND l.kind = 'use') != json_array_length(r.days_json)`);
       expect(gaps).toEqual([]);
-      // The favorites in the routine gallery have run history.
-      for (const id of ["rt_new_hire_ready", "rt_monthly_exec_report", "rt_people_digest", "rt_pre_payroll", "rt_milestones"]) {
+      // The routines the rich crawl opens, and the ones the world needs, have run history.
+      for (const id of ["rt_new_hire_ready", "rt_monthly_exec_report", "rt_people_digest", "rt_pre_payroll", "rt_time_off_requests", "rt_compliance_reminders", "rt_onboarding_nudge"]) {
         const n = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = ${id}`);
         expect(n[0]!.n, id).toBeGreaterThan(0);
       }
@@ -211,15 +237,17 @@ describe("seed profiles", () => {
       for (const l of letters) { expect(l.b, l.st).toMatch(/We are delighted to offer you/); expect(l.b).not.toMatch(/Start date \d{4}/); }
       const checks = await db.all<{ st: string }>(sql`SELECT o.status AS st FROM screening_orders s JOIN offers o ON o.id = s.offer_id`);
       for (const c of checks) expect(c.st).toBe("accepted");
-      // Every seeded routine run sits at a slot its own cron produces, and event routines carry an event ref.
-      const rruns = await db.all<{ r: string; at: string; ref: string }>(sql`SELECT routine_id AS r, started_at AS at, trigger_ref AS ref FROM routine_runs`);
+      // Every recorded routine run is either its own cron slot, fired unattended, or a person's Run now, attended.
+      const rruns = await db.all<{ r: string; at: string; ref: string; attended: number }>(sql`SELECT routine_id AS r, started_at AS at, trigger_ref AS ref, attended FROM routine_runs`);
       for (const x of rruns) {
         const def = PREBUILT.find((d) => d.id === x.r)!;
-        if (def.trigger.type === "cron") {
-          const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(x.at));
-          expect(x.at, `${x.r} ${x.at}`).toBe(cronSlot(x.r, day, Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hourCycle: "h23" }).format(new Date(x.at)))));
-          expect(x.ref, x.r).toBe(`cron:${x.at}`);
-        } else expect(x.ref, x.r).toMatch(/^event:[a-z_.]+:\w+$/);
+        expect(x.at <= SEED_CLOCK, `${x.r} ${x.at}`).toBe(true);
+        if (x.ref.startsWith("manual:")) { expect(x.attended, x.r).toBe(1); expect(x.ref.slice(7, 31), x.r).toBe(x.at); continue; }
+        expect(def.trigger.type, x.r).toBe("cron");
+        const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(x.at));
+        expect(x.at, `${x.r} ${x.at}`).toBe(cronSlot(x.r, day, Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", hourCycle: "h23" }).format(new Date(x.at)))));
+        expect(x.ref, x.r).toBe(`cron:${x.at}`);
+        expect(x.attended, x.r).toBe(0);
       }
       // Leavers' enrollments ride their imported paychecks until the end date, then end; employer benefits move with them.
       const rafael = await db.all<{ b: string; d: string }>(sql`SELECT p.benefits_json AS b, r.payday AS d FROM paychecks p JOIN payroll_runs r ON r.id = p.payroll_run_id JOIN workers w ON w.id = p.worker_id WHERE w.first_name = 'Rafael' ORDER BY r.payday`);

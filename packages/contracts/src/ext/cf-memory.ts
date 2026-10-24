@@ -65,7 +65,8 @@ export interface MemoryLogEntry {
 /**
  * The repository port. The store calls it under its own serial lock, so implementations need not serialize. Commit
  * ids, `list`, `read`, `grep` and `log` output must match between GitRepo and SqlRepo for the same history (cf1's
- * acceptance compares HEAD, all 36 rich-world commit SHAs, search, read-at, history, tree and recall output).
+ * acceptance compares HEAD, all of the rich world's commit SHAs (47 since 2026-10-23), search, read-at, history,
+ * tree and recall output).
  */
 export interface MemoryRepo {
   readonly kind: MemoryRepoKind;

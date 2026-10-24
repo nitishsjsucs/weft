@@ -1,28 +1,26 @@
-// Rich profile, part 2: hiring in every offer state, an accepted hire who is still onboarding, the approvals waiting
-// this week, paid expense history, integration deliveries and sync items, reconciliation history, device orders and
-// the contractors' accounts and documents. Same rules as rich/index.ts: add rows, never edit a planted one.
+// Rich profile, part 2: hiring in every offer state, an accepted hire who is still onboarding, paid expense history,
+// integration deliveries and sync items, reconciliation history, device orders and the contractors' accounts and
+// documents. Same rules as rich/index.ts: add rows, never edit a planted one.
 import { and, asc, eq } from "drizzle-orm";
 import {
   benefitReconFindings, companies, contractorTaxForms, devices, documents, enrollmentWindows, expenses, extLinks, integrationDeliveries, itAccounts, offers, onboardingTasks, payRates,
-  paychecks, payrollRuns, principals, routineRuns, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, timeOffPolicies, timeOffRequests, timeOffTypes, workers, type DbTx,
+  principals, screeningOrders, simDeviceOrders, simEmailMessages, syncItems, taxProfiles, workers, type DbTx,
 } from "@weft/db";
 import { confidentialityText, expenses as policy, newId, offerLetterFor, payroll, sha256Hex } from "@weft/core";
-import { formatCents, type Flag, type Preview } from "@weft/contracts";
+import type { Preview } from "@weft/contracts";
 import { createHash } from "node:crypto";
 import { uploads } from "@weft/db";
 import { seedUpload, type SeedBlobMode } from "../blobs";
 import { receiptPng } from "../w3-expenses";
 import { seedPortalHires } from "./portal-hires";
-import { day, joinAnd, paycheckNote } from "./flag-notes";
 
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
 type W = typeof workers.$inferSelect;
 type Bump = (table: string, n?: number) => void;
 type Proposal = (p: Record<string, unknown>) => Promise<string>;
-type Run = (spec: Record<string, unknown>) => Promise<{ runId: string; routineRunId: string | null }>;
 type ActionFn = (a: Record<string, unknown>) => void;
-export interface MotionApi { dataDir?: string; blobMode?: SeedBlobMode; tx: DbTx; bump: Bump; proposal: Proposal; run: Run; action: ActionFn; preview: (command: string, args: Record<string, unknown>) => Promise<Preview & { risk: string }>; chat: (channel: string, author: string, text: string, ts: string) => Promise<string> }
+export interface MotionApi { dataDir?: string; blobMode?: SeedBlobMode; tx: DbTx; bump: Bump; proposal: Proposal; action: ActionFn; preview: (command: string, args: Record<string, unknown>) => Promise<Preview & { risk: string }>; chat: (channel: string, author: string, text: string, ts: string) => Promise<string> }
 
 /** A DEMO receipt image in the uploads store, as the base seed and a portal upload write one; returns the upload id.
  * The bytes go where the world's uploads go: files by default, the blobs table with WEFT_BLOBS=sqlite (../blobs.ts). */
@@ -127,59 +125,6 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       await tx.insert(onboardingTasks).values({ id: await newId(tx, "obt_"), workerId: hireId, kind, status, owner, dueOn: "2026-11-09", doneAt: status === "done" ? pt("2026-10-12", 11) : null });
       L.bump("onboarding_tasks");
     }
-    const r = await L.run({ at: pt("2026-10-07", 9, 5), trigger: "routine", routineId: "rt_new_hire", triggerRef: `event:offer.accepted:${hireId}`, onBehalfOf: "usr_dana",
-      final: `Elias Brandt accepted. Created accounts, posted the welcome in #new-hires and proposed the laptop order.`,
-      tools: [{ name: "it__create_account", args: { worker_id: hireId, system: "google_ws" }, data: { created: true } }, { name: "it__order_device", args: { worker_id: hireId }, data: { proposed: true } }],
-      checklist: [{ id: "accounts", label: "create accounts", passed: true }, { id: "device", label: "propose the laptop", passed: true }] });
-    // Planted from it.order_device's own preview: its risk (R4), the catalog price and the ship-to the live card shows.
-    const args = { worker_id: hireId };
-    const p = await L.preview("it.order_device", args);
-    await L.proposal({ at: pt("2026-10-07", 9, 6), command: "it.order_device", args, subjectRef: p.subjectRef, risk: p.risk, domain: "it", moneyCents: p.moneyCents ?? undefined, status: "pending",
-      headline: p.title, runId: r.runId, routineRunId: r.routineRunId, expiresAt: "2026-11-02T17:00:00.000Z", diff: p.diff, evidence: [...p.evidence, { label: "Offer accepted", ref: hireId }] });
-  }
-  // The submit for this payroll, proposed by Friday's pre-payroll review and waiting for Theo.
-  const [draft] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, "pay_2026_10_30"));
-  if (draft && draft.status === "draft") {
-    const year = Number(draft.periodEnd.slice(0, 4));
-    const flagged = (await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, draft.id)))
-      .map((pc) => ({ pc, flags: JSON.parse(pc.flagsJson) as Flag[] })).filter((x) => x.flags.length > 0);
-    const names = new Map(ws.map((w) => [w.id, `${w.firstName} ${w.lastName}`]));
-    const blocked = flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => names.get(x.pc.workerId) ?? "One person");
-    // The counts the Payroll page shows for this draft (its anomaly summary), so the review and the page agree.
-    const counts = { needsReview: 0, blocked: 0, ...(JSON.parse(draft.anomalySummaryJson ?? "{}") as { needsReview?: number; blocked?: number }) };
-    const period = `${day(draft.periodStart, year)} to ${day(draft.periodEnd, year)}`;
-    const r = await L.run({ at: pt("2026-10-23", 9), trigger: "routine", routineId: "rt_pre_payroll", onBehalfOf: "usr_theo",
-      final: `Reviewed the ${period} payroll: ${counts.needsReview} ${counts.needsReview === 1 ? "paycheck needs" : "paychecks need"} review${counts.blocked ? ` and ${counts.blocked} ${counts.blocked === 1 ? "is" : "are"} blocked` : ""}, and each flagged one has an explanation. `
-        + (blocked.length ? `${joinAnd(blocked)} ${blocked.length === 1 ? "has" : "have"} no bank account on file, so I proposed the submit without ${blocked.length === 1 ? "that paycheck" : "those paychecks"} until one is.` : "Proposed the submit."),
-      tools: [{ name: "payroll__get_run", args: { run_id: draft.id }, data: { id: draft.id, status: "draft" } }, { name: "payroll__submit_run", args: { run_id: draft.id, exclude_blocked: true }, data: { proposed: true } }],
-      checklist: [{ id: "explain", label: "explain flagged paychecks", passed: true }, { id: "submit", label: "propose payroll.submit_run", passed: true }] });
-    // What that review wrote on the flagged paychecks (rich/flag-notes.ts): one line per flag, each the flag's fact and
-    // the context read from the worker's own rows, grounded as payroll.explain_flags grounds it, saved as the agent's.
-    const tasks = await tx.select().from(onboardingTasks).orderBy(asc(onboardingTasks.id));
-    const nudged = await tx.select({ summary: routineRuns.summary }).from(routineRuns).where(eq(routineRuns.routineId, "rt_onboarding_nudge"));
-    const reqs = new Map((await tx.select({ id: timeOffRequests.id, name: timeOffPolicies.name, paid: timeOffTypes.paid }).from(timeOffRequests)
-      .innerJoin(timeOffPolicies, eq(timeOffPolicies.id, timeOffRequests.policyId)).innerJoin(timeOffTypes, eq(timeOffTypes.id, timeOffPolicies.typeId))).map((q) => [q.id, { policyName: q.name, paid: q.paid }]));
-    const rateKinds = Object.fromEntries((await tx.select({ id: payRates.id, kind: payRates.kind }).from(payRates).orderBy(asc(payRates.id))).map((q) => [q.id, q.kind]));
-    for (const { pc, flags } of flagged) {
-      if (pc.explanation) continue;
-      const name = names.get(pc.workerId) ?? pc.workerId;
-      const mine = tasks.filter((k) => k.workerId === pc.workerId);
-      const text = paycheckNote(flags, {
-        name, year, hasOnboarding: mine.length > 0, openOnboarding: mine.filter((k) => k.status !== "done").map((k) => k.kind),
-        reminded: nudged.some((n) => (n.summary ?? "").includes(name) && /bank account/.test(n.summary ?? "")),
-        submitExcludesBlocked: true, rateKinds, timeOff: Object.fromEntries(flags.map((f) => String(f.evidence.request_id ?? "")).filter((id) => reqs.has(id)).map((id) => [id, reqs.get(id)!])),
-      });
-      const base = payroll.templateExplanation(flags) || flags.map((f) => f.message.replace(/\.?$/, ".")).join(" ");
-      const grounded = payroll.groundExplanation(text, flags, { gross_cents: pc.grossCents, net_cents: pc.netCents, hours_x100: pc.hoursX100 }).ok;
-      await tx.update(paychecks).set({ explanation: grounded ? text : base, explanationSource: grounded ? "agent" : "template", explanationRunId: r.runId }).where(eq(paychecks.id, pc.id));
-      L.bump("paycheck_explanations");
-    }
-    // From payroll.submit_run's own preview: the total without the blocked paycheck, the bank amount and the wording the
-    // live card uses. subjectHash stays null, so approving it runs the submit fresh against the run as it is then.
-    const submitArgs = { run_id: draft.id, exclude_blocked: true };
-    const sp = await L.preview("payroll.submit_run", submitArgs);
-    await L.proposal({ at: pt("2026-10-23", 9, 1), command: "payroll.submit_run", args: submitArgs, subjectRef: sp.subjectRef, risk: sp.risk, domain: "payroll", moneyCents: sp.moneyCents ?? undefined,
-      status: "pending", headline: sp.title, runId: r.runId, routineRunId: r.routineRunId, expiresAt: draft.approvalDeadline, onBehalfOf: "usr_theo", evidence: sp.evidence, diff: sp.diff });
   }
   void ws;
   return hireId;
@@ -316,24 +261,15 @@ async function seedItAndContractors(L: MotionApi, ws: W[], hireId: string | null
   void contractorTaxForms;
 }
 
-/** The October expense decisions already on the planted claims, as the proposals Vic approved from a chat review. */
+/** The October expense decisions already on the planted claims, as Vic's decisions on the action log. */
 async function seedExpenseDecisions(L: MotionApi, ws: W[]): Promise<void> {
   const decided = (await L.tx.select().from(expenses).orderBy(asc(expenses.id))).filter((e) => (e.status === "approved" || e.status === "declined") && e.decidedAt && e.id <= "exp_0014");
-  if (!decided.length) return;
-  const first = decided.map((e) => e.decidedAt!).sort()[0]!;
-  const at = new Date(Date.parse(first) - 20 * 60_000).toISOString();
-  const r = await L.run({ at, trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "expenses__list", args: { status: "submitted" }, data: { count: decided.length } }],
-    final: `Reviewed ${decided.length} submitted claims against the policy and proposed a decision for each; approvals stay with you.` });
   for (const e of decided) {
     const w = ws.find((x) => x.id === e.workerId);
     const who = w ? `${w.firstName} ${w.lastName}` : e.workerId;
     const approve = e.status === "approved";
-    const year = Number(e.transactionDate.slice(0, 4));
-    await L.proposal({ at, command: "expenses.decide", args: { expense_id: e.id, decision: approve ? "approve" : "decline" }, subjectRef: `expense:${e.id}`, risk: "R2", domain: "payroll",
-      moneyCents: approve ? e.amountCents : undefined, status: "executed", decidedBy: e.decidedBy ?? "usr_dana", decidedAt: e.decidedAt!, runId: r.runId, reversible: true,
-      headline: `${approve ? "Approve" : "Decline"} ${who}'s ${formatCents(e.amountCents)} ${e.category} claim from ${day(e.transactionDate, year)}`,
-      diff: [{ label: "Status", before: "Needs review", after: approve ? "Approved" : "Declined" }], evidence: [{ label: "Expense", ref: e.id }],
-      exec: { ts: e.decidedAt!, actorKind: "human", actorId: e.decidedBy ?? "usr_dana", summary: `${approve ? "Approved" : "Declined"} expense ${e.id} for ${who}`, reversible: "no" } });
+    L.action({ ts: e.decidedAt!, actorKind: "human", actorId: e.decidedBy ?? "usr_dana", command: "expenses.decide", args: { expense_id: e.id, decision: approve ? "approve" : "decline" },
+      summary: `${approve ? "Approved" : "Declined"} expense ${e.id} for ${who}`, reversible: "no" });
   }
 }
 

@@ -27,13 +27,14 @@ export async function readSeedProfile(db: Db): Promise<SeedProfile> {
   } catch { return "base"; }
 }
 
-/** seedWorld(), then the profile's layer. Leaves the clock at the seed time, frozen, like seedWorld. */
-export async function seedWorldProfile(weft: SeedTarget, profile: SeedProfile, opts: { log?: (line: string) => void } = {}): Promise<RichSummary | null> {
+/** seedWorld(), then the profile's layer. Leaves the clock at the seed time, frozen, like seedWorld. `showcase: false`
+ * builds the rich world without the recorded showcase runs (the world `pnpm seed:record-showcase` records them on). */
+export async function seedWorldProfile(weft: SeedTarget, profile: SeedProfile, opts: { log?: (line: string) => void; showcase?: boolean; showcaseFixture?: string } = {}): Promise<RichSummary | null> {
   await seedWorld(weft, opts);
   if (profile === "base") return null;
   const faker = undefined as never;   // the rich layer draws from its own fixed generator, never faker
   try {
-    const counts = await seedRichProfile({ db: weft.db, clock: weft.clock, executor: weft.executor, sims: weft.sims, dataDir: weft.dataDir, companyId: "cmp_larkspur", faker });
+    const counts = await seedRichProfile({ db: weft.db, clock: weft.clock, executor: weft.executor, sims: weft.sims, dataDir: weft.dataDir, companyId: "cmp_larkspur", faker }, { showcase: opts.showcase, showcaseFixture: opts.showcaseFixture });
     await weft.db.insert(settings).values({ key: SEED_PROFILE_SETTING, valueJson: JSON.stringify(profile) });
     opts.log?.(`seeded rich profile: ${Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(", ")}`);
     return counts;

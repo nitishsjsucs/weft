@@ -141,16 +141,19 @@ describe("cold starts", () => {
       expect(first.storage.stats().rowsWritten).toBe(0);
       expect(await storageWrites(first, () => first.weft.scheduler.tick())).toBe(0);
       let t = { statements: 0, rowsWritten: 0, tablesWritten: [] as string[], tablesRead: [] as string[] };
+      let boot: string[] = [];
       const written = await storageWrites(first, async () => {
         second = await first.reboot();
+        boot = second.meter.totals().tablesRead;
         second.meter.reset();
         await second.weft.scheduler.tick();
         t = second.meter.totals();
       });
       expect(t.statements).toBeGreaterThan(0);
       expect({ rowsWritten: t.rowsWritten, tablesWritten: t.tablesWritten, storageRowsWritten: written }).toEqual({ rowsWritten: 0, tablesWritten: [], storageRowsWritten: 0 });
-      // The prebuilt hash gate skipped the comparison: the routine rows were never loaded to compare.
-      expect(t.tablesRead).toContain("kv_state");
+      // The prebuilt hash gate skipped the comparison: the routine rows were never loaded to compare. The boot reads the
+      // gate first when a routine run is waiting for an approval (it reloads the run's routine), else the first tick.
+      expect([...boot, ...t.tablesRead]).toContain("kv_state");
     } finally { await ((second as DurableTestWorld | null) ?? first).close(); }
   });
 

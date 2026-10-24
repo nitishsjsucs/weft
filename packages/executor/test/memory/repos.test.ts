@@ -1,5 +1,5 @@
 // The two memory repositories behind the MemoryRepo port (docs/cloudflare/design.md 4.3): GitRepo (the git CLI) and
-// SqlRepo (git objects in SQL). For the rich world's 36 commits SqlRepo produces the same SHAs, the same HEAD and the
+// SqlRepo (git objects in SQL). For the rich world's 47 commits SqlRepo produces the same SHAs, the same HEAD and the
 // same search, read-at, history, tree, links and recall output, and `git fast-import` of its export reproduces every
 // commit. A store driven through the same writes on both repos gives the same commits. Owner: cf1-db.
 import { execFileSync } from "node:child_process";
@@ -200,11 +200,13 @@ describe("the rich world's memory on SqlRepo", () => {
     }
   }, 180_000);
 
-  it("reproduces all 36 commit SHAs and HEAD", async () => {
-    expect(commits).toHaveLength(36);
+  it("reproduces all 47 commit SHAs and HEAD", async () => {
+    // The seed's 11 notes and the timeline bullets of the rich layer's last 25 actions, then the 9 bullets the recorded
+    // showcase runs' actions appended (packages/seed/src/rich/showcase.json), after the two initial commits.
+    expect(commits).toHaveLength(47);
     expect(await sqlRepo.head()).toBe(commits.at(-1));
     expect(await sqlRepo.list()).toEqual(git(gitRoot, ["ls-files"]).trim().split("\n"));
-    expect((await sqlRepo.list())).toHaveLength(90);
+    expect((await sqlRepo.list())).toHaveLength(94);
   });
 
   it("gives the same search, read-at, history, tree, links and recall output as the git repo", async () => {
