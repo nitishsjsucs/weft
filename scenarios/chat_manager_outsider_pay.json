@@ -36,7 +36,7 @@
         "output": [
           {
             "type": "text",
-            "text": "I can't share Priya Raman (demo)'s salary. She is {{last.people__get.data.worker.title}} in {{last.people__get.data.worker.department}}, outside your direct and indirect reports, so her pay, bank account, W-4, benefits elections and ID numbers are not shared with you. Her manager or the People team can answer pay questions about her."
+            "text": "I can't share Priya Raman's salary. She is {{last.people__get.data.worker.title}} in {{last.people__get.data.worker.department}}, outside your direct and indirect reports, so her pay, bank account, W-4, benefits elections and ID numbers are not shared with you. Her manager or the People team can answer pay questions about her."
           }
         ]
       }

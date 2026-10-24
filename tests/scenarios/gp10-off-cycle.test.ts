@@ -1,6 +1,6 @@
 // Scenario GP10 (docs/wave2.md). Owner: w2-offboarding. Off-cycle pay on the scripted provider: an MCP agent proposes
 // payroll.propose_off_cycle for one employee whose raise took effect mid-period plus a bonus; the preview lists every
-// earning line in cents; Dana approves; the off_cycle run goes to the bank simulator like a regular run.
+// earning line in cents; Vic approves; the off_cycle run goes to the bank simulator like a regular run.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -9,7 +9,7 @@ import { payRates } from "@weft/db";
 import { formatCents, type Proposal } from "@weft/contracts";
 import { createTestWeft, type TestWeft } from "./helpers";
 
-const WORKER = "wrk_0042";   // Hollis Grey (demo), TX, $76,000.00 a year
+const WORKER = "wrk_0042";   // Hollis Grey, TX, $76,000.00 a year
 
 describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", () => {
   let weft: TestWeft;
@@ -47,7 +47,7 @@ describe("GP10 off-cycle pay with a mid-period raise and a supplemental bonus", 
     const dana = weft.uiHeaders("usr_dana");
     const p = (await (await req("GET", `/v1/proposals/${out.proposalId}`, dana)).json()) as Proposal;
     expect(p).toMatchObject({ command: "payroll.propose_off_cycle", risk: "R4", status: "pending" });
-    const line = (prefix: string) => p.diff.find((d) => d.label.startsWith(`Hollis Grey (demo) (${WORKER}): ${prefix}`));
+    const line = (prefix: string) => p.diff.find((d) => d.label.startsWith(`Hollis Grey (${WORKER}): ${prefix}`));
     // Oct 1 to 15 is 15 days: 5 at $76,000.00 and 10 at $82,000.00, one half-up rounding per line.
     expect(line("Salary (5 of 15 days")?.after).toBe("$1,055.56");    // 7,600,000 / 24 x 5 / 15 = 105,555.56
     expect(line("Salary (10 of 15 days")?.after).toBe("$2,277.78");   // 8,200,000 / 24 x 10 / 15 = 227,777.78

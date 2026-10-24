@@ -122,7 +122,7 @@ describe("reports.query against the seed", () => {
     // The w3_expenses seed already holds claims; the check is on what these inserts add per category.
     const base = new Map((await report("expenses_by_category", "?from=2026-09-01&to=2026-10-31")).body.rows.map((r) => [String(r.category), r]));
     const ins = (id: string, cat: string, cents: number, status: string, day: string) => weft.db.run(sql`INSERT INTO expenses (id, company_id, worker_id, category, merchant, amount_cents, transaction_date, submitted_at, business_purpose, status)
-      VALUES (${id}, 'cmp_larkspur', 'wrk_0003', ${cat}, 'Demo Merchant (demo)', ${cents}, ${day}, ${`${day}T12:00:00.000Z`}, 'Customer visit (demo)', ${status})`);
+      VALUES (${id}, 'cmp_larkspur', 'wrk_0003', ${cat}, 'Demo Merchant', ${cents}, ${day}, ${`${day}T12:00:00.000Z`}, 'Customer visit', ${status})`);
     await ins("exp_r001", "travel", 42_000, "approved", "2026-10-02");
     await ins("exp_r002", "travel", 18_050, "paid", "2026-09-20");
     await ins("exp_r003", "meals", 6_400, "needs_review", "2026-10-05");

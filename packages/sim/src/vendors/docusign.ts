@@ -62,7 +62,7 @@ export function createDocuSignSim(db: DbTx, clock: SimClock, faults: FaultInject
       const now = clock.now();
       const envelopeId = `sim-env-${String(seqOf(await mintId(db, "simx_"))).padStart(6, "0")}`;
       const e: Env = {
-        envelopeId, status: "sent", emailSubject: "Your offer documents (demo)", sentDateTime: now, deliveredDateTime: null, completedDateTime: null, voidedDateTime: null, voidedReason: null,
+        envelopeId, status: "sent", emailSubject: "Your offer documents", sentDateTime: now, deliveredDateTime: null, completedDateTime: null, voidedDateTime: null, voidedReason: null,
         documents: i.documents.map((d, n) => ({ documentId: String(n + 1), name: d.title, sha256: d.sha256, weftDocId: d.weftDocId })),
         recipients: { signers: [{ recipientId: "1", clientUserId: i.signer.clientUserId, name: i.signer.name, email: i.signer.email, status: "sent" }] },
         notification: { expirations: { expireEnabled: !!i.expiresOn, expireAfter: null, expiresOn: i.expiresOn } },
@@ -97,7 +97,7 @@ export function createDocuSignSim(db: DbTx, clock: SimClock, faults: FaultInject
     async download(envelopeId, which) {
       const e = await need(envelopeId);
       if (e.status !== "completed") throw new Error(`docusign simulator: envelope ${envelopeId} is not completed`);
-      const text = which === "combined" ? e._sim.docs.join("\n\n---- next document ----\n\n") : `Certificate of completion (simulated)\nEnvelope ${envelopeId}\nCompleted ${String(e.completedDateTime)}\nSigner ${signers(e)[0]!.name}`;
+      const text = which === "combined" ? e._sim.docs.join("\n\n---- next document ----\n\n") : `Certificate of completion\nEnvelope ${envelopeId}\nCompleted ${String(e.completedDateTime)}\nSigner ${signers(e)[0]!.name}`;
       return new TextEncoder().encode(text);
     },
     verifyWebhook(raw: Uint8Array, headers: Record<string, string>): WebhookVerdict {

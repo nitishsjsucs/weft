@@ -1,5 +1,5 @@
 // Seed step "actions" (SPEC 5). Owner: t2-world. The NY raise (18% effective 2026-10-16) as a governed action:
-// people.set_pay_rate through executor.human.exec as Dana with the clock at 2026-10-09 10:00 PT, so the payroll
+// people.set_pay_rate through executor.human.exec as Vic with the clock at 2026-10-09 10:00 PT, so the payroll
 // anomaly evidence can point at a real action row. Until the executor lands (scaffold stub), the command runs
 // directly in one transaction and the pay rate carries no action seq.
 import { eq } from "drizzle-orm";

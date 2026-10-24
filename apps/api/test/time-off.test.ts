@@ -48,7 +48,7 @@ describe("time-off routes", () => {
     // R-D: Ben started Oct 1; CA sick has a 90-day wait.
     const ben = await request("tor_0005");
     expect(ben.checks.map((c) => [c.rule, c.severity])).toEqual([["WAITING_PERIOD", "block"]]);
-    // R-C: a NY sick half day, clean, routed past a manager with no login to Dana.
+    // R-C: a NY sick half day, clean, routed past a manager with no login to Vic.
     const kenji = await request("tor_0004");
     expect(kenji).toMatchObject({ requestedMinutes: 240, approverPrincipalId: "usr_dana", checks: [] });
     expect(kenji.routing.map((s) => s.principalId)).toEqual([null, "usr_dana"]);

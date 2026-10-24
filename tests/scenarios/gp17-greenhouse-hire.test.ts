@@ -1,7 +1,7 @@
 // Scenario GP17 (docs/wave3.md 5): Greenhouse hire to a Weft offer. Owner: w3-integrations-hr. Scripted provider.
 // "Simulate a hire" makes the Greenhouse simulator queue a signed hire_candidate delivery; Weft verifies it over the
 // raw bytes, stores the delivery id (never the body), re-reads the hire and creates exactly one draft offer linked
-// in ext_links. rt_ats_hire reads the unmapped Boulder office as a sync item and proposes sending the offer; Dana
+// in ext_links. rt_ats_hire reads the unmapped Boulder office as a sync item and proposes sending the offer; Vic
 // approves and GP6 runs unchanged from there. A second delivery with the same id is a no-op, and a later offer
 // version with a new start date becomes a human-only sync conflict.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -74,7 +74,7 @@ describe("GP17 Greenhouse hire to Weft offer", () => {
     expect(send).toHaveLength(1);
     expect(send[0]!.args).toMatchObject({ offer_id: offerId });
 
-    // Dana approves; from here GP6 runs unchanged: the invite, the portal and signing.
+    // Vic approves; from here GP6 runs unchanged: the invite, the portal and signing.
     const ok = await call("usr_dana", "POST", `/v1/proposals/${send[0]!.id}/approve`, {});
     expect(ok.status).toBe(200);
     const sent = (await call("usr_dana", "GET", `/v1/offers/${offerId}`)).json;
@@ -83,7 +83,7 @@ describe("GP17 Greenhouse hire to Weft offer", () => {
     const mail = (await call("usr_dana", "GET", "/v1/sim/email?to=marisol.quint@candidate.example")).json as { kind: string; relatedRef: string }[];
     expect(mail).toEqual([expect.objectContaining({ kind: "offer_invite", relatedRef: offerId })]);
     const me = (await call(persona, "GET", "/v1/portal/me")).json;
-    expect(me).toMatchObject({ offerId, worker: { workState: "CO", displayName: "Marisol Quint (demo)" } });
+    expect(me).toMatchObject({ offerId, worker: { workState: "CO", displayName: "Marisol Quint" } });
     const letter = me.documents.find((d: { kind: string }) => d.kind === "offer_letter");
     const signed = await call(persona, "POST", `/v1/portal/documents/${letter.id}/sign`, { typedName: "Marisol Quint", documentSha256: letter.sha256 });
     expect(signed.json.data).toMatchObject({ offer_status: "accepted" });

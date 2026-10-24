@@ -84,7 +84,7 @@ export const newHire: Precheck = async (ctx, exec) => {
   const state = str(pick(person, "work_state", "state"));
   const regs = state ? await read(exec, ctx.companyId, "tax.list_registrations", { jurisdiction: state }) : null;
   const toRegister = arr(pick(regs ?? {}, "accounts", "registrations")).filter((a) => a.jurisdiction === state && (a.status === "not_registered" || a.status === "needs_info"));
-  // people.get names a person with their row id ("Noor Castellanos (demo) (wrk_0063)"); a channel post names them
+  // people.get names a person with their row id ("Noor Castellanos (wrk_0063)"); a channel post names them
   // as people do, with the role and team, as the seeded welcomes read. No digits, so nothing needs grounding.
   const name = (str(pick(person, "name", "display")) ?? "our new teammate").replace(/\s*\([a-z]{2,5}_\w*\d\w*\)/g, "");
   const title = str(pick(person, "title"));

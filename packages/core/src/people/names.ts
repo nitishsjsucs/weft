@@ -1,11 +1,10 @@
-// Names of record (SPEC 0 rule 1): every displayed person or company name ends with "(demo)".
-export const DEMO_SUFFIX = " (demo)";
+// Names of record: a person's first and last name as the seed or the record holds them, with no suffix.
 
 export function displayName(first: string, last: string): string {
-  return `${first} ${last}${DEMO_SUFFIX}`;
+  return `${first} ${last}`;
 }
 
-/** Readable reference with a short id, the concise read format: "Imani Ferreira (demo) (wrk_0004)". */
+/** Readable reference with a short id, the concise read format: "Imani Ferreira (wrk_0004)". */
 export function nameRef(first: string, last: string, id: string): string {
   return `${displayName(first, last)} (${id})`;
 }

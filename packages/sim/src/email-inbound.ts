@@ -10,19 +10,19 @@ export interface ReceiptFixture {
   amountCents: number; date: string; lines: string[];
 }
 
-/** The receipt fixtures a simulated email may attach. Merchants are fictional and marked (demo). */
+/** The receipt fixtures a simulated email may attach. Merchants are fictional. */
 export const RECEIPT_FIXTURES: Readonly<Record<string, ReceiptFixture>> = {
-  lunch_client: { fixture: "lunch_client", merchant: "Juniper Table (demo)", category: "meals", amountCents: 6420, date: "2026-10-22", lines: ["2 lunch specials", "2 iced teas", "Tip"] },
-  taxi_airport: { fixture: "taxi_airport", merchant: "Bayline Cabs (demo)", category: "travel", amountCents: 4875, date: "2026-10-21", lines: ["Airport to downtown", "Toll"] },
-  hotel_two_nights: { fixture: "hotel_two_nights", merchant: "Harborview Inn (demo)", category: "lodging", amountCents: 21_800, date: "2026-10-20", lines: ["Room, 2 nights", "Occupancy tax"] },
-  software_monthly: { fixture: "software_monthly", merchant: "Gridnote Software (demo)", category: "software", amountCents: 1800, date: "2026-10-19", lines: ["Monthly plan"] },
+  lunch_client: { fixture: "lunch_client", merchant: "Juniper Table", category: "meals", amountCents: 6420, date: "2026-10-22", lines: ["2 lunch specials", "2 iced teas", "Tip"] },
+  taxi_airport: { fixture: "taxi_airport", merchant: "Bayline Cabs", category: "travel", amountCents: 4875, date: "2026-10-21", lines: ["Airport to downtown", "Toll"] },
+  hotel_two_nights: { fixture: "hotel_two_nights", merchant: "Harborview Inn", category: "lodging", amountCents: 21_800, date: "2026-10-20", lines: ["Room, 2 nights", "Occupancy tax"] },
+  software_monthly: { fixture: "software_monthly", merchant: "Gridnote Software", category: "software", amountCents: 1800, date: "2026-10-19", lines: ["Monthly plan"] },
 };
 
 export const usdText = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 /** A small, valid one-page PDF naming the fixture; deterministic, so the same fixture always has the same sha256. */
 export function receiptPdf(f: ReceiptFixture): Buffer {
-  const text = [`DEMO RECEIPT (synthetic)`, f.merchant, f.date, ...f.lines, `Total ${usdText(f.amountCents)}`].map((l) => l.replace(/[()\\]/g, ""));
+  const text = [`RECEIPT`, f.merchant, f.date, ...f.lines, `Total ${usdText(f.amountCents)}`].map((l) => l.replace(/[()\\]/g, ""));
   const stream = `BT /F1 12 Tf 72 720 Td 16 TL ${text.map((l) => `(${l}) '`).join(" ")} ET`;
   const objs = [
     "<< /Type /Catalog /Pages 2 0 R >>",

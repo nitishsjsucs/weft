@@ -1,12 +1,10 @@
 // Weft's PDF templates (design 6.4 and 7.1): the offer letter, a signed agreement and a pay stub, as self-contained
 // HTML. Every value is escaped text, the styles are inline, there are no scripts, images, fonts or links, so the
 // renderer can load the page with JavaScript off and every request aborted. The output is deterministic for the same
-// data (no render time, no random ids), so its sha256 is the R2 cache key. Every page carries the demo banner.
+// data (no render time, no random ids), so its sha256 is the R2 cache key.
 // Track cf6-extras.
 import type { PdfKind } from "../../contracts/src/ext/cf-extras";
 import { escapeHtml } from "./bytes";
-
-export const PDF_DEMO_BANNER = "DEMO DOCUMENT. Fictional company, fictional people, simulated data. Not a real offer, agreement or pay statement.";
 
 export interface SignatureData { signerName: string; typedName: string; signedAt: string; documentSha256: string }
 export interface DocumentPdfData {
@@ -54,7 +52,6 @@ const STYLE = [
   "@page { size: letter; margin: 0.75in; }",
   "html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }",
   "body { font-family: Helvetica, Arial, sans-serif; color: #1c1b1a; font-size: 11pt; line-height: 1.45; margin: 0; }",
-  ".banner { border: 1px solid #b54708; color: #7a2e0e; background: #fff6ed; padding: 6pt 9pt; font-size: 8.5pt; letter-spacing: 0.02em; margin-bottom: 18pt; }",
   "header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #d6d3d1; padding-bottom: 8pt; margin-bottom: 16pt; }",
   ".mark { font-weight: 700; font-size: 14pt; letter-spacing: -0.01em; }",
   ".meta { color: #57534e; font-size: 9pt; text-align: right; }",
@@ -74,10 +71,9 @@ const e = escapeHtml;
 const page = (title: string, kindLabel: string, ref: string, inner: string) => [
   "<!doctype html>",
   `<html lang="en"><head><meta charset="utf-8"><title>${e(title)}</title><style>${STYLE}</style></head><body>`,
-  `<div class="banner">${e(PDF_DEMO_BANNER)}</div>`,
   `<header><div class="mark">Weft</div><div class="meta">${e(kindLabel)}<br>${e(ref)}</div></header>`,
   inner,
-  `<footer>Rendered by Weft from its own records. ${e(PDF_DEMO_BANNER)}</footer>`,
+  "<footer>Rendered by Weft from its own records.</footer>",
   "</body></html>",
 ].join("\n");
 

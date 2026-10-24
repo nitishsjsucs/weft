@@ -18,7 +18,7 @@ describe("memory store (w2-memory)", () => {
     const { m } = await world();
     await m.appendTimeline({ at: "2026-10-26T15:30:00.000Z", command: "people.update", text: "Updated wrk_0002 title", importance: 1, source: "action:99", chainHead: { seq: 99, hash: "0".repeat(64) } });
     const doc = await m.read("timeline/raw/2026-10-26.md");
-    expect(doc.body).toContain("- 2026-10-26T15:30:00.000Z [i1] people.update: Updated [[entities/people/wrk_0002|Theo Marsh (demo)]] title (src: action:99)");
+    expect(doc.body).toContain("- 2026-10-26T15:30:00.000Z [i1] people.update: Updated [[entities/people/wrk_0002|Theo Marsh]] title (src: action:99)");
   });
 
   it("memory.search finds lines through aliases and wiki-links, beyond fixed strings", async () => {
@@ -55,7 +55,7 @@ describe("memory store (w2-memory)", () => {
       ] }],
       states: [{ code: "CA", facts: [{ text: "Active employees 1", date: "2026-10-20", src: "workers:state=CA" }] }],
       agencies: [], notices: [],
-      onePager: { companyName: "Larkspur Robotics, Inc. (demo)", asOf: "2026-10-20", headcount: [{ text: "CA 1 active", date: "2026-10-20", src: "workers:state=CA" }], openItems: [], workstreams: [], autonomy: [] },
+      onePager: { companyName: "Larkspur Robotics, Inc.", asOf: "2026-10-20", headcount: [{ text: "CA 1 active", date: "2026-10-20", src: "workers:state=CA" }], openItems: [], workstreams: [], autonomy: [] },
     };
     const first = await m.digest({ now: "2026-10-28T00:00:00.000Z", sources, companyRef: "cmp_larkspur" });
     expect(first.commit).toMatch(/^[0-9a-f]{40}$/);

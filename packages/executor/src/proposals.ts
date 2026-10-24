@@ -178,9 +178,8 @@ export async function approvalCardOf(db: Db | DbTx, row: ProposalRow): Promise<A
   // a payroll submit excludes) is not its subject.
   const workerIds = [...new Set([...((row.subjectRef ?? "").match(/wrk_[A-Za-z0-9]+/g) ?? []), ...evidence.filter((x) => x.ref.startsWith("wrk_") && !/^excluded\b/i.test(x.label)).map((x) => x.ref)])];
   const names = await payroll.workerNames(db as DbTx, workerIds);
-  const demo = (n: string) => (n.endsWith(" (demo)") ? n : `${n} (demo)`);   // seeded people are fictional and say so
   const one = workerIds.length === 1 ? names.get(workerIds[0]!)?.name : undefined;
-  const subjectName = one ? demo(one) : workerIds.length > 1 ? `${workerIds.length} workers` : null;
+  const subjectName = one ? one : workerIds.length > 1 ? `${workerIds.length} workers` : null;
   let routineName: string | null = null;
   if (row.routineRunId) {
     const [r] = await db.select({ name: routines.name }).from(routineRuns).innerJoin(routines, eq(routines.id, routineRuns.routineId)).where(eq(routineRuns.id, row.routineRunId)).limit(1);

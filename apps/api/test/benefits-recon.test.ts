@@ -24,7 +24,7 @@ describe("carrier reconciliation (GP11)", () => {
     const list = ((await (await get("/v1/benefits/reconciliation?month=2026-10")).json()) as unknown[]).map((x) => ReconFinding.parse(x));
     expect(list.map((f) => f.kind)).toEqual(["terminated_but_billed", "missing_dependent", "wrong_tier"]);
     const [term, dep, tier] = list as [ReconFinding, ReconFinding, ReconFinding];
-    // Owen Mercer (demo), last day 2026-10-23: PPO, dental and vision ee billed for both periods, one period covered.
+    // Owen Mercer, last day 2026-10-23: PPO, dental and vision ee billed for both periods, one period covered.
     expect(term).toMatchObject({ workerId: "wrk_0027", planId: null, billedCents: 2 * (9_500 + 800 + 300), expectedCents: 9_500 + 800 + 300, deductedCents: 2 * (9_500 + 800 + 300), status: "open" });
     expect(term.detail).toContain("2026-10-23");
     // Single coverage billed at family on PPO: 2 x 31,000 billed, 2 x 9,500 expected and deducted.
@@ -34,7 +34,7 @@ describe("carrier reconciliation (GP11)", () => {
     expect(tier.expectedCents).toBe(tier.deductedCents);
     expect(tier.billedCents).toBeLessThan(tier.expectedCents);
     const ev = await weft.db.select().from(events).where(eq(events.type, "benefits.invoice_received"));
-    expect(ev.map((e) => JSON.parse(e.payloadJson))).toEqual([{ month: "2026-10", carrier: "Juniper Mutual (sim)" }]);
+    expect(ev.map((e) => JSON.parse(e.payloadJson))).toEqual([{ month: "2026-10", carrier: "Juniper Mutual" }]);
   });
 
   it("is idempotent per month and carrier", async () => {
@@ -57,7 +57,7 @@ describe("carrier reconciliation (GP11)", () => {
     const [p] = await weft.db.select().from(proposals).where(eq(proposals.id, out.proposalId));
     expect(p!.status).toBe("pending");
     expect(p!.contentJson).toContain("billing@juniper-mutual.example");
-    expect(p!.headline).toBe("Dispute missing dependent on the 2026-10 Juniper Mutual (sim) invoice");
+    expect(p!.headline).toBe("Dispute missing dependent on the 2026-10 Juniper Mutual invoice");
     const dec = await post(`/v1/proposals/${out.proposalId}/approve`, {});
     expect(dec.status, await dec.clone().text()).toBe(200);
     const [after] = await weft.db.select().from(benefitReconFindings).where(eq(benefitReconFindings.id, f!.id));
@@ -67,7 +67,7 @@ describe("carrier reconciliation (GP11)", () => {
     expect(mail[0]!.body).toContain("$620.00");
     const again = await post("/v1/tools/benefits.dispute_finding", { finding_id: f!.id });
     expect(again.status).toBe(422);
-    // Dana disputing from the Benefits screen acts directly (her click is the approval).
+    // Vic disputing from the Benefits screen acts directly (her click is the approval).
     const [w] = await weft.db.select().from(benefitReconFindings).where(eq(benefitReconFindings.kind, "wrong_tier"));
     const direct = await (await post("/v1/tools/benefits.dispute_finding", { finding_id: w!.id })).json() as { ok: boolean; status: string };
     expect(direct).toMatchObject({ ok: true, status: "done" });
@@ -85,7 +85,7 @@ describe("open enrollment", () => {
   it("lists one row per eligible employee for 2027 with deterministic statuses", async () => {
     const rows = ((await (await get("/v1/benefits/open-enrollment")).json()) as unknown[]).map((r) => W2BenefitsOpenEnrollmentRow.parse(r));
     const eligible = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM workers WHERE type = 'employee' AND status IN ('active', 'onboarding') AND end_date IS NULL`);
-    expect(rows).toHaveLength(eligible[0]!.n);   // on the wave 1 seed: 48 employees minus Owen Mercer (demo), who has an end date
+    expect(rows).toHaveLength(eligible[0]!.n);   // on the wave 1 seed: 48 employees minus Owen Mercer, who has an end date
     expect(rows.every((r) => r.planYear === 2027)).toBe(true);
     expect(rows.some((r) => r.workerId === "wrk_0027")).toBe(false);
     const counts = rows.reduce<Record<string, number>>((m, r) => ({ ...m, [r.status]: (m[r.status] ?? 0) + 1 }), {});

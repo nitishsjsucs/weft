@@ -10,7 +10,7 @@
       {
         "expect": { "lastResults": [{ "tool": "time_off__list_requests", "ok": true, "status": "done" }] },
         "output": [
-          { "type": "text", "text": "Ruth Okoro (demo) (wrk_0010) has two pending Larkspur Vacation requests: tor_0003 (Nov 23 to 27, 2026, 24 hours) and tor_0007 (Dec 14 to 15, 2026, 16 hours). If both are approved she has 73 hours (9.13 days) left, the balance now with both counted. If only the December one is approved, so tor_0003 is denied and its 24 hours come back, she has 97 hours (12.13 days)." }
+          { "type": "text", "text": "Ruth Okoro (wrk_0010) has two pending Larkspur Vacation requests: tor_0003 (Nov 23 to 27, 2026, 24 hours) and tor_0007 (Dec 14 to 15, 2026, 16 hours). If both are approved she has 73 hours (9.13 days) left, the balance now with both counted. If only the December one is approved, so tor_0003 is denied and its 24 hours come back, she has 97 hours (12.13 days)." }
         ]
       }
     ]

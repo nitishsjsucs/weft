@@ -7,7 +7,7 @@ const fm = (day: string) => `---\nid: "timeline-${day}"\ntype: "timeline_raw"\na
 const raw = (day: string, lines: string[]) => ({ path: `timeline/raw/${day}.md`, text: fm(day) + lines.map((l) => `${l}\n`).join("") });
 const week = [
   raw("2026-10-12", [
-    "- 2026-10-12T16:10:00.000Z [i1] people.update: Updated [[entities/people/wrk_0002|Theo Marsh (demo)]] (src: action:2)",
+    "- 2026-10-12T16:10:00.000Z [i1] people.update: Updated [[entities/people/wrk_0002|Theo Marsh]] (src: action:2)",
     "- 2026-10-12T16:40:00.000Z [i2] tax.update_rate: Updated the CA SUI rate for [[entities/notices/ntc_0002]] (src: action:3)",
     "- 2026-10-12T18:00:00.000Z [i0] comms.post_update: Posted a run update (src: action:4)",
   ]),

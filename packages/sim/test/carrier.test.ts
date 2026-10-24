@@ -11,7 +11,7 @@ afterEach(async () => { await w?.close(); w = null; });
 const PPO = { ee: 9_500, ee_spouse: 21_000, ee_children: 18_500, family: 31_000, employer: 38_000 };
 async function fixture(db: SimTestWorld["db"]) {
   const at = "2026-10-01T00:00:00.000Z";
-  await db.insert(companies).values({ id: "cmp_larkspur", legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-0000000", hqState: "CA", foundedOn: "2020-01-01", createdAt: at });
+  await db.insert(companies).values({ id: "cmp_larkspur", legalName: "Larkspur Robotics, Inc.", domain: "larkspur.example", ein: "00-0000000", hqState: "CA", foundedOn: "2020-01-01", createdAt: at });
   const person = (n: number, endDate: string | null = null) => ({
     id: `wrk_000${n}`, companyId: "cmp_larkspur", employeeNumber: `EMP-000${n}`, type: "employee", workerType: "us_w2", status: "active", firstName: `P${n}`, lastName: "Demo",
     workEmail: `p${n}@larkspur.example`, title: "Engineer", timezone: "America/Los_Angeles", startDate: "2024-01-01", endDate, createdAt: at, updatedAt: at,

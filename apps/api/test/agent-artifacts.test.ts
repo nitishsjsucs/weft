@@ -49,16 +49,16 @@ describe("GET /v1/agent/runs/:id/artifacts/:ref", () => {
     const h = await weft.executor.runs.openRoutineRun({ routineId: "rt_pre_payroll", routineRunId: "rtr_9151", triggerRef: "manual", attended: false });
     const dir = join(weft.dataDir, "runs", h.runId);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "benefits.json"), JSON.stringify({ rows: [{ plan: "Medical (demo)", enrolled: 41 }] }));
+    writeFileSync(join(dir, "benefits.json"), JSON.stringify({ rows: [{ plan: "Medical", enrolled: 41 }] }));
     writeFileSync(join(weft.dataDir, "..", `outside-${h.runId}.json`), JSON.stringify({ secret: "outside the data dir" }));
-    const row = { runId: h.runId, stepN: 1, bytes: 10, sha256: "0".repeat(64), summary: "Benefit enrollment (demo)", domain: "benefits", needs: "view", taintedBy: null };
+    const row = { runId: h.runId, stepN: 1, bytes: 10, sha256: "0".repeat(64), summary: "Benefit enrollment", domain: "benefits", needs: "view", taintedBy: null };
     await weft.db.insert(runArtifacts).values([
       { ...row, id: "art_9151", path: join("runs", h.runId, "benefits.json") },
       { ...row, id: "art_9152", path: join("..", `outside-${h.runId}.json`) },
     ]);
     const dana = await get(`/v1/agent/runs/${h.runId}/artifacts/art_9151`);
     expect(dana.status).toBe(200);
-    expect(await dana.json()).toMatchObject({ kind: "rows", domain: "benefits", data: { rows: [{ plan: "Medical (demo)" }] } });
+    expect(await dana.json()).toMatchObject({ kind: "rows", domain: "benefits", data: { rows: [{ plan: "Medical" }] } });
     expect((await get(`/v1/agent/runs/${h.runId}/artifacts/art_9151`, "usr_sam")).status).toBe(200);    // benefits: edit
     const theo = await get(`/v1/agent/runs/${h.runId}/artifacts/art_9151`, "usr_theo");                  // benefits: none
     expect(theo.status).toBe(403);
@@ -83,7 +83,7 @@ describe("GET /v1/agent/runs/:id/artifacts/:ref", () => {
 
 describe("chat allowlist choice (harness 5.3 wave 3 amendment)", () => {
   it("reads an action intent in code, never for questions or bulk decisions", () => {
-    for (const t of ["Pay Hollis Grey (demo) a $1,500.00 off-cycle bonus", "Please propose an off-cycle payment for Hollis", "Can you approve Ruth's vacation request?", "Deny the duplicate meal expense", "Hollis missed the Oct 1 to 15 payroll, propose an off-cycle run"]) {
+    for (const t of ["Pay Hollis Grey a $1,500.00 off-cycle bonus", "Please propose an off-cycle payment for Hollis", "Can you approve Ruth's vacation request?", "Deny the duplicate meal expense", "Hollis missed the Oct 1 to 15 payroll, propose an off-cycle run"]) {
       expect(readsActionIntent(t), t).toBe(true);
     }
     for (const t of ["Why is the NY raise flagged in the Oct 30 payroll?", "What did we pay in September?", "Show payroll cost by month", "Approve everything in my inbox", "approve all of them", "Deny every expense at once", "How many time off requests are open?"]) {
@@ -237,7 +237,7 @@ describe("approval card from the stored preview", () => {
     const [row] = await weft.db.select().from(proposals).where(eq(proposals.id, o.proposalId));
     const card = await approvalCardOf(weft.db, row!);
     const diff = JSON.parse(row!.diffJson) as Proposal["diff"];
-    expect(card).toMatchObject({ proposalId: row!.id, headline: row!.headline, risk: "R4", moneyCents: row!.moneyCents, subjectName: "Hollis Grey (demo)", approverName: "Dana Whitfield (demo)", routineName: null, status: "pending" });
+    expect(card).toMatchObject({ proposalId: row!.id, headline: row!.headline, risk: "R4", moneyCents: row!.moneyCents, subjectName: "Hollis Grey", approverName: "Vic Akisole", routineName: null, status: "pending" });
     expect(card.fields.map((f) => f.label)).toEqual(diff.map((d) => d.label));
     expect(card.fields.map((f) => f.value)).toEqual(diff.map((d) => d.after));
     expect(card.fields.find((f) => f.label.includes("Bonus"))?.value).toBe("$1,500.00");

@@ -27,7 +27,7 @@ export async function listOpenEnrollment(tx: DbTx, companyId: string, opts: { pl
   const people = (await tx.select({ id: workers.id, first: workers.firstName, last: workers.lastName, status: workers.status, endDate: workers.endDate }).from(workers).where(eq(workers.companyId, companyId)))
     .filter((w) => (w.status === "active" || w.status === "onboarding") && w.endDate === null);
   if (people.length === 0) return [];
-  const names = new Map(people.map((p) => [p.id, `${p.first} ${p.last} (demo)`]));
+  const names = new Map(people.map((p) => [p.id, `${p.first} ${p.last}`]));
   const conds = [inArray(openEnrollment.workerId, people.map((p) => p.id)), eq(openEnrollment.planYear, opts.planYear ?? OPEN_ENROLLMENT_PLAN_YEAR)];
   if (opts.status) conds.push(eq(openEnrollment.status, opts.status));
   const rows = await tx.select().from(openEnrollment).where(and(...conds)).orderBy(asc(openEnrollment.workerId));

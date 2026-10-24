@@ -1,5 +1,5 @@
 // Scenario GP6 (docs/wave2.md): offer to signed. Owner: w2-onboarding. Scripted provider, createTestWeft().
-// Dana drafts and sends an offer for a fictional CO candidate; the invite lands in the email simulator; the new hire
+// Vic drafts and sends an offer for a fictional CO candidate; the invite lands in the email simulator; the new hire
 // persona opens it (viewed) and signs the offer letter and the confidentiality agreement by typing their name.
 // Signature rows and action rows carry the signer, the sim timestamp and the server-verified document sha256.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ describe("GP6 offer to signed", () => {
   };
 
   let offerId = "", persona = "", workerId = "";
-  it("Dana drafts the offer, sends it, and the invite with the portal link is in the email simulator", async () => {
+  it("Vic drafts the offer, sends it, and the invite with the portal link is in the email simulator", async () => {
     const draft = await call("usr_dana", "POST", "/v1/offers", CANDIDATE);
     expect(draft.status).toBe(200);
     offerId = draft.json.data.offer_id;
@@ -46,7 +46,7 @@ describe("GP6 offer to signed", () => {
     expect((await call(persona, "GET", "/v1/workers")).status).toBe(403);
     expect((await call(persona, "GET", `/v1/offers/${offerId}`)).status).toBe(403);
     const before = (await call(persona, "GET", "/v1/portal/me")).json;
-    expect(before).toMatchObject({ offerId, done: 0, total: 7, worker: { id: workerId, displayName: "Rowan Ellery (demo)", workState: "CO" }, offer: { status: "sent" }, stateForm: { form: "DR 0004" } });
+    expect(before).toMatchObject({ offerId, done: 0, total: 7, worker: { id: workerId, displayName: "Rowan Ellery", workState: "CO" }, offer: { status: "sent" }, stateForm: { form: "DR 0004" } });
     expect(before.tasks.map((t: { kind: string; status: string }) => `${t.kind}:${t.status}`)).toEqual(["sign_offer:pending", "sign_confidentiality:blocked", "federal_w4:blocked", "state_withholding:blocked", "direct_deposit:blocked", "i9_sim:blocked", "benefits_selection:blocked"]);
     expect((await call(persona, "POST", "/v1/portal/offer/view")).json.data).toMatchObject({ status: "viewed", changed: true });
     expect((await call("usr_dana", "GET", `/v1/offers/${offerId}`)).json).toMatchObject({ status: "viewed", viewedAt: weft.clock.now() });
@@ -56,7 +56,8 @@ describe("GP6 offer to signed", () => {
     const view = (await call(persona, "GET", "/v1/portal/me")).json;
     const letter = view.documents.find((d: { kind: string }) => d.kind === "offer_letter");
     const nda = view.documents.find((d: { kind: string }) => d.kind === "confidentiality_agreement");
-    expect(letter.bodyText).toContain("DEMO DOCUMENT");
+    expect(letter.bodyText).toContain("Offer letter offr_");
+    expect(letter.bodyText).not.toMatch(/DEMO DOCUMENT|\(demo\)|fictional|simulated/i);
     const stale = await call(persona, "POST", `/v1/portal/documents/${letter.id}/sign`, { typedName: "Rowan Ellery", documentSha256: "0".repeat(64) });
     expect([stale.status, stale.json.code]).toEqual([422, "STALE_SUBJECT"]);
     const wrong = await call(persona, "POST", `/v1/portal/documents/${letter.id}/sign`, { typedName: "Someone Else", documentSha256: letter.sha256 });
@@ -79,7 +80,7 @@ describe("GP6 offer to signed", () => {
       expect(a!.summary).toContain(s.document_sha256);
     }
     expect((await call("usr_dana", "GET", `/v1/offers/${offerId}`)).json).toMatchObject({ status: "accepted", workerId });
-    expect((await call("usr_dana", "GET", `/v1/workers/${workerId}`)).json.worker).toMatchObject({ id: workerId, status: "onboarding", displayName: "Rowan Ellery (demo)" });
+    expect((await call("usr_dana", "GET", `/v1/workers/${workerId}`)).json.worker).toMatchObject({ id: workerId, status: "onboarding", displayName: "Rowan Ellery" });
     const lib = (await call("usr_dana", "GET", `/v1/workers/${workerId}/documents?status=signed`)).json as { kind: string }[];
     expect(lib.map((d) => d.kind)).toEqual(["offer_letter", "confidentiality_agreement"]);
     const me = (await call(persona, "GET", "/v1/portal/me")).json;

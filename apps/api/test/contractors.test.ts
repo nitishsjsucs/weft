@@ -22,7 +22,7 @@ describe("contractor payouts (GP11)", () => {
   it("serves the fixed FX table and converts half up with decimal.js, matching the simulator's integer math", async () => {
     const fx = ((await (await get("/v1/contractors/fx")).json()) as unknown[]).map((r) => W2BenefitsFxRate.parse(r));
     expect(fx.map((r) => [r.currency, r.usdPerUnit])).toEqual([["CAD", "0.73"], ["EUR", "1.08"], ["INR", "0.012"], ["USD", "1"]]);
-    expect(fx.every((r) => r.source.startsWith("Synthetic FX table"))).toBe(true);
+    expect(fx.every((r) => r.source === "Fixed FX table (not market data)")).toBe(true);
     for (const [m, c, r] of [[650_000, "EUR", "1.08"], [41_000_000, "INR", "0.012"], [980_000, "CAD", "0.73"], [125, "INR", "0.012"], [1_041, "CAD", "0.73"]] as const) {
       expect(convertToUsdCents(m, r)).toBe(toUsdCents(m, c));
     }

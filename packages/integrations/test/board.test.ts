@@ -11,7 +11,7 @@ describe("public job board", () => {
   it("parses the Larkspur fixture: single_select is a string, multi_select an array, offsets normalized", () => {
     const { total, jobs } = parseBoardJobs(fixture);
     expect(total).toBe(2);
-    expect(jobs[0]).toMatchObject({ id: "7100201", internalJobId: "4400103", name: "Firmware Test Engineer (demo)", departmentName: "Hardware", officeName: "Boulder, CO", location: "Hybrid", requisitionId: "LR-103", updatedAt: "2026-10-14T00:57:01.000Z" });
+    expect(jobs[0]).toMatchObject({ id: "7100201", internalJobId: "4400103", name: "Firmware Test Engineer", departmentName: "Hardware", officeName: "Boulder, CO", location: "Hybrid", requisitionId: "LR-103", updatedAt: "2026-10-14T00:57:01.000Z" });
     expect(jobs[0]!.metadata).toEqual([
       { name: "Career Site Department", type: "single_select", values: ["Hardware"] },
       { name: "Job Posting Location", type: "multi_select", values: ["Boulder, CO", "Remote US"] },

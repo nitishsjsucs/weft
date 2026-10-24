@@ -214,7 +214,7 @@ describe("runLoop on a routine (GP1 shape)", () => {
 describe("runLoop on chat", () => {
   const chatExec = () => createFakeExecutor([
     ...CHAT_TOOLS.map((name) => ({ name, effect: "read" as const })),
-    { name: "payroll.get_run", effect: "read" as const, handler: () => done({ flagged: [{ worker: "Rowan Achebe (demo) (wrk_0014)", rule: "GROSS_CHANGE", before_cents: 400000, after_cents: 432000, action_seq: 41, result_id: "res_0041" }] }, "Read pay_2026_10_30 flagged rows", "res_0200") },
+    { name: "payroll.get_run", effect: "read" as const, handler: () => done({ flagged: [{ worker: "Rowan Achebe (wrk_0014)", rule: "GROSS_CHANGE", before_cents: 400000, after_cents: 432000, action_seq: 41, result_id: "res_0041" }] }, "Read pay_2026_10_30 flagged rows", "res_0200") },
   ]);
 
   it("a tool-call preamble at the answer-by step is never taken as the answer", async () => {
@@ -237,7 +237,7 @@ describe("runLoop on chat", () => {
     const script: Script = { match: "NY raise", agents: { main: [
       { output: [{ type: "function_call", name: "payroll__get_run", arguments: { run_id: "pay_2026_10_30", flagged_only: true } }] },
       { output: [{ type: "text", text: "Gross pay rose to $4,400.00 for Rowan." }] },
-      { output: [{ type: "text", text: "Gross pay for Rowan Achebe (demo) (wrk_0014) rose from $4,000.00 to $4,320.00 after the raise applied as action 41 (res_0041)." }] },
+      { output: [{ type: "text", text: "Gross pay for Rowan Achebe (wrk_0014) rose from $4,000.00 to $4,320.00 after the raise applied as action 41 (res_0041)." }] },
     ] } };
     const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { chat_ny: script } }));
     const h = handle();

@@ -35,11 +35,11 @@ describe("offboarding routes", () => {
     expect(c).toMatchObject({ workerId: "wrk_0005", kind: "layoff", lastDay: "2026-10-30", status: "open" });
     expect(c.steps.map((s) => s.kind)).toEqual([...OFFBOARDING_STEP_ORDER]);
     const sso = c.steps.find((s) => s.kind === "sso_deactivate")!;
-    expect(sso).toMatchObject({ status: "skipped", detail: "No SSO (sim) account on file", proposalId: null });
+    expect(sso).toMatchObject({ status: "skipped", detail: "No SSO account on file", proposalId: null });
     expect(c.steps.find((s) => s.kind === "final_pay")).toMatchObject({ status: "proposed", detail: "Dismissal run through the last day, no PTO payout" });
     const list = OffboardingCase.array().parse(await (await call("GET", "/v1/offboarding")).json());
     expect(list.map((x) => x.id)).toEqual([c.id]);
-    // The proposals are the person's own: untainted, on Dana's behalf.
+    // The proposals are the person's own: untainted, on Vic's behalf.
     const rows = await weft.db.all<{ tainted_by: string | null; on_behalf_of: string | null; command: string }>(sql`SELECT tainted_by, on_behalf_of, command FROM proposals WHERE status = 'pending' AND command LIKE 'offboarding.%' ORDER BY id`);
     expect(rows.map((r) => r.command)).toEqual(["offboarding.final_pay", "offboarding.suspend_directory", "offboarding.lock_device"]);
     expect(rows.every((r) => r.tainted_by === null && r.on_behalf_of === "usr_dana")).toBe(true);

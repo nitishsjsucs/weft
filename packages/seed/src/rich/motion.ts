@@ -17,7 +17,6 @@ import { day, joinAnd, paycheckNote } from "./flag-notes";
 
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
-const DEMO_DOC = "DEMO DOCUMENT. Fictional company, fictional person, simulated signature. Not a real record.";
 type W = typeof workers.$inferSelect;
 type Bump = (table: string, n?: number) => void;
 type Proposal = (p: Record<string, unknown>) => Promise<string>;
@@ -47,7 +46,7 @@ export async function offerDocuments(L: { tx: DbTx; bump: Bump }, offerId: strin
   if (!o) throw new Error(`rich seed: no offer ${offerId}`);
   const [co] = await tx.select().from(companies).where(eq(companies.id, o.companyId));
   const letterText = await offerLetterFor(tx, o);
-  const ndaText = confidentialityText({ companyName: co?.legalName ?? "Larkspur Robotics, Inc. (demo)", candidateFirst: o.candidateFirst, candidateLast: o.candidateLast, offerId: o.id });
+  const ndaText = confidentialityText({ companyName: co?.legalName ?? "Larkspur Robotics, Inc.", candidateFirst: o.candidateFirst, candidateLast: o.candidateLast, offerId: o.id });
   const base = { companyId: o.companyId, workerId, offerId: o.id, createdAt: sentAt, sentAt, signedAt, status };
   const letter = await newId(tx, "doc_");
   await tx.insert(documents).values({ ...base, id: letter, kind: "offer_letter", title: `Offer letter: ${o.title}`, bodyText: letterText, sha256: sha256Hex(letterText) });
@@ -93,7 +92,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
     // row exists only once the letter is signed.
     const reserved = workerId ?? (o.status === "viewed" ? await newId(tx, "wrk_") : null);
     if (reserved) {
-      await tx.insert(principals).values({ id: await newId(tx, "usr_"), companyId: CO, kind: "human", workerId: reserved, display: `${o.first} ${o.last} (demo)`, email: mail, role: "employee",
+      await tx.insert(principals).values({ id: await newId(tx, "usr_"), companyId: CO, kind: "human", workerId: reserved, display: `${o.first} ${o.last}`, email: mail, role: "employee",
         grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
       L.bump("principals");
     }
@@ -108,9 +107,9 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       const ids = await offerDocuments(L, id, reserved, status, o.sent ?? o.created, o.accepted ?? null);
       await tx.update(offers).set({ documentId: ids.letter }).where(eq(offers.id, id));
     }
-    if (o.sent) await email(L, mail, `Your offer from Larkspur Robotics (demo): ${o.title}`, `Hi ${o.first}, your offer is ready to review and sign in the Weft portal (demo). It expires on ${o.expires}.`, "offer_sent", id, o.sent);
-    if (o.accepted) await email(L, mail, "Welcome to Larkspur Robotics (demo)", `Hi ${o.first}, thanks for signing. Your first day is ${o.start}. Your checklist is in the portal (demo).`, "offer_accepted", id, o.accepted);
-    if (o.voided) await email(L, mail, "Your Larkspur Robotics (demo) offer was withdrawn", `Hi ${o.first}, the ${o.title} offer was withdrawn after the role was put on hold.`, "offer_voided", id, o.voided);
+    if (o.sent) await email(L, mail, `Your offer from Larkspur Robotics: ${o.title}`, `Hi ${o.first}, your offer is ready to review and sign in the Weft portal. It expires on ${o.expires}.`, "offer_sent", id, o.sent);
+    if (o.accepted) await email(L, mail, "Welcome to Larkspur Robotics", `Hi ${o.first}, thanks for signing. Your first day is ${o.start}. Your checklist is in the portal.`, "offer_accepted", id, o.accepted);
+    if (o.voided) await email(L, mail, "Your Larkspur Robotics offer was withdrawn", `Hi ${o.first}, the ${o.title} offer was withdrawn after the role was put on hold.`, "offer_voided", id, o.voided);
     // A background check is ordered once an offer is accepted (the screening follow-up routine's trigger); a sent or
     // viewed offer has none yet.
     if (o.status === "accepted") {
@@ -119,7 +118,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
         etaOn: null, createdAt: pt("2026-10-07", 10), completedAt: pt("2026-10-09", 12) });
       L.bump("screening_orders");
     }
-    L.action({ ts: o.created, actorKind: "human", actorId: "usr_sam", command: "offers.create", args: { offer_id: id }, summary: `Drafted offer ${id} for ${o.first} ${o.last} (demo), ${o.title}`, reversible: "no" });
+    L.action({ ts: o.created, actorKind: "human", actorId: "usr_sam", command: "offers.create", args: { offer_id: id }, summary: `Drafted offer ${id} for ${o.first} ${o.last}, ${o.title}`, reversible: "no" });
   }
   // The accepted hire's checklist: five of seven done, bank and I-9 still open.
   if (hireId) {
@@ -129,7 +128,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
       L.bump("onboarding_tasks");
     }
     const r = await L.run({ at: pt("2026-10-07", 9, 5), trigger: "routine", routineId: "rt_new_hire", triggerRef: `event:offer.accepted:${hireId}`, onBehalfOf: "usr_dana",
-      final: `Elias Brandt (demo) accepted. Created accounts, posted the welcome in #new-hires and proposed the laptop order.`,
+      final: `Elias Brandt accepted. Created accounts, posted the welcome in #new-hires and proposed the laptop order.`,
       tools: [{ name: "it__create_account", args: { worker_id: hireId, system: "google_ws" }, data: { created: true } }, { name: "it__order_device", args: { worker_id: hireId }, data: { proposed: true } }],
       checklist: [{ id: "accounts", label: "create accounts", passed: true }, { id: "device", label: "propose the laptop", passed: true }] });
     // Planted from it.order_device's own preview: its risk (R4), the catalog price and the ship-to the live card shows.
@@ -144,7 +143,7 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
     const year = Number(draft.periodEnd.slice(0, 4));
     const flagged = (await tx.select().from(paychecks).where(eq(paychecks.payrollRunId, draft.id)))
       .map((pc) => ({ pc, flags: JSON.parse(pc.flagsJson) as Flag[] })).filter((x) => x.flags.length > 0);
-    const names = new Map(ws.map((w) => [w.id, `${w.firstName} ${w.lastName} (demo)`]));
+    const names = new Map(ws.map((w) => [w.id, `${w.firstName} ${w.lastName}`]));
     const blocked = flagged.filter((x) => x.flags.some((f) => f.severity === "block")).map((x) => names.get(x.pc.workerId) ?? "One person");
     // The counts the Payroll page shows for this draft (its anomaly summary), so the review and the page agree.
     const counts = { needsReview: 0, blocked: 0, ...(JSON.parse(draft.anomalySummaryJson ?? "{}") as { needsReview?: number; blocked?: number }) };
@@ -190,17 +189,17 @@ async function seedHiring(L: MotionApi, ws: W[]): Promise<string | null> {
 async function seedExpenseHistory(L: MotionApi, ws: W[]): Promise<void> {
   const emp = ws.filter((w) => w.type === "employee" && w.status === "active" && w.startDate < "2026-01-01");
   const claims: [string, string, number, string, string, number | null][] = [
-    ["travel", "Bayline Air (demo)", 38_420, "2026-01-21", "Customer visit in Austin", null], ["meals", "Harbor Noodle Bar (demo)", 6_480, "2026-02-04", "Team lunch with a prospect", null],
-    ["mileage", "Personal car (demo)", 0, "2026-02-18", "Drive to the Austin Yard test site", 603], ["software", "Sketchwell (demo)", 4_800, "2026-03-02", "Design tool seat", null],
-    ["travel", "Cedar Rail (demo)", 12_900, "2026-03-19", "Train to the Brooklyn studio", null], ["meals", "Lantern Diner (demo)", 5_210, "2026-04-08", "Recruiting dinner", null],
-    ["lodging", "Pinecrest Inn (demo)", 10_840, "2026-04-22", "Night before the trade show", null], ["mileage", "Personal car (demo)", 0, "2026-05-06", "Supplier visit in Fremont", 392],
-    ["software", "Fleetlog Cloud (demo)", 4_900, "2026-05-27", "Fleet log analysis seat", null], ["travel", "Bayline Air (demo)", 41_250, "2026-06-10", "Field trial in Austin", null],
-    ["meals", "Harbor Noodle Bar (demo)", 7_120, "2026-06-24", "Onboarding lunch", null], ["lodging", "Pinecrest Inn (demo)", 10_600, "2026-07-15", "Night before the site install", null],
-    ["mileage", "Personal car (demo)", 0, "2026-08-05", "Drives between Oakland and the warehouse", 820], ["software", "Sketchwell (demo)", 4_800, "2026-08-12", "Design tool seat", null],
-    ["travel", "Cedar Rail (demo)", 9_800, "2026-08-18", "Train to the customer review", null], ["meals", "Lantern Diner (demo)", 6_900, "2026-07-28", "Dinner with the integration partner", null],
-    ["travel", "Bayline Air (demo)", 29_300, "2026-04-02", "Conference travel, submitted after 60 days", null], ["meals", "Harbor Noodle Bar (demo)", 4_100, "2026-07-01", "Working lunch", null],
+    ["travel", "Bayline Air", 38_420, "2026-01-21", "Customer visit in Austin", null], ["meals", "Harbor Noodle Bar", 6_480, "2026-02-04", "Team lunch with a prospect", null],
+    ["mileage", "Personal car", 0, "2026-02-18", "Drive to the Austin Yard test site", 603], ["software", "Sketchwell", 4_800, "2026-03-02", "Design tool seat", null],
+    ["travel", "Cedar Rail", 12_900, "2026-03-19", "Train to the Brooklyn studio", null], ["meals", "Lantern Diner", 5_210, "2026-04-08", "Recruiting dinner", null],
+    ["lodging", "Pinecrest Inn", 10_840, "2026-04-22", "Night before the trade show", null], ["mileage", "Personal car", 0, "2026-05-06", "Supplier visit in Fremont", 392],
+    ["software", "Fleetlog Cloud", 4_900, "2026-05-27", "Fleet log analysis seat", null], ["travel", "Bayline Air", 41_250, "2026-06-10", "Field trial in Austin", null],
+    ["meals", "Harbor Noodle Bar", 7_120, "2026-06-24", "Onboarding lunch", null], ["lodging", "Pinecrest Inn", 10_600, "2026-07-15", "Night before the site install", null],
+    ["mileage", "Personal car", 0, "2026-08-05", "Drives between Oakland and the warehouse", 820], ["software", "Sketchwell", 4_800, "2026-08-12", "Design tool seat", null],
+    ["travel", "Cedar Rail", 9_800, "2026-08-18", "Train to the customer review", null], ["meals", "Lantern Diner", 6_900, "2026-07-28", "Dinner with the integration partner", null],
+    ["travel", "Bayline Air", 29_300, "2026-04-02", "Conference travel, submitted after 60 days", null], ["meals", "Harbor Noodle Bar", 4_100, "2026-07-01", "Working lunch", null],
   ];
-  const attendees = ["Priya Raman (demo), Marcus Hale (demo)", "Ana Sousa (demo)", "Jonah Pell (demo), Kofi Mensah (demo), Mira Delgado (demo)", "Ben Ashdown (demo)", "Lena Brooks (demo)"];
+  const attendees = ["Priya Raman, Marcus Hale", "Ana Sousa", "Jonah Pell, Kofi Mensah, Mira Delgado", "Ben Ashdown", "Lena Brooks"];
   const seen = new Map<string, policy.PolicyItem[]>();
   let meal = 0;
   for (const [i, [category, merchant, listed, date, purpose, miles]] of claims.entries()) {
@@ -226,7 +225,7 @@ async function seedExpenseHistory(L: MotionApi, ws: W[]): Promise<void> {
       checksJson: JSON.stringify(checks),
       approverPrincipalId: "usr_dana", decidedBy: "usr_dana", decidedAt: pt(decided, 11), decisionReasonCode: late ? "taxable_late" : null,
       decisionNote: late ? "Paid as taxable wages (accountable plan window passed). Reimbursed on the previous provider's payroll." : "Reimbursed on the previous provider's payroll.", policyVersion: 1, source: i % 5 === 0 ? "email" : "portal" });
-    L.action({ ts: pt(decided, 11), actorKind: "human", actorId: "usr_dana", command: "expenses.decide", args: { expense_id: id, decision: late ? "approve_taxable" : "approve" }, summary: `Approved expense ${id} for ${w.firstName} ${w.lastName} (demo)${late ? " as taxable wages" : ""}`, reversible: "no" });
+    L.action({ ts: pt(decided, 11), actorKind: "human", actorId: "usr_dana", command: "expenses.decide", args: { expense_id: id, decision: late ? "approve_taxable" : "approve" }, summary: `Approved expense ${id} for ${w.firstName} ${w.lastName}${late ? " as taxable wages" : ""}`, reversible: "no" });
     L.bump("expenses");
   }
 }
@@ -268,13 +267,13 @@ async function seedIntegrations(L: MotionApi): Promise<void> {
 /** August clean (no findings), September with three findings (two resolved, one disputed); October stays un-run. */
 async function seedReconciliation(L: MotionApi, ws: W[]): Promise<void> {
   const w = ws.find((x) => x.id === "wrk_0017");
-  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual (sim)", kind: "wrong_tier", workerId: w?.id ?? null, planId: null,
+  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual", kind: "wrong_tier", workerId: w?.id ?? null, planId: null,
     billedCents: 98_400, expectedCents: 61_200, deductedCents: 61_200, status: "resolved", detail: "Billed at family tier after a tier change to employee and spouse; the carrier credited the difference on the October invoice.", createdAt: "2026-10-02T17:00:00.000Z" });
   const leaver = ws.find((x) => x.type === "employee" && x.endDate !== null && x.endDate >= "2026-07-01" && x.endDate <= "2026-08-31");
-  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual (sim)", kind: "terminated_but_billed", workerId: leaver?.id ?? null, planId: null,
+  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual", kind: "terminated_but_billed", workerId: leaver?.id ?? null, planId: null,
     billedCents: 61_200, expectedCents: 0, deductedCents: 0, status: "resolved", detail: "Still billed after coverage ended with the August departure; the carrier credited the premium on the October invoice.", createdAt: "2026-10-02T17:05:00.000Z" });
   const sam = ws.find((x) => x.id === "wrk_0025");
-  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual (sim)", kind: "amount_mismatch", workerId: sam?.id ?? null, planId: null,
+  await L.tx.insert(benefitReconFindings).values({ id: await newId(L.tx, "rcf_"), companyId: CO, month: "2026-09", carrier: "Juniper Mutual", kind: "amount_mismatch", workerId: sam?.id ?? null, planId: null,
     billedCents: 39_800, expectedCents: 38_000, deductedCents: 38_000, status: "disputed", detail: "Billed at the 2027 rate a quarter early; a dispute went to the carrier on Oct 2 and is waiting for its reply.", createdAt: "2026-10-02T17:10:00.000Z" });
   L.bump("benefit_recon_findings", 3);
 }
@@ -284,15 +283,15 @@ async function seedItAndContractors(L: MotionApi, ws: W[], hireId: string | null
   const { tx } = L;
   for (const w of ws.filter((x) => x.type === "employee" && x.startDate >= "2026-01-01")) {
     const shipped = w.id === "wrk_0022";
-    await tx.insert(simDeviceOrders).values({ id: await newId(tx, "simd_"), workerId: w.id, sku: "larkspur-standard-laptop", shipTo: "Oakland office (demo)", priceCents: 189_900, status: shipped ? "shipped" : "delivered",
+    await tx.insert(simDeviceOrders).values({ id: await newId(tx, "simd_"), workerId: w.id, sku: "larkspur-standard-laptop", shipTo: "Oakland office", priceCents: 189_900, status: shipped ? "shipped" : "delivered",
       eta: pt(shipped ? "2026-10-28" : w.startDate, 12), createdAt: pt(new Date(Date.parse(`${w.startDate}T12:00:00Z`) - 10 * 86_400_000).toISOString().slice(0, 10), 10) });
     L.bump("sim_device_orders");
   }
   for (const w of ws.filter((x) => x.type === "contractor")) {
     const handle = `${w.firstName.toLowerCase()}.${w.lastName.toLowerCase()}.guest`;
     await tx.insert(itAccounts).values({ id: await newId(tx, "ita_"), workerId: w.id, system: "chat", handle, groupsJson: JSON.stringify(["#eng-contractors"]), status: "active" }).onConflictDoNothing();
-    await tx.insert(devices).values({ id: await newId(tx, "dev_"), workerId: w.id, model: "Contractor field tablet (sim)", status: "delivered", orderRef: null, priceCents: 64_900 });
-    const body = `${DEMO_DOC}\n\nIndependent contractor agreement\nLarkspur Robotics (demo)\n${w.firstName} ${w.lastName} (demo)\nMonthly fee in ${w.currency}, paid on the payment rail.`;
+    await tx.insert(devices).values({ id: await newId(tx, "dev_"), workerId: w.id, model: "Contractor field tablet", status: "delivered", orderRef: null, priceCents: 64_900 });
+    const body = `Independent contractor agreement\nLarkspur Robotics\n${w.firstName} ${w.lastName}\nMonthly fee in ${w.currency}, paid on the payment rail.`;
     await tx.insert(documents).values({ id: await newId(tx, "doc_"), companyId: CO, workerId: w.id, offerId: null, kind: "offer_letter", title: "Independent contractor agreement", status: "signed", bodyText: body,
       sha256: sha256Hex(body), createdAt: pt(w.startDate, 9), sentAt: pt(w.startDate, 9), signedAt: pt(w.startDate, 15) });
     L.bump("documents"); L.bump("devices");
@@ -317,7 +316,7 @@ async function seedItAndContractors(L: MotionApi, ws: W[], hireId: string | null
   void contractorTaxForms;
 }
 
-/** The October expense decisions already on the planted claims, as the proposals Dana approved from a chat review. */
+/** The October expense decisions already on the planted claims, as the proposals Vic approved from a chat review. */
 async function seedExpenseDecisions(L: MotionApi, ws: W[]): Promise<void> {
   const decided = (await L.tx.select().from(expenses).orderBy(asc(expenses.id))).filter((e) => (e.status === "approved" || e.status === "declined") && e.decidedAt && e.id <= "exp_0014");
   if (!decided.length) return;
@@ -327,7 +326,7 @@ async function seedExpenseDecisions(L: MotionApi, ws: W[]): Promise<void> {
     final: `Reviewed ${decided.length} submitted claims against the policy and proposed a decision for each; approvals stay with you.` });
   for (const e of decided) {
     const w = ws.find((x) => x.id === e.workerId);
-    const who = w ? `${w.firstName} ${w.lastName} (demo)` : e.workerId;
+    const who = w ? `${w.firstName} ${w.lastName}` : e.workerId;
     const approve = e.status === "approved";
     const year = Number(e.transactionDate.slice(0, 4));
     await L.proposal({ at, command: "expenses.decide", args: { expense_id: e.id, decision: approve ? "approve" : "decline" }, subjectRef: `expense:${e.id}`, risk: "R2", domain: "payroll",

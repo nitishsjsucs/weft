@@ -20,18 +20,18 @@ describe("seed people (SPEC 5.2)", () => {
     expect(offers).toEqual([{ id: "offr_0001", status: "sent", candidate_first: "Noor", work_state: "CO" }]);
   });
 
-  it("every displayed name ends with (demo) and every email domain is *.example", async () => {
+  it("every displayed name is the seeded first and last name with no suffix, and every email domain is *.example", async () => {
     const res = await get("/v1/workers?limit=100");
     const body = Page(Worker).parse(await res.json());
     expect(body.count).toBe(51);
     for (const w of body.data) {
-      expect(w.displayName.endsWith(" (demo)"), w.id).toBe(true);
+      expect(w.displayName, w.id).toBe(`${w.firstName} ${w.lastName}`);
       expect(w.workEmail.endsWith(".example"), w.id).toBe(true);
     }
     const emails = await weft.db.all<{ e: string }>(sql`SELECT candidate_email AS e FROM offers UNION ALL SELECT personal_email FROM workers WHERE personal_email IS NOT NULL`);
     for (const { e } of emails) expect(e.split("@")[1]!.endsWith(".example")).toBe(true);
     const co = await weft.db.all<{ legal_name: string; domain: string }>(sql`SELECT legal_name, domain FROM companies`);
-    expect(co).toEqual([{ legal_name: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example" }]);
+    expect(co).toEqual([{ legal_name: "Larkspur Robotics, Inc.", domain: "larkspur.example" }]);
   });
 
   it("exactly 3 CA workers are under the $7,000 SUI wage base before the Oct 30 run", async () => {
@@ -84,11 +84,11 @@ describe("GET /v1/workers", () => {
     expect(c.data.map((w) => w.currency)).toEqual(["EUR", "INR", "CAD"]);
   });
 
-  it("detail masks the SSN and shows compensation to Dana", async () => {
+  it("detail masks the SSN and shows compensation to Vic", async () => {
     const res = await get("/v1/workers/wrk_0004");
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.worker.displayName).toBe("Imani Ferreira (demo)");
+    expect(body.worker.displayName).toBe("Imani Ferreira");
     expect(body.worker.ssnMasked).toMatch(/^\*\*\*-\*\*-\d{4}$/);
     expect(JSON.stringify(body)).not.toMatch(/\b\d{3}-\d{2}-\d{4}\b/);
     expect(body.payRates[0].amount).toEqual({ amount: 23_200_000, currency: "USD", display: "$232,000.00" });
@@ -106,13 +106,13 @@ describe("people and onboarding read commands", () => {
   it("people.search is concise, readable and never returns profile fields", async () => {
     const out = await runDirect("people.search", { state: "CA", response_format: null }, directCtx(weft.clock), deps());
     expect(out.data.total).toBe(22);
-    expect(out.data.workers[0]).toEqual({ id: "wrk_0001", name: "Dana Whitfield (demo) (wrk_0001)", title: "Head of People", department: "People", work_state: "CA", status: "active", start_date: "2023-03-01" });
+    expect(out.data.workers[0]).toEqual({ id: "wrk_0001", name: "Vic Akisole (wrk_0001)", title: "Head of People", department: "People", work_state: "CA", status: "active", start_date: "2023-03-01" });
     expect(JSON.stringify(out)).not.toMatch(/preferred|personal_email|home_address/);
     const q = await runDirect("people.search", { query: "Ferreira" }, directCtx(weft.clock), deps());
     expect(q.data.workers.map((w: { id: string }) => w.id)).toEqual(["wrk_0004"]);
-    // A full name, the readable name with its (demo) suffix, and a short id all find the one worker (live L5 searched
+    // A full name, the readable reference with its short id, and a short id all find the one worker (live L5 searched
     // "Hollis Grey" and found nobody when only single fields were matched).
-    for (const query of ["Imani Ferreira", "Imani Ferreira (demo)", "wrk_0004"]) {
+    for (const query of ["Imani Ferreira", "Imani Ferreira (wrk_0004)", "wrk_0004"]) {
       const r = await runDirect("people.search", { query }, directCtx(weft.clock), deps());
       expect(r.data.workers.map((w: { id: string }) => w.id), query).toEqual(["wrk_0004"]);
     }

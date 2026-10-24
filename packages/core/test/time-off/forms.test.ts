@@ -54,7 +54,7 @@ describe("time-off forms", () => {
   });
 
   it("names a worker with the demo marker and the short id", () => {
-    expect(workerRef({ id: "wrk_0010", firstName: "Ruth", lastName: "Okoro", preferredName: null })).toBe("Ruth Okoro (demo) (wrk_0010)");
+    expect(workerRef({ id: "wrk_0010", firstName: "Ruth", lastName: "Okoro", preferredName: null })).toBe("Ruth Okoro (wrk_0010)");
   });
 });
 

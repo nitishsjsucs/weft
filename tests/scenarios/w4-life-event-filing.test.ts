@@ -1,6 +1,6 @@
 // Scenario (wave 4, w4-parity-people): life-event elections reach the carrier simulator as a proposal and come back
 // with a receipt. Scripted provider (scenarios/rt_life_event_window.json). The employee elects in the window, the
-// routine proposes benefits.submit_elections (R3, never executed by the agent), Dana approves, the scheduler hands
+// routine proposes benefits.submit_elections (R3, never executed by the agent), Vic approves, the scheduler hands
 // the filing to the simulated carrier and records the receipt with carrier.submission_confirmed.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
@@ -16,7 +16,7 @@ beforeAll(async () => {
   weft = await createTestWeft();
   // A portal sign-in with the persona's grants (people and benefits view) for one active employee.
   const [w] = await weft.db.select().from(workers).where(and(eq(workers.type, "employee"), eq(workers.status, "active"))).limit(1);
-  await weft.db.insert(principals).values({ id: HIRE, companyId: "cmp_larkspur", kind: "human", workerId: w!.id, display: "Test filer (demo)", email: null, role: "employee",
+  await weft.db.insert(principals).values({ id: HIRE, companyId: "cmp_larkspur", kind: "human", workerId: w!.id, display: "Test filer", email: null, role: "employee",
     grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
 });
 afterAll(async () => {
@@ -62,7 +62,7 @@ describe("life-event elections filed with the carrier and the 401(k) provider", 
     const el = await call("POST", `/v1/portal/enrollment-windows/${windowId}/elections`, { elections: [{ planId: medical.id, tier: "family" }, { planId: k401.id, deferralBps: 600 }] }, HIRE);
     expect(el.status, JSON.stringify(el.json)).toBe(200);
     filings = (await call("GET", `/v1/carrier-submissions?windowId=${windowId}`)).json;
-    expect(filings.map((f) => [f.carrier, f.status])).toEqual([["Juniper Mutual (sim)", "queued"], ["Tidewater Retirement (sim)", "queued"]]);
+    expect(filings.map((f) => [f.carrier, f.status])).toEqual([["Juniper Mutual", "queued"], ["Tidewater Retirement", "queued"]]);
   });
 
   it("the routine proposes the filing; nothing is sent until a person approves", async () => {
@@ -71,7 +71,7 @@ describe("life-event elections filed with the carrier and the 401(k) provider", 
     const props = (await call("GET", "/v1/proposals?status=pending")).json.data as { id: string; command: string; headline: string }[];
     const p = props.find((x) => x.command === "benefits.submit_elections");
     expect(p, JSON.stringify(props.map((x) => x.command))).toBeDefined();
-    expect(p!.headline).toBe("File 2 benefit election filings with Juniper Mutual (sim) and Tidewater Retirement (sim)");
+    expect(p!.headline).toBe("File 2 benefit election filings with Juniper Mutual and Tidewater Retirement");
     expect(((await call("GET", `/v1/carrier-submissions?windowId=${windowId}`)).json as { status: string }[]).every((f) => f.status === "queued")).toBe(true);
 
     expect((await call("POST", `/v1/proposals/${p!.id}/approve`, { reasonCode: "looks_right", note: "" })).status).toBe(200);
@@ -95,7 +95,7 @@ describe("life-event elections filed with the carrier and the 401(k) provider", 
   });
 
   it("the carrier simulator rejects a line it does not take", () => {
-    expect(fileElections({ submissionId: "csb_x", carrier: "Tidewater Retirement (sim)", workerId: "wrk_x", effectiveOn: "2026-10-23", lines: [{ plan_id: "bpl_x", type: "medical", tier: "ee", deferral_bps: null }] }))
-      .toEqual({ status: "rejected", receiptRef: null, reason: "Tidewater Retirement (sim) does not take medical elections" });
+    expect(fileElections({ submissionId: "csb_x", carrier: "Tidewater Retirement", workerId: "wrk_x", effectiveOn: "2026-10-23", lines: [{ plan_id: "bpl_x", type: "medical", tier: "ee", deferral_bps: null }] }))
+      .toEqual({ status: "rejected", receiptRef: null, reason: "Tidewater Retirement does not take medical elections" });
   });
 });

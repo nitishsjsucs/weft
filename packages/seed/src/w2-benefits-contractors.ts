@@ -1,6 +1,6 @@
 // Seed step "w2_benefits_contractors" (wave 2, docs/wave2.md). Owner: w2-benefits-contractors. Runs after "payroll". Keep it deterministic (ctx.faker, id counters).
 // Seeds the fixed FX table from packages/sim/src/fx.ts and one 2027 open enrollment row per eligible employee. The
-// carrier reconciliation fixtures need no new rows: the carrier simulator bills Owen Mercer (demo), whose last day is
+// carrier reconciliation fixtures need no new rows: the carrier simulator bills Owen Mercer, whose last day is
 // 2026-10-23 and whose enrollments were never terminated, and plants the tier errors on the first single and the first
 // family medical enrollment (packages/sim/src/carrier.ts). Wave 1 counts are untouched.
 import { fxRates, openEnrollment } from "@weft/db";

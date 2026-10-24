@@ -112,7 +112,8 @@ describe("prompt version and hygiene", () => {
     expect(version).not.toBe("p-274e2ca31b6d");   // w4.r2
     // A wording change moves this hash: update it together with PROMPT_REVISION.
     expect(version).not.toBe("p-15292b43192d");   // dp.r1
-    expect({ revision: PROMPT_REVISION, version }).toEqual({ revision: "dp.r2", version: "p-fd1776ba7e9d" });
+    expect(version).not.toBe("p-fd1776ba7e9d");   // dp.r2
+    expect({ revision: PROMPT_REVISION, version }).toEqual({ revision: "cu.r1", version: "p-7598a57275fd" });
   });
 
   it("new rules replace text: no prompt is longer than its round 1 (w4.r1) length", () => {

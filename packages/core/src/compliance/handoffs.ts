@@ -14,7 +14,7 @@ export type HandoffRow = typeof handoffCases.$inferSelect;
 export const HANDOFF_ASSIGNEE: Record<HandoffKind, { principal: string; name: string; email: string }> = {
   tax_specialist: { principal: SPECIALIST.principal, name: SPECIALIST.name, email: SPECIALIST.email },
   hr_person: { principal: "usr_dana", name: "People team", email: "people@larkspur.example" },
-  vendor_specialist: { principal: "sim_vendor_specialist", name: "Vendor specialist (simulated)", email: "vendor-specialist@weft-sim.example" },
+  vendor_specialist: { principal: "sim_vendor_specialist", name: "Vendor specialist", email: "vendor-specialist@advisors.example" },
 };
 
 export const HANDOFF_REASON_LABEL: Record<HandoffReason, string> = {
@@ -88,7 +88,7 @@ export async function evidenceFor(tx: DbTx, companyId: string, subjectRef: strin
 export function handoffEmail(c: { id: string; kind: HandoffKind; reason: HandoffReason; summary: string; subjectRef: string | null; evidence: { label: string; ref: string }[] }): { subject: string; body: string } {
   return {
     subject: `Hand-off ${c.id}${c.subjectRef ? ` for ${c.subjectRef}` : ""}`,
-    body: [`Larkspur Robotics (demo) is handing this to ${HANDOFF_ASSIGNEE[c.kind].name.toLowerCase()} because ${HANDOFF_REASON_LABEL[c.reason]}.`, "", c.summary, "", "Evidence pack:",
-      ...c.evidence.map((x) => `- ${x.label}: ${x.ref}`), "", "(sent by Weft; this recipient is simulated)"].join("\n"),
+    body: [`Larkspur Robotics is handing this to ${HANDOFF_ASSIGNEE[c.kind].name.toLowerCase()} because ${HANDOFF_REASON_LABEL[c.reason]}.`, "", c.summary, "", "Evidence pack:",
+      ...c.evidence.map((x) => `- ${x.label}: ${x.ref}`), "", "(sent by Weft)"].join("\n"),
   };
 }

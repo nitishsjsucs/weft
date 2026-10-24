@@ -88,7 +88,7 @@ describe("GET /v1/routine-gallery", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     const [card] = (await weft.db.select().from(proposals)).filter((p) => p.kind === "routine_enable" && p.status === "pending");
     let row = byId(await gallery(), card!.subjectRef!);
-    expect(row).toMatchObject({ source: "custom", createdBy: "usr_dana", createdByName: "Dana Whitfield (demo)", enabled: false, enabledAt: null, nextRunAt: null });
+    expect(row).toMatchObject({ source: "custom", createdBy: "usr_dana", createdByName: "Vic Akisole", enabled: false, enabledAt: null, nextRunAt: null });
     await weft.clock.set("2026-10-26T18:00:00.000Z", 0);
     expect((await post(`/v1/proposals/${card!.id}/approve`, { reasonCode: null, note: null })).status).toBe(200);
     row = byId(await gallery(), card!.subjectRef!);

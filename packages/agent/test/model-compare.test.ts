@@ -66,7 +66,7 @@ describe("the runtime records the override on the runs it opens", () => {
     const rt = createAgentRuntime({
       db, clock, executor, provider: p, env, ledger: createSpendLedger({ dir: join(dataDir, "spend"), caps: { runUsd: 0.1, dayUsd: 2, liveUsd: 0.5 } }),
       routinesView: { get: async () => null, checklist: async () => [] },
-      contextSource: { chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics (demo).", openLoops: [] }) },
+      contextSource: { chat: async () => ({ actingFor: "Vic Reyes (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics.", openLoops: [] }) },
     });
     const h = { runId: "run_0001", token: "tok" };
     await rt.startChat(h, { text: "Anything to do today?", recipe: "chat", pageContext: null });

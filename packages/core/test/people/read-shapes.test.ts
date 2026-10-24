@@ -23,7 +23,7 @@ beforeAll(async () => {
   const t = await openTempDb();
   db = t.db; close = t.close;
   ids = await buildFixtureWorld(db);
-  await db.insert(principals).values({ id: "usr_theo", companyId: CO, kind: "human", workerId: null, display: "Theo Marsh (demo)", email: "theo@larkspur.example", role: "payroll_admin", grantsJson: "[]" });
+  await db.insert(principals).values({ id: "usr_theo", companyId: CO, kind: "human", workerId: null, display: "Theo Marsh", email: "theo@larkspur.example", role: "payroll_admin", grantsJson: "[]" });
   await seedPayHistory(db, { newId: idMinter(db), bank: bank.bank, credential: "vault:sim-bank-operating", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
 });
 afterAll(async () => { await close(); });
@@ -114,11 +114,11 @@ describe("people.get", () => {
     expect(w.onboarding.done_count).toBe(1);
     expect(w.onboarding.done).toEqual(["Federal W-4"]);
     expect(w.onboarding.open_items.map((t) => [t.kind, t.status])).toEqual([["direct_deposit", "blocked"], ["i9_sim", "pending"]]);
-    expect(w.onboarding.open_items.find((t) => t.kind === "i9_sim")!.label).toBe("Form I-9 (simulated)");
+    expect(w.onboarding.open_items.find((t) => t.kind === "i9_sim")!.label).toBe("Form I-9");
     expect(w.onboarding.open_items.find((t) => t.kind === "direct_deposit")!.blocked_reason).toBe("no bank account");
     // The checklist read labels its items the same way.
     const cl = await exec<{ tasks: { kind: string; label: string }[] }>("onboarding.get_checklist", { worker_id: id });
-    expect(cl.tasks.find((t) => t.kind === "i9_sim")!.label).toBe("Form I-9 (simulated)");
+    expect(cl.tasks.find((t) => t.kind === "i9_sim")!.label).toBe("Form I-9");
   });
 
   it("an offboarding worker carries the case and every step with status", async () => {
@@ -145,10 +145,10 @@ describe("pay run approval facts", () => {
     const runs = (await exec<{ runs: { run_id: string; status: string; approved_by: string | null; approved_by_id: string | null; approved_at: string | null }[] }>("payroll.list_runs", {})).runs;
     const submitted = runs.filter((r) => r.status !== "draft");
     expect(submitted.length).toBeGreaterThan(0);
-    for (const r of submitted) expect(r).toMatchObject({ approved_by: "Theo Marsh (demo)", approved_by_id: "usr_theo", approved_at: expect.stringMatching(/^2026-/) });
+    for (const r of submitted) expect(r).toMatchObject({ approved_by: "Theo Marsh", approved_by_id: "usr_theo", approved_at: expect.stringMatching(/^2026-/) });
     for (const r of runs.filter((x) => x.status === "draft")) expect(r).toMatchObject({ approved_by: null, approved_by_id: null, approved_at: null });
     const one = await exec<Record<string, unknown>>("payroll.get_run", { run_id: submitted.at(-1)!.run_id });
-    expect(one).toMatchObject({ approved_by: "Theo Marsh (demo)", approved_by_id: "usr_theo", approved_at: submitted.at(-1)!.approved_at });
+    expect(one).toMatchObject({ approved_by: "Theo Marsh", approved_by_id: "usr_theo", approved_at: submitted.at(-1)!.approved_at });
   });
 
   it("an approver with no principal row falls back to the id", async () => {

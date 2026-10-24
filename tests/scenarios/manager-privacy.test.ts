@@ -1,5 +1,5 @@
-// Scenario: a manager's reads stop at her reports (packages/core/src/people/scope.ts). Imani Ferreira (demo), the
-// Hardware lead, asks the chat agent for Priya Raman (demo)'s salary: the agent's people.get result holds directory
+// Scenario: a manager's reads stop at her reports (packages/core/src/people/scope.ts). Imani Ferreira, the
+// Hardware lead, asks the chat agent for Priya Raman's salary: the agent's people.get result holds directory
 // fields and an access block, so the answer declines and carries no pay figure (scenarios/chat_manager_outsider_pay.json,
 // dev task PE-11). Then the Workday and Greenhouse reads she can reach withhold an outsider's pay the same way. Scripted
 // provider only; nothing here calls a live model.

@@ -39,7 +39,7 @@ describe("benefits (SPEC 5.3)", () => {
     const plans = await runDirect("benefits.list_plans", {}, directCtx(weft.clock), deps);
     expect(plans.data.plans[0]).toMatchObject({ name: "Juniper PPO 1500", prices: { ee: { cents: 9500, display: "$95.00" }, employer: { cents: 38000, display: "$380.00" } }, active_enrollments: 30 });
     const e = await runDirect("benefits.get_enrollment", { worker_id: "wrk_0001" }, directCtx(weft.clock), deps);
-    expect(e.data.worker).toBe("Dana Whitfield (demo) (wrk_0001)");
+    expect(e.data.worker).toBe("Vic Akisole (wrk_0001)");
     expect(e.data.count).toBeGreaterThan(0);
   });
 });

@@ -20,11 +20,11 @@ export async function seedMemoryFiles(db: DbTx, companyId: string, now: string):
   }
   for (const a of await db.select().from(taxAccounts).where(eq(taxAccounts.companyId, companyId))) {
     files.push({ path: `entities/agencies/${a.agency}-${a.accountType}.md`, text: renderDoc(fm(a.id, "agency", day, { aliases: [a.agency] }),
-      `# ${a.agency} (sim) ${a.accountType}\n\n- Jurisdiction ${a.jurisdiction} (${day}, src: seed)\n- Status ${a.status} (${day}, src: seed)\n- Account ${mask(a.accountNumber)} (${day}, src: seed)\n`) });
+      `# ${a.agency} ${a.accountType}\n\n- Jurisdiction ${a.jurisdiction} (${day}, src: seed)\n- Status ${a.status} (${day}, src: seed)\n- Account ${mask(a.accountNumber)} (${day}, src: seed)\n`) });
   }
   for (const w of await db.select().from(workers).where(eq(workers.companyId, companyId))) {
     files.push({ path: `entities/people/${w.id}.md`, text: renderDoc(fm(w.id, "person", day, { aliases: [`${w.firstName} ${w.lastName}`] }),
-      `# ${w.firstName} ${w.lastName} (demo)\n\n- Title ${w.title} (${day}, src: seed)\n- Status ${w.status} (${day}, src: seed)\n- Work state ${w.workState ?? "none"} (${day}, src: seed)\n- Start date ${w.startDate} (${day}, src: seed)\n`) });
+      `# ${w.firstName} ${w.lastName}\n\n- Title ${w.title} (${day}, src: seed)\n- Status ${w.status} (${day}, src: seed)\n- Work state ${w.workState ?? "none"} (${day}, src: seed)\n- Start date ${w.startDate} (${day}, src: seed)\n`) });
   }
   files.push({ path: "knowledge/procedures/state-sui-rate-notice.md", text: renderDoc(fm("proc-state-sui-rate-notice", "procedure", day),
     "# State SUI rate notice\n\n1. Read the notice and its extracted fields.\n2. Check the rate, the effective date and the account against the employer rates table.\n3. Propose `tax.update_rate` with the notice as the source.\n4. Draft the acknowledgement and propose sending it.\n5. Never pay or file anything without an approval.\n") });

@@ -9,7 +9,7 @@ import { paySchedules, workers } from "@weft/db";
 import type { SeedContext } from "./context";
 
 export const SEED_PAY_SCHEDULE = "ps_us_semimonthly";
-/** Theo Marsh (demo), Payroll Lead, approved the historic runs. */
+/** Theo Marsh, Payroll Lead, approved the historic runs. */
 export const SEED_HISTORY_APPROVER = "usr_theo";
 /**
  * The seed has no vault resolver (only the executor resolves credentials), so the historic batches carry the vault

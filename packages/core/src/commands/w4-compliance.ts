@@ -582,7 +582,7 @@ export const assignTrainingCmd = writeCommand<AssignInput>({
       if (open) { ids.push(open.id); continue; }
       const id = await deps.newId("tra_");
       await deps.tx.insert(trainingAssignments).values({ id, workerId: r.worker_id, courseId: c.id, dueOn: r.due_on, status: "assigned", assignedAt: ctx.now, remindedAt: null, completedAt: null, certificateUploadId: null, proposalId: ctx.approvedProposalId ?? null });
-      await deps.sims.email.send({ to: r.email, from: "people@larkspur.example", subject: `Required training: ${r.title}`, body: `Hi ${r.name.split(" ")[0]},\n\nPlease complete ${r.title} by ${r.due_on}. Open the Training section of your Weft portal to start and to record completion.\n\n(sent by Weft; demo)`, kind: "generic", relatedRef: id });
+      await deps.sims.email.send({ to: r.email, from: "people@larkspur.example", subject: `Required training: ${r.title}`, body: `Hi ${r.name.split(" ")[0]},\n\nPlease complete ${r.title} by ${r.due_on}. Open the Training section of your Weft portal to start and to record completion.\n\n(sent by Weft)`, kind: "generic", relatedRef: id });
       ids.push(id);
     }
     return {
@@ -612,7 +612,7 @@ export const sendTrainingRemindersCmd = writeCommand<Record<string, never>>({
     const rows = await reminderRows(deps.tx, ctx.companyId, ptDateOf(ctx.now));
     for (const a of rows) {
       const [w] = await deps.tx.select({ email: workers.workEmail, first: workers.firstName }).from(workers).where(eq(workers.id, a.workerId)).limit(1);
-      if (w) await deps.sims.email.send({ to: w.email, from: "people@larkspur.example", subject: `Reminder: ${a.courseTitle} ${a.status === "overdue" ? "is overdue" : `is due ${a.dueOn}`}`, body: `Hi ${w.first},\n\n${a.courseTitle} ${a.status === "overdue" ? `was due on ${a.dueOn}` : `is due on ${a.dueOn}`}. Open the Training section of your Weft portal to finish it.\n\n(sent by Weft; demo)`, kind: "generic", relatedRef: a.id });
+      if (w) await deps.sims.email.send({ to: w.email, from: "people@larkspur.example", subject: `Reminder: ${a.courseTitle} ${a.status === "overdue" ? "is overdue" : `is due ${a.dueOn}`}`, body: `Hi ${w.first},\n\n${a.courseTitle} ${a.status === "overdue" ? `was due on ${a.dueOn}` : `is due on ${a.dueOn}`}. Open the Training section of your Weft portal to finish it.\n\n(sent by Weft)`, kind: "generic", relatedRef: a.id });
       await deps.tx.update(trainingAssignments).set({ status: "reminded", remindedAt: ctx.now }).where(eq(trainingAssignments.id, a.id));
     }
     return { data: { reminded: rows.map((a) => a.id), count: rows.length }, summary: `Sent ${rows.length} training reminder${rows.length === 1 ? "" : "s"}` };

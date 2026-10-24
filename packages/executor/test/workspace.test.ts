@@ -48,7 +48,7 @@ describe("run workspace", () => {
     expect(posts).toEqual([{ channel: "#payroll", author: "Weft agent", text: "Approval needed: Update CA SUI rate from 0.034 to 0.015 (etr_0001)",
       // Wave 3 (ApprovalCardW3): the extra fields come from the stored preview and DB names, never from model text.
       card: { proposalId: "prp_0001", headline: "Update CA SUI rate from 0.034 to 0.015 (etr_0001)", risk: "R2", moneyCents: null,
-        routineName: null, subjectName: null, approverName: "Dana Whitfield (demo)", fields: [{ label: "rate", value: "0.034 to 0.015" }], status: "pending" } }]);
+        routineName: null, subjectName: null, approverName: "Vic Akisole", fields: [{ label: "rate", value: "0.034 to 0.015" }], status: "pending" } }]);
     void closeDb;
   });
 });

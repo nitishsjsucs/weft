@@ -1,5 +1,5 @@
 // Wiki-links and backlinks (harness 18 item 2). Fact and event bullets link the entities they mention as
-// [[entities/people/wrk_0002|Theo Marsh (demo)]], [[entities/states/CA]] or [[entities/notices/ntc_0002]].
+// [[entities/people/wrk_0002|Theo Marsh]], [[entities/states/CA]] or [[entities/notices/ntc_0002]].
 // Everything here is a pure, deterministic text transform: the store reads files, these functions rewrite them.
 
 export const WIKI_LINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g;

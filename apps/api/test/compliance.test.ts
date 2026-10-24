@@ -120,7 +120,7 @@ describe("Form 941 for 2026-Q3 from processed runs", () => {
     expect(viaUi.json).toMatchObject({ ok: true, status: "pending_approval" });
     const [p] = await weft.db.select().from(proposals).where(eq(proposals.id, viaUi.json.proposalId));
     expect(p).toMatchObject({ command: "tax.file_return", risk: "R4", subjectRef: id, status: "pending" });
-    expect(p!.headline).toBe("File Form 941 for 2026-Q3 with IRS (sim): $126,524.22 total, $0.00 balance due");
+    expect(p!.headline).toBe("File Form 941 for 2026-Q3 with IRS: $126,524.22 total, $0.00 balance due");
     expect(JSON.stringify(p!.contentJson)).toContain("Line 7 Adjustment for fractions of cents: -$0.13");
     expect((await weft.db.select().from(simAgencyMail)).length).toBe(before.length);
     expect((await weft.db.select().from(filings).where(eq(filings.id, id)))[0]!.status).toBe("draft");

@@ -46,10 +46,10 @@ describe("GP7 new-hire checklist unblocks payroll", () => {
   });
 
   it("direct deposit refuses a failed ABA checksum inline, verifies a valid one and stores only last 4 digits", async () => {
-    const bad = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "021000022", account: ACCOUNT, accountType: "checking", typedName: NAME });
+    const bad = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Tidepool Federal Credit Union", routing: "021000022", account: ACCOUNT, accountType: "checking", typedName: NAME });
     expect([bad.status, bad.json.code, bad.json.field]).toEqual([422, "INVALID_INPUT", "routing"]);
     expect(bad.json.message).toContain("ABA checksum");
-    const ok = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "021000021", account: ACCOUNT, accountType: "checking", typedName: NAME });
+    const ok = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Tidepool Federal Credit Union", routing: "021000021", account: ACCOUNT, accountType: "checking", typedName: NAME });
     expect(ok.status).toBe(200);
     expect(ok.json.data).toMatchObject({ routing_last4: "0021", account_last4: "0056", verification: "verified" });
     const banks = await weft.db.all<Record<string, unknown>>(sql`SELECT account_last4, routing_last4, credential_ref, status, source FROM bank_accounts WHERE worker_id = ${workerId}`);

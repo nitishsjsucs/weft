@@ -103,7 +103,7 @@ describe("DocuSign adapter (JWT grant, Connect HMAC, poll guard; fake fetch)", (
       : s.url.endsWith("/envelopes") ? { envelopeId: "env-1", status: "sent" } : { status: "completed", recipients: { signers: [{ clientUserId: "usr_0010", status: "completed" }] } });
     const c = createDocusignClient({ env: live(), fetch: f, nowMs: () => now });
     const docs = [{ weftDocId: "doc_1", title: "Offer letter", bytes: enc("letter"), sha256: "a".repeat(64) }, { weftDocId: "doc_2", title: "Confidentiality agreement", bytes: enc("nda"), sha256: "b".repeat(64) }];
-    expect(await c.send({ offerId: "offr_0002", documents: docs, signer: { name: "Rowan Ellery (demo)", email: "rowan@candidate.example", clientUserId: "usr_0010" }, expiresOn: "2026-11-09" })).toEqual({ envelopeId: "env-1", status: "sent" });
+    expect(await c.send({ offerId: "offr_0002", documents: docs, signer: { name: "Rowan Ellery", email: "rowan@candidate.example", clientUserId: "usr_0010" }, expiresOn: "2026-11-09" })).toEqual({ envelopeId: "env-1", status: "sent" });
     const post = seen.find((s) => s.url === "https://demo.example/restapi/v2.1/accounts/acct-test-0001/envelopes")!;
     const body = JSON.parse(post.body!);
     expect(body.documents).toHaveLength(2);

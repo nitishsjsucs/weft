@@ -11,7 +11,7 @@ import { completeTask } from "../onboarding/writes";
 /** HR-facing checklist item labels (the portal shows the employee-facing titles). */
 export const TASK_LABEL: Record<string, string> = {
   sign_offer: "Offer letter signed", sign_confidentiality: "Confidentiality agreement", federal_w4: "Federal W-4", state_withholding: "State withholding",
-  direct_deposit: "Direct deposit", i9_sim: "Form I-9 (simulated)", benefits_selection: "Benefits selection", it_accounts: "IT accounts", device: "Device",
+  direct_deposit: "Direct deposit", i9_sim: "Form I-9", benefits_selection: "Benefits selection", it_accounts: "IT accounts", device: "Device",
   state_registration: "State tax registration",
 };
 export const taskLabel = (kind: string): string => TASK_LABEL[kind] ?? kind.replaceAll("_", " ");

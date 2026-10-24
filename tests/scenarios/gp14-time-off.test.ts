@@ -11,7 +11,7 @@ import { routines, withWriteLock } from "@weft/db";
 import { createTestWeft, type TestWeft } from "./helpers";
 
 const RUTH_REQUEST = "tor_0003";
-const LUCY = "wrk_0038";   // Lucy Harrow (demo), TX salaried, one approved vacation day on Oct 23
+const LUCY = "wrk_0038";   // Lucy Harrow, TX salaried, one approved vacation day on Oct 23
 
 describe("GP14 time off with a coverage conflict", () => {
   let weft: TestWeft;
@@ -50,7 +50,7 @@ describe("GP14 time off with a coverage conflict", () => {
     expect(props).toHaveLength(1);
     const p = (await call("usr_dana", "GET", `/v1/proposals/${props[0]!.id}`)).json as Proposal;
     expect(p).toMatchObject({ status: "pending", command: "time_off.decide", risk: "R2" });
-    expect(p.headline).toMatch(/^Approve Ruth Okoro \(demo\)'s vacation 2026-11-23 to 2026-11-27 \(24\.00 h\)/);
+    expect(p.headline).toMatch(/^Approve Ruth Okoro's vacation 2026-11-23 to 2026-11-27 \(24\.00 h\)/);
     const args = JSON.parse(props[0]!.args_json) as { decision: string; note: string };
     expect(args.decision).toBe("approve");
     expect(args.note).toMatch(/Larkspur Vacation available 89\.00 h now with every open request counted, 113\.00 h without this request/);
@@ -59,8 +59,8 @@ describe("GP14 time off with a coverage conflict", () => {
     const posts = await weft.sims.chat.list("#people-ops");
     // The notice (no digits, grounded) and the proposal's approval card.
     expect(posts.map((m) => m.text).filter((t) => t.includes("Ruth"))).toEqual([
-      "A time-off request from Ruth Okoro (demo) is ready for a decision in Time Off. Weft is proposing to approve it; please look at the coverage conflict first.",
-      "Approval needed: Approve Ruth Okoro (demo)'s vacation 2026-11-23 to 2026-11-27 (24.00 h)",
+      "A time-off request from Ruth Okoro is ready for a decision in Time Off. Weft is proposing to approve it; please look at the coverage conflict first.",
+      "Approval needed: Approve Ruth Okoro's vacation 2026-11-23 to 2026-11-27 (24.00 h)",
     ]);
 
     // Viewing as Imani, she decides on the Requests screen (her own call runs; she manages Ruth).

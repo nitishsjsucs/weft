@@ -111,7 +111,7 @@ export async function recordAtsHire(deps: CommandDeps, ctx: ExecContext, vendor:
 
   // Candidate-entered names and the job title land in trusted offer and worker columns, so only plain name and title
   // text is imported; anything else waits for a human in the Integrations screen.
-  const title = hire.jobName.replace(/\s*\(demo\)\s*$/, "");
+  const title = hire.jobName;
   if (!plainText(hire.first, NAME_RE, 3) || !plainText(hire.last, NAME_RE, 4)) return block("candidate_name", { field: "candidate_name", reason: "The candidate name has characters Weft does not import. Enter the offer by hand." });
   if (!plainText(title, TITLE_RE, 8)) return block("job_title", { field: "job_title", reason: "The job title has characters Weft does not import. Enter the offer by hand." });
 

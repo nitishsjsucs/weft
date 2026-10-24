@@ -110,7 +110,7 @@ describe("GP16 first-month check-in", () => {
     const [row] = await weft.db.select().from(checkins).where(eq(checkins.id, checkinId));
     expect(row).toMatchObject({ status: "submitted", submittedAt: "2026-11-06T17:00:00.000Z" });
     const summary = (await mailSince(before)).find((m) => m.relatedRef === checkinId);
-    expect(summary).toMatchObject({ toAddr: manager.workEmail, subject: "First-month check-in from Juno Tester (demo)" });
+    expect(summary).toMatchObject({ toAddr: manager.workEmail, subject: "First-month check-in from Juno Tester" });
     expect(summary!.body).toContain("How the month is going: good.");
     expect(summary!.body).toContain("Tools, access and information: mostly.");
     expect(summary!.body).toContain("two written answers");

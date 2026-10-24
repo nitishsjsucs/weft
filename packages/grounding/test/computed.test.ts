@@ -18,7 +18,7 @@ describe("computedFigures", () => {
   it("keeps numbers, decimal strings, whole ISO dates and figure-only display strings; drops every other string", () => {
     expect(computedFigures({
       count: 3, rate: "0.015", start_date: "2026-11-02", at: "2026-10-26T15:30:00.000Z", amount_display: "$412.38", change_display: "18.0%",
-      name: "Imani Clarke (demo)", worker_display: "Imani Clarke (demo)", title: "Penalty notice, 2026-Q3, pay $250.00", text: "Weekly people digest: 47 employees",
+      name: "Imani Clarke", worker_display: "Imani Clarke", title: "Penalty notice, 2026-Q3, pay $250.00", text: "Weekly people digest: 47 employees",
       wrapped: "<untrusted n=\"abc\" src=\"notice:ntc_9501\">$9,999.00</untrusted>", month: "2026-10", nested: { total_cents: 412338, note: "about 12 days" },
     })).toEqual({ count: 3, rate: "0.015", start_date: "2026-11-02", at: "2026-10-26T15:30:00.000Z", amount_display: "$412.38", change_display: "18.0%", nested: { total_cents: 412338 } });
   });

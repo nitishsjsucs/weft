@@ -41,7 +41,7 @@ describe("the new hire persona", () => {
   it("a person who is not a new hire has no portal", async () => {
     const r = await call("usr_dana", "GET", "/v1/portal/me");
     expect(r.status).toBe(403);
-    expect((await call("usr_dana", "POST", "/v1/portal/w4", { filingStatus: "single", step2Checkbox: false, step3Cents: 0, step4aCents: 0, step4bCents: 0, step4cCents: 0, typedName: "Dana Whitfield" })).json.code).toBe("DOMAIN_NOT_NEW_HIRE");
+    expect((await call("usr_dana", "POST", "/v1/portal/w4", { filingStatus: "single", step2Checkbox: false, step3Cents: 0, step4aCents: 0, step4bCents: 0, step4cCents: 0, typedName: "Vic Akisole" })).json.code).toBe("DOMAIN_NOT_NEW_HIRE");
   });
 
   it("the state certificate appears for CA, NY and CO and not for TX", async () => {
@@ -58,14 +58,14 @@ describe("the new hire persona", () => {
 
   it("direct deposit refuses an ABA failure inline and a closed account through the bank simulator", async () => {
     const { persona, name } = await hire("CO");
-    const bad = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "123456789", account: "99887766", accountType: "checking", typedName: name });
+    const bad = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Tidepool Federal Credit Union", routing: "123456789", account: "99887766", accountType: "checking", typedName: name });
     expect([bad.status, bad.json.code, bad.json.field]).toEqual([422, "INVALID_INPUT", "routing"]);
-    const closed = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "011000015", account: "12340000", accountType: "savings", typedName: name });
+    const closed = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Tidepool Federal Credit Union", routing: "011000015", account: "12340000", accountType: "savings", typedName: name });
     expect([closed.status, closed.json.code]).toEqual([422, "DOMAIN_BANK_NOT_VERIFIED"]);
-    const ok = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "011000015", account: "12345678", accountType: "savings", typedName: name });
+    const ok = await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Tidepool Federal Credit Union", routing: "011000015", account: "12345678", accountType: "savings", typedName: name });
     expect(ok.status).toBe(200);
     expect(JSON.stringify(ok.json)).not.toContain("12345678");
-    expect((await call(persona, "GET", "/v1/portal/me")).json.bank).toEqual({ bankName: "Sim Federal Credit Union", routingLast4: "0015", accountLast4: "5678", status: "active" });
+    expect((await call(persona, "GET", "/v1/portal/me")).json.bank).toEqual({ bankName: "Tidepool Federal Credit Union", routingLast4: "0015", accountLast4: "5678", status: "active" });
   });
 
   it("the I-9 upload refuses a non-image and answers masked", async () => {

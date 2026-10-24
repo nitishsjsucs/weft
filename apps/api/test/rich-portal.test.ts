@@ -31,10 +31,10 @@ describe("rich profile portal personas", () => {
       expect(r.status, p.display).toBe(200);
       stages[p.display] = r.json.done;
     }
-    expect(stages["Odette Marsh (demo)"]).toBe(7);
-    expect(stages["Elias Brandt (demo)"]).toBe(5);
-    expect(stages["Tobias Wren (demo)"]).toBe(2);
-    expect(stages["Marisol Quint (demo)"]).toBe(0);
+    expect(stages["Odette Marsh"]).toBe(7);
+    expect(stages["Elias Brandt"]).toBe(5);
+    expect(stages["Tobias Wren"]).toBe(2);
+    expect(stages["Marisol Quint"]).toBe(0);
   });
 
   it("offers the policies the persona's state calls for in the portal's Request time off section", async () => {
@@ -49,7 +49,7 @@ describe("rich profile portal personas", () => {
     expect(ca.json.balances.map((b) => b.policyId)).toContain("top_sick_ca");
   });
 
-  it("lists the persona's own claim and training, not Dana's", async () => {
+  it("lists the persona's own claim and training, not Vic's", async () => {
     const exp = await get<{ workerId: string; data: { status: string; category: string }[] }>("/v1/portal/expenses", persona("Odette").id);
     expect(exp.json.workerId).toBe(persona("Odette").worker_id);
     expect(exp.json.data.map((x) => [x.category, x.status])).toEqual([["equipment", "approved"]]);

@@ -162,7 +162,7 @@ describe("seed profiles", () => {
       // Colorado is not planted: accepting Noor's offer files the registrations, per tax account.
       expect(props.filter((p) => p.command === "tax.register_state_account")).toEqual([]);
       // A subject named in a headline is the worker the arguments point at.
-      const names = new Map((await db.all<{ id: string; n: string }>(sql`SELECT id, first_name || ' ' || last_name || ' (demo)' AS n FROM workers`)).map((x) => [x.id, x.n]));
+      const names = new Map((await db.all<{ id: string; n: string }>(sql`SELECT id, first_name || ' ' || last_name AS n FROM workers`)).map((x) => [x.id, x.n]));
       for (const p of props) {
         const a = JSON.parse(p.args) as { worker_id?: string; request_id?: string };
         const wid = a.worker_id ?? (a.request_id ? (await db.all<{ w: string }>(sql`SELECT worker_id AS w FROM time_off_requests WHERE id = ${a.request_id}`))[0]?.w : undefined);
@@ -170,7 +170,7 @@ describe("seed profiles", () => {
         if (wid) expect(p.h, p.id).toContain(names.get(wid)!);
       }
       // The monthly exec report quotes the hires and departures report for the month it covers.
-      const execs = await db.all<{ t: string }>(sql`SELECT text AS t FROM sim_chat_messages WHERE channel = '#leadership' AND text LIKE '%exec report (demo)%' ORDER BY ts`);
+      const execs = await db.all<{ t: string }>(sql`SELECT text AS t FROM sim_chat_messages WHERE channel = '#leadership' AND text LIKE '%exec report%' ORDER BY ts`);
       expect(execs.length).toBe(9);
       const moves = await db.all<{ m: string; h: number; d: number }>(sql`SELECT m, SUM(h) AS h, SUM(d) AS d FROM (
           SELECT substr(start_date, 1, 7) AS m, 1 AS h, 0 AS d FROM workers WHERE type = 'employee' AND status != 'draft' AND start_date BETWEEN '2026-01-01' AND '2026-09-30'
@@ -244,7 +244,7 @@ describe("seed profiles", () => {
       const mismatched = await db.all<{ id: string }>(sql`SELECT c.id FROM offboarding_cases c JOIN workers w ON w.id = c.worker_id WHERE c.status = 'open' AND w.status != 'offboarding'`);
       expect(mismatched).toEqual([]);
       // Base channel posts carry the day they talk about, and no two people share a surname and a near first name.
-      const welcome = await db.all<{ ts: string }>(sql`SELECT ts FROM sim_chat_messages WHERE text = 'Welcome Ana and Ben to Larkspur (demo)!'`);
+      const welcome = await db.all<{ ts: string }>(sql`SELECT ts FROM sim_chat_messages WHERE text = 'Welcome Ana and Ben to Larkspur!'`);
       expect(welcome[0]!.ts.slice(0, 10)).toBe("2026-10-01");
       expect((await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM workers WHERE last_name = 'Calloway'`))[0]!.n).toBe(1);
       // Step details read as days, never ISO dates.

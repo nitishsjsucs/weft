@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { hiringManagerInScope, outsideReports, reportsAccess, splitByScope, type ReadScope } from "../../src/people/scope";
 
-const imani: ReadScope = { viewerId: "usr_imani", display: "Imani Ferreira (demo)", role: "manager", selfWorkerId: "wrk_0004", reports: new Set(["wrk_0010", "wrk_0011"]), grants: { people: "view", payroll: "none" } };
+const imani: ReadScope = { viewerId: "usr_imani", display: "Imani Ferreira", role: "manager", selfWorkerId: "wrk_0004", reports: new Set(["wrk_0010", "wrk_0011"]), grants: { people: "view", payroll: "none" } };
 const rows = [{ w: "wrk_0004" }, { w: "wrk_0010" }, { w: "wrk_0003" }, { w: null }, { w: "wrk_0011" }];
 
 describe("splitByScope", () => {
@@ -21,7 +21,7 @@ describe("the words a narrowed read carries", () => {
   it("the access block names the rows withheld and tells the model to decline", () => {
     const a = reportsAccess(imani, "time-off requests", 7);
     expect(a).toMatchObject({ scope: "reports", withheld_rows: 7 });
-    expect(a.reason).toContain("Imani Ferreira (demo) is a manager: time-off requests are shared only for their own record");
+    expect(a.reason).toContain("Imani Ferreira is a manager: time-off requests are shared only for their own record");
     expect(a.reason).toContain("cannot share");
   });
   it("the single-record refusal never says whether the record exists", () => {

@@ -60,8 +60,8 @@ describe("first-day message (rt_first_day_message)", () => {
     expect(run.status, JSON.stringify(run)).toBe("done");
     expect((run.precheck as { derivedArgs: Record<string, any> }).derivedArgs["comms.send_first_day_message"]).toEqual({ worker_ids: [HIRE], as_of: "2026-11-02" });
     const mail = await mailFor();
-    expect(mail.filter((m) => m.toAddr === "kai.tester@larkspur.example").map((m) => m.subject)).toEqual(["Welcome to Larkspur Robotics, Kai Tester (demo)"]);
-    expect(mail.filter((m) => m.subject === "Kai Tester (demo) starts today").length).toBeGreaterThan(0);
+    expect(mail.filter((m) => m.toAddr === "kai.tester@larkspur.example").map((m) => m.subject)).toEqual(["Welcome to Larkspur Robotics, Kai Tester"]);
+    expect(mail.filter((m) => m.subject === "Kai Tester starts today").length).toBeGreaterThan(0);
     const props = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM proposals WHERE command = 'comms.send_first_day_message'`);
     expect(props[0]!.n).toBe(0);   // untainted: sent without a proposal
     const evs = await weft.db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM events WHERE type = 'worker.first_day' AND subject_ref = ${HIRE}`);

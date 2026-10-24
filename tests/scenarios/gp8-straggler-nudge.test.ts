@@ -88,7 +88,7 @@ describe("GP8 straggler nudge", () => {
     expect(first.status).toBe("done");
     const posted = await nudges();
     expect(posted).toHaveLength(1);
-    expect(posted[0]!.text).toContain("Rowan Ellery (demo)");
+    expect(posted[0]!.text).toContain("Rowan Ellery");
     expect(posted[0]!.text).toContain("Federal tax withholding (Form W-4)");
     expect(posted[0]!.text).toContain("Direct deposit");
     expect(posted[0]!.text).not.toContain("State tax withholding");   // TX has no state certificate
@@ -103,7 +103,7 @@ describe("GP8 straggler nudge", () => {
     expect((await call(persona, "POST", `/v1/portal/documents/${nda.id}/sign`, { typedName: NAME, documentSha256: nda.sha256 })).status).toBe(200);
     expect((await call(persona, "POST", "/v1/portal/state-withholding", { state: "TX", filingStatus: "single", allowances: 0, extraCents: 0, exempt: false, typedName: NAME })).json.code).toBe("DOMAIN_NO_STATE_FORM");
     expect((await call(persona, "POST", "/v1/portal/w4", { filingStatus: "single", step2Checkbox: false, step3Cents: 0, step4aCents: 0, step4bCents: 0, step4cCents: 0, exempt: false, typedName: NAME })).status).toBe(200);
-    expect((await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "021000021", account: "5550001234", accountType: "checking", typedName: NAME })).status).toBe(200);
+    expect((await call(persona, "POST", "/v1/portal/direct-deposit", { bankName: "Tidepool Federal Credit Union", routing: "021000021", account: "5550001234", accountType: "checking", typedName: NAME })).status).toBe(200);
     const form = new FormData();
     form.set("citizenship", "citizen"); form.set("documentKind", "us_passport"); form.set("documentNumberLast4", "B9K1"); form.set("typedName", NAME);
     form.set("idImage", new Blob([Buffer.from("fake image bytes for the demo")], { type: "image/png" }), "id.png");

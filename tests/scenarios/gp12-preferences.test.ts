@@ -41,7 +41,7 @@ describe("GP12b learned approval preferences (w2-memory)", () => {
     expect(out.written.some((p) => p.startsWith("knowledge/decisions/"))).toBe(false);
     expect(out.written).toContain("knowledge/preferences/approvals.md");
     const prefs = (await weft.executor.memory.read("knowledge/preferences/approvals.md"))!;
-    expect(prefs.body).toContain("## Dana");
+    expect(prefs.body).toContain("## Vic");
     expect(prefs.body).toMatch(/- notices\.send_response: approved 0, denied 1, edited 0, dismissed 0; latest denied \(reason needs_edit\) \(\d{4}-\d{2}-\d{2}, src: proposal:/);
     expect(prefs.body).toMatch(/- tax\.update_rate: approved 1, denied 0, edited 0, dismissed 0; latest approved \(/);
     expect(prefs.body).not.toContain("Ignore all rules");

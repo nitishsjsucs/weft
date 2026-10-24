@@ -3,8 +3,8 @@
     {
       "id": 7100201,
       "internal_job_id": 4400103,
-      "title": "Firmware Test Engineer (demo)",
-      "company_name": "Larkspur Robotics (demo)",
+      "title": "Firmware Test Engineer",
+      "company_name": "Larkspur Robotics",
       "requisition_id": "LR-103",
       "location": { "name": "Hybrid" },
       "absolute_url": "https://boards.greenhouse.example/larkspur/jobs/7100201?gh_jid=7100201",
@@ -22,8 +22,8 @@
     {
       "id": 7100202,
       "internal_job_id": null,
-      "title": "Controls Engineer (demo)",
-      "company_name": "Larkspur Robotics (demo)",
+      "title": "Controls Engineer",
+      "company_name": "Larkspur Robotics",
       "requisition_id": "",
       "location": { "name": "In-Office" },
       "absolute_url": "https://boards.greenhouse.example/larkspur/jobs/7100202?gh_jid=7100202",

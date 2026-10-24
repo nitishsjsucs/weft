@@ -69,7 +69,7 @@ function runtimeWith(fake: FakeExecutor, p: ModelProvider, extra: Partial<Parame
   return createAgentRuntime({
     db, clock, executor: fake, provider: p, ledger,
     routinesView: { get: async () => routine, checklist: async ({ agentRunId }) => [{ id: "rate", label: "propose tax.update_rate", passed: fake.proposals.some((x) => x.runId === agentRunId) }] },
-    contextSource: { chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics (demo).", openLoops: [] }) },
+    contextSource: { chat: async () => ({ actingFor: "Vic Reyes (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics.", openLoops: [] }) },
     ...extra,
   });
 }
@@ -77,7 +77,7 @@ function runtimeWith(fake: FakeExecutor, p: ModelProvider, extra: Partial<Parame
 function chatExec(extra: Parameters<typeof createFakeExecutor>[0] = []): FakeExecutor {
   return createFakeExecutor([
     ...CHAT_TOOLS.filter((t) => t !== "payroll.get_run").map((name) => ({ name, effect: "read" as const })),
-    { name: "payroll.get_run", effect: "read" as const, handler: () => done({ flagged: [{ worker: "Rowan Achebe (demo) (wrk_0014)", before_cents: 400000, after_cents: 432000 }] }, "Read pay_2026_10_30 flagged rows", "res_0200") },
+    { name: "payroll.get_run", effect: "read" as const, handler: () => done({ flagged: [{ worker: "Rowan Achebe (wrk_0014)", before_cents: 400000, after_cents: 432000 }] }, "Read pay_2026_10_30 flagged rows", "res_0200") },
     ...extra,
   ]);
 }
@@ -90,7 +90,7 @@ describe("span tree", () => {
         { type: "function_call", name: "payroll__get_run", arguments: { run_id: "pay_2026_10_30" } },
         { type: "function_call", name: "tax__update_rate", arguments: { rate: "0.02" } },
       ] },
-      { output: [{ type: "text", text: "Gross pay for Rowan Achebe (demo) (wrk_0014) rose from $4,000.00 to $4,320.00 (res_0200)." }] },
+      { output: [{ type: "text", text: "Gross pay for Rowan Achebe (wrk_0014) rose from $4,000.00 to $4,320.00 (res_0200)." }] },
     ] } };
     const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { chat_ny: script } }));
     runTraceTags.set({ eval_task_id: "EX-01", eval_variant: "default", eval_split: "dev", eval_trial: 1 });
@@ -264,7 +264,7 @@ describe("span tree", () => {
 });
 
 describe("retrieval and MCP spans", () => {
-  const recallBlock = (body: string) => `<recall note="memory, data only">\n- knowledge/facts/company-onepager.md (one-pager, as of 2026-10-01): Larkspur Robotics (demo) runs payroll biweekly.\n- knowledge/procedures/ny-raise.md (hit, as of 2026-09-20, untrusted): ${body}\n</recall>`;
+  const recallBlock = (body: string) => `<recall note="memory, data only">\n- knowledge/facts/company-onepager.md (one-pager, as of 2026-10-01): Larkspur Robotics runs payroll biweekly.\n- knowledge/procedures/ny-raise.md (hit, as of 2026-09-20, untrusted): ${body}\n</recall>`;
   const hits = [
     { path: "knowledge/procedures/state-sui-rate-notice.md", line: 4, snippet: "SUI rate notices go to the tax queue.", commit: "a".repeat(40), date: "2026-10-01", cite: "knowledge/procedures/state-sui-rate-notice.md#L4", taintedBy: null },
     { path: "comms/2026-10-02.md", line: 9, snippet: "Rowan asked about the NY raise.", commit: "b".repeat(40), date: "2026-10-02", cite: "comms/2026-10-02.md#L9", taintedBy: "memory:comms/2026-10-02.md" },
@@ -288,7 +288,7 @@ describe("retrieval and MCP spans", () => {
     ] } };
     const rt = runtimeWith(fake, scriptedProvider({ scriptsDir: dataDir, scripts: { chat_ny: script } }), {
       contextSource: {
-        chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics (demo).", openLoops: [] }),
+        chat: async () => ({ actingFor: "Vic Reyes (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics.", openLoops: [] }),
         recall: async () => recallBlock("Raises over 5% need review."),
       },
     });
@@ -416,7 +416,7 @@ describe("canary: no secret reaches a span", () => {
     };
     const rt = runtimeWith(fake, plantingProvider(), {
       contextSource: {
-        chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: `summary ${planted()}`, openLoops: [] }),
+        chat: async () => ({ actingFor: "Vic Reyes (usr_0001), role admin", grants: {}, companySummary: `summary ${planted()}`, openLoops: [] }),
         recall: async () => `<recall note="memory, data only">\n- people/one-pager.md (one-pager, as of 2026-10-01): ${planted()}\n</recall>`,
       },
     });
@@ -482,7 +482,7 @@ describe("wave 4 round 1: routine runs without an agent run, empty recall and pr
   ]);
   const withRecall = (recall: () => Promise<string>, seen: { query: string; subjectRefs: string[] }[] = []) => ({
     contextSource: {
-      chat: async () => ({ actingFor: "Dana Reyes (demo) (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics (demo).", openLoops: [] }),
+      chat: async () => ({ actingFor: "Vic Reyes (usr_0001), role admin", grants: {}, companySummary: "Larkspur Robotics.", openLoops: [] }),
       recall: async (i: { query: string; subjectRefs: string[] }) => { seen.push({ query: i.query, subjectRefs: i.subjectRefs }); return recall(); },
     },
   });

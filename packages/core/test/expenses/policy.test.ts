@@ -13,7 +13,7 @@ const NY: PolicyWorker = { id: "wrk_0026", workState: "NY", startDate: "2024-03-
 const TX: PolicyWorker = { id: "wrk_0041", workState: "TX", startDate: "2025-01-20", endDate: null };
 let n = 0;
 const item = (x: Partial<PolicyItem>): PolicyItem => ({
-  id: `exp_${String(++n).padStart(4, "0")}`, workerId: "wrk_0005", category: "travel", merchant: "Skyway Air (demo)", amountCents: 1000, transactionDate: "2026-10-12",
+  id: `exp_${String(++n).padStart(4, "0")}`, workerId: "wrk_0005", category: "travel", merchant: "Skyway Air", amountCents: 1000, transactionDate: "2026-10-12",
   submittedDate: "2026-10-13", businessPurpose: "Site visit", attendees: null, milesX10: null, tripRef: null, preApprovalRef: null, hasReceipt: true,
   extract: null, status: "needs_review", ...x,
 });
@@ -72,8 +72,8 @@ describe("expense policy engine (hand-computed cases)", () => {
   });
 
   it("E7 duplicate of a non-declined item: block, decline duplicate; a declined twin is not a duplicate", () => {
-    const earlier = item({ id: "exp_0901", workerId: TX.id, category: "software", merchant: "Fleetlog Cloud (demo)", amountCents: 9_600, transactionDate: "2026-10-01", status: "approved" });
-    const e7 = item({ workerId: TX.id, category: "software", merchant: "  FLEETLOG cloud (demo) ", amountCents: 9_600, transactionDate: "2026-10-02", submittedDate: "2026-10-22" });
+    const earlier = item({ id: "exp_0901", workerId: TX.id, category: "software", merchant: "Fleetlog Cloud", amountCents: 9_600, transactionDate: "2026-10-01", status: "approved" });
+    const e7 = item({ workerId: TX.id, category: "software", merchant: "  FLEETLOG cloud ", amountCents: 9_600, transactionDate: "2026-10-02", submittedDate: "2026-10-22" });
     const r = evaluateExpense(e7, { worker: TX, others: [earlier] });
     expect(r.checks.find((c) => c.rule === "DUPLICATE")).toMatchObject({ severity: "block", evidence: [{ label: "Earlier expense", ref: "exp_0901" }] });
     expect(r.suggestion).toMatchObject({ decision: "decline", reasonCode: "duplicate" });
@@ -82,7 +82,7 @@ describe("expense policy engine (hand-computed cases)", () => {
   });
 
   it("two pending twins: only the later one is the duplicate, the original stays approvable", () => {
-    const a = item({ id: "exp_0910", workerId: TX.id, category: "software", merchant: "Fleetlog Cloud (demo)", amountCents: 4_000, transactionDate: "2026-10-10", submittedDate: "2026-10-12", status: "needs_review" });
+    const a = item({ id: "exp_0910", workerId: TX.id, category: "software", merchant: "Fleetlog Cloud", amountCents: 4_000, transactionDate: "2026-10-10", submittedDate: "2026-10-12", status: "needs_review" });
     const b = { ...a, id: "exp_0911" };
     expect(evaluateExpense(a, { worker: TX, others: [b] }).checks.some((c) => c.rule === "DUPLICATE")).toBe(false);
     expect(evaluateExpense(b, { worker: TX, others: [a] }).suggestion).toMatchObject({ decision: "decline", reasonCode: "duplicate" });

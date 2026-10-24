@@ -1,5 +1,5 @@
 // Scenario GP9 (docs/wave2.md). Owner: w2-offboarding. Termination with access revocation, end to end over HTTP on
-// the scripted provider: Dana terminates an active employee, the case opens with the eight ordered steps, the four
+// the scripted provider: Vic terminates an active employee, the case opens with the eight ordered steps, the four
 // proposal steps are pending proposals with previews, approving each runs its simulator call, the direct steps run
 // after final pay, every step has its own action row and offboarding.step_done event, and the case completes.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { OFFBOARDING_STEP_ORDER, OffboardingCase, type Proposal, type ToolOutcome } from "@weft/contracts";
 import { createTestWeft, type TestWeft } from "./helpers";
 
-const WORKER = "wrk_0004";   // Imani Ferreira (demo), Engineering: google_ws, chat, github, a laptop, benefits
+const WORKER = "wrk_0004";   // Imani Ferreira, Engineering: google_ws, chat, github, a laptop, benefits
 
 describe("GP9 termination with access revocation", () => {
   let weft: TestWeft;
@@ -52,7 +52,7 @@ describe("GP9 termination with access revocation", () => {
     };
     const fp = await proposalOf("final_pay");
     expect(fp).toMatchObject({ status: "pending", command: "offboarding.final_pay", risk: "R4", taintedBy: null, onBehalfOf: "usr_dana" });
-    expect(fp.headline).toMatch(/^Final pay for Imani Ferreira \(demo\) \(wrk_0004\): dismissal run, net \$[\d,]+\.\d\d/);
+    expect(fp.headline).toMatch(/^Final pay for Imani Ferreira \(wrk_0004\): dismissal run, net \$[\d,]+\.\d\d/);
     expect(fp.diff.map((d) => d.label)).toEqual(expect.arrayContaining(["Gross pay", "Net pay to bank"]));
     expect(fp.diff.some((d) => d.label.startsWith("Salary (") )).toBe(true);
     expect(fp.diff.some((d) => d.label.startsWith("Unused PTO payout (90.00 h"))).toBe(true);

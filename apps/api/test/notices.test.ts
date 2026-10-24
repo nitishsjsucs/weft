@@ -22,7 +22,8 @@ describe("GET /v1/notices", () => {
   });
   it("the detail returns the body and the extract", async () => {
     const n = Notice.parse(await (await get("/v1/notices/ntc_0001")).json());
-    expect(n.bodyText).toContain("SIMULATED AGENCY NOTICE");
+    expect(n.bodyText).toContain("NEW YORK STATE DEPARTMENT OF LABOR");
+    expect(n.bodyText).not.toMatch(/SIMULATED|\(demo\)/);
     expect(n.extracted?.rates).toEqual([{ code: "sui", oldRate: "0.038", newRate: "0.041" }]);
     expect((await get("/v1/notices/ntc_9999")).status).toBe(404);
   });
@@ -67,14 +68,14 @@ describe("notices.draft_response and send_response", () => {
     const def = findCommand("notices.send_response");
     expect([def.risk({ notice_id: id }), def.approval, def.reversible]).toEqual(["R3", "always", false]);
     const pv = await def.preview!({ notice_id: id }, directCtx(weft.clock), deps());
-    expect(pv.title).toBe(`File response 1 to DE 2088 notice ${id} with CA EDD (sim)`);
+    expect(pv.title).toBe(`File response 1 to DE 2088 notice ${id} with CA EDD`);
     expect(pv.content).toEqual([{ label: "Content to be sent", text: draft.data.body }]);
 
     const sent = await d.exec("notices.send_response", { notice_id: id });
-    expect(sent).toMatchObject({ ok: true, status: "done", data: { status: "resolved", confirmation: expect.stringMatching(/^CA-EDD-R-\d{6}$/), not_reversible_reason: "Not reversible: filed with the agency simulator" } });
+    expect(sent).toMatchObject({ ok: true, status: "done", data: { status: "resolved", confirmation: expect.stringMatching(/^CA-EDD-R-\d{6}$/), not_reversible_reason: "Not reversible: filed with the agency" } });
     expect(nonEmptyUntrusted(def, (sent as { data: unknown }).data)).toEqual(["confirmation"]);
     const n = await (await get(`/v1/notices/${id}`)).json();
-    expect(n).toMatchObject({ status: "resolved", responseConfirmation: (sent as { data: { confirmation: string } }).data.confirmation, resolution: { outcome: "response_filed", not_reversible_reason: "Not reversible: filed with the agency simulator" } });
+    expect(n).toMatchObject({ status: "resolved", responseConfirmation: (sent as { data: { confirmation: string } }).data.confirmation, resolution: { outcome: "response_filed", not_reversible_reason: "Not reversible: filed with the agency" } });
     const evts = await weft.db.all<{ type: string }>(sql`SELECT type FROM events WHERE subject_ref = ${id} ORDER BY id`);
     expect(evts.map((e) => e.type)).toEqual(["notice.received", "notice.resolved"]);
   });

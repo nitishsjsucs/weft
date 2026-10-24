@@ -67,7 +67,7 @@ const findingView = (f: ReturnType<typeof toFindingDto>, names: Map<string, stri
 });
 async function lookups(deps: Parameters<WeftCommand["run"]>[2], companyId: string) {
   const people = await deps.tx.select({ id: workers.id, f: workers.firstName, l: workers.lastName }).from(workers).where(eq(workers.companyId, companyId));
-  const names = new Map(people.map((p) => [p.id, `${p.f} ${p.l} (demo)`]));
+  const names = new Map(people.map((p) => [p.id, `${p.f} ${p.l}`]));
   const plans = new Map((await listPlans(deps.tx, companyId)).map((p) => [p.id, p.name]));
   return { names, plans };
 }

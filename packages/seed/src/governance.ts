@@ -18,7 +18,7 @@ const grants = (g: Partial<Record<"people" | "payroll" | "tax" | "benefits" | "i
   JSON.stringify({ people: "none", payroll: "none", tax: "none", benefits: "none", it: "none", comms: "none", company: "none", ...g });
 
 export const HUMANS = [
-  { id: "usr_dana", first: "Dana", last: "Whitfield", role: "admin",
+  { id: "usr_dana", first: "Vic", last: "Akisole", role: "admin",
     grants: grants({ people: "approve", payroll: "approve", tax: "approve", benefits: "approve", it: "approve", comms: "approve", company: "approve" }) },
   { id: "usr_theo", first: "Theo", last: "Marsh", role: "payroll_admin",
     grants: grants({ payroll: "approve", tax: "approve", people: "view", comms: "view", company: "view" }) },
@@ -32,9 +32,9 @@ export const LIMITS: Record<string, number> = {
   "agent.device_day_cents": 600000, "agent.off_cycle_day_cents": 2000000,
 };
 export const VAULT_SECRETS = [
-  ["ca-edd-portal", "CA EDD (sim) employer portal"], ["ny-dol-portal", "NY DOL (sim) employer portal"], ["ny-dtf-portal", "NY DTF (sim) withholding portal"],
-  ["tx-twc-portal", "TX TWC (sim) employer portal"], ["co-dor-portal", "CO DOR (sim) withholding portal"], ["co-cdle-portal", "CO CDLE (sim) UI portal"],
-  ["irs-efile", "IRS (sim) e-file"], ["sim-bank-operating", "Sim Federal Credit Union operating account"], ["idp-admin", "Simulated identity provider admin"],
+  ["ca-edd-portal", "CA EDD employer portal"], ["ny-dol-portal", "NY DOL employer portal"], ["ny-dtf-portal", "NY DTF withholding portal"],
+  ["tx-twc-portal", "TX TWC employer portal"], ["co-dor-portal", "CO DOR withholding portal"], ["co-cdle-portal", "CO CDLE UI portal"],
+  ["irs-efile", "IRS e-file"], ["sim-bank-operating", "Tidepool Federal Credit Union operating account"], ["idp-admin", "Identity provider admin"],
 ] as const;
 export const SYSTEM_PRINCIPALS = ["svc_scheduler", "svc_events", "svc_sim", "svc_digest"] as const;
 
@@ -50,13 +50,13 @@ export async function seedGovernance(ctx: SeedContext): Promise<void> {
   const { db, companyId, clock } = ctx;
   // principals.company_id references companies. The company step (t2-world) normally wrote this row already; the
   // fallback carries the SPEC 5.1 values so a governance-only world (track tests) still satisfies the foreign key.
-  await db.insert(companies).values({ id: companyId, legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-4817265", hqState: "CA",
+  await db.insert(companies).values({ id: companyId, legalName: "Larkspur Robotics, Inc.", domain: "larkspur.example", ein: "00-4817265", hqState: "CA",
     foundedOn: "2023-03-01", createdAt: clock.now() }).onConflictDoNothing();
   for (const h of HUMANS) {
     const [w] = await db.select({ id: workers.id, email: workers.workEmail }).from(workers)
       .where(and(eq(workers.companyId, companyId), eq(workers.firstName, h.first), eq(workers.lastName, h.last))).limit(1);
     await db.insert(principals).values({
-      id: h.id, companyId, kind: "human", workerId: w?.id ?? null, display: `${h.first} ${h.last} (demo)`,
+      id: h.id, companyId, kind: "human", workerId: w?.id ?? null, display: `${h.first} ${h.last}`,
       email: w?.email ?? `${h.first.toLowerCase()}.${h.last.toLowerCase()}@larkspur.example`, role: h.role, grantsJson: h.grants,
     }).onConflictDoNothing();
   }
@@ -77,9 +77,9 @@ export async function seedGovernance(ctx: SeedContext): Promise<void> {
     await executor.vault.put({ name, kind: "portal_password", value: `sim-${name}-${randomBytes(12).toString("hex")}`, description, by: "usr_dana" });
   }
 
-  // Demo API keys (SPEC 5.6): admin and mcp scope, principal Dana, files mode 0600. Only the hash is stored.
+  // Seeded API keys (SPEC 5.6): admin and mcp scope, principal Vic, files mode 0600. Only the hash is stored.
   fs().mkdirSync(ctx.dataDir, { recursive: true });
-  for (const k of [{ label: "demo", scope: "admin", surface: "api", file: "demo-api-key.txt" }, { label: "demo mcp", scope: "mcp", surface: "mcp", file: "demo-mcp-key.txt" }]) {
+  for (const k of [{ label: "admin", scope: "admin", surface: "api", file: "demo-api-key.txt" }, { label: "mcp", scope: "mcp", surface: "mcp", file: "demo-mcp-key.txt" }]) {
     const plaintext = newKeyPlaintext();
     const id = await newId(db, "key_");
     await db.insert(apiKeys).values({ id, companyId, principalId: "usr_dana", prefix: plaintext.slice(0, 16), hash: hashKey(plaintext), label: k.label, scope: k.scope, surface: k.surface, createdAt: clock.now(), revokedAt: null });

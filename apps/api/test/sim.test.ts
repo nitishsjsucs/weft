@@ -12,6 +12,7 @@ import { createSimulators } from "@weft/sim";
 import { createWeft } from "../src/compose";
 import { createTestWeft, type TestWeft } from "../src/testing";
 import { durationMs, nextCronSlot, resetWorld } from "../src/routes/sim";
+import { SEED_CHAT } from "../../../packages/seed/src/it";
 
 let weft: TestWeft;
 beforeAll(async () => { weft = await createTestWeft(); await ensureTestPrincipals(weft.db); });
@@ -48,7 +49,8 @@ describe("faults, chat and state", () => {
     // seeded messages are the inbound ones.
     const all = (await (await req("/v1/sim/chat")).json()).map((m: unknown) => ChatMessageDto.parse(m)).filter((m: ChatMessageDto) => m.inbound);
     expect(all).toHaveLength(6);
-    expect(all.every((m: ChatMessageDto) => m.inbound && m.author.endsWith("(demo)"))).toBe(true);
+    const authors = new Set<string>(SEED_CHAT.map((m) => m.author));
+    expect(all.every((m: ChatMessageDto) => m.inbound && authors.has(m.author))).toBe(true);
     const nh = await (await req("/v1/sim/chat?channel=%23new-hires")).json();
     expect(nh.map((m: ChatMessageDto) => m.channel)).toEqual(["#new-hires", "#new-hires"]);
     expect((await req("/v1/sim/chat?channel=%23random")).status).toBe(400);

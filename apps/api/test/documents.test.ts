@@ -33,7 +33,7 @@ describe("document library", () => {
     const [letter] = (await call("usr_dana", "GET", `/v1/workers/${workerId}/documents?status=signed`)).json as { id: string; sha256: string }[];
     const d = (await call("usr_dana", "GET", `/v1/documents/${letter!.id}`)).json;
     expect(d).toMatchObject({ kind: "offer_letter", status: "signed", signature: { signerPrincipalId: persona, typedName: "Pia Strand", documentSha256: letter!.sha256, signedAt: weft.clock.now() } });
-    expect(d.bodyText).toContain("Pia Strand (demo)");
+    expect(d.bodyText).toContain("Pia Strand");
     expect((await call("usr_dana", "GET", "/v1/documents/doc_9999")).status).toBe(404);
   });
 

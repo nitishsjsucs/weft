@@ -158,7 +158,7 @@ export async function cobraNotice(tx: DbTx, w: WorkerRow, c: CaseRow): Promise<{
   const body = [
     `Hello ${w.preferredName ?? w.firstName},`,
     "",
-    "This is your COBRA continuation coverage election notice from Larkspur Robotics (a fictional company; this notice is simulated).",
+    "This is your COBRA continuation coverage election notice from Larkspur Robotics.",
     "",
     `Your employment ends on ${c.lastDay}. Your group health coverage ends on ${coverageEnds}.`,
     health.length ? `Plans you can continue: ${health.join(", ")}.` : "You had no group health plans on file, so there is no coverage to continue.",
@@ -168,5 +168,5 @@ export async function cobraNotice(tx: DbTx, w: WorkerRow, c: CaseRow): Promise<{
     "",
     `Reference: ${c.id}. Reply to ${COBRA_FROM} with questions.`,
   ].join("\n");
-  return { to, subject: "Your COBRA continuation coverage notice (simulated)", body, plans: health };
+  return { to, subject: "Your COBRA continuation coverage notice", body, plans: health };
 }

@@ -67,5 +67,5 @@ export function requestTotals(
   return out;
 }
 
-/** A worker name with its short id, as other reads show people: "Ruth Okoro (demo) (wrk_0010)". */
+/** A worker name with its short id, as other reads show people: "Ruth Okoro (wrk_0010)". */
 export const workerRef = (w: Parameters<typeof displayName>[0] & { id: string }) => `${displayName(w)} (${w.id})`;

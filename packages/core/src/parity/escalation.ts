@@ -17,7 +17,7 @@ export const REASON_LABEL: Record<EscalationReason, string> = {
   missing_filing: "the agency says a filing is missing and none is on record",
   amount_mismatch: "the agency's amount does not match the ledger",
 };
-export const SPECIALIST = { principal: "sim_tax_specialist", name: "Tax specialist (simulated)", email: "tax-specialist@weft-sim.example" } as const;
+export const SPECIALIST = { principal: "sim_tax_specialist", name: "Tax specialist", email: "tax-specialist@advisors.example" } as const;
 
 export interface Escalation {
   outcome: "escalated"; reason_code: EscalationReason; reason: string; specialist: string; specialist_principal: string;

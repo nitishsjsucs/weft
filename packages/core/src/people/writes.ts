@@ -82,8 +82,8 @@ export const revertPayRate = writeCommand({
   },
 });
 
-// Demo self-onboarding bundle (SPEC 9.2): W-4 single, CO state profile, Sim Federal Credit Union account. HR-entered.
-export const DEMO_BUNDLE = { w4: { version: "2020", filingStatus: "single" }, bank: { name: "Sim Federal Credit Union" } } as const;
+// Demo self-onboarding bundle (SPEC 9.2): W-4 single, CO state profile, Tidepool Federal Credit Union account. HR-entered.
+export const DEMO_BUNDLE = { w4: { version: "2020", filingStatus: "single" }, bank: { name: "Tidepool Federal Credit Union" } } as const;
 const STATE_TZ: Record<string, string> = { CA: "America/Los_Angeles", NY: "America/New_York", TX: "America/Chicago", CO: "America/Denver" };
 
 export const ONBOARDING_TEMPLATE = [
@@ -110,7 +110,7 @@ async function loadSentOffer(i: AcceptInput, companyId: string, tx: Parameters<W
 
 export const acceptOffer = writeCommand({
   name: "people.accept_offer", summary: "Demo control: mark an offer accepted and create the onboarding worker.",
-  description: "Demo control (human only): marks a sent offer accepted, creates the worker as onboarding with the next employee number, the pay rate, the checklist and the demo self-onboarding bundle (W-4 single, state profile, Sim Federal Credit Union account), then emits offer.accepted.",
+  description: "Demo control (human only): marks a sent offer accepted, creates the worker as onboarding with the next employee number, the pay rate, the checklist and the demo self-onboarding bundle (W-4 single, state profile, Tidepool Federal Credit Union account), then emits offer.accepted.",
   input: AcceptInput, domain: "people", needs: "edit", effect: "write", risk: riskOf("R2"), approval: "always", access: "human_only", reversible: false,
   async preview(i, ctx, deps) {
     const o = await loadSentOffer(i, ctx.companyId, deps.tx);
@@ -162,7 +162,7 @@ const Address = z.object({ line1: z.string().min(1).max(120), line2: z.string().
 const ProfileInput = z.object({
   worker_id: z.string(),
   preferred_name: z.string().max(80).optional(),
-  personal_email: z.string().max(120).regex(/^[^@\s]+@[a-z0-9.-]+\.example$/i, "use a *.example address (demo data)").optional(),
+  personal_email: z.string().max(120).regex(/^[^@\s]+@[a-z0-9.-]+\.example$/i, "use a *.example address").optional(),
   home_address: Address.optional(),
 });
 export const updateProfile = writeCommand({

@@ -2,20 +2,20 @@
 import { describe, expect, it } from "vitest";
 import { backlinkIndex, extractLinks, linkify, stripLinks, withBacklinks } from "../../src/memory/links";
 
-const ctx = { people: new Map([["wrk_0002", "Theo Marsh (demo)"]]), states: new Set(["CA", "CO"]) };
+const ctx = { people: new Map([["wrk_0002", "Theo Marsh"]]), states: new Set(["CA", "CO"]) };
 
 describe("wiki-links", () => {
   it("links people, notices and states in event text but never inside the source suffix or an existing link", () => {
     const line = linkify("Updated wrk_0002 work state CA for ntc_0002 in CO, not OR (src: action:wrk_0002)", ctx);
-    expect(line).toBe("Updated [[entities/people/wrk_0002|Theo Marsh (demo)]] work state [[entities/states/CA]] for [[entities/notices/ntc_0002]] in [[entities/states/CO]], not OR (src: action:wrk_0002)");
+    expect(line).toBe("Updated [[entities/people/wrk_0002|Theo Marsh]] work state [[entities/states/CA]] for [[entities/notices/ntc_0002]] in [[entities/states/CO]], not OR (src: action:wrk_0002)");
     expect(linkify(line, ctx)).toBe(line);
     expect(linkify("Updated wrk_9999 (2026-10-26, src: seed)", ctx)).toBe("Updated wrk_9999 (2026-10-26, src: seed)");
   });
 
   it("extracts targets and strips links to their labels", () => {
-    const t = "See [[entities/people/wrk_0002|Theo Marsh (demo)]] and [[entities/states/CA]] and [[entities/states/CA]].";
+    const t = "See [[entities/people/wrk_0002|Theo Marsh]] and [[entities/states/CA]] and [[entities/states/CA]].";
     expect(extractLinks(t)).toEqual(["entities/people/wrk_0002", "entities/states/CA"]);
-    expect(stripLinks(t)).toBe("See Theo Marsh (demo) and CA and CA.");
+    expect(stripLinks(t)).toBe("See Theo Marsh and CA and CA.");
   });
 
   it("maintains ## Backlinks deterministically, ignoring links inside backlinks sections", () => {

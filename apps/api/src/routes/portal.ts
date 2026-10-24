@@ -67,7 +67,7 @@ export function portalRoutes(weft: Weft): Hono<WeftEnv> {
     }
     const d = parsed.data;
     const name = `bank-${p.workerId.replace(/_/g, "-")}`;
-    await weft.executor.vault.put({ name, kind: "bank_account", value: JSON.stringify({ routing: d.routing, account: d.account }), description: `Direct deposit for ${p.workerId} (demo)`, by: s.principalId });
+    await weft.executor.vault.put({ name, kind: "bank_account", value: JSON.stringify({ routing: d.routing, account: d.account }), description: `Direct deposit for ${p.workerId}`, by: s.principalId });
     const out = await weft.executor.human.exec(s, "documents.submit_direct_deposit", {
       bank_name: d.bankName, routing_last4: d.routing.slice(-4), account_last4: d.account.slice(-4), account_type: d.accountType, credential_ref: `vault:${name}`, typed_name: d.typedName,
     });

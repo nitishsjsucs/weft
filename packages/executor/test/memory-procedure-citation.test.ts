@@ -21,8 +21,8 @@ const TAINTED = "knowledge/procedures/benefit-charge-untrusted.md";
 async function note(path: string, id: string, body: string, taintedBy: string | null) {
   const b = memoryBinding(weft.db)!;
   await (b.memory as unknown as Mem).write({
-    path, message: `procedure: ${id}`, author: { name: "Dana Whitfield (demo)", email: "usr_dana@larkspur.example" },
-    frontmatter: { id, type: "procedure", aliases: [], links: [], sources: ["People Ops runbook (demo)"], status: null, updated: "2026-10-01", taintedBy },
+    path, message: `procedure: ${id}`, author: { name: "Vic Akisole", email: "usr_vic.akisole@larkspur.example" },
+    frontmatter: { id, type: "procedure", aliases: [], links: [], sources: ["People Ops runbook"], status: null, updated: "2026-10-01", taintedBy },
     body,
   });
 }
@@ -47,8 +47,8 @@ async function benefitChargeNotice(emit = true): Promise<string> {
   const id = `ntc_${String(950 + ++seq).padStart(4, "0")}`;
   const now = weft.clock.now();
   await weft.db.insert(notices).values({
-    id, companyId: "cmp_larkspur", agency: "ca_edd", kind: "benefit_charge", formCode: "DE 428T", title: "Simulated benefit_charge notice (demo)", receivedAt: now, respondBy: "2026-11-25",
-    status: "new", taxAccountId: "txa_0002", fileName: "BENEFIT_CHARGE.txt", bodyText: `SIMULATED AGENCY NOTICE (demo) ${id}. Kind benefit_charge.`,
+    id, companyId: "cmp_larkspur", agency: "ca_edd", kind: "benefit_charge", formCode: "DE 428T", title: "Simulated benefit_charge notice", receivedAt: now, respondBy: "2026-11-25",
+    status: "new", taxAccountId: "txa_0002", fileName: "BENEFIT_CHARGE.txt", bodyText: `SIMULATED AGENCY NOTICE ${id}. Kind benefit_charge.`,
     extractedJson: JSON.stringify({ agency: "ca_edd", formCode: "DE 428T", kind: "benefit_charge", accountNumber: null, taxAccountId: "txa_0002", taxYear: 2026, effectiveFrom: null, respondBy: "2026-11-25", rates: [], amountCents: null, period: null }),
     draftsJson: "[]", resolutionJson: null, responseConfirmation: null,
   });
@@ -101,7 +101,7 @@ describe("a notice run cites the procedure it followed (R2, R3)", () => {
     expect(derived["notices.escalate"]).toEqual({ notice_id: id, reason_code: "agency_call_needed", procedure_ref: PROC });
     const [n] = await weft.db.select().from(notices).where(eq(notices.id, id));
     expect(JSON.parse(n!.resolutionJson as string)).toMatchObject({ outcome: "escalated", procedure_ref: PROC });
-    expect(rr.summary).toContain(`Escalated ${id} to the tax specialist (simulated) with`);
+    expect(rr.summary).toContain(`Escalated ${id} to the tax specialist with`);
     expect(rr.summary).toContain(`per ${PROC}`);
   });
 

@@ -247,7 +247,7 @@ export const lockDeviceCommand = writeCommand({
   async run(i, ctx, deps) {
     const { c, step, worker } = await lockFacts(i, ctx.companyId, deps);
     const locks = await lockDevices(deps, worker.id, c.id);
-    const { completed } = await finish(deps, ctx, c, step, locks.length ? `Locked ${locks.length} device${locks.length === 1 ? "" : "s"} through the device simulator (sim)` : "No devices to lock");
+    const { completed } = await finish(deps, ctx, c, step, locks.length ? `Locked ${locks.length} device${locks.length === 1 ? "" : "s"} remotely` : "No devices to lock");
     return { data: { case_id: c.id, step_id: step.id, locks, case_complete: completed }, summary: `Locked ${locks.length} device(s) for ${nameRef(worker.firstName, worker.lastName, worker.id)}`, events: [stepDone(c, step)] };
   },
 });

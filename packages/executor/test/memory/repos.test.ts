@@ -87,7 +87,7 @@ async function twinStores(): Promise<{ g: LocalMemory; s: LocalMemory; clock: Re
   const clock = fixedClock("2026-10-19T16:00:00.000Z");
   const redactor = new Redactor();
   const initialFiles = async () => [
-    { path: "entities/people/wrk_0002.md", text: `---\nid: "wrk_0002"\ntype: "person"\naliases: ["Theo"]\nlinks: []\nsources: ["seed"]\nstatus: null\nupdated: "2026-10-19"\ntainted_by: null\n---\n# Theo Marsh (demo)\n\n- Works in CA (2026-10-19, src: seed)\n` },
+    { path: "entities/people/wrk_0002.md", text: `---\nid: "wrk_0002"\ntype: "person"\naliases: ["Theo"]\nlinks: []\nsources: ["seed"]\nstatus: null\nupdated: "2026-10-19"\ntainted_by: null\n---\n# Theo Marsh\n\n- Works in CA (2026-10-19, src: seed)\n` },
     { path: "entities/states/CA.md", text: `---\nid: "state-CA"\ntype: "state"\naliases: []\nlinks: []\nsources: ["seed"]\nstatus: null\nupdated: "2026-10-19"\ntainted_by: null\n---\n# California\n` },
   ];
   const gitDir = tmp("weft-twin-git-");
@@ -115,12 +115,12 @@ describe("a store over GitRepo and over SqlRepo", () => {
     await same((m) => m.write({ path: "knowledge/procedures/sui.md", frontmatter: fm("knowledge-procedures-sui", "procedure"), body: "# SUI notices\n\n1. Read the notice.\n2. Check the effective date.\n3. Propose the rate.\n", message: "note: sui v2", author: { name: "Weft Agent", email: "agent@weft.example" } }));
     const [e1, e2] = await Promise.all([g, s].map((m) => m.write({ path: "knowledge/procedures/sui.md", frontmatter: fm("knowledge-procedures-sui", "procedure"), body: "# SUI notices\n\n1. Read the notice.\n2. Check the effective date.\n3. Propose the rate.\n", message: "again", author: { name: "Weft Agent", email: "agent@weft.example" } }).then(() => "ok", (e: Error) => e.message)));
     expect(e2).toBe(e1);
-    await same((m) => m.seedFiles([{ path: "comms/oct.md", text: "# October (demo)\n\nDigest posted.\n" }, { path: "knowledge/facts/company.md", text: "---\nid: \"facts\"\ntype: \"fact\"\naliases: []\nlinks: []\nsources: [\"seed\"]\nstatus: null\nupdated: \"2026-10-20\"\ntainted_by: null\n---\n# Facts\n\n- Payday is the 15th (2026-10-20, src: seed)\n" }], "seed: facts"));
+    await same((m) => m.seedFiles([{ path: "comms/oct.md", text: "# October\n\nDigest posted.\n" }, { path: "knowledge/facts/company.md", text: "---\nid: \"facts\"\ntype: \"fact\"\naliases: []\nlinks: []\nsources: [\"seed\"]\nstatus: null\nupdated: \"2026-10-20\"\ntainted_by: null\n---\n# Facts\n\n- Payday is the 15th (2026-10-20, src: seed)\n" }], "seed: facts"));
     const sources = {
       people: [{ id: "wrk_0002", name: "Theo Marsh", aliases: ["Theo Marsh"], facts: [{ text: "Work state CA", date: "2026-10-20", src: "worker:wrk_0002" }] }],
       states: [{ code: "CA", facts: [{ text: "Active employees 1", date: "2026-10-20", src: "workers:state=CA" }] }],
       agencies: [], notices: [],
-      onePager: { companyName: "Larkspur Robotics, Inc. (demo)", asOf: "2026-10-20", headcount: [{ text: "CA 1 active", date: "2026-10-20", src: "workers:state=CA" }], openItems: [], workstreams: [], autonomy: [] },
+      onePager: { companyName: "Larkspur Robotics, Inc.", asOf: "2026-10-20", headcount: [{ text: "CA 1 active", date: "2026-10-20", src: "workers:state=CA" }], openItems: [], workstreams: [], autonomy: [] },
     };
     clock.at("2026-10-28T00:00:00.000Z");
     const d1 = await same((m) => m.digest({ now: "2026-10-28T00:00:00.000Z", sources, companyRef: CMP }));

@@ -46,7 +46,7 @@ describe("GP3 new hire in a new state (asserts tainted === false)", () => {
 
     const agent = d.human("agt_weft", "agent");   // the agent's executable calls, untainted main agent
     const person = done<{ worker: Record<string, unknown> }>(track("people.get", await agent.exec("people.get", { worker_id: noor })));
-    expect(person.worker).toMatchObject({ name: `Noor Castellanos (demo) (${noor})`, status: "onboarding", work_state: "CO", bank_account: { status: "active", source: "demo_bundle" }, w4: { filing_status: "single", source: "demo_bundle" } });
+    expect(person.worker).toMatchObject({ name: `Noor Castellanos (${noor})`, status: "onboarding", work_state: "CO", bank_account: { status: "active", source: "demo_bundle" }, w4: { filing_status: "single", source: "demo_bundle" } });
     const checklist = done<{ tasks: { kind: string; status: string }[] }>(track("onboarding.get_checklist", await agent.exec("onboarding.get_checklist", { worker_id: noor })));
     expect(checklist.tasks.filter((t) => t.status === "pending").map((t) => t.kind)).toEqual(["i9_sim", "benefits_selection", "it_accounts", "device", "state_registration"]);
     const regs = done<{ by_state: Record<string, string> }>(track("tax.list_registrations", await agent.exec("tax.list_registrations", { jurisdiction: "CO" })));
@@ -54,7 +54,7 @@ describe("GP3 new hire in a new state (asserts tainted === false)", () => {
 
     for (const system of ["chat", "google_ws", "github"]) track("it.create_account", await agent.exec("it.create_account", { worker_id: noor, system }));
     track("comms.send_message", await agent.exec("comms.send_message", { channel: "#new-hires", text: "Please welcome our new Senior Firmware Engineer joining the Hardware team in Colorado. Say hello here!" }));
-    // Proposals in the real flow; Dana approves, so here they run as Dana.
+    // Proposals in the real flow; Vic approves, so here they run as Vic.
     for (const id of CO_ACCOUNTS) done(track("tax.register_state_account", await dana.exec("tax.register_state_account", { tax_account_id: id })));
     const device = done<{ price_cents: number }>(track("it.order_device", await dana.exec("it.order_device", { worker_id: noor })));
     expect(device.price_cents).toBe(189_900);
@@ -124,14 +124,14 @@ describe("GP3 new hire in a new state (asserts tainted === false)", () => {
 
 // Part 2 is the real path: "Mark accepted" through the HumanExecutor route emits offer.accepted, a scheduler tick
 // fires rt_new_hire from that event, and the agent loop runs scenarios/rt_new_hire.json through the scripted
-// provider and the real executor. Then Dana's decisions, the sim clock route, the chain and memory checks.
+// provider and the real executor. Then Vic's decisions, the sim clock route, the chain and memory checks.
 describe("GP3 end to end through the routine and the executor (asserts tainted === false)", () => {
   let weft: TestWeft;
   beforeAll(async () => { weft = await createTestWeft(); });
   afterAll(async () => { await weft.close(); });
   const live = () => !["executor", "agent", "routines"].some((s) => weft.stubs.includes(s));
 
-  it("Mark accepted fires rt_new_hire, Dana approves, 2 business days activate CO and complete state_registration", async (ctx) => {
+  it("Mark accepted fires rt_new_hire, Vic approves, 2 business days activate CO and complete state_registration", async (ctx) => {
     if (!live()) return ctx.skip();
     const post = async (path: string, body?: unknown) => {
       const res = await weft.app.request(path, { method: "POST", headers: { ...weft.uiHeaders("usr_dana"), "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });

@@ -26,8 +26,8 @@ beforeAll(async () => {
   db = openDb({ dataDir: dir });
   await migrate(db);
   // The session's person must exist: the run reads narrow an unknown principal to its own runs (fail closed).
-  await db.insert(companies).values({ id: "cmp_larkspur", legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01", createdAt: clock.now() });
-  await db.insert(principals).values({ id: "usr_dana", companyId: "cmp_larkspur", kind: "human", workerId: null, display: "Dana Whitfield (demo)", email: "dana.whitfield@larkspur.example", role: "admin", grantsJson: "{}" });
+  await db.insert(companies).values({ id: "cmp_larkspur", legalName: "Larkspur Robotics, Inc.", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01", createdAt: clock.now() });
+  await db.insert(principals).values({ id: "usr_dana", companyId: "cmp_larkspur", kind: "human", workerId: null, display: "Vic Akisole", email: "vic.akisole@larkspur.example", role: "admin", grantsJson: "{}" });
   const fake = createFakeExecutor([
     ...CHAT_TOOLS.map((name) => ({ name, effect: "read" as const })),
     { name: "payroll.get_run", effect: "read" as const, handler: () => ({ ok: true as const, status: "done" as const, resultId: "res_0200", data: { flagged: [{ result_id: "res_0041", after_cents: 432000 }] }, summary: "Read pay_2026_10_30 flagged rows", actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" as const }) },

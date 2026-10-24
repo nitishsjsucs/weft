@@ -53,7 +53,7 @@ export const intakeEmail = writeCommand<IntakeInput>({
       await tx.insert(expenseIntake).values({ ...row, uploadId: null, status, expenseId: null });
       // A bounce goes back only to a simulated (*.example) address; anything else is recorded and dropped.
       if (EXAMPLE_ADDR.test(i.from.trim())) {
-        await deps.sims.email.send({ to: i.from.trim(), from: EXPENSES_INBOX, subject: `Not filed: ${i.subject || "your expense email"}`.slice(0, 200), body: `${why}\n\nThis is the Weft expenses inbox for Larkspur Robotics (demo). Nothing was filed.`, kind: "generic", relatedRef: id });
+        await deps.sims.email.send({ to: i.from.trim(), from: EXPENSES_INBOX, subject: `Not filed: ${i.subject || "your expense email"}`.slice(0, 200), body: `${why}\n\nThis is the Weft expenses inbox for Larkspur Robotics. Nothing was filed.`, kind: "generic", relatedRef: id });
       }
       return { data: { intake_id: id, status, expense_id: null }, summary: `Bounced ${i.message_ref}: ${status}`, events: [{ type: "email.expense_received", subjectRef: id, payload: { intake_id: id } }] };
     };

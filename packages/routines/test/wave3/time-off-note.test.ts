@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { decisionNote } from "../../src/wave3/time-off";
 
 const base = {
-  id: "tor_0003", workerId: "wrk_0010", workerName: "Ruth Okoro (demo)", departmentId: "dpt_hardware", policyId: "top_vac_us", policyName: "Larkspur Vacation",
+  id: "tor_0003", workerId: "wrk_0010", workerName: "Ruth Okoro", departmentId: "dpt_hardware", policyId: "top_vac_us", policyName: "Larkspur Vacation",
   typeKind: "vacation", status: "pending", startAt: "2026-11-23", endAt: "2026-11-27", requestedMinutes: 1_440, approverPrincipalId: "usr_imani",
   days: [{ date: "2026-11-26", minutes: 0, holiday: true }], checks: [],
 };

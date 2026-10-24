@@ -5,8 +5,8 @@
 import { createHash } from "node:crypto";
 
 export const CARRIER_INTAKE: Record<string, { code: string; label: string; accepts: readonly string[] }> = {
-  "Juniper Mutual (sim)": { code: "JM", label: "medical, dental and vision carrier", accepts: ["medical", "dental", "vision"] },
-  "Tidewater Retirement (sim)": { code: "TW", label: "401(k) provider", accepts: ["401k"] },
+  "Juniper Mutual": { code: "JM", label: "medical, dental and vision carrier", accepts: ["medical", "dental", "vision"] },
+  "Tidewater Retirement": { code: "TW", label: "401(k) provider", accepts: ["401k"] },
 };
 
 export interface CarrierFiling {

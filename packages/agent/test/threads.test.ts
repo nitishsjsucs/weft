@@ -11,7 +11,7 @@ import { answerForThread, boundTurns, earlierConversationBlock, questionOfPack, 
 const turn = (i: number, q = 40, a = 200): EarlierTurn => ({ question: `Q${i} ${"q".repeat(q)}`, answer: `A${i} ${"a".repeat(a)}` });
 const chars = (ts: EarlierTurn[]) => ts.reduce((s, t) => s + t.question.length + t.answer.length, 0);
 const pack = (extra: Partial<Parameters<typeof chatPack>[0]> = {}) => chatPack({
-  nonce: "0123456789abcdef", now: "2026-10-26T15:30:00.000Z", actingFor: "Dana Whitfield (demo) (usr_dana), role admin", grants: { payroll: "edit" },
+  nonce: "0123456789abcdef", now: "2026-10-26T15:30:00.000Z", actingFor: "Vic Akisole (usr_dana), role admin", grants: { payroll: "edit" },
   companySummary: "active headcount 48", openLoops: [], request: "And for September?", pageContext: null, ...extra,
 });
 
@@ -53,7 +53,7 @@ describe("boundTurns", () => {
 
 describe("answerForThread", () => {
   it("keeps the prose and drops the grounded receipt's tool result list", () => {
-    const summary = "Lena's gross changed after the raise (res_0041).\n\nWhat I read:\n- Read pay_2026_10_30 flagged rows (res_0200)\n- Read Lena Brooks (demo) (res_0201)";
+    const summary = "Lena's gross changed after the raise (res_0041).\n\nWhat I read:\n- Read pay_2026_10_30 flagged rows (res_0200)\n- Read Lena Brooks (res_0201)";
     expect(answerForThread(summary)).toBe("Lena's gross changed after the raise.");
   });
 

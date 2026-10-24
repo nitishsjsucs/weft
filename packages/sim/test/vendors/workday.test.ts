@@ -15,7 +15,7 @@ const T0 = "2026-10-26T15:30:00.000Z";
 async function wd() {
   w = await simWorld(T0);
   const db = w.db;
-  await db.run(sql`INSERT INTO companies (id, legal_name, domain, ein, hq_state, founded_on, created_at) VALUES ('cmp_demo', 'Demo Robotics (demo)', 'demo.example', '00-0000000', 'CA', '2020-01-01', ${T0})`);
+  await db.run(sql`INSERT INTO companies (id, legal_name, domain, ein, hq_state, founded_on, created_at) VALUES ('cmp_demo', 'Demo Robotics', 'demo.example', '00-0000000', 'CA', '2020-01-01', ${T0})`);
   await db.run(sql`INSERT INTO departments (id, company_id, name) VALUES ('dpt_engineering', 'cmp_demo', 'Engineering')`);
   const people: [string, string, string, string, string, number, string][] = [
     ["wrk_0001", "Ada", "Quill", "ada.quill@demo.example", "Staff Engineer", 18_500_000, "salary"],

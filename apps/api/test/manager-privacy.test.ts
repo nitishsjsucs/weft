@@ -48,7 +48,7 @@ describe("people.get for a manager's chat run", () => {
     const out = await exec("people.get", { worker_id: PRIYA, response_format: "detailed" });
     const w = done<{ worker: Record<string, unknown> }>(out).worker;
     expect(Object.keys(w).sort()).toEqual(["access", "department", "id", "manager", "name", "title", "work_state"]);
-    expect(w.name).toContain("Priya Raman (demo)");
+    expect(w.name).toContain("Priya Raman");
     expect(w.access).toMatchObject({ scope: "directory", withheld: ["pay", "bank account", "W-4", "benefits elections", "ID numbers"] });
     expect(String((w.access as { reason: string }).reason)).toContain("cannot share");
     expect(JSON.stringify(out)).not.toMatch(PAY);
@@ -91,7 +91,7 @@ describe("people.get for a manager's chat run", () => {
   });
 
   it("a principal with an unknown role reads directory fields only (fails closed)", async () => {
-    await weft.db.insert(principals).values({ id: "usr_test_norole", companyId: "cmp_larkspur", kind: "human", workerId: null, display: "No role (demo)", email: null, role: null,
+    await weft.db.insert(principals).values({ id: "usr_test_norole", companyId: "cmp_larkspur", kind: "human", workerId: null, display: "No role", email: null, role: null,
       grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "none", it: "none", comms: "view", company: "view" }) });
     const w = done<{ worker: Record<string, unknown> }>(await weft.executor.human.exec(session("usr_test_norole"), "people.get", { worker_id: RUTH })).worker;
     expect(w.access).toBeDefined();
@@ -157,7 +157,7 @@ describe("other reads a manager reaches", () => {
     expect(one.summary).toMatch(/^Withheld/);
     const dana = await (await weft.app.request(`/v1/actions/${rows[0]!.seq}`, { headers: weft.uiHeaders("usr_dana") })).json() as { summary: string };
     expect(dana.summary).toMatch(/\$250,000/);
-    // An agent's pay change for Priya is a proposal: Dana sees it, Imani's list and detail do not.
+    // An agent's pay change for Priya is a proposal: Vic sees it, Imani's list and detail do not.
     const handle = await weft.executor.runs.openChatRun(session("usr_dana"), { threadId: null, surface: "human_ui" });   // no allowlist: a test handle
     const filed = await weft.executor.agent.exec(handle, { callId: "pay1", command: "people.set_pay_rate", args: { worker_id: PRIYA, amount_cents: 26_000_000, effective_from: "2026-12-01" } });
     expect(filed.ok && filed.status, JSON.stringify(filed).slice(0, 300)).toBe("pending_approval");

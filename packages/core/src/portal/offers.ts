@@ -41,7 +41,7 @@ const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T12:00:
 // documents.create_offer ------------------------------------------------------------------------------------
 const CreateInput = z.object({
   candidate_first: z.string().min(1).max(60), candidate_last: z.string().min(1).max(60),
-  candidate_email: z.string().max(120).regex(EXAMPLE_EMAIL, "use a *.example address (demo data)"),
+  candidate_email: z.string().max(120).regex(EXAMPLE_EMAIL, "use a *.example address"),
   title: z.string().min(2).max(80), department_id: z.string(), workplace_id: z.string().optional(), work_state: z.enum(OFFER_STATES),
   manager_id: z.string().optional(), base_cents: z.number().int().positive(), pay_kind: z.enum(["salary", "hourly"]).optional(),
   start_date: isoDate, expires_on: isoDate.optional(),
@@ -80,7 +80,7 @@ export const createOffer = writeCommand({
 const OfferIdInput = z.object({ offer_id: z.string() });
 async function companyName(tx: DbTx, companyId: string) {
   const [c] = await tx.select().from(companies).where(eq(companies.id, companyId)).limit(1);
-  return c?.legalName ?? "Larkspur Robotics, Inc. (demo)";
+  return c?.legalName ?? "Larkspur Robotics, Inc.";
 }
 async function managerName(tx: DbTx, id: string | null) {
   if (!id) return null;
@@ -127,8 +127,8 @@ export const sendOffer = writeCommand({
     const link = portalLink(principalId);
     const email = await deps.sims.email.send({
       to: o.candidateEmail, from: INVITE_FROM, kind: "offer_invite", relatedRef: o.id,
-      subject: `Your offer from Larkspur Robotics (demo): ${o.title}`,
-      body: `Hi ${o.candidateFirst} (demo),\n\nYour offer for ${o.title} is ready. Open your new-hire portal to read and sign it, then finish your onboarding checklist:\n${link}\n\nThe offer stays open until ${o.expiresOn ?? o.startDate}.\n\nThis is a simulated email from a fictional company.`,
+      subject: `Your offer from Larkspur Robotics: ${o.title}`,
+      body: `Hi ${o.candidateFirst},\n\nYour offer for ${o.title} is ready. Open your new-hire portal to read and sign it, then finish your onboarding checklist:\n${link}\n\nThe offer stays open until ${o.expiresOn ?? o.startDate}.`,
     });
     // Wave 3: with WEFT_ESIGN=docusign the documents also go out as one envelope with the persona as embedded signer.
     const envelope = esignEnabled() ? await sendOfferEnvelope(deps, ctx, { ...o, status: "sent", sentAt: ctx.now, documentId: letterId }, [letterId, ndaId], principalId) : null;

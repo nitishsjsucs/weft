@@ -8,12 +8,12 @@ import type { SeedContext } from "./context";
 import { DEPARTMENTS } from "./company";
 
 export const SEED_CHAT = [
-  { channel: "#general", author: "Jordan Pike (demo)", text: "Reminder: the Brooklyn Studio demo day is Thursday. Snacks on the third floor." },
-  { channel: "#general", author: "Marcus Bell (demo)", text: "Austin Yard fleet hit 1,000 autonomous pallet moves this week." },
-  { channel: "#people-ops", author: "Sam Okafor (demo)", text: "Open enrollment questions can go in this channel." },
-  { channel: "#payroll", author: "Theo Marsh (demo)", text: "The Oct 15 payroll settled. Next approval deadline is Wed Oct 28 at 5 pm PT." },
-  { channel: "#new-hires", author: "Dana Whitfield (demo)", text: "Welcome Ana and Ben to Larkspur (demo)!" },
-  { channel: "#new-hires", author: "Imani Ferreira (demo)", text: "Hardware onboarding buddy list is pinned in the team folder." },
+  { channel: "#general", author: "Jordan Pike", text: "Reminder: the Brooklyn Studio demo day is Thursday. Snacks on the third floor." },
+  { channel: "#general", author: "Marcus Bell", text: "Austin Yard fleet hit 1,000 autonomous pallet moves this week." },
+  { channel: "#people-ops", author: "Sam Okafor", text: "Open enrollment questions can go in this channel." },
+  { channel: "#payroll", author: "Theo Marsh", text: "The Oct 15 payroll settled. Next approval deadline is Wed Oct 28 at 5 pm PT." },
+  { channel: "#new-hires", author: "Vic Akisole", text: "Welcome Ana and Ben to Larkspur!" },
+  { channel: "#new-hires", author: "Imani Ferreira", text: "Hardware onboarding buddy list is pinned in the team folder." },
 ] as const;
 
 export async function seedIt(ctx: SeedContext): Promise<void> {
@@ -31,7 +31,7 @@ export async function seedIt(ctx: SeedContext): Promise<void> {
       await db.insert(simIdpAccounts).values({ id: ref, workerId: w.id, system, handle, groupsJson: JSON.stringify(groups), status: "active", createdAt: now });
       await db.insert(itAccounts).values({ id: await newId(db, "ita_"), workerId: w.id, system, handle, groupsJson: JSON.stringify(groups), status: "active", simRef: ref });
     }
-    await db.insert(devices).values({ id: await newId(db, "dev_"), workerId: w.id, model: "Larkspur standard laptop (sim)", status: "assigned", orderRef: null, priceCents: 189_900 });
+    await db.insert(devices).values({ id: await newId(db, "dev_"), workerId: w.id, model: "Larkspur standard laptop", status: "assigned", orderRef: null, priceCents: 189_900 });
   }
   for (const m of SEED_CHAT) {
     await db.insert(simChatMessages).values({ id: await newId(db, "simc_"), channel: m.channel, author: m.author, text: m.text, inbound: true, cardJson: null, ts: now });

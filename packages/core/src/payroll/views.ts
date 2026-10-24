@@ -11,7 +11,7 @@ import { displayName } from "../people/names";
 type RunRow = typeof payrollRuns.$inferSelect;
 type PaycheckRow = typeof paychecks.$inferSelect;
 
-/** A worker's name of record, as every other screen and the agent print it ("Mira Delgado (demo)"). */
+/** A worker's name of record, as every other screen and the agent print it ("Mira Delgado"). */
 export const workerDisplayName = (w: { firstName: string; lastName: string }) => displayName(w.firstName, w.lastName);
 
 export async function workerNames(tx: DbTx, ids: string[]): Promise<Map<string, { name: string; state: string | null }>> {

@@ -1,9 +1,7 @@
-SIMULATED AGENCY NOTICE (scanned mail sample). Made for the Weft demo. Not a real government document.
-
-EMPLOYMENT DEVELOPMENT DEPARTMENT, STATE OF CALIFORNIA (SIMULATED)
+EMPLOYMENT DEVELOPMENT DEPARTMENT, STATE OF CALIFORNIA
 Statement of Charges to Reserve Account
 
-Employer: Larkspur Robotics, Inc. (demo)
+Employer: Larkspur Robotics, Inc.
 Employer Account Number: 000-4817-2
 Form: DE 428T
 Period: 2026-Q2

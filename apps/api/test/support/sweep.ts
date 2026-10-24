@@ -81,6 +81,6 @@ export const SWEPT_GET_ROUTES = ROUTES.filter((r) => r.method === "GET" && !/\/e
 export async function addSweepArtifact(w: Pick<DurableTestWorld, "weft">): Promise<void> {
   const h = await w.weft.executor.runs.openRoutineRun({ routineId: "rt_pre_payroll", routineRunId: "rtr_9400", triggerRef: "manual", attended: false });
   const path = `companies/cmp_larkspur/runs/${h.runId}/artifacts/1-sweep.json`;
-  await w.weft.runFiles.write(path, JSON.stringify({ rows: [{ plan: "Medical (demo)", enrolled: 41 }] }));
-  await w.weft.db.run(sql`INSERT INTO run_artifacts (id, run_id, step_n, path, bytes, sha256, summary, domain, needs, tainted_by) VALUES ('art_9400', ${h.runId}, 1, ${path}, 10, ${"0".repeat(64)}, 'Benefit enrollment (demo)', 'benefits', 'view', NULL)`);
+  await w.weft.runFiles.write(path, JSON.stringify({ rows: [{ plan: "Medical", enrolled: 41 }] }));
+  await w.weft.db.run(sql`INSERT INTO run_artifacts (id, run_id, step_n, path, bytes, sha256, summary, domain, needs, tainted_by) VALUES ('art_9400', ${h.runId}, 1, ${path}, 10, ${"0".repeat(64)}, 'Benefit enrollment', 'benefits', 'view', NULL)`);
 }

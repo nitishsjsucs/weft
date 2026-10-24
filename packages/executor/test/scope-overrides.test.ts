@@ -110,7 +110,7 @@ describe("propose_only", () => {
     // Reads under the same override still run, and the person's own calls are never narrowed.
     await override("usr_dana", "people.search", "propose_only");
     expect(await call(h, "people.search", { query: "Sam" })).toMatchObject({ ok: true, status: "done" });
-    expect(await w.executor.human.exec(w.ui("usr_dana"), "comms.send_message", { channel: "#general", text: "from Dana" })).toMatchObject({ ok: true, status: "done" });
+    expect(await w.executor.human.exec(w.ui("usr_dana"), "comms.send_message", { channel: "#general", text: "from Vic" })).toMatchObject({ ok: true, status: "done" });
   });
 
   it("forces a proposal in a run acting for another person only when that person set it", async () => {

@@ -65,9 +65,9 @@ export async function ensureTestPrincipals(db: DbTx): Promise<void> {
   const { principals } = await import("@weft/db");
   const all = (level: string) => JSON.stringify({ people: level, payroll: level, tax: level, benefits: level, it: level, comms: level, company: level });
   const rows = [
-    { id: "usr_dana", workerId: "wrk_0001", display: "Dana Whitfield (demo)", email: "dana.whitfield@larkspur.example", role: "admin", grantsJson: all("approve") },
-    { id: "usr_theo", workerId: "wrk_0002", display: "Theo Marsh (demo)", email: "theo.marsh@larkspur.example", role: "payroll_admin", grantsJson: JSON.stringify({ people: "view", payroll: "approve", tax: "approve", benefits: "none", it: "none", comms: "view", company: "view" }) },
-    { id: "usr_sam", workerId: "wrk_0025", display: "Sam Okafor (demo)", email: "sam.okafor@larkspur.example", role: "hr_manager", grantsJson: JSON.stringify({ people: "edit", payroll: "view", tax: "view", benefits: "edit", it: "edit", comms: "edit", company: "view" }) },
+    { id: "usr_dana", workerId: "wrk_0001", display: "Vic Akisole", email: "vic.akisole@larkspur.example", role: "admin", grantsJson: all("approve") },
+    { id: "usr_theo", workerId: "wrk_0002", display: "Theo Marsh", email: "theo.marsh@larkspur.example", role: "payroll_admin", grantsJson: JSON.stringify({ people: "view", payroll: "approve", tax: "approve", benefits: "none", it: "none", comms: "view", company: "view" }) },
+    { id: "usr_sam", workerId: "wrk_0025", display: "Sam Okafor", email: "sam.okafor@larkspur.example", role: "hr_manager", grantsJson: JSON.stringify({ people: "edit", payroll: "view", tax: "view", benefits: "edit", it: "edit", comms: "edit", company: "view" }) },
   ];
   for (const r of rows) await db.insert(principals).values({ ...r, companyId: "cmp_larkspur", kind: "human" }).onConflictDoNothing();
 }

@@ -15,8 +15,8 @@ export const MAX_MESSAGE_CHARS = 1500;
 const MARKUP = /<\s*\/?\s*[a-z!][^>]*>|\[\[?\s*card|"card_json"|card_json\s*[:=]/i;
 
 /**
- * A row id in parentheses after a name ("Please welcome Noor Castellanos (demo) (wrk_0063)") means nothing in a
- * channel, so it goes from the text that is shown and posted. "(demo)" and other words in parentheses stay.
+ * A row id in parentheses after a name ("Please welcome Noor Castellanos (wrk_0063)") means nothing in a
+ * channel, so it goes from the text that is shown and posted. Other words in parentheses ("Oakland (HQ)") stay.
  */
 const ROW_ID = "[a-z]{2,5}_[A-Za-z0-9_]*\\d[A-Za-z0-9_]*";
 export const withoutRowIds = (t: string): string => t.replace(new RegExp(`\\s*\\(\\s*${ROW_ID}(?:\\s*,\\s*${ROW_ID})*\\s*\\)`, "g"), "");
@@ -64,7 +64,7 @@ export async function routineFigures(tx: DbTx, companyId: string, routineRunId: 
 
 function validate(i: SendInput): ChatChannel {
   if (!i.channel || i.worker_id) {
-    throw new DomainRefusal("DOMAIN_RECIPIENT", i.worker_id ? "Direct messages are not available in the chat simulator yet; post to a channel" : "channel is required", "Pick one channel from the enum", { channel: "#new-hires", text: i.text.slice(0, 80) });
+    throw new DomainRefusal("DOMAIN_RECIPIENT", i.worker_id ? "Direct messages are not available yet; post to a channel" : "channel is required", "Pick one channel from the enum", { channel: "#new-hires", text: i.text.slice(0, 80) });
   }
   if (MARKUP.test(i.text)) throw new DomainRefusal("DOMAIN_MARKUP", "Messages are plain text; markup and approval cards are not allowed", "Remove HTML tags and card markup", null);
   return i.channel;

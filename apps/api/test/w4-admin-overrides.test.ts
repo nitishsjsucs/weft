@@ -48,7 +48,7 @@ describe("deny hides the command from the model's tools", () => {
     const dana = await toolsShown("usr_dana");
     expect(dana).not.toContain("people__search");
     expect(dana).toContain("people__get");
-    // Sam's runs are not bound by Dana's row.
+    // Sam's runs are not bound by Vic's row.
     expect(await toolsShown("usr_sam")).toContain("people__search");
     await overrideApproved("usr_dana", "people.search", "clear");
     expect(await toolsShown("usr_dana")).toContain("people__search");

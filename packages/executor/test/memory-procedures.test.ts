@@ -21,8 +21,8 @@ async function seed(w: World, files: { path: string; id: string; type: string; b
   const m = w.executor.memory as Mem;
   for (const f of files) {
     await m.write({
-      path: f.path, body: f.body, message: `note: ${f.path}`, author: { name: "Dana Whitfield (demo)", email: "usr_dana@larkspur.example" },
-      frontmatter: { id: f.id, type: f.type, aliases: [], links: [], sources: ["runbook (demo)"], status: null, updated: "2026-10-01", taintedBy: f.taintedBy ?? null },
+      path: f.path, body: f.body, message: `note: ${f.path}`, author: { name: "Vic Akisole", email: "usr_vic.akisole@larkspur.example" },
+      frontmatter: { id: f.id, type: f.type, aliases: [], links: [], sources: ["runbook"], status: null, updated: "2026-10-01", taintedBy: f.taintedBy ?? null },
     });
   }
   return m;

@@ -46,7 +46,7 @@ describe("greenhouse simulator", () => {
     const { g } = await gh();
     const h = await g.simulate("hire");
     const hire = await g.getHire(h.applicationId);
-    expect(hire).toMatchObject({ applicationId: h.applicationId, offerVersion: 1, first: "Marisol", last: "Quint", email: "marisol.quint@candidate.example", jobName: "Firmware Test Engineer (demo)", departmentExtId: "3300102", officeExtId: "2200109", startDate: "2026-11-16", salary: { amountMinor: 13_200_000, currency: "USD" } });
+    expect(hire).toMatchObject({ applicationId: h.applicationId, offerVersion: 1, first: "Marisol", last: "Quint", email: "marisol.quint@candidate.example", jobName: "Firmware Test Engineer", departmentExtId: "3300102", officeExtId: "2200109", startDate: "2026-11-16", salary: { amountMinor: 13_200_000, currency: "USD" } });
     const c = await g.simulate("start_date_change", { applicationId: h.applicationId });
     expect(c.offerVersion).toBe(2);
     const all = (await g.harvest("/v3/offers", { application_ids: h.applicationId })).body as { version: number; status: string }[];

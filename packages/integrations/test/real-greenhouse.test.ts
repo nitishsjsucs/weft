@@ -25,7 +25,7 @@ const json = (body: unknown, headers: Record<string, string> = {}, status = 200)
 const APP = { id: 6_600_101, candidate_id: 5_500_101, job_id: 4_400_103, status: "hired", updated_at: "2026-10-26T15:30:00.000Z" };
 const OFFER = { id: 7_700_101, version: 1, status: "Accepted", starts_on: "2026-11-16", resolved_at: "2026-10-26T15:30:00.000Z", custom_fields: { salary: { amount: 132_000, unit: "USD" } } };
 const CAND = { id: 5_500_101, first_name: "Marisol", last_name: "Quint", email_addresses: [{ value: "marisol.quint@candidate.example", type: "personal" }] };
-const JOB = { id: 4_400_103, name: "Firmware Test Engineer (demo)", updated_at: "2026-10-20T16:00:00.000Z", departments: [{ id: 3_300_102, name: "Hardware" }], offices: [{ id: 2_200_109, name: "Boulder Field Office", location: { name: "Boulder, CO" } }] };
+const JOB = { id: 4_400_103, name: "Firmware Test Engineer", updated_at: "2026-10-20T16:00:00.000Z", departments: [{ id: 3_300_102, name: "Hardware" }], offices: [{ id: 2_200_109, name: "Boulder Field Office", location: { name: "Boulder, CO" } }] };
 
 function fakeHarvest(over: Partial<Record<string, (url: URL, n: number) => HttpResponse>> = {}) {
   const calls: { url: string; auth: string }[] = [];
@@ -58,7 +58,7 @@ describe("real Greenhouse adapter (fake transport)", () => {
     let now = Date.parse("2026-10-26T15:30:00.000Z");
     const gh = createRealGreenhouse(fullEnv(), sim, { transport: f.t, nowMs: () => now })!;
     const page = await gh.listHires({ updatedAfter: "2026-10-01T00:00:00.000Z", cursor: null });
-    expect(page.items).toEqual([{ applicationId: "6600101", candidateId: "5500101", offerId: "7700101", offerVersion: 1, first: "Marisol", last: "Quint", email: "marisol.quint@candidate.example", jobName: "Firmware Test Engineer (demo)", departmentExtId: "3300102", officeExtId: "2200109", startDate: "2026-11-16", salary: { amountMinor: 13_200_000, currency: "USD" }, hiredAt: "2026-10-26T15:30:00.000Z" }]);
+    expect(page.items).toEqual([{ applicationId: "6600101", candidateId: "5500101", offerId: "7700101", offerVersion: 1, first: "Marisol", last: "Quint", email: "marisol.quint@candidate.example", jobName: "Firmware Test Engineer", departmentExtId: "3300102", officeExtId: "2200109", startDate: "2026-11-16", salary: { amountMinor: 13_200_000, currency: "USD" }, hiredAt: "2026-10-26T15:30:00.000Z" }]);
     expect(page.rateLimit.remaining).toBe(74);
     const tokenCall = f.calls.find((c) => c.url === GREENHOUSE_TOKEN_URL)!;
     expect(tokenCall.auth).toBe(`Basic ${Buffer.from(`fake-client-id-77:${SECRET}`).toString("base64")}`);
@@ -89,7 +89,7 @@ describe("real Greenhouse adapter (fake transport)", () => {
     const f = fakeHarvest({ "/v3/jobs": (_u, n) => (n === 1 ? json({ message: "Rate limit exceeded" }, { "retry-after": "3" }, 429) : n === 2 ? json({ message: "expired" }, {}, 401) : json([JOB])) });
     const gh = createRealGreenhouse(fullEnv(), sim, { transport: f.t, sleep: async (ms) => { slept.push(ms); } })!;
     const jobs = await gh.listJobs({ cursor: null, source: "harvest" });
-    expect(jobs.items.map((j) => j.name)).toEqual(["Firmware Test Engineer (demo)"]);
+    expect(jobs.items.map((j) => j.name)).toEqual(["Firmware Test Engineer"]);
     expect(slept).toEqual([3000]);
     expect(f.tokens()).toBe(2);
   });

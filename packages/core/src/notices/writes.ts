@@ -12,8 +12,8 @@ import { getNotice, parseDrafts, parseExtract, type NoticeDraft, type NoticeRow 
 
 export const MAX_NOTE_CHARS = 400;
 export const NOT_REVERSIBLE_REASONS: Readonly<Record<string, string>> = {
-  "notices.send_response": "Not reversible: filed with the agency simulator",
-  "tax.register_state_account": "Not reversible: filed with the agency simulator",
+  "notices.send_response": "Not reversible: filed with the agency",
+  "tax.register_state_account": "Not reversible: filed with the agency",
 };
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -33,7 +33,7 @@ export function letterDate(isoOrDate: string | null | undefined): string | null 
 export function responseTemplate(n: NoticeRow, accountNumber: string | null): string {
   const ex = parseExtract(n.extractedJson);
   const label = AGENCY_LABELS[n.agency] ?? n.agency;
-  const head = `To: ${label}\nRe: ${n.formCode} notice received ${letterDate(n.receivedAt) ?? n.receivedAt}, employer account ${accountNumber ?? ex?.accountNumber ?? "on file"}\nFrom: Larkspur Robotics, Inc. (demo), payroll@larkspur.example\n\n`;
+  const head = `To: ${label}\nRe: ${n.formCode} notice received ${letterDate(n.receivedAt) ?? n.receivedAt}, employer account ${accountNumber ?? ex?.accountNumber ?? "on file"}\nFrom: Larkspur Robotics, Inc., payroll@larkspur.example\n\n`;
   const by = letterDate(n.respondBy) ?? "the respond-by date";
   if (n.kind === "rate_change" && ex && ex.rates.length) {
     const lines = ex.rates.map((r) => `${r.code.toUpperCase()} ${rateDisplay(r.newRate)}${r.oldRate ? ` replacing ${rateDisplay(r.oldRate)}` : ""}`).join("; ");

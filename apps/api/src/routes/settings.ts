@@ -22,7 +22,7 @@ async function permissions(weft: Weft, companyId: string) {
     agentGrants: Object.fromEntries(ag.map((g) => [g.domain, g.level])),
     limits: Object.fromEntries(lim.map((l) => [l.key, l.cents])),
     requireSecondApprover: second ? JSON.parse(second.valueJson) === true : false,
-    viewingAsNote: "The Viewing as switcher is a demo control that defeats SELF_APPROVAL by design.",
+    viewingAsNote: "The Viewing as switcher is a development control (dev auth only) that defeats SELF_APPROVAL by design.",
   };
 }
 

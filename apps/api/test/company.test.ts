@@ -13,7 +13,7 @@ describe("GET /v1/company", () => {
     const res = await weft.app.request("/v1/company", { headers: weft.uiHeaders("usr_dana") });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(Company.parse(body.company)).toEqual({ id: "cmp_larkspur", legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01" });
+    expect(Company.parse(body.company)).toEqual({ id: "cmp_larkspur", legalName: "Larkspur Robotics, Inc.", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01" });
     expect(body.workplaces.map((w: unknown) => Workplace.parse(w).id)).toEqual(["wkp_austin", "wkp_brooklyn", "wkp_oakland", "wkp_remote"]);
     const depts = body.departments.map((d: unknown) => Department.parse(d));
     expect(depts).toHaveLength(6);

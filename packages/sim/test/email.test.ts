@@ -7,7 +7,7 @@ import { simWorld, type SimTestWorld } from "./helpers";
 
 let w: SimTestWorld | null = null;
 afterEach(async () => { await w?.close(); w = null; });
-const msg = (to: string, body = "Open the portal.") => ({ to, from: "people@larkspur.example", subject: "Your offer (demo)", body, kind: "offer_invite" as const, relatedRef: "offr_0002" });
+const msg = (to: string, body = "Open the portal.") => ({ to, from: "people@larkspur.example", subject: "Your offer", body, kind: "offer_invite" as const, relatedRef: "offr_0002" });
 
 describe("email simulator", () => {
   it("keeps sent mail in order, filters by recipient and stamps the sim time", async () => {

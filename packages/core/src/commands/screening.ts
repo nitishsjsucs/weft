@@ -102,7 +102,7 @@ export const orderScreening = writeCommand({
     const mode = (await connectorOf(deps.sims, vendor).status()).mode;
     return {
       title: `Order ${pkg.name} for ${nameRef(o.candidateFirst, o.candidateLast, o.workerId)} at ${formatCents(pkg.priceCents)}`,
-      diff: [{ label: "Background check", before: "none", after: `${pkg.name}, ${formatCents(pkg.priceCents)}, ${vendor} (${mode === "simulated" ? "Simulated" : "live"}), work location ${[loc.city, loc.state].filter(Boolean).join(", ")}` }],
+      diff: [{ label: "Background check", before: "none", after: `${pkg.name}, ${formatCents(pkg.priceCents)}, ${vendor} (${mode === "simulated" ? "sandbox" : "live"}), work location ${[loc.city, loc.state].filter(Boolean).join(", ")}` }],
       content: [{ label: "Consent", text: CONSENT_LINE }], moneyCents: pkg.priceCents, subjectRef: `${o.id}:screening`,
       subjectHash: sha256Hex(canonicalJson({ offer: o.id, status: o.status, pkg: pkg.slug, price: pkg.priceCents })), evidence: [{ label: "Offer", ref: o.id }, { label: "Worker", ref: o.workerId }],
     };

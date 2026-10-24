@@ -126,7 +126,7 @@ export async function seedW3TimeOff(ctx: SeedContext): Promise<void> {
   const [imani] = await db.select().from(workers).where(and(eq(workers.companyId, companyId), eq(workers.firstName, "Imani"), eq(workers.lastName, "Ferreira"))).limit(1);
   if (imani) {
     await db.insert(principals).values({
-      id: "usr_imani", companyId, kind: "human", workerId: imani.id, display: "Imani Ferreira (demo)", email: imani.workEmail, role: "manager",
+      id: "usr_imani", companyId, kind: "human", workerId: imani.id, display: "Imani Ferreira", email: imani.workEmail, role: "manager",
       grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "none", it: "none", comms: "view", company: "view" }),
     }).onConflictDoNothing();
   }

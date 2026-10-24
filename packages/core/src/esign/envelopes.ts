@@ -14,7 +14,7 @@ import { REVOKED_GRANTS, loadPersona, type OfferRow } from "../portal/persona";
 
 export type EnvelopeRow = typeof esignEnvelopes.$inferSelect;
 type Event = { type: string; subjectRef: string; payload: Record<string, string> };
-export const VOID_REASON = "The hiring team withdrew this offer (demo).";
+export const VOID_REASON = "The hiring team withdrew this offer.";
 
 export const esignEnabled = (env: Record<string, string | undefined> = process.env) => env.WEFT_ESIGN === "docusign";
 

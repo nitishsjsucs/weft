@@ -18,7 +18,7 @@ export const AGENCY_VAULT: Readonly<Record<AgencyCode, `vault:${string}`>> = {
   tx_twc: "vault:tx-twc-portal", co_dor: "vault:co-dor-portal", co_cdle: "vault:co-cdle-portal",
 };
 export const AGENCY_LABEL: Readonly<Record<AgencyCode, string>> = {
-  irs: "IRS (sim)", ca_edd: "CA EDD (sim)", ny_dtf: "NY DTF (sim)", ny_dol: "NY DOL (sim)", tx_twc: "TX TWC (sim)", co_dor: "CO DOR (sim)", co_cdle: "CO CDLE (sim)",
+  irs: "IRS", ca_edd: "CA EDD", ny_dtf: "NY DTF", ny_dol: "NY DOL", tx_twc: "TX TWC", co_dor: "CO DOR", co_cdle: "CO CDLE",
 };
 const CONFIRMATION_PREFIX: Readonly<Record<AgencyCode, string>> = {
   irs: "IRS", ca_edd: "CA-EDD", ny_dtf: "NY-DTF", ny_dol: "NY-DOL", tx_twc: "TX-TWC", co_dor: "CO-DOR", co_cdle: "CO-CDLE",

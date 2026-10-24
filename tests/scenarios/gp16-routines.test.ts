@@ -49,8 +49,8 @@ async function hire(id: string, first: string, state: string, ready: boolean) {
     return;
   }
   for (const system of ["chat", "google_ws", "github"]) await weft.db.insert(itAccounts).values({ id: `ita_${id.slice(4)}${system.slice(0, 2)}`, workerId: id, system, handle: first.toLowerCase(), status: "active" });
-  await weft.db.insert(devices).values({ id: `dev_${id.slice(4)}`, workerId: id, model: "Larkspur standard laptop (sim)", status: "delivered", priceCents: 189_900 });
-  await weft.db.insert(bankAccounts).values({ id: `bnk_${id.slice(4)}`, workerId: id, bankName: "Sim Federal Credit Union", accountLast4: "4242", routingLast4: "0001", credentialRef: `vault:bank-${id}`, status: "active", source: "seed" });
+  await weft.db.insert(devices).values({ id: `dev_${id.slice(4)}`, workerId: id, model: "Larkspur standard laptop", status: "delivered", priceCents: 189_900 });
+  await weft.db.insert(bankAccounts).values({ id: `bnk_${id.slice(4)}`, workerId: id, bankName: "Tidepool Federal Credit Union", accountLast4: "4242", routingLast4: "0001", credentialRef: `vault:bank-${id}`, status: "active", source: "seed" });
   await weft.db.insert(taxProfiles).values({ workerId: id, w4Version: "2020", filingStatus: "single", source: "portal" });
 }
 
@@ -71,7 +71,7 @@ describe("GP16 routine parity", () => {
   });
 
   it("the brain's ready line matches core's", () => {
-    const h = { worker_id: "wrk_x", name: "A B (demo)", start_date: "2026-10-28", work_state: "CA", first_day: false, ready: false, items: [], blocked: [{ item: "bank_verified" as const, label: "direct deposit account", owner: "the hire" as const }] };
+    const h = { worker_id: "wrk_x", name: "A B", start_date: "2026-10-28", work_state: "CA", first_day: false, ready: false, items: [], blocked: [{ item: "bank_verified" as const, label: "direct deposit account", owner: "the hire" as const }] };
     for (const v of [h, { ...h, ready: true, blocked: [] }, { ...h, first_day: true }, { ...h, first_day: true, ready: true, blocked: [] }]) expect(brainReadyLine(v)).toBe(coreReadyLine(v));
   });
 
@@ -82,12 +82,12 @@ describe("GP16 routine parity", () => {
     expect(run.status, JSON.stringify(run)).toBe("done");
     const post = (await chat("#new-hires")).find((m) => m.text.includes("Ready for day one"));
     expect(post?.text).toBe([
-      "Ready for day one: Robin Tester (demo) starts 2026-10-28. Accounts, laptop, pay and paperwork are all set.",
-      "Not ready yet: Kai Tester (demo) starts 2026-10-28. Blocking: work accounts (IT), laptop delivered (IT), direct deposit account (the hire), federal W-4 (the hire), state payroll registration (payroll).",
+      "Ready for day one: Robin Tester starts 2026-10-28. Accounts, laptop, pay and paperwork are all set.",
+      "Not ready yet: Kai Tester starts 2026-10-28. Blocking: work accounts (IT), laptop delivered (IT), direct deposit account (the hire), federal W-4 (the hire), state payroll registration (payroll).",
     ].join("\n"));
     const sug = (await weft.db.select().from(proposals).where(eq(proposals.kind, "suggestion"))).filter((p) => p.status === "pending");
     expect(sug.map((p) => [p.subjectRef, p.command])).toEqual([["wrk_0902", "onboarding.flag_not_ready"]]);
-    expect(sug[0]!.headline).toContain("Kai Tester (demo)");
+    expect(sug[0]!.headline).toContain("Kai Tester");
     const inbox = (await call("GET", "/v1/proposals?status=pending")).json;
     expect(JSON.stringify(inbox)).toContain(sug[0]!.id);
     const rows = (await call("GET", "/v1/routines")).json as { id: string; lastRun: { id: string; status: string } | null }[];
@@ -130,8 +130,8 @@ describe("GP16 routine parity", () => {
     expect(run.status, JSON.stringify(run)).toBe("done");
     const post = (await chat("#general")).find((m) => m.text.startsWith("Milestones today"));
     expect(post).toBeDefined();
-    for (const w of people.filter((p) => p.startDate.slice(5) === day!.slice(5))) expect(post!.text).toContain(`work anniversary, ${w.firstName} ${w.lastName} (demo)`);
-    const birthdays = [...post!.text.matchAll(/Happy birthday, ([^!]+) \(demo\)!/g)].map((m) => m[1]);
+    for (const w of people.filter((p) => p.startDate.slice(5) === day!.slice(5))) expect(post!.text).toContain(`work anniversary, ${w.firstName} ${w.lastName}`);
+    const birthdays = [...post!.text.matchAll(/Happy birthday, ([^!]+)!/g)].map((m) => m[1]);
     const all = await weft.db.select().from(workers);
     for (const name of birthdays) expect(all.find((w) => `${w.firstName} ${w.lastName}` === name)?.birthMonthDay).toBe(day!.slice(5));
     for (const w of all.filter((x) => x.birthMonthDay === null)) expect(post!.text).not.toContain(`Happy birthday, ${w.firstName} ${w.lastName}`);

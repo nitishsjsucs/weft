@@ -38,7 +38,7 @@ function doc(subjectRef: string | null, path: string, type: MemoryFrontmatter["t
 }
 
 export function personDossier(p: PersonInput, fallbackDate: string): DossierDoc {
-  return doc(p.id, `entities/people/${p.id}.md`, "person", p.id, p.aliases, `${clean(p.name)} (demo)`, p.facts, fallbackDate);
+  return doc(p.id, `entities/people/${p.id}.md`, "person", p.id, p.aliases, clean(p.name), p.facts, fallbackDate);
 }
 
 export function stateDossier(s: StateInput, fallbackDate: string): DossierDoc {
@@ -46,11 +46,11 @@ export function stateDossier(s: StateInput, fallbackDate: string): DossierDoc {
 }
 
 export function agencyDossier(a: AgencyInput, fallbackDate: string): DossierDoc {
-  return doc(a.id, a.path, "agency", a.id, a.aliases, `${clean(a.name)} (sim)`, a.facts, fallbackDate);
+  return doc(a.id, a.path, "agency", a.id, a.aliases, clean(a.name), a.facts, fallbackDate);
 }
 
 export function noticeDossier(n: NoticeInput, fallbackDate: string): DossierDoc {
-  return doc(n.id, `entities/notices/${n.id}.md`, "fact", n.id, [n.id], `Notice ${n.id} (sim)`, n.facts, fallbackDate);
+  return doc(n.id, `entities/notices/${n.id}.md`, "fact", n.id, [n.id], `Notice ${n.id}`, n.facts, fallbackDate);
 }
 
 /** knowledge/company/one-pager.md: headcount by state, open items, active workstreams, the agent's autonomy settings. */
@@ -64,7 +64,7 @@ export function onePager(o: OnePagerInput, companyRef: string): DossierDoc {
     return [`## ${title}`, "", ...(shown.length ? shown : [`- none (${o.asOf}, src: digest)`]), ""];
   };
   const body = [
-    `# ${clean(o.companyName).replace(/\s*\(demo\)$/, "")} one-pager (demo)`, "",
+    `# ${clean(o.companyName)} one-pager`, "",
     ...section("Headcount by state", o.headcount), ...section("Open items", o.openItems),
     ...section("Active workstreams", o.workstreams), ...section("Agent autonomy", o.autonomy),
   ].join("\n");

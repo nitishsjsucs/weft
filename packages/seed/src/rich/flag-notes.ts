@@ -9,7 +9,7 @@ import { payroll } from "@weft/core";
 
 /** What the review read beside the flags. */
 export interface NoteFacts {
-  /** The worker's display name of record, "Mira Delgado (demo)". */
+  /** The worker's display name of record, "Mira Delgado". */
   name: string;
   /** Onboarding task kinds that are not done, in checklist order (empty when there is no checklist or it is done). */
   openOnboarding: string[];

@@ -2,6 +2,7 @@
 // run calls them (redaction, offload and the frozen allowlist included), on the seeded world plus the ON-02 and OF-01
 // mutations. Scripted provider only; nothing here calls a live model.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 import { CHAT_TOOLS_W3, type ToolOutcome } from "@weft/contracts";
 import { registered } from "../src/agent/chat-allowlist";
 import { createTestWeft, type TestWeft } from "../src/testing";
@@ -114,9 +115,10 @@ describe("payroll run reads carry the approval facts (FM8, CQ-06)", () => {
     const runs = done<{ runs: { run_id: string; status: string; approved_by: string | null; approved_by_id: string | null; approved_at: string | null }[] }>(await exec("payroll.list_runs", {})).runs;
     const processed = runs.filter((r) => r.status === "processed");
     expect(processed.length).toBeGreaterThan(0);
+    const display = new Map((await weft.db.all<{ id: string; display: string }>(sql`SELECT id, display FROM principals`)).map((p) => [p.id, p.display]));
     for (const r of processed) {
       expect(r.approved_by_id).toMatch(/^usr_/);
-      expect(r.approved_by).toMatch(/\(demo\)$/);
+      expect(r.approved_by).toBe(display.get(r.approved_by_id!));
       expect(r.approved_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }
     for (const r of runs.filter((x) => x.status === "draft")) expect(r).toMatchObject({ approved_by: null, approved_by_id: null, approved_at: null });

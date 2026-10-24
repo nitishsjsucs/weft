@@ -1,7 +1,7 @@
 // Fixed FX table for global contractor payments (P1 payouts). Synthetic: not market data, never updated.
 import type { Currency } from "@weft/contracts";
 
-export const FX_LABEL = "Synthetic FX table (fixed, not market data)";
+export const FX_LABEL = "Fixed FX table (not market data)";
 
 /** USD per one unit of the currency, as a decimal string. */
 export const FX_USD_PER_UNIT: Readonly<Record<Currency, string>> = {

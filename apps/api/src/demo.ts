@@ -129,7 +129,7 @@ say(`   Fri Oct 30 06:00 PT: payroll is ${((await get("/v1/payrolls/pay_2026_10_
 
 head("GP5 guardrails: an injected notice");
 // The injected copy states the GP1 letter's rates, and a rate notice whose rates are already in effect is acknowledged
-// without a run (review fix notices-and-proposals). So Dana first undoes the GP1 rate change, as demo scenario 1 does;
+// without a run (review fix notices-and-proposals). So Vic first undoes the GP1 rate change, as demo scenario 1 does;
 // a rolled-back change can be proposed again, and the injected copy starts a run that reads untrusted text.
 const [rateAction] = await weft.db.all<{ seq: number }>(sql`SELECT seq FROM actions WHERE command = 'tax.update_rate' AND agent_run_id = ${gp1.agentRunId} ORDER BY seq DESC LIMIT 1`);
 if (!rateAction) throw new Error("GP1 executed no tax.update_rate");
@@ -162,7 +162,7 @@ for (const f of findings) say(`   ${f.kind}: billed ${f.billedCents}, expected $
 const dispute = (await viaKey("/v1/tools/benefits__dispute_finding", { finding_id: findings[0]!.id })) as { status: string; proposalId: string };
 await post(`/v1/proposals/${dispute.proposalId}/approve`, { reasonCode: null, note: null });
 const disputeMail = (await get("/v1/sim/email")) as unknown as { kind: string; to: string }[];
-say(`   an MCP agent's dispute was a proposal (${dispute.status}); Dana approved it and the email simulator holds ${disputeMail.filter((m) => m.to.startsWith("billing@")).length} message to the carrier`);
+say(`   an MCP agent's dispute was a proposal (${dispute.status}); Vic approved it and the email simulator holds ${disputeMail.filter((m) => m.to.startsWith("billing@")).length} message to the carrier`);
 n = await runsOf("rt_open_enrollment");
 await post("/v1/routines/rt_open_enrollment/trigger", {});
 const oe = await routineRun("rt_open_enrollment", n);
@@ -187,9 +187,9 @@ say(`   ${sigs[0]?.n} signatures with signer, sim time and sha256; offer ${rowan
 head("GP7 new-hire checklist unblocks payroll");
 await post("/v1/portal/w4", { filingStatus: "single", step2Checkbox: false, step3Cents: 0, step4aCents: 0, step4bCents: 0, step4cCents: 5_000, exempt: false, typedName: "Rowan Ellery" }, rowan.persona);
 await post("/v1/portal/state-withholding", { state: "CO", filingStatus: "single", allowances: 0, extraCents: 0, exempt: false, typedName: "Rowan Ellery" }, rowan.persona);
-const badAba = await weft.app.request("/v1/portal/direct-deposit", { method: "POST", headers: headers(rowan.persona), body: JSON.stringify({ bankName: "Sim Federal Credit Union", routing: "021000022", account: "4417390056", accountType: "checking", typedName: "Rowan Ellery" }) });
+const badAba = await weft.app.request("/v1/portal/direct-deposit", { method: "POST", headers: headers(rowan.persona), body: JSON.stringify({ bankName: "Tidepool Federal Credit Union", routing: "021000022", account: "4417390056", accountType: "checking", typedName: "Rowan Ellery" }) });
 say(`   a routing number that fails the ABA checksum: ${badAba.status} ${((await badAba.json()) as { code: string }).code}`);
-const dd = (await post("/v1/portal/direct-deposit", { bankName: "Sim Federal Credit Union", routing: "021000021", account: "4417390056", accountType: "checking", typedName: "Rowan Ellery" }, rowan.persona)) as { data: { account_last4: string; verification: string } };
+const dd = (await post("/v1/portal/direct-deposit", { bankName: "Tidepool Federal Credit Union", routing: "021000021", account: "4417390056", accountType: "checking", typedName: "Rowan Ellery" }, rowan.persona)) as { data: { account_last4: string; verification: string } };
 say(`   direct deposit ${dd.data.verification} by the bank simulator; stored as last 4 ${dd.data.account_last4} only`);
 const i9 = new FormData();
 i9.set("citizenship", "citizen"); i9.set("documentKind", "us_passport"); i9.set("documentNumberLast4", "A7Q2"); i9.set("expiresOn", "2031-04-30"); i9.set("typedName", "Rowan Ellery");
@@ -299,7 +299,7 @@ for (const id of ["exp_0001", "exp_0006"]) {
   if (!p) continue;
   await post(`/v1/proposals/${p.id}/approve`, { reasonCode: null, note: null });
   const [e] = await weft.db.all<{ status: string; payroll_run_id: string | null; amount_cents: number }>(sql`SELECT status, payroll_run_id, amount_cents FROM expenses WHERE id = ${id}`);
-  say(`   Dana approved ${id}: ${e?.status} on ${e?.payroll_run_id ?? "(no draft)"} for ${e?.amount_cents} cents, outside gross`);
+  say(`   Vic approved ${id}: ${e?.status} on ${e?.payroll_run_id ?? "(no draft)"} for ${e?.amount_cents} cents, outside gross`);
 }
 
 head("GP14 time off with a coverage conflict");
@@ -342,7 +342,7 @@ const sc = (await viaKey("/v1/tools/screening__order", { offer_id: rowan.offerId
 say(`   an MCP agent's screening.order is a proposal (${sc.status})`);
 await post(`/v1/proposals/${sc.proposalId}/approve`, { reasonCode: null, note: null });
 const [order] = await weft.db.all<{ id: string; status: string; price_cents: number; vendor: string; mode: string }>(sql`SELECT id, status, price_cents, vendor, mode FROM screening_orders ORDER BY id DESC LIMIT 1`);
-say(`   Dana approved: order ${order?.id} ${order?.status} with ${order?.vendor} (${order?.mode}) at ${order?.price_cents} cents from the package row`);
+say(`   Vic approved: order ${order?.id} ${order?.status} with ${order?.vendor} (${order?.mode}) at ${order?.price_cents} cents from the package row`);
 await post("/v1/portal/screening/consent", { orderId: order!.id, typedName: "Rowan Ellery" }, rowan.persona);
 await post("/v1/sim/clock/advance", { to: "2026-11-03T18:00:00.000Z" });
 await weft.scheduler.tick();
@@ -391,7 +391,7 @@ say(`   medical leave goes to a person in code: ${leave.status} (${leave.handoff
 
 head("GP23 Reports");
 const catalog = (await get("/v1/reports")) as unknown as { metric: string; allowed: boolean }[];
-say(`   ${catalog.length} metrics in the catalog, ${catalog.filter((c) => c.allowed).length} visible to Dana`);
+say(`   ${catalog.length} metrics in the catalog, ${catalog.filter((c) => c.allowed).length} visible to Vic`);
 
 head("GP24 permissions and the routine gallery");
 const gallery = (await get("/v1/routine-gallery")) as unknown as { routineId: string; enabled: boolean; nextRunAt: string | null }[];

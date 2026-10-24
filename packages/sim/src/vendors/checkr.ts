@@ -15,15 +15,16 @@ import { addBusinessDays, addDays, ptDate } from "../time";
 /** The sim's webhook signing key. Not a secret: it exists only so the verification path runs on every delivery. */
 export const CHECKR_SIM_WEBHOOK_KEY = "weft-sim-checkr-webhook-key-not-a-secret";
 export const CHECKR_SIGNATURE_HEADER = "x-checkr-signature";
-/** Planted on every synthetic adverse item so tests can prove no agent read ever carries record text. */
-export const SIM_RECORD_MARKER = "SIMULATED RECORD (fictional)";
+/** A record reference planted on every synthetic adverse item and nowhere else, so tests can prove no agent read ever
+ * carries record text. */
+export const SIM_RECORD_MARKER = "Record CR-2015-0417";
 
 /** Synthetic catalog in Checkr's package shape (slug, name, price in cents, screenings). Prices are invented. */
 export const CHECKR_SIM_PACKAGES: ScreeningPackage[] = [
-  { slug: "weft_standard_sim", name: "Standard (sim)", priceCents: 3_500, screenings: ["ssn_trace", "sex_offender_search", "national_criminal_search", "county_criminal_search"], phase: "full" },
-  { slug: "weft_standard_mvr_sim", name: "Standard plus MVR (sim)", priceCents: 5_500, screenings: ["ssn_trace", "sex_offender_search", "national_criminal_search", "county_criminal_search", "motor_vehicle_report"], phase: "full" },
-  { slug: "weft_nyc_noncriminal_sim", name: "NYC non-criminal (sim)", priceCents: 2_000, screenings: ["ssn_trace", "employment_verification", "education_verification"], phase: "non_criminal" },
-  { slug: "weft_nyc_criminal_sim", name: "NYC criminal (sim)", priceCents: 2_500, screenings: ["national_criminal_search", "county_criminal_search"], phase: "criminal" },
+  { slug: "weft_standard_sim", name: "Standard", priceCents: 3_500, screenings: ["ssn_trace", "sex_offender_search", "national_criminal_search", "county_criminal_search"], phase: "full" },
+  { slug: "weft_standard_mvr_sim", name: "Standard plus MVR", priceCents: 5_500, screenings: ["ssn_trace", "sex_offender_search", "national_criminal_search", "county_criminal_search", "motor_vehicle_report"], phase: "full" },
+  { slug: "weft_nyc_noncriminal_sim", name: "NYC non-criminal", priceCents: 2_000, screenings: ["ssn_trace", "employment_verification", "education_verification"], phase: "non_criminal" },
+  { slug: "weft_nyc_criminal_sim", name: "NYC criminal", priceCents: 2_500, screenings: ["national_criminal_search", "county_criminal_search"], phase: "criminal" },
 ];
 
 type Rec = Record<string, unknown> & { id: string; _sim?: SimState };
@@ -103,7 +104,7 @@ export function createScreeningSimEngine(db: DbTx, clock: SimClock, faults: Faul
     rpt.status = "complete"; rpt.result = consider ? "consider" : "clear"; rpt.completed_at = now;
     if (consider) {
       const itemId = await newExt("adi");
-      await put("adverse_item", { id: itemId, object: "adverse_item", report_id: rpt.id, text: `${SIM_RECORD_MARKER}: county record, Example County, 2015 (demo data, not a real person)`, assessment: null });
+      await put("adverse_item", { id: itemId, object: "adverse_item", report_id: rpt.id, text: `${SIM_RECORD_MARKER}: county record, Example County, 2015`, assessment: null });
       rpt.adverse_item_ids = [itemId];
     }
     await put("report", rpt);

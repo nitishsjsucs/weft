@@ -54,8 +54,8 @@ async function insertNotice(kind: string, extra: { formCode: string; agency: str
   const id = `ntc_${String(900 + n).padStart(4, "0")}`;
   const now = weft.clock.now();
   await weft.db.insert(notices).values({
-    id, companyId: "cmp_larkspur", agency: extra.agency, kind, formCode: extra.formCode, title: `Simulated ${kind} notice (demo)`, receivedAt: now, respondBy: "2026-11-25",
-    status: "new", taxAccountId: extra.taxAccountId, fileName: `${kind.toUpperCase()}.txt`, bodyText: `SIMULATED AGENCY NOTICE (demo). Kind ${kind}.`,
+    id, companyId: "cmp_larkspur", agency: extra.agency, kind, formCode: extra.formCode, title: `Simulated ${kind} notice`, receivedAt: now, respondBy: "2026-11-25",
+    status: "new", taxAccountId: extra.taxAccountId, fileName: `${kind.toUpperCase()}.txt`, bodyText: `SIMULATED AGENCY NOTICE. Kind ${kind}.`,
     extractedJson: JSON.stringify({ agency: extra.agency, formCode: extra.formCode, kind, accountNumber: null, taxAccountId: extra.taxAccountId, taxYear: 2026, effectiveFrom: null, respondBy: "2026-11-25", rates: [], amountCents: null, period: extra.period ?? null }),
     draftsJson: "[]", resolutionJson: null, responseConfirmation: null,
   });

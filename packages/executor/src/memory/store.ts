@@ -231,7 +231,7 @@ export function createMemoryStore(opts: CreateMemoryStoreOptions): LocalMemory {
         if (await r.exists()) { headSeq = await readHeadSeq(r); return; }
         headSeq = null;   // a fresh repo (first seed or after a reset) has no chain head yet
         const files = new Map<string, string>();
-        files.set("README.md", "# Weft memory (demo)\n\nMarkdown memory for a fictional company. Facts live in entities/ and knowledge/, events in timeline/ and comms/. Written only by the Weft executor.\n");
+        files.set("README.md", "# Weft memory\n\nMarkdown memory for the company. Facts live in entities/ and knowledge/, events in timeline/ and comms/. Written only by the Weft executor.\n");
         for (const f of MEMORY_FOLDERS) files.set(`${f}/.keep.md`, "");
         for (const f of (await opts.initialFiles?.(companyId, opts.clock.now())) ?? []) {
           const rel = normalizeMemoryPath(f.path);
@@ -446,7 +446,7 @@ export function createMemoryStore(opts: CreateMemoryStoreOptions): LocalMemory {
           if (text === null) continue;
           const d = parseDoc(text);
           const t = titleOf(d.body);
-          const aliases = [...new Set([...(d.frontmatter.aliases ?? []), ...(t && p.startsWith("entities/people/") ? [t.replace(/ \(demo\)$/, "")] : [])])];
+          const aliases = [...new Set([...(d.frontmatter.aliases ?? []), ...(t && p.startsWith("entities/people/") ? [t] : [])])];
           entries.push({ path: p, id: d.frontmatter.id || p.replace(/\.md$/, ""), aliases });
         }
         aliasCache = { head: h, entries };
@@ -472,7 +472,7 @@ export function createMemoryStore(opts: CreateMemoryStoreOptions): LocalMemory {
     const mentioned = new Set(raw.flatMap((f) => [...f.text.matchAll(/\bwrk_\d{4}\b/g)].map((m) => m[0])));
     const sources: DigestSources = { ...input.sources, people: input.sources.people.filter((p) => mentioned.has(p.id) || !tracked.includes(`entities/people/${p.id}.md`)) };
     const ctx = await linkContext(r);
-    const lctx: LinkContext = { people: new Map([...ctx.people, ...input.sources.people.map((p) => [p.id, `${p.name} (demo)`] as [string, string])]), states: new Set([...ctx.states, ...input.sources.states.map((x) => x.code)]) };
+    const lctx: LinkContext = { people: new Map([...ctx.people, ...input.sources.people.map((p) => [p.id, p.name] as [string, string])]), states: new Set([...ctx.states, ...input.sources.states.map((x) => x.code)]) };
     const docs = renderDossiers(sources, day, input.companyRef);
     const skipped: DigestOutcome["skipped"] = [];
     const next = new Map<string, string>();   // path -> full text

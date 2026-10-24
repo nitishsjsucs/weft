@@ -2,9 +2,9 @@
 // manager-privacy, "Left"): payroll, offers, time off, offboarding, background checks, sync items, IT, training,
 // documents and onboarding tasks; then (demo-perfect round 2) benefits, contractor payouts, the compliance calendar,
 // hand-offs and the simulator state. Runs on the rich world, where each of these has rows about people outside Imani
-// Ferreira (demo)'s reports. A manager (payroll: none, it: none) reads no pay run or paycheck at all, and for anyone
+// Ferreira's reports. A manager (payroll: none, it: none) reads no pay run or paycheck at all, and for anyone
 // outside her reporting chain no leave reason or balance, no offboarding case, no background check, no onboarding
-// task, no document and no offer pay. Dana (admin) still reads everything. Scripted provider only.
+// task, no document and no offer pay. Vic (admin) still reads everything. Scripted provider only.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { type HumanSession, type ToolOutcome } from "@weft/contracts";
@@ -186,7 +186,7 @@ describe("offboarding, background checks, onboarding, documents, training, IT an
     for (const a of [...listed.assignments, ...listed.needs_assignment]) expect(mine.has(a.worker_id)).toBe(true);
   });
 
-  it("IT accounts and devices: closed by her grants (it: none), open to Dana", async () => {
+  it("IT accounts and devices: closed by her grants (it: none), open to Vic", async () => {
     for (const path of ["/v1/it/accounts?limit=100", "/v1/it/devices?limit=100"]) {
       expect((await get(IMANI, path)).status, path).toBe(403);
       expect((await get("usr_dana", path)).status, path).toBe(200);
@@ -205,7 +205,7 @@ describe("offboarding, background checks, onboarding, documents, training, IT an
     }
   });
 
-  it("agent runs: a manager reads only the runs that acted for her, never Dana's chat answers or traces", async () => {
+  it("agent runs: a manager reads only the runs that acted for her, never Vic's chat answers or traces", async () => {
     const started = await weft.app.request("/v1/agent/runs", { method: "POST", headers: { ...weft.uiHeaders(IMANI), "content-type": "application/json" }, body: JSON.stringify({ text: "Who is out next week?" }) });
     expect(started.status).toBe(202);
     const all = rowsOf<{ id: string; summary: string | null }>(await json("usr_dana", "/v1/agent/runs?limit=100"));
@@ -229,13 +229,13 @@ describe("offboarding, background checks, onboarding, documents, training, IT an
       expect((await get("usr_dana", path)).status, path).toBe(200);
     }
     expect(rowsOf(await json(IMANI, "/v1/benefits/plans")).length).toBeGreaterThan(0);
-    // Dana's reads hold rows about people outside Imani's chain, so the 403 is what keeps them from her.
+    // Vic's reads hold rows about people outside Imani's chain, so the 403 is what keeps them from her.
     const findings = rowsOf<{ workerId: string | null }>(await json("usr_dana", "/v1/benefits/reconciliation"));
     expect(findings.some((f) => f.workerId && !mine.has(f.workerId))).toBe(true);
     expect(rowsOf<{ workerId: string }>(await json("usr_dana", "/v1/benefits/open-enrollment")).some((r) => !mine.has(r.workerId))).toBe(true);
   });
 
-  it("contractor payouts: closed by her grants (payroll: none), open to Dana and Theo", async () => {
+  it("contractor payouts: closed by her grants (payroll: none), open to Vic and Theo", async () => {
     const res = await get(IMANI, "/v1/contractors/payouts?limit=100");
     expect(res.status).toBe(403);
     const body = await res.text();

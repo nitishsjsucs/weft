@@ -7,7 +7,7 @@ import { mintId } from "./ids";
 import { addBusinessDays } from "./time";
 
 export const DEVICE_CATALOG: readonly DeviceCatalogItem[] = Object.freeze([
-  { sku: "lrk-laptop-std", name: "Larkspur standard laptop (sim)", priceCents: 189_900, etaBusinessDays: 3 },
+  { sku: "lrk-laptop-std", name: "Larkspur standard laptop", priceCents: 189_900, etaBusinessDays: 3 },
 ]);
 
 export function catalogItem(sku: string): DeviceCatalogItem | undefined {

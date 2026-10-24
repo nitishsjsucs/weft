@@ -29,7 +29,7 @@ describe("IT (SPEC 5.6)", () => {
   it("it.list_devices includes the $1,899.00 catalog item", async () => {
     const deps = directDeps(weft.db, weft.clock, createSimulators({ db: weft.db, clock: weft.clock }));
     const out = await runDirect("it.list_devices", { worker_id: "wrk_0004" }, directCtx(weft.clock), deps);
-    expect(out.data.catalog).toEqual([{ sku: "lrk-laptop-std", name: "Larkspur standard laptop (sim)", price_cents: 189_900, price_display: "$1,899.00", eta_business_days: 3 }]);
+    expect(out.data.catalog).toEqual([{ sku: "lrk-laptop-std", name: "Larkspur standard laptop", price_cents: 189_900, price_display: "$1,899.00", eta_business_days: 3 }]);
     const acc = await runDirect("it.list_accounts", {}, directCtx(weft.clock), deps);
     expect(acc.data.by_system).toMatchObject({ google_ws: 48, chat: 48 });
     expect(JSON.stringify(acc.data).length).toBeLessThan(8000);
@@ -43,7 +43,7 @@ describe("it and comms writes", () => {
     expect(await def.amountCents!({ worker_id: "wrk_0004" }, directCtx(weft.clock), deps)).toBe(189_900);
     expect([def.risk({ worker_id: "wrk_0004" }), def.approval, def.ceilingKey, def.autoAllow]).toEqual(["R4", "always", "agent.device_cents", "never"]);
     const pv = await def.preview!({ worker_id: "wrk_0004" }, directCtx(weft.clock), deps);
-    expect(pv).toMatchObject({ title: "Order Larkspur standard laptop (sim) for Imani Ferreira (demo) (wrk_0004) at $1,899.00", moneyCents: 189_900 });
+    expect(pv).toMatchObject({ title: "Order Larkspur standard laptop for Imani Ferreira (wrk_0004) at $1,899.00", moneyCents: 189_900 });
   });
   it("comms.send_message posts plain text to a channel and refuses markup and direct messages", async () => {
     const d = directExecutors(weft.db, weft.clock, weft.sims).human("usr_dana");

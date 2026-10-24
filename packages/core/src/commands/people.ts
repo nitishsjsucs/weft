@@ -16,9 +16,9 @@ import { taskLabel } from "./onboarding";
 const WorkerStatus = z.enum(["draft", "invited", "onboarding", "active", "offboarding", "inactive"]);
 const State = z.enum(["CA", "NY", "TX", "CO"]);
 
-/** Query words for people.search: split on spaces, parentheses and commas, without the "(demo)" name suffix. */
+/** Query words for people.search: split on spaces, parentheses and commas ("Imani Ferreira (wrk_0004)" is two names and an id). */
 export function searchWords(q: string | undefined): string[] {
-  return (q ?? "").split(/[\s(),]+/).filter((w) => w && w.toLowerCase() !== "demo");
+  return (q ?? "").split(/[\s(),]+/).filter((w) => w);
 }
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -86,7 +86,7 @@ const peopleSearch = readCommand({
     const base = workerWhere(ctx.companyId, { state: i.state, status: i.status, departmentId });
     const where = and(base, ...(i.start_from ? [gte(workers.startDate, i.start_from)] : []), ...(i.start_to ? [lte(workers.startDate, i.start_to)] : []))!;
     // Every word must match a name, title or employee number, so a full name ("Hollis Grey") or the readable name with
-    // its fictional-data suffix ("Hollis Grey (demo)") finds the worker; a single word behaves as before.
+    // its fictional-data suffix ("Hollis Grey") finds the worker; a single word behaves as before.
     const words = named ? [] : searchWords(q);
     const filtered = words.length ? and(where, ...words.map((w) => or(like(workers.firstName, `%${w}%`), like(workers.lastName, `%${w}%`), like(workers.title, `%${w}%`), like(workers.employeeNumber, `%${w}%`), like(workers.id, w)))) : where;
     const matched = await tx.select().from(workers).where(filtered).orderBy(asc(workers.id));

@@ -5,7 +5,7 @@ import type { Flag } from "@weft/contracts";
 import { payroll } from "@weft/core";
 import { day, flagNote, paycheckNote, type NoteFacts } from "../src/rich/flag-notes";
 
-const facts = (over: Partial<NoteFacts> = {}): NoteFacts => ({ name: "Mira Delgado (demo)", openOnboarding: [], hasOnboarding: true, reminded: false, submitExcludesBlocked: false, timeOff: {}, year: 2026, ...over });
+const facts = (over: Partial<NoteFacts> = {}): NoteFacts => ({ name: "Mira Delgado", openOnboarding: [], hasOnboarding: true, reminded: false, submitExcludesBlocked: false, timeOff: {}, year: 2026, ...over });
 const mira: Flag[] = [
   { rule: "NEW_IN_RUN", severity: "info", message: "Not in the previous run pay_2026_10_15; start date 2026-10-19", evidence: { worker_id: "wrk_0022", previous_run_id: "pay_2026_10_15", start_date: "2026-10-19", has_w4: true } },
   { rule: "PRORATED", severity: "review", message: "Partial period: start date 2026-10-19; 10 of 11 working days", evidence: { worker_id: "wrk_0022", start_date: "2026-10-19", end_date: null, worked_days: 10, period_days: 11, gross_cents: 393939, gross_display: "$3,939.39" } },
@@ -21,7 +21,7 @@ describe("rich flag notes", () => {
     expect(lines).toHaveLength(3);
     expect(lines[0]).toBe("First paycheck on this schedule. Onboarding is not finished: direct deposit, the I-9 and benefits selection are still open.");
     expect(lines[1]).toBe("Paid for 10 of 11 working days, counted from the start date. Expected for a partial first period.");
-    expect(lines[2]).toBe("No active bank account, so this paycheck is blocked until direct deposit is set up. The onboarding nudge reminded Mira Delgado (demo) to add one. The proposed submit leaves this paycheck out until it is on file.");
+    expect(lines[2]).toBe("No active bank account, so this paycheck is blocked until direct deposit is set up. The onboarding nudge reminded Mira Delgado to add one. The proposed submit leaves this paycheck out until it is on file.");
     expect(text).not.toMatch(/Oct 19|started/);
     expect(text).not.toMatch(/\b[a-z]{2,4}_\d{4}\b|\d{4}-\d{2}-\d{2}/);
     expect(payroll.groundExplanation(text, mira, { gross_cents: 393939, net_cents: 300000, hours_x100: null }).ok).toBe(true);

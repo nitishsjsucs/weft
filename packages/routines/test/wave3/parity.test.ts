@@ -55,16 +55,16 @@ describe("wave 3 parity prechecks", () => {
   it("new_hire_ready skips with no hires, and derives the post and the blocked ids", async () => {
     expect((await prechecks.new_hire_ready!(ctx, exec({ "onboarding.ready_check": { hires: [], window_end: "2026-11-05" } }))).action).toBe("skip");
     const r = await prechecks.new_hire_ready!(ctx, exec({ "onboarding.ready_check": { window_end: "2026-11-05", hires: [
-      { worker_id: "wrk_0901", name: "Robin Tester (demo)", start_date: "2026-11-02", first_day: true, ready: true, blocked: [] },
-      { worker_id: "wrk_0902", name: "Kai Tester (demo)", start_date: "2026-11-04", first_day: false, ready: false, blocked: [{ item: "w4", label: "federal W-4", owner: "the hire" }] },
+      { worker_id: "wrk_0901", name: "Robin Tester", start_date: "2026-11-02", first_day: true, ready: true, blocked: [] },
+      { worker_id: "wrk_0902", name: "Kai Tester", start_date: "2026-11-04", first_day: false, ready: false, blocked: [{ item: "w4", label: "federal W-4", owner: "the hire" }] },
     ] } }));
     expect(r).toMatchObject({ action: "run", severity: "interrupt", derivedArgs: { as_of: "2026-11-02", blocked_count: 1, "onboarding.flag_not_ready": { worker_ids: ["wrk_0902"], as_of: "2026-11-02" } } });
     const text = (r as { derivedArgs: Record<string, { text: string }> }).derivedArgs["comms.send_message"]!.text;
-    expect(text).toBe("First day today: please welcome Robin Tester (demo)! Accounts, laptop, pay and paperwork are all set.\nNot ready yet: Kai Tester (demo) starts 2026-11-04. Blocking: federal W-4 (the hire).");
+    expect(text).toBe("First day today: please welcome Robin Tester! Accounts, laptop, pay and paperwork are all set.\nNot ready yet: Kai Tester starts 2026-11-04. Blocking: federal W-4 (the hire).");
   });
 
   it("an all-ready window is a digest, not an interrupt", async () => {
-    const r = await prechecks.new_hire_ready!(ctx, exec({ "onboarding.ready_check": { window_end: "2026-11-05", hires: [{ worker_id: "wrk_0901", name: "R (demo)", start_date: "2026-11-04", first_day: false, ready: true, blocked: [] }] } }));
+    const r = await prechecks.new_hire_ready!(ctx, exec({ "onboarding.ready_check": { window_end: "2026-11-05", hires: [{ worker_id: "wrk_0901", name: "R", start_date: "2026-11-04", first_day: false, ready: true, blocked: [] }] } }));
     expect(r).toMatchObject({ action: "run", severity: "digest", derivedArgs: { blocked_count: 0, "onboarding.flag_not_ready": { worker_ids: [] } } });
   });
 
@@ -79,12 +79,12 @@ describe("wave 3 parity prechecks", () => {
 
   it("milestones post only today's, and the findings never carry a date of birth", async () => {
     const r = await prechecks.milestones!(ctx, exec({ "people.list_milestones": { milestones: [
-      { kind: "birthday", worker_id: "wrk_0002", name: "B (demo)", on: "2026-11-02", years: null },
-      { kind: "work_anniversary", worker_id: "wrk_0003", name: "C (demo)", on: "2026-11-02", years: 1 },
-      { kind: "work_anniversary", worker_id: "wrk_0004", name: "D (demo)", on: "2026-11-03", years: 3 },
+      { kind: "birthday", worker_id: "wrk_0002", name: "B", on: "2026-11-02", years: null },
+      { kind: "work_anniversary", worker_id: "wrk_0003", name: "C", on: "2026-11-02", years: 1 },
+      { kind: "work_anniversary", worker_id: "wrk_0004", name: "D", on: "2026-11-03", years: 3 },
     ] } }));
     const d = r as { findings: unknown; derivedArgs: Record<string, { text: string }> };
-    expect(d.derivedArgs["comms.send_message"]!.text).toBe("Milestones today: Happy birthday, B (demo)! Happy first work anniversary, C (demo)!");
+    expect(d.derivedArgs["comms.send_message"]!.text).toBe("Milestones today: Happy birthday, B! Happy first work anniversary, C!");
     expect((d.findings as { milestones: Record<string, unknown>[] }).milestones).toEqual([{ kind: "birthday", worker_id: "wrk_0002", years: null }, { kind: "work_anniversary", worker_id: "wrk_0003", years: 1 }]);
     expect((await prechecks.milestones!(ctx, exec({ "people.list_milestones": { milestones: [] } }))).action).toBe("skip");
   });

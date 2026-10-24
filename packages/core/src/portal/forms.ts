@@ -260,7 +260,7 @@ export const submitDirectDeposit = writeCommand({
     await tx.update(bankAccounts).set({ status: "inactive" }).where(and(eq(bankAccounts.workerId, w.id), eq(bankAccounts.status, "active")));
     await tx.insert(bankAccounts).values({ id, workerId: w.id, bankName: i.bank_name, accountLast4: i.account_last4, routingLast4: i.routing_last4, credentialRef: i.credential_ref, status: "active", source: "portal" });
     const rec = await signedRecord(deps, ctx, p, "direct_deposit_auth", "Direct deposit authorization", [
-      ["Bank", i.bank_name], ["Account type", i.account_type], ["Routing number", `ending ${i.routing_last4}`], ["Account number", `ending ${i.account_last4}`], ["Verification", "verified by the bank simulator"],
+      ["Bank", i.bank_name], ["Account type", i.account_type], ["Routing number", `ending ${i.routing_last4}`], ["Account number", `ending ${i.account_last4}`], ["Verification", "verified with the bank"],
     ]);
     await submission(deps, ctx, w.id, "direct_deposit", { bankName: i.bank_name, accountType: i.account_type, routingLast4: i.routing_last4, accountLast4: i.account_last4, verified: true }, rec.documentId);
     const done = await completePortalTask(tx, w.id, "direct_deposit", ctx.now);
@@ -288,7 +288,7 @@ export const submitI9 = writeCommand({
     checkTypedName(p, i.typedName);
     const id = await deps.newId("upl_");
     await tx.insert(uploads).values({ id, workerId: w.id, purpose: "i9_id_image", fileName: i.file_name, storagePath: i.storage_path, bytes: i.bytes, sha256: i.sha256, createdAt: ctx.now });
-    const rec = await signedRecord(deps, ctx, p, "i9", "Form I-9 section 1 (simulation)", [
+    const rec = await signedRecord(deps, ctx, p, "i9", "Form I-9 section 1", [
       ["Citizenship", i.citizenship.replace(/_/g, " ")], ["Document", i.documentKind.replace(/_/g, " ")], ["Document number", `ending ${i.documentNumberLast4}`], ["Expires", i.expiresOn ?? "n/a"], ["ID image", `upload ${id}, masked`],
     ]);
     await submission(deps, ctx, w.id, "i9_sim", { citizenship: i.citizenship, documentKind: i.documentKind, documentNumberLast4: i.documentNumberLast4, expiresOn: i.expiresOn ?? null, uploadId: id }, rec.documentId);

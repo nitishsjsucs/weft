@@ -14,11 +14,12 @@ describe("portal task kinds", () => {
 });
 
 describe("document templates", () => {
-  const input = { companyName: "Larkspur Robotics, Inc. (demo)", candidateFirst: "Ada", candidateLast: "Moss", title: "Engineer", departmentName: "Hardware", managerName: "Imani Ferreira (demo)", workState: "CO", baseCents: 12_345_600, payKind: "salary", startDate: "2026-11-02", expiresOn: "2026-11-01", offerId: "offr_0002" };
-  it("are visibly fictional, built from DB values, and hash like node:crypto", () => {
+  const input = { companyName: "Larkspur Robotics, Inc.", candidateFirst: "Ada", candidateLast: "Moss", title: "Engineer", departmentName: "Hardware", managerName: "Imani Ferreira", workState: "CO", baseCents: 12_345_600, payKind: "salary", startDate: "2026-11-02", expiresOn: "2026-11-01", offerId: "offr_0002" };
+  it("read as the company's own letter, built from DB values, and hash like node:crypto", () => {
     const t = offerLetterText(input);
-    expect(t).toContain("DEMO DOCUMENT");
-    expect(t).toContain("Ada Moss (demo)");
+    expect(t.startsWith("Larkspur Robotics, Inc.\nOffer letter offr_0002")).toBe(true);
+    expect(t).not.toMatch(/DEMO DOCUMENT|\(demo\)|fictional|simulated/i);
+    expect(t).toContain("Ada Moss");
     expect(t).toContain("$123,456.00 a year");
     expect([...t].some((ch) => ch.charCodeAt(0) === 0x2013 || ch.charCodeAt(0) === 0x2014)).toBe(false);
     expect(docSha(t)).toBe(createHash("sha256").update(t, "utf8").digest("hex"));

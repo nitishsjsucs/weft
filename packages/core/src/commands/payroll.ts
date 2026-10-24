@@ -10,7 +10,6 @@ import {
   concisePayrollRun, createDraft, getRun, groundExplanation, joinExplanations, listRuns, markFailed, markProcessed, MAX_EXPLANATION_CHARS, PayrollRefusal, previewRun,
   readAttempts, runSubjectHash, submitPreviewText, submitRun, templateExplanation, totalsFromDto, uncoveredFlags, workerNames, writeAttempts, writeRunSummary, type TotalsCents,
 } from "../payroll/index";
-import { DEMO_SUFFIX } from "../people/names";
 import { createSpecialRun, offCycleLines, OffCycleRefusal, planSpecialRun, specialSettleAt, type OffCycleInput as OffCycleSpecInput } from "../payroll/offcycle";
 import { computeTotals } from "../payroll/totals";
 import { canonicalJson } from "../shared/canonical-json";
@@ -377,7 +376,7 @@ export const proposeOffCycleCommand: WeftCommand<OffCycleInput> = {
   async preview(i, ctx, deps): Promise<Preview> {
     const { plan, totals, hash } = await offCyclePlan(i, ctx, deps);
     const names = await workerNames(deps.tx, plan.lines.map((l) => l.workerId));
-    const who = (w: string) => (names.get(w) ? `${names.get(w)!.name}${names.get(w)!.name.endsWith(DEMO_SUFFIX) ? "" : DEMO_SUFFIX} (${w})` : w);
+    const who = (w: string) => (names.get(w) ? `${names.get(w)!.name} (${w})` : w);
     return {
       title: `Off-cycle pay (${i.reason.replaceAll("_", " ")}) for ${plan.lines.length} worker${plan.lines.length === 1 ? "" : "s"}, ${i.period_start} to ${i.period_end}, payday ${i.payday}: net ${formatCents(totals.netPay)}, total cost ${formatCents(totals.totalCost)}`,
       diff: plan.lines.flatMap((l) => [

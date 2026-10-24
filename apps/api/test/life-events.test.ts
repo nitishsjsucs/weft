@@ -30,7 +30,7 @@ describe("life events and enrollment windows", () => {
     const others = await weft.db.select().from(workers).where(and(eq(workers.type, "employee"), eq(workers.status, "active")));
     otherWorker = others.find((w) => w.managerId !== imaniWorker && w.id !== imaniWorker)!.id;
     // A portal sign-in for one of Imani's direct reports (role employee reaches /v1/portal/* only).
-    await weft.db.insert(principals).values({ id: HIRE, companyId: "cmp_larkspur", kind: "human", workerId: reportWorker, display: "Test hire (demo)", email: null, role: "employee",
+    await weft.db.insert(principals).values({ id: HIRE, companyId: "cmp_larkspur", kind: "human", workerId: reportWorker, display: "Test hire", email: null, role: "employee",
       grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
   });
   afterAll(async () => { await weft.close(); });
@@ -132,7 +132,7 @@ describe("the 30-day check-in form", () => {
     reportWorker = reports[0]!.id;
     const others = await weft.db.select().from(workers).where(and(eq(workers.type, "employee"), eq(workers.status, "active")));
     otherWorker = others.find((w) => w.managerId !== imani!.workerId && w.id !== imani!.workerId)!.id;
-    await weft.db.insert(principals).values({ id: HIRE, companyId: "cmp_larkspur", kind: "human", workerId: reportWorker, display: "Test hire (demo)", email: null, role: "employee",
+    await weft.db.insert(principals).values({ id: HIRE, companyId: "cmp_larkspur", kind: "human", workerId: reportWorker, display: "Test hire", email: null, role: "employee",
       grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
     const at = "2026-10-26T15:30:00.000Z";
     await weft.db.insert(checkins).values([

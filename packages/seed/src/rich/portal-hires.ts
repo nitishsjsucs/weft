@@ -2,7 +2,7 @@
 // stage (Marisol at the offer, Tobias at 2 of 7, Elias at 5 of 7, Odette at 7 of 7 and payroll ready) and Home reads
 // "onboarding" for the hires who start in November. Odette (NY) also has a home office claim approved through the
 // portal and the New York harassment prevention course the training rules assign a new NY hire within 30 days.
-// Same rules as the rest of the rich layer: add rows only, fixed instants, (demo) names, no model calls.
+// Same rules as the rest of the rich layer: add rows only, fixed instants, no model calls.
 import { and, eq } from "drizzle-orm";
 import {
   bankAccounts, devices, documents, expenses, itAccounts, offers, onboardingTasks, payRates, principals, screeningOrders, simEmailMessages, taxProfiles, trainingAssignments,
@@ -14,7 +14,6 @@ import { offerDocuments, receiptUpload } from "./motion";
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-const DEMO_DOC = "DEMO DOCUMENT. Fictional company, fictional person, simulated signature. Not a real record.";
 const KINDS = ["sign_offer", "sign_confidentiality", "federal_w4", "state_withholding", "direct_deposit", "i9_sim", "benefits_selection", "it_accounts"] as const;
 const OWNER: Record<string, string> = { i9_sim: "hr", it_accounts: "agent" };
 
@@ -38,7 +37,7 @@ async function email(L: PortalHiresApi, to: string, subject: string, body: strin
 }
 
 async function doc(L: PortalHiresApi, workerId: string, offerId: string | null, kind: string, title: string, who: string, at: string): Promise<string> {
-  const body = `${DEMO_DOC}\n\n${title}\nLarkspur Robotics (demo)\n${who}\nSigned ${payroll.shortDay(at.slice(0, 10), 0)}.`;
+  const body = `${title}\nLarkspur Robotics\n${who}\nSigned ${payroll.shortDay(at.slice(0, 10), 0)}.`;
   const id = await newId(L.tx, "doc_");
   await L.tx.insert(documents).values({ id, companyId: CO, workerId, offerId, kind, title, status: "signed", bodyText: body, sha256: sha256Hex(body), createdAt: at, sentAt: at, signedAt: at });
   L.bump("documents");
@@ -49,7 +48,7 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
   const { tx } = L;
   const made: string[] = [];
   for (const h of PORTAL_HIRES) {
-    const who = `${h.first} ${h.last} (demo)`;
+    const who = `${h.first} ${h.last}`;
     const login = `${h.first.toLowerCase()}.${h.last.toLowerCase()}`;
     const mail = `${login}@candidate.example`;
     const offerId = await newId(tx, "offr_");
@@ -72,8 +71,8 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
     const ndaSigned = h.done.includes("sign_confidentiality");
     const offerDocs = await offerDocuments(L, offerId, workerId, "signed", h.sent, h.accepted, { status: ndaSigned ? "signed" : "sent", signedAt: ndaSigned ? pt(addDays(h.accepted.slice(0, 10), 1), 11) : null });
     await tx.update(offers).set({ documentId: offerDocs.letter }).where(eq(offers.id, offerId));
-    await email(L, mail, `Your offer from Larkspur Robotics (demo): ${h.title}`, `Hi ${h.first}, your offer is ready to review and sign in the Weft portal (demo). It expires on ${h.expires}.`, "offer_sent", offerId, h.sent);
-    await email(L, mail, "Welcome to Larkspur Robotics (demo)", `Hi ${h.first}, thanks for signing. Your first day is ${h.start}. Your checklist is in the portal (demo).`, "offer_accepted", offerId, h.accepted);
+    await email(L, mail, `Your offer from Larkspur Robotics: ${h.title}`, `Hi ${h.first}, your offer is ready to review and sign in the Weft portal. It expires on ${h.expires}.`, "offer_sent", offerId, h.sent);
+    await email(L, mail, "Welcome to Larkspur Robotics", `Hi ${h.first}, thanks for signing. Your first day is ${h.start}. Your checklist is in the portal.`, "offer_accepted", offerId, h.accepted);
     const clear = h.screening === "clear";
     await tx.insert(screeningOrders).values({ id: await newId(tx, "scr_"), companyId: CO, offerId, workerId, vendor: "checkr", mode: "simulated", packageSlug: "weft_standard_sim", priceCents: 3500,
       phase: "full", status: clear ? "complete" : "pending", result: clear ? "clear" : null, adjudication: clear ? "engaged" : "none", vendorCandidateId: `sim-cand-${offerId}`, vendorOrderId: `sim-order-${offerId}`,
@@ -90,7 +89,7 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
       if (k === "state_withholding" && h.state === "NY") await doc(L, workerId, null, "state_withholding", "IT-2104: New York employee withholding certificate", who, at);
       if (k === "i9_sim") await doc(L, workerId, null, "i9", "Form I-9 receipt (masked)", who, at);
       if (k === "direct_deposit") {
-        await tx.insert(bankAccounts).values({ id: await newId(tx, "bnk_"), workerId, bankName: "Sim Federal Credit Union", accountLast4: "4417", routingLast4: "0213", credentialRef: `vault:bank-${workerId}`, status: "active", source: "portal" });
+        await tx.insert(bankAccounts).values({ id: await newId(tx, "bnk_"), workerId, bankName: "Tidepool Federal Credit Union", accountLast4: "4417", routingLast4: "0213", credentialRef: `vault:bank-${workerId}`, status: "active", source: "portal" });
         L.bump("bank_accounts");
       }
       if (k === "it_accounts") {
@@ -101,7 +100,7 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
       }
     }
     // Hardware before day one: Odette's laptop has arrived, Tobias's workstation is on order.
-    const [model, status, price] = h.dept === "dpt_hardware" ? ["Engineering workstation (sim)", "ordered", 324_900] as const : ["Larkspur standard laptop (sim)", "delivered", 189_900] as const;
+    const [model, status, price] = h.dept === "dpt_hardware" ? ["Engineering workstation", "ordered", 324_900] as const : ["Larkspur standard laptop", "delivered", 189_900] as const;
     await tx.insert(devices).values({ id: await newId(tx, "dev_"), workerId, model, status, orderRef: null, priceCents: price });
     L.bump("devices");
     L.action({ ts: h.created, actorKind: "human", actorId: "usr_sam", command: "offers.create", args: { offer_id: offerId }, summary: `Drafted offer ${offerId} for ${who}, ${h.title}`, reversible: "no" });
@@ -113,14 +112,14 @@ export async function seedPortalHires(L: PortalHiresApi): Promise<string[]> {
   const exp = await newId(tx, "exp_");
   // Her receipt is on file (equipment over $75 needs one). The claim predates her start date, which the policy engine
   // flags as outside employment, so no checks are stored for it here (see docs/tracks/rich-seed.md, known gaps).
-  const extract = { merchant: "Deskline Supply (demo)", date: "2026-10-20", total_cents: 18_640, source: "simulated extractor (sidecar)" };
+  const extract = { merchant: "Deskline Supply", date: "2026-10-20", total_cents: 18_640, source: "simulated extractor (sidecar)" };
   const receiptUploadId = await receiptUpload(L, odette, exp, 900, pt("2026-10-21", 18), JSON.stringify(extract));
-  await tx.insert(expenses).values({ id: exp, companyId: CO, workerId: odette, category: "equipment", merchant: "Deskline Supply (demo)", amountCents: 18_640, transactionDate: "2026-10-20",
+  await tx.insert(expenses).values({ id: exp, companyId: CO, workerId: odette, category: "equipment", merchant: "Deskline Supply", amountCents: 18_640, transactionDate: "2026-10-20",
     submittedAt: pt("2026-10-21", 18), businessPurpose: "Pre-start equipment stipend: monitor arm and keyboard for the home office, under the remote work policy",
     receiptUploadId, receiptExtractJson: JSON.stringify(extract), status: "approved", checksJson: "[]",
     approverPrincipalId: "usr_dana", decidedBy: "usr_dana", decidedAt: pt("2026-10-22", 10), decisionNote: "Approved as a pre-start equipment stipend under the remote work policy, bought before her Nov 2 start. It pays with her first regular paycheck.", policyVersion: 1, source: "portal" });
   L.bump("expenses");
-  L.action({ ts: pt("2026-10-22", 10), actorKind: "human", actorId: "usr_dana", command: "expenses.decide", args: { expense_id: exp, decision: "approve" }, summary: `Approved expense ${exp} for Odette Marsh (demo)`, reversible: "no" });
+  L.action({ ts: pt("2026-10-22", 10), actorKind: "human", actorId: "usr_dana", command: "expenses.decide", args: { expense_id: exp, decision: "approve" }, summary: `Approved expense ${exp} for Odette Marsh`, reversible: "no" });
   const [ny] = await tx.select().from(trainingCourses).where(and(eq(trainingCourses.companyId, CO), eq(trainingCourses.code, "ny_harassment")));
   if (ny) {
     await tx.insert(trainingAssignments).values({ id: await newId(tx, "tra_"), workerId: odette, courseId: ny.id, dueOn: addDays("2026-11-02", ny.dueWithinDays), status: "assigned", assignedAt: pt("2026-10-23", 9) });

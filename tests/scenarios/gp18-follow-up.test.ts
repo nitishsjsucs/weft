@@ -85,7 +85,7 @@ describe("GP18 rt_screening_follow_up", () => {
     const run = await (weft.routines as unknown as { settled(id: string): Promise<RoutineRun> }).settled(rr!.id);
     expect(run.status, JSON.stringify(run)).toBe("waiting_approval");
     expect(run.leftForHuman).toEqual([expect.stringMatching(/^Approve screening\.order \(prp_/)]);
-    expect(run.summary).toMatch(/Standard \(sim\).*\$35\.00/);
+    expect(run.summary).toMatch(/Standard.*\$35\.00/);
     const agentRun = await (weft.agent as unknown as { settled(id: string): Promise<AgentRunRow> }).settled(run.agentRunId!);
     expect(agentRun).toMatchObject({ status: "waiting", tainted: false });
 
@@ -122,6 +122,6 @@ describe("GP18 rt_screening_follow_up", () => {
     await weft.db.run(sql`DELETE FROM screening_orders`);
     const out = await screeningFollowUp({ companyId: "cmp_larkspur", now: weft.clock.now(), triggerRef: "event:test", payload: { offer_id: offerId, worker_id: "wrk_x" } }, readOnly());
     expect(out).toMatchObject({ action: "run", subjectRefs: [offerId, "wrk_x"], derivedArgs: { offer_id: offerId, "screening.order": { offer_id: offerId } } });
-    expect(JSON.stringify(out)).not.toMatch(/price_cents|SIMULATED RECORD/);
+    expect(JSON.stringify(out)).not.toMatch(/price_cents|CR-2015-0417/);
   });
 });

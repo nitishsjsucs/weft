@@ -41,7 +41,7 @@ const toolCallReply = {
     { id: "fc_1", type: "function_call", call_id: "call_wai_a", name: "people__search", arguments: "{\"query\":\"Lena\"}", status: "completed" },
   ],
 };
-const finalReply = { id: "resp_wai_2", object: "response", model: WORKERS_AI_MODEL, usage: usage2, output: [{ id: "msg_1", type: "message", role: "assistant", content: [{ type: "output_text", text: "Lena Brooks (demo) is on the people list (res_0007)." }] }] };
+const finalReply = { id: "resp_wai_2", object: "response", model: WORKERS_AI_MODEL, usage: usage2, output: [{ id: "msg_1", type: "message", role: "assistant", content: [{ type: "output_text", text: "Lena Brooks is on the people list (res_0007)." }] }] };
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
 let dataDir: string;
@@ -59,7 +59,7 @@ afterEach(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-const found: ToolOutcome = { ok: true, status: "done", resultId: "res_0007", data: { people: [{ id: "wrk_0026", name: "Lena Brooks (demo)" }] }, summary: "1 person", actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" };
+const found: ToolOutcome = { ok: true, status: "done", resultId: "res_0007", data: { people: [{ id: "wrk_0026", name: "Lena Brooks" }] }, summary: "1 person", actionSeq: null, artifactRef: null, tainted: false, label: "synthetic" };
 
 describe("the workers_ai provider", () => {
   it("acceptance: a fake-binding tool round trip prices in neurons' USD equivalents and counts its neurons", async () => {
@@ -131,7 +131,7 @@ describe("the workers_ai provider", () => {
     const p = createProvider({ env: { WEFT_LLM: "workers_ai", WEFT_AIG_ACCOUNT_ID: "acct", WEFT_AIG_GATEWAY: "gw", WEFT_WORKERS_AI_TOKEN: "wai_tok_not_real", CF_AIG_TOKEN: "aig_tok" }, ledger: null as never, testMode: false, fetch });
     const req: ModelStepRequest = { runId: "run_0009", agentKind: "main", model: WORKERS_AI_MODEL, frozenPrompt: "F", tools: [], toolChoice: { mode: "auto" }, history: [{ kind: "context", text: "x" }], effort: "low", maxOutputTokens: 8000, cacheKey: "weft:main:chat:cmp_larkspur" };
     const r = await p.step(req);
-    expect(r).toMatchObject({ stop: "final", text: "Lena Brooks (demo) is on the people list (res_0007).", usage: { input: 1400, output: 40 } });
+    expect(r).toMatchObject({ stop: "final", text: "Lena Brooks is on the people list (res_0007).", usage: { input: 1400, output: 40 } });
     expect(seen[0]!.url).toBe(`https://gateway.ai.cloudflare.com/v1/acct/gw/workers-ai/${WORKERS_AI_MODEL}`);
     expect(seen[0]!.headers).toMatchObject({ authorization: "Bearer wai_tok_not_real", "cf-aig-authorization": "Bearer aig_tok", "cf-aig-metadata": JSON.stringify({ run: "run_0009", kind: "chat" }) });
     expect(seen[0]!.body).toEqual(workersAiBody(req));

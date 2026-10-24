@@ -4,8 +4,8 @@
 //
 // Rules: it only adds rows, never edits a planted row (the four pay runs, Ruth's coverage conflict, the 8 expenses in
 // review, the DE 2088 flow, Noor's offer, the open October reconciliation). Ids come from the same id counters the app
-// uses, timestamps are fixed sim-clock instants before the seed time, every name ends with (demo) where it is a name
-// of record, and nothing here calls a model: agent runs are scripted-provider transcripts at zero cost.
+// uses, timestamps are fixed sim-clock instants before the seed time, every domain is *.example, and nothing here
+// calls a model: agent runs are scripted-provider transcripts at zero cost.
 import { createHash } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { PREBUILT } from "@weft/routines";
@@ -35,7 +35,7 @@ function prng(seed: number) {
   return () => { s = (Math.imul(s, 1_664_525) + 1_013_904_223) >>> 0; return s / 0x1_0000_0000; };
 }
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
-const name = (w: Pick<W, "firstName" | "lastName">) => `${w.firstName} ${w.lastName} (demo)`;
+const name = (w: Pick<W, "firstName" | "lastName">) => `${w.firstName} ${w.lastName}`;
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const weekday = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay();
 const isWeekday = (d: string) => weekday(d) !== 0 && weekday(d) !== 6;
@@ -86,7 +86,7 @@ class Layer {
     return cmd.risk(cmd.input.parse(args));
   }
 
-  /** Runs a read command (R0) as Dana would, so a planted post quotes the figures the live tool returns. */
+  /** Runs a read command (R0) as Vic would, so a planted post quotes the figures the live tool returns. */
   async read<T>(command: string, args: Record<string, unknown>): Promise<T> {
     const cmd = commands.find((c) => c.name === command);
     if (!cmd || cmd.effect !== "read" || !this.sims || !this.clock) throw new Error(`rich seed: ${command} is not a read`);
@@ -283,21 +283,21 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
   const chats: RunSpec[] = [
     { at: pt("2026-10-23", 10, 12), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { chart: { kind: "stacked_bar" } } }],
       final: "Payroll cost by month for 2026: January to August from the imported history of the previous provider, September and October from the runs Weft paid. The chart splits each month into gross pay, employer taxes and benefits." },
-    { at: pt("2026-10-23", 10, 20), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "payroll__get_paycheck", args: { run_id: "pay_2026_10_30", worker: "Lena Brooks (demo)" }, data: { flags: ["GROSS_CHANGE"] } }, { name: "actions__list", args: { command: "people.set_pay_rate" }, data: { seq: 1 } }],
-      final: "Lena Brooks (demo) has a gross change flag: her gross changed against the last processed run because the raise in action #1 took effect on Oct 16." },
+    { at: pt("2026-10-23", 10, 20), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "payroll__get_paycheck", args: { run_id: "pay_2026_10_30", worker: "Lena Brooks" }, data: { flags: ["GROSS_CHANGE"] } }, { name: "actions__list", args: { command: "people.set_pay_rate" }, data: { seq: 1 } }],
+      final: "Lena Brooks has a gross change flag: her gross changed against the last processed run because the raise in action #1 took effect on Oct 16." },
     { at: pt("2026-10-22", 15, 4), trigger: "chat", onBehalfOf: "usr_theo", tools: [], status: "refused",
       final: "I can't approve anything: approvals are human-only and there is no approve tool. Open each card in the Inbox to review the diff, then approve or deny it yourself." },
-    { at: pt("2026-10-21", 11, 40), trigger: "chat", onBehalfOf: "usr_sam", tools: [{ name: "time_off__balances", args: { worker: "Dana Whitfield (demo)" }, data: { policies: 2 } }],
-      final: "Dana Whitfield (demo) has vacation and California sick leave balances on file; the Time off tab shows what is used, held and available." },
+    { at: pt("2026-10-21", 11, 40), trigger: "chat", onBehalfOf: "usr_sam", tools: [{ name: "time_off__balances", args: { worker: "Vic Akisole" }, data: { policies: 2 } }],
+      final: "Vic Akisole has vacation and California sick leave balances on file; the Time off tab shows what is used, held and available." },
     { at: pt("2026-10-20", 9, 15), trigger: "chat", onBehalfOf: "usr_dana", tools: [{ name: "expenses__policy", args: {}, data: { version: 1 } }],
       final: "From the company expense policy: business meals have a per person limit, lodging always needs a receipt, and mileage is paid at the IRS rate." },
   ];
   for (const c of chats) await L.run(c);
   // Open hand-offs to a tax specialist, and one already resolved.
   const hand = [
-    { kind: "tax_specialist", reason: "deposit_schedule_question", summary: "The IRS letter asks whether Larkspur (demo) moves to a semiweekly deposit schedule next year; a tax specialist should confirm the lookback period.", status: "open", createdAt: pt("2026-10-22", 10), subjectRef: "txa_0001" },
-    { kind: "tax_specialist", reason: "multi_state_withholding", summary: "Noor Castellanos (demo) will work remotely from Colorado; confirm the CO withholding and FAMLI setup before her first payroll.", status: "acknowledged", createdAt: pt("2026-10-23", 14), subjectRef: "offr_0001", assignee: "usr_theo" },
-    { kind: "hr_person", reason: "leave_question", summary: "Talia Brennan (demo) asked about paid family leave timing; Sam answered with the NY PFL guide.", status: "resolved", createdAt: pt("2026-09-08", 11), subjectRef: "wrk_0028", resolvedAt: pt("2026-09-09", 15), note: "Answered with the NY PFL guide (demo)." },
+    { kind: "tax_specialist", reason: "deposit_schedule_question", summary: "The IRS letter asks whether Larkspur moves to a semiweekly deposit schedule next year; a tax specialist should confirm the lookback period.", status: "open", createdAt: pt("2026-10-22", 10), subjectRef: "txa_0001" },
+    { kind: "tax_specialist", reason: "multi_state_withholding", summary: "Noor Castellanos will work remotely from Colorado; confirm the CO withholding and FAMLI setup before her first payroll.", status: "acknowledged", createdAt: pt("2026-10-23", 14), subjectRef: "offr_0001", assignee: "usr_theo" },
+    { kind: "hr_person", reason: "leave_question", summary: "Talia Brennan asked about paid family leave timing; Sam answered with the NY PFL guide.", status: "resolved", createdAt: pt("2026-09-08", 11), subjectRef: "wrk_0028", resolvedAt: pt("2026-09-09", 15), note: "Answered with the NY PFL guide." },
   ];
   for (const h of hand) {
     await L.tx.insert(handoffCases).values({ id: await newId(L.tx, "hnd_"), companyId: CO, kind: h.kind, reason: h.reason, subjectRef: h.subjectRef, workerId: null, summary: h.summary,
@@ -320,7 +320,7 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
     ["rt_milestones", "2026-09-21", anniversaries("2026-09-21"), "comms__send_message", "#general"],
     ["rt_milestones", "2026-10-05", anniversaries("2026-10-05"), "comms__send_message", "#general"],
     ["rt_open_enrollment", "2026-10-05", "Sent the first open enrollment reminder to the employees who have not opened the 2027 window.", "comms__send_email", null],
-    ["rt_onboarding_nudge", "2026-10-21", "Reminded Mira Delgado (demo) to add a bank account; payroll is blocked until it is on file.", "comms__send_email", null],
+    ["rt_onboarding_nudge", "2026-10-21", "Reminded Mira Delgado to add a bank account; payroll is blocked until it is on file.", "comms__send_email", null],
   ];
   for (const [routineId, day, final, tool, channel] of trial) {
     const { at, triggerRef } = cronRun(routineId, day);
@@ -332,11 +332,11 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
   }
   // People ops chat spread over days.
   for (const [ch, author, text, at] of [
-    ["#new-hires", "Weft agent", "Welcome Ana Sousa (demo) and Ben Ashdown (demo), who start today in Oakland. Accounts are ready.", pt("2026-10-01", 9)],
-    ["#new-hires", "Weft agent", "Welcome Mira Delgado (demo), Robotics Engineer, starting today in Oakland.", pt("2026-10-19", 9)],
-    ["#payroll", "Theo Marsh (demo)", "Sep 30 payroll approved. Thanks for the quick review.", pt("2026-09-28", 14)],
-    ["#people-ops", "Sam Okafor (demo)", "Reminder: managers, please decide pending time-off requests before Friday.", pt("2026-10-14", 10)],
-    ["#leadership", "Dana Whitfield (demo)", "Colorado hiring plan is on track; registrations go in before Noor starts.", pt("2026-10-20", 16)],
+    ["#new-hires", "Weft agent", "Welcome Ana Sousa and Ben Ashdown, who start today in Oakland. Accounts are ready.", pt("2026-10-01", 9)],
+    ["#new-hires", "Weft agent", "Welcome Mira Delgado, Robotics Engineer, starting today in Oakland.", pt("2026-10-19", 9)],
+    ["#payroll", "Theo Marsh", "Sep 30 payroll approved. Thanks for the quick review.", pt("2026-09-28", 14)],
+    ["#people-ops", "Sam Okafor", "Reminder: managers, please decide pending time-off requests before Friday.", pt("2026-10-14", 10)],
+    ["#leadership", "Vic Akisole", "Colorado hiring plan is on track; registrations go in before Noor starts.", pt("2026-10-20", 16)],
   ] as const) await L.chat(ch, author, text, at);
   // The base world's channel posts carry the seed time; with a year of history around them they would read as the
   // newest posts, so here each one gets the day it talks about (Ana and Ben started Oct 1, the Oct 15 run settled
@@ -346,7 +346,7 @@ async function seedAgentHistory(L: Layer, ws: W[]): Promise<void> {
     "Austin Yard fleet hit 1,000 autonomous pallet moves this week.": pt("2026-10-23", 16),
     "Open enrollment questions can go in this channel.": pt("2026-10-05", 10, 30),
     "The Oct 15 payroll settled. Next approval deadline is Wed Oct 28 at 5 pm PT.": pt("2026-10-15", 14),
-    "Welcome Ana and Ben to Larkspur (demo)!": pt("2026-10-01", 9, 30),
+    "Welcome Ana and Ben to Larkspur!": pt("2026-10-01", 9, 30),
     "Hardware onboarding buddy list is pinned in the team folder.": pt("2026-10-01", 10),
   };
   for (const m of SEED_CHAT) {
@@ -380,7 +380,7 @@ async function seedDecidedProposals(L: Layer, ws: W[]): Promise<void> {
     { at: pt("2026-05-11", 10), command: "it.order_device", args: laptop, subjectRef: laptopPreview.subjectRef, risk: laptopPreview.risk, headline: laptopPreview.title, diff: laptopPreview.diff,
       moneyCents: laptopPreview.moneyCents ?? undefined, evidence: laptopPreview.evidence, domain: "it", status: "denied", decidedBy: "usr_dana", decidedAt: pt("2026-05-11", 14), decisionCode: "not_needed",
       decisionNote: "Repair first; the screen is under warranty." },
-    { at: pt("2026-07-30", 9), command: "comms.send_message", args: { channel: "#general", text: "Summer hours start Monday (demo)." }, subjectRef: "#general", risk: "R1", headline: "Post the summer hours note in #general", kind: "suggestion", domain: "comms", status: "dismissed", decidedBy: "usr_dana", decidedAt: pt("2026-07-30", 12) },
+    { at: pt("2026-07-30", 9), command: "comms.send_message", args: { channel: "#general", text: "Summer hours start Monday." }, subjectRef: "#general", risk: "R1", headline: "Post the summer hours note in #general", kind: "suggestion", domain: "comms", status: "dismissed", decidedBy: "usr_dana", decidedAt: pt("2026-07-30", 12) },
     { at: pt("2026-10-05", 9), command: "benefits.nudge_open_enrollment", args: { plan_year: 2027 }, subjectRef: "open_enrollment:2027", risk: "R1", headline: "Remind the employees who have not opened the 2027 enrollment", kind: "suggestion", domain: "benefits", status: "dismissed", decidedBy: "usr_sam", decidedAt: pt("2026-10-05", 10), decisionNote: "Waiting until the carrier rates are final." },
   ];
   const decidedIds: string[] = [];
@@ -423,7 +423,7 @@ async function seedReportHistory(L: Layer): Promise<void> {
     const active = onRoll(day).length;
     const joined = emp.filter((w) => w.startDate > addDays(day, -7) && w.startDate <= day);
     const left = emp.filter((w) => w.endDate && w.endDate >= addDays(day, -7) && w.endDate < day);
-    const text = `Weekly people digest (demo): ${active} employees. New this week: ${joined.length ? joined.map(name).join(", ") : "none"}. `
+    const text = `Weekly people digest: ${active} employees. New this week: ${joined.length ? joined.map(name).join(", ") : "none"}. `
       + `Left last week: ${left.length ? left.map(name).join(", ") : "none"}. Open onboarding items and time-off requests are listed in Weft.`;
     const r = await L.run({ at, trigger: "routine", routineId: "rt_people_digest", onBehalfOf: "usr_dana", final: `Posted the weekly digest to #people-ops for the week of ${short(day)}: ${active} employees.`,
       tools: [{ name: "people__search", args: { status: "active" }, data: { count: active } }, { name: "comms__send_message", args: { channel: "#people-ops" }, data: { posted: true } }],
@@ -443,7 +443,7 @@ async function seedReportHistory(L: Layer): Promise<void> {
     const r = await L.run({ ...slot, trigger: "routine", routineId: "rt_monthly_exec_report", onBehalfOf: "usr_dana", final,
       tools: [{ name: "reports__query", args: { metric: "hires_and_departures_by_month" }, data: { period: mv.period, hires: mv.hires, departures: mv.departures, headcount_end: mv.headcount_end } },
         { name: "reports__query", args: { metric: "payroll_cost_by_month" }, data: { rows: 1 } }, { name: "comms__send_message", args: { channel: "#leadership" }, data: { posted: true } }] });
-    await L.chat("#leadership", "Weft agent", `${label} exec report (demo): ${mv.headcount_end} employees at month end, ${mv.hires} joined, ${mv.departures} left. Cost by month and compliance items are in Weft.`, slot.at);
+    await L.chat("#leadership", "Weft agent", `${label} exec report: ${mv.headcount_end} employees at month end, ${mv.hires} joined, ${mv.departures} left. Cost by month and compliance items are in Weft.`, slot.at);
     L.action({ ts: slot.at, actorKind: "routine", actorId: AGENT, onBehalfOf: "usr_dana", agentRunId: r.runId, routineRunId: r.routineRunId, command: "comms.send_message", args: { channel: "#leadership" }, summary: `Posted the ${label} exec report to #leadership`, reversible: "no" });
   }
   for (const day of mondays("2026-08-03", "2026-10-19")) {
@@ -491,19 +491,19 @@ const cronRun = (routineId: string, day: string, hour?: number) => { const at = 
  * routines run at their own slots; event routines carry the event and its subject in the trigger ref. */
 async function seedQuietRoutines(L: Layer): Promise<void> {
   const all = await L.tx.select().from(workers).orderBy(asc(workers.id));
-  const who = (first: string) => { const w = all.find((x) => x.firstName === first); return w ? name(w) : `${first} (demo)`; };
+  const who = (first: string) => { const w = all.find((x) => x.firstName === first); return w ? name(w) : first; };
   const idOf = (first: string) => all.find((x) => x.firstName === first)?.id ?? first.toLowerCase();
   const contractors = all.filter((w) => w.type === "contractor" && w.status === "active").length;
   const offerOf = async (first: string) => (await L.tx.select().from(offers).where(eq(offers.candidateFirst, first)))[0];
   const marisol = await offerOf("Marisol"), tess = await offerOf("Tess"), tobias = await offerOf("Tobias");
   const [tobiasCheck] = tobias ? await L.tx.select().from(screeningOrders).where(eq(screeningOrders.offerId, tobias.id)) : [];
   const [benefitCharges] = await L.tx.select().from(notices).where(eq(notices.formCode, "DE 428T"));
-  // The Austin office routine: Lucia Ferrante (demo), the seasonal Austin Yard technician, was its one Austin hire.
+  // The Austin office routine: Lucia Ferrante, the seasonal Austin Yard technician, was its one Austin hire.
   const austin = all.find((w) => w.workplaceId === "wkp_austin" && w.startDate >= "2026-01-01" && w.type === "employee");
   // One of the requests still waiting, routed the way the time-off engine routed it.
   const [pending] = await L.tx.select().from(timeOffRequests).where(eq(timeOffRequests.status, "pending")).orderBy(asc(timeOffRequests.createdAt));
   const pendingWho = pending ? all.find((w) => w.id === pending.workerId) : undefined;
-  const approver = pending?.approverPrincipalId === "usr_imani" ? "Imani Ferreira (demo)" : "Dana Whitfield (demo)";
+  const approver = pending?.approverPrincipalId === "usr_imani" ? "Imani Ferreira" : "Vic Akisole";
   const short = (d: string) => payroll.shortDay(d, 2026);
   const ev = (event: string, subject: string, at: string) => ({ at, triggerRef: `event:${event}:${subject}` });
   // A marriage reported in September whose 30-day window closed with no changes: what the life-event routine last saw.
@@ -523,9 +523,9 @@ async function seedQuietRoutines(L: Layer): Promise<void> {
     ["rt_benefits_window_reminders", cronRun("rt_benefits_window_reminders", "2026-10-20"), "comms__send_email", `Reminded ${who("Mira")} that her new-hire benefits window is open until Nov 18.`],
     ["rt_compliance_reminders", cronRun("rt_compliance_reminders", "2026-10-23"), "compliance__post_reminders", "Posted the filing and deposit deadlines due in the next 14 days to #payroll."],
     ["rt_compliance_training", cronRun("rt_compliance_training", "2026-10-23"), "training__assign", `Assigned the New York harassment prevention course to ${who("Odette")}, due within 30 days of her Nov 2 start.`],
-    ["rt_compliance_uploads", ev("notice.uploaded", benefitCharges?.id ?? "de428t", pt("2026-09-21", 10)), "notices__get", "Read the EDD statement of benefit charges and left it in review for Dana; an uploaded notice never changes a record without approval."],
+    ["rt_compliance_uploads", ev("notice.uploaded", benefitCharges?.id ?? "de428t", pt("2026-09-21", 10)), "notices__get", "Read the EDD statement of benefit charges and left it in review for Vic; an uploaded notice never changes a record without approval."],
     ["rt_contractor_forms", cronRun("rt_contractor_forms", "2026-10-19"), "contractors__list_forms", `Checked the contractors' tax forms: a current W-8BEN is on file for all ${contractors}.`],
-    ["rt_exec_briefing", cronRun("rt_exec_briefing", "2026-10-19"), "reports__query", "Sent Dana the Monday briefing: approvals waiting, people out this week and the Oct 30 payroll deadline."],
+    ["rt_exec_briefing", cronRun("rt_exec_briefing", "2026-10-19"), "reports__query", "Sent Vic the Monday briefing: approvals waiting, people out this week and the Oct 30 payroll deadline."],
     ["rt_first_day_message", cronRun("rt_first_day_message", "2026-10-01"), "comms__send_email", `Sent ${who("Ana")} and ${who("Ben")} their first-day message: manager, desk and the #new-hires channel.`],
     ["rt_first_day_message", cronRun("rt_first_day_message", "2026-10-19"), "comms__send_email", `Sent ${who("Mira")} her first-day message: manager, desk and the #new-hires channel.`],
     ...(austin ? [["rt_laptop_hand_delivery", ev("worker.created", austin.id, austin.createdAt), "comms__send_message",
@@ -594,7 +594,7 @@ async function seedTimeOffHistory(L: Layer, ws: W[]): Promise<void> {
       const roll = rnd();
       const status = roll < 0.08 ? "denied" : roll < 0.14 ? "cancelled" : "taken";
       const approver = w.managerId === "wrk_0004" ? "usr_imani" : "usr_dana";
-      const why = approver === "usr_imani" ? "Manager Imani Ferreira (demo) decides" : "Dana Whitfield (demo) decides for managers without a Weft login";
+      const why = approver === "usr_imani" ? "Manager Imani Ferreira decides" : "Vic Akisole decides for managers without a Weft login";
       const createdAt = pt(addDays(start, -14 - Math.floor(rnd() * 10)), 10);
       const id = await newId(L.tx, "tor_");
       await L.tx.insert(timeOffRequests).values({
@@ -646,7 +646,7 @@ async function seedTimeOffHistory(L: Layer, ws: W[]): Promise<void> {
       summary: `Approved 8 h of ${policy === "top_sick_ca" ? "sick leave" : "vacation"} for ${name(w)} (${reqId})`, reversible: "no" });
     await L.tx.insert(timeOffRequests).values({ id: reqId, companyId: CO, workerId: wid, policyId: policy, status: "approved", startAt: "2026-10-26", endAt: "2026-10-26",
       rangeType: "date", timeZone: w.timezone, requestedMinutes: 480, daysJson: JSON.stringify([{ date: "2026-10-26", minutes: 480, holiday: false }]), reason,
-      approverPrincipalId: "usr_dana", routingJson: JSON.stringify([{ principalId: "usr_dana", why: "Dana Whitfield (demo) decides for managers without a Weft login" }]),
+      approverPrincipalId: "usr_dana", routingJson: JSON.stringify([{ principalId: "usr_dana", why: "Vic Akisole decides for managers without a Weft login" }]),
       checksJson: "[]", decidedBy: "usr_dana", decidedAt: pt("2026-10-23", 11), decisionNote: "", createdAt: pt("2026-10-22", 9) });
     L.bump("time_off_requests");
   }
@@ -654,7 +654,6 @@ async function seedTimeOffHistory(L: Layer, ws: W[]): Promise<void> {
 
 // ---- onboarding, documents and offboarding ----------------------------------------------------------------------
 
-const DEMO_DOC = "DEMO DOCUMENT. Fictional company, fictional person, simulated signature. Not a real record.";
 
 async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
   const { tx } = L;
@@ -687,7 +686,7 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
     ];
     if (w.workState && stateForm[w.workState]) docs.push(["state_withholding", stateForm[w.workState]!]);
     for (const [kind, title] of docs) {
-      const body = `${DEMO_DOC}\n\n${title}\nLarkspur Robotics (demo)\n${name(w)}\nSigned ${payroll.shortDay(signed.slice(0, 10), 0)}.`;
+      const body = `${title}\nLarkspur Robotics\n${name(w)}\nSigned ${payroll.shortDay(signed.slice(0, 10), 0)}.`;
       await tx.insert(documents).values({ id: await newId(tx, "doc_"), companyId: CO, workerId: w.id, offerId: null, kind, title, status: "signed", bodyText: body, sha256: sha256Hex(body),
         createdAt: signed, sentAt: signed, signedAt: signed });
       L.bump("documents");
@@ -707,14 +706,14 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
   const done = await newId(tx, "ofb_");
   await tx.insert(offboardingCases).values({ id: done, companyId: CO, workerId: leaverId, kind: "voluntary", lastDay, reasonNote: "Relocating to be closer to family", status: "complete", createdAt: pt("2026-07-01", 10), closedAt: pt("2026-07-31", 12) });
   const stepsDone: [string, string][] = [
-    ["final_pay", "Final pay included on the Jul 31 regular run, with accrued vacation paid out"], ["directory_suspend", "Suspended Workspace (sim) rafael.ostrander"],
-    ["sso_deactivate", "Suspended SSO (sim) rafael.ostrander"], ["group_removal", "Removed 3 group memberships"], ["app_removal", "Removed Chat (sim) rafael.ostrander"],
+    ["final_pay", "Final pay included on the Jul 31 regular run, with accrued vacation paid out"], ["directory_suspend", "Suspended Workspace rafael.ostrander"],
+    ["sso_deactivate", "Suspended SSO rafael.ostrander"], ["group_removal", "Removed 3 group memberships"], ["app_removal", "Removed Chat rafael.ostrander"],
     ["device_lock", "Locked 1 device; returned to the Oakland office on Jul 20"], ["cobra_notice", "COBRA notice emailed to rafael.ostrander@mail.example"], ["benefits_terminate", "Terminated 4 enrollments, effective through Jul 31"],
   ];
   for (const [kind, detail] of stepsDone) {
     await tx.insert(offboardingSteps).values({ id: await newId(tx, "ofs_"), caseId: done, kind, status: "done", detail, doneAt: pt(kind === "final_pay" ? "2026-07-31" : "2026-07-18", 10) });
   }
-  L.action({ ts: pt("2026-07-01", 10), actorKind: "human", actorId: "usr_sam", command: "offboarding.start", args: { worker_id: leaverId, last_day: lastDay }, summary: `Started offboarding for Rafael Ostrander (demo) (${leaverId}), last day ${lastDay}`, reversible: "no" });
+  L.action({ ts: pt("2026-07-01", 10), actorKind: "human", actorId: "usr_sam", command: "offboarding.start", args: { worker_id: leaverId, last_day: lastDay }, summary: `Started offboarding for Rafael Ostrander (${leaverId}), last day ${lastDay}`, reversible: "no" });
   // An open resignation, about half done.
   const jonah = ws.find((w) => w.id === "wrk_0016");
   if (jonah) {
@@ -722,7 +721,7 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
     await tx.insert(offboardingCases).values({ id: open, companyId: CO, workerId: jonah.id, kind: "voluntary", lastDay: "2026-11-13", reasonNote: "Resigned to start a graduate program", status: "open", createdAt: pt("2026-10-16", 15) });
     const plan: [string, string, string][] = [
       ["final_pay", "pending", "Final pay on the Nov 13 regular run"], ["directory_suspend", "pending", "Scheduled for the end of the last day"], ["sso_deactivate", "pending", ""],
-      ["group_removal", "done", "Removed from the release on-call group"], ["app_removal", "done", "Handed off test tooling ownership to Kofi Mensah (demo)"], ["device_lock", "pending", ""],
+      ["group_removal", "done", "Removed from the release on-call group"], ["app_removal", "done", "Handed off test tooling ownership to Kofi Mensah"], ["device_lock", "pending", ""],
       ["cobra_notice", "done", "COBRA notice prepared and sent ahead of the last day"], ["benefits_terminate", "pending", "Coverage ends Nov 30"],
     ];
     for (const [kind, status, detail] of plan) await tx.insert(offboardingSteps).values({ id: await newId(tx, "ofs_"), caseId: open, kind, status, detail, doneAt: status === "done" ? pt("2026-10-20", 11) : null });
@@ -731,7 +730,7 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
     await tx.update(workers).set({ status: "offboarding", endDate: "2026-11-13", updatedAt: pt("2026-10-16", 15) }).where(eq(workers.id, jonah.id));
     L.action({ ts: pt("2026-10-16", 15), actorKind: "human", actorId: "usr_sam", command: "offboarding.start", args: { worker_id: jonah.id, last_day: "2026-11-13" }, summary: `Started offboarding for ${name(jonah)} (${jonah.id}), last day 2026-11-13`, reversible: "no" });
   }
-  // Owen Mercer (demo): the base world gives him a last day of Oct 23 (the carrier reconciliation reads it) and pays him
+  // Owen Mercer: the base world gives him a last day of Oct 23 (the carrier reconciliation reads it) and pays him
   // through it on the Oct 30 draft, but never offboards him. Here he resigned on Oct 9 and the case ran as
   // offboarding.start and its steps run it: he is offboarding, access and benefits ended with his last day, and the
   // one step left is final pay, which rides the Oct 30 run. Every screen then agrees he no longer works here.
@@ -746,8 +745,8 @@ async function seedPeopleRecords(L: Layer, ws: W[]): Promise<void> {
     const through = new Date(Date.UTC(Number(last.slice(0, 4)), Number(last.slice(5, 7)), 0, 12)).toISOString().slice(0, 10);
     const steps: [string, string, string][] = [
       ["final_pay", "pending", `Final pay on the ${payroll.shortDay("2026-10-30", 2026)} regular run, through the last day, with unused PTO`],
-      ["directory_suspend", "done", `Suspended Workspace (sim) ${login}`], ["sso_deactivate", "done", `Suspended SSO (sim) ${login}`],
-      ["group_removal", "done", "Removed group memberships"], ["app_removal", "done", `Removed Chat (sim) ${login}`],
+      ["directory_suspend", "done", `Suspended Workspace ${login}`], ["sso_deactivate", "done", `Suspended SSO ${login}`],
+      ["group_removal", "done", "Removed group memberships"], ["app_removal", "done", `Removed Chat ${login}`],
       ["device_lock", "done", "Locked 1 device; a return label went to his home address"], ["cobra_notice", "done", `COBRA notice emailed to ${owen.personalEmail ?? `${login}@mail.example`}`],
       ["benefits_terminate", "done", `Terminated ${enrolled.length} ${enrolled.length === 1 ? "enrollment" : "enrollments"}, effective through ${payroll.shortDay(through, 2026)}`],
     ];
@@ -822,17 +821,17 @@ async function seedMoneyAndCompliance(L: Layer, ws: W[]): Promise<void> {
     const confirmation = `SIM-${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()}-${period.replace("-", "")}-${String(4100 + k)}`;
     await tx.insert(filings).values({ id: await newId(tx, "fil_"), taxAccountId, form, period, status: "accepted", filedAt: pt(day, 11), confirmation, dueOn: null });
     // The return as the agency simulator received it, with the confirmation it gave back.
-    await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: a.split(":")[0]!, direction: "out", kind: "return_filing", body: canonicalJson({ form, period, note: "Filed from Weft (demo)" }),
+    await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: a.split(":")[0]!, direction: "out", kind: "return_filing", body: canonicalJson({ form, period, note: "Filed from Weft" }),
       relatedNoticeId: null, confirmation, credentialName: null, ts: pt(day, 11) });
     L.bump("sim_agency_mail");
-    L.action({ ts: pt(day, 11), actorKind: "human", actorId: "usr_theo", command: "tax.file_return", args: { form, period }, summary: `Filed ${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()} for ${period} with ${a.split(":")[0]} (sim); accepted`, reversible: "no" });
+    L.action({ ts: pt(day, 11), actorKind: "human", actorId: "usr_theo", command: "tax.file_return", args: { form, period }, summary: `Filed ${form.replace(/^(ca|ny|tx)_/, "").toUpperCase()} for ${period} with ${a.split(":")[0]}; accepted`, reversible: "no" });
     L.bump("filings");
   }
   // More agency notices across states and statuses, with their mail.
   const ntc: { agency: string; kind: string; form: string; title: string; at: string; status: string; body: string; resolution?: string; confirmation?: string }[] = [
-    { agency: "tx_twc", kind: "rate_change", form: "C-1", title: "TWC 2026 tax rate notice", at: "2026-01-12T16:00:00.000Z", status: "resolved", body: "SIMULATED NOTICE (demo). The 2026 Texas unemployment tax rate for Larkspur Robotics (demo) is unchanged.", resolution: "Rate confirmed unchanged; no update needed." },
-    { agency: "irs", kind: "deposit_schedule_change", form: "CP 136", title: "IRS deposit schedule notice", at: "2025-11-17T16:00:00.000Z", status: "resolved", body: "SIMULATED NOTICE (demo). Based on the lookback period your deposit schedule for 2026 is monthly.", resolution: "Deposit schedule confirmed as monthly; acknowledgement sent.", confirmation: "SIM-IRS-ACK-20251119" },
-    { agency: "ca_edd", kind: "benefit_charge", form: "DE 428T", title: "EDD statement of benefit charges", at: "2026-09-21T16:00:00.000Z", status: "in_review", body: "SIMULATED NOTICE (demo). A former employee's claim was charged to the reserve account. Review the charge within 60 days." },
+    { agency: "tx_twc", kind: "rate_change", form: "C-1", title: "TWC 2026 tax rate notice", at: "2026-01-12T16:00:00.000Z", status: "resolved", body: "The 2026 Texas unemployment tax rate for Larkspur Robotics is unchanged.", resolution: "Rate confirmed unchanged; no update needed." },
+    { agency: "irs", kind: "deposit_schedule_change", form: "CP 136", title: "IRS deposit schedule notice", at: "2025-11-17T16:00:00.000Z", status: "resolved", body: "Based on the lookback period your deposit schedule for 2026 is monthly.", resolution: "Deposit schedule confirmed as monthly; acknowledgement sent.", confirmation: "SIM-IRS-ACK-20251119" },
+    { agency: "ca_edd", kind: "benefit_charge", form: "DE 428T", title: "EDD statement of benefit charges", at: "2026-09-21T16:00:00.000Z", status: "in_review", body: "A former employee's claim was charged to the reserve account. Review the charge within 60 days." },
   ];
   for (const n of ntc) {
     const id = await newId(tx, "ntc_");
@@ -841,12 +840,12 @@ async function seedMoneyAndCompliance(L: Layer, ws: W[]): Promise<void> {
       status: n.status, taxAccountId: acc, fileName: `${n.agency.toUpperCase()}_${n.form.replace(/\W/g, "")}.txt`, bodyText: n.body, extractedJson: null, draftsJson: "[]",
       resolutionJson: n.resolution ? JSON.stringify({ note: n.resolution }) : null, responseConfirmation: n.confirmation ?? null, source: "simulated" });
     await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: n.agency, direction: "in", kind: "notice", body: n.body, relatedNoticeId: id, confirmation: null, credentialName: null, ts: n.at });
-    if (n.confirmation) await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: n.agency, direction: "out", kind: "notice_response", body: "Acknowledged (demo).", relatedNoticeId: id, confirmation: n.confirmation, credentialName: null, ts: new Date(Date.parse(n.at) + 2 * 86_400_000).toISOString() });
+    if (n.confirmation) await tx.insert(simAgencyMail).values({ id: await newId(tx, "simm_"), agency: n.agency, direction: "out", kind: "notice_response", body: "Acknowledged.", relatedNoticeId: id, confirmation: n.confirmation, credentialName: null, ts: new Date(Date.parse(n.at) + 2 * 86_400_000).toISOString() });
     L.bump("notices");
   }
   // The 2023 registrations as completed simulator records (Colorado stays for the tour).
   for (const [agency, type, at, num] of [["irs", "federal", "2023-02-20", "SIM-EIN"], ["ca_edd", "combined", "2023-03-06", "SIM-CA"], ["ny_dtf", "withholding", "2023-05-08", "SIM-NYW"], ["ny_dol", "unemployment", "2023-05-08", "SIM-NYU"], ["tx_twc", "unemployment", "2023-09-11", "SIM-TX"]] as const) {
-    await tx.insert(simRegistrations).values({ id: await newId(tx, "sima_"), agency, companyId: CO, accountType: type, requestJson: JSON.stringify({ legal_name: "Larkspur Robotics (demo)" }), status: "complete", completeAt: pt(at, 10), accountNumber: `${num}-****`, fault: null });
+    await tx.insert(simRegistrations).values({ id: await newId(tx, "sima_"), agency, companyId: CO, accountType: type, requestJson: JSON.stringify({ legal_name: "Larkspur Robotics" }), status: "complete", completeAt: pt(at, 10), accountNumber: `${num}-****`, fault: null });
     L.bump("sim_registrations");
   }
 }
@@ -855,20 +854,20 @@ async function seedMoneyAndCompliance(L: Layer, ws: W[]): Promise<void> {
 
 const MEMORY_DOCS: { path: string; day: string; id: string; type: string; links: string[]; body: string; message: string }[] = [
   { path: "workstreams/q4-open-enrollment.md", day: "2026-10-05", id: "ws-q4-open-enrollment", type: "workstream", links: ["entities/people/wrk_0025"], message: "workstream: Q4 open enrollment",
-    body: "# Q4 open enrollment (demo)\n\nOwner [[entities/people/wrk_0025|Sam Okafor]]. The 2027 window is open; stragglers get a nudge once the carrier rates are final.\n" },
+    body: "# Q4 open enrollment\n\nOwner [[entities/people/wrk_0025|Sam Okafor]]. The 2027 window is open; stragglers get a nudge once the carrier rates are final.\n" },
   { path: "workstreams/co-expansion.md", day: "2026-10-20", id: "ws-co-expansion", type: "workstream", links: ["entities/people/wrk_0004", "entities/people/wrk_0001"], message: "workstream: Colorado expansion",
-    body: "# Colorado expansion (demo)\n\nFirst Colorado hire starts Nov 2 under [[entities/people/wrk_0004|Imani Ferreira]]. Withholding and unemployment registrations are still to do. Sponsor [[entities/people/wrk_0001|Dana Whitfield]].\n" },
+    body: "# Colorado expansion\n\nFirst Colorado hire starts Nov 2 under [[entities/people/wrk_0004|Imani Ferreira]]. Withholding and unemployment registrations are still to do. Sponsor [[entities/people/wrk_0001|Vic Akisole]].\n" },
   // The guided tour opens the SUI rate notice procedure; this thread links it, so its Backlinks are not empty.
   { path: "workstreams/2026-agency-notices.md", day: "2026-09-25", id: "ws-2026-agency-notices", type: "workstream", links: ["knowledge/procedures/state-sui-rate-notice.md", "entities/agencies/ca_edd-combined.md"], message: "workstream: 2026 agency notices",
-    body: "# 2026 agency notices (demo)\n\nIn February, New York's unemployment rate notice went through [[knowledge/procedures/state-sui-rate-notice|the state SUI rate notice procedure]]: the rate change waited for Dana's approval. The Texas rate notice confirmed an unchanged rate. The [[entities/agencies/ca_edd-combined|EDD]] statement of benefit charges is still in review.\n" },
+    body: "# 2026 agency notices\n\nIn February, New York's unemployment rate notice went through [[knowledge/procedures/state-sui-rate-notice|the state SUI rate notice procedure]]: the rate change waited for Vic's approval. The Texas rate notice confirmed an unchanged rate. The [[entities/agencies/ca_edd-combined|EDD]] statement of benefit charges is still in review.\n" },
   { path: "workstreams/october-payroll.md", day: "2026-10-23", id: "ws-october-payroll", type: "workstream", links: ["entities/people/wrk_0002", "knowledge/preferences/agent/autonomy.md"], message: "workstream: October payroll",
-    body: "# October payroll (demo)\n\nOct 15 settled. The Oct 30 draft has four flagged paychecks; [[entities/people/wrk_0002|Theo Marsh]] approves by the Wednesday deadline. The agent proposes the submit and waits, as [[knowledge/preferences/agent/autonomy|the autonomy preference]] asks.\n" },
+    body: "# October payroll\n\nOct 15 settled. The Oct 30 draft has four flagged paychecks; [[entities/people/wrk_0002|Theo Marsh]] approves by the Wednesday deadline. The agent proposes the submit and waits, as [[knowledge/preferences/agent/autonomy|the autonomy preference]] asks.\n" },
   { path: "comms/2026-10-weekly-digests.md", day: "2026-10-19", id: "comms-2026-10-digests", type: "thread", links: ["workstreams/october-payroll.md"], message: "comms: October digests",
-    body: "# October digests (demo)\n\nThe weekly people digest posted every Monday in #people-ops. See [[workstreams/october-payroll]] for the payroll thread.\n" },
-  { path: "timeline/monthly/2026-08.md", day: "2026-09-01", id: "timeline-2026-08", type: "timeline_monthly", links: [], message: "digest: monthly 2026-08", body: "# August 2026 (demo)\n\n- Weekly digests posted each Monday.\n- Two semi-monthly payrolls ran on the previous provider.\n" },
-  { path: "timeline/monthly/2026-09.md", day: "2026-10-01", id: "timeline-2026-09", type: "timeline_monthly", links: ["workstreams/october-payroll.md"], message: "digest: monthly 2026-09", body: "# September 2026 (demo)\n\n- First two payrolls run in Weft (Sep 15 and Sep 30), approved by Theo.\n- Q3 deposits made on schedule.\n" },
-  { path: "timeline/weekly/2026-W42.md", day: "2026-10-19", id: "timeline-2026-W42", type: "timeline_weekly", links: ["workstreams/co-expansion.md"], message: "digest: weekly 2026-W42", body: "# Week of Oct 12 (demo)\n\n- Oct 15 payroll settled.\n- Jonah Pell gave notice; last day Nov 13.\n- Colorado plan moved forward ([[workstreams/co-expansion]]).\n" },
-  { path: "timeline/daily/2026-10-23.md", day: "2026-10-23", id: "timeline-2026-10-23", type: "timeline_daily", links: [], message: "digest: daily 2026-10-23", body: "# Fri Oct 23 (demo)\n\n- Owen Mercer's last day.\n- Agent answered two payroll questions in chat.\n" },
+    body: "# October digests\n\nThe weekly people digest posted every Monday in #people-ops. See [[workstreams/october-payroll]] for the payroll thread.\n" },
+  { path: "timeline/monthly/2026-08.md", day: "2026-09-01", id: "timeline-2026-08", type: "timeline_monthly", links: [], message: "digest: monthly 2026-08", body: "# August 2026\n\n- Weekly digests posted each Monday.\n- Two semi-monthly payrolls ran on the previous provider.\n" },
+  { path: "timeline/monthly/2026-09.md", day: "2026-10-01", id: "timeline-2026-09", type: "timeline_monthly", links: ["workstreams/october-payroll.md"], message: "digest: monthly 2026-09", body: "# September 2026\n\n- First two payrolls run in Weft (Sep 15 and Sep 30), approved by Theo.\n- Q3 deposits made on schedule.\n" },
+  { path: "timeline/weekly/2026-W42.md", day: "2026-10-19", id: "timeline-2026-W42", type: "timeline_weekly", links: ["workstreams/co-expansion.md"], message: "digest: weekly 2026-W42", body: "# Week of Oct 12\n\n- Oct 15 payroll settled.\n- Jonah Pell gave notice; last day Nov 13.\n- Colorado plan moved forward ([[workstreams/co-expansion]]).\n" },
+  { path: "timeline/daily/2026-10-23.md", day: "2026-10-23", id: "timeline-2026-10-23", type: "timeline_daily", links: [], message: "digest: daily 2026-10-23", body: "# Fri Oct 23\n\n- Owen Mercer's last day.\n- Agent answered two payroll questions in chat.\n" },
 ];
 
 async function seedMemory(ctx: SeedContext, tail: { seq: number; hash: string; ts: string; command: string; summary: string }[]): Promise<number> {

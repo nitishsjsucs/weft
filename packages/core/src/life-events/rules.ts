@@ -1,6 +1,6 @@
 // Life-event special enrollment rules (wave 4, T6). Owner: w4-parity-people.
 // Each qualifying event opens one special enrollment window of LIFE_EVENT_WINDOW_DAYS (30) days from the event date.
-// Two federal rules set the floor, and the plan rule for Larkspur Robotics (demo) uses 30 days for every kind:
+// Two federal rules set the floor, and the plan rule for Larkspur Robotics uses 30 days for every kind:
 // - HIPAA special enrollment (29 CFR 2590.701-6): marriage, birth, adoption or placement for adoption, and loss of
 //   other coverage give at least 30 days after the event to enroll in the group health plan.
 // - Section 125 change in status (26 CFR 1.125-4(c)): divorce, a dependent's death and a change of residence let a

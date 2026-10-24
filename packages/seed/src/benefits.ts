@@ -5,8 +5,8 @@ import { newId } from "@weft/core";
 import type { SeedContext } from "./context";
 import { ROSTER, seedWorkerId } from "./people";
 
-export const JUNIPER = "Juniper Mutual (sim)";
-export const TIDEWATER = "Tidewater Retirement (sim)";
+export const JUNIPER = "Juniper Mutual";
+export const TIDEWATER = "Tidewater Retirement";
 
 type Tier = "ee" | "ee_spouse" | "ee_children" | "family";
 export const PLANS = [

@@ -63,7 +63,7 @@ export async function planPayouts(tx: DbTx, companyId: string, workerIds: string
     if (!rate) return { ok: false, code: "DOMAIN_NO_RATE", message: `${id} has no contract rate on ${scheduledFor}` };
     const fx = await fxRateFor(tx, rate.currency, scheduledFor);
     if (!fx) return { ok: false, code: "DOMAIN_NO_FX_RATE", message: `No fixed FX rate for ${rate.currency}` };
-    lines.push({ workerId: id, name: `${w.firstName} ${w.lastName} (demo)`, currency: rate.currency, amountMinor: rate.amountCents, fxRate: fx.usdPerUnit, usdCents: convertToUsdCents(rate.amountCents, fx.usdPerUnit) });
+    lines.push({ workerId: id, name: `${w.firstName} ${w.lastName}`, currency: rate.currency, amountMinor: rate.amountCents, fxRate: fx.usdPerUnit, usdCents: convertToUsdCents(rate.amountCents, fx.usdPerUnit) });
   }
   const dup = await tx.select({ id: contractorPayments.id, workerId: contractorPayments.workerId }).from(contractorPayments).where(and(inArray(contractorPayments.workerId, unique), eq(contractorPayments.scheduledFor, scheduledFor)));
   if (dup.length > 0) return { ok: false, code: "DOMAIN_ALREADY_SCHEDULED", message: `${dup[0]!.workerId} already has a payout for ${scheduledFor} (${dup[0]!.id})` };

@@ -27,7 +27,7 @@ export async function openTempDb(): Promise<{ db: Db; close(): Promise<void> }> 
 }
 
 export async function buildFixtureWorld(db: Db): Promise<FixtureIds> {
-  await db.insert(companies).values({ id: CO, legalName: "Larkspur Robotics, Inc. (demo)", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01", createdAt: TS });
+  await db.insert(companies).values({ id: CO, legalName: "Larkspur Robotics, Inc.", domain: "larkspur.example", ein: "00-4817265", hqState: "CA", foundedOn: "2023-03-01", createdAt: TS });
   await db.insert(paySchedules).values({ id: PS, companyId: CO, name: "US semi-monthly", frequency: "semimonthly", region: "us", autopay: false });
   await db.insert(taxAccounts).values([
     { id: "txa_0001", companyId: CO, jurisdiction: "US", agency: "irs", accountType: "federal", accountNumber: "00-4817265", status: "active" },
@@ -41,9 +41,9 @@ export async function buildFixtureWorld(db: Db): Promise<FixtureIds> {
   const rate = (id: string, jurisdiction: string, code: string, r: string, base: number) => ({ id, companyId: CO, jurisdiction, code, rate: r, wageBaseCents: base, effectiveFrom: "2026-01-01", source: "seed" });
   await db.insert(employerTaxRates).values([rate("etr_0001", "CA", "sui", "0.034", 700000), rate("etr_0002", "CA", "ett", "0.001", 700000), rate("etr_0003", "NY", "sui", "0.041", 1760000), rate("etr_0004", "TX", "sui", "0.027", 900000)]);
   await db.insert(benefitPlans).values([
-    { id: "bpl_0001", companyId: CO, carrier: "Juniper Mutual (sim)", category: "health", type: "medical", name: "Juniper PPO 1500", pretaxCode: "section125_medical", pricesJson: JSON.stringify({ ee: 9500, ee_spouse: 21000, ee_children: 18500, family: 31000 }), matchJson: JSON.stringify({ employer_cents: 38000 }) },
-    { id: "bpl_0002", companyId: CO, carrier: "Juniper Mutual (sim)", category: "health", type: "dental", name: "Juniper Dental Plus", pretaxCode: "section125_medical", pricesJson: JSON.stringify({ ee: 800, ee_spouse: 1800, ee_children: 1600, family: 2800 }), matchJson: JSON.stringify({ employer_cents: 2400 }) },
-    { id: "bpl_0003", companyId: CO, carrier: "Tidewater Retirement (sim)", category: "retirement", type: "401k", name: "Tidewater 401(k)", pretaxCode: "401k_traditional", pricesJson: "{}", matchJson: JSON.stringify({ match_bps: 10000, cap_bps: 400 }) },
+    { id: "bpl_0001", companyId: CO, carrier: "Juniper Mutual", category: "health", type: "medical", name: "Juniper PPO 1500", pretaxCode: "section125_medical", pricesJson: JSON.stringify({ ee: 9500, ee_spouse: 21000, ee_children: 18500, family: 31000 }), matchJson: JSON.stringify({ employer_cents: 38000 }) },
+    { id: "bpl_0002", companyId: CO, carrier: "Juniper Mutual", category: "health", type: "dental", name: "Juniper Dental Plus", pretaxCode: "section125_medical", pricesJson: JSON.stringify({ ee: 800, ee_spouse: 1800, ee_children: 1600, family: 2800 }), matchJson: JSON.stringify({ employer_cents: 2400 }) },
+    { id: "bpl_0003", companyId: CO, carrier: "Tidewater Retirement", category: "retirement", type: "401k", name: "Tidewater 401(k)", pretaxCode: "401k_traditional", pricesJson: "{}", matchJson: JSON.stringify({ match_bps: 10000, cap_bps: 400 }) },
   ]);
 
   const ids: FixtureIds = { nyRaise: "", nyRaiseRate: "prt_0049", txSpike: "", caOct19: "", nyOffboard: "", caOct1: [], all: [] };
@@ -54,7 +54,7 @@ export async function buildFixtureWorld(db: Db): Promise<FixtureIds> {
     ids.all.push(id);
     await db.insert(workers).values({
       id, companyId: CO, employeeNumber: `EMP-${String(n).padStart(4, "0")}`, type: "employee", workerType: "us_w2", status: w.status ?? "active",
-      firstName: `Person${n}`, lastName: "Example (demo)", workEmail: `person${n}@larkspur.example`, title: "Engineer", workState: w.state,
+      firstName: `Person${n}`, lastName: "Example", workEmail: `person${n}@larkspur.example`, title: "Engineer", workState: w.state,
       timezone: "America/Los_Angeles", startDate: w.start, endDate: w.end ?? null, payScheduleId: PS, createdAt: TS, updatedAt: TS,
     });
     await db.insert(payRates).values({ id: `prt_${String(n).padStart(4, "0")}`, workerId: id, kind: w.kind, amountCents: w.amount, effectiveFrom: w.start });
@@ -62,7 +62,7 @@ export async function buildFixtureWorld(db: Db): Promise<FixtureIds> {
       workerId: id, w4Version: w.pre2020 ? "pre2020" : "2020", filingStatus: w.pre2020 ? "mfj" : n % 3 === 0 ? "mfj" : "single", allowances: w.pre2020 ? 3 : 0,
       step2Checkbox: n === 7, step3Cents: n % 8 === 0 ? 220000 : 0, stateFilingStatus: w.state === "TX" ? null : n % 3 === 0 ? "married" : "single", stateAllowances: 1, source: "seed",
     });
-    if (w.bank ?? true) await db.insert(bankAccounts).values({ id: `bnk_${String(n).padStart(4, "0")}`, workerId: id, bankName: "Sim Federal Credit Union", accountLast4: String(1000 + n), routingLast4: "0021", credentialRef: `vault:bank-${id}`, status: "active", source: "seed" });
+    if (w.bank ?? true) await db.insert(bankAccounts).values({ id: `bnk_${String(n).padStart(4, "0")}`, workerId: id, bankName: "Tidepool Federal Credit Union", accountLast4: String(1000 + n), routingLast4: "0021", credentialRef: `vault:bank-${id}`, status: "active", source: "seed" });
     if (w.benefits ?? n % 2 === 0) {
       await db.insert(benefitEnrollments).values([
         { id: `ben_${String(n * 3).padStart(4, "0")}`, workerId: id, planId: "bpl_0001", tier: "ee", status: "active", effectiveFrom: w.start },
@@ -95,7 +95,7 @@ export async function buildFixtureWorld(db: Db): Promise<FixtureIds> {
       await db.insert(timeEntries).values({ id: `tim_${String(++t).padStart(4, "0")}`, workerId: tech, periodStart: ps, periodEnd: pe, regularHoursX100: hours, overtimeHoursX100: 0, source: "seed" });
     }
   }
-  // The NY raise: 18% effective 2026-10-16, applied by Dana as an action (seq 1, result id = the new pay rate id).
+  // The NY raise: 18% effective 2026-10-16, applied by Vic as an action (seq 1, result id = the new pay rate id).
   await db.insert(actions).values({
     seq: 1, actionId: "act_0001", ts: "2026-10-09T17:00:00.000Z", actorKind: "human", actorId: "usr_dana", command: "people.update_pay_rate",
     argsJson: "{}", argsHash: "x", resultId: ids.nyRaiseRate, summary: "Pay rate change", reversible: "yes", prevHash: "0".repeat(64), hash: "1".repeat(64),

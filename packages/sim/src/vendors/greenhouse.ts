@@ -302,9 +302,9 @@ export async function seedGreenhouseSim(db: DbTx, now: string): Promise<void> {
     created_at: "2026-09-01T16:00:00.000Z", updated_at: "2026-10-20T16:00:00.000Z", departments: [d], offices: [o], custom_fields: { employment_type: "Full-time" },
   });
   const jobs = [
-    job(4_400_101, "Controls Engineer (demo)", dept(3_300_101, "Engineering"), office(2_200_101, "Oakland HQ", "Oakland, CA")),
-    job(4_400_102, "Field Operations Lead (demo)", dept(3_300_103, "Operations"), office(2_200_102, "Austin Yard", "Austin, TX")),
-    job(SIM_HIRE_JOB_ID, "Firmware Test Engineer (demo)", dept(3_300_102, "Hardware"), office(2_200_109, "Boulder Field Office", "Boulder, CO")),
+    job(4_400_101, "Controls Engineer", dept(3_300_101, "Engineering"), office(2_200_101, "Oakland HQ", "Oakland, CA")),
+    job(4_400_102, "Field Operations Lead", dept(3_300_103, "Operations"), office(2_200_102, "Austin Yard", "Austin, TX")),
+    job(SIM_HIRE_JOB_ID, "Firmware Test Engineer", dept(3_300_102, "Hardware"), office(2_200_109, "Boulder Field Office", "Boulder, CO")),
   ];
   const rows: { kind: Kind; body: Rec }[] = jobs.map((body) => ({ kind: "job" as const, body: body as unknown as Rec }));
   const people = [{ id: 5_500_051, first: "Odile", last: "Ferrante", email: "odile.ferrante@candidate.example", job: 4_400_101, app: 6_600_051 }, { id: 5_500_052, first: "Kofi", last: "Lindqvist", email: "kofi.lindqvist@candidate.example", job: 4_400_102, app: 6_600_052 }];

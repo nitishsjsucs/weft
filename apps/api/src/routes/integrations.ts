@@ -212,7 +212,7 @@ export function integrationsRoutes(weft: Weft): Hono<WeftEnv> {
     const out = [];
     for (const l of links) {
       const [o] = await weft.db.select().from(offers).where(eq(offers.id, l.weftId)).limit(1);
-      out.push({ applicationRef: l.extId, offerVersion: l.extVersion, offerId: l.weftId, status: o?.status ?? null, candidate: o ? `${o.candidateFirst} ${o.candidateLast} (demo)` : null, title: o?.title ?? null, startDate: o?.startDate ?? null, workState: o?.workState ?? null });
+      out.push({ applicationRef: l.extId, offerVersion: l.extVersion, offerId: l.weftId, status: o?.status ?? null, candidate: o ? `${o.candidateFirst} ${o.candidateLast}` : null, title: o?.title ?? null, startDate: o?.startDate ?? null, workState: o?.workState ?? null });
     }
     return c.json(out);
   });

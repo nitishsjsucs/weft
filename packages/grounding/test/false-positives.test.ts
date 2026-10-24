@@ -26,7 +26,7 @@ describe("3a: numerals in untainted string leaves", () => {
   });
 
   it("grounds a figure in a proposal title and a result summary", () => {
-    const results = [{ proposalId: "prp_0001", title: "Reimburse $3,693.59 to Jordan Okafor (demo)" }, { resultId: "res_0003", summary: "Found 51 workers", data: { rows: [] } }];
+    const results = [{ proposalId: "prp_0001", title: "Reimburse $3,693.59 to Jordan Okafor" }, { resultId: "res_0003", summary: "Found 51 workers", data: { rows: [] } }];
     expect(check("I proposed reimbursing $3,693.59 (prp_0001); the search found 51 workers.", results).ok).toBe(true);
   });
 

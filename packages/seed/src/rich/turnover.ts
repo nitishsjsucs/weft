@@ -7,7 +7,7 @@
 // Their year-to-date import is computed with the payroll engine (the same computeWorkerPaycheck loop the base seed's
 // writeOpeningYtd runs, end date included), so the imported January to August runs pay them period by period and the
 // totals still equal the ledger code by code. Current workers' ledger rows are never touched, so a recomputed draft is
-// identical to the base seed's. Rafael Ostrander (demo), the July leaver from part 1, gets his import here too.
+// identical to the base seed's. Rafael Ostrander, the July leaver from part 1, gets his import here too.
 import { and, eq, isNotNull, like } from "drizzle-orm";
 import { benefitEnrollments, benefitPlans, documents, offboardingCases, offboardingSteps, onboardingTasks, payRates, taxProfiles, workers, ytdLedger, type DbTx } from "@weft/db";
 import { newId, payroll, sha256Hex } from "@weft/core";
@@ -15,7 +15,6 @@ import { newId, payroll, sha256Hex } from "@weft/core";
 const CO = "cmp_larkspur";
 const pt = (date: string, hour: number, minute = 0) => payroll.ptToUtc(date, hour, minute);
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-const DEMO_DOC = "DEMO DOCUMENT. Fictional company, fictional person, simulated signature. Not a real record.";
 
 export interface TurnoverApi { tx: DbTx; bump: (table: string, n?: number) => void; action: (a: Record<string, unknown>) => void }
 
@@ -50,8 +49,8 @@ export const monthEnd = (d: string) => { const [y, m] = d.split("-").map(Number)
 const longDay = (d: string) => payroll.shortDay(d, 0);
 // The step details as the offboarding screen reads them: dates as days, the systems by the names IT shows.
 const STEPS = (l: Leaver, login: string): [string, string][] => [
-  ["final_pay", `Final pay included on the ${payroll.shortDay(regularPayday(l.end), 2026)} regular run`], ["directory_suspend", `Suspended Workspace (sim) ${login}`],
-  ["sso_deactivate", `Suspended SSO (sim) ${login}`], ["group_removal", "Removed group memberships"], ["app_removal", `Removed Chat (sim) ${login}`],
+  ["final_pay", `Final pay included on the ${payroll.shortDay(regularPayday(l.end), 2026)} regular run`], ["directory_suspend", `Suspended Workspace ${login}`],
+  ["sso_deactivate", `Suspended SSO ${login}`], ["group_removal", "Removed group memberships"], ["app_removal", `Removed Chat ${login}`],
   ["device_lock", "Device locked and returned"], ["cobra_notice", l.kind === "hourly" && l.title.includes("Intern") ? "Not enrolled in a group health plan, so no COBRA notice is due" : `COBRA notice emailed to ${login}@mail.example`],
   ["benefits_terminate", l.title.includes("Intern") ? "No enrollments to end" : `Terminated enrollments, effective through ${payroll.shortDay(monthEnd(l.end), 2026)}`],
 ];
@@ -110,12 +109,12 @@ export async function seedTurnover(L: TurnoverApi): Promise<void> {
     }
     const signed = pt(addDays(l.start, -10), 10);
     for (const [kind, title] of [["offer_letter", `Offer letter: ${l.title}`], ["confidentiality_agreement", "Confidentiality and invention assignment agreement"], ["w4", "Form W-4, employee's withholding certificate"], ["i9", "Form I-9 receipt (masked)"]] as const) {
-      const body = `${DEMO_DOC}\n\n${title}\nLarkspur Robotics (demo)\n${l.first} ${l.last} (demo)\nSigned ${longDay(signed.slice(0, 10))}.`;
+      const body = `${title}\nLarkspur Robotics\n${l.first} ${l.last}\nSigned ${longDay(signed.slice(0, 10))}.`;
       await tx.insert(documents).values({ id: await newId(tx, "doc_"), companyId: CO, workerId: id, offerId: null, kind, title, status: "signed", bodyText: body, sha256: sha256Hex(body), createdAt: signed, sentAt: signed, signedAt: signed });
       L.bump("documents");
     }
     const sent = pt(l.end, 16);
-    const statement = `${DEMO_DOC}\n\nFinal pay statement\nLarkspur Robotics (demo)\n${l.first} ${l.last} (demo)\nLast day ${longDay(l.end)}. Final wages paid on the ${longDay(regularPayday(l.end))} regular run.`;
+    const statement = `Final pay statement\nLarkspur Robotics\n${l.first} ${l.last}\nLast day ${longDay(l.end)}. Final wages paid on the ${longDay(regularPayday(l.end))} regular run.`;
     await tx.insert(documents).values({ id: await newId(tx, "doc_"), companyId: CO, workerId: id, offerId: null, kind: "final_pay_statement", title: "Final pay statement", status: "sent", bodyText: statement, sha256: sha256Hex(statement), createdAt: sent, sentAt: sent, signedAt: null });
     L.bump("documents");
     const opened = pt(addDays(l.end, l.termination === "involuntary" ? 0 : -14), 10);
@@ -125,8 +124,8 @@ export async function seedTurnover(L: TurnoverApi): Promise<void> {
       await tx.insert(offboardingSteps).values({ id: await newId(tx, "ofs_"), caseId, kind, status: "done", detail, doneAt: pt(kind === "final_pay" ? l.end : addDays(l.end, 1), 10) });
     }
     L.bump("offboarding_cases");
-    L.action({ ts: pt(addDays(l.start, -21), 10), actorKind: "human", actorId: "usr_sam", command: "people.create_worker", args: { worker_id: id }, summary: `Added ${l.first} ${l.last} (demo) (${id}) as ${l.title}, starting ${l.start}`, reversible: "no" });
-    L.action({ ts: opened, actorKind: "human", actorId: "usr_sam", command: "offboarding.start", args: { worker_id: id, last_day: l.end }, summary: `Started offboarding for ${l.first} ${l.last} (demo) (${id}), last day ${l.end}`, reversible: "no" });
+    L.action({ ts: pt(addDays(l.start, -21), 10), actorKind: "human", actorId: "usr_sam", command: "people.create_worker", args: { worker_id: id }, summary: `Added ${l.first} ${l.last} (${id}) as ${l.title}, starting ${l.start}`, reversible: "no" });
+    L.action({ ts: opened, actorKind: "human", actorId: "usr_sam", command: "offboarding.start", args: { worker_id: id, last_day: l.end }, summary: `Started offboarding for ${l.first} ${l.last} (${id}), last day ${l.end}`, reversible: "no" });
   }
   await importLeaverYtd(tx, L.bump);
 }

@@ -1,6 +1,6 @@
 // Scenario GP13 (docs/wave3.md 5): expense review to reimbursement. Owner: w3-expenses. Scripted provider
 // (scenarios/rt_expense_review.json). The routine explains each needs-review item and proposes exactly one decision per
-// item; nothing is decided until a person approves. Dana approves two proposals in the Inbox; the open draft carries
+// item; nothing is decided until a person approves. Vic approves two proposals in the Inbox; the open draft carries
 // their reimbursements on Mateo's paycheck outside gross, and processing the run marks them Paid out.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
@@ -59,7 +59,7 @@ describe("GP13 expense review to reimbursement", () => {
     // The CA over-limit item carries the human note, and nothing decided it.
     const e4 = props.find((p) => JSON.parse(p.argsJson!).expense_id === "exp_0004")!;
     expect(JSON.parse(e4.contentJson)[0].text).toMatch(/California workers must be reimbursed/);
-    expect(e4.headline).toBe("Approve expense exp_0004 for Kofi Mensah (demo) (wrk_0018): $1,249.00 equipment on 2026-10-14");
+    expect(e4.headline).toBe("Approve expense exp_0004 for Kofi Mensah (wrk_0018): $1,249.00 equipment on 2026-10-14");
     expect((await weft.db.select().from(actions)).filter((a) => a.command === "expenses.decide")).toHaveLength(0);
     const rows = await weft.db.select().from(expenses);
     expect(rows.filter((e) => e.id <= "exp_0008").every((e) => e.status === "needs_review" && e.explanation && e.explanationSource === "template")).toBe(true);
@@ -80,7 +80,7 @@ describe("GP13 expense review to reimbursement", () => {
     expect(pack[0]?.result_json).toContain(JSON.stringify(reviewBatchPlan(8)).slice(1, -1));
   });
 
-  it("Dana approves two proposals; the draft carries them outside gross; processing marks them paid", async () => {
+  it("Vic approves two proposals; the draft carries them outside gross; processing marks them paid", async () => {
     const before = PayrollRun.parse((await call("GET", `/v1/payrolls/${RUN}`)).json).totals!;
     const mateo0 = (await weft.db.select().from(paychecks).where(eq(paychecks.payrollRunId, RUN))).find((p) => p.workerId === "wrk_0005")!;
     for (const id of ["exp_0001", "exp_0006"]) {

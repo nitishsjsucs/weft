@@ -1,5 +1,5 @@
 // Seed step w4_compliance (wave 4, docs/wave4.md). Owner: w4-parity-compliance. Deterministic.
-// Never change wave 1 to 3 seed counts (asserted by tests), never touch processed runs, every name ends with (demo).
+// Never change wave 1 to 3 seed counts (asserted by tests), never touch processed runs, every domain is *.example.
 //
 // - Filing rows (2026-Q3 and 2026-Q4 for every quarterly form of an active account, and 2026 for the annual forms) and
 //   the calendar built from them, the federal deposits, notices and contractor forms. Nothing is prepared or filed:

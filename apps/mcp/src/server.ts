@@ -10,7 +10,7 @@ export interface McpConfig { apiUrl: string; apiKey: string }
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export const SERVER_INSTRUCTIONS =
-  "Weft runs on synthetic data for a fictional company (Larkspur Robotics (demo)). Every person, agency, bank and carrier is simulated. " +
+  "Weft runs on synthetic data for a fictional company (Larkspur Robotics). Every person, agency, bank and carrier is simulated. " +
   "Write tools only create proposals that a human approves in the Weft app.";
 
 export const NEVER_EXPOSED = /^(proposals|actions__rollback|vault__|settings|api_keys|memory__write|routines__enable|routines__disable)/;
@@ -19,7 +19,7 @@ interface Listing { name: string; description: string; parameters: Record<string
 
 const AGENT_ASK = {
   name: "agent_ask",
-  description: "Ask the Weft agent a question about the fictional company. It answers from read-only tools; the run is marked as reading untrusted input.",
+  description: "Ask the Weft agent a question about the company. It answers from read-only tools; the run is marked as reading untrusted input.",
   inputSchema: { type: "object", properties: { question: { type: "string" } }, required: ["question"], additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 };
@@ -69,7 +69,7 @@ export function createMcpServer(cfg: McpConfig, fetchImpl: Fetch = (u, i) => fet
       const q = typeof args.question === "string" ? args.question : "";
       if (opts.askLimiter) {
         const allowed = await opts.askLimiter.take(cfg.apiKey);
-        if (!allowed.ok) return { content: [{ type: "text", text: `agent_ask is limited to ${allowed.limit} runs per key per day on this demo; try again after 00:00 UTC.` }], isError: true };
+        if (!allowed.ok) return { content: [{ type: "text", text: `agent_ask is limited to ${allowed.limit} runs per key per day on this workspace; try again after 00:00 UTC.` }], isError: true };
       }
       const start = await call("/v1/agent/runs", { method: "POST", body: JSON.stringify({ text: q, pageContext: null, threadId: null }) });
       if (start.status >= 300) return { content: [{ type: "text", text: JSON.stringify(start.body) }], isError: true };

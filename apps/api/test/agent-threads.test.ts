@@ -94,7 +94,7 @@ describe("POST /v1/agent/runs with a threadId", () => {
   it("another person cannot follow up in someone else's thread", async () => {
     const t = thread();
     await ask("Show payroll cost by month", t, DANA);
-    const theo = await ask("What did Dana ask?", t, THEO);
+    const theo = await ask("What did Vic ask?", t, THEO);
     expect(theo.status).toBe(404);
     expect(String((theo.body as { message?: string }).message)).toContain(t);
   });

@@ -283,7 +283,7 @@ export function reportText(r: BuiltReport): { subject: string; body: string } {
   const body = [
     `${title}, ${r.from} to ${r.to}${isSnapshotOf(r.metric) ? "" : `, by ${r.groupBy}`}.`, "",
     ...(lines.length ? lines : ["No rows in this range."]), ...more, ...totalLine, "",
-    "Sent from Weft Reports. Figures are computed from the company's own records (simulated email, demo data).",
+    "Sent from Weft Reports. Figures are computed from the company's own records.",
   ].join("\n");
   return { subject, body };
 }

@@ -10,10 +10,10 @@ describe("wave 2 scaffold", () => {
   it("the email simulator keeps an outbox of *.example mail and refuses other domains", async () => {
     w = await simWorld();
     const sims = createSimulators({ db: w.db, clock: w.clock });
-    const { id } = await sims.email.send({ to: "ava.reyes@personal.example", from: "people@larkspur.example", subject: "Your offer from Larkspur (demo)", body: "Open the portal to review it.", kind: "offer_invite", relatedRef: "offr_0001" });
+    const { id } = await sims.email.send({ to: "ava.reyes@personal.example", from: "people@larkspur.example", subject: "Your offer from Larkspur", body: "Open the portal to review it.", kind: "offer_invite", relatedRef: "offr_0001" });
     expect(id).toMatch(/^eml_\d{4}$/);
     const inbox = await sims.email.list("ava.reyes@personal.example");
-    expect(inbox.map((m) => [m.subject, m.kind, m.relatedRef])).toEqual([["Your offer from Larkspur (demo)", "offer_invite", "offr_0001"]]);
+    expect(inbox.map((m) => [m.subject, m.kind, m.relatedRef])).toEqual([["Your offer from Larkspur", "offer_invite", "offr_0001"]]);
     await expect(sims.email.send({ to: "someone@gmail.com", from: "people@larkspur.example", subject: "x", body: "x", kind: "generic", relatedRef: null })).rejects.toThrow(/example/);
   });
   it("routing numbers pass the ABA checksum and offers follow the lifecycle", () => {

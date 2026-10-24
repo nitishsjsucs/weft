@@ -9,8 +9,8 @@ import { simWorld, type SimTestWorld } from "../helpers";
 const VECTOR_BODY = '{"event":"envelope-completed","apiVersion":"v2.1","generatedDateTime":"2026-10-27T15:30:00.000Z","data":{"accountId":"sim-account-0001","envelopeId":"sim-env-000001"}}';
 const VECTOR_B64 = "mJrSEMlywVvSNoALGrJ0EgWk8r81rHCZGwmDUPfbda0=";   // printf body | openssl dgst -sha256 -hmac key -binary | base64
 const enc = (s: string) => new TextEncoder().encode(s);
-const DOCS = [{ weftDocId: "doc_0001", title: "Offer letter", bytes: enc("Offer letter text (demo)"), sha256: "a".repeat(64) }, { weftDocId: "doc_0002", title: "Confidentiality agreement", bytes: enc("NDA text (demo)"), sha256: "b".repeat(64) }];
-const SIGNER = { name: "Rowan Ellery (demo)", email: "rowan.ellery@candidate.example", clientUserId: "usr_0010" };
+const DOCS = [{ weftDocId: "doc_0001", title: "Offer letter", bytes: enc("Offer letter text"), sha256: "a".repeat(64) }, { weftDocId: "doc_0002", title: "Confidentiality agreement", bytes: enc("NDA text"), sha256: "b".repeat(64) }];
+const SIGNER = { name: "Rowan Ellery", email: "rowan.ellery@candidate.example", clientUserId: "usr_0010" };
 
 let w: SimTestWorld;
 beforeEach(async () => { w = await simWorld(); });
@@ -44,7 +44,7 @@ describe("DocuSign simulator envelopes", () => {
     await expect(s.download(e.envelopeId, "combined")).rejects.toThrow(/not completed/);
     await c.finish(e.envelopeId, "signed");
     expect(await s.envelope(e.envelopeId)).toEqual({ status: "completed", recipients: [{ clientUserId: "usr_0010", status: "completed" }] });
-    expect(new TextDecoder().decode(await s.download(e.envelopeId, "combined"))).toContain("NDA text (demo)");
+    expect(new TextDecoder().decode(await s.download(e.envelopeId, "combined"))).toContain("NDA text");
     expect(await c.reads(e.envelopeId)).toHaveLength(2);
     const events = (await c.outbox(w.clock.now())).map((d) => JSON.parse(d.raw).event);
     expect(events).toEqual(["envelope-sent", "envelope-delivered", "envelope-completed"]);

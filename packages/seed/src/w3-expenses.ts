@@ -1,7 +1,7 @@
 // Seed step w3_expenses (wave 3, docs/wave3.md). Owner: w3-expenses. Deterministic: the policy row, the agent expense
 // ceilings, 8 needs_review items (the hand-computed cases E1 to E8 of research/wave3/expenses-timeoff.md 9.2), 4
 // approved and 2 declined items of history, and receipt images with sidecar extraction JSON (the simulated extractor
-// reads the sidecar; no OCR and no model calls). Every merchant ends with "(demo)".
+// reads the sidecar; no OCR and no model calls). Every merchant is fictional.
 // Never change wave 1 or wave 2 seed counts and never touch processed runs: nothing is attached to a run here, so the
 // open draft pay_2026_10_30 is unchanged. The approved history was imported as approved from the previous expense tool
 // and waits for the next draft Weft creates (expenses.schedule on payroll.draft_created).
@@ -27,30 +27,30 @@ interface SeedExpense {
 
 /** E1 to E8 in case order, then the history. Workers are pinned by id (packages/seed/src/people.ts roster order). */
 export const SEED_EXPENSES: readonly SeedExpense[] = [
-  // E1 clean travel: Mateo Alvarez (demo), CA
-  { key: "E1", workerId: "wrk_0005", category: "travel", merchant: "Skyway Air (demo)", amountCents: 41_238, transactionDate: "2026-10-12", submittedAt: "2026-10-13T16:20:00.000Z", purpose: "Flight to the Austin site for the fleet bring-up", receipt: { totalCents: 41_238, date: "2026-10-12" }, status: "needs_review" },
-  // E2 meals without attendees, over $75 for one person: Lena Brooks (demo), NY
-  { key: "E2", workerId: "wrk_0026", category: "meals", merchant: "Gristmill Diner (demo)", amountCents: 8_640, transactionDate: "2026-10-20", submittedAt: "2026-10-21T14:05:00.000Z", purpose: "Client lunch", receipt: { totalCents: 8_640, date: "2026-10-20" }, status: "needs_review" },
-  // E3 supplies under $75 without a receipt: Arturo Silva (demo), TX technician
-  { key: "E3", workerId: "wrk_0043", category: "supplies", merchant: "Austin Parts Depot (demo)", amountCents: 4_800, transactionDate: "2026-10-19", submittedAt: "2026-10-20T15:00:00.000Z", purpose: "Zip ties and labels for the fleet bay", status: "needs_review" },
-  // E4 equipment over $1,000 without pre-approval, CA Hardware: Kofi Mensah (demo)
-  { key: "E4", workerId: "wrk_0018", category: "equipment", merchant: "Benchline Instruments (demo)", amountCents: 124_900, transactionDate: "2026-10-14", submittedAt: "2026-10-15T18:30:00.000Z", purpose: "Bench power supply for actuator tests", receipt: { totalCents: 124_900, date: "2026-10-14" }, status: "needs_review" },
-  // E5 lodging without a receipt: Kenji Watanabe (demo), NY
-  { key: "E5", workerId: "wrk_0034", category: "lodging", merchant: "Harborview Hotel (demo)", amountCents: 28_900, transactionDate: "2026-10-15", submittedAt: "2026-10-19T13:40:00.000Z", purpose: "Customer workshop, one night", status: "needs_review" },
-  // E6 mileage at 76 cents (84.0 miles on Oct 6): Mateo Alvarez (demo)
-  { key: "E6", workerId: "wrk_0005", category: "mileage", merchant: "Personal car (demo)", amountCents: 6_384, milesX10: 840, transactionDate: "2026-10-06", submittedAt: "2026-10-07T23:10:00.000Z", purpose: "Drive to the Fremont supplier and back", status: "needs_review" },
-  // E7 duplicate of an approved item (same merchant, amount and date): Victor Huang (demo), TX
-  { key: "E7", workerId: "wrk_0041", category: "software", merchant: "Fleetlog Cloud (demo)", amountCents: 9_600, transactionDate: "2026-10-01", submittedAt: "2026-10-22T16:00:00.000Z", purpose: "Fleet log analysis seat", receipt: { totalCents: 9_600, date: "2026-10-01" }, status: "needs_review" },
-  // E8 past the 60-day window (81 days): Wren Calloway (demo), CA
-  { key: "E8", workerId: "wrk_0019", category: "meals", merchant: "Lakeside Bistro (demo)", amountCents: 5_420, transactionDate: "2026-07-31", submittedAt: "2026-10-20T19:45:00.000Z", purpose: "Customer dinner after the pilot review", attendees: "Wren Calloway, two customer engineers", receipt: { totalCents: 5_420, date: "2026-07-31" }, status: "needs_review" },
+  // E1 clean travel: Mateo Alvarez, CA
+  { key: "E1", workerId: "wrk_0005", category: "travel", merchant: "Skyway Air", amountCents: 41_238, transactionDate: "2026-10-12", submittedAt: "2026-10-13T16:20:00.000Z", purpose: "Flight to the Austin site for the fleet bring-up", receipt: { totalCents: 41_238, date: "2026-10-12" }, status: "needs_review" },
+  // E2 meals without attendees, over $75 for one person: Lena Brooks, NY
+  { key: "E2", workerId: "wrk_0026", category: "meals", merchant: "Gristmill Diner", amountCents: 8_640, transactionDate: "2026-10-20", submittedAt: "2026-10-21T14:05:00.000Z", purpose: "Client lunch", receipt: { totalCents: 8_640, date: "2026-10-20" }, status: "needs_review" },
+  // E3 supplies under $75 without a receipt: Arturo Silva, TX technician
+  { key: "E3", workerId: "wrk_0043", category: "supplies", merchant: "Austin Parts Depot", amountCents: 4_800, transactionDate: "2026-10-19", submittedAt: "2026-10-20T15:00:00.000Z", purpose: "Zip ties and labels for the fleet bay", status: "needs_review" },
+  // E4 equipment over $1,000 without pre-approval, CA Hardware: Kofi Mensah
+  { key: "E4", workerId: "wrk_0018", category: "equipment", merchant: "Benchline Instruments", amountCents: 124_900, transactionDate: "2026-10-14", submittedAt: "2026-10-15T18:30:00.000Z", purpose: "Bench power supply for actuator tests", receipt: { totalCents: 124_900, date: "2026-10-14" }, status: "needs_review" },
+  // E5 lodging without a receipt: Kenji Watanabe, NY
+  { key: "E5", workerId: "wrk_0034", category: "lodging", merchant: "Harborview Hotel", amountCents: 28_900, transactionDate: "2026-10-15", submittedAt: "2026-10-19T13:40:00.000Z", purpose: "Customer workshop, one night", status: "needs_review" },
+  // E6 mileage at 76 cents (84.0 miles on Oct 6): Mateo Alvarez
+  { key: "E6", workerId: "wrk_0005", category: "mileage", merchant: "Personal car", amountCents: 6_384, milesX10: 840, transactionDate: "2026-10-06", submittedAt: "2026-10-07T23:10:00.000Z", purpose: "Drive to the Fremont supplier and back", status: "needs_review" },
+  // E7 duplicate of an approved item (same merchant, amount and date): Victor Huang, TX
+  { key: "E7", workerId: "wrk_0041", category: "software", merchant: "Fleetlog Cloud", amountCents: 9_600, transactionDate: "2026-10-01", submittedAt: "2026-10-22T16:00:00.000Z", purpose: "Fleet log analysis seat", receipt: { totalCents: 9_600, date: "2026-10-01" }, status: "needs_review" },
+  // E8 past the 60-day window (81 days): Wren Calloway, CA
+  { key: "E8", workerId: "wrk_0019", category: "meals", merchant: "Lakeside Bistro", amountCents: 5_420, transactionDate: "2026-07-31", submittedAt: "2026-10-20T19:45:00.000Z", purpose: "Customer dinner after the pilot review", attendees: "Wren Calloway, two customer engineers", receipt: { totalCents: 5_420, date: "2026-07-31" }, status: "needs_review" },
   // History: approved (imported, waiting for the next draft)
-  { key: "H1", workerId: "wrk_0041", category: "software", merchant: "Fleetlog Cloud (demo)", amountCents: 9_600, transactionDate: "2026-10-01", submittedAt: "2026-10-02T15:00:00.000Z", purpose: "Fleet log analysis seat", receipt: { totalCents: 9_600, date: "2026-10-01" }, status: "approved", decided: { at: "2026-10-14T17:00:00.000Z", by: "usr_dana" } },
-  { key: "H2", workerId: "wrk_0007", category: "travel", merchant: "Bayline Rail (demo)", amountCents: 6_450, transactionDate: "2026-10-08", submittedAt: "2026-10-09T17:30:00.000Z", purpose: "Train to the Sacramento integrator", receipt: { totalCents: 6_450, date: "2026-10-08" }, status: "approved", decided: { at: "2026-10-14T17:05:00.000Z", by: "usr_dana" } },
-  { key: "H3", workerId: "wrk_0023", category: "office", merchant: "Paperworks Supply (demo)", amountCents: 3_275, transactionDate: "2026-10-13", submittedAt: "2026-10-14T14:10:00.000Z", purpose: "Binders for the audit files", receipt: { totalCents: 3_275, date: "2026-10-13" }, status: "approved", decided: { at: "2026-10-15T16:00:00.000Z", by: "usr_dana" } },
-  { key: "H4", workerId: "wrk_0037", category: "mileage", merchant: "Personal car (demo)", amountCents: 9_120, milesX10: 1_200, transactionDate: "2026-10-09", submittedAt: "2026-10-10T21:00:00.000Z", purpose: "Site visit to the San Marcos depot", status: "approved", decided: { at: "2026-10-15T16:05:00.000Z", by: "usr_dana" } },
+  { key: "H1", workerId: "wrk_0041", category: "software", merchant: "Fleetlog Cloud", amountCents: 9_600, transactionDate: "2026-10-01", submittedAt: "2026-10-02T15:00:00.000Z", purpose: "Fleet log analysis seat", receipt: { totalCents: 9_600, date: "2026-10-01" }, status: "approved", decided: { at: "2026-10-14T17:00:00.000Z", by: "usr_dana" } },
+  { key: "H2", workerId: "wrk_0007", category: "travel", merchant: "Bayline Rail", amountCents: 6_450, transactionDate: "2026-10-08", submittedAt: "2026-10-09T17:30:00.000Z", purpose: "Train to the Sacramento integrator", receipt: { totalCents: 6_450, date: "2026-10-08" }, status: "approved", decided: { at: "2026-10-14T17:05:00.000Z", by: "usr_dana" } },
+  { key: "H3", workerId: "wrk_0023", category: "office", merchant: "Paperworks Supply", amountCents: 3_275, transactionDate: "2026-10-13", submittedAt: "2026-10-14T14:10:00.000Z", purpose: "Binders for the audit files", receipt: { totalCents: 3_275, date: "2026-10-13" }, status: "approved", decided: { at: "2026-10-15T16:00:00.000Z", by: "usr_dana" } },
+  { key: "H4", workerId: "wrk_0037", category: "mileage", merchant: "Personal car", amountCents: 9_120, milesX10: 1_200, transactionDate: "2026-10-09", submittedAt: "2026-10-10T21:00:00.000Z", purpose: "Site visit to the San Marcos depot", status: "approved", decided: { at: "2026-10-15T16:05:00.000Z", by: "usr_dana" } },
   // History: declined
-  { key: "D1", workerId: "wrk_0028", category: "meals", merchant: "Corner Cafe (demo)", amountCents: 2_300, transactionDate: "2026-10-03", submittedAt: "2026-10-04T18:00:00.000Z", purpose: "Weekend brunch", attendees: "Talia Brennan", receipt: { totalCents: 2_300, date: "2026-10-03" }, status: "declined", decided: { at: "2026-10-06T16:00:00.000Z", by: "usr_dana", reason: "personal", note: "Not a business meal." } },
-  { key: "D2", workerId: "wrk_0024", category: "travel", merchant: "Cityride Taxi (demo)", amountCents: 12_600, transactionDate: "2026-10-05", submittedAt: "2026-10-06T13:00:00.000Z", purpose: "Taxi to the airport", status: "declined", decided: { at: "2026-10-07T16:00:00.000Z", by: "usr_dana", reason: "no_receipt", note: "No receipt after two reminders." } },
+  { key: "D1", workerId: "wrk_0028", category: "meals", merchant: "Corner Cafe", amountCents: 2_300, transactionDate: "2026-10-03", submittedAt: "2026-10-04T18:00:00.000Z", purpose: "Weekend brunch", attendees: "Talia Brennan", receipt: { totalCents: 2_300, date: "2026-10-03" }, status: "declined", decided: { at: "2026-10-06T16:00:00.000Z", by: "usr_dana", reason: "personal", note: "Not a business meal." } },
+  { key: "D2", workerId: "wrk_0024", category: "travel", merchant: "Cityride Taxi", amountCents: 12_600, transactionDate: "2026-10-05", submittedAt: "2026-10-06T13:00:00.000Z", purpose: "Taxi to the airport", status: "declined", decided: { at: "2026-10-07T16:00:00.000Z", by: "usr_dana", reason: "no_receipt", note: "No receipt after two reminders." } },
 ];
 
 /**

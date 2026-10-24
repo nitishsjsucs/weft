@@ -8,7 +8,7 @@ import { and, asc, eq, inArray, like } from "drizzle-orm";
 import { formatCents, type ReconFinding, type ReconFindingKind, type ReconFindingStatus } from "@weft/contracts";
 import { benefitEnrollments, benefitPlans, benefitReconFindings, paychecks, payrollRuns, simCarrierInvoices, workers, type DbTx } from "@weft/db";
 
-export const RECON_CARRIER = "Juniper Mutual (sim)";
+export const RECON_CARRIER = "Juniper Mutual";
 export const RECON_BILLED_TYPES: readonly string[] = ["medical", "dental", "vision"];
 export const RECON_DEPENDENT_TIERS: readonly string[] = ["ee_spouse", "ee_children", "family"];
 /** Coverage tiers in words for finding text a person reads; the codes stay in the finding's data. */
@@ -100,7 +100,7 @@ export async function computeFindings(tx: DbTx, companyId: string, invoice: Reco
     expected.set(k, { tier, periods: (prev?.periods ?? 0) + n, cents: (prev?.cents ?? 0) + price(planById.get(e.planId)!.pricesJson, tier) * n });
   }
 
-  const nameOf = (id: string) => { const p = personById.get(id); return p ? `${p.first} ${p.last} (demo)` : id; };
+  const nameOf = (id: string) => { const p = personById.get(id); return p ? `${p.first} ${p.last}` : id; };
   const planName = (id: string) => planById.get(id)?.name ?? id;
   const out: DraftFinding[] = [];
   const terminated = new Map<string, { billed: number; expected: number; deducted: number; plans: string[] }>();
@@ -201,7 +201,7 @@ export function disputeMessage(f: ReconFindingRow, workerName: string | null, pl
   const body = [
     `Hello Juniper Mutual billing team,`,
     ``,
-    `Larkspur Robotics (demo) disputes one line of the ${f.month} invoice: ${what[f.kind] ?? f.kind}.`,
+    `Larkspur Robotics disputes one line of the ${f.month} invoice: ${what[f.kind] ?? f.kind}.`,
     `Employee: ${workerName ?? "not applicable"}${f.workerId ? ` (${f.workerId})` : ""}`,
     `Plan: ${planName ?? "all plans on the line"}`,
     `Billed: ${formatCents(f.billedCents)}. Expected from our enrollment records: ${formatCents(f.expectedCents)}. Deducted from paychecks: ${formatCents(f.deductedCents)}.`,

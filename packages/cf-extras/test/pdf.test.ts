@@ -8,16 +8,16 @@ import { sha256Hex } from "../src/bytes";
 import { COUNTERS, memoryDailyCounters } from "../src/counters";
 import { ExtrasError } from "../src/errors";
 import { cachedPdf, createDocumentRenderer, MAX_PDF_HTML_BYTES, pdfBrowserReserveMs } from "../src/pdf";
-import { PDF_DEMO_BANNER, pdfFileName, renderPdfHtml, usd, type DocumentPdfData, type PayStubPdfData } from "../src/templates";
+import { pdfFileName, renderPdfHtml, usd, type DocumentPdfData, type PayStubPdfData } from "../src/templates";
 import { fakeBrowser, memoryR2 } from "./fakes";
 
 const offer: DocumentPdfData = {
-  kind: "offer_letter", companyName: "Larkspur Labs (demo)", documentId: "doc_0007", title: "Offer letter for Noor Castellanos (demo)",
-  bodyText: "Dear Noor Castellanos (demo),\n\n<script>fetch('https://evil.example/x')</script><img src=\"http://169.254.169.254/latest\">\nYour base pay is $142,000.00 a year.",
+  kind: "offer_letter", companyName: "Larkspur Labs", documentId: "doc_0007", title: "Offer letter for Noor Castellanos",
+  bodyText: "Dear Noor Castellanos,\n\n<script>fetch('https://evil.example/x')</script><img src=\"http://169.254.169.254/latest\">\nYour base pay is $142,000.00 a year.",
   sha256: "a".repeat(64), status: "sent", sentAt: "2026-10-20T16:00:00.000Z", signature: null,
 };
 const stub: PayStubPdfData = {
-  kind: "pay_stub", companyName: "Larkspur Labs (demo)", paycheckId: "pyc_0042", payrollRunId: "pay_0007", workerName: "Lena Brooks (demo)",
+  kind: "pay_stub", companyName: "Larkspur Labs", paycheckId: "pyc_0042", payrollRunId: "pay_0007", workerName: "Lena Brooks",
   periodStart: "2026-10-01", periodEnd: "2026-10-15", payday: "2026-10-16", grossCents: 580_166, netCents: 401_233, reimbursementsCents: 41_238,
   employeeTaxesCents: 140_000, companyTaxesCents: 44_383,
   earnings: [{ label: "Salary", amountCents: 580_166 }], deductions: [{ label: "401(k)", amountCents: 29_008, detail: "pretax" }], taxes: [{ label: "Federal income tax", amountCents: 98_000, detail: "US" }],
@@ -25,9 +25,10 @@ const stub: PayStubPdfData = {
 
 describe("templates", () => {
   it("escape every value and name no external resource, so a rendered page has nothing to fetch", () => {
-    for (const html of [renderPdfHtml(offer), renderPdfHtml(stub), renderPdfHtml({ ...offer, kind: "signed_agreement", signature: { signerName: "Noor Castellanos (demo)", typedName: "<b>Noor</b>", signedAt: "2026-10-21T17:00:00.000Z", documentSha256: "b".repeat(64) } })]) {
+    for (const html of [renderPdfHtml(offer), renderPdfHtml(stub), renderPdfHtml({ ...offer, kind: "signed_agreement", signature: { signerName: "Noor Castellanos", typedName: "<b>Noor</b>", signedAt: "2026-10-21T17:00:00.000Z", documentSha256: "b".repeat(64) } })]) {
       expect(html).not.toMatch(/<script|<img|<link|<iframe|<object|<embed|src="|href="|url\(|@import/i);
-      expect(html).toContain(PDF_DEMO_BANNER);
+      expect(html).toContain("Rendered by Weft from its own records.");
+      expect(html).not.toMatch(/DEMO DOCUMENT|fictional|simulated/i);
     }
     expect(renderPdfHtml(offer)).toContain("&lt;script&gt;fetch(&#39;https://evil.example/x&#39;)&lt;/script&gt;&lt;img src=&quot;http://169.254.169.254/latest&quot;&gt;");
   });

@@ -21,7 +21,7 @@ const H = (cents: number) => ({ kind: "hourly" as const, cents });
 /** Employee roster in employee-number order: index i is EMP-000(i+1) and wrk_000(i+1). */
 export const ROSTER: readonly RosterEntry[] = [
   // CA (22)
-  { key: "dana", first: "Dana", last: "Whitfield", state: "CA", workplace: "wkp_oakland", dept: "dpt_people", title: "Head of People", pay: S(18_500_000), start: "2023-03-01", filing: "mfj", lead: true, step3: 400_000 },
+  { key: "dana", first: "Vic", last: "Akisole", state: "CA", workplace: "wkp_oakland", dept: "dpt_people", title: "Head of People", pay: S(18_500_000), start: "2023-03-01", filing: "mfj", lead: true, step3: 400_000 },
   { key: "theo", first: "Theo", last: "Marsh", state: "CA", workplace: "wkp_oakland", dept: "dpt_finance", title: "Payroll Lead", pay: S(14_200_000), start: "2023-06-12", filing: "single" },
   { key: "priya", first: "Priya", last: "Raman", state: "CA", workplace: "wkp_oakland", dept: "dpt_engineering", title: "VP Engineering", pay: S(24_500_000), start: "2023-03-01", filing: "mfj", lead: true },
   { key: "imani", first: "Imani", last: "Ferreira", state: "CA", workplace: "wkp_oakland", dept: "dpt_hardware", title: "Hardware Lead", pay: S(23_200_000), start: "2023-04-03", filing: "single", lead: true },
@@ -141,7 +141,7 @@ export async function seedPeople(ctx: SeedContext): Promise<void> {
     });
     if (!r.noBank) {
       const bid = await newId(db, "bnk_");
-      await db.insert(bankAccounts).values({ id: bid, workerId: id, bankName: "Sim Federal Credit Union", accountLast4: faker.string.numeric(4), routingLast4: faker.string.numeric(4), credentialRef: `vault:bank-${id}`, status: "active", source: "seed" });
+      await db.insert(bankAccounts).values({ id: bid, workerId: id, bankName: "Tidepool Federal Credit Union", accountLast4: faker.string.numeric(4), routingLast4: faker.string.numeric(4), credentialRef: `vault:bank-${id}`, status: "active", source: "seed" });
     }
     if (r.pay.kind === "hourly") {
       for (const [k, [start, end]] of TECH_PERIODS.entries()) {

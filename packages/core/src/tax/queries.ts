@@ -4,7 +4,7 @@ import { money, type EmployerRate, type TaxAccount } from "@weft/contracts";
 import { employerTaxRates, taxAccounts, type DbTx } from "@weft/db";
 
 export const AGENCY_LABELS: Readonly<Record<string, string>> = {
-  irs: "IRS (sim)", ca_edd: "CA EDD (sim)", ny_dtf: "NY DTF (sim)", ny_dol: "NY DOL (sim)", tx_twc: "TX TWC (sim)", co_dor: "CO DOR (sim)", co_cdle: "CO CDLE (sim)",
+  irs: "IRS", ca_edd: "CA EDD", ny_dtf: "NY DTF", ny_dol: "NY DOL", tx_twc: "TX TWC", co_dor: "CO DOR", co_cdle: "CO CDLE",
 };
 
 /** Federal FUTA facts shown with the rates (SPEC 5.4). Display only: the credit reduction is year-end, never withheld per paycheck. */

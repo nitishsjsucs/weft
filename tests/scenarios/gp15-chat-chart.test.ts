@@ -8,7 +8,7 @@ import { payRates, settings } from "@weft/db";
 import { CHAT_ACT_TOOLS, ChartSpec, W3_SETTINGS, type AgentRunRow, type ApprovalCardW3, type Proposal, type RunStepRow } from "@weft/contracts";
 import { createTestWeft, type TestWeft } from "./helpers";
 
-const WORKER = "wrk_0042";   // Hollis Grey (demo), TX
+const WORKER = "wrk_0042";   // Hollis Grey, TX
 let weft: TestWeft;
 beforeAll(async () => { weft = await createTestWeft(); });
 afterAll(async () => { await weft?.close(); });
@@ -55,7 +55,7 @@ describe("GP15 chart answer and approval card", () => {
       await weft.db.run(sql`UPDATE pay_rates SET effective_to = '2026-10-05' WHERE id = ${current!.id}`);
       await weft.db.insert(payRates).values({ id: "prt_9101", workerId: WORKER, kind: "salary", amountCents: 8_200_000, currency: "USD", effectiveFrom: "2026-10-06", effectiveTo: null, createdActionSeq: null });
     });
-    const request = "Hollis Grey (demo) missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27.";
+    const request = "Hollis Grey missed the Oct 1 to 15 payroll. Please propose an off-cycle payment for that period plus a $1,500.00 bonus, payday Oct 27.";
 
     it("with chat_can_propose off, the request is answered read-only: no proposal, no action", async () => {
       await setCanPropose(false);
@@ -77,7 +77,7 @@ describe("GP15 chart answer and approval card", () => {
       const actions = await count("actions");
       const offCycleRuns = async () => Number((await weft.db.all<{ c: number }>(sql`SELECT count(*) AS c FROM payroll_runs WHERE subtype = 'off_cycle'`))[0]!.c);
       const runsBefore = await offCycleRuns();
-      const { trace, chatMode } = await ask("Pay Hollis Grey (demo) an off-cycle bonus of $1,500.00 with payday Oct 27");
+      const { trace, chatMode } = await ask("Pay Hollis Grey an off-cycle bonus of $1,500.00 with payday Oct 27");
       expect(chatMode).toBe("act");
       const p = trace.proposals[0]!;
       expect(p).toMatchObject({ command: "payroll.propose_off_cycle", status: "pending" });
@@ -105,7 +105,7 @@ describe("GP15 chart answer and approval card", () => {
       expect(p).toMatchObject({ command: "payroll.propose_off_cycle", risk: "R4", status: "pending", onBehalfOf: "usr_dana", proposerRunId: run.id });
       expect(await count("actions")).toBe(actions);
       const card = trace.cards[0]!;
-      expect(card).toMatchObject({ proposalId: p.id, headline: p.headline, risk: "R4", moneyCents: p.moneyCents, subjectName: "Hollis Grey (demo)", status: "pending" });
+      expect(card).toMatchObject({ proposalId: p.id, headline: p.headline, risk: "R4", moneyCents: p.moneyCents, subjectName: "Hollis Grey", status: "pending" });
       expect(card.fields.map((f) => f.label)).toEqual(p.diff.map((d) => d.label));
       expect(card.fields.find((f) => f.label.includes("Salary (5 of 15 days"))?.value).toBe("$1,055.56");
       expect(card.fields.find((f) => f.label.includes("Salary (10 of 15 days"))?.value).toBe("$2,277.78");

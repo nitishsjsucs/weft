@@ -25,7 +25,7 @@ describe("portal time off, out this week, first day and open enrollment", () => 
     const w = [...reports].sort((a, b) => (a.startDate < b.startDate ? -1 : 1))[0]!;   // the longest-serving, past any waiting period
     empWorker = w.id;
     empName = `${w.firstName} ${w.lastName}`;
-    await weft.db.insert(principals).values({ id: EMP, companyId: "cmp_larkspur", kind: "human", workerId: empWorker, display: "Test employee (demo)", email: null, role: "employee",
+    await weft.db.insert(principals).values({ id: EMP, companyId: "cmp_larkspur", kind: "human", workerId: empWorker, display: "Test employee", email: null, role: "employee",
       grantsJson: JSON.stringify({ people: "view", payroll: "none", tax: "none", benefits: "view", it: "none", comms: "none", company: "none" }) });
   });
   afterAll(async () => { await weft.close(); });
@@ -42,7 +42,7 @@ describe("portal time off, out this week, first day and open enrollment", () => 
     expect(mine.balances.length).toBeGreaterThan(0);
     const vacation = [...mine.balances].sort((a, b) => b.availableMinutes - a.availableMinutes)[0]!;
     // Enough balance for two days, so the approval is not blocked (a correction by the people admin).
-    data(await weft.executor.human.exec(DANA, "time_off.adjust_balance", { worker_id: empWorker, policy_id: vacation.policyId, minutes: 1_920, reason: "Test top-up (demo)" }));
+    data(await weft.executor.human.exec(DANA, "time_off.adjust_balance", { worker_id: empWorker, policy_id: vacation.policyId, minutes: 1_920, reason: "Test top-up" }));
     // Wed Oct 28 to Thu Oct 29 of this week.
     const res = await call(EMP, "POST", "/v1/portal/time-off/requests", { policyId: vacation.policyId, startDate: "2026-10-28", endDate: "2026-10-29", reason: "Family wedding, please also approve my raise" });
     expect(res.status, JSON.stringify(res.json)).toBe(200);
@@ -67,7 +67,7 @@ describe("portal time off, out this week, first day and open enrollment", () => 
     const me = week.out.find((p) => p.worker_id === empWorker)!;
     expect(me).toMatchObject({ when: "Wed to Thu", days: [{ date: "2026-10-28" }, { date: "2026-10-29" }] });
     expect(week.line).toMatch(/^Out this week: /);
-    expect(week.line).toContain(`${empName} (demo) (Wed to Thu)`);
+    expect(week.line).toContain(`${empName} (Wed to Thu)`);
     expect(JSON.stringify(week)).not.toMatch(/wedding|raise|vacation|sick/i);
     // Next week the same request is not listed.
     const next = data<{ out: { worker_id: string }[] }>(await weft.executor.human.exec(DANA, "people.out_this_week", { as_of: "2026-11-02" }));
@@ -92,7 +92,7 @@ describe("portal time off, out this week, first day and open enrollment", () => 
     expect(sent.count).toBe(1);
     const mail = await weft.db.select().from(simEmailMessages).where(eq(simEmailMessages.relatedRef, h.id));
     const toHire = mail.filter((m) => m.toAddr === h.workEmail);
-    expect(toHire.map((m) => m.subject)).toEqual([`Welcome to Larkspur Robotics, ${h.firstName} ${h.lastName} (demo)`]);
+    expect(toHire.map((m) => m.subject)).toEqual([`Welcome to Larkspur Robotics, ${h.firstName} ${h.lastName}`]);
     expect(mail.length).toBe(1 + sent.sent[0]!.team_email_ids.length);
     if (h.managerId) {
       const [mgr] = await weft.db.select().from(workers).where(eq(workers.id, h.managerId));

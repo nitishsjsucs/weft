@@ -35,7 +35,7 @@ export function trainingRoutes(weft: Weft): Hono<WeftEnv> {
     let certificate: { file_name: string; bytes: number; sha256: string; storage_path: string } | undefined;
     if (!body.certificateUploadId && a) {
       const now = weft.clock.now();
-      const text = `Certificate of completion (demo)\n\nAssignment ${a.id}\nWorker ${a.workerId}\nCompleted ${now}\nIssued by Weft for Larkspur Robotics (demo). Not a real certificate.\n`;
+      const text = `Certificate of completion\n\nAssignment ${a.id}\nWorker ${a.workerId}\nCompleted ${now}\nIssued by Weft for Larkspur Robotics.\n`;
       const up = await storeUpload(weft, new TextEncoder().encode(text));
       certificate = { file_name: `certificate-${a.id}.txt`, bytes: up.bytes, sha256: up.sha256, storage_path: up.storagePath };
     }

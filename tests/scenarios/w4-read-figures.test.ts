@@ -26,7 +26,7 @@ describe("expense reads carry the sums people ask for", () => {
   it("the approved claims: the total, and the total per person", async () => {
     const d = await read<{ totals: Sum; by_worker: (Sum & { worker: string })[] }>("expenses.list", { band: "approved", totals_by: ["worker"] });
     expect(d.totals).toEqual({ count: 4, amount_cents: 28_445, amount_display: "$284.45" });
-    expect(d.by_worker[0]).toEqual({ worker: "Victor Huang (demo) (wrk_0041)", count: 1, amount_cents: 9_600, amount_display: "$96.00" });
+    expect(d.by_worker[0]).toEqual({ worker: "Victor Huang (wrk_0041)", count: 1, amount_cents: 9_600, amount_display: "$96.00" });
     // Across every band, his two software claims; a worker filter gives the same figure as its plain total.
     const all = await read<{ by_worker: (Sum & { worker: string })[] }>("expenses.list", { totals_by: ["worker"] });
     expect(all.by_worker.find((w) => w.worker.includes("wrk_0041"))).toMatchObject({ count: 2, amount_display: "$192.00" });

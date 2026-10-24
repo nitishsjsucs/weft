@@ -50,7 +50,7 @@ export async function workerOf(tx: DbTx, companyId: string, id: string): Promise
   return w ?? null;
 }
 
-export const displayName = (w: Pick<WorkerRow, "firstName" | "lastName" | "preferredName">) => `${w.preferredName ?? w.firstName} ${w.lastName} (demo)`;
+export const displayName = (w: Pick<WorkerRow, "firstName" | "lastName" | "preferredName">) => `${w.preferredName ?? w.firstName} ${w.lastName}`;
 
 /** Whether the worker is employed on `date` (an employee whose start and end bracket it). */
 export const employedOn = (w: Pick<WorkerRow, "startDate" | "endDate" | "type">, date: string) => w.type === "employee" && w.startDate <= date && (w.endDate === null || w.endDate >= date);

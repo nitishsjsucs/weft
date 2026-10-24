@@ -96,7 +96,7 @@ export async function firstDayPlan(tx: DbTx, companyId: string, asOf: string): P
 export const firstDayEmails = (h: FirstDayHire) => ({
   hire: {
     subject: `Welcome to Larkspur Robotics, ${h.name}`,
-    body: `Hi ${h.name},\n\nWelcome! Today, ${h.start_date}, is your first day at Larkspur Robotics (a fictional demo company).${h.manager ? ` ${h.manager} is your manager and will find you this morning.` : ""} Your onboarding checklist, pay details and benefits are in the Weft portal.\n\nWe are glad you are here,\nLarkspur Robotics people team (sent by the Weft agent)`,
+    body: `Hi ${h.name},\n\nWelcome! Today, ${h.start_date}, is your first day at Larkspur Robotics.${h.manager ? ` ${h.manager} is your manager and will find you this morning.` : ""} Your onboarding checklist, pay details and benefits are in the Weft portal.\n\nWe are glad you are here,\nLarkspur Robotics people team (sent by the Weft agent)`,
   },
   team: {
     subject: `${h.name} starts today`,

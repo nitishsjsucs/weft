@@ -11,7 +11,7 @@ import { benefitEnrollments, benefitPlans, simCarrierInvoices, workers, type DbT
 import { firstFault, SimFaultError } from "./faults";
 import { mintId } from "./ids";
 
-export const CARRIER_NAME = "Juniper Mutual (sim)";
+export const CARRIER_NAME = "Juniper Mutual";
 /** Plan types the carrier invoices (premium plans with coverage tiers). HSA and 401(k) are not premiums. */
 export const CARRIER_BILLED_TYPES: readonly string[] = ["medical", "dental", "vision"];
 /** Coverage tiers that cover at least one dependent. */

@@ -42,7 +42,7 @@ function standInHuman(w: TestWeft): HumanExecutor {
 beforeAll(async () => {
   weft = await createTestWeft({ seed: false });
   ids = await buildFixtureWorld(weft.db);
-  await weft.db.insert(principals).values({ id: "usr_theo", companyId: CO, kind: "human", display: "Theo Marsh (demo)", role: "payroll_admin", grantsJson: "{}" });
+  await weft.db.insert(principals).values({ id: "usr_theo", companyId: CO, kind: "human", display: "Theo Marsh", role: "payroll_admin", grantsJson: "{}" });
   await payroll.seedPayHistory(weft.db, { newId: idMinter(weft.db), bank: bank.bank, credential: "vault:sim-bank-operating", approvedBy: "usr_theo", draftCreatedAt: TS }, { companyId: CO, payScheduleId: PS });
   (weft as { executor: unknown }).executor = { human: standInHuman(weft), redact: (s: string) => s, system: weft.executor.system, readOnly: weft.executor.readOnly, expireProposals: async () => 0 };
 });

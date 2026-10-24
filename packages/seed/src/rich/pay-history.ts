@@ -1,4 +1,4 @@
-// Rich profile, part 3: the January to August pay history. The base seed says Larkspur (demo) ran payroll on a
+// Rich profile, part 3: the January to August pay history. The base seed says Larkspur ran payroll on a
 // previous provider until Aug 31 and imports the year-to-date totals into ytd_ledger (source "import"). This layer
 // shows that history as sixteen processed, imported runs whose paychecks add up exactly to each worker's imported
 // totals, code by code, so the Payroll list and the Reports charts have January to August.

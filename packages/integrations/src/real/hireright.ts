@@ -1,7 +1,7 @@
 // Real hireright adapter (docs/wave3.md). Owner: w3-integrations-screening-esign. Built against nothing: HireRight publishes no API, so this always refuses with INTEGRATION_NOT_AVAILABLE.
 // The only code in Weft that calls this vendor over HTTP. Credentials come from ./secrets readSecret, never logged.
 // Live access needs a HireRight customer contract and an assigned technical consultant; until then every call refuses and
-// the simulator (labeled "Simulated, API shape not published") stays in place.
+// the simulator (labeled "Sandbox, API shape not published") stays in place.
 import type { ConnectorStatus, ScreeningConnector, WebhookVerdict } from "@weft/contracts";
 import type { Env } from "../secrets";
 import { IntegrationRefused } from "./checkr";

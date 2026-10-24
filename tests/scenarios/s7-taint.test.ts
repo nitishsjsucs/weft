@@ -20,7 +20,7 @@ describe("S7 injection batch [notices__get, comms__send_message]", () => {
   it("runs end to end with the scripted calls: the send is a proposal with the banner reason, no R2 to R4 executes", async () => {
     const h = await weft.executor.runs.openRoutineRun({ routineId: "rt_test", routineRunId: "rtr_0001", triggerRef: "evt_0001", attended: false }).catch(async () => {
       await weft.db.run(`INSERT INTO routines (id, company_id, name, description, owner_principal_id, enabled, trigger_json, instructions, tools_json, budget_json, surface_json, source, created_at)
-        VALUES ('rt_test', 'cmp_larkspur', 'Agency notice (demo)', 'test', 'usr_dana', 1, '{"type":"event","event":"notice.received"}', '', '["notices.get","comms.send_message","memory.write_note","tax.update_rate"]', '{}', '{}', 'prebuilt', '2026-10-26T15:30:00.000Z')` as never);
+        VALUES ('rt_test', 'cmp_larkspur', 'Agency notice', 'test', 'usr_dana', 1, '{"type":"event","event":"notice.received"}', '', '["notices.get","comms.send_message","memory.write_note","tax.update_rate"]', '{}', '{}', 'prebuilt', '2026-10-26T15:30:00.000Z')` as never);
       return weft.executor.runs.openRoutineRun({ routineId: "rt_test", routineRunId: "rtr_0001", triggerRef: "evt_0001", attended: false });
     });
     const outcomes: Record<string, ToolOutcome> = {};

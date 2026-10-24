@@ -61,7 +61,7 @@ describe("GET /v1/integrations", () => {
     const t = await call("POST", "/v1/integrations/greenhouse/test");
     expect(t.json).toMatchObject({ vendor: "greenhouse", mode: "simulated", health: "ok" });
     const jobs = await call("GET", "/v1/ats/jobs");
-    expect(jobs.json.map((j: { name: string }) => j.name)).toEqual(["Firmware Test Engineer (demo)", "Field Operations Lead (demo)", "Controls Engineer (demo)"]);
+    expect(jobs.json.map((j: { name: string }) => j.name)).toEqual(["Firmware Test Engineer", "Field Operations Lead", "Controls Engineer"]);
     expect(jobs.json[0].url).toMatch(/\.example\//);
   });
 });

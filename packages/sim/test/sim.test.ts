@@ -148,7 +148,7 @@ describe("idp, devices, chat", () => {
 
   it("device catalog is $1,899.00 with a 3 business day ETA", async () => {
     const sims = createSimulators({ db: w.db, clock: w.clock });
-    expect(sims.devices.catalog()).toEqual([{ sku: "lrk-laptop-std", name: "Larkspur standard laptop (sim)", priceCents: 189_900, etaBusinessDays: 3 }]);
+    expect(sims.devices.catalog()).toEqual([{ sku: "lrk-laptop-std", name: "Larkspur standard laptop", priceCents: 189_900, etaBusinessDays: 3 }]);
     const o = await sims.devices.order({ workerId: "wrk_0049", sku: "lrk-laptop-std", shipTo: "Denver, CO" });
     expect(o).toEqual({ orderRef: "simd_0001", eta: "2026-10-29T15:30:00.000Z", priceCents: 189_900 });
     expect(await sims.tick("2026-10-29T15:30:00.000Z")).toEqual([{ type: "sim.device_delivered", subjectRef: "simd_0001", payload: { order_ref: "simd_0001", worker_id: "wrk_0049" } }]);

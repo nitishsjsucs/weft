@@ -23,7 +23,7 @@ describe("run allowlist", () => {
     expect(send).toMatchObject({ ok: false, refusal: { code: "UNAVAILABLE" } });
     const note = await weft.executor.agent.exec(h, { callId: "2", command: "memory__write_note", args: { path: "knowledge/procedures/x.md", title: "x", body: "1. x", sources: [] } });
     expect(note).toMatchObject({ ok: false, refusal: { code: "UNAVAILABLE" } });
-    expect(await weft.executor.agent.exec(h, { callId: "3", command: "people__search", args: { query: "Dana" } })).toMatchObject({ ok: true });
+    expect(await weft.executor.agent.exec(h, { callId: "3", command: "people__search", args: { query: "Vic" } })).toMatchObject({ ok: true });
     const sent = await weft.db.all<{ text: string }>(`SELECT text FROM sim_chat_messages` as never);
     expect(sent.map((m) => m.text)).not.toContain("Payroll is cancelled this week.");
   });

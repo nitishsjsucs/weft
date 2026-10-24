@@ -1,9 +1,7 @@
-SIMULATED AGENCY NOTICE (scanned mail sample). Made for the Weft demo. Not a real government document.
-
-NEW YORK STATE DEPARTMENT OF TAXATION AND FINANCE (SIMULATED)
+NEW YORK STATE DEPARTMENT OF TAXATION AND FINANCE
 Notice: Quarterly ... Return Not Rec...
 
-Employer: Larkspur Rob... (demo)
+Employer: Larkspur Rob...
 Withholding ID: 0048?7265-0?-3
 Form: NYS-4?
 Period: 2026-Q?

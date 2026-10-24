@@ -82,10 +82,10 @@ describe("wave 4 report metrics against the seed", () => {
   it("compliance_due_by_month counts done, open and overdue items by due month", async () => {
     const today = (await weft.clock.now()).slice(0, 10);
     await weft.db.run(sql`INSERT INTO compliance_items (id, company_id, kind, title, form, period, due_on, status, created_at) VALUES
-      ('cal_w4a1', 'cmp_larkspur', 'filing', 'Form 941 (demo)', '941', '2026-Q2', '2026-07-31', 'done', ${today}),
-      ('cal_w4a2', 'cmp_larkspur', 'filing', 'DE 9 (demo)', 'DE9', '2026-Q2', '2026-07-31', 'upcoming', ${today}),
-      ('cal_w4a3', 'cmp_larkspur', 'filing', 'Form 941 (demo)', '941', '2026-Q4', '2027-01-31', 'upcoming', ${today}),
-      ('cal_w4a4', 'cmp_larkspur', 'deposit', 'Deposit (demo)', '941', '2026-12', '2027-01-15', 'waived', ${today})`);
+      ('cal_w4a1', 'cmp_larkspur', 'filing', 'Form 941', '941', '2026-Q2', '2026-07-31', 'done', ${today}),
+      ('cal_w4a2', 'cmp_larkspur', 'filing', 'DE 9', 'DE9', '2026-Q2', '2026-07-31', 'upcoming', ${today}),
+      ('cal_w4a3', 'cmp_larkspur', 'filing', 'Form 941', '941', '2026-Q4', '2027-01-31', 'upcoming', ${today}),
+      ('cal_w4a4', 'cmp_larkspur', 'deposit', 'Deposit', '941', '2026-12', '2027-01-15', 'waived', ${today})`);
     const { out } = await w4("compliance_due_by_month", { from: "2026-07-01", to: "2027-01-31" });
     const jul = out.rows.find((r) => r.period === "2026-07")!, jan = out.rows.find((r) => r.period === "2027-01")!;
     expect(jul).toMatchObject({ items: 2, done: 1, overdue: 1, open: 0 });   // past due and not done reads as overdue

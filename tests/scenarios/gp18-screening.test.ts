@@ -1,5 +1,5 @@
 // Scenario GP18 (docs/wave3.md 5). Owner: w3-integrations-screening-esign. Scripted provider, createTestWeft().
-// After acceptance the agent proposes screening.order (R4, priced from the package row); Dana approves; the candidate
+// After acceptance the agent proposes screening.order (R4, priced from the package row); Vic approves; the candidate
 // consents on the simulated apply page; the report completes clear on the sim clock through a signed webhook that goes
 // through verification and dedupe, and the background_check task completes. A consider result opens a human-only review
 // with no record text on any agent read; adverse steps are human only and the final step waits out the notice period.
@@ -44,7 +44,7 @@ describe("GP18 background check after acceptance", () => {
   };
   const agentRun = async (n: number) => {
     await weft.db.run(sql`INSERT INTO routines (id, company_id, name, description, owner_principal_id, enabled, trigger_json, instructions, tools_json, budget_json, surface_json, source, tainted_by, created_at)
-      VALUES (${`rt_gp18_${n}`}, 'cmp_larkspur', 'Screening follow-up (demo)', 'test', 'usr_dana', 0, '{"type":"event","event":"offer.accepted"}', '', '["screening.order","screening.get_status","onboarding.get_checklist"]', '{}', '{}', 'custom', NULL, '2026-10-26T15:30:00.000Z') ON CONFLICT DO NOTHING`);
+      VALUES (${`rt_gp18_${n}`}, 'cmp_larkspur', 'Screening follow-up', 'test', 'usr_dana', 0, '{"type":"event","event":"offer.accepted"}', '', '["screening.order","screening.get_status","onboarding.get_checklist"]', '{}', '{}', 'custom', NULL, '2026-10-26T15:30:00.000Z') ON CONFLICT DO NOTHING`);
     return weft.executor.runs.openRoutineRun({ routineId: `rt_gp18_${n}`, routineRunId: `rtr_gp18_${n}`, triggerRef: `event:offer.accepted:${n}`, attended: false });
   };
 

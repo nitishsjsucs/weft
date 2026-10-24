@@ -89,7 +89,7 @@ describe("prechecks on the t1 and t2 read shapes", () => {
 
   it("new_hire derives accounts, the welcome, registrations for unregistered accounts and the laptop", async () => {
     const r = await PRECHECKS.new_hire!(ctx({ worker_id: "wrk_0049", offer_id: "offr_0001" }), exec({
-      "people.get": { worker: { id: "wrk_0049", name: "Noor Castellanos (demo) (wrk_0049)", work_state: "CO" } },
+      "people.get": { worker: { id: "wrk_0049", name: "Noor Castellanos (wrk_0049)", work_state: "CO" } },
       "tax.list_registrations": { accounts: [{ id: "txa_0010", jurisdiction: "CO", agency: "co_dor", status: "not_registered" }, { id: "txa_0011", jurisdiction: "CO", agency: "co_cdle", status: "not_registered" }] },
     }));
     expect(r).toMatchObject({ action: "run", derivedArgs: {

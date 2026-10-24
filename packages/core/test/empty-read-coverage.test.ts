@@ -18,7 +18,7 @@ let db: Db;
 let close: () => Promise<void>;
 const clock: SimClock = { now: () => TS, rate: () => 0, advance: async () => {}, set: async () => {} };
 const MONTH = TS.slice(0, 7);
-const CARRIER = "Juniper Mutual (sim)";
+const CARRIER = "Juniper Mutual";
 
 beforeAll(async () => {
   const t = await openTempDb();
@@ -159,7 +159,7 @@ type Payouts = { count: number; total_usd_cents: number | null; total_usd_displa
 
 describe("contractors.list_payouts says what an empty list covers (R6)", () => {
   it("no payout rows: no total (not $0.00), the contractors on file, and that contract rates are not shown", async () => {
-    await db.insert(workers).values({ id: "wrk_0901", companyId: CO, employeeNumber: "CTR-0901", type: "contractor", workerType: "intl_contractor", status: "active", firstName: "Ines", lastName: "Example (demo)", workEmail: "ines@larkspur.example", title: "Designer", timezone: "Europe/Lisbon", startDate: "2026-01-01", endDate: null, createdAt: TS, updatedAt: TS });
+    await db.insert(workers).values({ id: "wrk_0901", companyId: CO, employeeNumber: "CTR-0901", type: "contractor", workerType: "intl_contractor", status: "active", firstName: "Ines", lastName: "Example", workEmail: "ines@larkspur.example", title: "Designer", timezone: "Europe/Lisbon", startDate: "2026-01-01", endDate: null, createdAt: TS, updatedAt: TS });
     const out = await exec<Payouts>("contractors.list_payouts", { month: MONTH });
     expect(out.data).toMatchObject({ count: 0, total_usd_cents: null, total_usd_display: null, month: MONTH, contractors_on_file: 1 });
     expect(out.summary).toBe(`No contractor payouts scheduled in ${MONTH}; 1 contractors on file. This list holds scheduled and sent payouts only, so it does not show what contract rates accrue before a payout is scheduled and approved`);

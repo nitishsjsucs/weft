@@ -116,7 +116,7 @@ export function screeningRoutes(weft: Weft): Hono<WeftEnv> {
     const [e] = (await weft.db.select().from(esignEnvelopes).where(eq(esignEnvelopes.offerId, p.offer.id))).sort((a, b) => (a.id < b.id ? 1 : -1));
     if (!e || (e.status !== "sent" && e.status !== "delivered")) throw new NotFound("This offer has no open e-signature envelope (built-in signing)");
     const returnUrl = `/portal?as=${encodeURIComponent(session.principalId)}&esign_return=1`;
-    const signer = { name: `${p.offer.candidateFirst} ${p.offer.candidateLast} (demo)`, email: p.offer.candidateEmail, clientUserId: session.principalId };
+    const signer = { name: `${p.offer.candidateFirst} ${p.offer.candidateLast}`, email: p.offer.candidateEmail, clientUserId: session.principalId };
     const link = await withWriteLock(() => weft.sims.vendors.docusign.signingUrl(e.envelopeId, signer, returnUrl));
     await weft.scheduler.kick();
     return c.json(link);

@@ -64,8 +64,8 @@ describe("grounding.check", () => {
   });
 
   it("ignores numbers inside identifiers the results contain", () => {
-    const results = [{ id: "wrk_0014", name: "Rowan Achebe (demo)", notice: "CA_EDD_DE2088_2026.txt", result_id: "res_0042" }];
-    expect(check("Rowan Achebe (demo) (wrk_0014) read CA_EDD_DE2088_2026.txt; see res_0042.", results).ok).toBe(true);
+    const results = [{ id: "wrk_0014", name: "Rowan Achebe", notice: "CA_EDD_DE2088_2026.txt", result_id: "res_0042" }];
+    expect(check("Rowan Achebe (wrk_0014) read CA_EDD_DE2088_2026.txt; see res_0042.", results).ok).toBe(true);
   });
 
   it("strips placeholders before checking", () => {
