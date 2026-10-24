@@ -14,12 +14,43 @@ import { NOOP_LOOP_TRACE, recallDocs, runInputOf, traceRun, type LoopTrace } fro
 import { frozenPrompt, prefixHash, type PromptKind } from "./prompts/index";
 import type { NewStep, RunStore } from "./store";
 import type { GatewayStepResult } from "./providers/gateway";
+import { ASSIST_BUDGET } from "../../contracts/src/ext/assist";
 
 export const BUDGETS = {
   chat: { steps: 12, usd: 0.1, minutes: 10, toolCallsPerStep: 8 },
   routine: { steps: 6, usd: 0.1, minutes: 10, toolCallsPerStep: 8 },
   routine_draft: { steps: 4, usd: 0.05, minutes: 5, toolCallsPerStep: 4 },
+  /** The cursor assistant (the manifest's ASSIST_BUDGET): at most 4 model steps under the usual run cap. */
+  assist: ASSIST_BUDGET,
 } as const;
+
+/** The cursor assistant's presentation tools (wire names ui__point, ui__navigate, ui__show, ui__say, ui__handoff, ui__steps). */
+export const isPresentationTool = (wire: string): boolean => wire.startsWith("ui__");
+
+/**
+ * The words a batch's accepted presentation calls put on the screen: the popover line, every walkthrough step's text
+ * and label, the pointer's labels, and a point's or navigation's hint (the name the popover says it found nothing for).
+ * They are checked like a chat answer (their figures must come from this run's results), and the client plays a
+ * batch's effects only once the loop marked them grounded.
+ */
+export function presentationText(calls: readonly { name: string; argumentsJson: string }[]): string {
+  const words: string[] = [];
+  for (const c of calls) {
+    if (!isPresentationTool(c.name)) continue;
+    const a = (parseArgs(c.argumentsJson) ?? {}) as { text?: unknown; label?: unknown; hint?: unknown; steps?: { text?: unknown; label?: unknown }[] };
+    if (c.name === "ui__say" && typeof a.text === "string") words.push(a.text);
+    if (typeof a.label === "string") words.push(a.label);
+    if ((c.name === "ui__point" || c.name === "ui__navigate") && typeof a.hint === "string") words.push(a.hint);
+    if (c.name === "ui__steps" && Array.isArray(a.steps)) for (const st of a.steps) words.push(String(st?.label ?? ""), String(st?.text ?? ""));
+  }
+  return words.map((w) => w.trim()).filter(Boolean).join(" ");
+}
+
+/** What an assist run that ended on presentation calls reads as: each call's summary, in order ("Opened Inbox and pointed at Approve it here."). */
+export function presentationSummary(outcomes: readonly ToolOutcome[]): string {
+  const lines = outcomes.flatMap((o) => (o.ok && o.status === "done" && o.summary && o.summary !== "Answered in the popover" ? [o.summary.replace(/[.\s]+$/, "")] : []));
+  return lines.length ? `${lines.join(". ")}.` : "Done.";
+}
 
 /**
  * Chat answers by this model step (SPEC 12 L3: at most 4). The step before it gets a budget notice; at it, tool calls
@@ -54,6 +85,17 @@ export interface RunSetup {
   trigger?: Record<string, unknown>;
   /** The acting principal (telemetry user.id); never shown to the model. */
   principal?: string | null;
+  /** An assist run the instant resolver answered: the calls its stand-in plays (assist/resolver.ts). */
+  resolved?: import("./assist/resolver").AssistResolution;
+  /**
+   * An assist run: the person's request as they wrote it. It is read back from here, never out of the pack, so no
+   * text inside the pack can stand in for it (grounding, a handoff's question, the task code writes).
+   */
+  request?: string;
+  /** An assist run: the compact page facts a handoff passes on (never the screen map's text). */
+  brief?: { route: string; under: { entity: string; kind: string } | null; recordIds: string[] };
+  /** A chat run an assist run handed its request to. */
+  handoffFrom?: { runId: string; reason: string; task: string };
 }
 
 export interface ChecklistState { id: string; label: string; passed: boolean }
@@ -71,6 +113,11 @@ export interface LoopDeps {
   signalFor: (runId: string) => AbortSignal | undefined;
   modelTimeoutMs: number;
   wallNow?: () => number;
+  /**
+   * The cursor assistant: starts the chat run an assist run hands its request to (in the same thread, with the same
+   * person, caps and taint) and returns its id, or null when it could not. Absent, an assist run cannot hand off.
+   */
+  handoff?: (run: AgentRunRow, handle: RunHandle, h: HandoffRequest) => Promise<string | null>;
 }
 
 function emptyTimings(): StepTimings {
@@ -134,7 +181,18 @@ function outcomeCode(o: ToolOutcome): RunStepRow["outcome"] {
   return "ok";
 }
 
-interface Terminal { status: RunStatus; reason: TerminalReason; summary: string | null; fallback?: boolean }
+interface Terminal { status: RunStatus; reason: TerminalReason; summary: string | null; fallback?: boolean; handoff?: AssistHandoffRecord }
+
+/** An assist run's handoff to a chat run (ext/assist.ts ui.handoff), as its terminal step records it. */
+export interface AssistHandoffRecord { to: string; reason: "change" | "analysis" | "multi_part"; forced: boolean; task: string }
+/** A handed-off assist run's summary, by reason: fixed words, never the model's task. */
+export const HANDOFF_SUMMARY: Readonly<Record<AssistHandoffRecord["reason"], string>> = {
+  change: "Handed to the agent: a change to propose.",
+  analysis: "Handed to the agent: an analysis.",
+  multi_part: "Handed to the agent: several asks at once.",
+};
+/** What the runtime's handoff port takes: why, what to do, and whether code (not the model) decided it. */
+export interface HandoffRequest { reason: AssistHandoffRecord["reason"]; task: string; forced: boolean }
 
 function parseArgs(json: string): unknown {
   try { return json.trim() ? JSON.parse(json) : {}; } catch { return undefined; }
@@ -199,7 +257,9 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   const usdBudget = (run.budget.usd || budget.usd) * runCapScale;
   const prompt = frozenPrompt(setup.promptKind);
   assertToolCap(setup.allowlist.length, `runLoop: run ${run.id} allowlist`);
-  const chat = setup.promptKind === "chat";
+  // The assist recipe is chat at the pointer: the same answer-by step, repairs and grounding, plus presentation tools.
+  const assist = setup.promptKind === "assist";
+  const chat = setup.promptKind === "chat" || assist;
   const answerBy = chat ? Math.min(chatAnswerBy(), stepBudget) : stepBudget;
   const allowlist = (await executor.toolAllowlist?.(handle, setup.allowlist)) ?? setup.allowlist;   // wave 4: per-action deny
   const tools: ToolSpec[] = executor.registry.toolSpecs({ agentKind: run.kind, allowlist })
@@ -258,7 +318,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       status: t.status, terminalReason: t.reason, summary: t.summary ?? run!.summary, endedAt,
       tainted: state?.tainted ?? run!.tainted, taintedBy: state?.taintedBy ?? run!.taintedBy,
     });
-    const row = await append({ stage: "terminal", kind: "verify", outcome: "ok", result: { status: t.status, reason: t.reason, ms: wall() - t0, ...(t.fallback ? { groundingFallback: true } : {}) }, timings: emptyTimings() });
+    const row = await append({ stage: "terminal", kind: "verify", outcome: "ok", result: { status: t.status, reason: t.reason, ms: wall() - t0, ...(t.fallback ? { groundingFallback: true } : {}), ...(t.handoff ? { handoff: t.handoff } : {}) }, timings: emptyTimings() });
     span.set({ "weft.step_n": row.n });
     return (await store.getRun(run!.id))!;
   });
@@ -273,8 +333,65 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
   for (const r of steps) {
     const o = (r.result as { outcome?: ToolOutcome } | null)?.outcome;
     const k = r.kind === "tool_call" && r.toolName ? readKey(r.toolName, r.toolArgs) : null;
-    if (k !== null && o && o.ok && o.status === "done" && o.actionSeq === null && !(r.result as { servedFrom?: string } | null)?.servedFrom) reads.set(k, o);
+    // Presentation calls are never served again: each one dispatches, so its words are checked every time.
+    if (k !== null && !isPresentationTool(r.toolName ?? "") && o && o.ok && o.status === "done" && o.actionSeq === null && !(r.result as { servedFrom?: string } | null)?.servedFrom) reads.set(k, o);
   }
+
+  /**
+   * A chat answer (or an assist run's popover line) through the grounding guard: done when every number matches a
+   * tool result; else one repair before the answer-by step and one reserved for an answer at or after it, inside the
+   * hard budget (null: the loop goes on); else the grounded receipt.
+   */
+  const answerOrRepair = async (text: string, summary: string = text): Promise<AgentRunRow | null> => {
+    const g = await lt.stage("post", {}, () => lt.guard("grounding", text, async () => { const ev = await evidence(); return check(text, ev.results, ev.opts); }, (r) => ({
+      "weft.grounded": r.ok, "weft.unmatched": r.offending.join(", "),
+    })));
+    if (g.ok) return finish({ status: "done", reason: "DONE", summary });
+    const r0 = run!;
+    const last = r0.stepsUsed >= answerAt;
+    const canRepair = last ? !lastRepairUsed && r0.stepsUsed < stepBudget : !earlyRepairUsed;
+    if (canRepair) {
+      corrected = true;
+      if (last) lastRepairUsed = true;
+      else earlyRepairUsed = true;
+      const notice = {
+        notice: "repair" as const, attrs: { n: setup.nonce, code: "UNGROUNDED", ...(last ? { at: "last" } : {}) },
+        text: last
+          ? `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. This is your last step: answer again from the tool results above without them; any tool call is not run.`
+          : `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. Read the source or remove them, then answer again.`,
+      };
+      await append({ stage: "post", kind: "notice", result: notice });
+      history = [...history, { kind: "notice", ...notice }];
+      return null;
+    }
+    const receipt = async () => finish({ status: "done", reason: "DONE", summary: await groundedFallback(text, evidence), fallback: true });
+    return assist ? handOff({ reason: "analysis", task: requestText(), forced: true }, receipt) : receipt();
+  };
+
+  /** The person's request: stored on the context step (an assist run), else the pack's own request block, its last one. */
+  const requestText = (): string => {
+    if (typeof setup.request === "string") return setup.request.trim();
+    const m = [...setup.text.matchAll(/<request>([\s\S]*?)<\/request>/g)].at(-1);
+    return (m?.[1] ?? "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim();
+  };
+  /**
+   * The cursor assistant never just gives up: a request it cannot finish (a change, an analysis past its steps, a
+   * tool it does not have, an answer it cannot ground) goes to the full agent as a chat run in the same thread, and
+   * the assist run ends done with HANDED_OFF and that run's id. Without a handoff port it ends with the receipt.
+   */
+  const handOff = async (h: HandoffRequest, otherwise: () => Promise<AgentRunRow>): Promise<AgentRunRow> => {
+    // A person who stopped it (Escape, the close button) after the model step: nothing starts on their behalf.
+    const cancelled = () => finish({ status: "cancelled", reason: "CANCELLED", summary: "Cancelled by a person." });
+    if (deps.isCancelled(run!.id)) return cancelled();
+    const to = deps.handoff ? await deps.handoff(run!, handle, h).catch(() => null) : null;
+    // A cancel that landed while the port worked: the port starts no chat run once it sees one (and cancels one it
+    // already started), so the run ends cancelled, never HANDED_OFF over the person's stop.
+    if (deps.isCancelled(run!.id)) return cancelled();
+    if (!to) return otherwise();
+    // The summary is code's words: the task is model text no grounding check reads, so it stays on the handoff record
+    // (the chat run gets it as its earlier turn) and never becomes this run's answer on the Agent page.
+    return finish({ status: "done", reason: "HANDED_OFF", summary: HANDOFF_SUMMARY[h.reason], handoff: { to, reason: h.reason, forced: h.forced, task: h.task.slice(0, 600) } });
+  };
 
   for (;;) {
     // Rule 1: cancelled by a person.
@@ -284,13 +401,18 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
     const tAdm = wall();
     run = (await store.getRun(run.id))!;
     // Template steps (the deterministic fallback) are free and bounded by their script, so only model steps count.
-    if (run.stepsUsed >= stepBudget && run.model !== "template") return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: `Stopped at the step budget (${stepBudget} model steps).` });
+    if (run.stepsUsed >= stepBudget && run.model !== "template") {
+      const stop = () => finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: `Stopped at the step budget (${stepBudget} model steps).` });
+      return assist ? handOff({ reason: "analysis", task: requestText(), forced: true }, stop) : stop();
+    }
     if (wall() - startedWall > budget.minutes * 60_000) {
       return finish({ status: "escalated", reason: "BUDGET_EXCEEDED", summary: "Stopped at the wall-clock budget." });
     }
     // Chat: the step before the answer-by step tells the model to answer now (gate report item 3).
     if (chat && run.stepsUsed === answerAt - 1 && answerAt > 1 && !history.some((h) => h.kind === "notice" && h.notice === "budget" && h.attrs.code === "ANSWER_NOW")) {
-      const notice = { notice: "budget" as const, attrs: { n: setup.nonce, code: "ANSWER_NOW" }, text: "This is your last step. Write the answer now from the tool results above; any tool call in this step is not run." };
+      const notice = { notice: "budget" as const, attrs: { n: setup.nonce, code: "ANSWER_NOW" }, text: assist
+        ? "This is your last step. Answer now with presentation calls (ui__say, and a point or show if it helps) from the tool results above; any read in this step is not run."
+        : "This is your last step. Write the answer now from the tool results above; any tool call in this step is not run." };
       await append({ stage: "post", kind: "notice", result: notice });
       history = [...history, { kind: "notice", ...notice }];
     }
@@ -424,8 +546,24 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
 
     // Chat at its answer-by step: the calls are not run; the person gets the grounded summary of what was read.
     // Text that comes with tool calls is a preamble ("Next I will read X"), never the answer, so it is not used.
-    if (chat && result.toolCalls.length > 0 && run.stepsUsed >= answerAt) {
-      return finish({ status: "done", reason: "DONE", summary: await groundedFallback(null, evidence), fallback: true });
+    // An assist step of presentation calls only is the answer itself, so it still runs.
+    const presentationOnly = assist && result.toolCalls.length > 0 && result.toolCalls.every((c) => isPresentationTool(c.name));
+    // A handoff is the step's decision whatever else the step holds: the full agent continues from the request.
+    const handoffCall = assist ? result.toolCalls.find((c) => c.name === "ui__handoff") : undefined;
+    const modelHandoff = (): HandoffRequest => {
+      const a = (parseArgs(handoffCall?.argumentsJson ?? "") ?? {}) as { reason?: string; task?: string };
+      const reason = a.reason === "change" || a.reason === "analysis" || a.reason === "multi_part" ? a.reason : "multi_part";
+      // The resolver's stand-in hands a change request off by code, not by a model's choice.
+      return { reason, task: String(a.task ?? "").trim() || requestText(), forced: run!.model === "resolver" };
+    };
+    if (chat && result.toolCalls.length > 0 && run.stepsUsed >= answerAt && !presentationOnly) {
+      const receipt = async () => finish({ status: "done", reason: "DONE", summary: await groundedFallback(null, evidence), fallback: true });
+      // An assist run at its step cap with reads still pending continues as a chat run.
+      return assist ? handOff(handoffCall ? modelHandoff() : { reason: "analysis", task: requestText(), forced: true }, receipt) : receipt();
+    }
+    // An assist step that asks for a tool the assist recipe does not have: the full agent has more, so it continues there.
+    if (assist && result.toolCalls.some((c) => !offered.has(c.name))) {
+      return handOff({ reason: "multi_part", task: requestText(), forced: true }, async () => finish({ status: "done", reason: "DONE", summary: await groundedFallback(null, evidence), fallback: true }));
     }
 
     // ---- dispatch
@@ -468,7 +606,7 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
         }
         toolSpan.outcome(outcome, args, threw);
         if (!outcome.ok) failuresByTool.set(call.name, (failuresByTool.get(call.name) ?? 0) + 1);
-        else if (outcome.status === "done" && outcome.actionSeq === null) { const k = readKey(call.name, args); if (k !== null) reads.set(k, outcome); }
+        else if (outcome.status === "done" && outcome.actionSeq === null && !isPresentationTool(call.name)) { const k = readKey(call.name, args); if (k !== null) reads.set(k, outcome); }
         const consecutiveErrors: number = outcome.ok ? 0 : run.consecutiveErrors + 1;
         run = { ...run, consecutiveErrors };
         outputs.push({
@@ -502,8 +640,36 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
       }
       history = [...history, { kind: "tool_outputs", outputs: toolOutputs }];
       await append({ stage: "post", kind: "recite", result: { plan, ms: wall() - tPost, batchDispatchMs: tPost - tDisp }, timings: { ...emptyTimings(), dispatchMs: tPost - tDisp } });
+      // An assist batch's accepted presentation calls, whatever else the batch holds: their words (the popover line,
+      // walkthrough text and labels, pointer labels) are checked against this run's results now, and the marker says
+      // whether the client may play them. A batch with no marker, or one marked withheld, never reaches the screen.
+      const accepted = assist ? result.toolCalls.filter((c) => isPresentationTool(c.name) && outputs.find((o) => o.callId === c.callId)?.outcome.ok) : [];
+      if (accepted.length) {
+        const words = presentationText(accepted);
+        const g = words ? await (async () => { const ev = await evidence(); return check(words, ev.results, ev.opts); })() : { ok: true, offending: [] as string[] };
+        await append({ stage: "post", kind: "verify", parentN: modelStepRow!.n, outcome: "ok", result: { presentation: g.ok ? "grounded" : "withheld", offending: g.offending }, timings: emptyTimings() });
+      }
 
       if (deps.isCancelled(run.id)) return finish({ status: "cancelled", reason: "CANCELLED", summary: "Cancelled by a person." });
+      // An accepted ui.handoff ends the assist run, even beside reads (they ran and are recorded; the chat run reads again).
+      if (handoffCall && outputs.find((o) => o.callId === handoffCall.callId)?.outcome.ok) {
+        return handOff(modelHandoff(), async () => finish({ status: "done", reason: "DONE", summary: "I could not hand this to the agent. Ask it on the Agent page." }));
+      }
+      // The assist recipe's one decision per step: a step of presentation calls that all succeeded is the answer, so
+      // the run ends here with no further model call. Its popover line (ui.say) is checked like a chat answer; without
+      // one the summary says what was shown. A refused call goes back to the model like any refusal.
+      if (presentationOnly && outputs.every((o) => o.outcome.ok)) {
+        const say = result.toolCalls.find((c) => c.name === "ui__say");
+        const line = say ? String(((parseArgs(say.argumentsJson) ?? {}) as { text?: unknown }).text ?? "").trim() : "";
+        // Everything the batch shows is read like the popover line (a walkthrough's text and labels, the pointer's
+        // labels): their figures must come from this run's results. The summary without a line repeats the labels.
+        const words = presentationText(result.toolCalls);
+        const shown = presentationSummary(outputs.map((o) => o.outcome));
+        if (!words) return finish({ status: "done", reason: "DONE", summary: shown });
+        const settled = await answerOrRepair(words, line || shown);
+        if (settled) return settled;
+        continue;
+      }
       // Rule 5: 3 consecutive errors or 3 failures of the same tool.
       if (run.consecutiveErrors >= 3 || [...failuresByTool.values()].some((n) => n >= 3)) {
         return finish({ status: "escalated", reason: "REPEATED_ERRORS", summary: "Stopped after repeated tool errors." });
@@ -513,29 +679,10 @@ async function driveLoop(deps: LoopDeps, handle: RunHandle, lt: LoopTrace): Prom
 
     // ---- the model ended its turn with no function calls (rule 6)
     const text = result.text.trim();
-    if (setup.promptKind === "chat") {
-      const g = await lt.stage("post", {}, () => lt.guard("grounding", text, async () => { const ev = await evidence(); return check(text, ev.results, ev.opts); }, (r) => ({
-        "weft.grounded": r.ok, "weft.unmatched": r.offending.join(", "),
-      })));
-      if (g.ok) return finish({ status: "done", reason: "DONE", summary: text });
-      // One repair before the answer-by step, and one reserved for an answer at or after it, inside the hard budget.
-      const last = run.stepsUsed >= answerAt;
-      const canRepair = last ? !lastRepairUsed && run.stepsUsed < stepBudget : !earlyRepairUsed;
-      if (canRepair) {
-        corrected = true;
-        if (last) lastRepairUsed = true;
-        else earlyRepairUsed = true;
-        const notice = {
-          notice: "repair" as const, attrs: { n: setup.nonce, code: "UNGROUNDED", ...(last ? { at: "last" } : {}) },
-          text: last
-            ? `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. This is your last step: answer again from the tool results above without them; any tool call is not run.`
-            : `These numbers do not match any tool result in this run: ${g.offending.join(", ")}. Read the source or remove them, then answer again.`,
-        };
-        await append({ stage: "post", kind: "notice", result: notice });
-        history = [...history, { kind: "notice", ...notice }];
-        continue;
-      }
-      return finish({ status: "done", reason: "DONE", summary: await groundedFallback(text, evidence), fallback: true });
+    if (chat) {
+      const settled = await answerOrRepair(text);
+      if (settled) return settled;
+      continue;
     }
     const items = await deps.checklist(run);
     if (items) await store.updateRun(run.id, { checklist: items });

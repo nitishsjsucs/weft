@@ -10,6 +10,11 @@ export interface ScriptStep {
   expect?: { lastResults: { tool: string; ok?: boolean; status?: string; code?: string }[] };
   output: ScriptOutput[];
   stop?: "tool_calls" | "final" | "refusal" | "incomplete";
+  /**
+   * A model that takes this long to answer (ms, at most 60 s), so a browser test can press Stop while the run works.
+   * A cancel or the step's own timer ends the wait early (the request's signal), and the step answers as written.
+   */
+  delayMs?: number;
 }
 export interface Script { match?: string; agents: Record<string, ScriptStep[]> }
 
@@ -31,6 +36,16 @@ export interface ScriptedProviderOptions {
 }
 
 export const SCRIPTED_LABEL = "Scripted, no model";
+
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+function waitFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((done) => {
+    const t = setTimeout(finish, ms);
+    function finish() { clearTimeout(t); signal?.removeEventListener("abort", finish); done(); }
+    signal?.addEventListener("abort", finish, { once: true });
+  });
+}
 
 export class ScriptExpectationError extends Error {
   readonly code = "SCRIPT_EXPECT";
@@ -170,8 +185,12 @@ export function scriptedProviderFrom(opts: Omit<ScriptedProviderOptions, "script
       const v = await opts.variant({ routineId: routine, trigger: parsed.trigger });
       if (v && load(v)) return v;
     }
-    if (routine !== "chat" && load(routine)) return routine;
+    if (routine !== "chat" && routine !== "assist" && load(routine)) return routine;
+    // The cursor assistant's scripts (assist_*.json) answer assist runs only, and no chat run ever plays one, so a chat
+    // question that happens to match an assist script is answered exactly as before.
+    const assist = routine === "assist";
     for (const name of allNames()) {
+      if (name.startsWith("assist_") !== assist) continue;
       const s = load(name);
       if (s?.match && new RegExp(s.match, "i").test(parsed.request)) return name;
     }
@@ -199,6 +218,7 @@ export function scriptedProviderFrom(opts: Omit<ScriptedProviderOptions, "script
         return { stop: "final", text, toolCalls: [], native: { scripted: true, scenario: name, step: stepIndex, output: [{ type: "text", text }] }, usage: synthUsage(req, text.length, stepIndex), servedBy: "scripted", requestId: null };
       }
       checkExpect(step, req.history, `${name}.${agent}[${stepIndex}]`);
+      if (step.delayMs) await waitFor(Math.min(step.delayMs, 60_000), req.signal);
       const priorCalls = own.reduce((n, h) => n + ((h.kind === "model" ? (h.native as { calls?: number })?.calls : 0) ?? 0), 0);
       const scope = { trigger: parsed.trigger, derived: parsed.derived, history: req.history };
       let text = "";

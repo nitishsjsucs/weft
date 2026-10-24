@@ -158,7 +158,7 @@ describe("AI Gateway transport", () => {
     expect(aiGatewayFromEnv({ WEFT_AIG_ACCOUNT_ID: "a" })).toBeNull();
     expect(aiGatewayFromEnv({ WEFT_AIG_ACCOUNT_ID: " a ", WEFT_AIG_GATEWAY: "g" })).toEqual({ accountId: "a", gateway: "g", token: null });
     expect(aiGatewayFromEnv({ WEFT_AIG_ACCOUNT_ID: "a", WEFT_AIG_GATEWAY: "g", CF_AIG_TOKEN: "t" })).toEqual({ accountId: "a", gateway: "g", token: "t" });
-    expect(["weft:main:chat:c", "weft:main:routine_draft:c", "weft:main:rt_agency_notice:c"].map(aigKindOf)).toEqual(["chat", "draft", "routine"]);
+    expect(["weft:main:chat:c", "weft:main:routine_draft:c", "weft:main:rt_agency_notice:c", "weft:main:assist:c"].map(aigKindOf)).toEqual(["chat", "draft", "routine", "assist"]);
     const h = JSON.parse(aigMetadataHeader({ slot: "slot-2", gen: 1, run: null, kind: "embed", visitor: null })) as Record<string, unknown>;
     expect(h).toEqual({ slot: "slot-2", gen: 1, kind: "embed" });
     expect(Object.keys(JSON.parse(aigMetadataHeader({ slot: "s", gen: 1, run: "r", kind: "chat", visitor: "v" })))).toHaveLength(5);

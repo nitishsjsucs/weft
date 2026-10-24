@@ -28,6 +28,9 @@ import { immediateRunHost } from "./run-host";
 import { earlierConversationBlock, type EarlierTurn } from "./threads";
 import type { ScriptSource } from "./script-source";
 import type { RunHost } from "../../contracts/src/ext/cf-agent";
+import { ASSIST_TOOLS } from "../../contracts/src/ext/assist";
+import { assistPack } from "./assist/pack";
+import { resolveAssist, resolverProvider, type AssistResolution } from "./assist/resolver";
 
 export { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
 import { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
@@ -52,6 +55,24 @@ export interface ChatContextSource {
    * renders them (threads.ts). Absent, a follow-up gets no prior conversation.
    */
   earlier?(input: { companyId: string; runId: string; threadId: string }): Promise<EarlierTurn[]>;
+  /**
+   * The cursor assistant's handoff: opens a chat run for the person an assist run acted for (the chat tools code picks
+   * for the question, the same caps; tainted when `taintedBy` is set), starts it with `start`, and returns its id.
+   * apps/api provides it; absent, an assist run cannot hand off and ends with its own answer.
+   */
+  handoff?(input: { companyId: string; fromRunId: string; question: string; threadId: string | null; taintedBy: string | null }, start: (handle: RunHandle, allowlist: readonly string[] | null) => Promise<void>): Promise<string | null>;
+}
+
+/**
+ * The page facts a handoff's chat run gets as its page line: the route, the kind and id of what the pointer was on, and
+ * the record ids the page held. No label or other text from the screen map is passed on.
+ */
+export function handoffPageLine(brief: RunSetup["brief"] | undefined): string | null {
+  if (!brief) return null;
+  const parts = [`${brief.route} (asked at the pointer)`];
+  if (brief.under) parts.push(`pointer on ${brief.under.kind} ${brief.under.entity}`);
+  if (brief.recordIds.length) parts.push(`records on the page: ${brief.recordIds.slice(0, 20).join(", ")}`);
+  return parts.join("; ").slice(0, 600);
 }
 
 /** The acting principal for telemetry (user.id): the source's id, else the "(prn_...)" id inside actingFor. */
@@ -148,7 +169,7 @@ function planScripted(p: ModelProvider, scripts: ScriptSource): ModelProvider {
     step: (req) => {
       const parts = req.cacheKey.split(":");
       const routine = parts[2] ?? "chat";
-      const plan = routine === "chat" || routine === "routine_draft" ? null : parseContext(req.history).derived.plan;
+      const plan = routine === "chat" || routine === "routine_draft" || routine === "assist" ? null : parseContext(req.history).derived.plan;
       if (typeof plan !== "string" || !/^[a-z_]{1,40}$/.test(plan) || !has(`${routine}.${plan}`)) return p.step(req);
       parts[2] = `${routine}.${plan}`;
       return p.step({ ...req, cacheKey: parts.join(":") });
@@ -275,8 +296,10 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
   }
 
   const remember = async (handle: RunHandle) => {
-    // Run ids start over after POST /v1/sim/reset, so a new run never inherits an old run's trigger.
+    // Run ids start over after POST /v1/sim/reset, so a new run never inherits an old run's trigger, nor the stop a
+    // person gave an old run of the same id (it would be cancelled before its first step).
     triggers.delete(handle.runId);
+    cancelled.delete(handle.runId);
     handles.set(handle.runId, handle);
     // A handle that cannot be persisted still works in this process; only restart survival is lost for that run.
     await handleStore?.save(handle).catch(() => undefined);
@@ -308,6 +331,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
   /** The provider a run continues on: the one its row pins (the pool's by id on hosted, else the main provider). */
   const providerFor = (run: { provider: string; model: string }): ModelProvider => {
     if (run.model === "template") return templateProvider;
+    if (run.model === "resolver") return resolverProvider(null);
     const p = opts.providers?.byId(run.provider, run.model);
     return p ? wrap(p) : mainProvider;
   };
@@ -333,8 +357,42 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     return block;
   }
 
+  /**
+   * The cursor assistant's handoff (loop.ts handOff): a chat run in the same thread for the same person, started with
+   * the assist exchange as its earlier turn and the compact page facts, tainted when the assist run was.
+   */
+  const handoff = async (run: AgentRunRow, handle: RunHandle, h: { reason: string; task: string; forced: boolean }): Promise<string | null> => {
+    if (!opts.contextSource?.handoff) return null;
+    const setup = await setupOf(run.id);
+    // The request as the person wrote it, stored on the context step (never read out of the pack, where screen text sits).
+    const question = (setup?.request ?? "").trim();
+    if (!question) return null;
+    const state = await opts.executor.runState(handle).catch(() => ({ tainted: true, taintedBy: "run" }));
+    // A handoff code decided carries a task code wrote from the person's own words (for a choice, their earlier
+    // request and the one they picked), so that task is the chat run's request; a model's task stays in the earlier
+    // turn only, and the person's question is the request (it also picks the chat tools, as for any question).
+    const text = h.forced ? h.task.trim() || question : question;
+    // The person may stop the assist run while the handoff is being admitted and opened (a network call on hosted):
+    // checked before the port, again just before the chat run starts, and once more after, when one it started is
+    // cancelled too. A stopped request never leaves a chat run working for the person.
+    const stopped = () => cancelled.has(run.id);
+    if (stopped()) return null;
+    let started = null as string | null;
+    const to = await opts.contextSource.handoff({ companyId, fromRunId: run.id, question: text, threadId: run.threadId, taintedBy: state.tainted ? (state.taintedBy ?? "run") : null }, async (chatHandle, allowlist) => {
+      if (stopped()) return;
+      started = chatHandle.runId;
+      await runtime.startChat(chatHandle, {
+        text, recipe: "chat", pageContext: handoffPageLine(setup?.brief), ...(allowlist ? { allowlist } : {}),
+        ...(run.threadId ? { threadId: run.threadId } : {}), handoff: { fromRunId: run.id, reason: h.reason, task: h.task, question },
+      });
+    });
+    if (!stopped()) return to;
+    if (started) await runtime.cancel(started).catch(() => undefined);
+    return null;
+  };
+
   const loopDeps = {
-    store, executor: opts.executor, provider: mainProvider, ledger: opts.ledger, clock: opts.clock, prices, checklist,
+    store, executor: opts.executor, provider: mainProvider, ledger: opts.ledger, clock: opts.clock, prices, checklist, handoff,
     isCancelled: (id: string) => cancelled.has(id),
     signalFor: (id: string) => aborts.get(id)?.signal,
     // A local model gets its 180 s step budget (harness 11.4) plus a margin, so the provider's own timer reports first.
@@ -359,7 +417,8 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     const job = async () => {
       try {
         const current = await store.getRun(runId);
-        const used = current ? providerFor(current) : mainProvider;
+        // A resolved assist run plays the resolution stored on its context step (no model call).
+        const used = current?.model === "resolver" ? resolverProvider((await setupOf(runId))?.resolved) : current ? providerFor(current) : mainProvider;
         const row = await runLoop({ ...loopDeps, provider: used, prices: opts.providers ? pricesOf(used) : prices }, handle);
         // Template fallback (SPEC 9.6): a routine whose real model failed (live, or a local server that is down)
         // finishes on the deterministic templates. The scripted provider never falls back, so scenarios stay exact.
@@ -392,7 +451,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     const provider = p.kind === "routine" && useTemplates(p.provider, p.attended) ? templateProvider : p.provider;
     return {
       id: handle.runId, companyId, kind: "main", parentRunId: null, threadId: p.threadId ?? null, routineRunId: p.routineRunId, trigger: p.trigger, attended: p.attended,
-      provider: provider.id, model: provider.model, effort: effortFor(provider), cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : "chat")}:${companyId}`,
+      provider: provider.id, model: provider.model, effort: effortFor(provider), cacheKey: `weft:main:${p.routineId ?? (p.kind === "routine_draft" ? "routine_draft" : p.kind === "assist" ? "assist" : "chat")}:${companyId}`,
       status: "queued", terminalReason: null, tainted: false, taintedBy: null, checklist: null, budget: { steps: b.steps, usd: b.usd, minutes: b.minutes },
       stepsUsed: 0, requeues: 0, consecutiveErrors: 0, costUsdMicros: 0, tokens: { ...ZERO_USAGE }, createdAt: opts.clock.now(), endedAt: null, summary: null,
     };
@@ -422,15 +481,28 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     },
     async startChat(handle, input) {
       await remember(handle);
-      const kind: PromptKind = input.recipe === "routine_draft" ? "routine_draft" : "chat";
+      const kind: PromptKind = input.recipe === "routine_draft" ? "routine_draft" : input.recipe === "assist" && input.assist ? "assist" : "chat";
       // A conversation thread (the Agent page) is recorded on the run row; the side panel and every other caller pass none.
-      const threadId = kind === "chat" && typeof input.threadId === "string" && input.threadId ? input.threadId : null;
-      const row = baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind, provider: opts.providers ? await chooseProvider(kind, true) : opts.provider, threadId });
+      // An assist exchange carries one too, so Continue in Agent opens it as a conversation.
+      const threadId = (kind === "chat" || kind === "assist") && typeof input.threadId === "string" && input.threadId ? input.threadId : null;
+      // An assist exchange in a conversation reads the thread's earlier turns like a chat follow-up, so a choice or a
+      // short follow-up continues the request before it (a source that throws leaves them out).
+      const earlierAssist = kind === "assist" && threadId && opts.contextSource?.earlier ? await opts.contextSource.earlier({ companyId, runId: handle.runId, threadId }).catch(() => []) : [];
+      // The cursor assistant's instant path: a where or how question the resolver answers is pinned to its stand-in.
+      const resolved: AssistResolution | null = kind === "assist" ? resolveAssist(input.text, input.assist!, { hosted: !!opts.providers, earlier: earlierAssist.at(-1)?.question ?? null }) : null;
+      const provider = resolved ? resolverProvider(resolved) : opts.providers ? await chooseProvider(kind, true) : opts.provider;
+      const row = baseRow(handle, { trigger: "chat", attended: true, routineRunId: null, routineId: null, kind, provider, threadId });
       await store.createRun(row);
       const nonce = (handle as { nonce?: string }).nonce ?? newNonce();   // harness 6.3: one nonce per run, shared with the executor wrapper
       let text: string;
       let principal: string | null = null;
-      if (kind === "chat") {
+      if (kind === "assist") {
+        const c = (await opts.contextSource?.chat({ companyId, runId: handle.runId })) ?? { actingFor: "the person in this chat", grants: {}, companySummary: "No company summary is available.", openLoops: [] };
+        principal = principalOf(c);
+        const earlier = earlierAssist.length ? earlierConversationBlock(earlierAssist) : "";
+        text = assistPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, request: input.text, assist: input.assist!, ...(earlier ? { earlier } : {}) });
+        noteRunRecall(handle.runId, { query: input.text, reason: "assist_run", chars: 0 });
+      } else if (kind === "chat") {
         const c = (await opts.contextSource?.chat({ companyId, runId: handle.runId })) ?? { actingFor: "the person in this chat", grants: {}, companySummary: "No company summary is available.", openLoops: [] };
         principal = principalOf(c);
         if (typeof input.pageContext === "string" && input.pageContext.startsWith(PORTAL_PAGE_MARKER)) {
@@ -441,9 +513,10 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
         } else {
           // A follow-up reads the thread's earlier turns (question and final answer only, bounded); a source that
           // throws leaves them out and the run still starts.
-          const earlier = threadId && opts.contextSource?.earlier
-            ? earlierConversationBlock(await opts.contextSource.earlier({ companyId, runId: handle.runId, threadId }).catch(() => []))
-            : "";
+          const prior = threadId && opts.contextSource?.earlier ? await opts.contextSource.earlier({ companyId, runId: handle.runId, threadId }).catch(() => []) : [];
+          // A handoff from the cursor assistant: that exchange is the earlier turn this run continues.
+          const turns = input.handoff ? [...prior, { question: input.handoff.question ?? input.text, answer: `The assistant at the pointer handed this to you (${input.handoff.reason}): ${input.handoff.task}` }] : prior;
+          const earlier = turns.length ? earlierConversationBlock(turns) : "";
           text = chatPack({ nonce, now: opts.clock.now(), actingFor: c.actingFor, grants: c.grants, companySummary: c.companySummary, openLoops: c.openLoops, request: input.text, pageContext: input.pageContext, ...(earlier ? { earlier } : {}) });
           text = withRecall(text, await recallFor(handle.runId, { kind: "chat", query: input.text, subjectRefs: [] }));
         }
@@ -451,7 +524,18 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
         const channels = (await opts.contextSource?.channels?.(companyId)) ?? ["#people-ops", "#new-hires", "#payroll"];
         text = routineDraftPack({ nonce, now: opts.clock.now(), actingFor: "the person in this chat", request: input.text, channels, tools: [...CHAT_TOOLS, "comms.send_message"] });
       }
-      await writeContext(handle.runId, { promptKind: kind, allowlist: kind === "chat" ? [...(input.allowlist ?? CHAT_TOOLS)] : [...DRAFT_TOOLS], nonce, routineId: null, text, pack: true, principal });
+      const allowlist = kind === "chat" ? [...(input.allowlist ?? CHAT_TOOLS)] : kind === "assist" ? [...(input.allowlist ?? ASSIST_TOOLS)] : [...DRAFT_TOOLS];
+      // An assist run keeps the compact page facts a handoff passes on: the route, the kind and id under the pointer
+      // and the record ids, never a label or any other text of the screen map.
+      const brief = kind === "assist" && input.assist ? {
+        route: input.assist.screen.route,
+        under: input.assist.cursor.under ? { entity: input.assist.cursor.under.entity, kind: input.assist.cursor.under.kind } : null,
+        recordIds: [...new Set(input.assist.records.flatMap((r) => r.rows.map((x) => x.id)))].slice(0, 20),
+      } : undefined;
+      await writeContext(handle.runId, {
+        promptKind: kind, allowlist, nonce, routineId: null, text, pack: true, principal, ...(resolved ? { resolved } : {}), ...(brief ? { brief, request: input.text } : {}),
+        ...(input.handoff ? { handoffFrom: { runId: input.handoff.fromRunId, reason: input.handoff.reason, task: input.handoff.task } } : {}),
+      });
       enqueue(handle.runId, providerFor(row).live);
     },
     async startRoutineRun(handle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }) {

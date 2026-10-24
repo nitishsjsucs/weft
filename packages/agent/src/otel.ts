@@ -8,6 +8,7 @@
 // redactor (apps/api/src/compose.ts passes the executor's Redactor.value), strings and JSON alike. Never captured:
 // headers, client config, the prompt_cache_key value (only that it was set), encrypted reasoning, raw exceptions and
 // stacks. The tracer is looked up per span because Phoenix's runExperiment swaps the global provider during a task.
+import type { PromptKind } from "./prompts/index";
 import { context, ROOT_CONTEXT, trace, SpanStatusCode, type Attributes, type AttributeValue, type Context, type Span } from "@opentelemetry/api";
 import { clearSession, clearUser, OITracer, setMetadata, setSession, setTags, setUser } from "@arizeai/openinference-core";
 import { MimeType, OpenInferenceSpanKind, SemanticConventions as SC } from "@arizeai/openinference-semantic-conventions";
@@ -149,7 +150,7 @@ async function active<T>(name: string, kind: WeftSpanKind, attrs: Attributes, fn
 
 export interface RunTraceInput {
   run: AgentRunRow;
-  promptKind: "chat" | "routine" | "routine_draft";
+  promptKind: PromptKind;
   allowlist: readonly string[];
   routineId: string | null;
   /** The acting principal (the person for chat and attended runs); unattended routine runs use routine:<id>. */
@@ -187,7 +188,7 @@ export function runMeta(i: RunTraceInput, t: Partial<EvalTraceTags> | null = run
 }
 
 export function runTags(meta: TraceRunMeta): string[] {
-  const out: string[] = [meta.kind === "routine" ? "routine" : meta.kind === "routine_draft" ? "routine_draft" : "chat"];
+  const out: string[] = [meta.kind === "routine" ? "routine" : meta.kind === "routine_draft" ? "routine_draft" : meta.kind === "assist" ? "assist" : "chat"];
   if (meta.routine_id) out.push(meta.routine_id);
   if (!meta.attended) out.push("unattended");
   if (meta.eval_task_id) out.push("eval", meta.eval_task_id);
