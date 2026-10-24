@@ -39,7 +39,9 @@ export function AgentPanel({ id, className, overlay = false }: { id?: string; cl
 
   return (
     <aside id={id} aria-label="Agent" data-tour="agent-panel" className={cn("flex h-full min-h-0 flex-col border-l border-[var(--app-border)] bg-[var(--app-sidebar-bg)]", className)}>
-      <div className="flex h-[var(--app-header-h)] shrink-0 items-center gap-2 border-b border-[var(--app-border)] px-4">
+      {/* The top bar is --tb-h tall with its 1 px rule below it (header.tsx), so this header is --tb-h plus that rule:
+          the two bottom rules then sit on the same line. */}
+      <div data-agent-panel-header="" className="flex h-[calc(var(--tb-h)+1px)] shrink-0 items-center gap-2 border-b border-[var(--app-border)] px-4">
         <span className="flex-1 text-2 font-semibold">Weft agent</span>
         <Button variant="ghost" size="icon" onClick={agent.clear} aria-label="New thread"><Plus strokeWidth={1.5} /></Button>
         {/* Docked, the top bar's agent toggle closes the panel; the X shows only when the panel overlays the page. */}

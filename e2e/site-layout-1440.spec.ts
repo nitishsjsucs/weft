@@ -73,6 +73,14 @@ async function docked(page: Page): Promise<void> {
   const { edge, window: width } = await page.evaluate(() => ({ edge: document.documentElement.getBoundingClientRect().right, window: window.innerWidth }));
   expect(width - edge, `only a scrollbar gutter (${width - edge} px) sits right of the page`).toBeLessThanOrEqual(SCROLLBAR_MAX);
   expect(panel!.x + panel!.width, `the docked panel reaches the right edge (${edge})`).toBeGreaterThanOrEqual(edge - 1);
+  // The top bar's bottom rule and the agent panel header's bottom rule are one continuous line.
+  const rules = await page.evaluate(() => {
+    const bar = document.querySelector("header")?.parentElement?.getBoundingClientRect().bottom ?? null;
+    const head = document.querySelector("[data-agent-panel-header]")?.getBoundingClientRect().bottom ?? null;
+    return { bar, head };
+  });
+  expect(rules.bar, "the top bar is on the page").not.toBeNull();
+  expect(rules.head, `the agent panel header's rule (${rules.head}) lines up with the top bar's (${rules.bar})`).toBe(rules.bar);
 }
 
 test("1440 px with the agent panel docked: paycheck table and run steps fit, and a scripted run is not live", async ({ page, weft }) => {
