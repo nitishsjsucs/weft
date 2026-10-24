@@ -36,7 +36,8 @@ export interface Responses {
   "GET /v1/actions/verify": ChainStatus;
   "POST /v1/actions/:seq/rollback": ToolOutcome;
   "GET /v1/events": PageResult<EventRow>;
-  "POST /v1/agent/runs": { runId: string };
+  /** recipe "assist" also returns chatMode and the conversation's threadId (ext/assist.ts AssistRunAccepted). */
+  "POST /v1/agent/runs": { runId: string; chatMode?: string; threadId?: string };
   "GET /v1/agent/runs/:id": AgentRunRow;
   "GET /v1/agent/runs/:id/trace": RunTrace;
   "GET /v1/routines": RoutineDef[];

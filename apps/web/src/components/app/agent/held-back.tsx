@@ -20,7 +20,7 @@ export function HeldBack({ text, runRead }: { text: string | null | undefined; r
       </div>
       <details className="text-gray-11">
         <summary className="cursor-pointer select-none text-gray-10">Show the held-back {lines.length === 1 ? "line" : "lines"}</summary>
-        <pre className="mt-1 rounded-md bg-gray-2 px-2 py-1 font-mono text-0 break-words whitespace-pre-wrap text-gray-12">{lines.join("\n")}</pre>
+        <pre data-assist-untrusted="" className="mt-1 rounded-md bg-gray-2 px-2 py-1 font-mono text-0 break-words whitespace-pre-wrap text-gray-12">{lines.join("\n")}</pre>
       </details>
     </div>
   );

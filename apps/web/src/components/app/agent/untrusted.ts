@@ -18,6 +18,8 @@ const KIND: Record<string, string> = {
   offer: "text from a candidate's offer",
   documents: "text from an uploaded document",
   integrations: "data an outside system sent",
+  // The cursor assistant: text people typed that was on the screen (selected, under the pointer, or in a record).
+  screen: "text people typed that was on the screen",
 };
 
 /** Where a run's untrusted content came from, in words ("a chat message someone posted in #payroll"). */
