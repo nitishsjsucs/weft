@@ -143,7 +143,7 @@ belong to the two integrations tracks, so round 2 used 4676/4677. Any free pair 
 
 The e2e suite sits at the UI rate limit (apps/api/src/http/auth.ts: 1,200 requests per principal in a fixed 60 s
 window). The app shell polls the clock, proposals, offers, health and the chat about every second, and almost every
-spec runs as Vic, so a fast machine packs about 1,200 of her requests into one window. Measured in round 2: the
+spec runs as Vic, so a fast machine packs about 1,200 of their requests into one window. Measured in round 2: the
 golden-path specs alone made 1,196 Vic requests in 29 s. Main at 35b385f also failed one site-layout spec with 429
 on the same machine. Both GP14 specs therefore view as Sam (HR manager) and read the API as Sam, which leaves 6 Vic
 requests from this track. The full suite passed 33 of 33 on the final run; when it fails, the failures are 429s in

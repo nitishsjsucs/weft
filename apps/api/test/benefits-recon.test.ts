@@ -67,7 +67,7 @@ describe("carrier reconciliation (GP11)", () => {
     expect(mail[0]!.body).toContain("$620.00");
     const again = await post("/v1/tools/benefits.dispute_finding", { finding_id: f!.id });
     expect(again.status).toBe(422);
-    // Vic disputing from the Benefits screen acts directly (her click is the approval).
+    // Vic disputing from the Benefits screen acts directly (their click is the approval).
     const [w] = await weft.db.select().from(benefitReconFindings).where(eq(benefitReconFindings.kind, "wrong_tier"));
     const direct = await (await post("/v1/tools/benefits.dispute_finding", { finding_id: w!.id })).json() as { ok: boolean; status: string };
     expect(direct).toMatchObject({ ok: true, status: "done" });
