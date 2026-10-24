@@ -5,13 +5,14 @@
 // The rows are read structurally (the run store's RunStepRow and the eval suite's EvStep both fit), so this package
 // still imports nothing. It reads three kinds of row:
 // - the context pack (kind "context", result.pack true): the person's request, between <request> tags and escaped
-//   by the pack, and the run clock, on its "now: <ISO instant>" line;
+//   by the pack (an assist run also stores it as written, as result.request, which wins), and the run clock, on its
+//   "now: <ISO instant>" line;
 // - the first assemble row that carries result.requestTrusted (stage "assemble", kind "context"; the pack row has the
 //   same stage and kind but no decision): the loop's decision that the run was untainted before its first model
 //   step. Without it the request is not evidence (a routine run, or a run tainted before it began);
 // - tool_call rows: a done outcome gives its result, a pending one its proposal id and title, and every string in
-//   the call's arguments is an echo. The run feed update (comms.post_update) is model-authored prose: it gives
-//   neither a result nor an echo.
+//   the call's arguments is an echo. The run feed update (comms.post_update) and the cursor assistant's presentation
+//   tools (ui.*) are model-authored: they give neither a result nor an echo.
 import type { CheckOptions } from "./check";
 
 /** The fields of a run step that evidence reads. */
@@ -40,8 +41,13 @@ export interface RunEvidenceOptions {
   request?: string | null;
 }
 
-/** Tools whose calls are model-authored text, not reads: never evidence and never echoes. Wire or dotted names. */
-export const MODEL_AUTHORED_TOOLS: ReadonlySet<string> = new Set(["comms.post_update"]);
+/**
+ * Tools whose calls are model-authored text, not reads: never evidence and never echoes. Wire or dotted names. The
+ * cursor assistant's presentation tools carry the model's own labels, answer, handoff task and walkthrough text (a
+ * result such as ui.steps' may hold that text normalized, so it would otherwise read as evidence), and their results
+ * hold nothing read.
+ */
+export const MODEL_AUTHORED_TOOLS: ReadonlySet<string> = new Set(["comms.post_update", "ui.point", "ui.navigate", "ui.show", "ui.say", "ui.handoff", "ui.steps"]);
 
 const dotted = (name: string) => name.replace("__", ".");
 
@@ -80,7 +86,10 @@ export function runEvidence(steps: Iterable<EvidenceStep>, o: RunEvidenceOptions
   const pack = rows.find((s) => s.kind === "context" && (s.result as { pack?: unknown } | null)?.pack === true);
   const text = typeof (pack?.result as { text?: unknown } | undefined)?.text === "string" ? (pack!.result as { text: string }).text : "";
   const trusted = requestTrustOf(rows) === true;
-  const request = !trusted ? null : pack ? unescapeTagText(/<request>([\s\S]*?)<\/request>/.exec(text)?.[1] ?? "") : o.request ?? null;
+  // An assist run stores the request as written beside its pack (screen text sits inside the pack, so it is never
+  // searched for there); any other pack has one escaped request block.
+  const stored = (pack?.result as { request?: unknown } | undefined)?.request;
+  const request = !trusted ? null : typeof stored === "string" ? stored : pack ? unescapeTagText(/<request>([\s\S]*?)<\/request>/.exec(text)?.[1] ?? "") : o.request ?? null;
   const now = /^now: (\S+)$/m.exec(text)?.[1] ?? o.now ?? null;
 
   const results: unknown[] = [];

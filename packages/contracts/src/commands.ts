@@ -7,7 +7,8 @@ export type Namespace = "people" | "payroll" | "tax" | "notices" | "benefits" | 
   | "memory" | "vault" | "actions" | "routines" | "agent" | "code"
   | "documents" | "offboarding" | "contractors"   // wave 2
   | "expenses" | "time_off" | "reports" | "integrations" | "ats" | "hris" | "screening"   // wave 3
-  | "compliance" | "handoffs" | "training" | "portal" | "settings";   // wave 4
+  | "compliance" | "handoffs" | "training" | "portal" | "settings"   // wave 4
+  | "ui";   // the cursor assistant's presentation tools (ext/assist.ts, additive): R0, they write nothing
 export type Domain = "people" | "payroll" | "tax" | "benefits" | "it" | "comms" | "company";
 export type Grant = "none" | "view" | "edit" | "approve";
 export type Effect = "read" | "draft" | "write" | "external";

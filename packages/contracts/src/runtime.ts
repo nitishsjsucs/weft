@@ -5,6 +5,7 @@ import type { NoticeKind } from "./provider";
 import type { PrecheckResult, RoutineDef, RoutineRun } from "./routines";
 import type { RunStepRow, RunTrace } from "./trace";
 import type { ProposalDecided } from "./approvals";
+import type { AssistInput } from "./ext/assist";
 
 export interface SimClock { now(): string; rate(): number; advance(to: string): Promise<void>; set(to: string, rate?: number): Promise<void> }
 // svc_jobs (Weft on Cloudflare, docs/cloudflare/design.md 5.4): the queue write-backs; it has an allowlist only where the
@@ -24,7 +25,9 @@ export interface AgentRuntime {
   boot(): Promise<void>;                                            // boot rule PROCESS_RESTART
   /** `allowlist` (wave 3, additive): the chat tools the API chose for this run (CHAT_TOOLS_W3 or CHAT_ACT_TOOLS); omitted means CHAT_TOOLS. */
   /** `threadId` (Agent page, additive): the conversation this chat run belongs to (ext/agent-page.ts); omitted or null is a single run. */
-  startChat(run: RunHandle, input: { text: string; recipe: "chat" | "routine_draft"; pageContext: string | null; allowlist?: readonly string[]; threadId?: string | null }): Promise<void>;
+  /** `assist` (the cursor assistant, additive): the screen map, cursor context, page records and trail the client sent (ext/assist.ts). */
+  /** `handoff` (additive): a chat run an assist run handed its request to; the assist exchange is its earlier turn. */
+  startChat(run: RunHandle, input: { text: string; recipe: "chat" | "routine_draft" | "assist"; pageContext: string | null; allowlist?: readonly string[]; threadId?: string | null; assist?: AssistInput; handoff?: { fromRunId: string; reason: string; task: string; question?: string } }): Promise<void>;
   startRoutineRun(run: RunHandle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }): Promise<void>;
   requeue(runId: string, notice: { kind: NoticeKind; attrs: Record<string, string>; text: string }): Promise<void>;
   cancel(runId: string): Promise<void>;

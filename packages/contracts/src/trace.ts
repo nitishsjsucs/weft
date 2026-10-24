@@ -5,7 +5,8 @@ import type { Proposal } from "./approvals";
 export type RunStatus = "queued" | "running" | "waiting" | "held" | "done" | "failed" | "refused" | "escalated" | "expired" | "cancelled";
 export type Stage = "admission" | "assemble" | "model" | "dispatch" | "post" | "terminal";
 export type TerminalReason = "DONE" | "WAITING_APPROVAL" | "REFUSED" | "MODEL_INCOMPLETE" | "BUDGET_EXCEEDED" | "REPEATED_ERRORS"
-  | "NOT_DONE" | "CANCELLED" | "PROVIDER_DOWN" | "EXPIRED" | "HELD" | "PROCESS_RESTART";
+  | "NOT_DONE" | "CANCELLED" | "PROVIDER_DOWN" | "EXPIRED" | "HELD" | "PROCESS_RESTART"
+  | "HANDED_OFF";   // the cursor assistant handed the request to a chat run in the same thread (ext/assist.ts, additive)
 
 export interface AgentRunRow {
   id: string; companyId: string; kind: AgentKind; parentRunId: string | null; threadId: string | null; routineRunId: string | null;

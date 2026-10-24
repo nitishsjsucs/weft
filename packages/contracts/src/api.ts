@@ -58,7 +58,7 @@ export const ROUTES = [
   r("GET", "/v1/settings/permissions", "settings", "t3-governance", "Permissions", { auth: "not_mcp" }),
   r("PUT", "/v1/settings/agent-grants", "settings", "t3-governance", "Permissions", { auth: "ui_only" }),
   r("POST", "/v1/api-keys", "api-keys", "t3-governance", "CreatedApiKey", { auth: "ui_only", body: "{ label, scope }" }),
-  r("POST", "/v1/agent/runs", "agent", "t4-agent", "{ runId }", { body: "{ text, pageContext, threadId }" }),
+  r("POST", "/v1/agent/runs", "agent", "t4-agent", "{ runId }", { body: "{ text, pageContext, threadId, recipe?, assist? } (recipe assist: AssistRunRequest, ext/assist.ts)" }),
   r("GET", "/v1/agent/runs", "agent", "t4-agent", "Page<AgentRunRow>"),
   r("GET", "/v1/agent/runs/:id", "agent", "t4-agent", "AgentRunRow"),
   r("GET", "/v1/agent/runs/:id/events", "agent", "t4-agent", "SSE<RunStepRow>"),
