@@ -16,6 +16,8 @@ import { PageHeader } from "../page";
 import { fmtDate } from "../format";
 import { cn } from "@weft/ui";
 import { STACK } from "../stack";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { PAGE_TABS } from "../../../../../../packages/contracts/src/ext/assist";
 
 type PagedPath = "/v1/benefits/enrollments" | "/v1/it/accounts" | "/v1/it/devices" | "/v1/workers";
 
@@ -68,11 +70,13 @@ export function BenefitsView() {
   const names = new Map((people.rows ?? []).map((w) => [w.id, w.displayName]));
   const planNames = new Map(list.map((p) => [p.id, p.name]));
   const err = plans.error ?? enr.error;
+  // The tab is in the link (?tab=reconciliation; Plans when absent), so one link opens any tab and Back keeps working.
+  const [tabParam, setTabParam] = useUrlState("tab", oneOf(PAGE_TABS.benefits));
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="Benefits" subtitle="Plans and enrollments held by the carriers. Deductions flow into payroll through the pretax codes." />
       {err ? <div role="alert" className="mb-4 rounded-lg bg-red-3 px-3 py-2 text-1 text-red-11">{errorText(err)}</div> : null}
-      <Tabs defaultValue="plans">
+      <Tabs value={tabParam ?? "plans"} onValueChange={(v) => setTabParam(v === "plans" ? null : v)}>
         <TabsList className="mb-2">
           <TabsTrigger value="plans" data-testid={W2_BENEFITS_TID.tabPlans}>Plans</TabsTrigger>
           <TabsTrigger value="reconciliation" data-testid={W2_BENEFITS_TID.tabRecon}>Reconciliation</TabsTrigger>

@@ -12,6 +12,7 @@ import { STACK } from "../stack";
 import { useAgent } from "../agent-context";
 import { ApprovalCard } from "../agent/approval-card";
 import { HeldBack } from "../agent/held-back";
+import { Untrusted } from "../untrusted-text";
 import { SimInboundControls } from "./w4-inbound";   // wave 4 (w4-parity-agent): inbound chat mentions and emailed receipts
 import { HOSTED } from "@/lib/hosted/flags";
 import { ModelSwitchSection } from "../../hosted/model-switch";
@@ -135,6 +136,23 @@ function SimTable({ kind, rows, empty, testid }: { kind: keyof typeof SIM_COLS; 
   );
 }
 
+/**
+ * One message. A person's post shows exactly as written, its words (and the name they post under) untrusted for the
+ * cursor assistant; Weft's own posts read as copy, and a post that carries an approval card says only that, since the
+ * card below names the change.
+ */
+export function ChatLine({ m }: { m: ChatMessageDto }) {
+  const c = ApprovalCardW3.safeParse(m.card);
+  return (
+    <li className="text-[13px] leading-5">
+      <div className="flex items-baseline gap-2"><span className="font-medium">{m.inbound ? <Untrusted>{m.author}</Untrusted> : m.author}</span><span className="text-0 text-gray-10">{fmtDateTime(m.ts)}</span></div>
+      {!m.inbound && c.success ? <SimChatCard card={c.data} />
+        : m.inbound ? <p data-assist-untrusted="" className="break-words whitespace-pre-wrap text-gray-12">{m.text}</p>
+        : <p title={m.text} className="break-words whitespace-pre-wrap text-gray-12">{answerText(m.text).text}</p>}
+    </li>
+  );
+}
+
 function ChatFeed({ channel }: { channel: (typeof CHANNELS)[number] }) {
   const q = useGet("/v1/sim/chat", { query: { channel }, refreshMs: 3_000 });
   const msgs = (q.data ?? []) as ChatMessageDto[];
@@ -143,19 +161,7 @@ function ChatFeed({ channel }: { channel: (typeof CHANNELS)[number] }) {
       <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3 py-2 text-[13px] font-medium"><MessageSquare className="size-3.5 text-gray-10" />{channel}<span className="ml-auto text-0 font-normal text-gray-10">{msgs.length}</span></div>
       <ul className="flex max-h-56 flex-col gap-2 overflow-y-auto px-3 py-2">
         {msgs.length === 0 ? <li className="text-1 text-gray-10">{q.error ? errorText(q.error) : "No messages."}</li> : null}
-        {msgs.slice(-20).map((m) => (
-          <li key={m.id} className="text-[13px] leading-5">
-            <div className="flex items-baseline gap-2"><span className="font-medium">{m.author}</span><span className="text-0 text-gray-10">{fmtDateTime(m.ts)}</span></div>
-            {(() => {
-              // A person's post shows exactly as written; Weft's own posts read as copy, and a post that carries an
-              // approval card says only that, since the card below names the change.
-              const c = ApprovalCardW3.safeParse(m.card);
-              if (!m.inbound && c.success) return <SimChatCard card={c.data} />;
-              const text = m.inbound ? m.text : answerText(m.text).text;
-              return <p title={m.inbound ? undefined : m.text} className="break-words whitespace-pre-wrap text-gray-12">{text}</p>;
-            })()}
-          </li>
-        ))}
+        {msgs.slice(-20).map((m) => <ChatLine key={m.id} m={m} />)}
       </ul>
     </Card>
   );

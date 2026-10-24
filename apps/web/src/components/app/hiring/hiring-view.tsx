@@ -9,6 +9,7 @@ import { useCan } from "@/lib/api/access";
 import { fmtDate, fmtDateTime } from "../format";
 import { PageHeader } from "../page";
 import { OfferScreening } from "../screening/offer-screening";
+import { CandidateName } from "../untrusted-text";
 import { HOSTED } from "@/lib/hosted/flags";
 import { PdfButton } from "../../hosted/pdf-button";
 
@@ -75,9 +76,9 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
   const [confirmVoid, setConfirmVoid] = useState(false);
   const err = send.error ?? voidIt.error;
   return (
-    <li data-testid={T.offerRow} data-tour="hiring-offer" data-offer={o.id} data-status={o.status} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
+    <li data-testid={T.offerRow} data-tour="hiring-offer" data-offer={o.id} data-entity={o.id} data-entity-kind="offer" data-status={o.status} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
       <div className="min-w-[200px] flex-1">
-        <div className="font-medium">{o.candidateFirst} {o.candidateLast}</div>
+        <div className="font-medium"><CandidateName first={o.candidateFirst} last={o.candidateLast} /></div>
         <div className="text-gray-10">{o.title} · {o.workState}{o.baseCents === null ? "" : ` · ${formatCents(o.baseCents)}`} · starts {fmtDate(o.startDate)}{o.expiresOn ? ` · open until ${fmtDate(o.expiresOn)}` : ""}</div>
       </div>
       <Badge data-testid={T.offerStatus} data-status={o.status} tone={STATUS_TONE[o.status] ?? "gray"} size="md">{STATUS_LABEL[o.status] ?? o.status}</Badge>
@@ -90,7 +91,8 @@ function OfferRow({ o }: { o: W2OnboardingOfferDetail }) {
           <Button size="sm" variant="secondary" onClick={() => setConfirmVoid(false)}>Cancel</Button>
         </span>
       ) : null}
-      {o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted") ? <a data-testid={T.offerPortalLink} className="text-1 text-blue-11 hover:underline" href={`/portal?as=${o.personaPrincipalId}`}>Open portal as new hire</a> : null}
+      {/* Opening the portal signs this browser in as the new hire and marks the offer viewed: the cursor assistant never opens it. */}
+      {o.personaPrincipalId && (o.status === "sent" || o.status === "viewed" || o.status === "accepted") ? <a data-testid={T.offerPortalLink} data-assist-mutating="" className="text-1 text-blue-11 hover:underline" href={`/portal?as=${o.personaPrincipalId}`}>Open portal as new hire</a> : null}
       {HOSTED ? offerPdfs(o).map((p) => <PdfButton key={p.kind} kind={p.kind} subjectId={p.subjectId} size="xs" />) : null}
       {err ? <span role="alert" className="w-full text-1 text-red-11">{errorText(err)}</span> : null}
       <OfferScreening offerId={o.id} accepted={o.status === "accepted"} />
@@ -126,7 +128,7 @@ export function HiringView() {
                   <li key={m.id} data-testid={T.outboxItem} data-kind={m.kind} data-ref={m.relatedRef ?? ""} className="rounded-lg border border-[var(--app-border)] p-3 text-[13px]">
                     <div className="font-medium">{m.subject}</div>
                     <div className="text-1 text-gray-10"><span className="break-all">To {m.to}</span> · <span className="whitespace-nowrap">{fmtDateTime(m.ts)}</span></div>
-                    {link ? <a className="mt-1 inline-block text-1 text-blue-11 hover:underline" href={link}>Open the new-hire portal</a> : null}
+                    {link ? <a data-assist-mutating="" className="mt-1 inline-block text-1 text-blue-11 hover:underline" href={link}>Open the new-hire portal</a> : null}
                   </li>
                 );
               })}

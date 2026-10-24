@@ -65,7 +65,7 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
         {GROUPS.map((g) => {
           const groupRows = rows.filter((r) => r.original.reviewGroup === g.key);
           return (
-            <TBody key={g.key} data-testid={g.testid} data-tour={g.key === "needs_review" ? "payroll-needs-review" : undefined} data-count={groupRows.length}>
+            <TBody key={g.key} data-testid={g.testid} data-tour={g.key === "needs_review" ? "payroll-needs-review" : undefined} data-assist-section={g.key === "needs_review" ? "needs-review" : "ready"} data-count={groupRows.length}>
               <tr className={cn("border-b border-[var(--app-border)]", g.wash)}>
                 <td colSpan={ncol} className="px-3 py-1.5 text-1 font-medium">
                   <span className="sticky left-3 inline-flex items-center gap-2"><span className={cn("size-2 rounded-full", g.dot)} />{g.label} ({groupRows.length})</span>
@@ -77,6 +77,8 @@ export function PaycheckTable({ data, onOpen }: { data: Paycheck[]; onOpen: (p: 
                   <TR
                     key={r.id}
                     data-testid={tid.payrollRow(pc.workerId)}
+                    data-entity={`${pc.payrollRunId}:${pc.workerId}`}
+                    data-entity-kind="paycheck"
                     data-status={pc.status}
                     tabIndex={0}
                     onClick={() => onOpen(pc)}

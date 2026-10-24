@@ -1,5 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { PAGE_TABS } from "../../../../../../packages/contracts/src/ext/assist";
 import { Inbox as InboxIcon } from "lucide-react";
 import { Badge, Tabs, TabsContent, TabsList, TabsTrigger } from "@weft/ui/components";
 import { tid, type Proposal } from "@weft/contracts";
@@ -24,22 +26,25 @@ export function InboxView() {
   const pending = rows?.filter((p) => p.status === "pending" && p.kind !== "suggestion");
   const suggestions = rows?.filter((p) => p.status === "pending" && p.kind === "suggestion");
   const decided = rows?.filter((p) => p.status !== "pending");
-  // A deep link (/app/inbox?proposal=prp_...) opens the tab that holds the proposal and scrolls to its card.
-  const [tab, setTab] = useState("pending");
-  const [target, setTarget] = useState<string | null>(null);
-  useEffect(() => { setTarget(new URLSearchParams(window.location.search).get("proposal")); }, []);
+  // The tab is in the link (?tab=decided; Approvals when absent). A deep link (/app/inbox?proposal=prp_...) opens the
+  // tab that holds the proposal and scrolls to its card, once per proposal it names.
+  const [tabParam, setTabParam] = useUrlState("tab", oneOf(PAGE_TABS.inbox));
+  const tab = tabParam ?? "pending";
+  const setTab = (v: string) => setTabParam(v === "pending" ? null : v);
+  const [target] = useUrlState("proposal", (v) => /^prp_[0-9]{4,6}$/.test(v));
+  const shown = useRef<string | null>(null);
   useEffect(() => {
-    if (!target || !rows) return;
+    if (!target || !rows || shown.current === target) return;
     const p = rows.find((x) => x.id === target);
     if (!p) return;
+    shown.current = target;
     setTab(p.status !== "pending" ? "decided" : p.kind === "suggestion" ? "suggestions" : "pending");
     const t = setTimeout(() => {
       const el = document.querySelector(`[data-testid="${tid.inboxCard(target)}"]`);
       if (el instanceof HTMLElement) { el.scrollIntoView({ block: "center" }); el.classList.add("ring-2", "ring-[var(--blue-9)]", "rounded-xl"); }
     }, 50);
-    setTarget(null);
     return () => clearTimeout(t);
-  }, [target, rows]);
+  }, [target, rows]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="mx-auto w-full max-w-[880px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="Inbox" subtitle="Every change the agent, a routine or a person proposes waits here for a decision. Approving re-runs every check on the stored arguments." />

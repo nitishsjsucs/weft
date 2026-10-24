@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useUrlState } from "@/lib/url-state";
 import { FilePlus2, Play, RefreshCw, Send } from "lucide-react";
 import { Badge, Button, Drawer } from "@weft/ui/components";
 import { TID, type Paycheck, type PayrollRun, type ToolOutcome } from "@weft/contracts";
@@ -32,7 +33,10 @@ export function PayrollReview({ id }: { id: string }) {
   const clock = useSimClock();
   const run = useGet("/v1/payrolls/:id", { params: { id }, refreshMs: 5_000 });
   const pcs = useGet("/v1/payrolls/:id/paychecks", { params: { id }, query: { limit: 100 }, refreshMs: 5_000 });
-  const [open, setOpen] = useState<Paycheck | null>(null);
+  // The open paycheck and the section to show are in the link (?paycheck=wrk_...&section=needs-review), so one link
+  // reaches a paycheck's drawer from any page; opening and closing the drawer replaces the URL (Back is unchanged).
+  const [paycheckId, setPaycheckId] = useUrlState("paycheck", (v) => /^wrk_[0-9]{4}$/.test(v));
+  const [section] = useUrlState("section", (v) => v === "needs-review" || v === "ready");
   const [outcome, setOutcome] = useState<ToolOutcome | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [excludeBlocked, setExcludeBlocked] = useState(true);
@@ -49,6 +53,15 @@ export function PayrollReview({ id }: { id: string }) {
 
   const r = run.data;
   const data = pcs.data?.data ?? [];
+  const open = paycheckId ? data.find((p) => p.workerId === paycheckId) ?? null : null;
+  const setOpen = (p: Paycheck | null) => setPaycheckId(p ? p.workerId : null);
+  // ?section= scrolls its band of the table into view once the paychecks are on the page.
+  const scrolled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!section || !data.length || scrolled.current === section) return;
+    const el = document.querySelector(`[data-testid="${section === "ready" ? TID.payrollGroupReady : TID.payrollGroupNeedsReview}"]`);
+    if (el instanceof HTMLElement) { scrolled.current = section; el.scrollIntoView({ block: "start" }); }
+  }, [section, data.length]);
   const blocked = data.filter((p) => p.status === "blocked").length;
   const nr = data.filter((p) => p.reviewGroup === "needs_review").length;
   // GP2: when the agent has proposed submitting this run, say so here and make the human Submit secondary.

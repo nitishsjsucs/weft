@@ -85,7 +85,7 @@ export function HomeView() {
         {payroll ? <Widget testid="home-widget-payrolls" icon={<Banknote />} title="Upcoming payrolls" href="/app/payroll" footer={<><span>Paid by ACH debit</span><Link href="/app/payroll" className="hover:text-foreground">Review</Link></>}>
           {upcoming.length === 0 ? <div className="p-4 text-2 text-gray-10">{runs.error ? "Payroll is not available yet." : "No upcoming payrolls."}</div> : null}
           {upcoming.map((r) => (
-            <Link key={r.id} href={`/app/payroll/${r.id}`} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-3 last:border-0 hover:bg-gray-2">
+            <Link key={r.id} href={`/app/payroll/${r.id}`} data-entity={r.id} data-entity-kind="pay_run" className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-3 last:border-0 hover:bg-gray-2">
               <div className="min-w-0 flex-1"><div className="text-2 font-medium">{period(r.periodStart, r.periodEnd)}</div><div className="text-1 text-gray-10">US · {runKind(r.subtype).label} · payday {fmtDate(r.payday)}</div></div>
               <span className={`text-2 font-medium whitespace-nowrap ${r.status === "draft" ? "text-amber-11" : "text-blue-11"}`}>{r.status === "draft" ? (now ? `Due ${relative(r.approvalDeadline, now)}` : "Draft") : statusLabel(r.status)}</span>
             </Link>
@@ -94,14 +94,14 @@ export function HomeView() {
         <Widget testid="home-widget-approvals" icon={<Inbox />} title="Approvals waiting" href="/app/inbox">
           <div className="flex items-baseline gap-2 px-4 pt-4"><span className="text-7 font-semibold tabular">{props.data ? approvals.length : "-"}</span><span className="text-1 text-gray-10">waiting</span>{myTor.length ? <Link data-testid="home-approvals-time-off" href="/app/time-off" className="ml-auto text-1 text-blue-11 hover:underline">+ {myTor.length} time-off {myTor.length === 1 ? "decision" : "decisions"} for you</Link> : null}</div>
           <ul className="px-2 pt-2 pb-2">
-            {approvals.slice(0, 3).map((p) => <li key={p.id}><Link href="/app/inbox" title={p.headline} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2">{p.risk ? <Badge size="xs" className="shrink-0">{p.risk}</Badge> : null}<span className="min-w-0 flex-1 truncate">{humanLine(p.headline)}</span></Link></li>)}
+            {approvals.slice(0, 3).map((p) => <li key={p.id} data-entity={p.id} data-entity-kind="proposal"><Link href="/app/inbox" title={p.headline} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2">{p.risk ? <Badge size="xs" className="shrink-0">{p.risk}</Badge> : null}<span className="min-w-0 flex-1 truncate">{humanLine(p.headline)}</span></Link></li>)}
           </ul>
         </Widget>
         <Widget testid="home-widget-registrations" icon={<Landmark />} title="State tax registrations" href="/app/compliance">
           {accounts.error ? <div className="p-4 text-2 text-gray-10">Registrations are not available yet.</div> : null}
           <ul>
             {(accounts.data ?? []).filter((a) => a.jurisdiction !== "US").map((a) => (
-              <li key={a.id} className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-2 text-[13px] last:border-0">
+              <li key={a.id} data-entity={a.id} data-entity-kind="tax_account" className="flex items-center gap-3 border-b border-[var(--app-border)] px-4 py-2 text-[13px] last:border-0">
                 <span className="w-8 font-medium">{a.jurisdiction}</span><span className="min-w-0 flex-1 text-gray-11">{AGENCY[a.agency] ?? a.agency} <span className="text-gray-10">{ACCOUNT_TYPE[a.accountType] ?? statusLabel(a.accountType)}{a.registeredAt ? <span className="max-[1439px]:hidden"> · since {fmtDate(a.registeredAt, { month: "short", year: "numeric" })}</span> : ""}</span></span>
                 <Badge tone={a.status === "active" ? "green" : a.status === "awaiting_state" ? "amber" : "gray"}>{humanStatus(a.status)}</Badge>
               </li>
@@ -116,14 +116,14 @@ export function HomeView() {
           {/* Who is out today sits under its count; the approved-ahead list has its own label. */}
           {outToday.length ? (
             <ul data-testid="home-time-off-out-list" aria-label="Out today" className="px-2 pb-1">
-              {outToday.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{r.endAt !== r.startAt ? `to ${fmtDate(r.endAt)}` : "today"}</span></Link></li>)}
+              {outToday.slice(0, 3).map((r) => <li key={r.id} data-entity={r.id} data-entity-kind="time_off_request"><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{r.endAt !== r.startAt ? `to ${fmtDate(r.endAt)}` : "today"}</span></Link></li>)}
             </ul>
           ) : null}
           {soon.length ? (
             <>
               <div className="px-4 pt-1 text-1 font-medium text-gray-10">Approved ahead</div>
               <ul aria-label="Approved ahead" className="px-2 pb-2">
-                {soon.slice(0, outToday.length ? 2 : 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
+                {soon.slice(0, outToday.length ? 2 : 3).map((r) => <li key={r.id} data-entity={r.id} data-entity-kind="time_off_request"><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
               </ul>
             </>
           ) : null}
@@ -136,10 +136,10 @@ export function HomeView() {
                 : teamSoon.length ? <div><div className="text-7 font-semibold tabular">{teamSoon.length}</div><div className="text-1 text-gray-10">off in the next 30 days</div></div> : null}
             </div>
             <ul className="px-2 pb-2">
-              {teamOut.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span></Link></li>)}
-              {teamDecide.slice(0, 3).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="amber">Decide</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
-              {teamSoon.slice(0, 2).map((r) => <li key={r.id}><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="green">Approved</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}</span></Link></li>)}
-              {joining.slice(0, 2).map((w) => <li key={w.id}><Link href={`/app/people/${w.id}`} className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="blue">Joining</Badge><span className="min-w-0 flex-1 truncate">{w.displayName}</span><span className="text-1 text-gray-10 tabular">starts {fmtDate(w.startDate)}</span></Link></li>)}
+              {teamOut.slice(0, 3).map((r) => <li key={r.id} data-entity={r.id} data-entity-kind="time_off_request"><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="gray">Out today</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span></Link></li>)}
+              {teamDecide.slice(0, 3).map((r) => <li key={r.id} data-entity={r.id} data-entity-kind="time_off_request"><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="amber">Decide</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}{r.endAt !== r.startAt ? ` to ${fmtDate(r.endAt)}` : ""}</span></Link></li>)}
+              {teamSoon.slice(0, 2).map((r) => <li key={r.id} data-entity={r.id} data-entity-kind="time_off_request"><Link href="/app/time-off" className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="green">Approved</Badge><span className="min-w-0 flex-1 truncate">{r.workerName}</span><span className="text-1 text-gray-10 tabular">{fmtDate(r.startAt)}</span></Link></li>)}
+              {joining.slice(0, 2).map((w) => <li key={w.id} data-entity={w.id} data-entity-kind="worker"><Link href={`/app/people/${w.id}`} className="flex items-baseline gap-2 truncate rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-2"><Badge size="xs" tone="blue">Joining</Badge><span className="min-w-0 flex-1 truncate">{w.displayName}</span><span className="text-1 text-gray-10 tabular">starts {fmtDate(w.startDate)}</span></Link></li>)}
             </ul>
           </Widget>
         ) : null}

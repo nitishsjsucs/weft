@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { PAGE_TABS } from "../../../../../../packages/contracts/src/ext/assist";
 import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
 import { CircleCheck, CircleDashed, CircleSlash } from "lucide-react";
 import { Badge, Button, Card, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
@@ -15,6 +17,7 @@ import { PersonActions } from "../offboarding/person-actions";
 import { useAgent } from "../agent-context";
 import { agentRunIdsNow, newRoutineAgentRun } from "../agent/follow";
 import { BalancesTab, RequestsTab } from "../time-off/time-off-view";
+import { CandidateName } from "../untrusted-text";
 
 const DEPT: Record<string, string> = { dpt_engineering: "Engineering", dpt_hardware: "Hardware", dpt_operations: "Operations", dpt_people: "People", dpt_finance: "Finance", dpt_gtm: "Go-to-market" };
 const deptName = (id: string | null) => (id ? (DEPT[id] ?? id) : "-");
@@ -45,7 +48,7 @@ function PeopleTable({ data }: { data: Worker[] }) {
           {table.getRowModel().rows.map((r) => {
             const w = r.original;
             return (
-              <TR key={r.id} data-testid={`people-row-${w.id}`} className="hover:bg-gray-2">
+              <TR key={r.id} data-testid={`people-row-${w.id}`} data-entity={w.id} data-entity-kind="worker" className="hover:bg-gray-2">
                 {r.getAllCells().map((cell) =>
                   cell.column.id === "displayName" ? (
                     <TD key={cell.id}>
@@ -86,9 +89,9 @@ function OfferCard({ o }: { o: Offer }) {
     if (runId) agent.watch(runId, `New hire readiness: ${o.candidateFirst} ${o.candidateLast}`);
   };
   return (
-    <Card className="flex flex-col gap-3 p-4 tablet:flex-row tablet:items-center">
+    <Card data-entity={o.id} data-entity-kind="offer" className="flex flex-col gap-3 p-4 tablet:flex-row tablet:items-center">
       <div className="min-w-0 flex-1">
-        <div className="text-3 font-medium">{o.candidateFirst} {o.candidateLast}</div>
+        <div className="text-3 font-medium"><CandidateName first={o.candidateFirst} last={o.candidateLast} /></div>
         <div className="text-[13px] text-gray-11">{o.title} · {deptName(o.departmentId)} · work state {o.workState}{base ? ` · ${base} a year` : ""} · starts {fmtDate(o.startDate, { month: "short", day: "numeric", year: "numeric" })}</div>
         {out && !out.ok ? <div role="alert" title={out.refusal.code} className="mt-1 text-1 text-red-11">{out.refusal.message}</div> : null}
         {accept.error ? <div role="alert" className="mt-1 text-1 text-red-11">{errorText(accept.error)}</div> : null}
@@ -112,11 +115,12 @@ export function PeopleView() {
   const [q, setQ] = useState("");
   const data = useMemo(() => (workers.data?.data ?? []).filter((w) => !q || `${w.displayName} ${w.title} ${w.workState}`.toLowerCase().includes(q.toLowerCase())), [workers.data, q]);
   const err = workers.error ?? offers.error;
+  const [tabParam, setTabParam] = useUrlState("tab", oneOf(PAGE_TABS.people));
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="People" subtitle="Everyone at Larkspur Robotics." />
       {err ? <div role="alert" className="mb-4 text-1 text-red-11">{errorText(err)}</div> : null}
-      <Tabs defaultValue="people">
+      <Tabs value={tabParam ?? "people"} onValueChange={(v) => setTabParam(v === "people" ? null : v)}>
         <TabsList>
           <TabsTrigger value="people">People {workers.data ? <Badge size="xs">{workers.data.count}</Badge> : null}</TabsTrigger>
           <TabsTrigger value="offers">Offers {offers.data ? <Badge size="xs" title="Sent offers waiting on the candidate">{offers.data.data.filter((o) => o.status === "sent").length} to act on</Badge> : null}</TabsTrigger>
@@ -257,17 +261,30 @@ const IT_SYSTEM: Record<string, string> = { google_ws: "Workspace", chat: "Chat"
 const WORDS: Record<string, string> = { hsa_cafeteria: "HSA and cafeteria plan", fsa: "FSA", hsa: "HSA", employee_only: "Employee only", employee_spouse: "Employee and spouse", employee_children: "Employee and children" };
 const human = (s: string) => WORDS[s] ?? statusLabel(s);
 
+/** Whether a person's record renders a tab for this viewer (the triggers below): Benefits and IT need their grants, Time off an employee. */
+export function personTabOffered(tab: string, has: { benefits: boolean; it: boolean; employee: boolean }): boolean {
+  if (tab === "benefits") return has.benefits;
+  if (tab === "it") return has.it;
+  if (tab === "time-off") return has.employee;
+  return (PAGE_TABS.person as readonly string[]).includes(tab);
+}
+
 export function PersonView({ id }: { id: string }) {
   const w = useGet("/v1/workers/:id", { params: { id }, refreshMs: 5_000 });
   const tasks = useGet("/v1/workers/:id/onboarding", { params: { id }, refreshMs: 3_000 });
   const d = toDetail(w.data);
   const p = d?.worker;
-  const [tab, setTab] = useState("profile");
+  // The record's tab is in the link (?tab=pay; Profile when absent), so one link opens any tab of any record.
+  const [tabParam, setTabParam] = useUrlState("tab", oneOf(PAGE_TABS.person));
+  const setTab = (v: string) => setTabParam(v === "profile" ? null : v);
   // Benefits and IT follow the viewer's grants as well as the reporting chain: a manager (benefits: none, it: none)
   // reads neither for anyone, so those tabs are not offered and the directory note does not promise them.
   const can = useCan();
   const benefits = can("benefits");
   const it = can("it");
+  // A link may name a tab this record does not offer this viewer (Benefits without the grant, Time off for a
+  // contractor): the page shows Profile instead of a strip with nothing selected.
+  const tab = tabParam && personTabOffered(tabParam, { benefits, it, employee: p?.type === "employee" }) ? tabParam : "profile";
   // The portal's order first (sign the offer before the confidentiality agreement), then the agent's own tasks.
   const list = ((tasks.data ?? []) as { id: string; kind: string; status: "pending" | "done" | "blocked"; owner: string; dueOn: string | null; blockedReason: string | null }[])
     .slice().sort((a, b) => TASK_ORDER.indexOf(a.kind) - TASK_ORDER.indexOf(b.kind));

@@ -4,6 +4,9 @@
 // Filing a return always files a pending proposal (R4) that a person approves in the Inbox.
 import Link from "next/link";
 import { useState } from "react";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { CALENDAR_KINDS } from "../../../../../../packages/contracts/src/ext/assist";
+import { useAssistIntent } from "../../assist/intents";
 import { Badge, Button, Card, Drawer, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { cents, fmtDate, statusLabel } from "../format";
@@ -29,7 +32,12 @@ const days = (n: number) => (n === 0 ? "today" : n > 0 ? `in ${n} day${n === 1 ?
 
 export function CalendarPanel() {
   const cal = useGet("/v1/compliance/calendar", { refreshMs: 5_000 });
-  const [kind, setKind] = useState<string>("all");
+  // The kind filter is in the link (?filter.kind=deposit; All when absent), so the assistant's list.filter and a pasted
+  // link both open the same view.
+  const [kindParam, setKindParam] = useUrlState("filter.kind", oneOf(CALENDAR_KINDS));
+  const kind = kindParam ?? "all";
+  const setKind = (k: string) => setKindParam(k === "all" ? null : k);
+  useAssistIntent("list.filter", ({ name, value }) => name === "kind" && (value === "all" || (CALENDAR_KINDS as readonly string[]).includes(value ?? "")) ? (setKind(value!), true) : false);
   const rows = ((cal.data ?? []) as unknown as CalendarRowDto[]).filter((r) => kind === "all" || r.kind === kind);
   const kinds = [...new Set(((cal.data ?? []) as unknown as CalendarRowDto[]).map((r) => r.kind))];
   return (

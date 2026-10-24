@@ -15,6 +15,8 @@ import type { AgentRunRow } from "@weft/contracts";
 import { AGENT_PAGE_NEW_CHAT_EVENT, AGENT_PAGE_TID as T, type ConversationRunRow } from "../../../../../../packages/contracts/src/ext/agent-page";
 import { client, errorText, invalidate, useGet, useSimClock } from "@/lib/api/hooks";
 import { HOSTED } from "@/lib/hosted/flags";
+import { oneOf, URL_STATE_EVENT, useUrlState } from "@/lib/url-state";
+import { PAGE_TABS } from "../../../../../../packages/contracts/src/ext/assist";
 import { appendDictation, DictateButton } from "../../hosted/dictate-button";
 import { RunFeed } from "../agent/run-feed";
 import { PanelStart } from "../agent/panel-start";
@@ -58,14 +60,16 @@ function ConversationList({ conversations, background, routineNames, selectedKey
   conversations: Conversation[]; background: AgentRunRow[]; routineNames: Map<string, string>; selectedKey: string | null; now: string; base: string; loading: boolean;
   onSelect: (sel: Selection) => void; onNewChat: () => void; onClose?: () => void;
 }) {
-  const [tab, setTab] = useState<"threads" | "background">("threads");
+  // The list's tab is in the link (?tab=background; Conversations when absent), beside the selected thread or run.
+  const [tabParam, setTabParam] = useUrlState("tab", oneOf(PAGE_TABS.agent));
+  const tab = tabParam ?? "threads";
   return (
     <div data-testid={T.list} className="flex h-full min-h-0 w-full flex-col">
       <div className="flex items-center gap-1.5 px-3 pt-3 pb-2">
         <Button data-testid={T.newChat} variant="secondary" className="flex-1 justify-start" onClick={onNewChat}><SquarePen strokeWidth={1.5} /> New chat</Button>
         {onClose ? <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close conversations"><X strokeWidth={1.5} /></Button> : null}
       </div>
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "threads" | "background")} className="flex min-h-0 flex-1 flex-col">
+      <Tabs value={tab} onValueChange={(v) => setTabParam(v === "threads" ? null : v)} className="flex min-h-0 flex-1 flex-col">
         <TabsList className="mx-3 shrink-0 max-tablet:flex-nowrap">
           <TabsTrigger value="threads" data-testid={T.threadsTab}>Conversations</TabsTrigger>
           <TabsTrigger value="background" data-testid={T.backgroundTab}>Background work</TabsTrigger>
@@ -147,12 +151,14 @@ export function AgentPage() {
   const pinRef = useRef<() => void>(() => undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
-  // The selection is the URL's: read after mount (the export prerenders the page without a query) and on Back.
+  // The selection is the URL's: read after mount (the export prerenders the page without a query), on Back, and when
+  // the query is written in place (setUrlState: the cursor assistant opening a thread or run on this page).
   useEffect(() => {
     const read = () => { setSel(selectionFromSearch(window.location.search)); setBase(window.location.pathname || PAGE_PATH); };
     read();
     window.addEventListener("popstate", read);
-    return () => window.removeEventListener("popstate", read);
+    window.addEventListener(URL_STATE_EVENT, read);
+    return () => { window.removeEventListener("popstate", read); window.removeEventListener(URL_STATE_EVENT, read); };
   }, []);
   const go = (next: Selection, replace = false) => {
     setSel(next);

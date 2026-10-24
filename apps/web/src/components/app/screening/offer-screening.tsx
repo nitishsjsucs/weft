@@ -7,6 +7,7 @@ import { Badge, Button } from "@weft/ui/components";
 import { formatCents } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { fmtDate } from "../format";
+import { Untrusted } from "../untrusted-text";
 
 interface View {
   id: string; offerId: string; vendor: string; mode: "simulated" | "real"; packageName: string; priceCents: number; phase: string; status: string; result: string | null;
@@ -47,6 +48,11 @@ export function OfferScreening({ offerId, accepted }: { offerId: string; accepte
   );
 }
 
+/** The report's items, as the vendor wrote them: untrusted for the cursor assistant. */
+export function ScreeningItems({ items }: { items: readonly { id: string; text: string }[] }) {
+  return <ul className="rounded border border-[var(--app-border)] bg-card p-2" data-testid="offer-screening-items">{items.map((x) => <li key={x.id} className="whitespace-pre-wrap"><Untrusted>{x.text}</Untrusted></li>)}</ul>;
+}
+
 function OrderLine({ r }: { r: View }) {
   const [items, setItems] = useState<{ id: string; text: string }[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -71,7 +77,7 @@ function OrderLine({ r }: { r: View }) {
           {r.nextSteps.map((s) => <Button key={s} size="sm" variant={STEP[s]?.variant ?? "secondary"} data-testid={`offer-screening-step-${s}`} disabled={step.pending} onClick={() => void step.run(s)}>{STEP[s]?.label ?? s}</Button>)}
         </div>
       ) : null}
-      {items ? <ul className="rounded border border-[var(--app-border)] bg-card p-2" data-testid="offer-screening-items">{items.map((x) => <li key={x.id} className="whitespace-pre-wrap">{x.text}</li>)}</ul> : null}
+      {items ? <ScreeningItems items={items} /> : null}
       {err || step.error ? <p role="alert" className="text-red-11">{err ?? errorText(step.error)}</p> : null}
     </div>
   );

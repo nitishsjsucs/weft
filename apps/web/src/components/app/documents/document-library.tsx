@@ -7,6 +7,9 @@ import { W2_ONBOARDING_TID as T, type WorkerDocument } from "@weft/contracts";
 import { client, errorText, useGet } from "@/lib/api/hooks";
 import { fmtDate, fmtDateTime } from "../format";
 import { auditLabel } from "../copy";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { DOCUMENT_TABS } from "../../../../../../packages/contracts/src/ext/assist";
+import { useAssistIntent } from "../../assist/intents";
 
 const TABS = [["signed", "Signed"], ["sent", "Sent"], ["pending", "Pending"]] as const;
 const tabOf = (d: WorkerDocument): "signed" | "sent" | "pending" => (d.status === "voided" ? (d.sentAt ? "sent" : "pending") : d.status === "signed" ? "signed" : d.status === "sent" ? "sent" : "pending");
@@ -16,7 +19,12 @@ interface DocDetail extends WorkerDocument { bodyText: string; signature: { sign
 export function DocumentLibrary({ workerId }: { workerId: string }) {
   const q = useGet("/v1/workers/:id/documents", { params: { id: workerId }, refreshMs: 5_000 });
   const docs = (q.data ?? []) as WorkerDocument[];
-  const [tab, setTab] = useState<string>("signed");
+  // The list's tab is in the link (?tab=documents&filter.documents=sent; Signed when absent), and the cursor
+  // assistant's list.filter(documents, ...) writes it there too.
+  const [tabParam, setTabParam] = useUrlState("filter.documents", oneOf(DOCUMENT_TABS));
+  const tab = tabParam ?? "signed";
+  const setTab = (v: string) => setTabParam(v === "signed" ? null : v);
+  useAssistIntent("list.filter", ({ name, value }) => name === "documents" && (DOCUMENT_TABS as readonly string[]).includes(value ?? "") ? (setTab(value!), true) : false);
   const [open, setOpen] = useState<DocDetail | null>(null);
   const show = async (id: string) => setOpen((await client.get("/v1/documents/:id", { params: { id } })) as DocDetail);
   return (
