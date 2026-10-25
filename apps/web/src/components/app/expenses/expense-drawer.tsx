@@ -71,7 +71,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
             <div className="flex gap-4">
               {live.hasReceipt ? <ReceiptPreview id={live.id} /> : <div className="flex h-24 w-20 items-center justify-center rounded-md bg-gray-2 text-center text-0 text-gray-9">No receipt</div>}
               <dl className="min-w-0 flex-1 text-[13px]">
-                <Row k="Merchant" v={<span className="break-words">{live.merchant}</span>} />
+                <Row k="Merchant" v={<span data-assist-untrusted="" className="break-words">{live.merchant}</span>} />
                 <Row k="Amount" v={usd(live.amountCents)} warn={!!ex && ex.totalCents !== live.amountCents} />
                 <Row k="Date" v={fmtDate(live.transactionDate, { month: "short", day: "numeric", year: "numeric" })} />
                 <Row k="Submitted" v={fmtDate(live.submittedDate)} />
@@ -81,8 +81,8 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
             {ex ? <p className="mt-2 text-1 text-gray-10">Receipt reads {usd(ex.totalCents)} on {fmtDate(ex.date)}.</p>
               : live.hasReceipt ? <p className="mt-2 text-1 text-gray-10">No extraction for this receipt: the extractor reads only the receipts it knows, so compare the image by eye.</p> : null}
             <dl className="mt-2 text-[13px]">
-              <Row k="Purpose" v={<span className="break-words">{live.businessPurpose}</span>} />
-              {live.category === "meals" ? <Row k="Attendees" v={live.attendees ?? <span className="text-gray-9">none listed</span>} /> : null}
+              <Row k="Purpose" v={<span data-assist-untrusted="" className="break-words">{live.businessPurpose}</span>} />
+              {live.category === "meals" ? <Row k="Attendees" v={live.attendees ? <span data-assist-untrusted="">{live.attendees}</span> : <span className="text-gray-9">none listed</span>} /> : null}
             </dl>
             <p className="mt-1 text-0 text-gray-9">Merchant, purpose and attendees are the employee&apos;s own words.</p>
           </Section>
@@ -107,7 +107,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
           {live.allowedDecisions.length ? (
             <Section title="Decision">
               {live.suggestion ? (
-                <p className="mb-2 text-[13px] text-gray-11">Policy suggests <strong className="font-medium text-foreground">{DECISION_LABEL[live.suggestion.decision]}</strong>: {live.suggestion.note}.{live.suggestion.humanNote ? <span className="mt-1 block text-amber-11">{live.suggestion.humanNote}.</span> : null}</p>
+                <p className="mb-2 text-[13px] text-gray-11">Policy suggests <strong className="font-medium text-foreground">{DECISION_LABEL[live.suggestion.decision]}</strong>: {live.suggestion.note}.{live.suggestion.humanNote ? <span data-assist-untrusted="" className="mt-1 block text-amber-11">{live.suggestion.humanNote}.</span> : null}</p>
               ) : null}
               <textarea value={note} onChange={(ev) => setNote(ev.target.value)} maxLength={400} rows={2} placeholder={live.allowedDecisions.includes("return") ? "Note to the employee (needed to return)" : "Decision note (optional)"}
                 className="mb-2 w-full rounded-lg bg-card px-2.5 py-1.5 text-[13px] shadow-[var(--shadow-border)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-9)]" />
@@ -133,7 +133,7 @@ export function ExpenseDrawer({ id, onClose }: { id: string | null; onClose: () 
               {live.paycheckId ? <Row k="Paycheck" v={<span className="font-mono text-1">{live.paycheckId}</span>} /> : null}
               {live.decidedBy ? <Row k="Decided" v={`${live.decidedBy}${live.decidedAt ? `, ${fmtDateTime(live.decidedAt)}` : ""}`} /> : null}
               {live.decisionReasonCode ? <Row k="Reason" v={REASON_LABEL[live.decisionReasonCode]} /> : null}
-              {live.decisionNote ? <Row k="Note" v={<span className="break-words">{live.decisionNote}</span>} /> : null}
+              {live.decisionNote ? <Row k="Note" v={<span data-assist-untrusted="" className="break-words">{live.decisionNote}</span>} /> : null}
             </dl>
             {live.allowedDecisions.length === 0 ? (
               live.reopenBlocker ? <p className="mt-2 text-1 text-gray-10">{live.reopenBlocker}.</p>

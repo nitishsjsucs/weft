@@ -40,6 +40,7 @@
     "wave:ledger": "tsx scripts/wave-ledger.ts",
     "memory:bundle": "tsx scripts/memory-bundle.ts",
     "memory:restore": "tsx scripts/memory-restore.ts",
+    "voice:build": "tsx scripts/assist/build-voice.ts",
     "cf:fixtures": "test -f scripts/cf/fixtures.ts || { echo 'cf:fixtures: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/fixtures.ts",
     "cf:snapshot": "test -f scripts/cf/snapshot.ts || { echo 'cf:snapshot: not built yet (track cf4-worker)'; exit 1; } && tsx scripts/cf/snapshot.ts",
     "cf:test": "test -f apps/cf/vitest.workerd.config.ts || { echo 'cf:test: not built yet (track cf4-worker)'; exit 1; } && vitest run --config apps/cf/vitest.workerd.config.ts",

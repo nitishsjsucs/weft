@@ -99,7 +99,7 @@ export function PermissionsView() {
             </THead>
             <TBody>
               {rows.map((r) => (
-                <TR key={r.principalId} data-testid={T.matrixRow(r.principalId)} data-tour={r.role === "agent" ? "permissions-agent-row" : undefined}>
+                <TR key={r.principalId} data-testid={T.matrixRow(r.principalId)} data-entity={r.principalId} data-entity-kind="principal" data-tour={r.role === "agent" ? "permissions-agent-row" : undefined}>
                   <TH scope="row" className="sticky left-0 z-[1] h-auto w-[8.5rem] min-w-[8.5rem] bg-card py-2 text-left font-normal whitespace-normal">
                     <span className="block leading-snug font-medium text-gray-12">{r.name}</span>
                     <span className="block text-1 text-gray-10">{r.role === "agent" ? "The agent (every run)" : ROLE_WORDS[r.role] ?? r.role.replace(/_/g, " ")}</span>
@@ -118,7 +118,7 @@ export function PermissionsView() {
         <Card className="mb-3 p-1">
           <ul className="m-0 list-none p-0">
             {overrides.map((o) => (
-              <li key={o.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-a3 px-3 py-2 text-[13px] last:border-0">
+              <li key={o.id} data-entity={o.id} data-entity-kind="permission_override" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-a3 px-3 py-2 text-[13px] last:border-0">
                 <span className="font-mono">{o.command}</span>
                 <Badge tone={o.mode === "deny" ? "red" : "amber"} size="xs">{MODE_LABEL[o.mode]}</Badge>
                 <span className="text-gray-11">{o.who}</span>

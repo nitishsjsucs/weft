@@ -1,21 +1,23 @@
-// HostedExtras' logic (design 3.1 and 10): Help search, dictation, the Platform readout, the model comparison, the run
-// catalog writer and world export downloads, for the front Worker's /api/_hosted/* routes. The front applies the
-// gates first (design 6.3): RL_API for Help, the mutation gate (lease, human grant, RL_RUN) for dictation. This file
+// HostedExtras' logic (design 3.1 and 10): Help search, dictation, spoken answers, the Platform readout, the model
+// comparison, the run catalog writer and world export downloads, for the front Worker's /api/_hosted/* routes. The front
+// applies the gates first (design 6.3): RL_API for Help, the mutation gate (lease, human grant, RL_RUN) for dictation and
+// spoken answers. This file
 // builds on plain dependencies so it runs under vitest; entrypoint.ts wraps it in the WorkerEntrypoint. Track cf6-extras.
 import {
-  createDictation, type AiGatewayOption, type DictationResult, type HelpSearch, type MetricsSink, type NeuronBudget, type PlatformReadout, type R2BucketLike,
+  createDictation, createSpeech, type AiGatewayOption, type SpeechResult, type DictationResult, type HelpSearch, type MetricsSink, type NeuronBudget, type PlatformReadout, type R2BucketLike,
   type RunCatalog, type WorkersAiBindingLike,
 } from "@weft/cf-extras";
 import type { AigMetadata } from "../../../../packages/contracts/src/ext/cf-agent";
 import { hostedWorldId } from "../../../../packages/contracts/src/ext/cf-hosted";
 import { exportObjectKey } from "./queues";
-import type { DictateInput, HostedExtrasApi, SlotExport } from "./ports";
+import type { DictateInput, HostedExtrasApi, SlotExport, SpeakInput } from "./ports";
 
 export interface HostedExtrasDeps {
   help: HelpSearch;
   ai: WorkersAiBindingLike | null;
   neurons: NeuronBudget;
   dictationEnabled: () => Promise<boolean>;
+  speechEnabled: () => Promise<boolean>;
   catalog: RunCatalog | null;
   platform: () => Promise<PlatformReadout>;
   files: R2BucketLike;
@@ -37,6 +39,18 @@ export function createHostedExtras(deps: HostedExtrasDeps): HostedExtrasApi {
       });
       const r = await d.transcribe({ audio, contentType: input.contentType });
       if (r.ok) deps.metrics.emit({ name: "job.done", value: r.seconds, slot, tags: { kind: "dictation" } });
+      return r;
+    },
+    async speak(input: SpeakInput): Promise<SpeechResult> {
+      if (!deps.ai) return { ok: false, code: "SPEECH_DISABLED", message: "Spoken answers are not available here" };
+      const slot = input.slot ?? "showcase";
+      const s = createSpeech({
+        ai: deps.ai, neurons: deps.neurons, enabled: deps.speechEnabled,
+        gateway: deps.gatewayFor({ slot, gen: input.gen ?? 0, run: null, kind: "speech", visitor: input.visitor }),
+        charge: { world: input.slot && input.gen !== null ? hostedWorldId({ slot: input.slot, gen: input.gen }) : null, visitor: input.visitor, ipHash: input.ipHash },
+      });
+      const r = await s.speak({ text: input.text });
+      if (r.ok) deps.metrics.emit({ name: "job.done", value: r.chars, slot, tags: { kind: "speech" } });
       return r;
     },
     platform: () => deps.platform(),

@@ -3,7 +3,7 @@
 // evaluate the Weft modules (design 3.2). cf4-worker adds the methods to the Durable Objects; the DO side of each is
 // implemented in ./slot (createSlotExtras) and in @weft/cf-extras (sqlDailyCounters). Types only.
 import type {
-  AttachReceiptExtractArgs, AttachScanExtractArgs, CounterTake, HelpSearchResult, DictationResult, LobbyReadout, ModelComparisonRow,
+  AttachReceiptExtractArgs, AttachScanExtractArgs, CounterTake, HelpSearchResult, DictationResult, SpeechResult, LobbyReadout, ModelComparisonRow,
   PlatformReadout, RunCatalogRow,
 } from "@weft/cf-extras";
 import type { HostedSpendLedger } from "../../../../packages/contracts/src/ext/cf-agent";
@@ -80,6 +80,8 @@ export interface DurableNamespaceLike<T> {
 export interface HostedExtrasApi {
   help(query: string): Promise<HelpSearchResult>;
   dictate(input: DictateInput): Promise<DictationResult>;
+  /** The cursor assistant's spoken answer: audio/mpeg bytes, or a refusal (packages/cf-extras speech.ts). */
+  speak(input: SpeakInput): Promise<SpeechResult>;
   platform(): Promise<PlatformReadout>;
   models(opts?: { days?: number }): Promise<ModelComparisonRow[]>;
   recordRun(row: RunCatalogRow): Promise<void>;
@@ -87,3 +89,5 @@ export interface HostedExtrasApi {
 }
 /** The front has already applied the mutation gate (lease, human grant, RL_RUN) before it calls dictate. */
 export interface DictateInput { audio: Uint8Array | ArrayBuffer; contentType: string; slot: string | null; gen: number | null; visitor: string | null; ipHash: string | null }
+/** The front has applied the same mutation gate (lease, human grant and Turnstile) and the route RL_RUN before speak. */
+export interface SpeakInput { text: string; slot: string | null; gen: number | null; visitor: string | null; ipHash: string | null }

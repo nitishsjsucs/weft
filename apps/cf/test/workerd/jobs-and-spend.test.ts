@@ -2,7 +2,7 @@
 // its handler, a failing job retries and lands in weft-dlq, a malformed or unhandled message is acknowledged; and
 // SpendDO's caps hold across two slots (day, visitor, IP hash, neurons) with orphans settled at the worst case.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DO_NAMES, HOSTED_CONFIG_KEYS, ORPHAN_SETTLE_MS, type HostedJob } from "../../src/shared/contracts";
+import { DO_NAMES, HOSTED_CONFIG_KEYS, NEURON_SHARES, ORPHAN_SETTLE_MS, type HostedJob } from "../../src/shared/contracts";
 import { Harness } from "../support/harness";
 
 let h: Harness;
@@ -108,7 +108,7 @@ describe("SpendDO across slots", () => {
     } finally {
       await env.CONFIG.delete(HOSTED_CONFIG_KEYS.capIpDayUsd);
     }
-    expect((await s.reserve({ runId: "run_9003", usdMicros: 0, model: "@cf/openai/gpt-oss-120b", live: true, neurons: 3_999, product: "agent", world: "slot-1:gen-9" })).ok).toBe(true);
+    expect((await s.reserve({ runId: "run_9003", usdMicros: 0, model: "@cf/openai/gpt-oss-120b", live: true, neurons: NEURON_SHARES.agent - 1, product: "agent", world: "slot-1:gen-9" })).ok).toBe(true);
     expect(await s.reserve({ runId: "run_9004", usdMicros: 0, model: "@cf/openai/gpt-oss-120b", live: true, neurons: 2, product: "agent", world: "slot-1:gen-9" })).toMatchObject({ ok: false, hostedCap: "neurons" });
     const before = (await s.status({})).openReservations;
     expect(before).toBeGreaterThan(0);

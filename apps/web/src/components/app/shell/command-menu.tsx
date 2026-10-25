@@ -60,7 +60,7 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/20" />
-        <Dialog.Content className="fixed top-[12vh] left-1/2 z-50 w-[min(560px,calc(100vw-24px))] -translate-x-1/2 overflow-hidden rounded-xl bg-card shadow-[var(--shadow-modal)] outline-none">
+        <Dialog.Content className="fixed inset-x-0 top-[12vh] z-50 mx-auto w-[min(560px,calc(100vw-24px))] overflow-hidden rounded-xl bg-card shadow-[var(--shadow-modal)] outline-none">
           <Dialog.Title className="sr-only">Search and navigate</Dialog.Title>
           <Dialog.Description className="sr-only">Type to search pages, people and payroll runs</Dialog.Description>
           <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-3">

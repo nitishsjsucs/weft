@@ -5,7 +5,7 @@
 // weft-engine.ts, loaded lazily (design 3.2: @weft/* is imported inside blockConcurrencyWhile); the Miniflare suite
 // plugs a small fake in through the same seam, so the plumbing is tested without the Weft stack.
 import type {
-  AigMetadata, DurableStorageLike, HostedProviderId, HostedSpendLedger, HostedWorldRef, McpKeyMint, RunHost, SchedulerHost, SqlMeter, TxGuard, WorkersAiBindingLike,
+  AigMetadata, DurableStorageLike, HostedProviderId, HostedSpendLedger, HostedWorldRef, McpKeyMint, RunAdmission, RunHost, SchedulerHost, SqlMeter, TxGuard, WorkersAiBindingLike,
 } from "../../shared/contracts";
 import type { AiGatewayOption, ExtrasFlags, HostedJob, NeuronBudget, QueueLike, R2BucketLike, RunCatalogRow, VectorizeLike } from "@weft/cf-extras";
 import type { SlotExtrasPort } from "../../extras/ports";
@@ -45,6 +45,8 @@ export interface WorldBootInput {
   mcpAskAllowed: (apiKey: string) => Promise<boolean>;
   /** The extras' bindings; absent in the fake-engine suite. */
   extras?: WorldExtrasBindings;
+  /** The gates for a run the world starts on its own for a visitor (the cursor assistant's handoff): RL_RUN and the rows budget. */
+  admitRun?: RunAdmission;
 }
 
 /** One after-commit outbox row (design 3.4); `job` is null when the row's body is not a job (dropped unsent). */

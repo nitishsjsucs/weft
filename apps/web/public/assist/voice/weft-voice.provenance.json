@@ -1,0 +1,82 @@
+{
+  "voice": "Resemble AI built-in default voice, MIT; speaker not documented",
+  "file": {
+    "path": "apps/web/public/assist/voice/weft-voice.bin",
+    "bytes": 1318231,
+    "sha256": "34350b2ba632c90872cd0f9f5d21ac0069dc0147e865cceac559bee25b3e91e2"
+  },
+  "tensors": [
+    {
+      "name": "audio_features",
+      "dtype": "float32",
+      "dims": [
+        1,
+        376,
+        768
+      ]
+    },
+    {
+      "name": "audio_tokens",
+      "dtype": "int64",
+      "dims": [
+        1,
+        250
+      ]
+    },
+    {
+      "name": "speaker_embeddings",
+      "dtype": "float32",
+      "dims": [
+        1,
+        192
+      ]
+    },
+    {
+      "name": "speaker_features",
+      "dtype": "float32",
+      "dims": [
+        1,
+        500,
+        80
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "repo": "ResembleAI/chatterbox-nano",
+      "revision": "71ccd1d0081b430592cea481f4307e764e07bc64",
+      "path": "conds.pt",
+      "bytes": 169454,
+      "sha256": "b1852099306fd6a7814eb9d0bd10186caba7249596cc23868f78a0eefbfa5033",
+      "license": "MIT",
+      "used": "gen.prompt_token, gen.embedding, gen.prompt_feat, t3.cond_prompt_speech_tokens"
+    },
+    {
+      "repo": "owensong/chatterbox-nano-ONNX",
+      "revision": "4a66d7dab72a9e98f24b515d49a1d7a81632df2e",
+      "path": "onnx/speech_encoder_q4f16.onnx_data",
+      "bytes": 176273652,
+      "sha256": "55d89bd87fd36be48b2e831c99c2e309d432169119049066f9f22fcfe517798d",
+      "license": "MIT",
+      "used": "/Constant_93_output_0: bytes 3840 to 5376, sha256 b85fe6f914ec8fc0b4f3c7c7a116d3b0ed29facc1e3330819a5cceb5cbcf1670"
+    },
+    {
+      "repo": "owensong/chatterbox-nano-ONNX",
+      "revision": "4a66d7dab72a9e98f24b515d49a1d7a81632df2e",
+      "path": "onnx/embed_tokens_fp16.onnx_data",
+      "bytes": 87304704,
+      "sha256": "bcd7b35ae4f206932e2491cb60b42ebb80f6d8facfdb53ba7d7449ad00a3237b",
+      "license": "MIT",
+      "used": "speech_emb.weight: bytes 77223936 to 87304704, sha256 9d7c3b3ba82b6433db6ddd04600bcfac2b567750e8738622f640b1a0564cf457"
+    }
+  ],
+  "crossCheck": {
+    "repo": "ResembleAI/chatterbox-nano",
+    "revision": "71ccd1d0081b430592cea481f4307e764e07bc64",
+    "path": "t3_nano_v1.safetensors",
+    "sha256": "72b110185087d945dbdf54dee4e333848e1811bdd5fd6cb16ceb8da50006f0c9",
+    "speakerRowMaxDiff": 0.00042945745064359997,
+    "speechRowsMaxDiff": 0.0009658336639404297
+  },
+  "builtBy": "scripts/assist/build-voice.ts"
+}

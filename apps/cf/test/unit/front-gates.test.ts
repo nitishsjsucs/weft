@@ -18,10 +18,12 @@ export interface FakeFront {
   takes: { key: string; limit: number }[];
   /** SpendDO.status calls (what each asked for). */
   spend: unknown[];
+  /** Requests forwarded to weft-core's extras (CORE): the path and the signed ctx header. */
+  extras: { path: string; ctx: string | null }[];
 }
 
-export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown; worldStatus?: number; worldHeaders?: Record<string, string>; worldQuery?: (url: URL) => string | null; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
-  const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [], spend: [] };
+export function fakeFront(o: { config?: Record<string, string>; pool?: number; worldBody?: (url: URL) => unknown; worldStatus?: number; worldHeaders?: Record<string, string>; worldQuery?: (url: URL) => string | null; status?: (input: { visitor: string | null; slot?: string | null; gen?: number | null }) => unknown } = {}): FakeFront {
+  const out: FakeFront = { env: null as never, worlds: [], limits: [], takes: [], spend: [], extras: [] };
   const rl = (binding: string, max: number) => {
     const seen = new Map<string, number>();
     return { limit: async ({ key }: { key: string }) => { out.limits.push({ binding, key }); const n = (seen.get(key) ?? 0) + 1; seen.set(key, n); return { success: n <= max }; } };
@@ -31,7 +33,8 @@ export function fakeFront(o: { pool?: number; worldBody?: (url: URL) => unknown;
     WEFT_SESSION_SECRET: "s".repeat(64), WEFT_CTX_SECRET: "c".repeat(64), WEFT_PROXY_SECRET: "p".repeat(64), WEFT_ADMIN_TOKEN: "a".repeat(64), WEFT_SMOKE_TOKEN: "m".repeat(64),
     WEFT_PUBLIC_ORIGIN: "https://weft.test", WEFT_POOL_SIZE: String(o.pool ?? 2), WEFT_CONFIG_MEMO_MS: "0",
     RL_API: rl("RL_API", 600), RL_MUTATE: rl("RL_MUTATE", 30), RL_MCP: rl("RL_MCP", 60),
-    CONFIG: { get: async (keys: string[] | string) => (Array.isArray(keys) ? new Map(keys.map((k) => [k, null])) : null) },
+    CONFIG: { get: async (keys: string[] | string) => (Array.isArray(keys) ? new Map(keys.map((k) => [k, o.config?.[k] ?? null])) : o.config?.[keys] ?? null) },
+    CORE: { fetch: async (req: Request) => { out.extras.push({ path: new URL(req.url).pathname, ctx: req.headers.get("x-weft-ctx") }); return new Response(new Uint8Array([0xff, 0xfb]), { headers: { "content-type": "audio/mpeg" } }); } },
     COMPANY: {
       idFromName: (n: string) => n,
       get: (slot: string) => ({
@@ -263,6 +266,48 @@ describe("the showcase memo", () => {
     for (let i = 0; i < 50; i++) expect((await call(f, "/api/v1/health")).status).toBe(200);
     expect((await call(f, "/api/v1/health", { method: "HEAD" })).status).toBe(200);
     expect(f.worlds).toHaveLength(1);
+  });
+});
+
+describe("spoken answers (POST /api/_hosted/speak)", () => {
+  const leased = async (f: FakeFront, visitor = "vis_" + "f".repeat(32)) => {
+    const nowS = Math.floor(Date.now() / 1000);
+    return `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor, slot: "slot-1", gen: 1, exp: nowS + 600, leaseExpiresMs: (nowS + 600) * 1000 })}; ${HUMAN_GRANT_COOKIE}=${await grantToken(f.env.WEFT_SESSION_SECRET!, { visitor, exp: nowS + 600 })}`;
+  };
+  const body = JSON.stringify({ text: "Four paychecks need review." });
+  const speak = (f: FakeFront, headers: Record<string, string>, b: string = body) =>
+    call(f, "/api/_hosted/speak", { method: "POST", body: b, headers: { "content-type": "application/json", "content-length": String(new TextEncoder().encode(b).length), origin: "https://weft.test", ...headers } });
+
+  it("goes through the mutation gate, then to weft-core with the signed ctx", async () => {
+    const f = fakeFront();
+    const r = await speak(f, { cookie: await leased(f) });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("audio/mpeg");
+    expect(f.extras).toMatchObject([{ path: "/api/_hosted/speak", ctx: expect.any(String) }]);
+    expect(f.limits.some((l) => l.binding === "RL_MUTATE")).toBe(true);
+  });
+
+  it("refuses a visit without a lease and a human grant before weft-core sees it", async () => {
+    const f = fakeFront();
+    expect((await speak(f, {})).status).toBeGreaterThanOrEqual(400);
+    const nowS = Math.floor(Date.now() / 1000);
+    const noGrant = `${SESSION_COOKIE}=${await sessionToken(f.env.WEFT_SESSION_SECRET!, { visitor: "vis_" + "9".repeat(32), slot: "slot-1", gen: 1, exp: nowS + 600, leaseExpiresMs: (nowS + 600) * 1000 })}`;
+    expect((await speak(f, { cookie: noGrant })).status).toBeGreaterThanOrEqual(400);
+    expect(f.extras).toEqual([]);
+  });
+
+  it("caps the body from its Content-Length, needs one, and pauses with the agent", async () => {
+    const f = fakeFront();
+    const cookie = await leased(f);
+    expect((await speak(f, { cookie }, JSON.stringify({ text: "y".repeat(3_000) }))).status).toBe(413);
+    const chunked = await call(f, "/api/_hosted/speak", { method: "POST", body: stalling(10), duplex: "half", headers: { cookie, origin: "https://weft.test", "content-type": "application/json" } } as RequestInit);
+    expect(chunked.status).toBe(411);
+    expect((await call(f, "/api/_hosted/speak", { method: "GET", headers: { cookie } })).status).toBe(405);
+    const paused = fakeFront({ config: { "agent.enabled": "false" } });
+    const p = await speak(paused, { cookie: await leased(paused) });
+    expect(p.status).toBe(503);
+    expect(await p.json()).toMatchObject({ code: "AGENT_PAUSED" });
+    expect([...f.extras, ...paused.extras]).toEqual([]);
   });
 });
 

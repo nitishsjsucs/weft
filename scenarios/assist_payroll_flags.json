@@ -1,0 +1,27 @@
+{
+  "match": "payroll flags|flagged paychecks|needs review section",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__navigate",
+            "arguments": {
+              "route": "/app/payroll/pay_2026_10_30",
+              "target": "#payroll-needs-review",
+              "label": "Needs review"
+            }
+          },
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "These paychecks need review before the run can be approved. Open a flag to read why it fired."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

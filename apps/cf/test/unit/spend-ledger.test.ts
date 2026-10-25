@@ -2,7 +2,7 @@
 // visitor, IP-hash and neuron caps, orphans settled at their worst case (design 4.3, 5.2, 6.3, section 0), and the
 // persisted day totals that keep every read flat on a ledger that just woke from hibernation (design 5.5).
 import { describe, expect, it } from "vitest";
-import { HOSTED_CAP_DEFAULTS, ORPHAN_SETTLE_MS, type HostedCaps } from "../../src/shared/contracts";
+import { HOSTED_CAP_DEFAULTS, NEURON_SHARES, ORPHAN_SETTLE_MS, type HostedCaps } from "../../src/shared/contracts";
 import { createSqlSpendLedger, fold, migrateSpend, PRUNE_BATCH, rebuildSpendTotals, SPEND_SCHEMA_VERSION, type SpendRow } from "../../src/core/spend/ledger";
 import { billedWriteMeter, memorySql, readMeter } from "./sqlite";
 import { SPEND_ROWS_PER_LIVE_STEP } from "../../src/core/lobby/policy";
@@ -18,7 +18,7 @@ function ledger(caps: Partial<HostedCaps> = {}, start = "2026-10-26T12:00:00.000
   return { l, s, caps: c, at: (iso: string) => { now = new Date(iso); }, advance: (ms: number) => { now = new Date(now.getTime() + ms); } };
 }
 
-const reserve = (l: ReturnType<typeof ledger>["l"], usd: number, o: Partial<Parameters<ReturnType<typeof ledger>["l"]["reserve"]>[0]> = {}) =>
+const reserve = (l: ReturnType<typeof createSqlSpendLedger>, usd: number, o: Partial<Parameters<ReturnType<typeof ledger>["l"]["reserve"]>[0]> = {}) =>
   l.reserve({ runId: "run_0001", usdMicros: usd * USD, model: "gpt-5.6-luna", live: true, world: "slot-1:gen-1", visitor: "vis_a", ipHash: "ip_a", ...o });
 
 describe("SpendDO ledger", () => {
@@ -95,7 +95,7 @@ describe("SpendDO ledger", () => {
     const st = l.status({});
     expect(st.neurons.byProduct).toEqual({
       agent: folded((r) => r.day === "2026-10-26" && r.product === "agent").neurons, ocr: folded((r) => r.day === "2026-10-26" && r.product === "ocr").neurons + 300,
-      embeddings: 300, dictation: 300,
+      embeddings: 300, dictation: 300, speech: 0,
     });
     expect(st.openReservations).toBe((s.db.prepare(`SELECT COUNT(*) AS n FROM spend_entries r WHERE day = '2026-10-26' AND kind = 'reserve' AND NOT EXISTS (SELECT 1 FROM spend_entries x WHERE x.reservation_id = r.reservation_id AND x.kind != 'reserve')`).get() as { n: number }).n);
     // A later start (every cold start runs the migration) reads the schema row and builds nothing.
@@ -242,15 +242,56 @@ describe("SpendDO ledger", () => {
 
   it("enforces the neuron day cap and each product's share (design 5.2)", () => {
     const { l } = ledger({ neuronsDay: 5000 });
-    const n = (neurons: number, product: "agent" | "ocr" | "embeddings" | "dictation", runId: string | null = null) =>
+    const n = (neurons: number, product: "agent" | "ocr" | "embeddings" | "dictation" | "speech", runId: string | null = null) =>
       l.reserve({ runId, usdMicros: 0, model: "@cf/openai/gpt-oss-120b", live: true, neurons, product, world: "slot-1:gen-1" });
-    expect(n(3900, "agent", "run_0001").ok).toBe(true);
+    expect(n(3400, "agent", "run_0001").ok).toBe(true);
     expect(n(200, "agent", "run_0002")).toMatchObject({ ok: false, hostedCap: "neurons", cap: "day" });
     expect(n(480, "ocr").ok).toBe(true);
     expect(n(30, "ocr")).toMatchObject({ ok: false, hostedCap: "neurons" });
     l.recordNeurons({ product: "dictation", model: "@cf/openai/whisper-large-v3-turbo", neurons: 290 });
-    expect(l.neuronsLeft("dictation")).toEqual({ product: 10, day: 5000 - 3900 - 480 - 290 });
-    expect(l.status({}).neurons).toEqual({ used: 4670, byProduct: { agent: 3900, ocr: 480, embeddings: 0, dictation: 290 } });
+    expect(l.neuronsLeft("dictation")).toEqual({ product: 10, day: 5000 - 3400 - 480 - 290 });
+    expect(l.status({}).neurons).toEqual({ used: 4170, byProduct: { agent: 3400, ocr: 480, embeddings: 0, dictation: 290, speech: 0 } });
+    // Speech has its own share of 500 (taken from the agent's), inside the same 5,000 day cap.
+    expect(l.neuronsLeft("speech")).toEqual({ product: 500, day: 830 });
+    expect(n(501, "speech")).toMatchObject({ ok: false, hostedCap: "neurons" });
+    expect(n(491, "speech").ok).toBe(true);
+    expect(l.status({}).neurons.byProduct.speech).toBe(491);
+    // The shares partition the cap: every product at its share is the whole day.
+    expect(Object.values(NEURON_SHARES).reduce((a, b) => a + b, 0)).toBe(5000);
+  });
+
+  it("caps speech at its own share on a quiet day", () => {
+    const { l } = ledger({ neuronsDay: 5000 });
+    const speak = (neurons: number) => l.reserve({ runId: null, usdMicros: 0, model: "@cf/deepgram/aura-2-en", live: true, neurons, product: "speech", world: "slot-1:gen-1" });
+    expect(speak(491).ok).toBe(true);
+    expect(speak(491)).toMatchObject({ ok: false, hostedCap: "neurons" });
+    expect(l.neuronsLeft("speech")).toEqual({ product: 9, day: 5000 - 491 });
+  });
+
+  it("a schema 3 ledger from before the speech column gains it on its next start: every total kept, nothing rebuilt, the schema row unchanged so the code before it still reads it", () => {
+    const s = memorySql();
+    migrateSpend(s);
+    const l = createSqlSpendLedger(s, { caps: () => HOSTED_CAP_DEFAULTS, wallNow: () => new Date("2026-10-26T12:00:00.000Z") });
+    expect(reserve(l, 0.02).ok).toBe(true);
+    l.recordNeurons({ product: "ocr", model: "@cf/meta/llama-3.2-11b-vision-instruct", neurons: 40 });
+    // Schema 3 as it was: the same tables, spend_days without the speech column.
+    s.sql.exec(`ALTER TABLE spend_days DROP COLUMN speech_neurons`);
+    s.sql.exec(`UPDATE spend_meta SET v = '3' WHERE k = 'schema'`);
+    const before = persistedDays(s).map(({ speech_neurons: _s, ...r }) => r);
+    expect(before.length).toBeGreaterThan(0);
+    migrateSpend(s);
+    // Still "3": weft-core from before the speech product accepts only 1, 2 and 3, so rolling it back keeps SpendDO up.
+    expect(SPEND_SCHEMA_VERSION).toBe("3");
+    expect(s.sql.exec(`SELECT v FROM spend_meta WHERE k = 'schema'`).toArray()).toEqual([{ v: "3" }]);
+    expect(persistedDays(s)).toEqual(before.map((r) => ({ ...r, speech_neurons: 0 })));
+    expect(persistedDays(s)).toEqual(foldedDays(s));
+    const again = createSqlSpendLedger(s, { caps: () => HOSTED_CAP_DEFAULTS, wallNow: () => new Date("2026-10-26T12:00:00.000Z") });
+    again.recordNeurons({ product: "speech", model: "@cf/deepgram/aura-2-en", neurons: 120 });
+    expect(again.status({}).neurons.byProduct).toMatchObject({ ocr: 40, speech: 120 });
+    // A later start reads the schema row only.
+    const meter = readMeter(s);
+    migrateSpend(s);
+    expect(meter.rows).toBe(1);
   });
 
   it("settles a reservation by its actual neurons, or keeps the reserved neurons", () => {
@@ -366,7 +407,8 @@ function legacySchema(s: ReturnType<typeof memorySql>, o: { indexes: boolean }):
 }
 
 type DayRow = Record<string, number | string>;
-const DAY_KEYS = ["settled_micros", "open_micros", "open_count", "neurons", "agent_neurons", "ocr_neurons", "embeddings_neurons", "dictation_neurons", "live_settled_micros", "live_open_micros", "live_neurons"];
+const PRODUCT_KEYS = ["agent", "ocr", "embeddings", "dictation", "speech"];
+const DAY_KEYS = ["settled_micros", "open_micros", "open_count", "neurons", ...PRODUCT_KEYS.map((p) => `${p}_neurons`), "live_settled_micros", "live_open_micros", "live_neurons"];
 const nonZero = (r: DayRow) => DAY_KEYS.some((k) => Number(r[k]) !== 0);
 
 /** spend_days as persisted, without rows that are all zeros (a day whose reservations were all released). */
@@ -385,11 +427,11 @@ function foldedDays(s: ReturnType<typeof memorySql>): DayRow[] {
     const settled = f.open ? 0 : f.micros, open = f.open ? f.micros : 0;
     add(r, "settled_micros", settled); add(r, "open_micros", open); add(r, "open_count", f.open ? 1 : 0); add(r, "neurons", f.neurons);
     const p = f.r.product ?? "agent";
-    if (["agent", "ocr", "embeddings", "dictation"].includes(p)) add(r, `${p}_neurons`, f.neurons);
+    if (PRODUCT_KEYS.includes(p)) add(r, `${p}_neurons`, f.neurons);
     if (f.r.live === 1) { add(r, "live_settled_micros", settled); add(r, "live_open_micros", open); add(r, "live_neurons", f.neurons); }
   }
   for (const d of s.db.prepare(`SELECT day, product, neurons FROM neuron_entries`).all() as { day: string; product: string; neurons: number }[]) {
-    if (["agent", "ocr", "embeddings", "dictation"].includes(d.product)) add(at(d.day), `${d.product}_neurons`, d.neurons);
+    if (PRODUCT_KEYS.includes(d.product)) add(at(d.day), `${d.product}_neurons`, d.neurons);
   }
   return [...days.values()].filter(nonZero).sort((a, b) => String(a.day).localeCompare(String(b.day)));
 }

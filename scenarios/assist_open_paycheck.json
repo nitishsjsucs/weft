@@ -1,0 +1,38 @@
+{
+  "match": "lena'?s paycheck|open .*paycheck|paycheck for lena",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__show",
+            "arguments": {
+              "intent": "payroll.openPaycheck",
+              "params": [
+                {
+                  "name": "payrollId",
+                  "value": "pay_2026_10_30"
+                },
+                {
+                  "name": "workerId",
+                  "value": "wrk_0026"
+                }
+              ],
+              "target": null,
+              "action": null,
+              "label": "Lena's paycheck"
+            }
+          },
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "Here is Lena Brooks's paycheck with its tax trace."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

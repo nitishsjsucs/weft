@@ -26,3 +26,8 @@ export { describeSecret, envSecret, parseSecretsFile } from "./secrets-core";
 export { canonicalJson, sha256, newNonce, escapeTagText } from "./canonical";
 export { lockedWrite, isBusy } from "./busy";
 export { setTraceRedactor, traceRedact, runTraceTags, traceMcpCall, type McpCallInfo } from "./otel";   // wave 4 telemetry seam (w4-telemetry)
+export { assistPack, assistUntrustedSource, intentsLine, ASSIST_BUDGET_TOKENS, type AssistPackInput } from "./assist/pack";   // the cursor assistant
+export { readsAsChange, resolveAssist, resolverProvider, RESOLVER_LABEL, type AssistCall, type AssistResolution } from "./assist/resolver";
+export { chipFor, closingShow, entitiesIn, CLOSING_CHIPS, type AssistClosing, type ClosingChip } from "./assist/closing";
+export { handoffPageLine } from "./runtime";
+export { isPresentationTool, presentationSummary, type AssistHandoffRecord, type HandoffRequest } from "./loop";

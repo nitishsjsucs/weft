@@ -161,6 +161,13 @@ export interface WeftPlatform<TDb = unknown> {
   readonly executor?: HostedExecutorOptions;
 }
 
+/**
+ * Admits a run the API starts on its own, with no HTTP request of its own to pass the host's gates: the cursor
+ * assistant's handoff to a chat run. The hosted slot supplies it (RL_RUN for the lease's visitor and the rows budget,
+ * as at the door for POST /v1/agent/runs); without one (Node) every such run is admitted.
+ */
+export type RunAdmission = (input: { kind: "assist_handoff"; fromRunId: string }) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+
 /** The durable platform supplies every part. */
 export type DurableWeftPlatform<TDb = unknown> = Required<WeftPlatform<TDb>> & { readonly kind: "durable" };
 

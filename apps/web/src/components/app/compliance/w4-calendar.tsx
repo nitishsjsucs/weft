@@ -4,6 +4,9 @@
 // Filing a return always files a pending proposal (R4) that a person approves in the Inbox.
 import Link from "next/link";
 import { useState } from "react";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { CALENDAR_KINDS } from "../../../../../../packages/contracts/src/ext/assist";
+import { useAssistIntent } from "../../assist/intents";
 import { Badge, Button, Card, Drawer, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
 import { cents, fmtDate, statusLabel } from "../format";
@@ -19,7 +22,7 @@ interface FilingDto {
   confirmation: string | null; prepared: boolean; periodOpen: boolean; totalDueCents: number | null; balanceDueCents: number | null; sourceUrl: string | null;
 }
 interface PreparedReturn { lines: { line: string; label: string; cents: number | null; count: number | null }[]; runs: string[]; coverage: string; employees: Record<string, unknown>[]; total_due_cents: number; balance_due_cents: number }
-interface HandoffDto { id: string; kind: string; reason: string; subjectRef: string | null; summary: string; evidence: { label: string; ref: string }[]; status: string; assigneeName: string; createdAt: string; resolutionNote: string | null }
+export interface HandoffDto { id: string; kind: string; reason: string; subjectRef: string | null; summary: string; evidence: { label: string; ref: string }[]; status: string; assigneeName: string; createdAt: string; resolutionNote: string | null }
 interface Page<T> { data: T[]; count: number; hasMore: boolean }
 
 const TONE: Record<CalendarRowDto["status"], "gray" | "blue" | "amber" | "green" | "red"> = { upcoming: "gray", due_soon: "amber", prepared: "blue", proposed: "blue", done: "green", overdue: "red", waived: "gray" };
@@ -29,7 +32,12 @@ const days = (n: number) => (n === 0 ? "today" : n > 0 ? `in ${n} day${n === 1 ?
 
 export function CalendarPanel() {
   const cal = useGet("/v1/compliance/calendar", { refreshMs: 5_000 });
-  const [kind, setKind] = useState<string>("all");
+  // The kind filter is in the link (?filter.kind=deposit; All when absent), so the assistant's list.filter and a pasted
+  // link both open the same view.
+  const [kindParam, setKindParam] = useUrlState("filter.kind", oneOf(CALENDAR_KINDS));
+  const kind = kindParam ?? "all";
+  const setKind = (k: string) => setKindParam(k === "all" ? null : k);
+  useAssistIntent("list.filter", ({ name, value }) => name === "kind" && (value === "all" || (CALENDAR_KINDS as readonly string[]).includes(value ?? "")) ? (setKind(value!), true) : false);
   const rows = ((cal.data ?? []) as unknown as CalendarRowDto[]).filter((r) => kind === "all" || r.kind === kind);
   const kinds = [...new Set(((cal.data ?? []) as unknown as CalendarRowDto[]).map((r) => r.kind))];
   return (
@@ -140,21 +148,27 @@ export function HandoffsPanel({ status = "open" }: { status?: string }) {
     <section data-testid="handoffs-panel" className="flex flex-col gap-2">
       {list.error ? <div role="alert" className="text-1 text-red-11">{errorText(list.error)}</div> : null}
       {rows.length === 0 && list.data ? <p className="text-[13px] text-gray-10">No open hand-offs.</p> : null}
-      {rows.map((h) => (
-        <Card key={h.id} className="flex flex-col gap-1.5 p-3" data-testid={`handoff-${h.id}`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="amber">{statusLabel(h.kind)}</Badge><span className="text-1 text-gray-10">{statusLabel(h.reason)}</span>
-            {h.subjectRef ? <SubjectLink r={h.subjectRef} /> : null}
-          </div>
-          <p className="text-[13px]">{humanCopy(h.summary)}</p>
-          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-0 text-gray-11">{/* Evidence that only points at a row by its id says nothing on its own (the subject link above names it). */}
-            {h.evidence.filter((e) => !/^[a-z]{2,5}_\w*\d/.test(e.ref)).map((e) => <li key={`${e.label}${e.ref}`}>{humanLine(e.label)}: {humanLine(e.ref)}</li>)}</ul>
-          <div className="flex items-center gap-2 text-1 text-gray-10">With {h.assigneeName}
-            {h.status === "open" || h.status === "acknowledged" ? <Button size="sm" variant="secondary" disabled={resolve.pending} onClick={() => void resolve.run(h.id)}>Mark resolved</Button> : null}
-          </div>
-        </Card>
-      ))}
+      {rows.map((h) => <HandoffCard key={h.id} h={h} resolving={resolve.pending} onResolve={() => void resolve.run(h.id)} />)}
     </section>
+  );
+}
+
+/** One hand-off. Its summary and evidence are the words of the run that opened it (handoffs.open), often a run that
+ *  read a notice, so they are marked untrusted for the cursor assistant; the kind, reason and subject are the app's. */
+export function HandoffCard({ h, resolving, onResolve }: { h: HandoffDto; resolving: boolean; onResolve: () => void }) {
+  return (
+    <Card className="flex flex-col gap-1.5 p-3" data-testid={`handoff-${h.id}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="amber">{statusLabel(h.kind)}</Badge><span className="text-1 text-gray-10">{statusLabel(h.reason)}</span>
+        {h.subjectRef ? <SubjectLink r={h.subjectRef} /> : null}
+      </div>
+      <p data-assist-untrusted="" className="text-[13px]">{humanCopy(h.summary)}</p>
+      <ul data-assist-untrusted="" className="flex flex-wrap gap-x-3 gap-y-1 text-0 text-gray-11">{/* Evidence that only points at a row by its id says nothing on its own (the subject link above names it). */}
+        {h.evidence.filter((e) => !/^[a-z]{2,5}_\w*\d/.test(e.ref)).map((e) => <li key={`${e.label}${e.ref}`}>{humanLine(e.label)}: {humanLine(e.ref)}</li>)}</ul>
+      <div className="flex items-center gap-2 text-1 text-gray-10">With {h.assigneeName}
+        {h.status === "open" || h.status === "acknowledged" ? <Button size="sm" variant="secondary" disabled={resolving} onClick={onResolve}>Mark resolved</Button> : null}
+      </div>
+    </Card>
   );
 }
 

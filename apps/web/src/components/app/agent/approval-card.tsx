@@ -17,6 +17,11 @@ import { RiskChip } from "../risk";
 import { ChangeValue, idleMoneyRow, splitChange } from "../card-rows";
 import { cardField, enumWords, humanLine } from "../copy";
 import { taintText } from "./untrusted";
+import { followInPlace } from "@/lib/url-state";
+import { viewPatch } from "../../assist/surface-core";
+
+/** The proposal in the Inbox. On the Inbox itself the Open link writes it in place (followInPlace), so the page shows it. */
+const inboxHref = (proposalId: string) => `/app/inbox?proposal=${encodeURIComponent(proposalId)}`;
 
 const OUTCOME: Partial<Record<ProposalStatus, { text: string; tone: string }>> = {
   executed: { text: "Approved and done", tone: "text-green-11" },
@@ -88,7 +93,7 @@ export function ApprovalCard({ card, status, taintedBy = null, known = true, com
             <Button data-testid={W3_CHAT_TID.cardDeny(card.proposalId)} variant="secondary" size="sm" disabled={m.pending} onClick={() => void decide("deny")}><X /> Deny</Button>
           </>
         ) : null}
-        <Button asChild variant="ghost" size="sm"><Link href={`/app/inbox?proposal=${encodeURIComponent(card.proposalId)}`}>Open <ExternalLink className="size-3" /></Link></Button>
+        <Button asChild variant="ghost" size="sm"><Link href={inboxHref(card.proposalId)} onClick={(e) => followInPlace(e, inboxHref(card.proposalId), viewPatch(inboxHref(card.proposalId)))}>Open <ExternalLink className="size-3" /></Link></Button>
       </div>
     </div>
   );

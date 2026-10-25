@@ -17,7 +17,7 @@ export function TourResetDialog({ open, from, reasons, busy, error, note, onRese
         <AlertDialog.Content
           data-tour-reset=""
           onEscapeKeyDown={(e) => { e.preventDefault(); if (!busy) (from === "start" ? onSkip : onCancel)(); }}
-          className="weft-tour-card fixed top-1/2 left-1/2 z-[71] flex w-[min(440px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-xl bg-card p-5 text-[13px] shadow-[var(--shadow-modal)] outline-none"
+          className="weft-tour-card fixed inset-0 z-[71] m-auto flex h-fit w-[min(440px,calc(100vw-32px))] flex-col gap-3 rounded-xl bg-card p-5 text-[13px] shadow-[var(--shadow-modal)] outline-none"
         >
           <AlertDialog.Title className="text-[14px] font-semibold text-gray-12">{C.title}</AlertDialog.Title>
           <AlertDialog.Description className="leading-5 text-gray-11">{C.body}</AlertDialog.Description>

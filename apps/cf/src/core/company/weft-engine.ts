@@ -68,7 +68,7 @@ async function boot(input: WorldBootInput): Promise<WorldEngine> {
     ...platform,
     openDb: async (dataDir: string) => (opened = await platform.openDb(dataDir)),
   };
-  const weft = await inScope(() => d.assembleWeft(wrapped as never, { dataDir: `/weft/${input.world.slot}`, testMode: false }));
+  const weft = await inScope(() => d.assembleWeft(wrapped as never, { dataDir: `/weft/${input.world.slot}`, testMode: false, ...(input.admitRun ? { admitRun: input.admitRun } : {}) }));
   const db = opened as PlatformDb<unknown> | null;
   if (!db?.meter || !db.guard) {
     await weft.close();

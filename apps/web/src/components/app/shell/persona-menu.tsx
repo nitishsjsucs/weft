@@ -13,6 +13,8 @@ import { PRINCIPALS, setPrincipal, useGet, usePrincipal } from "@/lib/api/hooks"
 import { firstName, groupPersonas, initials, roleLabel } from "./env";
 import { segmentClass } from "./segment";
 import { useTour } from "../../tour/tour-provider";
+import { ASSIST_TID } from "../../../../../../packages/contracts/src/ext/assist";
+import { setAssistPref, useAssistIcon } from "../../assist/prefs";
 
 /** New-hire personas from sent, viewed or accepted offers. They sign in to the portal only (PORTAL_ONLY elsewhere). */
 function usePortalPersonas(): { id: string; name: string }[] {
@@ -32,8 +34,26 @@ export function PersonaAvatar({ name, className }: { name: string; className?: s
   );
 }
 
+/**
+ * A touch screen with no hovering pointer (a phone): no Ctrl or Cmd J and, on iOS, no right-click, so the docked icon
+ * is the one way to the assistant there.
+ */
+function useTouchOnly(): boolean {
+  const [touch, setTouch] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const on = () => setTouch(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return touch;
+}
+
 export function PersonaMenu() {
   const tour = useTour();
+  const assistIcon = useAssistIcon();
+  const touchOnly = useTouchOnly();
   const who = usePrincipal();
   const portal = usePortalPersonas();
   const current = PRINCIPALS.find((p) => p.id === who) ?? PRINCIPALS[0];
@@ -106,6 +126,12 @@ export function PersonaMenu() {
             <DropdownMenuLabel>Workspace</DropdownMenuLabel>
             <DropdownMenuItem data-tour="tour-menu-start" onSelect={() => tour.start()}>Take the tour</DropdownMenuItem>
             <DropdownMenuItem data-tour="tour-menu-reset" onSelect={() => tour.openReset()}>Reset workspace data…</DropdownMenuItem>
+            <DropdownMenuItem data-testid={ASSIST_TID.toggle} data-on={assistIcon ? "true" : "false"} onSelect={() => setAssistPref("icon", !assistIcon)}>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">{assistIcon ? "Hide the assistant icon" : "Show the assistant icon"}</span>
+                <span className="truncate text-1 text-gray-11">{touchOnly ? "On a touch screen the icon is the way in" : "Ctrl or Cmd J opens the assistant either way"}</span>
+              </span>
+            </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>

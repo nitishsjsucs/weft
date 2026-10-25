@@ -1,0 +1,66 @@
+{
+  "match": "^\\s*(please )?approve (this|it|that|ruth)",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__show",
+            "arguments": {
+              "intent": null,
+              "params": null,
+              "target": "#inbox-time-off-approve",
+              "action": "open",
+              "label": null
+            }
+          }
+        ]
+      },
+      {
+        "expect": {
+          "lastResults": [
+            {
+              "tool": "ui__show",
+              "ok": false,
+              "code": "NOT_PERMITTED"
+            }
+          ]
+        },
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__show",
+            "arguments": {
+              "intent": "approval.card",
+              "params": [
+                {
+                  "name": "proposalId",
+                  "value": "{{derived.under.entity}}"
+                }
+              ],
+              "target": null,
+              "action": null,
+              "label": null
+            }
+          },
+          {
+            "type": "function_call",
+            "name": "ui__point",
+            "arguments": {
+              "target": "#inbox-time-off-approve",
+              "label": "Approve it yourself"
+            }
+          },
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "I can't approve it for you; approvals are yours to make. Its card is open here: approve or deny it yourself."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -141,7 +141,7 @@ describe("OCR jobs", () => {
     slot.blobs.set(job.storagePath, TINY_JPEG);
     const ai = fakeAi({ [OCR_MODEL]: ocrReply });
     let now = new Date("2026-10-26T15:30:00Z");
-    const spent = memoryNeuronBudget({ agent: 4000, ocr: 20, embeddings: 200, dictation: 300 });
+    const spent = memoryNeuronBudget({ agent: 4000, ocr: 20, embeddings: 200, dictation: 300, speech: 0 });
     const deps = jobDeps({ "slot-1": slot }, { ai, neurons: spent, now: () => now });
     // The first deliveries retry shortly: an open reservation may settle in seconds.
     for (let a = 1; a < BUDGET_RETRIES; a++) {

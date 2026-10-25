@@ -12,7 +12,7 @@ import { TurnstileWidget } from "./turnstile";
 import { useHostedState } from "./use-hosted";
 
 const overlay = "fixed inset-0 z-[80] bg-black/20";
-const panel = "fixed top-1/2 left-1/2 z-[81] flex w-[min(460px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-xl bg-card p-5 text-[13px] shadow-[var(--shadow-modal)] outline-none";
+const panel = "fixed inset-0 z-[81] m-auto flex h-fit w-[min(460px,calc(100vw-32px))] flex-col gap-3 rounded-xl bg-card p-5 text-[13px] shadow-[var(--shadow-modal)] outline-none";
 
 function errorLine(e: unknown): string {
   if (e instanceof HostedRequestError) {

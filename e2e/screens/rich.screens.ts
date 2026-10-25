@@ -24,6 +24,9 @@ const shot = async (page: Page, name: string, fullPage = false) => {
   await settled(page);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(1, page.viewportSize()!.height - 1);
+  // The pointer leaves the window, so the cursor assistant's floating icon (it follows the pointer) is not in the shot.
+  await page.evaluate(() => document.documentElement.dispatchEvent(new PointerEvent("pointerleave")));
+  await page.waitForTimeout(250); // the icon's fade
   await expect(page.locator("body")).not.toContainText("Application error");
   await page.screenshot({ path: `${OUT}/${name}.png`, fullPage });
 };

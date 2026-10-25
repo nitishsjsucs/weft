@@ -13,6 +13,12 @@ export type ExpenseRow = typeof expenses.$inferSelect;
 export interface StoreDeps { newId(prefix: IdPrefix): Promise<string>; now: string }
 
 export const bandOf = (s: string): ExpenseBand => (Object.entries(EXPENSE_BANDS).find(([, v]) => (v as readonly string[]).includes(s))?.[0] ?? "needs_review") as ExpenseBand;
+/** Roles that read every claim (GET /v1/expenses); anyone else reads only their own. */
+export const EXPENSE_ADMIN_ROLES: ReadonlySet<string> = new Set(["admin", "payroll_admin"]);
+/** Whether a person (their role and own worker record) reads the claim of `ownerWorkerId`: the Expenses API's rule. */
+export function seesExpense(viewer: { role: string | null; workerId: string | null }, ownerWorkerId: string | null): boolean {
+  return EXPENSE_ADMIN_ROLES.has(viewer.role ?? "") || (!!viewer.workerId && viewer.workerId === ownerWorkerId);
+}
 /** Statuses an approver can decide from. */
 export const DECIDABLE: readonly ExpenseStatus[] = ["submitted", "needs_review"];
 /** Approved statuses that attach to a draft and ride the payroll seam. */

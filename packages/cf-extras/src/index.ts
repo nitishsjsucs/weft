@@ -8,6 +8,7 @@ export * from "./bytes";
 export * from "./catalog";
 export * from "./counters";
 export * from "./dictation";
+export * from "./speech";
 export * from "./errors";
 export * from "./flags";
 export * from "./gateway";

@@ -36,7 +36,7 @@ describe("bytes", () => {
 
 describe("flags", () => {
   it("each extra is on unless its kill flag says off; semantic recall is off until KV (or, without KV, the var) turns it on", () => {
-    expect(flagsFrom({})).toEqual({ ocr: true, pdf: true, help: true, dictation: true, recallSemantic: false });
+    expect(flagsFrom({})).toEqual({ ocr: true, pdf: true, help: true, dictation: true, speech: true, recallSemantic: false });
     expect(flagsFrom({ extrasOcr: "off", extrasPdf: "FALSE", extrasHelp: "on", extrasDictation: "0" })).toMatchObject({ ocr: false, pdf: false, help: true, dictation: false });
     expect(flagsFrom({}, { WEFT_SEMANTIC_RECALL: "0" }).recallSemantic).toBe(false);
     expect(flagsFrom({ recallSemantic: "on" }, { WEFT_SEMANTIC_RECALL: "0" }).recallSemantic).toBe(true);

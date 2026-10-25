@@ -15,16 +15,25 @@ export function runNeurons(provider: string, tokens: { input?: number; output?: 
   return Math.ceil(((tokens.input ?? 0) * WORKERS_AI_NEURONS_PER_M.input + (tokens.output ?? 0) * WORKERS_AI_NEURONS_PER_M.output) / 1_000_000);
 }
 
+/**
+ * What a run answers, from its cache key (weft:<agentKind>:<chat|assist|routine_draft|routineId>:<companyId>, as
+ * aigKindOf reads it): every run the runtime starts is stored with kind "main", so the kind column cannot tell them apart.
+ */
+const promptKindOf = (cacheKey: string): string => cacheKey.split(":")[2] ?? "";
+
 export async function catalogRowFor(db: Db, runId: string, world: { slot: string; gen: number }, endedAtWall: Date = new Date()): Promise<RunCatalogRow | null> {
   const [r] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1);
-  if (!r || !TERMINAL.has(r.status)) return null;
+  // The cursor assistant's runs (the instant resolver's no-model stand-in among them) are not the model comparison's:
+  // a few presentation steps per question would read as a model and skew the chat runs' steps, cost and latency. A
+  // request it hands off is an ordinary chat run, recorded like any other.
+  if (!r || !TERMINAL.has(r.status) || promptKindOf(r.cacheKey) === "assist") return null;
   const [t] = await db.select({ resultJson: runSteps.resultJson }).from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.stage, "terminal"))).orderBy(desc(runSteps.n)).limit(1);
   let result: { ms?: unknown; groundingFallback?: unknown } = {};
   try { result = t?.resultJson ? (JSON.parse(String(t.resultJson)) as typeof result) : {}; } catch { result = {}; }
   let tokens: { input?: number; output?: number } = {};
   try { tokens = JSON.parse(String(r.tokensJson)) as typeof tokens; } catch { tokens = {}; }
   // Grounding applies to chat answers: a done chat run without the grounded-receipt fallback was grounded.
-  const grounded = r.kind === "chat" && r.status === "done" ? result.groundingFallback !== true : null;
+  const grounded = promptKindOf(r.cacheKey) === "chat" && r.status === "done" ? result.groundingFallback !== true : null;
   return {
     runId: r.id, slot: world.slot, gen: world.gen, provider: r.provider as HostedProviderId, model: r.model, trigger: r.trigger, steps: r.stepsUsed, grounded,
     costUsdMicros: r.costUsdMicros, neurons: runNeurons(r.provider, tokens), latencyMs: typeof result.ms === "number" ? Math.round(result.ms) : 0,

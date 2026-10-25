@@ -53,9 +53,9 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
   let manifest: { digests: Record<string, { rows: number }>; extra?: { chainHead: string | null; snapshotId: string } };
   beforeAll(async () => {
     manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as typeof manifest;
-    // One pool slot per case that leases (five), so no case waits for another's lease to end.
-    h = await Harness.start({ engine: "real", poolSize: 5 });
-    // Seven worlds restore in one day here (the deployed pool of 2 makes four): lift the provisioning ceiling.
+    // One pool slot per case that leases (six, with the cursor assistant's), so no case waits for another's lease to end.
+    h = await Harness.start({ engine: "real", poolSize: 6 });
+    // Eight worlds restore in one day here (the deployed pool of 2 makes four): lift the provisioning ceiling.
     await (await h.coreEnv()).CONFIG.put("lobby.provision_rows_ceiling", "400000");
     await sleep(400);
     await h.provision(300_000);
@@ -202,6 +202,25 @@ describe.skipIf(!realEngine.run)("real engine in workerd", () => {
     const fin = await until(async () => (await v.json<{ status: string }>(`/api/v1/agent/runs/${start.body.runId}`, { headers: { "x-weft-principal": "usr_dana" } })).body, (r) => !["queued", "running"].includes(r.status));
     expect(["done", "waiting"]).toContain(fin.status);
     expect((await (await company(l.slot!)).alarmFetches()).peak).toBeLessThanOrEqual(MAX_FETCHES_PER_ALARM);
+  });
+
+  it("answers the cursor assistant through the front: the resolver's instant answer in a minted thread, and a change handed to a chat run there", async () => {
+    const v = h.visitor();
+    await v.lease();
+    const screen = { route: "/app", title: "Home", tab: null, items: [], intents: [], truncated: false, viewport: [1440, 900] };
+    const input = { screen, cursor: { under: null, trail: [], selection: null, focused: null, layer: null, view: { tab: null, filters: [], selected: null } }, records: [], trail: [] };
+    const ask = (text: string) => v.json<{ runId: string; chatMode: string; threadId: string }>("/api/v1/agent/runs", { method: "POST", body: JSON.stringify({ text, recipe: "assist", pageContext: null, assist: input }), headers: { "x-weft-principal": "usr_dana" } });
+    const settled = (id: string) => until(async () => (await v.json<{ run: { status: string; model: string; threadId: string | null; terminalReason: string | null }; handoff: { to: string | null } | null }>(`/api/v1/agent/runs/${id}/trace`, { headers: { "x-weft-principal": "usr_dana" } })).body, (t) => !["queued", "running"].includes(t.run.status));
+    const where = await ask("Where is the audit log?");
+    expect(where.status).toBe(202);
+    expect(where.body).toMatchObject({ chatMode: "assist", threadId: expect.stringMatching(/^thr_[0-9a-f]{20}$/) });
+    expect((await settled(where.body.runId)).run).toMatchObject({ status: "done", model: "resolver", threadId: where.body.threadId });
+    const change = await ask("Pay Hollis an off-cycle bonus for the October 1 to 15 period");
+    const t = await settled(change.body.runId);
+    expect(t.run).toMatchObject({ status: "done", terminalReason: "HANDED_OFF" });
+    const chat = await settled(t.handoff!.to!);
+    expect(chat.run.threadId).toBe(change.body.threadId);
+    expect(["done", "waiting"]).toContain(chat.run.status);
   });
 
   it("fails a run left running with PROCESS_RESTART when the object restarts", async () => {

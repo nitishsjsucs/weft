@@ -1,0 +1,19 @@
+{
+  "match": "compare the last three (pay )?runs",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__handoff",
+            "arguments": {
+              "reason": "analysis",
+              "task": "Compare the last three pay runs and name the outliers."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

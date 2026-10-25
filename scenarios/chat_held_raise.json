@@ -1,0 +1,28 @@
+{
+  "match": "give felix wainwright a raise of 2 percent from november 16",
+  "agents": {
+    "main": [
+      {
+        "delayMs": 20000,
+        "output": [
+          {
+            "type": "function_call",
+            "name": "people__get",
+            "arguments": {
+              "worker_id": "wrk_0007",
+              "response_format": "concise"
+            }
+          }
+        ]
+      },
+      {
+        "output": [
+          {
+            "type": "text",
+            "text": "Felix Wainwright's record is read [{{last.people__get.resultId}}]. A raise is a proposal you approve in the Inbox."
+          }
+        ]
+      }
+    ]
+  }
+}

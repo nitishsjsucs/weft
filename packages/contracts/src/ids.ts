@@ -34,3 +34,9 @@ export function idPrefixOf(id: string): IdPrefix | null {
 }
 
 export const ID_SHAPE = /^[a-z]{2,5}_[A-Za-z0-9_]+$/;
+
+/**
+ * A record id as a NotFound message repeats it: a path segment of no id shape (a sender's words in a link someone
+ * sent) is not echoed back, so a page's alert never shows it as the app's own words.
+ */
+export const idInMessage = (id: string): string => (ID_SHAPE.test(id) && id.length <= 64 ? id : "with that id");

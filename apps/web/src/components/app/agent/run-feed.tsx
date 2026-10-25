@@ -75,8 +75,8 @@ export function RunFeed({ runId, label, latest = true, background = false }: { r
           source chips. The stored text keeps the ids for the graders. */}
       {w.run?.summary && !working ? (
         w.run.routineRunId
-          ? <p data-testid={background ? "agent-background-answer" : TID.agentAnswer} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{routineSummaryText(w.run.summary)}</p>
-          : <AnswerView testId={TID.agentAnswer} text={w.run.summary} runId={runId} />
+          ? <p data-testid={background ? "agent-background-answer" : TID.agentAnswer} data-assist-untrusted={w.run.tainted ? "" : undefined} className="text-2 leading-[22px] whitespace-pre-wrap text-gray-12">{routineSummaryText(w.run.summary)}</p>
+          : <AnswerView testId={TID.agentAnswer} text={w.run.summary} runId={runId} untrusted={!!w.run.tainted} />
       ) : null}
       <Link href={`/app/runs/${runId}`} className={cn("inline-flex w-fit items-center gap-1 text-1 text-gray-10 hover:text-foreground")}>Open run <ExternalLink className="size-3" /></Link>
     </div>

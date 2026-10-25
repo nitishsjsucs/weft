@@ -201,7 +201,7 @@ describe("Platform readout", () => {
     const counters = memoryDailyCounters(() => now);
     await counters.add(COUNTERS.help, 4);
     await counters.add(COUNTERS.browserMs, 6600);
-    const status: HostedSpendStatus = { day: "2026-10-26", caps: HOSTED_CAP_DEFAULTS, spentMicros: { day: 41_200, visitor: null, ip: null, live: 0 }, neurons: { used: 133, byProduct: { agent: 100, ocr: 22, embeddings: 1, dictation: 10 } }, openReservations: 0 };
+    const status: HostedSpendStatus = { day: "2026-10-26", caps: HOSTED_CAP_DEFAULTS, spentMicros: { day: 41_200, visitor: null, ip: null, live: 0 }, neurons: { used: 133, byProduct: { agent: 100, ocr: 22, embeddings: 1, dictation: 10, speech: 0 } }, openReservations: 0 };
     const out = await buildPlatformReadout({
       lobby: async () => ({ day: "2026-10-26", level: 1, restoresLeft: 2, leases: { active: 1, pool: 2, waitlist: 0 }, lastSweepAt: "2026-10-26T17:45:00.000Z", shares: { "do.rows_written": { used: 41_000, share: 60_000 } } }),
       spend: { status: async () => status }, ops: db, counters, now: () => now,
@@ -216,7 +216,7 @@ describe("Platform readout", () => {
   it("asks nothing else when the Lobby's readout carries the spend status and the counters, and counts dead letters to a bound", async () => {
     const db = d1Shim();
     const now = new Date("2026-10-26T18:00:00Z");
-    const status: HostedSpendStatus = { day: "2026-10-26", caps: HOSTED_CAP_DEFAULTS, spentMicros: { day: 41_200, visitor: null, ip: null, live: 0 }, neurons: { used: 133, byProduct: { agent: 100, ocr: 22, embeddings: 1, dictation: 10 } }, openReservations: 0 };
+    const status: HostedSpendStatus = { day: "2026-10-26", caps: HOSTED_CAP_DEFAULTS, spentMicros: { day: 41_200, visitor: null, ip: null, live: 0 }, neurons: { used: 133, byProduct: { agent: 100, ocr: 22, embeddings: 1, dictation: 10, speech: 0 } }, openReservations: 0 };
     const asked: string[] = [];
     const counters = { take: async () => { throw new Error("unused"); }, add: async () => { throw new Error("unused"); }, peek: async (n: string) => { asked.push(`peek:${n}`); return 0; } };
     const out = await buildPlatformReadout({

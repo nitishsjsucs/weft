@@ -244,6 +244,7 @@ export class CompanyDO extends DurableObject<CoreEnv> {
           gateway: (meta) => gatewayOption(this.env as unknown as Record<string, unknown>, meta),
           snapshot: () => this.ctx.storage.kv.get<string>(SNAPSHOT_KEY) ?? "none",
         },
+        admitRun: () => this.admitWorldRun(),
         mcpAskAllowed: async (apiKey) => {
           const keyId = await mcpKeyId(apiKey);
           // A cross-object call inside a transaction would hold the slot's input gate (IO_IN_TX, design 4.2).
@@ -367,6 +368,26 @@ export class CompanyDO extends DurableObject<CoreEnv> {
       this.runHost.poke();
       this.scheduler.poke();
       this.maybePushUsage();
+    }
+  }
+
+  /**
+   * The gates for a run the world starts on its own for a visitor's request (the cursor assistant's handoff to a
+   * chat run): the rows budget, and RL_RUN under the lease visitor's key, the one POST /v1/agent/runs takes at the door
+   * (a showcase, which has no lease visitor, shares one key per slot). Fails closed: the assist run then ends with its
+   * own answer.
+   */
+  private async admitWorldRun(): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+    const stamp = this.stamp;
+    if (!stamp) return { ok: false, code: "WORLD_NOT_READY", message: "This workspace is not ready" };
+    if (this.budgetRefusal(stamp, "POST")) return { ok: false, code: stamp.mode === "showcase" ? "SHOWCASE_LIMIT" : "DEMO_LIMIT", message: "This workspace has used today's activity limit" };
+    // A cross-object call inside a transaction would hold the slot's input gate (IO_IN_TX, design 4.2).
+    this.engine?.guard.assertNotInTx("RL_RUN.limit");
+    try {
+      const rl = await this.env.RL_RUN.limit({ key: stamp.visitor ? `run:${stamp.visitor}` : `run:slot:${stamp.slot}` });
+      return rl.success ? { ok: true } : { ok: false, code: "RATE_LIMITED", message: "Too many agent runs in a minute" };
+    } catch {
+      return { ok: false, code: "RATE_LIMITED", message: "The run limit could not be checked" };
     }
   }
 

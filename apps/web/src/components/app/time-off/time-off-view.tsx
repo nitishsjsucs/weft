@@ -10,6 +10,9 @@ import { client, errorText, PRINCIPALS, useGet, useMutation, usePrincipal } from
 import { PageHeader } from "../page";
 import { fmtDate } from "../format";
 import { humanDateText } from "../copy";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { DEPARTMENT_IDS, MONTH_RE, PAGE_TABS } from "../../../../../../packages/contracts/src/ext/assist";
+import { useAssistIntent } from "../../assist/intents";
 
 export interface TimeOffRequestRow {
   id: string; workerId: string; workerName: string; departmentId: string | null; policyId: string; policyName: string; typeKind: string | null;
@@ -93,10 +96,10 @@ function RequestCard({ r, viewer, onDone, today }: { r: TimeOffRequestRow; viewe
       ) : null}
       <p className="text-1 text-gray-10">
         {r.status === "pending" ? <>Routed to <span className="text-gray-12">{principalName(r.approverPrincipalId)}</span>{r.routing.length > 1 ? `: ${r.routing.filter((s) => !s.principalId).map((s) => s.why).join("; ")}` : ""}</>
-          : r.status === "cancelled" ? <>Cancelled{r.decisionNote ? `: ${r.decisionNote}` : ""}</>
-          : r.decidedBy ? <>Decided by {principalName(r.decidedBy)}{r.decisionNote ? `: ${r.decisionNote}` : ""}</> : null}
+          : r.status === "cancelled" ? <>Cancelled{r.decisionNote ? <>: <span data-assist-untrusted="">{r.decisionNote}</span></> : ""}</>
+          : r.decidedBy ? <>Decided by {principalName(r.decidedBy)}{r.decisionNote ? <>: <span data-assist-untrusted="">{r.decisionNote}</span></> : ""}</> : null}
       </p>
-      {r.reason ? <p className="text-1 text-gray-10">Employee note (as written): <q className="text-gray-11">{r.reason}</q></p> : null}
+      {r.reason ? <p className="text-1 text-gray-10">Employee note (as written): <q data-assist-untrusted="" className="text-gray-11">{r.reason}</q></p> : null}
       {decide.error ? <p role="alert" className="text-1 text-red-11">{errorText(decide.error)}</p> : null}
       {canDecide ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -164,8 +167,18 @@ export function CalendarTab() {
   // Opens on the first pending request with a coverage conflict (else the first pending one): its department and month.
   const pendingRows = ((reqs.data as { data?: TimeOffRequestRow[] } | undefined)?.data ?? []).slice().sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
   const firstPending = pendingRows.find((r) => r.checks.some((c) => c.rule === "COVERAGE_CONFLICT")) ?? pendingRows[0];
-  const [dept, setDept] = useState<string | null>(null);
-  const [month, setMonth] = useState<string | null>(null);
+  // The department and the month are in the link (?tab=calendar&filter.dept=dpt_people&filter.month=2026-12; when
+  // absent, the request's above), so the cursor assistant's timeOff.calendar and list.filter(dept or month, ...) and a
+  // pasted link open the same calendar.
+  const [dept, setDeptParam] = useUrlState("filter.dept", oneOf(DEPARTMENT_IDS));
+  const setDept = (v: string) => setDeptParam((DEPARTMENT_IDS as readonly string[]).includes(v) ? v : null);
+  const [month, setMonthParam] = useUrlState("filter.month", (v) => MONTH_RE.test(v));
+  const setMonth = (v: string) => setMonthParam(MONTH_RE.test(v) ? v : null);
+  useAssistIntent("list.filter", ({ name, value }) => {
+    if (name === "dept" && (DEPARTMENT_IDS as readonly string[]).includes(value ?? "")) { setDept(value!); return true; }
+    if (name === "month" && MONTH_RE.test(value ?? "")) { setMonth(value!); return true; }
+    return false;
+  });
   const deptId = dept ?? firstPending?.departmentId ?? depts[0]?.id ?? "dpt_hardware";
   const ym = month ?? (firstPending ? firstPending.startAt.slice(0, 7) : "2026-11");
   const b = monthBounds(ym);
@@ -318,10 +331,12 @@ export function HolidaysTab() {
 }
 
 export function TimeOffView() {
+  // The tab is in the link (?tab=calendar; Requests when absent).
+  const [tabParam, setTabParam] = useUrlState("tab", oneOf(PAGE_TABS.timeOff));
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader title="Time Off" subtitle="Balances come from an append-only ledger in minutes. A request takes its hours from the dates and the holiday calendar, runs its checks and goes to the person who decides." />
-      <Tabs defaultValue="requests">
+      <Tabs value={tabParam ?? "requests"} onValueChange={(v) => setTabParam(v === "requests" ? null : v)}>
         <TabsList className="mb-4 flex-wrap">
           <TabsTrigger value="requests" data-testid={TID.tab("requests")}><CalendarDays className="size-3.5" /> Requests</TabsTrigger>
           <TabsTrigger value="calendar" data-testid={TID.tab("calendar")}>Calendar</TabsTrigger>

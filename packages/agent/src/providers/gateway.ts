@@ -23,10 +23,10 @@ export function aiGatewayFromEnv(env: Record<string, string | undefined>): AiGat
   return { accountId, gateway, token: token || null };
 }
 
-/** The call kind from a run's cache key (weft:<agentKind>:<routineId|chat|routine_draft>:<companyId>). */
+/** The call kind from a run's cache key (weft:<agentKind>:<routineId|chat|assist|routine_draft>:<companyId>). */
 export function aigKindOf(cacheKey: string): AigCallKind {
   const part = cacheKey.split(":")[2] ?? "chat";
-  return part === "chat" ? "chat" : part === "routine_draft" ? "draft" : "routine";
+  return part === "chat" ? "chat" : part === "assist" ? "assist" : part === "routine_draft" ? "draft" : "routine";
 }
 
 /** Who a call is for: the world (slot and generation) and the lease's visitor, read per call. */

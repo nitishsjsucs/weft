@@ -55,6 +55,16 @@ export function startPoller(fire: () => void, baseMs: number, url: string | null
 }
 
 const cache = new Map<string, unknown>();
+/** Keys of the queries mounted right now, with how many components hold each (the cursor assistant reads these). */
+const mounted = new Map<string, number>();
+
+/**
+ * The data of every query a mounted component holds, newest key last: what the page is showing right now. The
+ * cursor assistant summarizes it (ids and key fields only) instead of reading text off the screen.
+ */
+export function mountedQueries(): { key: string; data: unknown }[] {
+  return [...mounted.keys()].filter((k) => cache.has(k)).map((key) => ({ key, data: cache.get(key) }));
+}
 
 export interface Query<T> { data: T | undefined; error: ApiError | Error | null; loading: boolean; reload: () => void }
 
@@ -71,6 +81,11 @@ export function useGet<P extends GetPath>(path: P, opts: CallOptions & { refresh
   optsRef.current = { params, query };
 
   const pollRef = useRef<Registration | null>(null);
+  useEffect(() => {
+    if (!key) return;
+    mounted.set(key, (mounted.get(key) ?? 0) + 1);
+    return () => { const n = (mounted.get(key) ?? 1) - 1; if (n <= 0) mounted.delete(key); else mounted.set(key, n); };
+  }, [key]);
   useEffect(() => {
     if (!key) return;
     pollRef.current?.ran();

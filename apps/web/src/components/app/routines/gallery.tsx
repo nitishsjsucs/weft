@@ -56,7 +56,7 @@ export function RoutineGallery({ rows }: { rows: RoutineRow[] }) {
       <h2 className="mb-2 text-3 font-medium">Favorites</h2>
       <div className="grid gap-3 tablet:grid-cols-2 laptop:grid-cols-3">
         {favs.map((r) => (
-          <Card key={r.id} className="flex flex-col gap-2 p-4">
+          <Card key={r.id} data-entity={r.id} data-entity-kind="routine" className="flex flex-col gap-2 p-4">
             <div className="flex items-start gap-2">
               <Link href={`/app/routines/${r.id}`} className="min-w-0 flex-1 text-2 font-medium hover:underline">{r.name}</Link>
               <Badge tone={r.enabled ? "green" : "gray"}>{r.enabled ? "Enabled" : "Disabled"}</Badge>

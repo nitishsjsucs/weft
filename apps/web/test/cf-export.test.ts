@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  appRoutes, buildCsp, buildHeaders, buildRedirects, checkExport, exportedFilesFor, headerPattern, htmlFile, inlineScripts, LIMITS, matchPattern, parseHeaders,
+  appRoutes, buildCsp, VOICE_FILE, VOICE_MODEL_ORIGINS, buildHeaders, buildRedirects, checkExport, exportedFilesFor, headerPattern, htmlFile, inlineScripts, LIMITS, matchPattern, parseHeaders,
   parseRedirects, resolveRedirect, rscFile, sha256Source, TURNSTILE_ORIGIN, writeExport, type Route,
 } from "../scripts/cf-export";
 
@@ -80,6 +80,19 @@ describe("CSP", () => {
     expect(buildCsp([], { publicOrigin: "https://weft.nitish-ratakonda.workers.dev" })).toContain("connect-src 'self' wss://weft.nitish-ratakonda.workers.dev");
     expect(buildCsp(["'sha256-AAA='"], { unsafeInline: true })).toContain("script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com");
   });
+  it("lets the in-browser voice model download from Hugging Face and compile its WebAssembly only when the export ships it", () => {
+    const csp = buildCsp(["'sha256-AAA='"], { publicOrigin: "https://weft.nitish-ratakonda.workers.dev", voice: true });
+    expect(VOICE_MODEL_ORIGINS).toEqual(["https://huggingface.co", "https://*.hf.co"]);
+    expect(VOICE_FILE).toBe("assist/voice/weft-voice.bin");
+    expect(csp).toContain("connect-src 'self' wss://weft.nitish-ratakonda.workers.dev https://huggingface.co https://*.hf.co;");
+    expect(csp).toMatch(/script-src [^;]*'wasm-unsafe-eval'/);
+    expect(csp).not.toMatch(/'unsafe-eval'/);
+    expect(csp).not.toMatch(/script-src [^;]*hf\.co/);
+    // Without the voice file the in-browser voice never runs: no third-party connection and no WebAssembly compile.
+    const plain = buildCsp(["'sha256-AAA='"], { publicOrigin: "https://weft.nitish-ratakonda.workers.dev" });
+    expect(plain).toContain("connect-src 'self' wss://weft.nitish-ratakonda.workers.dev;");
+    expect(plain).not.toMatch(/hf\.co|huggingface|wasm-unsafe-eval/);
+  });
   it("gives shells a one-segment placeholder rule and static routes exact rules", () => {
     expect(headerPattern({ path: "/", shellOf: null })).toBe("/");
     expect(headerPattern({ path: "/app/people", shellOf: null })).toBe("/app/people/");
@@ -135,6 +148,30 @@ describe("writeExport and checkExport", () => {
     expect(r.errors).toEqual([]);
     expect(r).toMatchObject({ ok: true, routes: 4, redirectRules: 1, headerRules: 6 });
     expect(r.fallbacks).toEqual([]);
+  });
+
+  it("adds the voice model hosts to connect-src and 'wasm-unsafe-eval' to script-src only once the export ships the voice file", () => {
+    const { outDir, appDir } = fakeExport();
+    const policies = () => parseHeaders(readFileSync(join(outDir, "_headers"), "utf8")).flatMap((r) => r.headers.filter(([k]) => k === "Content-Security-Policy").map(([, v]) => v));
+    const directive = (csp: string, name: string) => csp.split("; ").find((d) => d.startsWith(`${name} `))!.split(" ").slice(1);
+    writeExport({ outDir, appDir, hosted: false });
+    const without = policies();
+    expect(without.length).toBe(5);
+    for (const csp of without) expect(csp).not.toMatch(/huggingface|hf\.co|wasm-unsafe-eval/);
+    mkdirSync(join(outDir, "assist/voice"), { recursive: true });
+    writeFileSync(join(outDir, VOICE_FILE), "WEFTVOICE1\n");
+    writeExport({ outDir, appDir, hosted: false });
+    const withVoice = policies();
+    expect(withVoice.length).toBe(without.length);
+    withVoice.forEach((csp, i) => {
+      const before = without[i]!;
+      expect(directive(csp, "connect-src")).toEqual([...directive(before, "connect-src"), "https://huggingface.co", "https://*.hf.co"]);
+      expect(directive(csp, "script-src")).toEqual([...directive(before, "script-src"), "'wasm-unsafe-eval'"]);
+      // Nothing else in the policy moves.
+      const rest = (c: string) => c.split("; ").filter((d) => !/^(connect|script)-src /.test(d));
+      expect(rest(csp)).toEqual(rest(before));
+    });
+    expect(checkExport({ outDir, appDir, hosted: false }).errors).toEqual([]);
   });
 
   it("fails on a hosted build whose hosted page is missing", () => {

@@ -11,17 +11,17 @@
 import { join, resolve } from "node:path";
 import { isWeftError, NotImplemented, type AgentRuntime, type ExecutorBundle, type ModelProvider, type RoutinesEngine, type SimClock, type Simulators, type SpendLedger } from "@weft/contracts";
 import { eq } from "drizzle-orm";
-import { closeDb, migrate, notices, openDb, settings, type Db } from "@weft/db";
+import { closeDb, migrate, notices, openDb, settings, withWriteLock, type Db } from "@weft/db";
 import { commands, complianceNoticeVariant, createSimClock, handlers } from "@weft/core";
 import { createSimulators } from "@weft/sim";
 import { createVendorOverlay } from "@weft/integrations";
-import { createExecutor, executorInternals, fileRunFiles } from "@weft/executor";
+import { assistScreenKey, createExecutor, executorInternals, fileRunFiles } from "@weft/executor";
 import {
   createAgentRuntime, createHostedProviderPool, createProvider, createSpendLedger, envSecret, fixtureScriptSource, hostedProviderSelector, hostedProviderSet,
   loadSecret, nodeProviderPorts, setTraceRedactor, traceMcpCall, type ProviderPool,
 } from "@weft/agent";
 import { createRoutines, PREBUILT_HASH_KEY, type WeftRoutinesEngine } from "@weft/routines";
-import { createChatContextSource } from "./routes/agent";
+import { createChatContextSource, type RunAdmission } from "./routes/agent";
 import { createRoutinesEventSource } from "./routes/routines";
 import type { Weft, WeftPlatformInfo } from "./http/context";
 import { hostedApp } from "./http/hosted";
@@ -59,6 +59,8 @@ export interface CreateWeftOptions {
   /** Set by the seed CLI: skips agent.boot() and the proposal wiring side effects that need a seeded world. */
   seeding?: boolean;
   ports?: { api?: number; web?: number };
+  /** The host's gates for a run the API starts on its own (the cursor assistant's handoff); the hosted slot passes RL_RUN and the rows budget. */
+  admitRun?: RunAdmission;
 }
 
 const isStubError = (e: unknown) => isWeftError(e) && e._tag === "NotImplemented";
@@ -251,8 +253,12 @@ export async function assembleWeft(platform: WeftPlatform<Db>, opts: CreateWeftO
       get: (id: string) => (routinesRef.current as WeftRoutinesEngine).view.get(id),
       checklist: (x: Parameters<WeftRoutinesEngine["view"]["checklist"]>[0]) => (routinesRef.current as WeftRoutinesEngine).view.checklist(x),
     },
-    contextSource: createChatContextSource(db),
+    contextSource: createChatContextSource(db, { executor, liveProvider: () => provider.live, ...(opts.admitRun ? { admitRun: opts.admitRun } : {}) }),   // the cursor assistant's handoff opens chat runs
     handleStore: runHandles,
+    // An assist run's screen map (routes/agent.ts) is only for its own checks: it goes when the run ends, or when the
+    // boot rule fails a run a restart cut short, so the run files hold the screens of the runs in flight and no more
+    // (on hosted they are rows of a workspace that may last 30 days).
+    onAssistRunEnded: (run: { id: string; companyId: string }) => withWriteLock(() => runFiles.removePrefix(assistScreenKey(run.companyId, run.id))),
     ...(platform.runHost ? { runHost: platform.runHost } : {}),
     ...(durable ? { env: secretEnv, scriptSource, ...(pool ? { providers: pool } : {}) } : {}),
   };

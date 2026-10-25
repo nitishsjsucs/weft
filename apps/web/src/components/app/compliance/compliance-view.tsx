@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { PAGE_TABS } from "../../../../../../packages/contracts/src/ext/assist";
 import { STACK } from "../stack";
 import { Badge, Card, Drawer, Tabs, TabsContent, TabsList, TabsTrigger, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { TID, W3_ROUTINES_TID, tid, type EmployerRate, type Notice, type TaxAccount } from "@weft/contracts";
@@ -23,15 +25,16 @@ function currentRate(rates: EmployerRate[], j: string, code: string): EmployerRa
   return rates.filter((r) => r.jurisdiction === j && r.code === code && r.supersededActionSeq === null).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
 }
 
-interface EscalationCase { outcome: "escalated"; reason: string; specialist: string; escalated_at: string; escalated_by: string; evidence: { label: string; ref: string }[] }
+export interface EscalationCase { outcome: "escalated"; reason: string; specialist: string; escalated_at: string; escalated_by: string; evidence: { label: string; ref: string }[] }
 const escalationOf = (n: Notice): EscalationCase | null => (n.status === "escalated" && n.resolution?.outcome === "escalated" ? (n.resolution as unknown as EscalationCase) : null);
 
-/** The specialist hand-off (notices.escalate): who has it, why, and the evidence pack it carried. */
-function Escalation({ e }: { e: EscalationCase }) {
+/** The specialist hand-off (notices.escalate): who has it, why, and the evidence pack it carried. The reason is the
+ *  escalating run's words (often a run that read the notice), so it is marked untrusted for the cursor assistant. */
+export function Escalation({ e }: { e: EscalationCase }) {
   return (
     <section data-testid={W3_ROUTINES_TID.noticeEscalation} className="rounded-lg border border-red-6 bg-red-2 p-3">
       <h3 className="mb-1 text-1 font-medium text-red-11 uppercase">With the {e.specialist.toLowerCase()}</h3>
-      <p className="text-[13px]">Escalated {fmtDateTime(e.escalated_at)} by <code className="font-mono text-0">{e.escalated_by}</code>: {e.reason}.</p>
+      <p className="text-[13px]">Escalated {fmtDateTime(e.escalated_at)} by <code className="font-mono text-0">{e.escalated_by}</code>: <span data-assist-untrusted="">{e.reason}</span>.</p>
       <ul className="mt-2 flex flex-col gap-1 text-[13px]">
         {e.evidence.map((x) => (
           <li key={`${x.label}${x.ref}`} className="flex flex-wrap items-center gap-2"><span className="text-gray-10">{x.label}</span>{refHref(x.ref) ? <Link href={refHref(x.ref)!} className="font-mono text-0 text-blue-11 hover:underline">{x.ref}</Link> : <code className="font-mono text-0">{x.ref}</code>}</li>
@@ -41,22 +44,35 @@ function Escalation({ e }: { e: EscalationCase }) {
   );
 }
 
+/** A notice in the list. Its title is the agency's words (or a scan's), so it is marked untrusted for the assistant. */
+export function NoticeRow({ n, onOpen }: { n: Pick<Notice, "id" | "title" | "agency" | "formCode" | "receivedAt" | "respondBy" | "status">; onOpen: () => void }) {
+  return (
+    <button type="button" data-testid={tid.noticeRow(n.id)} onClick={onOpen} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-2">
+      <div className="min-w-0 flex-1">
+        <div data-assist-untrusted="" className="truncate text-2 font-medium">{n.title}</div>
+        <div className="truncate text-1 text-gray-10">{AGENCY[n.agency]} · {n.formCode} · received {fmtDateTime(n.receivedAt)}{n.respondBy ? ` · respond by ${fmtDate(n.respondBy)}` : ""}</div>
+      </div>
+      <Badge data-testid={TID.noticeStatus} tone={NOTICE_TONE[n.status]}>{human(n.status)}</Badge>
+    </button>
+  );
+}
+
 function NoticeDetail({ id, onClose }: { id: string | null; onClose: () => void }) {
   const n = useGet("/v1/notices/:id", { params: { id: id ?? "" }, enabled: !!id });
   const props = useGet("/v1/proposals", { query: { limit: 100 }, enabled: !!id });
   const linked = (props.data?.data ?? []).filter((p) => p.subjectRef === id || p.evidence.some((e) => e.ref === id));
   const d = n.data;
   return (
-    <Drawer open={!!id} onOpenChange={(o) => { if (!o) onClose(); }} title={d?.title ?? "Notice"} description={d ? `${AGENCY[d.agency]} · ${d.formCode} · received ${fmtDateTime(d.receivedAt)}` : undefined}>
+    <Drawer open={!!id} onOpenChange={(o) => { if (!o) onClose(); }} title={d ? <span data-assist-untrusted="">{d.title}</span> : "Notice"} description={d ? `${AGENCY[d.agency]} · ${d.formCode} · received ${fmtDateTime(d.receivedAt)}` : undefined}>
       {n.error ? <div role="alert" className="text-1 text-red-11">{errorText(n.error)}</div> : null}
       {d ? (
         <div className="flex flex-col gap-5" data-testid="notice-detail">
-          <div className="flex flex-wrap items-center gap-2"><Badge tone={NOTICE_TONE[d.status]} size="md">{human(d.status)}</Badge>{d.responseConfirmation ? <span className="text-1 text-gray-11">Confirmation <code className="font-mono">{d.responseConfirmation}</code></span> : null}</div>
+          <div className="flex flex-wrap items-center gap-2"><Badge tone={NOTICE_TONE[d.status]} size="md">{human(d.status)}</Badge>{d.responseConfirmation ? <span className="text-1 text-gray-11">Confirmation <code data-assist-untrusted="" className="font-mono">{d.responseConfirmation}</code></span> : null}</div>
           {escalationOf(d) ? <Escalation e={escalationOf(d)!} /> : null}
           <HeldBack text={d.bodyText} />
           <section>
             <h3 className="mb-1.5 text-1 font-medium text-gray-10 uppercase">Original text ({d.fileName})</h3>
-            <pre data-testid="notice-body" className="max-h-80 overflow-auto rounded-lg border border-[var(--app-border)] bg-gray-2 p-3 font-mono text-0 leading-4 break-words whitespace-pre-wrap">{d.bodyText ?? "(no text)"}</pre>
+            <pre data-testid="notice-body" data-assist-untrusted="" className="max-h-80 overflow-auto rounded-lg border border-[var(--app-border)] bg-gray-2 p-3 font-mono text-0 leading-4 break-words whitespace-pre-wrap">{d.bodyText ?? "(no text)"}</pre>
             <p className="mt-1 text-0 text-gray-10">Shown as plain text. Notice text is untrusted: runs that read it are marked tainted.</p>
           </section>
           {d.extracted ? (
@@ -73,7 +89,7 @@ function NoticeDetail({ id, onClose }: { id: string | null; onClose: () => void 
             {linked.length === 0 ? <p className="text-[13px] text-gray-10">None yet.</p> : (
               <ul className="flex flex-col gap-1.5 text-[13px]">
                 {linked.map((p) => (
-                  <li key={p.id} className="flex flex-wrap items-center gap-2">
+                  <li key={p.id} data-entity={p.id} data-entity-kind="proposal" className="flex flex-wrap items-center gap-2">
                     <Badge tone={p.status === "pending" ? "amber" : p.status === "executed" ? "green" : "gray"}>{p.status === "executed" ? "Done" : statusLabel(p.status)}</Badge>
                     <Link href={`/app/inbox?proposal=${encodeURIComponent(p.id)}`} className="min-w-0 flex-1 truncate hover:underline">{linkedHeadline(p.headline)}</Link>
                     {p.proposerRunId ? <Link href={`/app/runs/${p.proposerRunId}`} className="text-1 text-blue-11 hover:underline">Agent run</Link> : null}
@@ -99,15 +115,16 @@ export function ComplianceView() {
   const notices = useGet("/v1/notices", { query: { limit: 100 }, refreshMs: 5_000 });
   // A rate sourced to a notice names the notice by its form ("DE 2088 notice"), not by its row id.
   const noticeLabel = (id: string): string => noticeName(notices.data?.data.find((x) => x.id === id)?.formCode);
-  const [open, setOpen] = useState<string | null>(null);
-  const [tab, setTab] = useState("registrations");
+  // The tab is in the link (?tab=rates; Registrations when absent), so one link opens any tab and Back keeps working.
+  const [tabParam, setTabParam] = useUrlState("tab", oneOf(PAGE_TABS.compliance));
+  const tab = tabParam ?? "registrations";
+  const setTab = (v: string) => setTabParam(v === "registrations" ? null : v);
+  // So is the open notice (?notice=ntc_0003): a link opens its drawer whether it is pasted or written into the URL in
+  // place (the cursor assistant's show), and closing the drawer takes it out of the link. A notice opens on its tab.
+  const [open, setOpen] = useUrlState("notice", (v) => /^ntc_[0-9]+$/.test(v));
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search);
-    const n = q.get("notice");
-    if (n) { setTab("notices"); setOpen(n); }
-    const t = q.get("tab");
-    if (!n && t && ["calendar", "filings", "handoffs", "training", "notices"].includes(t)) setTab(t);
-  }, []);
+    if (open && tab !== "notices") setTab("notices");
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const rs = rates.data ?? [];
   const err = accounts.error ?? rates.error ?? notices.error;
   return (
@@ -174,15 +191,7 @@ export function ComplianceView() {
         <TabsContent value="notices">
           <div className="mb-3"><NoticeUpload /></div>
           <Card className="divide-y divide-[var(--app-border)]">
-            {(notices.data?.data ?? []).map((n) => (
-              <button type="button" key={n.id} data-testid={tid.noticeRow(n.id)} onClick={() => setOpen(n.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-2">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-2 font-medium">{n.title}</div>
-                  <div className="truncate text-1 text-gray-10">{AGENCY[n.agency]} · {n.formCode} · received {fmtDateTime(n.receivedAt)}{n.respondBy ? ` · respond by ${fmtDate(n.respondBy)}` : ""}</div>
-                </div>
-                <Badge data-testid={TID.noticeStatus} tone={NOTICE_TONE[n.status]}>{human(n.status)}</Badge>
-              </button>
-            ))}
+            {(notices.data?.data ?? []).map((n) => <NoticeRow key={n.id} n={n} onOpen={() => setOpen(n.id)} />)}
             {notices.data && notices.data.data.length === 0 ? <div className="px-4 py-6 text-2 text-gray-10">No notices.</div> : null}
           </Card>
         </TabsContent>

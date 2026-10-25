@@ -1,5 +1,8 @@
 # A cursor assistant for Weft (research, 2026-10-24)
 
+**Status: built (phases 1 and 2), 2026-10-24, branch `cf/assist`.** Section 8 lists what shipped, where it lives and
+where it differs from this design. Phase 3 (the eval tasks and a live measurement) is still open.
+
 Nitish asked for a feature like [cursor-buddy](https://github.com/leojuriolli7/cursor-buddy): an assistant that lives at the cursor and answers by pointing at something on screen, moving to another page, or showing a short answer in a popover next to the cursor. This note covers what cursor-buddy does, why Weft should borrow its ideas rather than its package, and a design that fits Weft's harness.
 
 ## 1. What cursor-buddy is
@@ -102,3 +105,64 @@ New `assist` tasks in the eval suite, with deterministic graders:
 3. **What it does on its own ("show me"):** it points, navigates and drives the UI to show things (open a row, switch a tab or filter, scroll, expand a section). It never clicks Approve, Submit or any control that changes data; changes are proposals with the usual approval card, so the audit log stays honest.
 4. **Voice in:** the browser's live speech recognition where available, with the hosted whisper route as the fallback.
 5. **Voice out:** off by default. When on: Chatterbox Nano in the browser (community ONNX build, MIT, about 390 MB downloaded once and cached, WebGPU in Chrome or Edge), falling back to Deepgram Aura-2 on Workers AI (about $0.006 per short answer) where the browser cannot run it.
+6. **The in-browser voice:** Resemble AI's built-in default voice, the `conds.pt` its MIT model repos ship and its own code loads when it is given no reference clip (ResembleAI/chatterbox-nano at a pinned revision). Who the speaker is and their consent are not documented; that was accepted.
+7. **Marking:** spoken answers carry no label and no audio watermark (the ONNX path applies none, unlike upstream's PerTh watermark in PyTorch).
+
+## 8. What was built (2026-10-24)
+
+Everything in sections 4 and 7, plus three upgrades from Nitish's review: the assistant uses the app from the inside
+(structured cursor context and typed intents instead of synthetic clicks), page view state lives in the URL so one
+validated link reaches any record on any page, and complicated requests go to the full agent on their own.
+
+| Piece | Where |
+|---|---|
+| The manifest shared by client, executor and agent: tools, budget, screen map, cursor context, records, trail, nav registry, anchors, intents, URL query keys, show allowlist and denylist, effects, help corpus, test ids, speech constants | `packages/contracts/src/ext/assist.ts`, `assist-speech.ts` |
+| Presentation tools, validated server side | `packages/executor/src/assist.ts` |
+| The `assist` recipe, its frozen prompt (`as.r3`), pack, instant resolver, closing show and the handoff | `packages/agent/src/assist/`, `loop.ts`, `runtime.ts`, `prompts/index.ts` |
+| The route, the screen map in the run workspace, taint, the minted thread | `apps/api/src/routes/agent.ts` |
+| The client: icon, Weft menu, composer, card, progress card, chips, choices, walkthrough player, effects, live guard, voice in and out | `apps/web/src/components/assist/` (mounted once in `app-shell.tsx`) |
+| Hosted: the speak route (Aura-2), the speech neuron share, the handoff's admission, the CSP | `packages/cf-extras/src/speech.ts`, `apps/cf/src/extras/http.ts`, `apps/cf/src/front/index.ts`, `apps/cf/src/core/company/company-do.ts`, `apps/web/scripts/cf-export.ts` |
+
+Where it differs from sections 4 and 7:
+
+- **Six presentation tools, not three.** `ui.point`, `ui.navigate`, `ui.say` as designed, plus `ui.show` (typed
+  intents, or a non-mutating control from the screen map), `ui.handoff` and `ui.steps` (walkthroughs of at most 6
+  steps). The 16-tool cap holds with 10 chat reads: the run feed post, `actions.get_run`, `agent.read_artifact` and
+  `tax.list_registrations` are left out, and the full agent a handoff reaches has them all.
+- **"Show me" goes through typed intents.** Pages register named, non-mutating intents; the server checks each
+  against a static manifest that has no approve, submit or run intent at all. Global intents (`payroll.openPaycheck`,
+  `people.openTab`, `compliance.openTab`, `approval.card` and others) are links whose query keys are validated per
+  route (`ASSIST_QUERY_KEYS`). The element fallback takes only open, tab, scroll, expand and collapse on allowed
+  kinds, and refuses any control whose label, test id or anchor reads as a change; the browser checks the live
+  element again before it acts.
+- **Context is structured, not scraped.** Besides the screen map: the record under the pointer, a hover trail, the
+  selection, the focused control, an open layer and the URL's view state; summaries of the records the page already
+  holds in its query cache; and the last ten in-app events. Text people typed goes only as untrusted and taints the
+  run.
+- **Handoff to the full agent.** A change, an analysis or several asks at once become an ordinary chat run in the
+  same thread (code forces it for a change, at the step cap with reads pending, or for a tool outside the recipe),
+  shown as a progress card. Code adds the closing show: an approval card for a proposal, up to four "Show me" chips
+  for cited records, or a choice when a name is ambiguous.
+- **Wake.** As decided in 7.1 (icon, single right-click menu, double right-click to listen), with Ctrl or Cmd J for the
+  keyboard. Holding Ctrl+Alt to talk (4.1) was not built; the double right-click replaced it.
+- **Voice out.** The chain of 7.5 is built: Chatterbox Nano on WebGPU with `shader-f16`
+  (`owensong/chatterbox-nano-ONNX` at a pinned revision, 395,879,052 bytes, the speech encoder's 177 MB skipped),
+  then Aura-2 through a new hosted route (`POST /api/_hosted/speak`, a 500-neuron share taken from the agent's, so
+  Weft keeps half the account's neurons; RL_RUN), then the browser's speech synthesis with a voice the device
+  provides. The voice is 7.6's: `scripts/assist/build-voice.ts` (`pnpm voice:build`) converts `conds.pt` into the
+  1.3 MB `apps/web/public/assist/voice/weft-voice.bin` with no PyTorch, no model run and no clip. It reads conds.pt's
+  stored tensors by byte length, takes the encoder's constant speaker row and the 375 speech-embedding rows from HTTP
+  byte ranges of the pinned ONNX data files, checks every file against the repo's SHA256SUMS and every slice against
+  its own sha256, and agrees with the official float32 weights within 1e-3. Its sources are in
+  `weft-voice.provenance.json`. The graphs' input and output names were checked against the pinned files. A real run
+  in headless Chrome on an Apple GPU (2026-10-24) created the three sessions and spoke each utterance until the stop
+  token: a 97-character answer became 149 to 156 speech tokens and 6.0 to 6.3 s of audio, synthesized in 5 to 7 s,
+  and the 396 MB download took about 15 s. Utterances are cut at 120 characters (about 1.5 tokens a character, inside
+  the 256-token cap), and the next one is made while one plays. The
+  hosted CSP adds `https://huggingface.co`, `https://*.hf.co` and `'wasm-unsafe-eval'` because the export ships that
+  voice file; without it, nothing.
+- **Tests.** Unit tests for every core (contracts, executor, grounding, agent, the client's pure modules), API tests
+  for the route and every handoff case, the browser golden path `e2e/gp27-cursor-assistant.spec.ts` at 1440 by 900
+  and 390 by 844 with faked speech recognition, and the hosted check `e2e/cf/cf-assist.spec.ts`. The eval tasks of
+  4.6 are phase 3 and not written.
+

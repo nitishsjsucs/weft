@@ -73,7 +73,7 @@ describe("the SQL spend store", () => {
     await ledger.settle(r.reservationId, 4_400, { neurons: 400 });
     expect(store.neuronsSettled("2026-10-26")).toEqual({ agent: 400 });
     expect(st.db.prepare("SELECT day, product, model, neurons FROM neuron_entries").all()).toEqual([{ day: "2026-10-26", product: "agent", model: "@cf/openai/gpt-oss-120b", neurons: 400 }]);
-    expect((await ledger.status({})).neurons).toEqual({ used: 400, byProduct: { agent: 400, ocr: 0, embeddings: 0, dictation: 0 } });
+    expect((await ledger.status({})).neurons).toEqual({ used: 400, byProduct: { agent: 400, ocr: 0, embeddings: 0, dictation: 0, speech: 0 } });
   });
 
   it("stores the entries the file store writes, field for field", async () => {

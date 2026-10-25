@@ -3,6 +3,9 @@
 // Weft reads an uploaded notice from its scan sidecar (no OCR, no model call); anything it cannot read with confidence,
 // or a kind it does not handle, goes to a tax specialist and shows under Hand-offs. The upload's text is untrusted.
 import { useState } from "react";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { TRAINING_FILTERS } from "../../../../../../packages/contracts/src/ext/assist";
+import { useAssistIntent } from "../../assist/intents";
 import type { ToolOutcome } from "@weft/contracts";
 import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { ApiError } from "@/lib/api/client";
@@ -58,7 +61,11 @@ export function NoticeUpload() {
 export function TrainingPanel() {
   const list = useGet("/v1/training/assignments", { query: { limit: 100 }, refreshMs: 5_000 });
   const courses = useGet("/v1/training/courses", {});
-  const [filter, setFilter] = useState("open");
+  // The filter is in the link (?filter.training=overdue; Open when absent).
+  const [filterParam, setFilterParam] = useUrlState("filter.training", oneOf(TRAINING_FILTERS));
+  const filter = filterParam ?? "open";
+  const setFilter = (k: string) => setFilterParam(k === "open" ? null : k);
+  useAssistIntent("list.filter", ({ name, value }) => name === "training" && (TRAINING_FILTERS as readonly string[]).includes(value ?? "") ? (setFilter(value!), true) : false);
   const [busy, setBusy] = useState<string | null>(null);
   const rows = (((list.data as unknown as { data?: TrainingRowDto[] } | undefined)?.data) ?? []).filter((a) => filter === "all" || (filter === "open" ? a.status !== "completed" && a.status !== "waived" : a.status === filter));
   const complete = async (id: string) => { setBusy(id); try { await post(`/v1/training/assignments/${id}/complete`, "{}"); invalidate(); } finally { setBusy(null); } };

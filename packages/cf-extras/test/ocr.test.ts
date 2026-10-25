@@ -98,10 +98,10 @@ describe("receipt OCR", () => {
 
   it("refuses when the OCR neuron share cannot cover a read's worst case, without calling the model", async () => {
     const ai = fakeAi({ [OCR_MODEL]: () => reply({ total: "1.00" }) });
-    expect(await createReceiptOcr({ ai, neurons: memoryNeuronBudget({ agent: 4000, ocr: 48, embeddings: 200, dictation: 300 }), enabled: () => true }).read(await input(TINY_JPEG)))
+    expect(await createReceiptOcr({ ai, neurons: memoryNeuronBudget({ agent: 4000, ocr: 48, embeddings: 200, dictation: 300, speech: 0 }), enabled: () => true }).read(await input(TINY_JPEG)))
       .toMatchObject({ ok: false, code: "OCR_BUDGET" });
     expect(ai.calls).toHaveLength(0);
-    const neurons = memoryNeuronBudget({ agent: 4000, ocr: 49 + 27, embeddings: 200, dictation: 300 });
+    const neurons = memoryNeuronBudget({ agent: 4000, ocr: 49 + 27, embeddings: 200, dictation: 300, speech: 0 });
     const ocr = createReceiptOcr({ ai, neurons, enabled: () => true });
     expect(await ocr.read(await input(TINY_JPEG))).toMatchObject({ ok: true, neurons: 28 });
     // 28 used and a 49-neuron worst case is 77, one past the share.

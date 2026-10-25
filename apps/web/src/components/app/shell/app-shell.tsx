@@ -12,6 +12,7 @@ import { mocksEnabled } from "@/lib/api/mocks";
 import { HOSTED } from "@/lib/hosted/flags";
 import { HostedBanner } from "../../hosted/hosted-banner";
 import { TourShellBridge } from "../../tour/shell-bridge";
+import { CursorAssistant } from "../../assist/assistant";
 
 function useMedia(q: string): boolean {
   const [m, setM] = useState(false);
@@ -77,6 +78,8 @@ function Frame({ children }: { children: ReactNode }) {
       ) : null}
       <CommandMenu open={search} onOpenChange={setSearch} />
       <TourShellBridge setMobileNav={setMobileNav} laptop={laptop} desktop={desktop} />
+      {/* The cursor assistant lives in the app shell only: the marketing pages and the portal keep the browser's menu. */}
+      <CursorAssistant pathname={pathname} />
     </div>
   );
 }

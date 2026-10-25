@@ -4,7 +4,7 @@
 import { Hono, type Context } from "hono";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { NotFound, Unauthorized, type HumanSession, type ToolOutcome } from "@weft/contracts";
+import { idInMessage, NotFound, Unauthorized, type HumanSession, type ToolOutcome } from "@weft/contracts";
 import { paychecks, payrollRuns, workers } from "@weft/db";
 import { payroll } from "@weft/core";
 import type { Weft, WeftEnv } from "../http/context";
@@ -51,7 +51,7 @@ export function payrollsRoutes(weft: Weft): Hono<WeftEnv> {
     await canRead(c);
     const s = session(c);
     const run = (await weft.db.select().from(payrollRuns).where(and(eq(payrollRuns.id, c.req.param("id")), eq(payrollRuns.companyId, s.companyId))))[0];
-    if (!run) throw new NotFound(`No payroll run ${c.req.param("id")}`);
+    if (!run) throw new NotFound(`No payroll run ${idInMessage(c.req.param("id"))}`);
     const n = (await weft.db.select({ id: paychecks.id }).from(paychecks).where(eq(paychecks.payrollRunId, run.id))).length;
     return c.json(payroll.runDto(run, n));
   });

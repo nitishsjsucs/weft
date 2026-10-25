@@ -34,7 +34,7 @@ The API is Hono on Node, bound to 127.0.0.1 (port 4070 by default). The route ta
 | Tools | `GET /v1/tools?surface=mcp|main`, `POST /v1/tools/:name` (the surface comes from the key, never the request) |
 | Memory | `GET /v1/memory/tree`, `GET /v1/memory/file?path=` (with `links`: outgoing and backlinks), `GET /v1/memory/search?q=` (alias and wiki-link expansion), `GET /v1/memory/history?path=&limit=` (read only) |
 | Activity and settings | `GET /v1/events?afterId=`, `GET /v1/settings/permissions`, `PUT /v1/settings/agent-grants`, `POST /v1/api-keys` (the key is shown once) |
-| Agent | `POST /v1/agent/runs`, `GET /v1/agent/runs`, `GET /v1/agent/runs/:id`, `GET /v1/agent/runs/:id/events` (SSE), `GET /v1/agent/runs/:id/trace`, `GET /v1/agent/runs/:id/artifacts/:ref`, `POST /v1/agent/runs/:id/cancel`, `GET /v1/agent/costs?day=` |
+| Agent | `POST /v1/agent/runs` (`threadId` optional; `recipe: "assist"` with `assist: { screen, cursor, records, trail }` for the cursor assistant, at most 32,000 bytes, SPEC 9.12), `GET /v1/agent/runs`, `GET /v1/agent/runs/:id`, `GET /v1/agent/runs/:id/events` (SSE), `GET /v1/agent/runs/:id/trace`, `GET /v1/agent/runs/:id/artifacts/:ref`, `POST /v1/agent/runs/:id/cancel`, `GET /v1/agent/costs?day=` |
 | Routines | `GET /v1/routines`, `GET /v1/routines/:id`, `GET /v1/routines/:id/runs`, `GET /v1/routine-runs/:id`, `POST /v1/routines/:id/trigger`, `POST /v1/routines/draft`, `POST /v1/routines/:id/enable`, `POST /v1/routines/:id/disable` |
 | Simulators (dev only) | see [simulators.md](simulators.md) |
 

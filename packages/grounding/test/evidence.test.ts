@@ -42,6 +42,21 @@ describe("runEvidence", () => {
     }
   });
 
+  it("never takes the cursor assistant's walkthrough text or handoff task as evidence, even when the result normalizes it", () => {
+    // ui.steps returns each step's text trimmed, so the result no longer equals the echoed argument.
+    const text = "17 paychecks need review, $12,345.67 in all.";
+    for (const name of ["ui__steps", "ui.steps"]) {
+      const rows = run("Walk me through it", done(name, { steps: [{ target: "#payroll-needs-review", label: "Needs review", text: `${text} ` }] }, { effect: "steps", steps: [{ text }] }, "Walkthrough of 1 step", "res_0010"));
+      const ev = runEvidence(rows);
+      expect(ev.results).toEqual([]);
+      expect(ev.opts.echoes.size).toBe(0);
+      expect(check(text, ev.results, ev.opts)).toMatchObject({ ok: false, offending: expect.arrayContaining(["17", "$12,345.67"]) });
+    }
+    const handoff = run("Compare the runs", done("ui__handoff", { reason: "analysis", task: "Payroll rose by $4,210.00." }, { effect: "handoff", reason: "analysis" }, "Handed to the agent", "res_0011"));
+    const ev = runEvidence(handoff);
+    expect(check("Payroll rose by $4,210.00.", ev.results, ev.opts).ok).toBe(false);
+  });
+
   it("drops the request without a stored trust decision or with a false one; the pack row is never the decision", () => {
     expect(requestTrustOf([pack("x")])).toBeNull();
     expect(requestTrustOf([pack("x"), assemble(false), assemble(true)])).toBe(false);

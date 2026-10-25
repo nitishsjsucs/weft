@@ -50,7 +50,7 @@ export function McpConnectButton({ size = "sm" }: { size?: "xs" | "sm" | "md" })
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/20" />
-        <Dialog.Content data-testid="hosted-mcp" className="fixed top-1/2 left-1/2 z-[81] flex max-h-[85vh] w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-y-auto rounded-xl bg-card p-5 text-[13px] shadow-[var(--shadow-modal)] outline-none">
+        <Dialog.Content data-testid="hosted-mcp" className="fixed inset-0 z-[81] m-auto flex h-fit max-h-[85vh] w-[min(560px,calc(100vw-32px))] flex-col gap-3 overflow-y-auto rounded-xl bg-card p-5 text-[13px] shadow-[var(--shadow-modal)] outline-none">
           <Dialog.Title className="text-[14px] font-semibold text-gray-12">Connect an MCP client</Dialog.Title>
           <Dialog.Description className="leading-5 text-gray-11">
             Any MCP client that speaks Streamable HTTP can use Weft's tools on your workspace. The key works until your workspace ends; its tools read and propose, and every change still waits for approval here.

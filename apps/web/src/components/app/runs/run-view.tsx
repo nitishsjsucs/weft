@@ -90,7 +90,7 @@ export function RunView({ id }: { id: string }) {
     <div className="mx-auto w-full max-w-[1100px] px-4 py-6 tablet:px-8 tablet:py-8">
       <PageHeader
         title={<span data-testid="run-title">{runTitle(run, run.routineRunId ? routineNames[run.routineRunId] : undefined)}</span>}
-        subtitle={run.summary ? (run.routineRunId ? routineSummaryText(run.summary) : answerPlain(run.summary)) : undefined}
+        subtitle={run.summary ? <span data-assist-untrusted={run.tainted ? "" : undefined}>{run.routineRunId ? routineSummaryText(run.summary) : answerPlain(run.summary)}</span> : undefined}
         meta={
           <>
             <Badge data-testid="run-status" data-status={run.status} tone={run.status === "done" ? "green" : run.status === "waiting" ? "amber" : working ? "blue" : "red"} size="md">{working ? <ShimmerText>{statusLabel(run.status)}</ShimmerText> : run.status === "waiting" ? "Waiting for approval" : statusLabel(run.status)}</Badge>
@@ -165,7 +165,7 @@ export function RunView({ id }: { id: string }) {
           <h2 className="mb-2 text-2 font-medium">Proposals and their fate</h2>
           <Card className="divide-y divide-[var(--app-border)]">
             {w.trace.proposals.map((p) => (
-              <Link key={p.id} href={`/app/inbox?proposal=${encodeURIComponent(p.id)}`} title={`${p.id}: ${p.headline}`} className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
+              <Link key={p.id} href={`/app/inbox?proposal=${encodeURIComponent(p.id)}`} data-entity={p.id} data-entity-kind="proposal" title={`${p.id}: ${p.headline}`} className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-gray-2">
                 <span className="min-w-0 flex-1 truncate">{humanLine(p.headline)}</span>
                 <Badge tone={p.status === "executed" || p.status === "approved" ? "green" : p.status === "pending" ? "amber" : "red"}>{p.status === "pending" ? "Waiting for approval" : statusLabel(p.status)}</Badge>
                 {p.decidedBy ? <span className="hidden text-1 text-gray-10 tablet:inline">Decided by {principalName(p.decidedBy)}</span> : null}

@@ -21,7 +21,7 @@ const status = (o: { day?: number; visitor?: number | null; ip?: number | null; 
   day: "2026-10-26",
   caps: { ...HOSTED_CAP_DEFAULTS, ...(o.liveUsd !== undefined ? { liveUsd: o.liveUsd } : {}) },
   spentMicros: { day: o.day ?? 0, visitor: o.visitor === undefined ? 0 : o.visitor, ip: o.ip === undefined ? 0 : o.ip, live: o.live ?? 0 },
-  neurons: { used: o.neurons ?? 0, byProduct: { agent: o.agent ?? 0, ocr: 0, embeddings: 0, dictation: 0 } },
+  neurons: { used: o.neurons ?? 0, byProduct: { agent: o.agent ?? 0, ocr: 0, embeddings: 0, dictation: 0, speech: 0 } },
   openReservations: 0,
 });
 const all = new Set<HostedProviderId>(["openai", "workers_ai", "scripted"]);
@@ -49,7 +49,7 @@ describe("chooseHostedProvider", () => {
     expect(choose({ status: status({ live: 99_000_000 }) })).toEqual({ id: "openai", reason: "default" });
     expect(choose({ status: status({ live: 499_000, liveUsd: 0.5 }) })).toEqual({ id: "scripted", reason: "budget" });
     // Neurons matter only to Workers AI.
-    expect(choose({ world: "workers_ai", status: status({ neurons: 5000 - MIN_NEURONS_FOR_RUN + 1 }) })).toEqual({ id: "scripted", reason: "neurons" });
+    expect(choose({ world: "workers_ai", status: status({ neurons: HOSTED_CAP_DEFAULTS.neuronsDay - MIN_NEURONS_FOR_RUN + 1 }) })).toEqual({ id: "scripted", reason: "neurons" });
     expect(choose({ world: "workers_ai", status: status({ agent: 4000 - MIN_NEURONS_FOR_RUN + 1 }) })).toEqual({ id: "scripted", reason: "neurons" });
     expect(choose({ world: "workers_ai", status: status({ neurons: 1000, agent: 1000 }) })).toEqual({ id: "workers_ai", reason: "world" });
     expect(choose({ status: status({ neurons: 5000 }) })).toEqual({ id: "openai", reason: "default" });

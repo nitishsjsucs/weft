@@ -63,7 +63,7 @@ export function fakeSpend(): FakeSpend {
     async spent() { calls.push("spent"); return [...settled.values()].reduce((a, b) => a + b, 0); },
     async status() {
       calls.push("status");
-      return { day: "2026-10-26", caps: { runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 }, spentMicros: { day: 0, visitor: 0, ip: 0, live: 0 }, neurons: { used: 0, byProduct: { agent: 0, ocr: 0, embeddings: 0, dictation: 0 } }, openReservations: 0 };
+      return { day: "2026-10-26", caps: { runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 }, spentMicros: { day: 0, visitor: 0, ip: 0, live: 0 }, neurons: { used: 0, byProduct: { agent: 0, ocr: 0, embeddings: 0, dictation: 0, speech: 0 } }, openReservations: 0 };
     },
     async settleOrphans() { calls.push("settleOrphans"); return 0; },
   };

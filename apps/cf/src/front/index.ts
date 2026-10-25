@@ -6,6 +6,7 @@ import {
   DO_NAMES, HOSTED_CONFIG_KEYS, HOSTED_PATHS, HOSTED_SETTINGS, parseHostedMcpKey,
   type HostedResetResult,
 } from "../shared/contracts";
+import { SPEECH_BODY_BYTES } from "../../../../packages/contracts/src/ext/assist-speech";
 import { agentEnabled, envConfig } from "../shared/config";
 import { isPoolSlot, type FrontEnv } from "../shared/env";
 import { ADMIN_MAX_BODY_BYTES, hostedError, isMutation, json, plainError, readJson, readTextCapped } from "../shared/http";
@@ -202,7 +203,9 @@ async function hosted(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<
     const inner = path === HOSTED_PATHS.modelSwitch ? DO_PATHS.model : DO_PATHS.mcpKey;
     return forwardToWorld(req, env, { ...worldOf(v, t), path: inner, search: "" });
   }
-  const gated = path === HOSTED_PATHS.dictate || path.startsWith(`${HOSTED_PATHS.pdf}/`);
+  // Dictation and spoken answers are model calls a visitor starts: the mutation gate (lease, human grant and
+  // Turnstile, RL_MUTATE) applies, and weft-core adds RL_RUN.
+  const gated = path === HOSTED_PATHS.dictate || path === HOSTED_PATHS.speak || path.startsWith(`${HOSTED_PATHS.pdf}/`);
   if (gated || isMutation(req.method)) {
     const refused = await mutationGate(req, env, v);
     if (refused) return refused;
@@ -215,13 +218,21 @@ async function hosted(req: Request, env: FrontEnv, url: URL, v: Visit): Promise<
   }
   // Exports belong to a leased world (the job id names its slot's file).
   if (path.startsWith(HOSTED_EXPORT_PREFIX) && !t.leased && !v.smoke) return hostedError("LEASE_REQUIRED", "Exports belong to your own workspace");
-  if (![HOSTED_PATHS.platform, HOSTED_PATHS.models, HOSTED_PATHS.help, HOSTED_PATHS.dictate].includes(path as never) && !path.startsWith(HOSTED_EXPORT_PREFIX)) {
+  if (![HOSTED_PATHS.platform, HOSTED_PATHS.models, HOSTED_PATHS.help, HOSTED_PATHS.dictate, HOSTED_PATHS.speak].includes(path as never) && !path.startsWith(HOSTED_EXPORT_PREFIX)) {
     return plainError(404, "NotFound", "NOT_FOUND", "No such hosted route");
   }
   if (path === HOSTED_PATHS.dictate) {
     const len = Number(req.headers.get("content-length") ?? "NaN");
     if (!Number.isFinite(len)) return plainError(411, "ValidationError", "LENGTH_REQUIRED", "Dictation needs a Content-Length");
     if (len > DICTATE_MAX_BYTES) return plainError(413, "ValidationError", "DICTATION_TOO_LONG", "Dictation clips are at most 30 seconds");
+  }
+  if (path === HOSTED_PATHS.speak) {
+    if (req.method !== "POST") return plainError(405, "ValidationError", "METHOD", "POST { text }");
+    // A paid model call: the kill switch pauses it like the agent's own admissions.
+    if (!agentEnabled(await envConfig(env))) return hostedError("AGENT_PAUSED", "The agent is paused right now", { retryAfterS: 300 });
+    const len = Number(req.headers.get("content-length") ?? "NaN");
+    if (!Number.isFinite(len)) return plainError(411, "ValidationError", "LENGTH_REQUIRED", "Spoken answers need a Content-Length");
+    if (len > SPEECH_BODY_BYTES) return plainError(413, "ValidationError", "SPEECH_TOO_LONG", "A spoken answer is a short text");
   }
   return forwardToExtras(req, env, url, ctxOf(v, t.slot, t.gen));
 }

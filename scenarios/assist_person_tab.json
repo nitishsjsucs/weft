@@ -1,0 +1,38 @@
+{
+  "match": "lena'?s pay tab|pay tab for lena",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__show",
+            "arguments": {
+              "intent": "people.openTab",
+              "params": [
+                {
+                  "name": "workerId",
+                  "value": "wrk_0026"
+                },
+                {
+                  "name": "tab",
+                  "value": "pay"
+                }
+              ],
+              "target": null,
+              "action": null,
+              "label": "Pay and tax"
+            }
+          },
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "Here is the Pay and tax tab of Lena Brooks's record."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

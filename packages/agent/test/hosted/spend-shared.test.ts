@@ -147,7 +147,7 @@ describe("the shared ledger on the file and SQL stores", () => {
     expect(byLabel.get("after reopen")).toEqual(byLabel.get("before sweep"));
     expect(byLabel.get("before sweep")).toMatchObject({
       run: 50_000, day: 50_000, live: 50_000, visitorA: 50_000,
-      status: { spentMicros: { day: 420_000, visitor: 140_000, ip: 230_000, live: 260_000 }, neurons: { used: 820, byProduct: { agent: 600, ocr: 220, embeddings: 0, dictation: 0 } }, openReservations: 8 },
+      status: { spentMicros: { day: 420_000, visitor: 140_000, ip: 230_000, live: 260_000 }, neurons: { used: 820, byProduct: { agent: 600, ocr: 220, embeddings: 0, dictation: 0, speech: 0 } }, openReservations: 8 },
     });
     expect(byLabel.get("sweep early")).toBe(0);
     expect(byLabel.get("sweep")).toBe(8);

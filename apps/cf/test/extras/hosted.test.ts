@@ -4,6 +4,7 @@
 // Lobby counters run over DO SQLite semantics, SpendDO's ledger over the neuron budget.
 import { describe, expect, it } from "vitest";
 import { createHelpSearch, createRunCatalog, DICTATION_MODEL, memoryDailyCounters, memoryNeuronBudget, refreshComparison, type LobbyReadout } from "@weft/cf-extras";
+import { SPEECH_MODEL, speechNeurons } from "../../../../packages/contracts/src/ext/assist-speech";
 import type { HostedSpendStatus } from "../../../../packages/contracts/src/ext/cf-agent";
 import { HOSTED_SETTINGS } from "../../../../packages/contracts/src/ext/cf-hosted";
 import { createHostedExtras } from "../../src/extras/hosted";
@@ -19,7 +20,7 @@ const wav = (seconds: number) => {
   dv.setUint32(24, 16_000, true); dv.setUint32(28, 32_000, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); put(36, "data"); dv.setUint32(40, data, true);
   return b;
 };
-const status: HostedSpendStatus = { day: "2026-10-26", caps: { runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 }, spentMicros: { day: 12_000, visitor: null, ip: null, live: 0 }, neurons: { used: 40, byProduct: { agent: 0, ocr: 22, embeddings: 0, dictation: 18 } }, openReservations: 0 };
+const status: HostedSpendStatus = { day: "2026-10-26", caps: { runUsd: 0.1, dayUsd: 2, liveUsd: null, visitorDayUsd: 2, ipDayUsd: 2, neuronsDay: 5000 }, spentMicros: { day: 12_000, visitor: null, ip: null, live: 0 }, neurons: { used: 40, byProduct: { agent: 0, ocr: 22, embeddings: 0, dictation: 18, speech: 0 } }, openReservations: 0 };
 const readout: LobbyReadout = { day: "2026-10-26", level: 0, restoresLeft: 3, leases: { active: 1, pool: 2, waitlist: 0 }, lastSweepAt: "2026-10-26T15:15:00.000Z", shares: {} };
 
 function deps(o: Partial<Parameters<typeof createHostedExtras>[0]> = {}) {
@@ -30,8 +31,8 @@ function deps(o: Partial<Parameters<typeof createHostedExtras>[0]> = {}) {
     db, metrics, counters,
     api: createHostedExtras({
       help: createHelpSearch({ search: fakeAiSearch(chunks), counters, enabled: () => true }),
-      ai: fakeAi({ [DICTATION_MODEL]: () => ({ text: "Show payroll cost by month", transcription_info: { duration: 2.5 } }) }),
-      neurons: memoryNeuronBudget(), dictationEnabled: async () => true, catalog: createRunCatalog(db),
+      ai: fakeAi({ [DICTATION_MODEL]: () => ({ text: "Show payroll cost by month", transcription_info: { duration: 2.5 } }), [SPEECH_MODEL]: () => new Uint8Array([0xff, 0xfb, 1, 2]) }),
+      neurons: memoryNeuronBudget(), dictationEnabled: async () => true, speechEnabled: async () => true, catalog: createRunCatalog(db),
       platform: async () => ({ day: "2026-10-26", level: 0, dollars: { spentUsd: 0, dayCapUsd: 2, runCapUsd: 0.1 }, neurons: { used: 0, cap: 5000 }, restoresLeft: 3, leases: readout.leases, deadLetters: 0, lastSweepAt: null, shares: {} }),
       files: memoryR2(), metrics, gatewayFor: () => null, ...o,
     }),
@@ -56,6 +57,17 @@ describe("HostedExtras", () => {
     const off = deps({ dictationEnabled: async () => false }).api;
     expect(await off.dictate({ audio: wav(1), contentType: "audio/wav", slot: null, gen: null, visitor: null, ipHash: null })).toMatchObject({ ok: false, code: "DICTATION_DISABLED" });
     expect(await deps({ ai: null }).api.dictate({ audio: wav(1), contentType: "audio/wav", slot: null, gen: null, visitor: null, ipHash: null })).toMatchObject({ ok: false, code: "DICTATION_DISABLED" });
+  });
+
+  it("speaks an answer inside the speech share, charged to the visitor's world, and not when switched off", async () => {
+    const neurons = memoryNeuronBudget();
+    const { api, metrics } = deps({ neurons });
+    const r = await api.speak({ text: "Four paychecks need review.", slot: "slot-1", gen: 3, visitor: "v_1", ipHash: "ip_1" });
+    expect(r).toMatchObject({ ok: true, contentType: "audio/mpeg", chars: 27, neurons: speechNeurons(27) });
+    expect(neurons.used("speech")).toBe(speechNeurons(27));
+    expect(metrics.points).toEqual([{ name: "job.done", value: 27, slot: "slot-1", tags: { kind: "speech" } }]);
+    expect(await deps({ speechEnabled: async () => false }).api.speak({ text: "Hi.", slot: null, gen: null, visitor: null, ipHash: null })).toMatchObject({ ok: false, code: "SPEECH_DISABLED" });
+    expect(await deps({ ai: null }).api.speak({ text: "Hi.", slot: null, gen: null, visitor: null, ipHash: null })).toMatchObject({ ok: false, code: "SPEECH_DISABLED" });
   });
 
   it("refuses a compressed clip before any model call, since its length cannot be checked first", async () => {

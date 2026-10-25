@@ -4,7 +4,7 @@
 // needs with present or missing (never a value), the free path, a connection test and, for Greenhouse and Workday,
 // the sandbox controls (each vendor's simulator in packages/sim). Below: the sync items people decide (keep the Weft
 // value or take the vendor value), the hires imported as draft offers, the time off imported from Workday and the open roles. Vendor names say what Weft connects to; no logos.
-import { Fragment, useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Badge, Button, Card } from "@weft/ui/components";
 import { W3_INTEGRATIONS_HR_TID as H, W3_INTEGRATIONS_TID as T, type ConnectorStatus, type IntegrationCard, type SyncItem } from "@weft/contracts";
 import { client, errorText, useGet, useMutation } from "@/lib/api/hooks";
@@ -129,23 +129,30 @@ export function syncSubject(subjectRef: string, offers: Record<string, string>):
   return /^offr_/.test(subjectRef) ? "An offer" : subjectRef;
 }
 
-function SyncItemRow({ s, offers }: { s: SyncItem; offers: Record<string, string> }) {
+/** Text a vendor's records hold (names, values people typed there): the cursor assistant reads it as untrusted. */
+function Vendor({ children }: { children: ReactNode }) {
+  return <span data-assist-untrusted="">{children}</span>;
+}
+
+export function SyncItemRow({ s, offers }: { s: SyncItem; offers: Record<string, string> }) {
   const resolve = useMutation(async (take: "weft" | "vendor") => client.post("/v1/sync-items/:id/resolve", { params: { id: s.id }, body: { take } }));
   const d = s.detail;
   const vendor = VENDOR_LABEL[s.vendor] ?? s.vendor;
   // Pay values read as dollars (syncValue), so the stored "(cents)" unit leaves the label.
   const field = (d.label ?? FIELD_LABEL[d.field ?? ""] ?? d.field ?? "").replace(/ \(cents\)$/, "");
   const payChange = d.reason === "pay_affecting";
+  // What the vendor sent (a Greenhouse department or office name, a changed value) is text people typed there: core
+  // reads it as untrusted (integrations.list_sync_items), so the cursor assistant never takes it as the page's words.
   const text = s.kind === "sync_conflict"
-    ? `${field} changed in ${vendor}${d.offer_version ? ` (offer version ${d.offer_version})` : ""}: Weft has ${syncValue(d.field, d.weft_value)}, ${vendor} has ${syncValue(d.field, d.vendor_value)}.${payChange ? " Pay changes are applied from People so payroll previews them." : ""}`
-    : s.kind === "unmapped_value" ? `${field} ${d.ext_name ? `"${d.ext_name}"` : ""} is not mapped. ${d.reason ?? ""}`
+    ? <>{`${field} changed in ${vendor}${d.offer_version ? ` (offer version ${d.offer_version})` : ""}: Weft has ${syncValue(d.field, d.weft_value)}, ${vendor} has `}<Vendor>{syncValue(d.field, d.vendor_value)}</Vendor>{`.${payChange ? " Pay changes are applied from People so payroll previews them." : ""}`}</>
+    : s.kind === "unmapped_value" ? <>{`${field} `}{d.ext_name ? <Vendor>{`"${d.ext_name}"`}</Vendor> : null}{` is not mapped. ${d.reason ?? ""}`}</>
       : d.reason ?? KIND_LABEL[s.kind];
   return (
-    <li data-testid={H.syncItem(s.id)} data-kind={s.kind} data-subject={s.subjectRef} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
+    <li data-testid={H.syncItem(s.id)} data-entity={s.id} data-entity-kind="sync_item" data-kind={s.kind} data-subject={s.subjectRef} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-[13px]">
       <Badge tone={s.kind === "sync_conflict" ? "amber" : "gray"} size="md">{KIND_LABEL[s.kind] ?? s.kind}</Badge>
       <div className="min-w-[220px] flex-1">
         <div>{text}</div>
-        <div className="text-1 text-gray-10" title={s.subjectRef}>{vendor} · {syncSubject(s.subjectRef, offers)} · opened {fmtDateTime(s.createdAt)}</div>
+        <div className="text-1 text-gray-10" title={s.subjectRef}>{vendor} · {offers[s.subjectRef] ? <Vendor>{syncSubject(s.subjectRef, offers)}</Vendor> : syncSubject(s.subjectRef, offers)} · opened {fmtDateTime(s.createdAt)}</div>
       </div>
       <Button size="sm" variant="secondary" data-testid={H.syncResolve(s.id, "weft")} disabled={resolve.pending} onClick={() => void resolve.run("weft")}>Keep Weft value</Button>
       {s.kind === "sync_conflict" && !payChange ? <Button size="sm" variant="primary" data-testid={H.syncResolve(s.id, "vendor")} disabled={resolve.pending} onClick={() => void resolve.run("vendor")}>Take {vendor} value</Button> : null}
@@ -191,10 +198,10 @@ export function IntegrationsView() {
             {imported.length === 0 ? <p className="text-[13px] text-gray-10">No hires imported yet. Send a test hire from the Greenhouse card.</p> : (
               <ul className="flex flex-col divide-y divide-[var(--app-border)]">
                 {imported.map((o) => (
-                  <li key={o.offerId} data-offer={o.offerId} data-status={o.status ?? ""} className="flex flex-wrap items-center gap-x-3 py-2 text-[13px]">
+                  <li key={o.offerId} data-offer={o.offerId} data-entity={o.offerId} data-entity-kind="offer" data-status={o.status ?? ""} className="flex flex-wrap items-center gap-x-3 py-2 text-[13px]">
                     <div className="min-w-[200px] flex-1">
-                      <div className="font-medium">{o.candidate}</div>
-                      <div className="text-gray-10">{o.title} · {o.workState} · starts {o.startDate ? fmtDate(o.startDate) : "unknown"} · Greenhouse application {o.applicationRef}, offer version {o.offerVersion ?? 1}</div>
+                      <div className="font-medium"><Vendor>{o.candidate}</Vendor></div>
+                      <div className="text-gray-10"><Vendor>{o.title}</Vendor> · {o.workState} · starts {o.startDate ? fmtDate(o.startDate) : "unknown"} · Greenhouse application {o.applicationRef}, offer version {o.offerVersion ?? 1}</div>
                     </div>
                     <Badge size="md" tone={o.status === "accepted" ? "green" : o.status === "draft" ? "gray" : "blue"}>{o.status ?? "unknown"}</Badge>
                     <a className="text-1 text-blue-11 hover:underline" href="/app/hiring">Open in Hiring</a>
@@ -209,7 +216,7 @@ export function IntegrationsView() {
             {wdTimeOff.length === 0 ? <p className="text-[13px] text-gray-10">Nothing imported yet. Approve two days off on the Workday card, then Sync now.</p> : (
               <ul className="flex flex-col divide-y divide-[var(--app-border)]">
                 {wdTimeOff.map((t) => (
-                  <li key={t.requestId} data-request={t.requestId} data-source="workday" className="flex flex-wrap items-center gap-x-3 py-2 text-[13px]">
+                  <li key={t.requestId} data-request={t.requestId} data-entity={t.requestId} data-entity-kind="time_off_request" data-source="workday" className="flex flex-wrap items-center gap-x-3 py-2 text-[13px]">
                     <div className="min-w-[200px] flex-1">
                       <div className="font-medium">{t.worker}</div>
                       <div className="text-gray-10">{fmtDate(t.date)} · {(t.minutes / 60).toFixed(2)} h · Workday entry {t.entryRef.slice(0, 8)}</div>
@@ -228,8 +235,8 @@ export function IntegrationsView() {
           <ul className="flex flex-col gap-2">
             {roles.map((j) => (
               <li key={j.id} className="rounded-lg border border-[var(--app-border)] p-2 text-[13px]">
-                <div className="font-medium">{j.name}</div>
-                <div className="text-1 text-gray-10">{[j.departmentName, j.officeName, j.location].filter(Boolean).join(" · ")}</div>
+                <div className="font-medium"><Vendor>{j.name}</Vendor></div>
+                <div className="text-1 text-gray-10"><Vendor>{[j.departmentName, j.officeName, j.location].filter(Boolean).join(" · ")}</Vendor></div>
               </li>
             ))}
           </ul>

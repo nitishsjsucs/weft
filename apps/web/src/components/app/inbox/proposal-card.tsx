@@ -95,7 +95,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
     .filter((r) => r.before !== r.after);
 
   return (
-    <Card data-testid={tid.inboxCard(p.id)} data-tour="inbox-card" data-proposal-id={p.id} data-has-diff={p.diff.length ? "true" : "false"} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
+    <Card data-testid={tid.inboxCard(p.id)} data-tour="inbox-card" data-proposal-id={p.id} data-command={p.command ?? undefined} data-has-diff={p.diff.length ? "true" : "false"} data-status={p.status} data-tainted={p.taintedBy ? "true" : "false"} className="overflow-hidden">
       {p.taintedBy ? (
         <div data-testid={TID.inboxTaintedBanner} role="alert" className="flex items-start gap-2 border-b border-amber-9/30 bg-amber-3 px-4 py-2 text-[13px] text-amber-11">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
@@ -143,7 +143,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
             {p.content.map((c, i) => (
               <div key={i} className="rounded-lg border border-[var(--app-border)]">
                 <div className="border-b border-[var(--app-border)] bg-gray-2 px-3 py-1.5 text-1 font-medium text-gray-11">{contentLabel(c.label)}</div>
-                <pre className="max-w-full overflow-x-auto px-3 py-2 font-sans text-[13px] leading-5 break-words whitespace-pre-wrap">{c.text}</pre>
+                <pre data-assist-untrusted="" className="max-w-full overflow-x-auto px-3 py-2 font-sans text-[13px] leading-5 break-words whitespace-pre-wrap">{c.text}</pre>
               </div>
             ))}
           </div>
@@ -151,7 +151,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
         {p.agentNote && !p.content.some((c) => c.text.trim() === p.agentNote!.trim()) ? (
           <div className="rounded-lg bg-gray-2 px-3 py-2">
             <div data-testid="proposal-note-label" data-proposer={who.kind} className="text-1 font-medium text-gray-11">{noteLabel(who, principalName)}</div>
-            <p className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12 max-mobile:line-clamp-3" title={humanTimes(p.agentNote)}>{humanTimes(p.agentNote)}</p>
+            <p data-assist-untrusted="" className="mt-0.5 text-[13px] leading-5 break-words whitespace-pre-wrap text-gray-12 max-mobile:line-clamp-3" title={humanTimes(p.agentNote)}>{humanTimes(p.agentNote)}</p>
           </div>
         ) : null}
         {p.evidence.length ? (
@@ -172,7 +172,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
           <div className="text-1 text-gray-10">
             {p.decidedBy ? <>Decided by {principalName(p.decidedBy)}{p.decidedAt ? ` on ${fmtDateTime(p.decidedAt)}` : ""}</> : null}
             {p.decisionCode ? <> · Reason: {reasonLabel(p.decisionCode).toLowerCase()}</> : null}
-            {p.decisionNote ? <> · {p.decisionNote}</> : null}
+            {p.decisionNote ? <> · <span data-assist-untrusted="">{p.decisionNote}</span></> : null}
             {p.executedActionSeq !== null ? <> · <Link href="/app/audit" className="text-blue-11 hover:underline">{auditLabel(p.executedActionSeq)}</Link></> : null}
           </div>
         ) : null}

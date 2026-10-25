@@ -13,6 +13,7 @@ import { type Db } from "@weft/db";
 import type { WeftCommand } from "@weft/core";
 import { createAgentExecutor } from "./agent";
 import { builtinCommands } from "./builtins";
+import { assistCommands } from "./assist";
 import { verifyActions } from "./chain";
 import type { Engine, SimulatorsFactory } from "./engine";
 import { createHumanExecutor } from "./human";
@@ -43,6 +44,7 @@ export { writeLocked, isBusy } from "./write";
 export { escapeUntrusted, wrapUntrusted, nonceFromToken, LT_ESCAPE } from "./untrusted";
 export { actionHash, GENESIS_HASH } from "./chain";
 export { toProposal, approvalCardOf } from "./proposals";
+export { assistCommands, assistScreenKey } from "./assist";
 export { toCsv } from "./workspace";
 export type { WeftRunHandle } from "./runs";
 export type { BatchedAgentCall } from "./agent";
@@ -132,7 +134,8 @@ export async function createExecutor(opts: CreateExecutorOptions): Promise<Execu
   };
   const memory = createMemoryStore(memoryOptions);
   engine.memory = memory;
-  const mine = [...builtinCommands(engine), ...memoryCommands(engine)];
+  // The cursor assistant's presentation tools (ui.*) are on the assist recipe's allowlist only and hidden from MCP.
+  const mine = [...builtinCommands(engine), ...memoryCommands(engine), ...assistCommands(engine)];
   const own = new Set(mine.map((c) => c.name));
   // Wave 4 round 2 (R3): a command that cites a memory note (notices.escalate procedure_ref) is checked against memory.
   // Platform-only commands (the hidden OCR write-backs) join last; Node passes none, so its registry is unchanged.

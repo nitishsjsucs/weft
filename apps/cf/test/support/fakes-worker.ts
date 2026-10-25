@@ -15,6 +15,8 @@ export class FakeAi extends WorkerEntrypoint {
       return { shape: [list.length, 768], data: list.map((t) => Array.from({ length: 768 }, (_, i) => ((t.length + i) % 7) / 7)) };
     }
     if (model.includes("whisper")) return { text: "fake dictation" };
+    // Aura-2 text to speech: a few bytes that start like an MP3 file (an ID3 tag), as raw bytes.
+    if (model.includes("aura")) return new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
     if (model.includes("mistral")) return { response: JSON.stringify({ merchant: "Fake Cafe", date: "2026-10-20", totalCents: 1062, currency: "USD", confidence: 0.9 }) };
     return { output: [{ type: "message", content: [{ type: "output_text", text: "fake" }] }], usage: { input_tokens: 10, output_tokens: 2 } };
   }

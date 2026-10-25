@@ -161,7 +161,7 @@ function History({ path }: { path: string }) {
               <div className="truncate text-1 font-medium">{c.subject}</div>
               <div className="text-0 text-gray-10"><code className="font-mono">{c.commit.slice(0, 10)}</code> by {c.author === "Weft Agent" ? "Weft agent" : c.author}, {fmtDateTime(c.date)}</div>
             </button>
-            {openSha === c.commit ? <pre className="mt-2 max-h-[320px] overflow-auto rounded-md bg-gray-2 p-2 font-mono text-[11px] leading-snug">{c.diff.split("\n").map((l, i) => (
+            {openSha === c.commit ? <pre data-assist-untrusted="" className="mt-2 max-h-[320px] overflow-auto rounded-md bg-gray-2 p-2 font-mono text-[11px] leading-snug">{c.diff.split("\n").map((l, i) => (
               <div key={i} className={cn(l.startsWith("+") && !l.startsWith("+++") && "text-green-11", l.startsWith("-") && !l.startsWith("---") && "text-red-11")}>{l || " "}</div>
             ))}</pre> : null}
           </li>
@@ -213,7 +213,7 @@ export function MemoryView() {
                   {f.frontmatter.updated ? <Badge tone="gray" title={f.frontmatter.updated}>updated {/^\d{4}-\d{2}-\d{2}$/.test(f.frontmatter.updated) ? fmtDate(f.frontmatter.updated) : f.frontmatter.updated}</Badge> : null}
                   {f.frontmatter.taintedBy ? <Badge tone="amber" data-testid="memory-tainted">untrusted: {f.frontmatter.taintedBy}</Badge> : null}
                 </div>
-                <div className="text-2 leading-relaxed">{content.map((l, i) => <Line key={i} text={l} onOpen={open} resolved={(p) => known.has(p)} />)}</div>
+                <div data-assist-untrusted="" className="text-2 leading-relaxed">{content.map((l, i) => <Line key={i} text={l} onOpen={open} resolved={(p) => known.has(p)} />)}</div>
               </>
             ) : null}
           </Card>

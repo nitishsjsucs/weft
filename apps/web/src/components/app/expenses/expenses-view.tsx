@@ -4,6 +4,8 @@
 // employee's own text: React renders them as plain text, never markup.
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { oneOf, useUrlState } from "@/lib/url-state";
+import { useAssistIntent } from "../../assist/intents";
 import { CircleCheck, CircleDashed, CircleX, Receipt } from "lucide-react";
 import { Badge, Button, Card, TBody, TD, TH, THead, TR, Table } from "@weft/ui/components";
 import { ExpenseBand, ExpenseCategory, W3_EXPENSES_TID as TID } from "@weft/contracts";
@@ -30,9 +32,21 @@ function CheckDots({ row }: { row: W3ExpensesRow }) {
 }
 
 export function ExpensesView() {
-  const [category, setCategory] = useState<string>("");
-  const [band, setBand] = useState<ExpenseBand | "">("");
-  const [openId, setOpenId] = useState<string | null>(null);
+  // The filters and the open claim are in the link (?filter.band=needs_review&filter.category=travel&expense=exp_...),
+  // written with replace, so one link reaches any claim and Back is unchanged.
+  const [categoryParam, setCategoryParam] = useUrlState("filter.category", oneOf(ExpenseCategory.options));
+  const [bandParam, setBandParam] = useUrlState("filter.band", oneOf(ExpenseBand.options));
+  const [openId, setOpenId] = useUrlState("expense", (v) => /^exp_[0-9]{4}$/.test(v));
+  const category = categoryParam ?? "";
+  const band = (bandParam ?? "") as ExpenseBand | "";
+  const setCategory = (v: string) => setCategoryParam(v || null);
+  const setBand = (v: ExpenseBand | "") => setBandParam(v || null);
+  // The cursor assistant's list.filter on this page: a band or a category of the page's own options (never a write).
+  useAssistIntent("list.filter", ({ name, value }) => {
+    if (name === "band" && (ExpenseBand.options as readonly string[]).includes(value ?? "")) { setBand(value as ExpenseBand); return true; }
+    if (name === "category" && (ExpenseCategory.options as readonly string[]).includes(value ?? "")) { setCategory(value!); return true; }
+    return false;
+  });
   const q = useGet("/v1/expenses", { query: { limit: 100, category: category || undefined }, refreshMs: 10_000 });
   const page = q.data as W3ExpensesPage | undefined;
   const rows = useMemo(() => page?.data ?? [], [page]);
@@ -106,7 +120,7 @@ export function ExpensesView() {
                       </div>
                     </TD>
                     <TD className="h-auto max-w-0 py-2">
-                      <div className="line-clamp-2 break-words" title={r.merchant}>{r.merchant}</div>
+                      <div data-assist-untrusted="" className="line-clamp-2 break-words" title={r.merchant}>{r.merchant}</div>
                       <div className="truncate text-1 text-gray-10">{CATEGORY_LABEL[r.category]}{r.hasReceipt || r.category === "mileage" ? null : <span className="text-gray-9">, no receipt</span>}</div>
                     </TD>
                     <TD numeric className="h-auto py-2 whitespace-nowrap">

@@ -5,7 +5,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
-import { DRAFT_TOOLS, NotFound, Refused, Unauthorized, type RoutineDef, type RoutineRun, type WeftEvent } from "@weft/contracts";
+import { DRAFT_TOOLS, idInMessage, NotFound, Refused, Unauthorized, type RoutineDef, type RoutineRun, type WeftEvent } from "@weft/contracts";
 import { events, type Db } from "@weft/db";
 // Relative on purpose: @weft/core exports only "." and its index is shared; the integrator may re-export it there.
 import { parseRoutineDraft } from "../../../../packages/core/src/routines/draft-parser";
@@ -56,7 +56,7 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
   const kick = async () => { try { await weft.scheduler.kick(); } catch { /* the scheduler may still be a stub */ } };
   const getRoutine = async (id: string): Promise<RoutineDef> => {
     const def = await engine.view.get(id);
-    if (!def) throw new NotFound(`No routine ${id}`);
+    if (!def) throw new NotFound(`No routine ${idInMessage(id)}`);
     return def;
   };
   const dto = (run: RoutineRun) => ({ ...run, durationMs: run.startedAt && run.endedAt ? new Date(run.endedAt).getTime() - new Date(run.startedAt).getTime() : null });
@@ -79,7 +79,7 @@ export function routinesRoutes(weft: Weft): Hono<WeftEnv> {
 
   r.get("/v1/routine-runs/:id", async (c) => {
     const run = await engine.getRun(c.req.param("id"));
-    if (!run) throw new NotFound(`No routine run ${c.req.param("id")}`);
+    if (!run) throw new NotFound(`No routine run ${idInMessage(c.req.param("id"))}`);
     return c.json(dto(run));
   });
 

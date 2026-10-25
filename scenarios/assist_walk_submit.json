@@ -1,0 +1,71 @@
+{
+  "match": "walk me through submitting",
+  "agents": {
+    "main": [
+      {
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__steps",
+            "arguments": {
+              "steps": [
+                {
+                  "route": "/app/payroll/pay_2026_10_30",
+                  "target": "#payroll-needs-review",
+                  "label": "Needs review",
+                  "text": "Clear every flag first."
+                },
+                {
+                  "route": null,
+                  "target": "#payroll-submit",
+                  "label": "Submit",
+                  "text": "Then submit the run."
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "expect": {
+          "lastResults": [
+            {
+              "tool": "ui__steps",
+              "ok": false,
+              "code": "NOT_PERMITTED"
+            }
+          ]
+        },
+        "output": [
+          {
+            "type": "function_call",
+            "name": "ui__steps",
+            "arguments": {
+              "steps": [
+                {
+                  "route": "/app/payroll/pay_2026_10_30",
+                  "target": "#payroll-needs-review",
+                  "label": "Needs review",
+                  "text": "Clear every flag first; open each one to read why it fired."
+                },
+                {
+                  "route": "/app/inbox",
+                  "target": "#inbox-approvals",
+                  "label": "Approvals",
+                  "text": "The review files its submit proposal here. You approve it yourself."
+                }
+              ]
+            }
+          },
+          {
+            "type": "function_call",
+            "name": "ui__say",
+            "arguments": {
+              "text": "Two steps. Use Next and Back; you press every button yourself."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

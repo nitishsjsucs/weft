@@ -185,4 +185,18 @@ describe("scripted provider", () => {
     expect(stub.stop).toBe("final");
     expect(stub.text).toContain(SCRIPTED_LABEL);
   });
+
+  it("a step with delayMs waits that long before it answers, and a cancel (the request's signal) ends the wait", async () => {
+    const held = { held: { match: "held raise", agents: { main: [{ delayMs: 60_000, output: [{ type: "text" as const, text: "Held." }] }] } }, quick: { match: "quick raise", agents: { main: [{ delayMs: 150, output: [{ type: "text" as const, text: "Quick." }] }] } } };
+    const p = scriptedProvider({ scriptsDir: join(dir, "none"), scripts: held });
+    let t = Date.now();
+    expect((await p.step(req("weft:main:chat:cmp_larkspur", [ctx("<request>a quick raise</request>")]))).text).toBe("Quick.");
+    expect(Date.now() - t).toBeGreaterThanOrEqual(140);
+    const stop = new AbortController();
+    t = Date.now();
+    const step = p.step({ ...req("weft:main:chat:cmp_larkspur", [ctx("<request>a held raise</request>")]), signal: stop.signal });
+    setTimeout(() => stop.abort(), 100);
+    expect((await step).text).toBe("Held.");
+    expect(Date.now() - t).toBeLessThan(5_000);
+  });
 });
