@@ -6,7 +6,7 @@
 import { Hono, type Context } from "hono";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
-  NotFound, OffCycleRequest, OFFBOARDING_PROPOSAL_STEPS, OFFBOARDING_STEP_ORDER, TerminationInput, Unauthorized,
+  idInMessage, NotFound, OffCycleRequest, OFFBOARDING_PROPOSAL_STEPS, OFFBOARDING_STEP_ORDER, TerminationInput, Unauthorized,
   type HumanSession, type OffboardingCase, type OffboardingStep, type OffboardingStepKind, type ToolOutcome,
 } from "@weft/contracts";
 import { offboardingCases, offboardingSteps, proposals, type DbTx } from "@weft/db";
@@ -99,7 +99,7 @@ export function offboardingRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/offboarding/:id", async (c) => {
     const s = session(c);
     const rows = await weft.db.select().from(offboardingCases).where(and(eq(offboardingCases.id, c.req.param("id")), eq(offboardingCases.companyId, s.companyId)));
-    if (!rows.length || !inScope(await viewerScope(weft, c), rows[0]!.workerId)) throw new NotFound(`No offboarding case ${c.req.param("id")}`);
+    if (!rows.length || !inScope(await viewerScope(weft, c), rows[0]!.workerId)) throw new NotFound(`No offboarding case ${idInMessage(c.req.param("id"))}`);
     return c.json((await caseDtos(weft.db, rows))[0]);
   });
 

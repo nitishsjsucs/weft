@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { NotFound } from "@weft/contracts";
+import { idInMessage, NotFound } from "@weft/contracts";
 import { principals, workers } from "@weft/db";
 import { bankSummary, getWorker, homeAddressText, inScope, listTasks, lookups, pageById, payRateHistory, readScopeFor, taxProfile, toPayRateDto, toTaskDto, toWorkerDto, withheldReason, workerWhere, type WorkerRow } from "@weft/core";
 import type { Weft, WeftEnv } from "../http/context";
@@ -42,7 +42,7 @@ export function workersRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/workers/:id", async (c) => {
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
     const w = await getWorker(weft.db, companyId, c.req.param("id"));
-    if (!w) throw new NotFound(`No worker ${c.req.param("id")}`);
+    if (!w) throw new NotFound(`No worker ${idInMessage(c.req.param("id"))}`);
     const L = await lookups(weft.db, companyId);
     const bank = await bankSummary(weft.db, w.id);
     const tp = await taxProfile(weft.db, w.id);
@@ -71,7 +71,7 @@ export function workersRoutes(weft: Weft): Hono<WeftEnv> {
   r.get("/v1/workers/:id/onboarding", async (c) => {
     const companyId = c.var.session?.companyId ?? "cmp_larkspur";
     const w = await getWorker(weft.db, companyId, c.req.param("id"));
-    if (!w) throw new NotFound(`No worker ${c.req.param("id")}`);
+    if (!w) throw new NotFound(`No worker ${idInMessage(c.req.param("id"))}`);
     // Onboarding tasks (W-4, direct deposit, I-9, background check) are private to the hire's own management chain.
     if (!inScope(await readScopeFor(weft.db, companyId, c.var.session?.principalId ?? null), w.id)) return c.json([]);
     return c.json((await listTasks(weft.db, w.id)).map(toTaskDto));

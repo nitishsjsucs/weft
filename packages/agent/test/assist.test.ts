@@ -12,7 +12,7 @@ import { agentRuns as agentRunsTable, closeDb, migrate, openDb, runSteps as runS
 import { ASSIST_TOOLS, EMPTY_CURSOR, type AssistInput, type ScreenItem } from "../../contracts/src/ext/assist";
 import { assistPack, assistUntrustedSource, createAgentRuntime, createSpendLedger, frozenPrompt, readsAsChange, resolveAssist, scriptedProvider, type ChatContextSource, type Script, type WeftAgentRuntime } from "../src/index";
 import { check, runEvidence } from "@weft/grounding";
-import { presentationText, SAY_HELD } from "../src/loop";
+import { presentationText, SAY_HELD, SAY_NOT_SHOWN } from "../src/loop";
 import { createFakeExecutor, type FakeExecutor } from "./fake-executor";
 
 const clock: SimClock = { now: () => "2026-10-26T16:00:00.000Z", rate: () => 0, advance: async () => undefined, set: async () => undefined };
@@ -299,6 +299,10 @@ const SCRIPTS: Record<string, Script> = {
     { output: [fc("payroll__get_run", { run_id: "pay_2026_10_30" }), fc("ui__say", { text: "Here is the run." })] },
     { output: [{ type: "text", text: "Here is the run, with 4 paychecks to review [res_0300]." }] },
   ] } },
+  assist_say_beside_refused: { match: "^say beside a refused show", agents: { main: [
+    { output: [fc("ui__show", { intent: "inbox.approve" }), fc("ui__say", { text: "Only you can approve it; approve or deny it yourself." })] },
+    { output: [fc("ui__say", { text: "Only you can approve it; approve or deny it yourself." })] },
+  ] } },
   assist_refused_walk: { match: "^refused walk", agents: { main: [
     { output: [fc("ui__show", { intent: "inbox.approve" }), fc("ui__steps", { steps: [{ route: "/app/payroll/pay_2026_10_30", target: "#payroll-needs-review", label: "Needs review", text: "17 paychecks need review." }] })] },
     { output: [fc("ui__say", { text: "Here it is." })] },
@@ -341,6 +345,17 @@ describe("presentation words are grounded wherever they appear", () => {
     expect((say.result as { output: string }).output).not.toContain("Answered in the popover");
     // The line the run ends with is the answer.
     expect(row).toMatchObject({ status: "done", summary: "Here is the run, with 4 paychecks to review [res_0300]." });
+    await rt.idle();
+  });
+
+  it("a popover line beside a refused show is not shown either: the model is told so, and the line it ends on is the answer", async () => {
+    const rt = runtime(executor(), SCRIPTS);
+    const { row, steps } = await ask(rt, "say beside a refused show");
+    const says = steps.filter((s) => s.kind === "tool_call" && s.toolName === "ui__say");
+    expect((says[0]!.result as { output: string }).output).toContain(SAY_NOT_SHOWN);
+    expect((says[0]!.result as { output: string }).output).not.toContain("Answered in the popover");
+    expect(row).toMatchObject({ status: "done", summary: "Only you can approve it; approve or deny it yourself." });
+    expect(steps.filter((s) => s.kind === "model_call")).toHaveLength(2);
     await rt.idle();
   });
 

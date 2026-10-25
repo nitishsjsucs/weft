@@ -5,7 +5,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { CHAT_TOOLS, Forbidden, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type ExecutorBundle, type HumanSession, type Proposal, type RunStepRow } from "@weft/contracts";
+import { CHAT_TOOLS, Forbidden, idInMessage, NotFound, ReportResult, Unauthorized, ValidationError, type ApprovalCardW3, type ExecutorBundle, type HumanSession, type Proposal, type RunStepRow } from "@weft/contracts";
 import { agentRuns, execRuns, notices, offboardingCases, payrollRuns, principals, proposals, routines, runArtifacts, withWriteLock, workers, type Db } from "@weft/db";
 import { assistUntrustedSource, closingShow, createRunStore, summarize, type ChatContextSource, type WeftAgentRuntime } from "@weft/agent";
 import { proposalVisible, readScopeFor } from "@weft/core";
@@ -122,11 +122,17 @@ export function createChatContextSource(db: Db, deps: ChatContextDeps = {}): Cha
   };
 }
 
+/** The shape both thread minters give (newThreadId here and on the Agent page): hex only, so it spells no words. */
+const MINTED_THREAD_RE = /^thr_[0-9a-f]{20}$/;
+
 /**
  * Which of the ids a cursor assistant request names (assistRecordIds: record pages, threads, the selected paycheck)
- * exist in this company. Looked up by prefix, one query each, so a sender's words spelled as an id are found out.
+ * exist in this company. Looked up by prefix, one query each, so a sender's words spelled as an id are found out. A
+ * thread id is chosen by whoever starts its first run, so a thread counts only in the minted shape and only when every
+ * run on it acted for `principalId` (the executor's ROUTE_REFS thr_ rule): another person's thread, or one named in
+ * someone's words, is dropped like an unknown one.
  */
-async function knownAssistRecords(db: Db, companyId: string, ids: readonly string[]): Promise<Set<string>> {
+async function knownAssistRecords(db: Db, companyId: string, principalId: string, ids: readonly string[]): Promise<Set<string>> {
   const of = (p: string) => ids.filter((id) => id.startsWith(p));
   const found = new Set<string>();
   const add = (rows: { id: string | null }[]) => { for (const r of rows) if (r.id) found.add(r.id); };
@@ -136,7 +142,14 @@ async function knownAssistRecords(db: Db, companyId: string, ids: readonly strin
   await look("run_", (xs) => db.select({ id: agentRuns.id }).from(agentRuns).where(and(eq(agentRuns.companyId, companyId), inArray(agentRuns.id, xs))));
   await look("rt_", (xs) => db.select({ id: routines.id }).from(routines).where(and(eq(routines.companyId, companyId), inArray(routines.id, xs))));
   await look("ofb_", (xs) => db.select({ id: offboardingCases.id }).from(offboardingCases).where(and(eq(offboardingCases.companyId, companyId), inArray(offboardingCases.id, xs))));
-  await look("thr_", (xs) => db.select({ id: agentRuns.threadId }).from(agentRuns).where(and(eq(agentRuns.companyId, companyId), inArray(agentRuns.threadId, xs))));
+  await look("thr_", async (xs) => {
+    const minted = xs.filter((x) => MINTED_THREAD_RE.test(x));
+    if (!minted.length) return [];
+    const rows = await db.select({ id: agentRuns.threadId, live: execRuns.onBehalfOf, seeded: agentRuns.onBehalfOf }).from(agentRuns)
+      .leftJoin(execRuns, eq(execRuns.id, agentRuns.id)).where(and(eq(agentRuns.companyId, companyId), inArray(agentRuns.threadId, minted)));
+    const shared = new Set(rows.filter((r) => (r.live ?? r.seeded) !== principalId).map((r) => r.id));
+    return rows.filter((r) => !shared.has(r.id));
+  });
   return found;
 }
 
@@ -146,8 +159,8 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
   const runtime = weft.agent as Partial<WeftAgentRuntime>;
   const getRun = async (id: string, c?: Context<WeftEnv>) => {
     const run = await store.getRun(id);
-    if (!run) throw new NotFound(`No agent run ${id}`);
-    if (c) { const mine = await ownRuns(c); if (mine && !mine.has(run.id)) throw new NotFound(`No agent run ${id}`); }
+    if (!run) throw new NotFound(`No agent run ${idInMessage(id)}`);
+    if (c) { const mine = await ownRuns(c); if (mine && !mine.has(run.id)) throw new NotFound(`No agent run ${idInMessage(id)}`); }
     return run;
   };
   /**
@@ -188,7 +201,7 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
       // executor's checks as the page's own words, not even spelled as an id.
       const hosted = { hosted: !!weft.platform?.world };
       const cleaned = cleanAssistInput(body.assist, hosted);
-      const known = await knownAssistRecords(weft.db, session.companyId, assistRecordIds(cleaned, hosted));
+      const known = await knownAssistRecords(weft.db, session.companyId, session.principalId, assistRecordIds(cleaned, hosted));
       const input = assistKnownRecords(cleaned, (id) => known.has(id), hosted);
       const registry = weft.executor.registry as { get?: (n: string) => unknown } | undefined;
       const allowlist = ASSIST_TOOLS.filter((n) => !registry?.get || registry.get(n));
@@ -364,7 +377,7 @@ export function agentRoutes(weft: Weft): Hono<WeftEnv> {
     if (!s) throw new Unauthorized();
     const id = c.req.param("id"), ref = c.req.param("ref");
     const [run] = await weft.db.select({ companyId: execRuns.companyId, onBehalfOf: execRuns.onBehalfOf, routineRunId: execRuns.routineRunId, parentRunId: execRuns.parentRunId }).from(execRuns).where(eq(execRuns.id, id)).limit(1);
-    if (!run || run.companyId !== s.companyId) throw new NotFound(`No agent run ${id}`);
+    if (!run || run.companyId !== s.companyId) throw new NotFound(`No agent run ${idInMessage(id)}`);
     const [a] = await weft.db.select().from(runArtifacts).where(and(eq(runArtifacts.id, ref), eq(runArtifacts.runId, id))).limit(1);
     if (!a) throw new NotFound(`No artifact ${ref} in run ${id}`);
     if (!run.routineRunId && run.onBehalfOf && run.onBehalfOf !== s.principalId) throw new Forbidden(`Run ${id} belongs to another person`, { code: "NOT_PERMITTED" });

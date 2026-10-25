@@ -34,6 +34,7 @@ import { resolveAssist, resolverProvider, type AssistResolution } from "./assist
 
 export { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
 import { CHAT_TOOLS, DRAFT_TOOLS } from "@weft/contracts";
+import { requestTrustOf } from "@weft/grounding";
 export const DEFAULT_COMPANY_ID = "cmp_larkspur";
 
 /** Read access to routine definitions and their code-owned checklists. */
@@ -397,6 +398,9 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
     // request and the one they picked), so that task is the chat run's request; a model's task stays in the earlier
     // turn only, and the person's question is the request (it also picks the chat tools, as for any question).
     const text = h.forced ? h.task.trim() || question : question;
+    // The chat run's request counts as evidence when it is the person's question itself and the assist run counted it
+    // (a forced task code restated, such as a choice's, is decided on the chat run's own taint).
+    const requestTrusted = text === question && requestTrustOf(await store.steps(run.id)) === true;
     // The person may stop the assist run while the handoff is being admitted and opened (a network call on hosted):
     // checked before the port, again just before the chat run starts, and once more after, when one it started is
     // cancelled too. A stopped request never leaves a chat run working for the person.
@@ -408,7 +412,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
       started = chatHandle.runId;
       await runtime.startChat(chatHandle, {
         text, recipe: "chat", pageContext: handoffPageLine(setup?.brief), ...(allowlist ? { allowlist } : {}),
-        ...(run.threadId ? { threadId: run.threadId } : {}), handoff: { fromRunId: run.id, reason: h.reason, task: h.task, question },
+        ...(run.threadId ? { threadId: run.threadId } : {}), handoff: { fromRunId: run.id, reason: h.reason, task: h.task, question, requestTrusted },
       });
     });
     if (!stopped()) { if (to) handedTo.set(run.id, to); return to; }
@@ -566,7 +570,7 @@ export function createAgentRuntime(opts: CreateAgentRuntimeOptions & { scriptSou
       } : undefined;
       await writeContext(handle.runId, {
         promptKind: kind, allowlist, nonce, routineId: null, text, pack: true, principal, ...(resolved ? { resolved } : {}), ...(brief ? { brief, request: input.text } : {}),
-        ...(input.handoff ? { handoffFrom: { runId: input.handoff.fromRunId, reason: input.handoff.reason, task: input.handoff.task } } : {}),
+        ...(input.handoff ? { handoffFrom: { runId: input.handoff.fromRunId, reason: input.handoff.reason, task: input.handoff.task, ...(input.handoff.requestTrusted ? { requestTrusted: true } : {}) } } : {}),
       });
       enqueue(handle.runId, providerFor(row).live);
     },

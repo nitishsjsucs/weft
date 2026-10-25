@@ -437,22 +437,33 @@ export function cleanView(view: AssistCursor["view"], route: string, opts: { hos
   return { tab, filters, selected };
 }
 
+/** Alerts and status lines the page shows: a page that could not load what its link names may repeat the link's text. */
+const echoesLink = (t: TrailEvent) => t.kind === "error" || t.kind === "toast";
+/** Marks the trail's alerts and status lines untrusted (they taint the run and reach the model only wrapped). */
+const alertsUntrusted = (trail: TrailEvent[]): TrailEvent[] => trail.map((t) => (echoesLink(t) && !t.untrusted ? { ...t, untrusted: true } : t));
+
 /**
  * The request as the server keeps it: routes and view state cleaned (cleanRoute, cleanView), and a navigation in the
  * trail named again from its cleaned route (assistPageName), so its label never holds more than the route keeps; the
- * rest unchanged.
+ * rest unchanged. When cleaning took text out of a path (the screen's or a trail event's: one outside the registry), the
+ * page's alerts and status lines are marked untrusted, since a "No worker ..." alert repeats that text.
  */
 export function cleanAssistInput(a: AssistInput, opts: { hosted?: boolean } = {}): AssistInput {
   const route = cleanRoute(a.screen.route, opts);
+  const pathOf = (r: string) => splitRoute(normalizeRoute(String(r ?? "").trim())).path;
+  const lost = (raw: string, clean: string) => splitRoute(clean).path !== pathOf(raw);
+  let dropped = lost(a.screen.route, route);
+  const trail = a.trail.map((t) => {
+    if (!t.route) return t;
+    const r = cleanRoute(t.route, opts);
+    if (lost(t.route, r)) dropped = true;
+    return t.kind === "navigate" ? { ...t, route: r, label: `Opened ${assistPageName(r, opts)}` } : { ...t, route: r };
+  });
   return {
     ...a,
     screen: { ...a.screen, route },
     cursor: { ...a.cursor, view: cleanView(a.cursor.view, route, opts) },
-    trail: a.trail.map((t) => {
-      if (!t.route) return t;
-      const r = cleanRoute(t.route, opts);
-      return t.kind === "navigate" ? { ...t, route: r, label: `Opened ${assistPageName(r, opts)}` } : { ...t, route: r };
-    }),
+    trail: dropped ? alertsUntrusted(trail) : trail,
   };
 }
 
@@ -486,14 +497,17 @@ export function assistRecordIds(a: AssistInput, opts: { hosted?: boolean } = {})
  * reads as its sidebar page, a thread key is dropped, and so is a selected record that names one, so a sender's words
  * spelled as an id never reach the model, the handoff or the executor's checks as the page's own. A trail label that
  * spells one goes too: a record opened or closed through the link is left out of the trail, and any other event (an
- * alert that repeats the id) is marked untrusted; a navigation is named again from its route (cleanAssistInput).
+ * alert that repeats the id) is marked untrusted; a navigation is named again from its route (cleanAssistInput). A
+ * record page that reads as its sidebar page marks every alert and status line untrusted, as cleanAssistInput does.
  * `known` answers for the ids assistRecordIds listed; the request is cleaned again after (cleanAssistInput).
  */
 export function assistKnownRecords(a: AssistInput, known: (id: string) => boolean, opts: { hosted?: boolean } = {}): AssistInput {
   const ok = (v: string) => !lookedUp(v) || known(v);
+  let dropped = false;
   const reduce = (route: string): string => {
     const { path, query } = splitRoute(route);
     const rec = recordOf(path);
+    if (rec && !ok(rec.id)) dropped = true;
     const p = rec && !ok(rec.id) ? nearPage(path, opts) : path;
     const params = new URLSearchParams(query ?? "");
     for (const [k, v] of [...params]) if (!ok(v)) params.delete(k);
@@ -501,17 +515,19 @@ export function assistKnownRecords(a: AssistInput, known: (id: string) => boolea
     return q ? `${p}?${q}` : p;
   };
   const selected = a.cursor.view.selected;
+  const screenRoute = reduce(a.screen.route);
+  const trail = a.trail.flatMap((t) => {
+    const e = t.route ? { ...t, route: reduce(t.route) } : t;
+    // A question the person asked earlier is their own words, whatever ids it spells.
+    if ((e.kind === "navigate" && e.route) || e.kind === "ask") return [e];
+    if (labelIds(e.label).every(ok)) return [e];
+    return e.kind === "open" || e.kind === "close" ? [] : [{ ...e, untrusted: true }];
+  });
   const next: AssistInput = {
     ...a,
-    screen: { ...a.screen, route: reduce(a.screen.route) },
+    screen: { ...a.screen, route: screenRoute },
     cursor: { ...a.cursor, view: { ...a.cursor.view, selected: selected && selected.split(":").every(ok) ? selected : null } },
-    trail: a.trail.flatMap((t) => {
-      const e = t.route ? { ...t, route: reduce(t.route) } : t;
-      // A question the person asked earlier is their own words, whatever ids it spells.
-      if ((e.kind === "navigate" && e.route) || e.kind === "ask") return [e];
-      if (labelIds(e.label).every(ok)) return [e];
-      return e.kind === "open" || e.kind === "close" ? [] : [{ ...e, untrusted: true }];
-    }),
+    trail: dropped ? alertsUntrusted(trail) : trail,
   };
   return cleanAssistInput(next, opts);
 }

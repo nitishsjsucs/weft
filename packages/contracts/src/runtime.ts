@@ -27,7 +27,7 @@ export interface AgentRuntime {
   /** `threadId` (Agent page, additive): the conversation this chat run belongs to (ext/agent-page.ts); omitted or null is a single run. */
   /** `assist` (the cursor assistant, additive): the screen map, cursor context, page records and trail the client sent (ext/assist.ts). */
   /** `handoff` (additive): a chat run an assist run handed its request to; the assist exchange is its earlier turn. */
-  startChat(run: RunHandle, input: { text: string; recipe: "chat" | "routine_draft" | "assist"; pageContext: string | null; allowlist?: readonly string[]; threadId?: string | null; assist?: AssistInput; handoff?: { fromRunId: string; reason: string; task: string; question?: string } }): Promise<void>;
+  startChat(run: RunHandle, input: { text: string; recipe: "chat" | "routine_draft" | "assist"; pageContext: string | null; allowlist?: readonly string[]; threadId?: string | null; assist?: AssistInput; handoff?: { fromRunId: string; reason: string; task: string; question?: string; requestTrusted?: boolean } }): Promise<void>;
   startRoutineRun(run: RunHandle, input: { routine: RoutineDef; routineRun: RoutineRun; trigger: WeftEvent | null; precheck: PrecheckResult }): Promise<void>;
   requeue(runId: string, notice: { kind: NoticeKind; attrs: Record<string, string>; text: string }): Promise<void>;
   cancel(runId: string): Promise<void>;
