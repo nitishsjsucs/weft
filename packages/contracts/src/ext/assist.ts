@@ -945,6 +945,7 @@ export const ASSIST_TID = {
   continue: "assist-continue",
   voiceOut: "assist-voice-out",
   voiceProgress: "assist-voice-progress",
+  voiceNote: "assist-voice-note",
   close: "assist-close",
   menu: "assist-menu",
   menuCopy: "assist-menu-copy",

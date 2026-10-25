@@ -184,7 +184,8 @@ export function CursorIcon({ onOpen, hidden, docked }: { onOpen: (at: { x: numbe
     document.addEventListener("focusout", onFocus);
     const offFocus = () => { document.removeEventListener("focusin", onFocus); document.removeEventListener("focusout", onFocus); };
     // Docked, the icon only steps aside while the person types (the keyboard and the field's own buttons are below it).
-    if (docked) return offFocus;
+    // Its corner classes alone place it: a translate left from following the pointer would move it off the window.
+    if (docked) { el.style.transform = ""; return offFocus; }
     let x = -100, y = -100, tx = -100, ty = -100, raf = 0;
     let armTimer: ReturnType<typeof setTimeout> | null = null;
     const OFFSET = { x: 18, y: 22 };
@@ -234,6 +235,7 @@ export function CursorIcon({ onOpen, hidden, docked }: { onOpen: (at: { x: numbe
       cancelAnimationFrame(raf);
       if (armTimer) clearTimeout(armTimer);
       if (quietTimer) clearTimeout(quietTimer);
+      el.style.transform = "";
       offFocus();
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("scroll", onScroll, { capture: true });

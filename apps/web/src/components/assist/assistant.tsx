@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { ArrowUp, Check, CircleAlert, Clock, ExternalLink, Mic, ShieldAlert, Sparkles, Square, Volume2, VolumeX, X } from "lucide-react";
 import { ShimmerText } from "@weft/ui/components";
 import { cn } from "@weft/ui";
@@ -41,7 +42,7 @@ import { setAssistPref, useAssistIcon, useAssistVoice } from "./prefs";
 import { summarizeRecords } from "./records-core";
 import { createRightClickDetector } from "./right-click";
 import { cardTaint, chipLabel, clipAnswer, effectTrailLabel, fitAssistRequest, playableEffects, progressSteps, refusedChange, type AssistTrace } from "./run-core";
-import { composing, iconHidden, isAssistHotkey, mayShowNow, sheetReserve, viewPatch } from "./surface-core";
+import { closingPlays, composing, iconHidden, isAssistHotkey, mayShowNow, sheetReserve, stopAfterCancel, viewPatch, type StopState } from "./surface-core";
 import { pushTrail, startTrail, syncTrail, trailEvents } from "./trail";
 import { AssistPointer, CursorIcon, FloatingCard, InLayer, useLayerHost, useTrackedRect, WeftMenu } from "./visuals";
 import { browserVoiceInMode, listen, VOICE_COPY, type Listening } from "./voice-in";
@@ -74,10 +75,9 @@ interface Exchange {
   chatId: string | null;
   chat: RunWatch | null;
   error: string | null;
-  /** Stop on the progress card: sent, then stopped once the cancel is accepted, or failed (Stop stays to try again). */
+  /** Stop on the progress card: sent, then stopped once the cancel stopped the run, or failed (Stop stays to try again). */
   stop: StopState;
 }
-type StopState = "idle" | "sending" | "stopped" | "failed";
 interface Pointing { key: number; target: HTMLElement; label: string; from: { x: number; y: number }; done: () => void }
 /** `returnTo`: what had focus before the right-click, where focus goes back when the menu or what it opened closes. */
 interface MenuState { at: { x: number; y: number }; copy: string; start: CursorStart; returnTo: HTMLElement | null }
@@ -126,7 +126,10 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
   const [about, setAbout] = useState<EntityRef | null>(null);
   const [text, setText] = useState("");
   const [voice, setVoice] = useState<"idle" | "listening" | "transcribing">("idle");
-  const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  // Numbered, so the same note again (a second try with no microphone) is written again and read out again.
+  const [voiceNote, setVoiceNoteNow] = useState<VoiceNote | null>(null);
+  const noteN = useRef(0);
+  const setVoiceNote = (t: string | null) => setVoiceNoteNow(t ? { text: t, n: ++noteN.current } : null);
   const [exchange, setExchange] = useState<Exchange | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [pointer, setPointer] = useState<Pointing | null>(null);
@@ -303,9 +306,10 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
   /**
    * A run is over: the closing show code built (a proposal's card ringed in the Inbox), and the answer spoken when on.
    * The show moves the page only while the person is still where they asked and doing nothing else (mayShowNow);
-   * otherwise it stays a "Show me" chip on the card, theirs to press.
+   * otherwise it stays a "Show me" chip on the card, theirs to press. After Stop neither plays (closingPlays).
    */
   const finish = (t: AssistTrace) => {
+    if (!closingPlays(t.run.status, exRef.current?.stop ?? "idle")) return;
     const prop = t.closing?.proposals[0];
     const chip = prop ? t.closing?.chips.find((c) => c.id === prop && c.intent === "approval.card") : undefined;
     if (chip && mayShowNow({ askedFrom: leftAt.current.route, here: routeNow(), typing: typingOnPage(), layerNow: !!openLayer(), layerThen: leftAt.current.layer })) playChip(chip);
@@ -512,6 +516,16 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
     };
   }, [closeAll, openComposer]);
 
+  /**
+   * The walkthrough's Done and Close end the walkthrough only: the run's card (its answer, notes, chips and approval
+   * card) comes back and takes focus. Escape and the hotkey still close everything; with no card to come back to,
+   * so do these.
+   */
+  const endWalk = () => {
+    if (phase !== "card" || !exchange) { closeAll(); return; }
+    setWalk(null);
+  };
+
   // ---- render ----------------------------------------------------------------------------------------------------
   // The ringed target, followed each frame: after a scroll or a resize the card is placed clear of where it is now.
   const avoid: Rect | null = useTrackedRect(pointer?.target ?? null);
@@ -526,7 +540,13 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
       {/* Docked on a phone, the icon would sit over the right-hand button of what fills the screen there (the agent's
           Send, a drawer's Submit): it steps aside whenever one is open. */}
       <CursorIcon hidden={iconHidden({ on: iconOn, tour: tour.active, busy: phase !== "idle" || !!walk || !!menu, docked, agentComposer: pathname === "/app/agent" || agentPanel.open, layer: host !== null })} docked={docked}
-        onOpen={(p, el) => openComposer(p, captureStart(lastPointer(), routeNow()), docked ? { returnTo: el } : {})} />
+        onOpen={(p, el) => {
+          if (!docked) { openComposer(p, captureStart(lastPointer(), routeNow())); return; }
+          // A phone's keyboard opens only for a focus made inside the tap itself (iOS Safari): the composer is
+          // rendered now, and its field focused before the tap's handler returns.
+          flushSync(() => openComposer(p, captureStart(lastPointer(), routeNow()), { returnTo: el }));
+          document.querySelector<HTMLInputElement>(`[data-testid="${ASSIST_TID.input}"]`)?.focus({ preventScroll: true });
+        }} />
       {menu ? (
         <WeftMenu at={menu.at} canCopy={!!menu.copy.trim()}
           onCopy={() => { const c = menu.copy; closeMenu(); void navigator.clipboard?.writeText(c).catch(() => undefined); }}
@@ -556,11 +576,12 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
             {handedOff ? (
               <Progress watch={exchange.chat} stop={exchange.stop} threadId={exchange.threadId}
                 onStop={() => {
-                  // Stopped only once the cancel is accepted: a refused or failed one leaves Stop to press again.
+                  // Stopped only once the cancel stopped the run: a refused or failed one leaves Stop to press again, and
+                  // one that arrived after the run ended leaves its answer as it is (stopAfterCancel).
                   const id = exchange.chatId!, exId = exchange.id;
                   const set = (stop: StopState) => setExchange((e) => (e && e.id === exId ? { ...e, stop } : e));
                   set("sending");
-                  void client.post("/v1/agent/runs/:id/cancel", { params: { id } }).then(() => set("stopped"), () => set("failed"));
+                  void client.post("/v1/agent/runs/:id/cancel", { params: { id } }).then((row) => set(stopAfterCancel((row as { status?: string } | null)?.status)), () => set("failed"));
                 }} />
             ) : null}
             {finalT ? <Answer trace={finalT} threadId={exchange.threadId} handedOff={handedOff} onChip={playChip}
@@ -575,16 +596,28 @@ export function CursorAssistant({ pathname }: { pathname: string }) {
         </FloatingCard>
       ) : null}
       {pointer ? <AssistPointer key={pointer.key} target={pointer.target} label={pointer.label} from={pointer.from} onArrived={() => { setSaid(pointer.label); pointer.done(); }} /> : null}
-      {walk ? <WalkPlayer key={walkKey} steps={walk} registry={registry.current} here={routeNow} push={(h) => router.push(h)} sheet={sheet} start={at} pathname={pathname} onExit={() => closeAll()} /> : null}
+      {walk ? <WalkPlayer key={walkKey} steps={walk} registry={registry.current} here={routeNow} push={(h) => router.push(h)} sheet={sheet} start={at} pathname={pathname} onExit={endWalk} /> : null}
     </InLayer>
   );
 }
 
+/** A note under the composer (no voice here, the microphone refused, nothing heard), numbered per time it is set. */
+interface VoiceNote { text: string; n: number }
+
 function Composer({ at, sheet, about, onClearAbout, text, setText, voice, voiceNote, onSubmit, onClose, onMic }: {
   at: { x: number; y: number }; sheet: boolean; about: EntityRef | null; onClearAbout: () => void; text: string; setText: (t: string) => void;
-  voice: "idle" | "listening" | "transcribing"; voiceNote: string | null; onSubmit: () => void; onClose: () => void; onMic: () => void;
+  voice: "idle" | "listening" | "transcribing"; voiceNote: VoiceNote | null; onSubmit: () => void; onClose: () => void; onMic: () => void;
 }) {
   const input = useRef<HTMLInputElement | null>(null);
+  // The note is written into a status region that is open before it (one that mounts with its text in it is often
+  // not read out), a moment after the composer mounts or the note is set, and each time it is set.
+  const [noteShown, setNoteShown] = useState("");
+  useEffect(() => {
+    setNoteShown("");
+    if (!voiceNote) return;
+    const t = setTimeout(() => setNoteShown(voiceNote.text), 120);
+    return () => clearTimeout(t);
+  }, [voiceNote]);
   // After the card is placed (it renders hidden until measured, and a hidden field cannot take focus). A modal app
   // menu that was open as it opened (closeAppMenu) holds focus inside itself until it is gone: focus comes back here
   // then, unless the person already moved it somewhere of their own.
@@ -619,7 +652,7 @@ function Composer({ at, sheet, about, onClearAbout, text, setText, voice, voiceN
           <button type="submit" data-testid={ASSIST_TID.send} aria-label={ASSIST_COPY.send} disabled={!text.trim()} className="grid size-7 shrink-0 place-items-center rounded-full bg-gray-12 text-white disabled:opacity-40"><ArrowUp className="size-3.5" /></button>
         </div>
         {voice !== "idle" ? <p data-testid={ASSIST_TID.transcript} aria-live="polite" className="px-1 text-1 text-gray-10">{voice === "transcribing" ? ASSIST_COPY.transcribing : text || ASSIST_COPY.listening}</p> : null}
-        {voiceNote ? <p role="status" className="px-1 text-1 text-amber-11">{voiceNote}</p> : null}
+        <p role="status" data-testid={ASSIST_TID.voiceNote} className={cn("px-1 text-1 text-amber-11", !noteShown && "sr-only")}>{noteShown}</p>
       </form>
     </FloatingCard>
   );

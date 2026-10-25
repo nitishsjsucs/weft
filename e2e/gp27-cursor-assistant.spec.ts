@@ -319,6 +319,7 @@ test.describe("GP27 the cursor assistant", () => {
 
   test("hands complicated requests to the full agent: progress, approval card, chips and a choice", async ({ page, weft }) => {
     await openApp(page, "/app");
+    let filed = "";
 
     await test.step("analysis: the progress card, then the cited answer with Show me chips", async () => {
       const popover = await ask(page, "Compare the last three pay runs and show me the outliers");
@@ -352,10 +353,29 @@ test.describe("GP27 the cursor assistant", () => {
         const runs = await weft.agentRuns();
         const chat = runs.find((r) => r.trigger === "chat" && r.threadId && runs.some((o) => o.id !== r.id && o.threadId === r.threadId));
         expect(chat, "the assist run and its chat run share one thread").toBeTruthy();
+        filed = p.id;
       } finally {
         await setCanPropose(page, false);
       }
       await dismiss(page);
+    });
+
+    await test.step("a second link to the same proposal opens its tab again after the person picked another", async () => {
+      // Decided by the person through the API, the proposal's card is on the Decided tab.
+      await weft.post(`/v1/proposals/${filed}/deny`, { note: "Not this period" });
+      await openApp(page, `/app/inbox?proposal=${filed}`);
+      const card = page.getByTestId(tid.inboxCard(filed));
+      await expect(card).toBeVisible();
+      await page.getByRole("tab", { name: /Approvals/ }).click();
+      await expect(page).toHaveURL(new RegExp(`proposal=${filed}.*tab=pending|tab=pending.*proposal=${filed}`));
+      await expect(card).toHaveCount(0);
+      // The assistant's show of the same proposal writes the link in place, as goTo does (viewPatch: no tab key).
+      await page.evaluate((id) => {
+        window.history.replaceState(window.history.state, "", `/app/inbox?proposal=${id}`);
+        window.dispatchEvent(new Event("weft:url-state"));
+      }, filed);
+      await expect(card).toBeVisible();
+      await expect(page.getByRole("tab", { name: /Decided/ })).toHaveAttribute("data-state", "active");
     });
 
     await test.step("ambiguity: one question with the candidates as buttons; the choice continues the thread", async () => {
@@ -437,6 +457,13 @@ test.describe("GP27 the cursor assistant", () => {
       await expect(walk).not.toContainText(/Then submit the run/);
       await page.getByTestId(A.walkNext).click();
       await expect(walk).toHaveCount(0);
+      // Done ends the walkthrough only: the run's card comes back with its answer and the note on the refused step.
+      const popover = page.getByTestId(A.popover);
+      await expect(popover).toBeVisible();
+      await expect(popover.getByTestId(A.answer)).toContainText("you press every button yourself");
+      await expect(popover).toContainText("Shown, not pressed: only you can make that change.");
+      await expect(popover).toBeFocused();
+      await dismiss(page);
       expect((await weft.payroll(SEED.draftRun)).status).toBe(before.status);
     });
   });
@@ -737,6 +764,13 @@ test.describe("GP27 the cursor assistant", () => {
       await expect(stop).toBeVisible();
       await expect(progress).not.toContainText("Stopped.");
       await page.unroute(isCancel);
+      // A cancel that reaches a run already finished (the route answers with the run as it is) is no stop either.
+      await page.route(isCancel, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "run_done", status: "done" }) }));
+      await stop.click();
+      await expect(stop).not.toHaveAttribute("aria-disabled", "true");
+      await expect(progress).not.toContainText("The agent stopped");
+      await expect(progress).not.toContainText("Stopped.");
+      await page.unroute(isCancel);
       const cancel = page.waitForRequest((r) => r.method() === "POST" && /\/api\/v1\/agent\/runs\/run_[^/]+\/cancel$/.test(new URL(r.url()).pathname));
       await stop.click();
       const runId = /\/runs\/(run_[^/]+)\/cancel$/.exec(new URL((await cancel).url()).pathname)![1]!;
@@ -866,6 +900,37 @@ test.describe("GP27 the cursor assistant", () => {
       await expect(page.getByTestId("paycheck-drawer")).toBeVisible();
       await expect.poll(takesTap).toBe(false);
     });
+
+    test("a tap on the docked icon focuses the composer's field inside the tap, and its status region is open before a note", async ({ page }) => {
+      await openApp(page, "/app");
+      const icon = page.getByTestId(A.icon);
+      await expect(icon).not.toHaveAttribute("aria-hidden", "true");
+      // iOS opens the keyboard only for a focus made inside the tap's own handler: focus is read before it returns.
+      const focused = await icon.evaluate((el) => { (el as HTMLElement).click(); return document.activeElement?.getAttribute("data-testid") ?? null; });
+      expect(focused).toBe(A.input);
+      const note = page.getByTestId(A.voiceNote);
+      await expect(note).toHaveCount(1);
+      await expect(note).toHaveText("");
+      await expect(note).toHaveAttribute("role", "status");
+    });
+  });
+
+  test("the icon that followed a mouse docks in its corner when the screen turns to touch", async ({ page }) => {
+    await openApp(page, "/app");
+    const icon = page.getByTestId(A.icon);
+    await page.mouse.move(500, 400);
+    await page.mouse.move(520, 420);
+    await expect.poll(() => icon.evaluate((el) => (el as HTMLElement).style.transform)).toContain("translate3d");
+    // A 2-in-1 detached into tablet mode: touch emulation makes the primary pointer coarse with no hover.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await expect.poll(() => page.evaluate(() => matchMedia("(hover: none) and (pointer: coarse)").matches)).toBe(true);
+    await expect.poll(() => icon.evaluate((el) => (el as HTMLElement).style.transform)).toBe("");
+    const box = (await icon.boundingBox())!;
+    const vp = page.viewportSize()!;
+    expect(box.x + box.width).toBeLessThanOrEqual(vp.width);
+    expect(box.y + box.height).toBeLessThanOrEqual(vp.height);
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
   });
 
   test("outside the app shell the browser keeps its own menu", async ({ page }) => {

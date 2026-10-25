@@ -5,7 +5,7 @@
 // focused record, and a person's tab the viewer is not offered falls back to Profile.
 import { describe, expect, it } from "vitest";
 import { patchedSearch, sameAsPage } from "../src/lib/url-state";
-import { composing, iconHidden, isAssistHotkey, mayShowNow, sheetReserve, viewPatch, type IconState, type KeyPress } from "../src/components/assist/surface-core";
+import { closingPlays, composing, iconHidden, isAssistHotkey, mayShowNow, sheetReserve, stopAfterCancel, viewPatch, type IconState, type KeyPress } from "../src/components/assist/surface-core";
 import { stepPage, walkIndex } from "../src/components/assist/walk";
 import { readAssistPref, setAssistPref } from "../src/components/assist/prefs";
 import { keyboardOrigin } from "../src/components/assist/context-core";
@@ -112,6 +112,25 @@ describe("what the second review of the cursor assistant found", () => {
     expect(mayShowNow({ ...idle, typing: true })).toBe(false);
     // A drawer that was already open when they asked is theirs to keep, and no reason to hold the show back.
     expect(mayShowNow({ ...idle, layerNow: true, layerThen: true })).toBe(true);
+  });
+
+  it("after Stop, a run's end neither moves the page to its proposal's card nor speaks; its chip stays to press", () => {
+    expect(closingPlays("done", "idle")).toBe(true);
+    expect(closingPlays("cancelled", "idle")).toBe(false);
+    expect(closingPlays("cancelled", "stopped")).toBe(false);
+    // The cancel still on its way, or accepted while the run's last step landed: the person asked it to stop.
+    expect(closingPlays("done", "sending")).toBe(false);
+    expect(closingPlays("done", "stopped")).toBe(false);
+    // A cancel that failed leaves Stop to press again; the run that finishes still closes as usual.
+    expect(closingPlays("done", "failed")).toBe(true);
+  });
+
+  it("a Stop that reaches a run already finished leaves its answer as it is, without the stopped heading", () => {
+    expect(stopAfterCancel("cancelled")).toBe("stopped");
+    // The abort is on its way: the run ends cancelled.
+    expect(stopAfterCancel("running")).toBe("stopped");
+    expect(stopAfterCancel("queued")).toBe("stopped");
+    for (const status of ["done", "failed", "waiting", "refused", "escalated"]) expect(stopAfterCancel(status), status).toBe("idle");
   });
 
   it("a link to the page already open is followed in place (Next keeps the page mounted and tells it nothing)", () => {

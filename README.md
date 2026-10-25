@@ -265,17 +265,22 @@ eval digest are unchanged; the hosted neuron day cap is unchanged at 5,000, with
 4,000, now 3,500 (docs/cloudflare/design.md 5.2). Two product bugs the browser suites found were fixed on the way: closing a drawer while a navigation was in
 flight (the guided tour leaving Expenses) cancelled that navigation, because the URL view state's write made Next's
 router restore the old page; and a closing chip for a person read only from a flag's evidence was labelled "this
-person" instead of the name the read carries.
+person" instead of the name the read carries. The rows below were taken again after the last review's fixes (a
+handoff keeps the person's own words as evidence, a popover line beside a refused show is held, an alert under a link
+someone sent is untrusted, a thread counts only when it is the person's own, the Inbox opens a proposal past its first
+page and its tab again, and Stop, the walkthrough's Done, the voice notes and the docked icon behave as they say).
+`packages/db` `test:workerd` still fails one case (697 rows written against a band of 696), as this branch predates
+the re-baseline on `cf/integration`.
 
 | Command | Outcome |
 |---|---|
 | `pnpm typecheck` | 18 of 18 tasks; `tsc -p e2e` and `tsc -p e2e/cf` clean |
-| `pnpm test` | 2,515 passed, 8 skipped (327 files, 1 skipped) |
-| `pnpm eval:ci` | 72 of 128 trials, gate passed; 69 of 69 worlds reproduce their digest |
-| `pnpm e2e` | 64 passed, 1 skipped, 2.9 min (GP27: 10 tests at 1440 by 900 and 390 by 844) |
+| `pnpm test` | 2,550 passed, 8 skipped (329 files, 1 skipped) |
+| `pnpm eval:ci` | 72 of 128 trials, gate passed; `pnpm eval:suite digests --split all`: 110 of 110 worlds reproduce their digest |
+| `pnpm e2e` | 68 passed, 1 skipped, 3.0 min (GP27: 14 tests at 1440 by 900 and 390 by 844) |
 | `pnpm e2e:tour` | 31 of 31 in 9.2 min (20 steps) |
 | `pnpm e2e:rich` | 6 of 6, 1.8 min |
-| `pnpm cf:snapshot`, `pnpm cf:test` | snapshot `66138d918b6b5b8d` (118 chunks, 8,190 rows); 165 passed, 1 skipped |
+| `pnpm cf:snapshot`, `pnpm cf:test` | snapshot `66138d918b6b5b8d` (118 chunks, 8,190 rows), not retaken since; 166 passed, 1 skipped |
 | Hosted export, `pnpm --filter @weft/web e2e:hosted` | 33 routes, the export check passed; 20 passed |
 | `pnpm e2e:cf --project local` | 19 passed, 4.8 min (with `cf-assist.spec.ts`) |
 | `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` | ok |

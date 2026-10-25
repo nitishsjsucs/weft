@@ -74,6 +74,22 @@ export function mayShowNow(s: IdleState): boolean {
   return s.here === s.askedFrom && !s.typing && (!s.layerNow || s.layerThen);
 }
 
+/** Stop on a handoff's progress card: sent, then stopped once the cancel stopped the run, or failed (Stop stays). */
+export type StopState = "idle" | "sending" | "stopped" | "failed";
+
+/**
+ * Whether a run's end plays its closing show and speaks its answer: never once the person pressed Stop (the cancel on
+ * its way or accepted) or the run was cancelled. Its chips stay on the card, theirs to press.
+ */
+export const closingPlays = (status: string | null | undefined, stop: StopState): boolean => status !== "cancelled" && stop !== "sending" && stop !== "stopped";
+
+/**
+ * What a Stop comes to once the cancel route answers with the run: stopped when the run was cancelled, or is still
+ * queued or running with the abort on its way; a run that had already ended (done, failed) or waits keeps its own
+ * state, and its answer stands without the stopped heading.
+ */
+export const stopAfterCancel = (status: string | null | undefined): StopState => (status === "cancelled" || status === "queued" || status === "running" ? "stopped" : "idle");
+
 /** The parts of a keydown the assistant reads. */
 export interface KeyPress { key: string; code: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number }
 
