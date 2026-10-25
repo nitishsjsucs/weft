@@ -156,12 +156,18 @@ Voice:
   (Workers AI whisper); on the local app without speech recognition the composer says to type. A refused microphone
   is said plainly.
 - **Out.** Off by default; the speaker toggle in the card turns it on. The first choice is Chatterbox Nano in the
-  browser on WebGPU (the MIT community ONNX build `owensong/chatterbox-nano-ONNX` at a pinned revision, about 395 MB
-  fetched once and cached, with a progress line; ONNX Runtime Web's JSPI WebAssembly, about 17 MB, is served from
-  Weft itself). This build does not ship its fixed voice file yet (see "What is stubbed or left"), so today spoken
-  answers use Deepgram Aura-2 on the hosted app (`POST /api/_hosted/speak`, Workers AI, inside a 500-neuron share
-  and RL_RUN) and the browser's own speech synthesis on the local app, with a voice the device provides, so no text
-  leaves the machine. Escape stops speech.
+  browser on WebGPU with `shader-f16` (Chrome or Edge), in Resemble AI's built-in default voice (MIT; the speaker is
+  not documented), with no label and no audio watermark. The model is the MIT community ONNX build
+  `owensong/chatterbox-nano-ONNX` at a pinned revision: three of its four graphs, 395,879,052 bytes (about 396 MB),
+  fetched once from Hugging Face when spoken answers are first used, with a progress line, and kept in the browser's
+  Cache Storage; the speech encoder (177 MB) is never fetched. The voice is a 1.3 MB file Weft serves itself
+  (`apps/web/public/assist/voice/weft-voice.bin`, made by `pnpm voice:build` from `conds.pt` in
+  `ResembleAI/chatterbox-nano` and two byte ranges of the pinned ONNX files, with its sources in
+  `weft-voice.provenance.json`), and ONNX Runtime Web's JSPI WebAssembly (about 17 MB) is served from Weft too. An
+  answer longer than about 120 characters is said in sentence-sized utterances, the next made while one plays. Where
+  the browser cannot run it, or a download fails, spoken answers use Deepgram Aura-2 on the hosted app
+  (`POST /api/_hosted/speak`, Workers AI, inside a 500-neuron share and RL_RUN) and the browser's own speech synthesis
+  on the local app, with a voice the device provides, so no text leaves the machine. Escape stops speech.
 - Dependencies, pinned exactly: `onnxruntime-web` 1.30.0 (MIT) and `@huggingface/tokenizers` 0.2.0 (Apache-2.0), both
   loaded only when spoken answers are turned on.
 
@@ -285,6 +291,7 @@ the re-baseline on `cf/integration`.
 | `pnpm e2e:cf --project local` | 19 passed, 4.8 min (with `cf-assist.spec.ts`) |
 | `pnpm lint:prose`, `pnpm lint:brand`, `pnpm brand:overlap` | ok |
 | `pnpm screenshots` (the top bar and cursor assistant groups) | `21` to `21d` retaken, `42` to `44` retaken on 2026-10-24, `45` and `46` new |
+| In-browser voice, a real run in headless Chrome 156 on an Apple GPU (WebGPU, `shader-f16`) | the three sessions created; 395,879,052 bytes downloaded once, then loaded from Cache Storage; each utterance stopped on the stop token (97 characters: 149 to 156 tokens, 6.0 to 6.3 s of 24 kHz audio, 5 to 7 s to make) |
 
 ### Clean workspace (2026-10-23, branch `cf/clean-ui`)
 
@@ -586,12 +593,11 @@ time; the action chain verifies at the end of every scenario.
 
 ## What is stubbed or left
 
-- The cursor assistant's in-browser voice (Chatterbox Nano) is built but stays off: it needs a fixed voice file
-  (`/assist/voice/weft-voice.bin`) made once from the speech encoder and a reference clip Weft has the rights to, and
-  neither is in the repository yet, so spoken answers use Aura-2 on the hosted app and the device's own voice locally.
-  The ONNX input and output names in `apps/web/src/components/assist/chatterbox.ts` are written from the model card
-  and are not yet checked against a real download. The assistant's eval tasks (research/cursor-assistant.md 4.6,
-  phase 3) are not written.
+- The cursor assistant's in-browser voice (Chatterbox Nano) ran end to end in headless Chrome on an Apple GPU
+  (2026-10-24: the three sessions created, each utterance stopped on the stop token); it has not been tried on other
+  GPUs, and the browser loop has no classifier-free guidance, so it sounds below upstream Chatterbox. Who the default
+  voice's speaker is, and their consent, is not documented by Resemble AI. The assistant's eval tasks
+  (research/cursor-assistant.md 4.6, phase 3) are not written.
 - Benefits, IT and Contractors run on their simulators only; the landing page's routine showcase is P1. Wave 3's open items
   are listed under "Wave 3: left" below and in `docs/wave3.md`.
 - `code.run` ships in QuickJS but is opt-in (`WEFT_SANDBOX=quickjs`) and on no prebuilt allowlist. Return values

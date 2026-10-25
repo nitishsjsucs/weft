@@ -105,6 +105,8 @@ New `assist` tasks in the eval suite, with deterministic graders:
 3. **What it does on its own ("show me"):** it points, navigates and drives the UI to show things (open a row, switch a tab or filter, scroll, expand a section). It never clicks Approve, Submit or any control that changes data; changes are proposals with the usual approval card, so the audit log stays honest.
 4. **Voice in:** the browser's live speech recognition where available, with the hosted whisper route as the fallback.
 5. **Voice out:** off by default. When on: Chatterbox Nano in the browser (community ONNX build, MIT, about 390 MB downloaded once and cached, WebGPU in Chrome or Edge), falling back to Deepgram Aura-2 on Workers AI (about $0.006 per short answer) where the browser cannot run it.
+6. **The in-browser voice:** Resemble AI's built-in default voice, the `conds.pt` its MIT model repos ship and its own code loads when it is given no reference clip (ResembleAI/chatterbox-nano at a pinned revision). Who the speaker is and their consent are not documented; that was accepted.
+7. **Marking:** spoken answers carry no label and no audio watermark (the ONNX path applies none, unlike upstream's PerTh watermark in PyTorch).
 
 ## 8. What was built (2026-10-24)
 
@@ -143,13 +145,22 @@ Where it differs from sections 4 and 7:
   for cited records, or a choice when a name is ambiguous.
 - **Wake.** As decided in 7.1 (icon, single right-click menu, double right-click to listen), with Ctrl or Cmd J for the
   keyboard. Holding Ctrl+Alt to talk (4.1) was not built; the double right-click replaced it.
-- **Voice out.** The chain of 7.5 is built: Chatterbox Nano on WebGPU (`owensong/chatterbox-nano-ONNX` at a pinned
-  revision, about 395 MB, the speech encoder skipped), then Aura-2 through a new hosted route
-  (`POST /api/_hosted/speak`, a 500-neuron share taken from the agent's, so Weft keeps half the account's neurons;
-  RL_RUN), then the browser's speech synthesis with a voice the device provides. Chatterbox stays off until the fixed
-  voice file exists (it needs the speech encoder and a reference clip Weft has the rights to), so today the hosted app
-  speaks through Aura-2 and the local app through the device. The hosted CSP adds `https://huggingface.co`,
-  `https://*.hf.co` and `'wasm-unsafe-eval'` for it once the export ships that voice file, and nothing before.
+- **Voice out.** The chain of 7.5 is built: Chatterbox Nano on WebGPU with `shader-f16`
+  (`owensong/chatterbox-nano-ONNX` at a pinned revision, 395,879,052 bytes, the speech encoder's 177 MB skipped),
+  then Aura-2 through a new hosted route (`POST /api/_hosted/speak`, a 500-neuron share taken from the agent's, so
+  Weft keeps half the account's neurons; RL_RUN), then the browser's speech synthesis with a voice the device
+  provides. The voice is 7.6's: `scripts/assist/build-voice.ts` (`pnpm voice:build`) converts `conds.pt` into the
+  1.3 MB `apps/web/public/assist/voice/weft-voice.bin` with no PyTorch, no model run and no clip. It reads conds.pt's
+  stored tensors by byte length, takes the encoder's constant speaker row and the 375 speech-embedding rows from HTTP
+  byte ranges of the pinned ONNX data files, checks every file against the repo's SHA256SUMS and every slice against
+  its own sha256, and agrees with the official float32 weights within 1e-3. Its sources are in
+  `weft-voice.provenance.json`. The graphs' input and output names were checked against the pinned files. A real run
+  in headless Chrome on an Apple GPU (2026-10-24) created the three sessions and spoke each utterance until the stop
+  token: a 97-character answer became 149 to 156 speech tokens and 6.0 to 6.3 s of audio, synthesized in 5 to 7 s,
+  and the 396 MB download took about 15 s. Utterances are cut at 120 characters (about 1.5 tokens a character, inside
+  the 256-token cap), and the next one is made while one plays. The
+  hosted CSP adds `https://huggingface.co`, `https://*.hf.co` and `'wasm-unsafe-eval'` because the export ships that
+  voice file; without it, nothing.
 - **Tests.** Unit tests for every core (contracts, executor, grounding, agent, the client's pure modules), API tests
   for the route and every handoff case, the browser golden path `e2e/gp27-cursor-assistant.spec.ts` at 1440 by 900
   and 390 by 844 with faked speech recognition, and the hosted check `e2e/cf/cf-assist.spec.ts`. The eval tasks of
