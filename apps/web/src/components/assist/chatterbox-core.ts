@@ -1,14 +1,49 @@
 // Chatterbox Nano in the browser, the pure parts (owensong/chatterbox-nano-ONNX, MIT; its run_onnx.py is the
 // reference): sampling with a repetition penalty, temperature, top-k and top-p; the speech token sequence the decoder
-// takes; half floats; and the fixed voice file. The voice file holds what the speech encoder would compute from a
-// reference clip (audio_features, audio_tokens, speaker_embeddings, speaker_features), so the browser never downloads
-// or runs the encoder. It is made once from the speech encoder and a reference clip Weft has the rights to; neither
-// is in the repository yet (README, "What is stubbed or left"), so the in-browser voice stays off until it is.
+// takes; half floats; an answer cut into utterances; and the fixed voice file. The voice file holds what the speech
+// encoder would compute from a reference clip (audio_features, audio_tokens, speaker_embeddings, speaker_features), so
+// the browser never downloads or runs the encoder. It is Resemble AI's built-in default voice (conds.pt in
+// ResembleAI/chatterbox-nano, MIT; the speaker is not documented), converted once by scripts/assist/build-voice.ts
+// with no clip and no encoder run: public/assist/voice/weft-voice.bin, its sources in the provenance file beside it.
 export const SAMPLE_RATE = 24_000;
 export const START_SPEECH = 6561;
 export const STOP_SPEECH = 6562;
 export const SILENCE = 4299;
 export const SAMPLING = { temperature: 0.8, topK: 1000, topP: 0.95, repetitionPenalty: 1.2, maxNewTokens: 256 } as const;
+
+/**
+ * The longest utterance one synthesis takes, in characters. maxNewTokens speech tokens at 25 a second are about 10 s;
+ * the default voice takes about 1.5 tokens a character (149 to 156 for a 97-character answer in Chrome on
+ * 2026-10-24), so 120 characters stay near 190 tokens, well inside the cap (a longer one would be cut off).
+ */
+export const UTTERANCE_MAX_CHARS = 120;
+
+/**
+ * An answer as utterances of at most `max` characters, in order: whole sentences joined while they fit; a sentence
+ * longer than `max` is cut after a comma, semicolon or colon where it can be, else between words.
+ */
+export function utterances(text: string, max: number = UTTERANCE_MAX_CHARS): string[] {
+  const sentences = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+  const pieces: string[] = [];
+  for (const raw of sentences) {
+    let s = raw.trim();
+    while (s.length > max) {
+      const head = s.slice(0, max + 1);
+      const at = Math.max(head.lastIndexOf(", "), head.lastIndexOf("; "), head.lastIndexOf(": "));
+      const cut = at > max * 0.4 ? at + 1 : head.lastIndexOf(" ") > 0 ? head.lastIndexOf(" ") : max;
+      pieces.push(s.slice(0, cut).trim());
+      s = s.slice(cut).trim();
+    }
+    if (s) pieces.push(s);
+  }
+  const out: string[] = [];
+  for (const p of pieces) {
+    const last = out[out.length - 1];
+    if (last !== undefined && last.length + 1 + p.length <= max) out[out.length - 1] = `${last} ${p}`;
+    else out.push(p);
+  }
+  return out;
+}
 
 /** Run_onnx.py's repetition penalty: a token already generated has a negative logit multiplied, a positive one divided. */
 export function applyRepetitionPenalty(logits: Float32Array, generated: readonly number[], penalty: number): void {

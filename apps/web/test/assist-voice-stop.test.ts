@@ -1,6 +1,7 @@
 // Stopping the cursor assistant's voice, mocked: a clip cancelled while it is being written down is never asked, an
-// answer interrupted while Aura-2 is fetching does not mark Aura failed for the rest of the session, and an answer
-// stopped while the in-browser voice downloads is never spoken once the download finishes.
+// answer interrupted while Aura-2 is fetching does not mark Aura failed for the rest of the session, an answer
+// stopped while the in-browser voice downloads is never spoken once the download finishes, and a long answer is said
+// in utterances, with only the unsaid rest left to Aura-2 when the in-browser voice fails part way.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dictation = vi.hoisted(() => ({ release: null as ((t: string) => void) | null }));
@@ -11,11 +12,11 @@ vi.mock("../src/components/hosted/dictate-button", () => ({
 vi.mock("@/lib/hosted/flags", () => ({ HOSTED: true }));
 const api = vi.hoisted(() => ({ calls: 0, impl: null as null | ((init: RequestInit) => Promise<Response>) }));
 vi.mock("@/lib/api/client", () => ({ apiFetch: (_p: string, init: RequestInit) => { api.calls++; return api.impl!(init); } }));
-const cb = vi.hoisted(() => ({ release: null as (() => void) | null, progress: null as ((p: { loaded: number; total: number }) => void) | null, synthesize: 0, play: 0 }));
+const cb = vi.hoisted(() => ({ release: null as (() => void) | null, progress: null as ((p: { loaded: number; total: number }) => void) | null, synthesize: 0, play: 0, texts: [] as string[], failAt: 0 }));
 vi.mock("../src/components/assist/chatterbox", () => ({
   voiceFileAvailable: async () => true,
   loadChatterbox: (onProgress: (p: { loaded: number; total: number }) => void) => new Promise((resolve) => { cb.progress = onProgress; cb.release = () => resolve({}); }),
-  synthesize: async () => { cb.synthesize++; return new Float32Array(4); },
+  synthesize: async (_m: unknown, text: string) => { cb.synthesize++; cb.texts.push(text); if (cb.synthesize === cb.failAt) throw new Error("the device was lost"); return new Float32Array(4); },
   playWave: async () => { cb.play++; },
 }));
 
@@ -139,7 +140,7 @@ describe("voice out, stopped (mocked)", () => {
   });
 
   it("an answer stopped while the in-browser voice downloads is never spoken, and its progress stops", async () => {
-    vi.stubGlobal("navigator", { gpu: { requestAdapter: async () => ({}) } });
+    vi.stubGlobal("navigator", { gpu: { requestAdapter: async () => ({ features: new Set(["shader-f16"]) }) } });
     (WebAssembly as { Suspending?: unknown }).Suspending = function Suspending() {};
     const onProgress = vi.fn();
     const c = new AbortController();
@@ -154,5 +155,32 @@ describe("voice out, stopped (mocked)", () => {
     expect(onProgress).toHaveBeenCalledTimes(1);
     expect(cb.synthesize).toBe(0);
     expect(cb.play).toBe(0);
+  });
+
+  it("says a long answer in utterances, and leaves Aura-2 only the rest when the in-browser voice fails part way", async () => {
+    vi.stubGlobal("navigator", { gpu: { requestAdapter: async () => ({ features: new Set(["shader-f16"]) }) } });
+    (WebAssembly as { Suspending?: unknown }).Suspending = function Suspending() {};
+    const answer = "Requests are on the Time Off page. A new hire asks from the portal; each request runs its checks before it reaches the manager.";
+    cb.texts = []; cb.synthesize = 0; cb.play = 0; cb.failAt = 0; cb.release = null;
+    const done = speak(answer);
+    for (let i = 0; i < 5 && !cb.release; i++) await tick();
+    cb.release!();
+    expect(await done).toBe("chatterbox");
+    expect(cb.texts).toEqual(["Requests are on the Time Off page.", "A new hire asks from the portal; each request runs its checks before it reaches the manager."]);
+    expect(cb.play).toBe(2);
+
+    // The second utterance fails: the first was said, so Aura-2 is asked for the second only.
+    cb.texts = []; cb.synthesize = 0; cb.play = 0; cb.failAt = 2; cb.release = null;
+    let body = "";
+    api.impl = (init) => { body = String(init.body); return new Promise((_r, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))); };
+    const c = new AbortController();
+    const second = speak(answer, { signal: c.signal });
+    for (let i = 0; i < 5 && !cb.release; i++) await tick();
+    cb.release!();
+    for (let i = 0; i < 10 && !body; i++) await tick();
+    expect(cb.play).toBe(1);
+    expect(JSON.parse(body)).toEqual({ text: "A new hire asks from the portal; each request runs its checks before it reaches the manager." });
+    c.abort();
+    expect(await second).toBeNull();
   });
 });

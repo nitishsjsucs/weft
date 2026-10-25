@@ -17,6 +17,8 @@ export function voiceInMode(e: VoiceInEnv): VoiceInMode {
 export interface VoiceOutEnv {
   /** navigator.gpu with an adapter. */
   webgpu: boolean;
+  /** The adapter offers 'shader-f16' (the language model's key and value cache is float16). */
+  shaderF16: boolean;
   /** WebAssembly JS Promise Integration (the JSPI build of ONNX Runtime Web the in-browser voice runs on). */
   jspi: boolean;
   /** The fixed voice this server ships (public/assist/voice/weft-voice.bin). */
@@ -30,7 +32,7 @@ export interface VoiceOutEnv {
 /** The engines to try, in order; empty means no spoken answers here. */
 export function voiceOutChain(e: VoiceOutEnv): VoiceOutEngine[] {
   const out: VoiceOutEngine[] = [];
-  if (e.webgpu && e.jspi && e.voiceFile && !e.failed.has("chatterbox")) out.push("chatterbox");
+  if (e.webgpu && e.shaderF16 && e.jspi && e.voiceFile && !e.failed.has("chatterbox")) out.push("chatterbox");
   if (e.hosted && !e.failed.has("aura")) out.push("aura");
   if (e.localVoice && !e.failed.has("browser")) out.push("browser");
   return out;

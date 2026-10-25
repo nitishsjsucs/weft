@@ -1,5 +1,5 @@
-// Spoken answers through the browser's own speech, mocked (the local app ships no voice file, so it is the only
-// engine there): the first answer waits for a voice list that has not loaded yet instead of saying spoken answers are
+// Spoken answers through the browser's own speech, mocked (the only engine on the local app where the in-browser voice
+// cannot run): the first answer waits for a voice list that has not loaded yet instead of saying spoken answers are
 // unavailable, and one failed utterance stays that answer's, so the next answer speaks.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -1,12 +1,14 @@
 "use client";
 // Spoken answers (off by default; research/cursor-assistant.md 7.5). The chain voice-core.ts chooses: Chatterbox
-// Nano in the browser on WebGPU (downloaded once when the person turns it on, with progress); on the hosted app,
+// Nano in the browser on WebGPU with shader-f16 (downloaded once when the person turns it on, with progress, in
+// Resemble AI's built-in default voice, with no label and no audio watermark); on the hosted app,
 // Deepgram Aura-2 through Weft's own speak route (counted against the speech neuron share and RL_RUN); on either, the
 // browser's speech synthesis with a voice the device provides. Text is never sent to any other service.
 import { HOSTED_PATHS } from "../../../../../packages/contracts/src/ext/cf-hosted";
 import { SPEECH_MAX_CHARS } from "../../../../../packages/contracts/src/ext/assist";
 import { HOSTED } from "@/lib/hosted/flags";
 import { apiFetch } from "@/lib/api/client";
+import { utterances } from "./chatterbox-core";
 import { auraRefusalSpan, nextUtcMidnight, pickLocalVoice, spokenText, voiceOutChain, type VoiceOutEngine } from "./voice-core";
 
 const failed = new Set<VoiceOutEngine>();
@@ -81,13 +83,17 @@ async function voicesNow(): Promise<SpeechSynthesisVoice[]> {
 
 export interface SpeakHooks { onProgress?(p: { loaded: number; total: number }): void; onEngine?(e: VoiceOutEngine): void; signal?: AbortSignal }
 
+interface GpuAdapter { features?: { has(f: string): boolean } }
 async function env() {
-  const gpu = typeof navigator !== "undefined" && "gpu" in navigator && !!(await (navigator as unknown as { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter().catch(() => null));
+  const adapter = typeof navigator !== "undefined" && "gpu" in navigator ? await (navigator as unknown as { gpu: { requestAdapter(): Promise<GpuAdapter | null> } }).gpu.requestAdapter().catch(() => null) : null;
+  const gpu = !!adapter;
+  // The language model's key and value cache is float16, which WebGPU runs only on an adapter with shader-f16.
+  const shaderF16 = !!adapter?.features?.has("shader-f16");
   const jspi = typeof WebAssembly !== "undefined" && "Suspending" in WebAssembly;
-  if (fileKnown === null && gpu && jspi) fileKnown = await (await import("./chatterbox")).voiceFileAvailable();
+  if (fileKnown === null && gpu && shaderF16 && jspi) fileKnown = await (await import("./chatterbox")).voiceFileAvailable();
   const voices = await voicesNow();
   const out = Date.now() < auraOffUntil ? new Set<VoiceOutEngine>([...failed, "aura"]) : failed;
-  return { webgpu: gpu, jspi, voiceFile: !!fileKnown, hosted: HOSTED, localVoice: !!pickLocalVoice(voices), failed: out };
+  return { webgpu: gpu, shaderF16, jspi, voiceFile: !!fileKnown, hosted: HOSTED, localVoice: !!pickLocalVoice(voices), failed: out };
 }
 
 /** The engines this browser would use, in order (the popover names the first). */
@@ -132,6 +138,8 @@ export async function speak(answer: string, hooks: SpeakHooks = {}): Promise<Voi
   const text = spokenText(answer, 600);
   if (!text) return null;
   const stopped = () => !!hooks.signal?.aborted;
+  // What the in-browser voice had not said yet when it failed part way: the next engine says only that.
+  let rest: string | null = null;
   for (const engine of voiceOutChain(await env())) {
     if (stopped()) return null;
     try {
@@ -142,11 +150,20 @@ export async function speak(answer: string, hooks: SpeakHooks = {}): Promise<Voi
         // silently and the old answer is never spoken.
         const m = await cb.loadChatterbox((p) => { if (!stopped()) hooks.onProgress?.(p); });
         if (stopped()) return null;
-        const wave = await cb.synthesize(m, text);
-        if (stopped()) return null;
-        await cb.playWave(wave, hooks.signal);
-      } else if (engine === "aura") await aura(spokenText(answer, SPEECH_MAX_CHARS), hooks.signal);
-      else await browser(text, hooks.signal);
+        // One synthesis speaks about 10 s (chatterbox-core.ts UTTERANCE_MAX_CHARS), so a longer answer is said in
+        // utterances, the next one made while this one plays.
+        const parts = utterances(text);
+        let next = cb.synthesize(m, parts[0]!);
+        for (let i = 0; i < parts.length; i++) {
+          const wave = await next;
+          if (stopped()) return null;
+          if (i + 1 < parts.length) { next = cb.synthesize(m, parts[i + 1]!); next.catch(() => undefined); }
+          await cb.playWave(wave, hooks.signal);
+          if (stopped()) return null;
+          rest = parts.slice(i + 1).join(" ") || null;
+        }
+      } else if (engine === "aura") await aura(spokenText(rest ?? answer, SPEECH_MAX_CHARS), hooks.signal);
+      else await browser(rest ?? text, hooks.signal);
       return engine;
     } catch (e) {
       // Stopped by the person (a new question, the card closed, voice turned off): not a failure of the engine.

@@ -3,8 +3,8 @@
 // Worker's gates as an assist run (POST /api/v1/agent/runs); the instant resolver needs no model; navigate and show
 // land on the export's section shells (trailing slashes); without live speech recognition the hosted app offers the
 // recorded clip and its dictation route instead (a refused microphone is said plainly); the speak route answers through
-// the gate with audio; and the CSP names no voice model host while the export ships no voice file. Nothing here
-// approves or submits anything.
+// the gate with audio; and, as the export ships the fixed voice file, the CSP lets the in-browser voice download from
+// Hugging Face and compile its WebAssembly, and nothing more. Nothing here approves or submits anything.
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { mutationHeadroom } from "./world";
@@ -39,11 +39,14 @@ test("the cursor assistant on a leased hosted world: resolver, go there, show, v
   const res = await page.goto("/app/");
   expect(res?.status()).toBe(200);
   const csp = res?.headers()["content-security-policy"] ?? "";
-  // This export ships no fixed voice file, so the in-browser voice never runs: the policy names no download host and
-  // allows no WebAssembly compile (apps/web/scripts/cf-export.ts VOICE_FILE turns both on when it ships).
-  expect(csp, "connect-src is self only").toMatch(/connect-src 'self'[^;]*;/);
-  expect(csp, "no voice model hosts without the voice").not.toMatch(/huggingface|hf\.co/);
-  expect(csp, "no WebAssembly compile without the voice").not.toMatch(/wasm-unsafe-eval/);
+  // The export ships the fixed voice file (apps/web/scripts/cf-export.ts VOICE_FILE), so the policy adds exactly the
+  // voice model's download hosts to connect-src and 'wasm-unsafe-eval' to script-src, and no string eval.
+  const connect = /connect-src ([^;]*)/.exec(csp)?.[1]?.split(" ") ?? [];
+  expect(connect[0], "connect-src starts with self").toBe("'self'");
+  expect(connect.filter((s) => /huggingface|hf\.co/.test(s)), "the voice model hosts").toEqual(["https://huggingface.co", "https://*.hf.co"]);
+  expect(connect.filter((s) => s !== "'self'" && !/^wss?:/.test(s) && !/huggingface|hf\.co/.test(s)), "no other host").toEqual([]);
+  expect(csp, "WebAssembly compiles for the voice").toMatch(/script-src [^;]*'wasm-unsafe-eval'/);
+  expect(csp, "no string eval").not.toMatch(/'unsafe-eval'/);
   await expect(page.getByTestId("hosted-world")).toHaveAttribute("data-slot", operator.lease.slot);
 
   await test.step("a where question takes the instant path: no model, it opens the audit log", async () => {

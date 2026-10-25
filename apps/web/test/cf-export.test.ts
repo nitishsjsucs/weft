@@ -150,6 +150,30 @@ describe("writeExport and checkExport", () => {
     expect(r.fallbacks).toEqual([]);
   });
 
+  it("adds the voice model hosts to connect-src and 'wasm-unsafe-eval' to script-src only once the export ships the voice file", () => {
+    const { outDir, appDir } = fakeExport();
+    const policies = () => parseHeaders(readFileSync(join(outDir, "_headers"), "utf8")).flatMap((r) => r.headers.filter(([k]) => k === "Content-Security-Policy").map(([, v]) => v));
+    const directive = (csp: string, name: string) => csp.split("; ").find((d) => d.startsWith(`${name} `))!.split(" ").slice(1);
+    writeExport({ outDir, appDir, hosted: false });
+    const without = policies();
+    expect(without.length).toBe(5);
+    for (const csp of without) expect(csp).not.toMatch(/huggingface|hf\.co|wasm-unsafe-eval/);
+    mkdirSync(join(outDir, "assist/voice"), { recursive: true });
+    writeFileSync(join(outDir, VOICE_FILE), "WEFTVOICE1\n");
+    writeExport({ outDir, appDir, hosted: false });
+    const withVoice = policies();
+    expect(withVoice.length).toBe(without.length);
+    withVoice.forEach((csp, i) => {
+      const before = without[i]!;
+      expect(directive(csp, "connect-src")).toEqual([...directive(before, "connect-src"), "https://huggingface.co", "https://*.hf.co"]);
+      expect(directive(csp, "script-src")).toEqual([...directive(before, "script-src"), "'wasm-unsafe-eval'"]);
+      // Nothing else in the policy moves.
+      const rest = (c: string) => c.split("; ").filter((d) => !/^(connect|script)-src /.test(d));
+      expect(rest(csp)).toEqual(rest(before));
+    });
+    expect(checkExport({ outDir, appDir, hosted: false }).errors).toEqual([]);
+  });
+
   it("fails on a hosted build whose hosted page is missing", () => {
     const { outDir, appDir } = fakeExport();
     expect(() => writeExport({ outDir, appDir, hosted: true })).toThrow();   // no HTML to hash for /app/platform

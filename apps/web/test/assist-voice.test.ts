@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pickLocalVoice, spokenText, voiceInMode, voiceOutChain, type VoiceOutEnv } from "../src/components/assist/voice-core";
 import { fallbackMode, listen, VOICE_COPY } from "../src/components/assist/voice-in";
-import { applyRepetitionPenalty, concatSeq, decodeVoice, encodeVoice, halfToFloat, sampleToken, SILENCE, speechTokens, START_SPEECH, STOP_SPEECH, type VoiceTensor } from "../src/components/assist/chatterbox-core";
+import { applyRepetitionPenalty, concatSeq, decodeVoice, encodeVoice, halfToFloat, sampleToken, SILENCE, speechTokens, START_SPEECH, STOP_SPEECH, utterances, UTTERANCE_MAX_CHARS, type VoiceTensor } from "../src/components/assist/chatterbox-core";
 
 describe("voice in", () => {
   it("prefers live recognition, then the hosted dictation route, then none", () => {
@@ -56,10 +56,12 @@ describe("listen (live recognition, mocked)", () => {
 });
 
 describe("voice out", () => {
-  const env = (over: Partial<VoiceOutEnv>): VoiceOutEnv => ({ webgpu: true, jspi: true, voiceFile: true, hosted: true, localVoice: true, failed: new Set(), ...over });
+  const env = (over: Partial<VoiceOutEnv>): VoiceOutEnv => ({ webgpu: true, shaderF16: true, jspi: true, voiceFile: true, hosted: true, localVoice: true, failed: new Set(), ...over });
   it("tries the in-browser voice, then Aura-2 on the hosted app, then the device's own voice", () => {
     expect(voiceOutChain(env({}))).toEqual(["chatterbox", "aura", "browser"]);
     expect(voiceOutChain(env({ webgpu: false }))).toEqual(["aura", "browser"]);
+    // The language model's key and value cache is float16: an adapter without shader-f16 cannot run it.
+    expect(voiceOutChain(env({ shaderF16: false }))).toEqual(["aura", "browser"]);
     expect(voiceOutChain(env({ voiceFile: false }))).toEqual(["aura", "browser"]);
     expect(voiceOutChain(env({ hosted: false, webgpu: false }))).toEqual(["browser"]);
     expect(voiceOutChain(env({ failed: new Set(["chatterbox"]) }))).toEqual(["aura", "browser"]);
@@ -96,6 +98,21 @@ describe("the in-browser voice, pure parts", () => {
     expect(halfToFloat(0xc000)).toBe(-2);
     expect(halfToFloat(0x7c00)).toBe(Infinity);
     expect(concatSeq(new Float32Array([1, 2]), [1, 1, 2], new Float32Array([3, 4]), [1, 1, 2])).toEqual({ data: new Float32Array([1, 2, 3, 4]), dims: [1, 2, 2] });
+  });
+  it("says a long answer in utterances of whole sentences, each within the cap, losing no words", () => {
+    const answer = "Requests are on the Time Off page. A new hire asks from the portal; each request runs its checks before it reaches the manager.";
+    expect(utterances(answer)).toEqual(["Requests are on the Time Off page.", "A new hire asks from the portal; each request runs its checks before it reaches the manager."]);
+    expect(utterances("Pay is up 12.5% this period. That is all.")).toEqual(["Pay is up 12.5% this period. That is all."]);
+    const long = "The largest change is on one paycheck, which is up because of a retro raise, an overtime correction, a bonus approved late, and a move to another state with its own withholding.";
+    const parts = utterances(long);
+    expect(parts.length).toBe(2);
+    expect(parts.every((p) => p.length <= UTTERANCE_MAX_CHARS)).toBe(true);
+    expect(parts[0]).toMatch(/,$/);
+    expect(parts.join(" ")).toBe(long);
+    const words = "word ".repeat(100).trim();
+    expect(utterances(words).every((p) => p.length <= UTTERANCE_MAX_CHARS && !p.startsWith(" "))).toBe(true);
+    expect(utterances(words).join(" ")).toBe(words);
+    expect(utterances("  ")).toEqual([]);
   });
   it("penalizes repeats, samples within top-p, and builds the decoder's tokens", () => {
     const logits = new Float32Array([2, -2, 1]);

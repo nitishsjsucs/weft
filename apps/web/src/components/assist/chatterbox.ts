@@ -2,43 +2,47 @@
 // Chatterbox Nano in the browser (research/cursor-assistant.md 7.5): owensong/chatterbox-nano-ONNX (MIT, Resemble AI
 // upstream) on ONNX Runtime Web's WebGPU build, pinned to one revision. Downloaded only when the person turns spoken
 // answers on, once, with progress; the browser's Cache Storage keeps the files, so a later visit loads from disk. Only
-// three of the four graphs are fetched (token embeddings, the language model and the decoder, about 392 MB): the
-// speech encoder is skipped and the voice is the fixed one this server ships (chatterbox-core.ts voice file). The
-// pipeline follows the model's own run_onnx.py: embed the text, prepend the voice's features, sample speech tokens
-// with a KV cache until the stop token, then decode a 24 kHz waveform. Nothing leaves the browser.
+// three of the four graphs are fetched (token embeddings, the language model and the decoder, about 396 MB): the
+// speech encoder is skipped and the voice is the fixed one this server ships (Resemble AI's built-in default voice;
+// chatterbox-core.ts voice file). The pipeline follows the model's own run_onnx.py, with the input and output names
+// its graphs carry at this revision: embed the text, prepend the voice's features, sample speech tokens with a KV
+// cache until the stop token, then decode a 24 kHz waveform. Nothing leaves the browser.
 import { applyRepetitionPenalty, concatSeq, decodeVoice, halvesToFloats, sampleToken, SAMPLE_RATE, SAMPLING, speechTokens, START_SPEECH, STOP_SPEECH, type VoiceTensor } from "./chatterbox-core";
 
 export const VOICE_MODEL = {
   repo: "owensong/chatterbox-nano-ONNX",
   revision: "4a66d7dab72a9e98f24b515d49a1d7a81632df2e",
   files: {
-    tokenizer: { path: "tokenizer.json", bytes: 3_560_000 },
+    tokenizer: { path: "tokenizer.json", bytes: 3_562_272 },
     tokenizerConfig: { path: "tokenizer_config.json", bytes: 414 },
     embed: { path: "onnx/embed_tokens_fp16.onnx", bytes: 1_520 },
-    embedData: { path: "onnx/embed_tokens_fp16.onnx_data", bytes: 87_300_000 },
-    lm: { path: "onnx/language_model_q4f16.onnx", bytes: 522_000 },
+    embedData: { path: "onnx/embed_tokens_fp16.onnx_data", bytes: 87_304_704 },
+    lm: { path: "onnx/language_model_q4f16.onnx", bytes: 522_078 },
     lmData: { path: "onnx/language_model_q4f16.onnx_data", bytes: 55_911_658 },
-    decoder: { path: "onnx/conditional_decoder_q4.onnx", bytes: 2_180_000 },
-    decoderData: { path: "onnx/conditional_decoder_q4.onnx_data", bytes: 246_000_000 },
+    decoder: { path: "onnx/conditional_decoder_q4.onnx", bytes: 2_179_022 },
+    decoderData: { path: "onnx/conditional_decoder_q4.onnx_data", bytes: 246_397_384 },
   },
 } as const;
-/** About 395 MB in all (the speech encoder's 177 MB are never fetched). */
+/** 395,879,052 bytes in all, about 396 MB (the speech encoder's 177 MB are never fetched). */
 export const VOICE_MODEL_BYTES = Object.values(VOICE_MODEL.files).reduce((a, f) => a + f.bytes, 0);
-/** The fixed voice, served by Weft itself once it is made (chatterbox-core.ts; not in the repository yet). */
+/** The fixed voice, served by Weft itself (chatterbox-core.ts; made by scripts/assist/build-voice.ts). */
 export const VOICE_FILE_URL = "/assist/voice/weft-voice.bin";
 const CACHE = "weft-voice-v1";
 const fileUrl = (path: string) => `https://huggingface.co/${VOICE_MODEL.repo}/resolve/${VOICE_MODEL.revision}/${path}`;
 
 export class VoiceUnavailable extends Error {}
 
+/** A performance mark with what one step did (DevTools and the browser check read it; it holds no answer text). */
+const mark = (name: string, detail: Record<string, unknown>) => { try { performance.mark(name, { detail }); } catch { /* no marks here */ } };
+
 export interface Progress { loaded: number; total: number; file: string }
 
-/** One file, from Cache Storage when it is there, else downloaded with progress and cached. */
-async function cachedBytes(url: string, expect: number, onBytes: (n: number) => void): Promise<Uint8Array> {
+/** One file, from Cache Storage when it is there (`onCached`), else downloaded with progress (`onBytes`) and cached. */
+async function cachedBytes(url: string, expect: number, onBytes: (n: number) => void, onCached: (n: number) => void): Promise<Uint8Array> {
   let cache: Cache | null = null;
   try { cache = await caches.open(CACHE); } catch { cache = null; }
   const hit = await cache?.match(url).catch(() => undefined);
-  if (hit) { const b = new Uint8Array(await hit.arrayBuffer()); onBytes(b.length); return b; }
+  if (hit) { const b = new Uint8Array(await hit.arrayBuffer()); onCached(expect); return b; }
   const res = await fetch(url, { mode: "cors", credentials: "omit", referrerPolicy: "no-referrer" });
   if (!res.ok || !res.body) throw new VoiceUnavailable(`The voice model file could not be downloaded (${res.status}).`);
   const reader = res.body.getReader();
@@ -88,9 +92,11 @@ export function loadChatterbox(onProgress: (p: Progress) => void): Promise<Loade
     const vres = await fetch(VOICE_FILE_URL);
     if (!vres.ok) throw new VoiceUnavailable("The in-browser voice is not set up on this server.");
     const voice = decodeVoice(await vres.arrayBuffer());
+    // A file already in Cache Storage leaves the total, so progress counts only what is downloaded now (none at all
+    // when every file is cached).
     let loaded = 0;
-    const total = VOICE_MODEL_BYTES;
-    const get = (f: { path: string; bytes: number }) => cachedBytes(fileUrl(f.path), f.bytes, (n) => { loaded += n; for (const l of listeners) l({ loaded: Math.min(loaded, total), total, file: f.path }); });
+    let total = VOICE_MODEL_BYTES;
+    const get = (f: { path: string; bytes: number }) => cachedBytes(fileUrl(f.path), f.bytes, (n) => { loaded += n; for (const l of listeners) l({ loaded: Math.min(loaded, total), total, file: f.path }); }, (n) => { total -= n; });
     const F = VOICE_MODEL.files;
     // The JSPI build: its WebAssembly (about 17 MB) is the one that fits a static asset and runs WebGPU.
     const ort = (await import("onnxruntime-web/jspi")) as unknown as Ort;
@@ -106,6 +112,7 @@ export function loadChatterbox(onProgress: (p: Progress) => void): Promise<Loade
     const embed = await session(F.embed, F.embedData);
     const lm = await session(F.lm, F.lmData);
     const decoder = await session(F.decoder, F.decoderData);
+    mark("weft-voice-ready", { sessions: [embed, lm, decoder].map((x) => ({ inputs: x.inputNames.length, outputs: x.outputNames.length })), downloaded: loaded, cached: VOICE_MODEL_BYTES - total });
     return { ort, tok, embed, lm, decoder, voice };
   })();
   loading.catch(() => { loading = null; });
@@ -117,6 +124,7 @@ const tensorOf = (ort: Ort, t: VoiceTensor) => new ort.Tensor(t.dtype, t.data as
 /** The answer as a 24 kHz waveform. `rand` makes sampling repeatable in a test. */
 export async function synthesize(m: Loaded, text: string, rand: () => number = Math.random): Promise<Float32Array> {
   const { ort } = m;
+  const started = performance.now();
   const ids = m.tok.encode(text).ids;
   const run = async (s: Session, feeds: Record<string, import("onnxruntime-web").Tensor>) => s.run(feeds);
   const embedIds = async (xs: number[]) => (await run(m.embed, { [m.embed.inputNames[0]!]: new ort.Tensor("int64", BigInt64Array.from(xs.map(BigInt)), [1, xs.length]) }))[m.embed.outputNames[0]!]!;
@@ -166,7 +174,9 @@ export async function synthesize(m: Loaded, text: string, rand: () => number = M
     speaker_features: tensorOf(ort, m.voice.get("speaker_features")!),
   });
   const wav = dec[m.decoder.outputNames[0]!]!;
-  return wav.type === "float16" ? halvesToFloats(wav.data as Uint16Array) : Float32Array.from(wav.data as Float32Array);
+  const samples = wav.type === "float16" ? halvesToFloats(wav.data as Uint16Array) : Float32Array.from(wav.data as Float32Array);
+  mark("weft-voice-utterance", { chars: text.length, tokens: generated.length - 1, stopped: generated[generated.length - 1] === STOP_SPEECH, samples: samples.length, ms: Math.round(performance.now() - started) });
+  return samples;
 }
 
 /** Plays a waveform; resolves when it ends or `signal` stops it. */
